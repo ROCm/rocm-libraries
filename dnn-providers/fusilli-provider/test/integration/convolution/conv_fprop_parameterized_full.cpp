@@ -166,7 +166,8 @@ TEST_P(ConvFpropParameterizedTest, Correctness) {
       ::testing::UnitTest::GetInstance()->current_test_info();
 
   // Get the name of the individual test
-  const char *test_name = test_info->name();
+  const std::string test_name =
+      std::string(test_info->test_suite_name()) + "_" + test_info->name();
 
   const ConvTestCase &tc = GetParam();
 

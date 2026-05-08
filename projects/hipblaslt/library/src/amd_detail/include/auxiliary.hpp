@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -137,13 +137,16 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "bf8_r";
     case HIP_R_8F_UE8M0:
         return "e8_r";
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         return "f6_r";
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         return "bf6_r";
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         return "f4_r";
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch"
     case static_cast<hipDataType>(HIP_R_8F_E5M3_EXT):
+#pragma GCC diagnostic pop
         return "e5m3_r";
     default:
         return "non-supported type";
@@ -193,9 +196,9 @@ constexpr hipDataType string_to_hip_datatype(const std::string& value)
         value == "f16_r" || value == "h" ? HIP_R_16F :
         value == "bf16_r"                ? HIP_R_16BF :
         value == "i8_r" || value == "i8" ? HIP_R_8I :
-        value == "f6_r"                  ? static_cast<hipDataType>(HIP_R_6F_E2M3_EXT) :
-        value == "bf6_r"                 ? static_cast<hipDataType>(HIP_R_6F_E3M2_EXT) :
-        value == "f4_r"                  ? static_cast<hipDataType>(HIP_R_4F_E2M1_EXT) :
+        value == "f6_r"                  ? static_cast<hipDataType>(HIP_R_6F_E2M3) :
+        value == "bf6_r"                 ? static_cast<hipDataType>(HIP_R_6F_E3M2) :
+        value == "f4_r"                  ? static_cast<hipDataType>(HIP_R_4F_E2M1) :
         value == "i32_r" || value == "i" ? HIP_R_32I :
         value == "f8_fnuz_r"             ? HIP_R_8F_E4M3_FNUZ :
         value == "bf8_fnuz_r"            ? HIP_R_8F_E5M2_FNUZ :

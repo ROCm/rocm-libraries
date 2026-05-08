@@ -1,0 +1,706 @@
+/* ************************************************************************
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+//==============================================================================
+// GFX1250 (RDNA4) INSTRUCTION FORMAT DEFINITIONS
+//
+// Architecture metadata (must appear before DEF_FORMAT)
+//------------------------------------------------------------------------------
+DEF_ARCH(Gfx1250,
+    .major = 12, .minor = 5, .stepping = 0,
+    .wavefront = 32,
+    .maxVGPR = 256, .maxSGPR = 102, .maxAGPR = 0,
+    .defaultCycle = 1, .defaultLatency = 1)
+
+//------------------------------------------------------------------------------
+// This file defines default properties for each instruction encoding format.
+// Instructions using a format inherit its defaults and can optionally override them.
+//
+// Each DEF_FORMAT defines:
+//   - microcode: Microcode format (ISA-level encoding, e.g., MC_VOP3P, MC_SMEM)
+//   - unit: Default execution unit (VALU, SALU, MatrixUnit, etc.)
+//   - encoding: Instruction encoding size in bits
+//   - maxOperands: Maximum number of operands
+//   - flags: Instruction classification flags (optional)
+//   - fields: Per-operand encoding field descriptions (see below)
+//   - promotedFormat: Wider encoding format for promotion (e.g., MC_VOP3 for VOP2)
+//   - alt_fields: Operand fields for the promoted encoding (optional)
+//
+// .fields = { ... } — Each entry describes one operand slot:
+//
+//   {Pos, EncodeField, Type, Size [, Options...]}
+//
+//   Pos          D0, D1, ... (dest) or S0, S1, ... (src)
+//   EncodeField  hardware encoding field   (vdata, vaddr, rsrc, soffset, simm16, ...)
+//   Type         operand type              (vgpr, sreg, label, wait_alu, ...)
+//   Size         field size in bits (16, 32, 64, 128, ...) or M64
+//   Options      RW (read-write), M64 (64-bit lane mask, truncatable in wave32)
+//
+//   M64 can appear as the Size field (implies 64 bits) or as an Option.
+//   It marks a 64-bit lane mask operand that may be truncated to 32 bits
+//   in wave32 mode.  Example: {D0, vdst, vcc, M64}
+//
+// Instructions inherit .fields from their format.  Per-instruction
+// .operand_fields can provide a partial override using named fields:
+//
+//   {D0, .size=64}              — override size of dest operand 0
+//   {S0, .type=wait_alu}        — override type of src operand 0
+//   {D0, .size=64, .type=vgpr}  — override both
+//
+// Example — format inheritance, promotion, and per-instruction override:
+//
+//   // 1) Base format: 32-bit VOP2 with two source operands
+//   DEF_FORMAT(VOP2,
+//       .microcode = MC_VOP2,
+//       .unit = VALU,
+//       .encoding = {32},
+//       .maxOperands = 3,
+//       .flags = {VALU},
+//       .fields = {                           // default (narrow) encoding
+//           {D0, vdst, vgpr, 32},
+//           {S0, src0, src,  32},
+//           {S1, vsrc1, vgpr, 32},            // S1 restricted to VGPR
+//       },
+//       .promotedFormat = MC_VOP3,            // can promote to 64-bit VOP3
+//       .alt_fields = {                       // operand layout in promoted encoding
+//           {D0, vdst, vgpr, 32},
+//           {S0, src0, src,  32},
+//           {S1, src1, src,  32},             // S1 relaxed to any src
+//       },
+//   )
+//
+//   // 2) Child format: inherits everything from VOP2, adds Commutative flag
+//   DEF_FORMAT(VOP2_COMMUTATIVE,
+//       .parent = VOP2,
+//       .flags = {Commutative},              // merged with parent: {VALU, Commutative}
+//   )
+//
+//   // 3) Buffer load format with per-operand fields
+//   DEF_FORMAT(MUBUF_LOAD,
+//       .parent = MUBUF,                     // inherits microcode, unit, encoding
+//       .flags = {MUBUFLoad},
+//       .fields = {
+//           {D0, vdata, vgpr, 32},           // dest: 32-bit VGPR by default
+//           {S0, vaddr, vgpr, 64},           // src0: 64-bit VGPR address
+//           {S1, rsrc, sreg, 128, RSRC},     // src1: 128-bit resource descriptor
+//           {S2, soffset, sreg_m0, 32},      // src2: scalar offset
+//       },
+//   )
+//
+//   // 4) Instruction overrides only D0 size (32 -> 64):
+//   DEF_T(BufferLoadB64Inst, "buffer_load_b64", .format = MUBUF_LOAD,
+//       .operand_fields = { {D0, .size=64} })
+//
+//   Result after inheritance:
+//       {D0, vdata, vgpr, 64},              // size overridden: 32 -> 64
+//       {S0, vaddr, vgpr, 64},              // unchanged
+//       {S1, rsrc, sreg, 128, RSRC},        // unchanged
+//       {S2, soffset, sreg_m0, 32},         // unchanged
+//
+// NOTE: Only existing flags from include/stinkytofu/hardware/Flags.def are used.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// VECTOR ALU FORMATS
+//------------------------------------------------------------------------------
+
+// Vector 1-operand (32-bit encoding)
+// Used for: v_mov, v_not, v_cvt_*, etc.
+DEF_FORMAT(VOP1,
+    .microcode = MC_VOP1,
+    .unit = VALU,
+    .encoding = {32},
+    .maxOperands = 2,  // dst + src
+    .cost = {1, 5},
+    .flags = {VALU},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+    },
+    .promotedFormat = MC_VOP3,
+    .alt_fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+    },
+)
+
+// Vector 2-operand (32-bit encoding)
+// Used for: v_add_f32, v_mul_f32, etc.
+DEF_FORMAT(VOP2,
+    .microcode = MC_VOP2,
+    .unit = VALU,
+    .encoding = {32},
+    .maxOperands = 3,  // dst + src0 + src1
+    .cost = {1, 5},
+    .flags = {VALU},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+        {S1, vsrc1, vgpr, 32},
+    },
+    .promotedFormat = MC_VOP3,
+    .alt_fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+    },
+)
+
+// Vector 3-operand (64-bit encoding)
+// Used for: v_fma_f32, v_mad_f32, etc.
+DEF_FORMAT(VOP3,
+    .microcode = MC_VOP3,
+    .unit = VALU,
+    .encoding = {64},
+    .maxOperands = 4,  // dst + src0 + src1 + src2
+    .cost = {1, 5},
+    .flags = {VALU},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+        {S2, src2, src, 32},
+    },
+)
+
+// Vector 2-source VOP3 (64-bit encoding)
+// Used for VOP3-encoded instructions that only take src0/src1.
+DEF_FORMAT(VOP3_2SRC,
+    .parent = VOP3,
+    .maxOperands = 3,  // dst + src0 + src1
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+    },
+)
+
+// Vector 2-source VOP3 (64-bit encoding), commutative ops.
+DEF_FORMAT(VOP3_2SRC_COMMUTATIVE,
+    .parent = VOP3_2SRC,
+    .flags = {Commutative},
+)
+
+// Vector compare (32-bit encoding)
+// Used for: v_cmp_eq_f32, v_cmp_lt_i32, etc.
+DEF_FORMAT(VOPC,
+    .microcode = MC_VOPC,
+    .unit = VALU,
+    .encoding = {32},
+    .maxOperands = 3,  // dst(vcc/sdst) + src0 + src1
+    .cost = {1, 5},
+    .flags = {VALU},
+    .fields = {
+        {D0, vdst, vcc, M64},
+        {S0, src0, src, 32},
+        {S1, vsrc1, vgpr, 32},
+    },
+    .promotedFormat = MC_VOP3,
+    .alt_fields = {
+        {D0, vdst, sreg, M64},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+    },
+)
+
+// Vector compare-and-write-exec: v_cmpx_*
+DEF_FORMAT(VCMPX,
+    .parent = VOPC,
+    .flags = {VCmpX, ImplicitWriteEXEC},
+    .fields = {
+        {D0, vdst, exec, M64},
+        {S0, src0, src, 32},
+        {S1, vsrc1, vgpr, 32},
+    },
+    .promotedFormat = MC_VOP3,
+    .alt_fields = {
+        {D0, vdst, exec, M64},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+    },
+)
+
+// Vector 2-operand commutative: v_add_f32, v_mul_f32, etc.
+// VOP2 encoding (32-bit) is the primary form; VOP3 (64-bit) is the promoted form.
+DEF_FORMAT(VOP2_COMMUTATIVE,
+    .parent = VOP2,
+    .flags = {Commutative},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+        {S1, vsrc1, vgpr, 32},
+    },
+    .promotedFormat = MC_VOP3,
+    .alt_fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+    },
+)
+
+// Vector 1-operand transcendental: v_rcp_f32, v_rsq_f32, v_exp_f32, etc.
+DEF_FORMAT(VOP1_TRANSCENDENTAL,
+    .parent = VOP1,
+    .cost = {1, 8},
+    .flags = {Transcendental},
+)
+
+// Vector 3-operand commutative: v_fma_f32, etc.
+DEF_FORMAT(VOP3_COMMUTATIVE,
+    .parent = VOP3,
+    .flags = {Commutative},
+)
+
+// Vector 3-operand packed (64-bit encoding) - hardware ISA format (gfx12/RDNA4)
+// Used as encoding base for WMMA/SWMMA/MXWMMA on Gfx1250 (reference: gfx12 / 9070XT)
+DEF_FORMAT(VOP3P,
+    .microcode = MC_VOP3P,
+    .unit = VALU,
+    .encoding = {64},
+    .maxOperands = 4,
+    .flags = {},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+    },
+)
+
+// Vector 3-operand with single destination (64-bit encoding)
+DEF_FORMAT(VOP3SD,
+    .microcode = MC_VOP3SD,
+    .unit = VALU,
+    .encoding = {64},
+)
+
+// Vector 3-operand packed extended (128-bit encoding)
+DEF_FORMAT(VOP3PX2,
+    .microcode = MC_VOP3PX2,
+    .unit = VALU,
+    .encoding = {128},
+)
+
+// Vector 3-operand packed extended (192-bit encoding)
+DEF_FORMAT(VOP3PX3,
+    .microcode = MC_VOP3PX3,
+    .unit = VALU,
+    .encoding = {192},
+)
+
+// Vector dual-issue (64-bit encoding)
+DEF_FORMAT(VOPD,
+    .microcode = MC_VOPD,
+    .unit = VALU,
+    .encoding = {64},
+)
+
+// Vector triple-issue (96-bit encoding)
+DEF_FORMAT(VOPD3,
+    .microcode = MC_VOPD3,
+    .unit = VALU,
+    .encoding = {96},
+)
+
+// Data Parallel Primitive 16-lane (32-bit encoding)
+DEF_FORMAT(DPP16,
+    .microcode = MC_DPP16,
+    .unit = VALU,
+    .encoding = {32},
+)
+
+// Data Parallel Primitive 8-lane (32-bit encoding)
+DEF_FORMAT(DPP8,
+    .microcode = MC_DPP8,
+    .unit = VALU,
+    .encoding = {32},
+)
+
+//------------------------------------------------------------------------------
+// SCALAR ALU FORMATS
+//------------------------------------------------------------------------------
+
+// Scalar 1-operand (32-bit encoding)
+// Used for: s_mov_b32, s_not_b32, etc.
+DEF_FORMAT(SOP1,
+    .microcode = MC_SOP1,
+    .unit = SALU,
+    .encoding = {32},
+    .maxOperands = 2,  // dst + src
+    .cost = {1, 2},
+    .flags = {SALU},
+    .fields = {
+        {D0, sdst, sdst, 32},
+        {S0, ssrc0, ssrc, 32},
+    },
+)
+
+// Scalar 2-operand (32-bit encoding)
+// Used for: s_add_u32, s_and_b32, etc.
+DEF_FORMAT(SOP2,
+    .microcode = MC_SOP2,
+    .unit = SALU,
+    .encoding = {32},
+    .maxOperands = 3,  // dst + src0 + src1
+    .cost = {1, 2},
+    .flags = {SALU},
+    .fields = {
+        {D0, sdst, sdst, 32},
+        {S0, ssrc0, ssrc, 32},
+        {S1, ssrc1, ssrc, 32},
+    },
+)
+
+// Scalar compare (32-bit encoding)
+// Used for: s_cmp_eq_i32, s_cmp_lt_u32, etc.
+DEF_FORMAT(SOPC,
+    .microcode = MC_SOPC,
+    .unit = SALU,
+    .encoding = {32},
+    .maxOperands = 2,  // src0 + src1 (result to SCC)
+    .cost = {1, 2},
+    .flags = {SALU, ImplicitWriteSCC},
+    .fields = {
+        {S0, ssrc0, ssrc, 32},
+        {S1, ssrc1, ssrc, 32},
+    },
+)
+
+// Scalar program flow (32-bit encoding)
+// Used for: s_branch, s_cbranch_*, s_waitcnt, s_barrier, etc.
+DEF_FORMAT(SOPP,
+    .microcode = MC_SOPP,
+    .unit = BranchUnit,
+    .encoding = {32},
+    .maxOperands = 1,  // label or immediate
+)
+
+DEF_FORMAT(SOPP_BRANCH,
+    .parent = SOPP,
+    .flags = {Branch},
+    .fields = {
+        {S0, simm16, label, 16},
+    },
+)
+
+DEF_FORMAT(SOPP_WAIT16,
+    .parent = SOPP,
+    .fields = {
+        {S0, simm16, simm16, 16},
+    },
+)
+
+DEF_FORMAT(SOPP_IMM32,
+    .parent = SOPP,
+    .fields = {
+        {S0, simm32, simm32, 32},
+    },
+)
+
+// Scalar with 16-bit inline constant (32-bit encoding)
+// Used for: s_movk_i32, s_cmpk_*, s_addk_i32, etc.
+DEF_FORMAT(SOPK,
+    .microcode = MC_SOPK,
+    .unit = SALU,
+    .encoding = {32},
+    .cost = {1, 2},
+    .flags = {SALU},
+)
+
+//------------------------------------------------------------------------------
+// MATRIX FORMATS (GFX1250 / RDNA4: WMMA only; no MFMA) - inherit from VOP3P
+//------------------------------------------------------------------------------
+// Gfx1250 uses WMMA/SWMMA/MXWMMA (gfx12-style matrix ops); encoding base is VOP3P.
+
+// Wave Matrix Multiply-Accumulate: same 64-bit encoding as VOP3P, Matrix unit
+DEF_FORMAT(WMMA,
+    .parent = VOP3P,
+    .microcode = MC_VOP3P,
+    .unit = MatrixUnit,
+    .maxOperands = 4,
+    .cost = {4, 8},
+    .flags = {WMMA},
+    .fields = {
+        {D0, vdst, vgpr, 256},
+        {S0, src0, src_vgpr, 256},
+        {S1, src1, src_vgpr, 256},
+        {S2, src2, src_vgpr_or_inline, 256},
+    },
+)
+
+DEF_FORMAT(WMMA_INT8,
+    .parent = WMMA,
+    .cost = {8, 16},
+)
+
+DEF_FORMAT(WMMA_FLOAT8MIX_16x16x64,
+    .parent = WMMA,
+    .cost = {3, 4},
+)
+
+DEF_FORMAT(WMMA_FLOAT8MIX_16x16x128,
+    .parent = WMMA,
+    .cost = {5, 8},
+)
+
+// Sparse Wave Matrix Multiply-Accumulate
+DEF_FORMAT(SWMMA,
+    .parent = VOP3P,
+    .microcode = MC_VOP3P,
+    .unit = MatrixUnit,
+    .maxOperands = 5,
+    .cost = {6, 8},
+    .flags = {SWMMA},
+    .fields = {
+        {D0, vdst, vgpr, 256, RW},
+        {S0, src0, src_vgpr, 256},
+        {S1, src1, src_vgpr, 256},
+        {S2, src2, src_vgpr, 32},
+    },
+)
+
+DEF_FORMAT(SWMMA_INT8,
+    .parent = SWMMA,
+    .cost = {12, 16},
+)
+
+// MX Format Wave Matrix Multiply-Accumulate (v_mxwmma_*, v_wmma_scale*)
+DEF_FORMAT(MXWMMA,
+    .parent = VOP3P,
+    .microcode = MC_VOP3P,
+    .unit = MatrixUnit,
+    .maxOperands = 4,
+    .cost = {6, 8},
+    .flags = {MXWMMA},
+)
+
+// v_wmma_scale_* (VOP3PX2, 128-bit encoding, 6 operands)
+DEF_FORMAT(MXWMMA_SCALE,
+    .parent = MXWMMA,
+    .microcode = MC_VOP3PX2,
+    .maxOperands = 6,
+    .encoding = {128},
+    .fields = {
+        {D0, vdst, vgpr, 256},
+        {S0, src0, src_vgpr, 512},
+        {S1, src1, src_vgpr, 512},
+        {S2, src2, src_vgpr_or_inline, 256},
+        {S3, scale_src0, src_simple, 32},
+        {S4, scale_src1, src_simple, 32},
+    },
+)
+
+// v_wmma_scale16_* (VOP3PX3, 192-bit encoding, 6 operands)
+DEF_FORMAT(MXWMMA_SCALE16,
+    .parent = MXWMMA,
+    .microcode = MC_VOP3PX3,
+    .maxOperands = 6,
+    .encoding = {192},
+    .fields = {
+        {D0, vdst, vgpr, 256},
+        {S0, src0, src_vgpr, 512},
+        {S1, src1, src_vgpr, 512},
+        {S2, src2, src_vgpr_or_inline, 256},
+        {S3, scale_src0, src_simple, 64},
+        {S4, scale_src1, src_simple, 64},
+    },
+)
+
+//------------------------------------------------------------------------------
+// MEMORY FORMATS (hardware encodings: MUBUF, FLAT, DS, SMRD per AMD ISA / gfx12)
+//------------------------------------------------------------------------------
+
+// MUBUF - untyped buffer (hardware encoding); buffer_* instructions use this
+DEF_FORMAT(MUBUF,
+    .microcode = MC_VBUFFER,
+    .unit = BufferMemory,
+    .encoding = {96},
+    .maxOperands = 5,
+    .flags = {},
+)
+
+DEF_FORMAT(MUBUF_LOAD,
+    .parent = MUBUF,
+    .flags = {MUBUFLoad},
+    .fields = {
+        {D0, vdata, vgpr, 32},
+        {S0, vaddr, vgpr, 32},
+        {S1, rsrc, sreg, 128, RSRC},
+        {S2, soffset, sreg_m0, 32},
+    },
+)
+
+DEF_FORMAT(MUBUF_STORE,
+    .parent = MUBUF,
+    .flags = {MUBUFStore},
+    .fields = {
+        {S0, vdata, vgpr, 32},
+        {S1, vaddr, vgpr, 32},
+        {S2, rsrc, sreg, 128, RSRC},
+        {S3, soffset, sreg_m0, 32},
+    },
+)
+
+DEF_FORMAT(MUBUF_ATOMIC,
+    .parent = MUBUF,
+    .flags = {MUBUFAtomic},
+    .fields = {
+        {D0, vdata, vgpr, 32, RW},
+        {S0, vaddr, vgpr, 32},
+        {S1, rsrc, sreg, 128, RSRC},
+        {S2, soffset, sreg_m0, 32},
+    },
+)
+
+// DS - Data Share / LDS (hardware encoding)
+// Used for: ds_read_*, ds_write_*, ds_add_*, etc.
+DEF_FORMAT(DS,
+    .microcode = MC_VDS,
+    .unit = LDS,
+    .encoding = {64},
+    .maxOperands = 3,
+    .cost = {1, 52},
+    .flags = {},
+)
+
+DEF_FORMAT(DS_READ,
+    .parent = DS,
+    .flags = {DSRead},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, addr, vgpr, 32},
+    },
+)
+
+DEF_FORMAT(DS_STORE,
+    .parent = DS,
+    .flags = {DSStore},
+    .fields = {
+        {S0, addr, vgpr, 32},
+        {S1, data0, vgpr, 32},
+    },
+)
+
+// FLAT - flat memory (hardware encoding)
+// Used for: flat_load_*, flat_store_*, flat_atomic_*
+DEF_FORMAT(FLAT,
+    .microcode = MC_VFLAT,
+    .unit = GlobalMemory,
+    .encoding = {96},
+    .maxOperands = 3,
+    .flags = {},
+)
+
+DEF_FORMAT(FLAT_LOAD,
+    .parent = FLAT,
+    .flags = {FLATLoad},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, vaddr, vgpr, 64},
+        {S1, saddr, sreg, 64},
+    },
+)
+
+DEF_FORMAT(FLAT_STORE,
+    .parent = FLAT,
+    .flags = {FLATStore},
+    .fields = {
+        {S0, vaddr, vgpr, 64},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
+)
+
+DEF_FORMAT(FLAT_ATOMIC,
+    .parent = FLAT,
+    .flags = {FLATAtomic},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, vaddr, vgpr, 64},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
+)
+
+// SMRD - Scalar Memory Read/Write (hardware encoding, gfx12 uses 64-bit)
+DEF_FORMAT(SMRD,
+    .microcode = MC_SMEM,
+    .unit = ScalarMemory,
+    .encoding = {64},
+    .maxOperands = 3,
+    .flags = {},
+)
+
+DEF_FORMAT(SMRD_LOAD,
+    .parent = SMRD,
+    .flags = {SMemLoad},
+    .fields = {
+        {D0, sdata, sreg, 32},
+        {S0, sbase, sreg, 64},
+        {S1, soffset, smem_offset, 32},
+    },
+)
+
+DEF_FORMAT(SMRD_STORE,
+    .parent = SMRD,
+    .flags = {SMemStore},
+)
+
+// VIMAGE - vector memory image (96-bit encoding)
+// Used for: image_load_*, image_store_*, image_sample_*, etc.
+DEF_FORMAT(VIMAGE,
+    .microcode = MC_VIMAGE,
+    .encoding = {96},
+)
+
+// VGLOBAL - global memory (96-bit encoding)
+// Used for: global_load_*, global_store_*, global_atomic_*
+DEF_FORMAT(VGLOBAL,
+    .microcode = MC_VGLOBAL,
+    .unit = GlobalMemory,
+    .encoding = {96},
+)
+
+// VSCRATCH - scratch memory (96-bit encoding)
+// Used for: scratch_load_*, scratch_store_*
+DEF_FORMAT(VSCRATCH,
+    .microcode = MC_VSCRATCH,
+    .encoding = {96},
+)
+
+// Tensor operations (GFX1250-specific; no shared parent in defs)
+DEF_FORMAT(TENSOR,
+    .unit = TensorUnit,
+    .encoding = {64},
+    .maxOperands = 4,
+    .flags = {TENSORLoadToLds},
+    .fields = {
+        {S0, vaddr0, sgpr, 128},
+        {S1, vaddr1, sgpr, 256},
+        {S2, vaddr2, sreg, 128},
+        {S3, vaddr3, sreg, 128},
+    },
+)
+
+//==============================================================================
+// END OF GFX1250 FORMAT DEFINITIONS
+//==============================================================================

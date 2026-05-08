@@ -33,6 +33,7 @@
 #include "miopen/rnn.hpp"
 #include "miopen/tensor.hpp"
 #include "workspace.hpp"
+#include "gtest_desc_guard.hpp"
 
 #define MIO_RNN_TEST_DEBUG 0
 #define MIO_RNN_TIME_EVERYTHING 0
@@ -286,13 +287,15 @@ struct verify_forward_infer_rnn
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
+        auto hx_dev = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+
         miopenRNNForwardInference(&handle,
                                   rnnDesc,
                                   seqLength,
                                   inputDescs.data(),
                                   input_dev.get(),
                                   &hiddenDesc,
-                                  ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                                  hx_dev.get(),
                                   &hiddenDesc,
                                   nullptr,
                                   &weightDesc,
@@ -564,13 +567,15 @@ struct verify_forward_train_rnn
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
+        auto hx_dev = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+
         miopenRNNForwardTraining(&handle,
                                  rnnDesc,
                                  seqLength,
                                  inputDescs.data(),
                                  input_dev.get(),
                                  &hiddenDesc,
-                                 ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                                 hx_dev.get(),
                                  &hiddenDesc,
                                  nullptr,
                                  &weightDesc,
@@ -848,6 +853,9 @@ struct verify_backward_data_rnn
         std::vector<T> dhx(initHidden.size());
         auto dhx_dev = handle.Write(dhx);
 
+        auto dhy_dev = nodhy ? miopen::Allocator::ManageDataPtr{} : handle.Write(dhy);
+        auto hx_dev  = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+
         miopenRNNBackwardData(&handle,
                               rnnDesc,
                               seqLength,
@@ -856,13 +864,13 @@ struct verify_backward_data_rnn
                               outputDescs.data(),
                               dyin_dev.get(),
                               &hiddenDesc,
-                              ((nodhy) ? nullptr : handle.Write(dhy).get()),
+                              dhy_dev.get(),
                               &hiddenDesc,
                               nullptr,
                               &weightDesc,
                               weights_dev.get(),
                               &hiddenDesc,
-                              ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                              hx_dev.get(),
                               &hiddenDesc,
                               nullptr,
                               inputDescs.data(),
@@ -1081,7 +1089,7 @@ struct verify_backward_weights_rnn
         hlens[1] = batch_seq[0];
         hlens[2] = hiddenSize;
         miopen::TensorDescriptor hiddenDesc(miopen::deref(rnnDesc).dataType, hlens);
-        // auto hx_dev    = handle.Write(initHidden);
+        auto hx_dev    = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
         auto dy_dev    = handle.Write(dy);
         auto input_dev = handle.Write(input);
 
@@ -1091,7 +1099,7 @@ struct verify_backward_weights_rnn
                                  inputDescs.data(),
                                  input_dev.get(),
                                  &hiddenDesc,
-                                 ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                                 hx_dev.get(),
                                  outputDescs.data(),
                                  dy_dev.get(),
                                  &weightDesc,
@@ -1199,13 +1207,17 @@ protected:
 
         int batch_n = std::accumulate(batchSeq.begin(), batchSeq.end(), 0);
 
-        miopenRNNDescriptor_t rnnDesc;
-        miopenCreateRNNDescriptor(&rnnDesc);
-        miopenDropoutDescriptor_t DropoutDesc;
-        miopenCreateDropoutDescriptor(&DropoutDesc);
+        RNNDescGuard rnnDesc;
+        DropoutDescGuard DropoutDesc;
         size_t statesSizeInBytes = 0;
 
-        miopenRNNAlgo_t algoMode = miopenRNNdefault;
+        miopenRNNAlgo_t algoMode  = miopenRNNdefault;
+        miopenHandle_t mio_handle = nullptr;
+#if MIOPEN_BACKEND_HIP
+        void* dropout_state_buf = nullptr;
+#elif MIOPEN_BACKEND_OPENCL
+        cl_mem dropout_state_buf = nullptr;
+#endif
         if(useDropout != 0)
         {
 // Workaround for issue #2335.
@@ -1213,7 +1225,6 @@ protected:
 #if MIOPEN_BACKEND_OPENCL
             GTEST_SKIP() << "Skip test for Issue #2335: " << std::endl;
 #endif
-            miopenHandle_t mio_handle;
             miopenCreateWithStream(&mio_handle, handle.GetStream());
 
             float dropout_rate              = 0.5;
@@ -1224,10 +1235,9 @@ protected:
             cl_context ctx;
             clGetCommandQueueInfo(
                 handle.GetStream(), CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-            cl_mem dropout_state_buf =
+            dropout_state_buf =
                 clCreateBuffer(ctx, CL_MEM_READ_WRITE, statesSizeInBytes, nullptr, nullptr);
 #elif MIOPEN_BACKEND_HIP
-            void* dropout_state_buf;
             (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 #endif
 
@@ -1475,6 +1485,16 @@ protected:
         //                                        seqLength, numLayers,
         //                                        biasMode, dirMode,
         //                                        inputMode, rnnMode, inVecReal});
+
+        if(useDropout != 0)
+        {
+#if MIOPEN_BACKEND_HIP
+            (void)hipFree(dropout_state_buf);
+#elif MIOPEN_BACKEND_OPENCL
+            (void)clReleaseMemObject(dropout_state_buf);
+#endif
+            miopenDestroy(mio_handle);
+        }
     }
 
 private:

@@ -255,9 +255,10 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
-            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
-            auto        hasNTModifier    = rocIsa::getInstance().getAsmCaps()["HasNTModifier"];
+            auto        asmCaps          = rocIsa::getInstance().getAsmCaps();
+            auto        hasDLCModifier   = asmCaps["HasDLCModifier"];
+            auto        hasSCOPEModifier = asmCaps["HasSCOPEModifier"];
+            auto        hasNTModifier    = asmCaps["HasNTModifier"];
             std::string kStr;
             if(offen)
             {
@@ -418,14 +419,19 @@ namespace rocisa
     // dot2: for WaveSplitK reduction. Only a subset of DPP modifiers are used here
     struct DPPModifiers : public Container
     {
-        int row_shr;
-        int row_bcast;
-        int bound_ctrl;
+        int              row_shr;
+        int              row_bcast;
+        int              bound_ctrl;
+        std::vector<int> quad_perm;
 
-        DPPModifiers(int row_shr = -1, int row_bcast = -1, int bound_ctrl = -1)
+        DPPModifiers(int                      row_shr    = -1,
+                     int                      row_bcast  = -1,
+                     int                      bound_ctrl = -1,
+                     const std::vector<int>&  quad_perm  = {})
             : row_shr(row_shr)
             , row_bcast(row_bcast)
             , bound_ctrl(bound_ctrl)
+            , quad_perm(quad_perm)
         {
         }
 
@@ -443,7 +449,24 @@ namespace rocisa
                 kStr += " row_bcast:" + std::to_string(row_bcast);
             if(bound_ctrl != -1)
                 kStr += " bound_ctrl:" + std::to_string(bound_ctrl);
+            if(!quad_perm.empty())
+                kStr += " quad_perm:" + vectorToString(quad_perm);
             return kStr;
+        }
+
+        std::string vectorToString(const std::vector<int>& vec) const
+        {
+            std::string result = "[";
+            for(size_t i = 0; i < vec.size(); ++i)
+            {
+                result += std::to_string(vec[i]);
+                if(i < vec.size() - 1)
+                {
+                    result += ",";
+                }
+            }
+            result += "]";
+            return result;
         }
     };
 
@@ -573,6 +596,52 @@ namespace rocisa
         }
 
         bool setHi;
+    };
+
+    struct EXECLO : public Container
+    {
+        EXECLO()
+            : Container()
+        {
+        }
+
+        EXECLO(const EXECLO& other)
+            : Container()
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<EXECLO>(*this);
+        }
+
+        std::string toString() const override
+        {
+            return "exec_lo";
+        }
+    };
+
+    struct EXECHI : public Container
+    {
+        EXECHI()
+            : Container()
+        {
+        }
+
+        EXECHI(const EXECHI& other)
+            : Container()
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<EXECHI>(*this);
+        }
+
+        std::string toString() const override
+        {
+            return "exec_hi";
+        }
     };
 
     struct VCC : public Container
@@ -1291,6 +1360,39 @@ namespace rocisa
     std::shared_ptr<RegisterContainer> mgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> mgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> mgpr(const std::string& name, float regNum = 1.f);
+    struct MemTokenData : public Container
+    {
+        std::vector<int> tokens;
+
+        MemTokenData(const std::vector<int>& tokens = {})
+            : Container()
+            , tokens(tokens)
+        {
+        }
+
+        MemTokenData(const MemTokenData& other)
+            : Container()
+            , tokens(other.tokens)
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<MemTokenData>(*this);
+        }
+
+        std::string toString() const override
+        {
+            std::string result = "mem_token:";
+            for(size_t i = 0; i < tokens.size(); ++i)
+            {
+                if(i > 0)
+                    result += ",";
+                result += " " + std::to_string(tokens[i]);
+            }
+            return result;
+        }
+    };
 
     struct ContinuousRegister
     {

@@ -5,9 +5,9 @@
 #include "hipdnn_backend.h"
 #include <filesystem>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <span>
 #include <stdexcept>
@@ -271,7 +271,8 @@ void extractTensorInfoFromGraph(const flatbuffers::DetachedBuffer& serializedGra
     nameToUidMap.clear();
     uidToDimsMap.clear();
 
-    auto deserializedGraph = hipdnn_data_sdk::data_objects::UnPackGraph(serializedGraph.data());
+    auto deserializedGraph
+        = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serializedGraph.data());
     ASSERT_NE(deserializedGraph, nullptr);
 
     // Extract all tensor information from the deserialized graph

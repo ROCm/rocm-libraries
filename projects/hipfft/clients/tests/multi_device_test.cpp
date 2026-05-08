@@ -81,7 +81,9 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
     // to multiple GPUs
     std::vector<fft_params> params_single;
 
-    for(auto run_callbacks : {false, true})
+    // legacy callbacks need -fgpu-rdc, but that causes build
+    // nondeterminism in kpack
+    for(auto run_callbacks : {false, /*true*/})
     {
         auto params = param_generator_complex(test_prob,
                                               multi_gpu_sizes,

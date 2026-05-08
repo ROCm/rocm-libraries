@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "HipKernelHandle.hpp"
+#include "HipKernelUtils.hpp"
 #include "hip/ICompiledProgram.hpp"
 #include "hip/IRunnableKernel.hpp"
 
@@ -25,8 +26,16 @@ class BatchnormFwdTrainingParams
 {
 public:
     BatchnormFwdTrainingParams(
-        const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap);
+
+    BatchnormFwdTrainingParams(
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdTrainingParams(const BatchnormFwdTrainingParams&) = delete;
@@ -35,41 +44,47 @@ public:
     BatchnormFwdTrainingParams(BatchnormFwdTrainingParams&&) = default;
     BatchnormFwdTrainingParams& operator=(BatchnormFwdTrainingParams&&) = default;
 
-    const hipdnn_data_sdk::data_objects::TensorAttributes* x() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* y() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* scale() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* bias() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* x() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* y() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scale() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* bias() const;
     double epsilonValue() const;
 
     bool hasSaveMeanVariance() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* mean() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* invVariance() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* mean() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVariance() const;
 
     bool hasRunningStats() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* prevRunningMean() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* prevRunningVariance() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* prevRunningMean() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* prevRunningVariance() const;
     double momentumValue() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningMean() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningVariance() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* nextRunningMean() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* nextRunningVariance() const;
+
+    const std::optional<hip_kernel_utils::ActivationParams>& optActivation() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
 
 private:
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _x;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _y;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _scale;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _bias;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
     double _epsilonValue;
 
     // Save mean/variance
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _mean = nullptr;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _invVariance = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _mean = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invVariance = nullptr;
 
     // Running statistics
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _prevRunningMean = nullptr;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _prevRunningVariance = nullptr;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _nextRunningMean = nullptr;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _nextRunningVariance = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _prevRunningMean = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _prevRunningVariance = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _nextRunningMean = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _nextRunningVariance = nullptr;
     std::optional<double> _momentumValue;
     bool _hasRunningStats{false};
+
+    std::optional<hip_kernel_utils::ActivationParams> _optActivation;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
 class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>

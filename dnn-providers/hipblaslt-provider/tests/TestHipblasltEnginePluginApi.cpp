@@ -4,8 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <HipblasltPlugin.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginGraphTestUtils.hpp>
@@ -297,7 +297,7 @@ TEST(TestGpuHipblasltEnginePluginApi, GetEngineDetailsValid)
     auto status = hipdnnEnginePluginGetEngineDetailsImpl(
         handle, HIPBLASLT_ENGINE_ID, &opGraph, &engineDetailsOut);
 
-    hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(
         engineDetailsOut.ptr, engineDetailsOut.size);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);

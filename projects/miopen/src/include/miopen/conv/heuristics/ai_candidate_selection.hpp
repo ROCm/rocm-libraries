@@ -124,7 +124,7 @@ MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
 EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_params,
                    const CandidateSelectionMetadata& metadata);
 
-MIOPEN_INTERNALS_EXPORT struct CandidateSelectionResult
+struct MIOPEN_INTERNALS_EXPORT CandidateSelectionResult
 {
     std::vector<int> kernel_indices; // Sorted list of kernel indices (best to worst)
     std::vector<int> split_k_values; // Corresponding split_k values

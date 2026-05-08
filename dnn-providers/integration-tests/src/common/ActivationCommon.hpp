@@ -3,26 +3,29 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 
 #include <exception>
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace test_activation_common
 {
 
 struct ActivTestCase
 {
-    hipdnn_data_sdk::data_objects::PointwiseMode mode;
+    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode;
     std::optional<float> reluLowerClip;
     std::optional<float> reluUpperClip;
     std::optional<float> reluLowerClipSlope;
     std::optional<float> swishBeta;
     std::optional<float> eluAlpha;
     std::optional<float> softplusBeta;
+    std::string note;
 
-    ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode modeLocal,
+    ActivTestCase(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode modeLocal,
                   std::optional<float> reluLowerClipLocal = std::nullopt,
                   std::optional<float> reluUpperClipLocal = std::nullopt,
                   std::optional<float> reluLowerClipSlopeLocal = std::nullopt,
@@ -36,8 +39,9 @@ struct ActivTestCase
         , swishBeta(swishBetaLocal)
         , eluAlpha(eluAlphaLocal)
         , softplusBeta(softplusBetaLocal)
+        , note(generateNote())
     {
-        using PointwiseMode = hipdnn_data_sdk::data_objects::PointwiseMode;
+        using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
         switch(mode)
         {
@@ -57,6 +61,51 @@ struct ActivTestCase
         default:
             throw std::invalid_argument("Unknown activation mode");
         }
+    }
+
+    std::string generateNote() const
+    {
+        std::vector<std::string> tags;
+        if(reluLowerClip.has_value())
+        {
+            tags.emplace_back("LowerClip");
+        }
+        if(reluUpperClip.has_value())
+        {
+            tags.emplace_back("UpperClip");
+        }
+        if(reluLowerClipSlope.has_value())
+        {
+            tags.emplace_back("LowerClipSlope");
+        }
+        if(swishBeta.has_value())
+        {
+            tags.emplace_back("SwishBeta");
+        }
+        if(eluAlpha.has_value())
+        {
+            tags.emplace_back("EluAlpha");
+        }
+        if(softplusBeta.has_value())
+        {
+            tags.emplace_back("SoftplusBeta");
+        }
+
+        if(tags.empty())
+        {
+            return {};
+        }
+
+        std::string result;
+        for(size_t i = 0; i < tags.size(); ++i)
+        {
+            if(i > 0)
+            {
+                result += "+";
+            }
+            result += tags[i];
+        }
+        return result;
     }
 
     friend std::ostream& operator<<(std::ostream& ss, const ActivTestCase& tc)
@@ -86,6 +135,10 @@ struct ActivTestCase
         {
             ss << " softplusBeta:" << tc.softplusBeta.value();
         }
+        if(!tc.note.empty())
+        {
+            ss << " note:" << tc.note;
+        }
         ss << ")";
 
         return ss;
@@ -94,7 +147,7 @@ struct ActivTestCase
 
 inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
 {
-    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     std::vector<ActivTestCase> cases;
 
@@ -113,7 +166,7 @@ inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
 
 inline std::vector<ActivTestCase> createFwdActivationFullCases()
 {
-    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     std::vector<ActivTestCase> cases;
 
@@ -162,30 +215,14 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
 
 inline std::vector<ActivTestCase> createBatchnormBwdActivationTestCases()
 {
-    return {// ReLU Backward: d/dx Max(0, x) = 1 * (x > 0)
-            ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
-                          0.0f,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt),
-            // Clipped ReLU Backward: d/dx Clamp(x, -inf, upper)
-            ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
-                          std::nullopt,
-                          0.5f,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt),
-            // CLAMP Backward: d/dx Clamp(x, lower, upper)
-            ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
-                          0.1f,
-                          0.5f,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt)};
+    return {
+        // ReLU Backward: d/dx Max(0, x) = 1 * (x > 0)
+        ActivTestCase(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD, 0.0f),
+        // Clipped ReLU Backward: d/dx Clamp(x, -inf, upper)
+        ActivTestCase(
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD, std::nullopt, 0.5f),
+        // CLAMP Backward: d/dx Clamp(x, lower, upper)
+        ActivTestCase(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD, 0.1f, 0.5f)};
 }
 
 } // namespace test_activation_common

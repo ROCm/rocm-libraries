@@ -214,35 +214,25 @@ inline bool IsWinogradV21Preferred(const std::string& asic, const ProblemDescrip
 }
 
 inline bool IsShaderConstraintsMetV21(const ProblemDescription& problem,
-                                      const int R,
-                                      const int S,
-                                      const int C,
-                                      const int K,
-                                      const int H,
-                                      const int W,
-                                      const int OH,
-                                      const int OW,
-                                      const int N)
+                                      const uint64_t R,
+                                      const uint64_t S,
+                                      const uint64_t C,
+                                      const uint64_t K,
+                                      const uint64_t H,
+                                      const uint64_t W,
+                                      const uint64_t OH,
+                                      const uint64_t OW,
+                                      const uint64_t N)
 {
-    // Convert arguments to uint64_t
-    uint64_t N_    = N;
-    uint64_t C_    = C;
-    uint64_t H_    = H;
-    uint64_t W_    = W;
-    uint64_t K_    = K;
-    uint64_t S_    = S;
-    uint64_t R_    = R;
-    uint64_t OH_   = OH;
-    uint64_t OW_   = OW;
-    uint64_t padW_ = problem.GetPadW();
-    uint64_t padH_ = problem.GetPadH();
+    uint64_t padW = problem.GetPadW();
+    uint64_t padH = problem.GetPadH();
 
-    uint64_t o_K_stride      = OH_ * OW_;
-    uint64_t o_N_stride      = o_K_stride * K_;
+    uint64_t o_K_stride      = OH * OW;
+    uint64_t o_N_stride      = o_K_stride * K;
     uint64_t o_N_stride_OHOW = o_N_stride + o_K_stride;
 
-    uint64_t d_C_stride    = H_ * W_;
-    uint64_t d_N_stride    = d_C_stride * C_;
+    uint64_t d_C_stride    = H * W;
+    uint64_t d_N_stride    = d_C_stride * C;
     uint64_t d_N_stride_HW = d_N_stride + d_C_stride;
 
     auto num_tiles  = Ceil(OH, 2) * Ceil(OW, 2);
@@ -251,84 +241,77 @@ inline bool IsShaderConstraintsMetV21(const ProblemDescription& problem,
 
     // clang-format off
     // Check implementation limits.
-    return N_           < (uint64_t{1} << 16)
-        && C_           < (uint64_t{1} << 16)
-        && H_           < (uint64_t{1} << 16)
-        && W_           < (uint64_t{1} << 16)
-        && K_           < (uint64_t{1} << 16)
-        && S_           < (uint64_t{1} << 16)
-        && R_           < (uint64_t{1} << 16)
-        && OH_          < (uint64_t{1} << 16)
-        && OW_          < (uint64_t{1} << 16)
-        && padW_        < (uint64_t{1} << 16)
-        && padH_        < (uint64_t{1} << 16)
-        && C_ * R_ * S_ < (uint64_t{1} << 22)
-        && K_ * R_ * S_ < (uint64_t{1} << 28)
+    return N         < (uint64_t{1} << 16)
+        && C         < (uint64_t{1} << 16)
+        && H         < (uint64_t{1} << 16)
+        && W         < (uint64_t{1} << 16)
+        && K         < (uint64_t{1} << 16)
+        && S         < (uint64_t{1} << 16)
+        && R         < (uint64_t{1} << 16)
+        && OH        < (uint64_t{1} << 16)
+        && OW        < (uint64_t{1} << 16)
+        && padW      < (uint64_t{1} << 16)
+        && padH      < (uint64_t{1} << 16)
+        && C * R * S < (uint64_t{1} << 22)
+        && K * R * S < (uint64_t{1} << 28)
         && ((o_N_stride_OHOW < (uint64_t{1} << 29) && d_N_stride_HW < (uint64_t{1} << 29))
            || (stride_one && o_N_stride < (uint64_t{1} << 30) && d_N_stride < (uint64_t{1} << 30)
-           && (N == 1 || num_tiles % 16 == 0)));
+           && (N == 1 || num_tiles % 16 == 0)))
+        && (!problem.IsDirectionBackwardWrW()
+          || C == 1
+          || N * H * W < (uint64_t{1} << 28));
     // clang-format on
 }
 
 inline bool IsShaderConstraintsMetV30(const ProblemDescription& problem,
-                                      const int R,
-                                      const int S,
-                                      const int C,
-                                      const int K,
-                                      const int H,
-                                      const int W,
-                                      const int OH,
-                                      const int OW,
-                                      const int N)
+                                      const uint64_t R,
+                                      const uint64_t S,
+                                      const uint64_t C,
+                                      const uint64_t K,
+                                      const uint64_t H,
+                                      const uint64_t W,
+                                      const uint64_t OH,
+                                      const uint64_t OW,
+                                      const uint64_t N)
 {
-    // Convert arguments to uint64_t
-    uint64_t N_    = N;
-    uint64_t C_    = C;
-    uint64_t H_    = H;
-    uint64_t W_    = W;
-    uint64_t K_    = K;
-    uint64_t S_    = S;
-    uint64_t R_    = R;
-    uint64_t OH_   = OH;
-    uint64_t OW_   = OW;
-    uint64_t padW_ = problem.GetPadW();
-    uint64_t padH_ = problem.GetPadH();
+    uint64_t padW = problem.GetPadW();
+    uint64_t padH = problem.GetPadH();
 
     // clang-format off
     // Check implementation limits.
-    return N_    < (uint64_t{1} << 16)
-        && C_    < (uint64_t{1} << 16)
-        && H_    < (uint64_t{1} << 16)
-        && W_    < (uint64_t{1} << 16)
-        && K_    < (uint64_t{1} << 16)
-        && S_    < (uint64_t{1} << 16)
-        && R_    < (uint64_t{1} << 16)
-        && OH_   < (uint64_t{1} << 16)
-        && OW_   < (uint64_t{1} << 16)
-        && padW_ < (uint64_t{1} << 16)
-        && padH_ < (uint64_t{1} << 16)
-        && H_ * W_              < (uint64_t{1} << 29)
-        && K_ * R_ * S_         < (uint64_t{1} << 28)
-        && (C_ + 1) * H_ * W_   < (uint64_t{1} << 30)
-        && (C_ + 1) * R_ * S_   < (uint64_t{1} << 22)
-        && (K_ + 1) * OH_ * OW_ < (uint64_t{1} << 30)
+    return N    < (uint64_t{1} << 16)
+        && C    < (uint64_t{1} << 16)
+        && H    < (uint64_t{1} << 16)
+        && W    < (uint64_t{1} << 16)
+        && K    < (uint64_t{1} << 16)
+        && S    < (uint64_t{1} << 16)
+        && R    < (uint64_t{1} << 16)
+        && OH   < (uint64_t{1} << 16)
+        && OW   < (uint64_t{1} << 16)
+        && padW < (uint64_t{1} << 16)
+        && padH < (uint64_t{1} << 16)
+        && H * W             < (uint64_t{1} << 29)
+        && K * R * S         < (uint64_t{1} << 28)
+        && (C + 1) * H * W   < (uint64_t{1} << 30)
+        && (C + 1) * R * S   < (uint64_t{1} << 22)
+        && (K + 1) * OH * OW < (uint64_t{1} << 30)
         && (!problem.IsDirectionBackwardWrW()
-          || C_ == 1
-          || N_ * H_ * W_       < (uint64_t{1} << 28));
+          || C == 1
+          || N * H * W       < (uint64_t{1} << 28));
     // clang-format on
 }
 
 template <int Winodata, int Winofilter>
 inline bool IsShaderConstraintsMet(const ProblemDescription& problem,
-                                   const int R,
-                                   const int S,
-                                   const int C,
-                                   const int K,
-                                   const int H,
-                                   const int W,
-                                   const int OH,
-                                   const int OW,
-                                   const int N,
+                                   const uint64_t R,
+                                   const uint64_t S,
+                                   const uint64_t C,
+                                   const uint64_t K,
+                                   const uint64_t H,
+                                   const uint64_t W,
+                                   const uint64_t OH,
+                                   const uint64_t OW,
+                                   const uint64_t N,
                                    const std::string& asic)
 {
     // Padding for bwd data shall not be negative.
