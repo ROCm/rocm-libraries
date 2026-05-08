@@ -289,7 +289,10 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 1. **Generate** — write a generation script following the [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
 2. **Commit** — add the bundle to `hipdnn_reference_data/{Operation}/{Layout}/{DataType}/`. For large tensors, use git-lfs or DVC (see [Data Management](#data-management))
-3. **Instantiate** (new folders only) — add a one-time `INSTANTIATE_TEST_SUITE_P` in a test `.cpp` file, pointing `getGoldenReferenceParams()` at the new `{Operation}/{Layout}/{DataType}` folder. Skip this step when adding test cases to a folder that already has an instantiation
+3. **Instantiate** — if the `{Operation}/{Layout}/{DataType}` folder is new, add a one-time `INSTANTIATE_TEST_SUITE_P` in a test `.cpp` file pointing `getGoldenReferenceParams()` at it. Existing folders already have this — no C++ change needed
+   ```cpp
+   INSTANTIATE_TEST_SUITE_P(, TestBnormFwdFp32, getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32"));
+   ```
 
 ---
 
