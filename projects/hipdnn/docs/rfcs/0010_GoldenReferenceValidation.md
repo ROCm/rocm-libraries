@@ -289,7 +289,7 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 1. **Generate** — write a generation script following the [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
 2. **Commit** — add the bundle to `hipdnn_reference_data/{Operation}/{Layout}/{DataType}/`. For large tensors, use git-lfs or DVC (see [Data Management](#data-management))
-3. **Instantiate** (new operations only) — add a one-time `INSTANTIATE_TEST_SUITE_P` in a test `.cpp` file, pointing `getGoldenReferenceParams()` at the new folder. Existing operations already have this — skip this step when adding test cases to an existing folder
+3. **Instantiate** (new folders only) — add a one-time `INSTANTIATE_TEST_SUITE_P` in a test `.cpp` file, pointing `getGoldenReferenceParams()` at the new `{Operation}/{Layout}/{DataType}` folder. Skip this step when adding test cases to a folder that already has an instantiation
 
 ---
 
@@ -299,16 +299,7 @@ Golden data lives in `hipdnn_reference_data/` at the project root (see [Folder C
 
 **Note**: because CMake uses `file(COPY)` at configure time, adding new golden data requires re-running CMake (not just rebuilding) to update the build tree.
 
-Golden data can grow large (a single test case with `8x512x64x64` fp32 tensors is ~64 MB). For large datasets, external storage is needed:
-
-| Option | Pros | Cons |
-|--------|------|------|
-| git (small data) | Simplest, no extra tools | Only practical for small tensors |
-| git-lfs | Built into git, no new tool | GitHub storage/bandwidth costs at scale |
-| DVC | Data versioned alongside code, backend-agnostic (S3/Azure/GCS) | Third-party tool, learning curve |
-| S3/Azure + script | No new dependency, simple | No automatic version linkage to code |
-
-This RFC does not prescribe a specific storage tool. The existing batchnorm data (small tensors) is committed directly to git.
+The existing batchnorm data (small tensors) is committed directly to git. Golden data can grow large (a single test case with `8x512x64x64` fp32 tensors is ~64 MB), so large datasets will need external storage (git-lfs, DVC, or similar). The storage tool decision is out of scope for this RFC.
 
 ---
 
@@ -317,7 +308,7 @@ This RFC does not prescribe a specific storage tool. The existing batchnorm data
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
 | FlatBuffers schema change | Old JSON bundles unreadable by `loadGraphAndTensors()` | Medium | Regenerate from Python scripts (Python framework is schema-independent) |
-| Reference script bug freezes wrong data | Silent incorrect baseline | Medium | Cross-validate against C++ CPU ref; review generated data before committing; [generation-time validation](#data-integrity) rejects degenerate outputs |
+| Reference script bug freezes wrong data | Silent incorrect baseline | Medium | Cross-validate against C++ CPU ref; review generated data before committing; [proposed generation-time validation](#data-integrity) will reject degenerate outputs |
 | PyTorch version drift | Different versions produce slightly different outputs | Low | Pin PyTorch version in `requirements.txt`; regenerate when upgrading |
 | Large golden data sets slow CI | CI feedback loop degrades | Low | Storage caching, selective fetch by test filter, compression (future) |
 | Remote storage unavailable | Golden-mode CI fails | Low | Computed-mode CI is independent of storage; CI fallback to computed-only |
