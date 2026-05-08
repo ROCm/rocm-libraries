@@ -30,10 +30,8 @@ TEST_ROUTINE_WITH_CONFIG(roti,
                          hipsparse_test_config_real_only,
                          arg.N,
                          arg.nnz,
-                         arg.alpha,
-                         arg.alphai,
-                         arg.beta,
-                         arg.betai,
+                         arg.c,
+                         arg.s,
                          arg.baseA,
                          arg.graph_test);
 #endif
