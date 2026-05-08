@@ -303,14 +303,14 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
                                      uint32_t num_device_buffers);
 
 /**
- * @brief Optional override-aware execute entry point (RFC 0008 §4.5).
+ * @brief Optional override-aware execute entry point for engine plugins.
  *
- * Plugins that support per-execute tensor-shape overrides export this symbol
- * in addition to `hipdnnEnginePluginExecuteOpGraph`. Plugins that do not
- * support overrides simply omit this symbol from their dynamic library. The
- * host MAY filter plugins lacking this symbol out during applicability when
- * the graph opts in to dynamic shapes, and MUST treat a missing symbol as
- * "not supported" at dispatch.
+ * The host selects this entry only when the plugin reports a new enough API
+ * version and exports this symbol. If either requirement is missing, the
+ * plugin is ineligible for override execution. A plugin that exports this
+ * symbol but cannot support overrides for a particular graph should reject
+ * that graph during applicability; the execute implementation may then be an
+ * empty stub.
  *
  * @param[in] handle             The engine plugin handle.
  * @param[in] execution_context  Execution context produced for this engine
@@ -321,10 +321,9 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *                               (same layout as the existing execute entry).
  * @param[in] num_device_buffers Number of entries in `device_buffers`.
  * @param[in] num_overrides      Number of tensor unique-ids in the override
- *                               selectors. May be zero, in which case the
- *                               override pointer arrays are unused and the
- *                               call is observably equivalent to the existing
- *                               execute entry.
+ *                               selectors. The current host dispatches empty
+ *                               override sets through the existing execute
+ *                               entry instead of this function.
  * @param[in] override_unique_ids Pointer to an array of length `num_overrides`
  *                                identifying which graph tensors carry an
  *                                override. Each unique id must also appear in
@@ -349,14 +348,12 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *       `override_unique_ids`, `override_lengths`, `override_shapes`,
  *       `override_strides`, and the inner per-tensor buffers reachable
  *       through them are owned by the host and are valid only for the
- *       duration of this call. Plugins must not retain any of these
- *       pointers past return; copy any data that must outlive the call.
- *       This matches the lifetime of `device_buffers` for the existing
- *       execute entry. See RFC 0008 §4.6.
+ *       duration of this call. Plugins must not retain any of these pointers
+ *       past return; copy any data that must outlive the call. This matches
+ *       the lifetime of `device_buffers` for the existing execute entry.
  *
- * @note This symbol is OPTIONAL. The host resolves it through the loader's
- *       optional-symbol mechanism; a missing symbol is not an error and is
- *       equivalent to the plugin opting out of override support.
+ * @note The host resolves this symbol through the loader's optional-symbol
+ *       mechanism for backward compatibility with pre-1.1 plugins.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginExecuteOpGraphWithOverrides(

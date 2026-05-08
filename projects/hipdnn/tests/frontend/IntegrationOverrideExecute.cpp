@@ -2,30 +2,20 @@
 // SPDX-License-Identifier:  MIT
 
 // Frontend integration tests for overridable tensor shapes (RFC 0008,
-// execute path). Covers:
-//   * The four-corner dispatch matrix from RFC §9.4 (graph flag × plugin
-//     capability) using the override-implementing and override-omitting
-//     fakes published by Stream B.
-//   * Test #11 (RFC 0008 plan §6.5) — non-override graph + override-implementing
-//     plugin must invoke the existing executeOpGraph entry, NOT the override
-//     entry.
-//   * Test #15 (RFC 0008 plan §6.5) — empty-overrides pass-through for the
-//     map overload: empty map + flag set is observably indistinguishable
-//     from a non-override execute call.
-//   * Map vs parallel-array equivalence (RFC §4.2 "pure sugar").
+// execute path). Covers the graph-flag/plugin-capability dispatch matrix,
+// empty-override fall-through, map vs parallel-array equivalence, and
+// compiled-plan-only execution.
 //
-// Stream B's fake plugins record their last-called entry into a thread-local
-// `TestPluginLastCallRecord` exposed via the suffixed
-// `getLastCallRecord_<suffix>()` / `resetLastCallRecord_<suffix>()` C entry
-// points (resolved via `getLastCallRecordIfLoaded` /
-// `resetLastCallRecordIfLoaded` from `TestPluginCommon.hpp`, which dlsym
-// the symbols out of the dlopen'd plugin `.so`). Per Risk #11
-// (TLS-leak-between-tests), every test resets the TLS state in `SetUp()`.
+// Fake plugins record their last-called entry into a thread-local
+// `TestPluginLastCallRecord` exposed via suffixed C entry points. The
+// IfLoaded helpers resolve those symbols from already-loaded plugin `.so`
+// handles without causing a plugin load.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
 #include "OverrideTestUtils.hpp"
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -34,10 +24,19 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #ifdef HIPDNN_ENABLE_SDPA
 
@@ -69,19 +68,50 @@ struct SimpleTensorBundle
 /// `buildPointwiseReluGraph` helper that defaults strides to NCHW packed.
 std::shared_ptr<Graph> createSimplePointwiseGraph(const std::string& graphName,
                                                   const std::vector<int64_t>& declaredDims,
-                                                  bool dynamicShapeEnabled)
+                                                  bool overrideShapeEnabled)
 {
     return hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
-        graphName, declaredDims, /*strides=*/{}, dynamicShapeEnabled);
+        graphName, declaredDims, /*strides=*/{}, overrideShapeEnabled);
 }
 
 // Bring the shared `compileGraph(graph, handle)` helper into the file's
 // anonymous namespace so existing call sites resolve unqualified.
 using hipdnn_tests::override_test_utils::compileGraph;
 
+class ScopedTempFile
+{
+public:
+    explicit ScopedTempFile(std::filesystem::path path)
+        : _path(std::move(path))
+    {
+        std::filesystem::remove(_path);
+    }
+
+    ~ScopedTempFile()
+    {
+        std::error_code ignored;
+        std::filesystem::remove(_path, ignored);
+    }
+
+    ScopedTempFile(const ScopedTempFile&) = delete;
+    ScopedTempFile& operator=(const ScopedTempFile&) = delete;
+
+    const std::filesystem::path& path() const
+    {
+        return _path;
+    }
+
+    std::string string() const
+    {
+        return _path.string();
+    }
+
+private:
+    std::filesystem::path _path;
+};
+
 /// Common fixture: load a configurable set of fake plugins and create a handle.
-/// Per Risk #11, derived tests must reset the TLS LastCallRecord in their own
-/// SetUp() before any plugin invocation.
+/// Each test starts with any already-loaded fake-plugin records reset.
 class IntegrationOverrideExecuteBase : public ::testing::Test
 {
 protected:
@@ -91,10 +121,7 @@ protected:
         ASSERT_EQ(hipInit(0), hipSuccess);
         int deviceId = 0;
         ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
-        // Reset the TLS LastCallRecord across every override-execute fake
-        // plugin that may be loaded (see `OverrideTestUtils.hpp`).
-        // Resetters for plugins not (yet) loaded are silently skipped
-        // (Risk #11).
+        // Reset any override-execute fake plugin already loaded in this process.
         hipdnn_tests::override_test_utils::resetAllOverrideFakePluginRecords();
     }
 
@@ -105,6 +132,7 @@ protected:
             ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
             _handle = nullptr;
         }
+        _pluginLibraries.clear();
     }
 
     /// Load the override-implementing and override-omitting fakes and create
@@ -112,9 +140,12 @@ protected:
     /// the four-corner matrix tests.
     void loadBothFakes()
     {
-        const std::array<const char*, 2> paths
-            = {hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath().c_str(),
-               hipdnn_tests::plugin_constants::testOverrideOmittingPluginPath().c_str()};
+        const auto& implementingPath
+            = hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath();
+        const auto& omittingPath = hipdnn_tests::plugin_constants::testOverrideOmittingPluginPath();
+        ownPluginLibraries({implementingPath, omittingPath});
+
+        const std::array<const char*, 2> paths = {implementingPath.c_str(), omittingPath.c_str()};
 
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
@@ -125,8 +156,10 @@ protected:
     /// Load only the override-omitting fake (no override entry exported).
     void loadOmittingOnly()
     {
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testOverrideOmittingPluginPath().c_str()};
+        const auto& omittingPath = hipdnn_tests::plugin_constants::testOverrideOmittingPluginPath();
+        ownPluginLibraries({omittingPath});
+
+        const std::array<const char*, 1> paths = {omittingPath.c_str()};
 
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
@@ -137,8 +170,11 @@ protected:
     /// Load only the override-implementing fake (override entry available).
     void loadImplementingOnly()
     {
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath().c_str()};
+        const auto& implementingPath
+            = hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath();
+        ownPluginLibraries({implementingPath});
+
+        const std::array<const char*, 1> paths = {implementingPath.c_str()};
 
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
@@ -146,16 +182,206 @@ protected:
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
     }
 
+    void resetOverrideImplementingRecord() const
+    {
+        resetRecordForOwnedPlugin(
+            hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
+            "OverrideImplementing");
+    }
+
+    const TestPluginLastCallRecord* getOverrideImplementingRecord() const
+    {
+        return getRecordForOwnedPlugin(
+            hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
+            "OverrideImplementing");
+    }
+
+    const TestPluginLastCallRecord* getRecordForOwnedPlugin(const std::string& pluginPath,
+                                                            const std::string& suffix) const
+    {
+        return getLastCallRecord(ownedPluginLibrary(pluginPath), suffix);
+    }
+
+    void resetRecordForOwnedPlugin(const std::string& pluginPath, const std::string& suffix) const
+    {
+        resetLastCallRecord(ownedPluginLibrary(pluginPath), suffix);
+    }
+
     hipdnnHandle_t _handle = nullptr;
+
+private:
+    void ownPluginLibraries(const std::vector<std::string>& pluginPaths)
+    {
+        _pluginLibraries.clear();
+        _pluginLibraries.reserve(pluginPaths.size());
+        for(const auto& pluginPath : pluginPaths)
+        {
+            _pluginLibraries.emplace_back(pluginPath);
+        }
+    }
+
+    const ScopedTestPluginLibrary& ownedPluginLibrary(const std::string& pluginPath) const
+    {
+        for(const auto& pluginLibrary : _pluginLibraries)
+        {
+            if(pluginLibrary.pluginPath() == pluginPath)
+            {
+                return pluginLibrary;
+            }
+        }
+        throw std::logic_error("Test plugin is not owned by this fixture: " + pluginPath);
+    }
+
+    std::vector<ScopedTestPluginLibrary> _pluginLibraries;
 };
 
+std::vector<int64_t> packedNchwStrides(const std::vector<int64_t>& dims)
+{
+    return hipdnn_data_sdk::utilities::generateStrides(dims);
+}
+
+int currentProcessId()
+{
+#ifdef _WIN32
+    return _getpid();
+#else
+    return ::getpid();
+#endif
+}
+
+void createPlanOnlyGraph(hipdnnHandle_t handle,
+                         const std::vector<int64_t>& dims,
+                         std::shared_ptr<Graph>& restored)
+{
+    auto source
+        = createSimplePointwiseGraph("PlanOnly_Source", dims, /*overrideShapeEnabled=*/true);
+    compileGraph(source, handle);
+
+    auto [compiledPlan, serializeResult] = source->to_compiled_plan_binary();
+    ASSERT_EQ(serializeResult.code, ErrorCode::OK) << serializeResult.err_msg;
+    ASSERT_FALSE(compiledPlan.empty());
+
+    restored = std::make_shared<Graph>();
+    auto restoreResult = restored->from_compiled_plan_binary(handle, compiledPlan);
+    ASSERT_EQ(restoreResult.code, ErrorCode::OK) << restoreResult.err_msg;
+}
+
+void expectCapturedOverrides(const TestPluginLastCallRecord& record,
+                             const std::vector<int64_t>& overrideUids,
+                             const std::vector<std::vector<int64_t>>& overrideShapes,
+                             const std::vector<std::vector<int64_t>>& overrideStrides)
+{
+    ASSERT_EQ(record.numOverrides, overrideUids.size());
+    ASSERT_LE(overrideUids.size(), K_MAX_TEST_OVERRIDES);
+    for(size_t i = 0; i < overrideUids.size(); ++i)
+    {
+        SCOPED_TRACE("override[" + std::to_string(i) + "]");
+        EXPECT_EQ(record.capturedUniqueIds[i], overrideUids[i]);
+        ASSERT_EQ(overrideShapes[i].size(), overrideStrides[i].size());
+        ASSERT_LE(overrideShapes[i].size(), K_MAX_TEST_OVERRIDE_RANK);
+        EXPECT_EQ(record.capturedLengths[i], overrideShapes[i].size());
+        for(size_t axis = 0; axis < overrideShapes[i].size(); ++axis)
+        {
+            EXPECT_EQ(record.capturedShapes[i][axis], overrideShapes[i][axis]);
+            EXPECT_EQ(record.capturedStrides[i][axis], overrideStrides[i][axis]);
+        }
+    }
+}
+
+void expectCapturedOverridesByUid(
+    const TestPluginLastCallRecord& record,
+    const std::unordered_map<int64_t, OverrideEntry>& expectedOverrides)
+{
+    ASSERT_EQ(record.numOverrides, expectedOverrides.size());
+    std::unordered_set<int64_t> seen;
+    for(size_t i = 0; i < record.numOverrides; ++i)
+    {
+        const auto uid = record.capturedUniqueIds[i];
+        EXPECT_TRUE(seen.insert(uid).second) << "Duplicate captured override UID " << uid;
+        const auto iter = expectedOverrides.find(uid);
+        ASSERT_NE(iter, expectedOverrides.end()) << "Unexpected override UID " << uid;
+        ASSERT_EQ(iter->second.shape.size(), iter->second.stride.size());
+        ASSERT_LE(iter->second.shape.size(), K_MAX_TEST_OVERRIDE_RANK);
+        EXPECT_EQ(record.capturedLengths[i], iter->second.shape.size());
+        for(size_t axis = 0; axis < iter->second.shape.size(); ++axis)
+        {
+            EXPECT_EQ(record.capturedShapes[i][axis], iter->second.shape[axis]);
+            EXPECT_EQ(record.capturedStrides[i][axis], iter->second.stride[axis]);
+        }
+    }
+}
+
 } // namespace
+
+class IntegrationOverrideExecutePluginLookup : public ::testing::Test
+{
+};
+
+TEST_F(IntegrationOverrideExecutePluginLookup, NoLoadMissThenScopedOwnerHitAndUnload)
+{
+    const auto sourcePath = test_plugin_internal::resolvePluginPathRelativeToBackend(
+        hipdnn_tests::plugin_constants::testSecondOverridePluginPath());
+    const auto probePath
+        = std::filesystem::temp_directory_path()
+          / ("hipdnn_second_override_noload_probe_" + std::to_string(currentProcessId())
+             + sourcePath.extension().string());
+    const ScopedTempFile probeFile(probePath);
+    std::filesystem::copy_file(
+        sourcePath, probeFile.path(), std::filesystem::copy_options::overwrite_existing);
+
+    const auto pluginPath = probeFile.string();
+    constexpr const char* SUFFIX = "SecondOverride";
+
+    ASSERT_EQ(getLastCallRecordIfLoaded(pluginPath, SUFFIX), nullptr)
+        << "RTLD_NOLOAD lookup must not load a plugin on miss.";
+
+    {
+        const ScopedTestPluginLibrary owner(pluginPath);
+        ASSERT_NE(getLastCallRecordIfLoaded(pluginPath, SUFFIX), nullptr)
+            << "RTLD_NOLOAD lookup should resolve while a real owner pins the plugin.";
+
+        resetLastCallRecord(owner, SUFFIX);
+        const auto* record = getLastCallRecord(owner, SUFFIX);
+        ASSERT_NE(record, nullptr);
+        EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE);
+    }
+
+    EXPECT_EQ(getLastCallRecordIfLoaded(pluginPath, SUFFIX), nullptr)
+        << "The temporary RTLD_NOLOAD handle must not keep the plugin loaded after owner teardown.";
+}
+
+class IntegrationOverrideExecutePluginDispatch : public IntegrationOverrideExecuteBase
+{
+};
+
+TEST_F(IntegrationOverrideExecutePluginDispatch,
+       HostLoadMakesLookupAvailableAndDispatchesLegacyEntry)
+{
+    loadImplementingOnly();
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    SimpleTensorBundle<float> bundle(dims);
+    auto graph = createSimplePointwiseGraph(
+        "PluginLookup_NoLoadMissThenHostLoad", dims, /*overrideShapeEnabled=*/false);
+    compileGraph(graph, _handle);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = bundle.xTensor.memory().deviceData();
+    variantPack[2] = bundle.yTensor.memory().deviceData();
+
+    resetOverrideImplementingRecord();
+    auto result = graph->execute(_handle, variantPack, nullptr);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const auto* afterLoad = getOverrideImplementingRecord();
+    ASSERT_NE(afterLoad, nullptr);
+    EXPECT_EQ(afterLoad->whichEntry, TestPluginExecuteEntry::OP_GRAPH);
+}
 
 // ----------------------------------------------------------------------------
 // Four-corner matrix: graph flag × plugin capability (RFC §9.4).
 //
 //   Corner 1 (false × omitting):       legacy graph, legacy plugin → legacy entry
-//   Corner 2 (false × implementing):   legacy graph, new plugin    → legacy entry (Test #11)
+//   Corner 2 (false × implementing):   legacy graph, new plugin    → legacy entry
 //   Corner 3 (true  × omitting):       new graph, legacy plugin    → no applicable engine
 //   Corner 4 (true  × implementing):   new graph, new plugin       → override entry
 // ----------------------------------------------------------------------------
@@ -164,7 +390,7 @@ class IntegrationOverrideExecuteFourCorner : public IntegrationOverrideExecuteBa
 {
 };
 
-/// Corner 1: graph without `is_dynamic_shape_enabled`, override-omitting plugin
+/// Corner 1: graph without `is_override_shape_enabled`, override-omitting plugin
 /// loaded. Dispatch must use `hipdnnEnginePluginExecuteOpGraph` (the legacy
 /// entry). Verifies binary compatibility for the "no new feature anywhere"
 /// case.
@@ -176,7 +402,7 @@ TEST_F(IntegrationOverrideExecuteFourCorner, LegacyGraphLegacyPluginUsesLegacyEn
     SimpleTensorBundle<float> bundle(dims);
 
     auto graph = createSimplePointwiseGraph(
-        "FourCorner_LegacyGraphLegacyPlugin", dims, /*dynamicShapeEnabled=*/false);
+        "FourCorner_LegacyGraphLegacyPlugin", dims, /*overrideShapeEnabled=*/false);
     compileGraph(graph, _handle);
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -186,20 +412,18 @@ TEST_F(IntegrationOverrideExecuteFourCorner, LegacyGraphLegacyPluginUsesLegacyEn
     auto result = graph->execute(_handle, variantPack, nullptr);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    const auto* record = getLastCallRecordIfLoaded(
+    const auto* record = getRecordForOwnedPlugin(
         hipdnn_tests::plugin_constants::testOverrideOmittingPluginPath(), "OverrideOmitting");
     ASSERT_NE(record, nullptr);
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::OP_GRAPH)
         << "Corner 1 must dispatch through the legacy executeOpGraph entry.";
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     EXPECT_EQ(record->numOverrides, 0U) << "Legacy entry must receive no override metadata.";
 }
 
-/// Corner 2 / Test #11: graph without `is_dynamic_shape_enabled`, the
-/// override-implementing plugin is loaded. The host MUST still pick the
-/// legacy entry — the override entry is exclusively for graphs that opted in
-/// at build time. (RFC 0008 plan Test #11.)
+/// Corner 2: graph without `is_override_shape_enabled`, the
+/// override-implementing plugin is loaded. The host must still pick the
+/// legacy entry because the override entry is only for graphs that opted in
+/// at build time.
 TEST_F(IntegrationOverrideExecuteFourCorner, LegacyGraphImplementingPluginUsesLegacyEntry)
 {
     loadImplementingOnly();
@@ -208,7 +432,7 @@ TEST_F(IntegrationOverrideExecuteFourCorner, LegacyGraphImplementingPluginUsesLe
     SimpleTensorBundle<float> bundle(dims);
 
     auto graph = createSimplePointwiseGraph(
-        "FourCorner_LegacyGraphImplementingPlugin", dims, /*dynamicShapeEnabled=*/false);
+        "FourCorner_LegacyGraphImplementingPlugin", dims, /*overrideShapeEnabled=*/false);
     compileGraph(graph, _handle);
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -218,17 +442,16 @@ TEST_F(IntegrationOverrideExecuteFourCorner, LegacyGraphImplementingPluginUsesLe
     auto result = graph->execute(_handle, variantPack, nullptr);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    const auto* record = getLastCallRecordIfLoaded(
+    const auto* record = getRecordForOwnedPlugin(
         hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
         "OverrideImplementing");
     ASSERT_NE(record, nullptr);
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::OP_GRAPH)
-        << "Test #11: even when the override entry is available, a graph "
-           "that did not opt in must use the legacy executeOpGraph entry.";
+        << "Even when the override entry is available, a graph that did not "
+           "opt in must use the legacy executeOpGraph entry.";
 }
 
-/// Corner 3: graph with `is_dynamic_shape_enabled=true`, only the
+/// Corner 3: graph with `is_override_shape_enabled=true`, only the
 /// override-omitting plugin loaded (reports `apiVersionWithoutTweak()` =
 /// `"1.0.0"`). The version filter must exclude it from the applicability set,
 /// so plan creation reports "no applicable engine" before any execute call.
@@ -238,7 +461,7 @@ TEST_F(IntegrationOverrideExecuteFourCorner, OverrideGraphOmittingPluginNoApplic
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createSimplePointwiseGraph(
-        "FourCorner_OverrideGraphOmittingPlugin", dims, /*dynamicShapeEnabled=*/true);
+        "FourCorner_OverrideGraphOmittingPlugin", dims, /*overrideShapeEnabled=*/true);
 
     // Validation succeeds (it is structural, not engine-aware).
     auto result = graph->validate();
@@ -247,16 +470,14 @@ TEST_F(IntegrationOverrideExecuteFourCorner, OverrideGraphOmittingPluginNoApplic
     result = graph->build_operation_graph(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    // Engine selection must fail downstream — the only loaded plugin reports
-    // version "1.0.0" and is filtered out for override-flag graphs by the
-    // applicability check (Stream B). The exact stage that surfaces the
-    // failure is implementation-defined; what matters for this test is that
-    // SOME stage rejects, and it does so without invoking any execute entry.
+    // Engine selection must fail downstream because the only loaded plugin
+    // reports version "1.0.0" and is filtered out for override-flag graphs.
+    // The exact stage that surfaces the failure is implementation-defined;
+    // what matters is that some stage rejects without invoking an execute entry.
     const auto plansResult = graph->create_execution_plans();
     if(plansResult.code == ErrorCode::OK)
     {
         const auto supportResult = graph->check_support();
-        // NOLINTNEXTLINE(readability-implicit-bool-conversion)
         EXPECT_NE(supportResult.code, ErrorCode::OK)
             << "Corner 3 must fail engine selection when no plugin meets the "
                "override-version floor.";
@@ -267,15 +488,14 @@ TEST_F(IntegrationOverrideExecuteFourCorner, OverrideGraphOmittingPluginNoApplic
     }
 
     // No execute entry should have been touched.
-    const auto* record = getLastCallRecordIfLoaded(
+    const auto* record = getRecordForOwnedPlugin(
         hipdnn_tests::plugin_constants::testOverrideOmittingPluginPath(), "OverrideOmitting");
     ASSERT_NE(record, nullptr);
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE)
         << "Corner 3 must not invoke any execute entry.";
 }
 
-/// Corner 4: graph with `is_dynamic_shape_enabled=true`, override-implementing
+/// Corner 4: graph with `is_override_shape_enabled=true`, override-implementing
 /// plugin loaded. Override execute entry is invoked with the supplied per-UID
 /// shapes/strides. Workspace pointer is forwarded as-is.
 TEST_F(IntegrationOverrideExecuteFourCorner, OverrideGraphImplementingPluginUsesOverrideEntry)
@@ -286,7 +506,7 @@ TEST_F(IntegrationOverrideExecuteFourCorner, OverrideGraphImplementingPluginUses
     SimpleTensorBundle<float> bundle(declaredDims);
 
     auto graph = createSimplePointwiseGraph(
-        "FourCorner_OverrideGraphImplementingPlugin", declaredDims, /*dynamicShapeEnabled=*/true);
+        "FourCorner_OverrideGraphImplementingPlugin", declaredDims, /*overrideShapeEnabled=*/true);
     compileGraph(graph, _handle);
 
     // Override the X and Y tensors to a smaller shape, packed-strided.
@@ -305,29 +525,27 @@ TEST_F(IntegrationOverrideExecuteFourCorner, OverrideGraphImplementingPluginUses
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    const auto* record = getLastCallRecordIfLoaded(
+    const auto* record = getRecordForOwnedPlugin(
         hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
         "OverrideImplementing");
     ASSERT_NE(record, nullptr);
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::OP_GRAPH_WITH_OVERRIDES)
         << "Corner 4: override-flag graph + override-implementing plugin must "
            "dispatch through the override entry.";
-    EXPECT_EQ(record->numOverrides, overrideUids.size());
+    expectCapturedOverrides(*record, overrideUids, overrideShapes, overrideStrides);
 }
 
 // ----------------------------------------------------------------------------
-// No-overrides short-circuit (Test #15) and map vs parallel-array equivalence.
+// No-overrides short-circuit and map vs parallel-array equivalence.
 // ----------------------------------------------------------------------------
 
 class IntegrationOverrideExecuteShortCircuit : public IntegrationOverrideExecuteBase
 {
 };
 
-/// Test #15: empty map + flag set. The map overload must lower to empty
-/// parallel arrays, hit the no-overrides short-circuit, and dispatch through
-/// the legacy executeOpGraph entry — observably identical to a non-override
-/// execute.
+/// Empty map + flag set. The map overload must lower to empty parallel arrays,
+/// hit the no-overrides short-circuit, and dispatch through the legacy
+/// executeOpGraph entry.
 TEST_F(IntegrationOverrideExecuteShortCircuit, EmptyMapDispatchesLegacyEntry)
 {
     loadBothFakes();
@@ -336,7 +554,7 @@ TEST_F(IntegrationOverrideExecuteShortCircuit, EmptyMapDispatchesLegacyEntry)
     SimpleTensorBundle<float> bundle(dims);
 
     auto graph
-        = createSimplePointwiseGraph("ShortCircuit_EmptyMap", dims, /*dynamicShapeEnabled=*/true);
+        = createSimplePointwiseGraph("ShortCircuit_EmptyMap", dims, /*overrideShapeEnabled=*/true);
     compileGraph(graph, _handle);
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -347,17 +565,16 @@ TEST_F(IntegrationOverrideExecuteShortCircuit, EmptyMapDispatchesLegacyEntry)
     auto result = graph->execute(_handle, variantPack, nullptr, emptyOverrides);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    // With `dynamicShapeEnabled=true`, the omitting plugin is filtered out
+    // With `overrideShapeEnabled=true`, the omitting plugin is filtered out
     // by the host's version check, so dispatch lands on the
     // override-implementing fake even for the no-overrides short-circuit.
-    const auto* record = getLastCallRecordIfLoaded(
+    const auto* record = getRecordForOwnedPlugin(
         hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
         "OverrideImplementing");
     ASSERT_NE(record, nullptr);
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::OP_GRAPH)
         << "Empty-map override-execute must short-circuit to the legacy entry "
-           "(RFC 0008 plan Test #15).";
+           "when no override metadata is supplied.";
     EXPECT_EQ(record->numOverrides, 0U);
 }
 
@@ -370,7 +587,7 @@ TEST_F(IntegrationOverrideExecuteShortCircuit, EmptyParallelArraysDispatchesLega
     SimpleTensorBundle<float> bundle(dims);
 
     auto graph = createSimplePointwiseGraph(
-        "ShortCircuit_EmptyParallel", dims, /*dynamicShapeEnabled=*/true);
+        "ShortCircuit_EmptyParallel", dims, /*overrideShapeEnabled=*/true);
     compileGraph(graph, _handle);
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -386,8 +603,8 @@ TEST_F(IntegrationOverrideExecuteShortCircuit, EmptyParallelArraysDispatchesLega
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Same dispatch reasoning as `EmptyMapDispatchesLegacyEntry`: the
-    // omitting plugin is filtered out under `dynamicShapeEnabled=true`.
-    const auto* record = getLastCallRecordIfLoaded(
+    // omitting plugin is filtered out under `overrideShapeEnabled=true`.
+    const auto* record = getRecordForOwnedPlugin(
         hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
         "OverrideImplementing");
     ASSERT_NE(record, nullptr);
@@ -410,7 +627,7 @@ TEST_F(IntegrationOverrideExecuteEquivalence, MapAndParallelArrayProduceSameDisp
     SimpleTensorBundle<float> bundle(declaredDims);
 
     auto graph = createSimplePointwiseGraph(
-        "Equivalence_MapVsArray", declaredDims, /*dynamicShapeEnabled=*/true);
+        "Equivalence_MapVsArray", declaredDims, /*overrideShapeEnabled=*/true);
     compileGraph(graph, _handle);
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -428,17 +645,16 @@ TEST_F(IntegrationOverrideExecuteEquivalence, MapAndParallelArrayProduceSameDisp
         auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
-    const auto* recordAfterArray = getLastCallRecordIfLoaded(
+    const auto* recordAfterArray = getRecordForOwnedPlugin(
         hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
         "OverrideImplementing");
     ASSERT_NE(recordAfterArray, nullptr);
     EXPECT_EQ(recordAfterArray->whichEntry, TestPluginExecuteEntry::OP_GRAPH_WITH_OVERRIDES);
-    const auto arrayUidCount = recordAfterArray->numOverrides;
+    expectCapturedOverrides(*recordAfterArray, {1, 2}, {shape, shape}, {stride, stride});
 
     // Reset between calls so we observe just the second invocation's record.
-    resetLastCallRecordIfLoaded(
-        hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
-        "OverrideImplementing");
+    resetRecordForOwnedPlugin(hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
+                              "OverrideImplementing");
 
     // Second call: map form with identical content.
     {
@@ -448,15 +664,13 @@ TEST_F(IntegrationOverrideExecuteEquivalence, MapAndParallelArrayProduceSameDisp
         auto result = graph->execute(_handle, variantPack, nullptr, overrides);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
-    const auto* recordAfterMap = getLastCallRecordIfLoaded(
+    const auto* recordAfterMap = getRecordForOwnedPlugin(
         hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
         "OverrideImplementing");
     ASSERT_NE(recordAfterMap, nullptr);
     EXPECT_EQ(recordAfterMap->whichEntry, TestPluginExecuteEntry::OP_GRAPH_WITH_OVERRIDES);
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
-    EXPECT_EQ(recordAfterMap->numOverrides, arrayUidCount)
-        << "Map form must lower to the same (uids, shapes, strides) payload "
-           "as the parallel-array form (RFC §4.2 'pure sugar').";
+    expectCapturedOverridesByUid(
+        *recordAfterMap, {{1, OverrideEntry{shape, stride}}, {2, OverrideEntry{shape, stride}}});
 }
 
 // ----------------------------------------------------------------------------
@@ -467,7 +681,7 @@ TEST_F(IntegrationOverrideExecuteEquivalence, MapAndParallelArrayProduceSameDisp
 // must perform the SAME guard so a user calling override-execute before
 // `build_plans()` (or `from_compiled_plan_binary()`) gets a clean
 // INVALID_VALUE diagnostic instead of dereferencing a null/invalid plan
-// descriptor (RFC 0008 post-review fix #3).
+// descriptor.
 // ----------------------------------------------------------------------------
 
 class IntegrationOverrideExecutePlanGuard : public IntegrationOverrideExecuteBase
@@ -489,7 +703,7 @@ TEST_F(IntegrationOverrideExecutePlanGuard, ArrayFormRejectedBeforeBuildPlan)
     // create_execution_plans / check_support / build_plans). The override
     // overload must reject before touching the (absent) plan descriptor.
     auto graph = createSimplePointwiseGraph(
-        "PlanGuard_ArrayBeforeBuild", dims, /*dynamicShapeEnabled=*/true);
+        "PlanGuard_ArrayBeforeBuild", dims, /*overrideShapeEnabled=*/true);
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[1] = bundle.xTensor.memory().deviceData();
@@ -503,7 +717,6 @@ TEST_F(IntegrationOverrideExecutePlanGuard, ArrayFormRejectedBeforeBuildPlan)
     auto result = graph->execute(
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
 
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
         << "Override-execute before build_plans must reject with INVALID_VALUE: " << result.err_msg;
     // Mirrors the wording of the non-override guard (Graph.hpp ~line 1818).
@@ -512,13 +725,209 @@ TEST_F(IntegrationOverrideExecutePlanGuard, ArrayFormRejectedBeforeBuildPlan)
 
     // The override-implementing fake must NOT have been touched: the guard
     // runs before any backend interaction.
-    const auto* record = getLastCallRecordIfLoaded(
+    const auto* record = getRecordForOwnedPlugin(
         hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
         "OverrideImplementing");
     ASSERT_NE(record, nullptr);
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE)
         << "Plan-guard rejection must precede any backend dispatch.";
+}
+
+// ----------------------------------------------------------------------------
+// Compiled-plan-only execution.
+// ----------------------------------------------------------------------------
+
+class IntegrationOverrideExecutePlanOnly : public IntegrationOverrideExecuteBase
+{
+};
+
+struct RestoredPlanRejectCase
+{
+    const char* name;
+    std::vector<int64_t> overrideUids;
+    std::vector<std::vector<int64_t>> overrideShapes;
+    std::vector<std::vector<int64_t>> overrideStrides;
+};
+
+class IntegrationOverrideExecutePlanOnlyReject
+    : public IntegrationOverrideExecuteBase,
+      public ::testing::WithParamInterface<RestoredPlanRejectCase>
+{
+};
+
+TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanNormalExecuteUsesLegacyEntry)
+{
+    loadImplementingOnly();
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    SimpleTensorBundle<float> bundle(dims);
+    std::shared_ptr<Graph> graph;
+    createPlanOnlyGraph(_handle, dims, graph);
+    ASSERT_NE(graph, nullptr);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = bundle.xTensor.memory().deviceData();
+    variantPack[2] = bundle.yTensor.memory().deviceData();
+
+    resetOverrideImplementingRecord();
+    auto result = graph->execute(_handle, variantPack, nullptr);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const auto* record = getOverrideImplementingRecord();
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::OP_GRAPH);
+    EXPECT_EQ(record->numOverrides, 0U);
+}
+
+TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanOverrideExecuteForwardsPayload)
+{
+    loadImplementingOnly();
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    SimpleTensorBundle<float> bundle(dims);
+    std::shared_ptr<Graph> graph;
+    createPlanOnlyGraph(_handle, dims, graph);
+    ASSERT_NE(graph, nullptr);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = bundle.xTensor.memory().deviceData();
+    variantPack[2] = bundle.yTensor.memory().deviceData();
+
+    const std::vector<int64_t> overrideUids = {1, 2};
+    const std::vector<int64_t> shape = {1, 3, 2, 2};
+    const std::vector<int64_t> stride = {12, 4, 2, 1};
+    const std::vector<std::vector<int64_t>> overrideShapes = {shape, shape};
+    const std::vector<std::vector<int64_t>> overrideStrides = {stride, stride};
+
+    resetOverrideImplementingRecord();
+    auto result = graph->execute(
+        _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const auto* record = getOverrideImplementingRecord();
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::OP_GRAPH_WITH_OVERRIDES);
+    expectCapturedOverrides(*record, overrideUids, overrideShapes, overrideStrides);
+}
+
+TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanUnknownGraphUidReachesProvider)
+{
+    loadImplementingOnly();
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    SimpleTensorBundle<float> bundle(dims);
+    std::shared_ptr<Graph> graph;
+    createPlanOnlyGraph(_handle, dims, graph);
+    ASSERT_NE(graph, nullptr);
+
+    constexpr int64_t UNKNOWN_GRAPH_UID = 99;
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = bundle.xTensor.memory().deviceData();
+    variantPack[2] = bundle.yTensor.memory().deviceData();
+    variantPack[UNKNOWN_GRAPH_UID] = bundle.xTensor.memory().deviceData();
+
+    const std::vector<int64_t> overrideUids = {UNKNOWN_GRAPH_UID};
+    const std::vector<std::vector<int64_t>> overrideShapes = {{1, 1, 1, 1}};
+    const std::vector<std::vector<int64_t>> overrideStrides = {{1, 1, 1, 1}};
+
+    resetOverrideImplementingRecord();
+    auto result = graph->execute(
+        _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const auto* record = getOverrideImplementingRecord();
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::OP_GRAPH_WITH_OVERRIDES);
+    expectCapturedOverrides(*record, overrideUids, overrideShapes, overrideStrides);
+}
+
+TEST_P(IntegrationOverrideExecutePlanOnlyReject, RestoredCompiledPlanRejectsInvalidOverrides)
+{
+    loadImplementingOnly();
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    SimpleTensorBundle<float> bundle(dims);
+    std::shared_ptr<Graph> graph;
+    createPlanOnlyGraph(_handle, dims, graph);
+    ASSERT_NE(graph, nullptr);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = bundle.xTensor.memory().deviceData();
+    variantPack[2] = bundle.yTensor.memory().deviceData();
+
+    const auto& testCase = GetParam();
+
+    resetOverrideImplementingRecord();
+    auto result = graph->execute(_handle,
+                                 variantPack,
+                                 nullptr,
+                                 testCase.overrideUids,
+                                 testCase.overrideShapes,
+                                 testCase.overrideStrides);
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
+
+    const auto* record = getOverrideImplementingRecord();
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RestoredCompiledPlan,
+    IntegrationOverrideExecutePlanOnlyReject,
+    ::testing::Values(
+        RestoredPlanRejectCase{"OuterArraySizeMismatch",
+                               {1, 2},
+                               {{1, 3, 4, 4}},
+                               {packedNchwStrides({1, 3, 4, 4}), packedNchwStrides({1, 3, 4, 4})}},
+        RestoredPlanRejectCase{
+            "ShapeStrideRankMismatch", {1}, {{1, 3, 4}}, {packedNchwStrides({1, 3, 4, 4})}},
+        RestoredPlanRejectCase{"DuplicateUids",
+                               {1, 1},
+                               {{1, 3, 4, 4}, {1, 3, 4, 4}},
+                               {packedNchwStrides({1, 3, 4, 4}), packedNchwStrides({1, 3, 4, 4})}},
+        RestoredPlanRejectCase{
+            "NonPositiveShape", {1}, {{1, 3, 0, 4}}, {packedNchwStrides({1, 3, 4, 4})}},
+        RestoredPlanRejectCase{"ZeroRankOverride", {1}, {{}}, {{}}},
+        RestoredPlanRejectCase{"NonPositiveStride", {1}, {{1, 3, 4, 4}}, {{48, 16, 0, 1}}}),
+    [](const auto& info) { return std::string(info.param.name); });
+
+TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanEmptyOverridesFallThrough)
+{
+    loadImplementingOnly();
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    SimpleTensorBundle<float> bundle(dims);
+    std::shared_ptr<Graph> graph;
+    createPlanOnlyGraph(_handle, dims, graph);
+    ASSERT_NE(graph, nullptr);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = bundle.xTensor.memory().deviceData();
+    variantPack[2] = bundle.yTensor.memory().deviceData();
+
+    const std::vector<int64_t> emptyUids;
+    const std::vector<std::vector<int64_t>> emptyShapes;
+    const std::vector<std::vector<int64_t>> emptyStrides;
+
+    resetOverrideImplementingRecord();
+    auto result
+        = graph->execute(_handle, variantPack, nullptr, emptyUids, emptyShapes, emptyStrides);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const auto* recordAfterArrays = getOverrideImplementingRecord();
+    ASSERT_NE(recordAfterArrays, nullptr);
+    EXPECT_EQ(recordAfterArrays->whichEntry, TestPluginExecuteEntry::OP_GRAPH);
+    EXPECT_EQ(recordAfterArrays->numOverrides, 0U);
+
+    resetOverrideImplementingRecord();
+    const std::unordered_map<int64_t, OverrideEntry> emptyOverrides;
+    result = graph->execute(_handle, variantPack, nullptr, emptyOverrides);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const auto* recordAfterMap = getOverrideImplementingRecord();
+    ASSERT_NE(recordAfterMap, nullptr);
+    EXPECT_EQ(recordAfterMap->whichEntry, TestPluginExecuteEntry::OP_GRAPH);
+    EXPECT_EQ(recordAfterMap->numOverrides, 0U);
 }
 
 #endif // HIPDNN_ENABLE_SDPA

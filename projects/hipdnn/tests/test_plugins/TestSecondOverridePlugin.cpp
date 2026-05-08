@@ -1,11 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Fake plugin for RFC 0008 Test #9: a second override-implementing plugin
-// used to verify that the host's applicability filter and dispatch switch
-// handle multiple plugins serving the same override-flag graph without
-// short-circuiting after the first match. Behaves identically to
-// `TestOverrideImplementingPlugin` apart from a distinct engine id.
+// Second override-implementing fake with a distinct engine id.
 
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"

@@ -54,9 +54,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     graph->intermediate_data_type = _intermediateDataType;
     graph->io_data_type = _ioDataType;
     graph->preferred_engine_id = _preferredEngineId;
-    // Schema field is `bool = false`; FlatBuffers omits wire bytes when the
-    // value equals the default, so legacy readers continue to see "false".
-    graph->is_dynamic_shape_enabled = _isDynamicShapeEnabled;
+    graph->is_override_shape_enabled = _isOverrideShapeEnabled;
     graph->name = _name;
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
@@ -135,18 +133,6 @@ void GraphDescriptor::setPreferredEngineId(hipdnnBackendAttributeType_t attribut
     _preferredEngineId = flatbufferOptional;
 }
 
-void GraphDescriptor::setIsDynamicShapeEnabled(hipdnnBackendAttributeType_t attributeType,
-                                               int64_t elementCount,
-                                               const void* arrayOfElements)
-{
-    setScalar(_isDynamicShapeEnabled,
-              HIPDNN_TYPE_BOOLEAN,
-              attributeType,
-              elementCount,
-              arrayOfElements,
-              "GraphDescriptor::setIsDynamicShapeEnabled");
-}
-
 void GraphDescriptor::setHandle(hipdnnBackendAttributeType_t attributeType,
                                 int64_t elementCount,
                                 const void* arrayOfElements)
@@ -210,9 +196,14 @@ void GraphDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT:
         getPreferredEngineId(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED:
-        getIsDynamicShapeEnabled(
-            attributeType, requestedElementCount, elementCount, arrayOfElements);
+    case HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT:
+        getScalar(_isOverrideShapeEnabled,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "GraphDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
         getString(_name,
@@ -273,20 +264,6 @@ void GraphDescriptor::getPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                          elementCount,
                                          arrayOfElements,
                                          "GraphDescriptor::getAttribute()");
-}
-
-void GraphDescriptor::getIsDynamicShapeEnabled(hipdnnBackendAttributeType_t attributeType,
-                                               int64_t requestedElementCount,
-                                               int64_t* elementCount,
-                                               void* arrayOfElements) const
-{
-    getScalar(_isDynamicShapeEnabled,
-              HIPDNN_TYPE_BOOLEAN,
-              attributeType,
-              requestedElementCount,
-              elementCount,
-              arrayOfElements,
-              "GraphDescriptor::getAttribute()");
 }
 
 void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,
@@ -359,8 +336,13 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT:
         setPreferredEngineId(attributeType, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED:
-        setIsDynamicShapeEnabled(attributeType, elementCount, arrayOfElements);
+    case HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT:
+        setScalar(_isOverrideShapeEnabled,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "GraphDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
         setString(
@@ -401,9 +383,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _intermediateDataType = graph->intermediate_data_type;
     _ioDataType = graph->io_data_type;
     _preferredEngineId = graph->preferred_engine_id;
-    // Schema field is `bool = false`. Legacy graphs that predate the field
-    // deserialize to false via the FlatBuffers default; explicit `true` survives.
-    _isDynamicShapeEnabled = graph->is_dynamic_shape_enabled;
+    _isOverrideShapeEnabled = graph->is_override_shape_enabled;
     _name = graph->name;
 
     // Populate _operations from the deserialized graph nodes

@@ -11,7 +11,10 @@
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 
+#include <cstdint>
+#include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace hipdnn_frontend::detail
@@ -20,15 +23,12 @@ namespace hipdnn_frontend::detail
 /// Assembles a GraphDescriptor from pre-built operation descriptors without
 /// setting a handle or finalizing. Unset data types are skipped.
 ///
-/// `isDynamicShapeEnabled` corresponds to the
-/// `HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED` graph-level boolean.
-/// When unset, the attribute is skipped (the backend default is `false`).
 inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescriptor>& operations,
                                      std::optional<hipdnnDataType_t> computeDataType,
                                      std::optional<hipdnnDataType_t> intermediateDataType,
                                      std::optional<hipdnnDataType_t> ioDataType,
                                      const std::optional<int64_t>& preferredEngineId,
-                                     const std::optional<bool>& isDynamicShapeEnabled,
+                                     bool isOverrideShapeEnabled,
                                      const std::string& name,
                                      std::unique_ptr<ScopedHipdnnBackendDescriptor>& outGraphDesc)
 {
@@ -94,18 +94,12 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
                                     "preferred engine ID on GraphDescriptor"));
     }
 
-    // Set dynamic-shape opt-in flag if specified (RFC 0008).
-    // The backend default is `false`, so an unset optional skips the write.
-    if(isDynamicShapeEnabled.has_value())
-    {
-        const bool flagValue = isDynamicShapeEnabled.value();
-        HIPDNN_CHECK_ERROR(
-            setDescriptorAttrScalar(graphDesc.get(),
-                                    HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
-                                    HIPDNN_TYPE_BOOLEAN,
-                                    flagValue,
-                                    "is_dynamic_shape_enabled on GraphDescriptor"));
-    }
+    HIPDNN_CHECK_ERROR(
+        setDescriptorAttrScalar(graphDesc.get(),
+                                HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                HIPDNN_TYPE_BOOLEAN,
+                                isOverrideShapeEnabled,
+                                "is_override_shape_enabled on GraphDescriptor"));
 
     // Set graph name if non-empty
     if(!name.empty())
@@ -126,7 +120,7 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
                                      std::optional<hipdnnDataType_t> intermediateDataType,
                                      std::optional<hipdnnDataType_t> ioDataType,
                                      const std::optional<int64_t>& preferredEngineId,
-                                     const std::optional<bool>& isDynamicShapeEnabled,
+                                     bool isOverrideShapeEnabled,
                                      const std::string& name,
                                      std::unique_ptr<ScopedHipdnnBackendDescriptor>& outGraphDesc)
 {
@@ -135,7 +129,7 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
                                                intermediateDataType,
                                                ioDataType,
                                                preferredEngineId,
-                                               isDynamicShapeEnabled,
+                                               isOverrideShapeEnabled,
                                                name,
                                                outGraphDesc));
 

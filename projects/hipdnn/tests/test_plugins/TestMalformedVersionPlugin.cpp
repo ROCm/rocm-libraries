@@ -1,16 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Fake plugin for RFC 0008 post-review fix #1: reports a malformed
-// API version string (does not match the required "MAJOR.MINOR.PATCH"
-// format). The host-side `Version{...}` parser would normally throw
-// `std::invalid_argument` from this string; this plugin exercises the
-// load-time guard in `EnginePluginManager::validateBeforeAdding`, which
-// uses the lazily-cached `PluginBase::parsedApiVersion()` to reject the
-// plugin before it can pollute the dispatch hot path. The host must catch
-// the rejection inside the existing `tryCatch` wrapper in
-// `loadPluginFromFile` (PluginCore.hpp), log a diagnostic, and continue
-// running so that other well-formed plugins remain available.
+// Fake plugin that reports a malformed API version string.
 
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
@@ -32,9 +23,8 @@ public:
         return "1.0.0";
     }
 
-    /// Deliberately not parseable as MAJOR.MINOR.PATCH so the host's lazy
-    /// `parsedApiVersion()` cache yields `nullopt` and `validateBeforeAdding`
-    /// throws.
+    /// Deliberately not parseable as MAJOR.MINOR.PATCH so `parsedApiVersion()`
+    /// yields `nullopt` and `validateBeforeAdding` throws.
     const char* getPluginApiVersion() const override
     {
         return "not.a.version";

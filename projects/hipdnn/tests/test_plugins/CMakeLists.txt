@@ -5,8 +5,6 @@ cmake_minimum_required(VERSION 3.25.2)
 
 find_package(hip REQUIRED)
 
-# Pull in the RFC 0008 override-execute fake-plugin target name constants
-# (Stream B → Stream C handoff per task B.6a).
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestPluginTargets.cmake")
 
 # Define plugin names as variables
@@ -34,7 +32,8 @@ function(add_test_plugin target_name)
     add_library(${target_name} SHARED ${source_files})
 
     target_compile_definitions(
-        ${target_name} PRIVATE HIPDNN_COMPONENT_NAME="${target_name}" __HIP_PLATFORM_AMD__
+        ${target_name} PRIVATE HIPDNN_COMPONENT_NAME="${target_name}" HIPDNN_TEST_PLUGIN_BUILD
+                               __HIP_PLATFORM_AMD__
     )
 
     target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -95,37 +94,23 @@ add_test_plugin(${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME} TestKnobConstrain
 # test_incompatible_version_plugin is a plugin that returns an incompatible plugin API version
 add_test_plugin(${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME} TestIncompatibleVersionPlugin.cpp)
 
-# RFC 0008 override-execute fake plugins (target names are published in
-# `cmake/TestPluginTargets.cmake` for Stream C consumption per B.6a).
-#
 # Override-implementing fake: reports `K_OVERRIDE_EXECUTE_MIN_API_VERSION`
-# and exports the optional override-execute symbol — admitted by the
-# version filter, dispatched through the override path.
+# and exports the optional override-execute symbol.
 add_test_plugin(${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET} TestOverrideImplementingPlugin.cpp)
 
-# Override-omitting fake: reports the baseline "1.0.0" — filtered out for
-# override-flag graphs, admitted for non-override graphs (binary-compat
-# regression).
+# Override-omitting fake: reports the baseline API and omits the override symbol.
 add_test_plugin(${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET} TestOverrideOmittingPlugin.cpp)
 
-# Version-liar fake: reports `K_OVERRIDE_EXECUTE_MIN_API_VERSION` but does
-# NOT export the override symbol — exercises the dispatch-time
-# `hasOverrideExecute()` safety net.
+# Version-liar fake: reports the override API version but omits the override symbol.
 add_test_plugin(${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET} TestVersionLiarPlugin.cpp)
 
-# Second override-implementing fake (distinct engine id) — Test #9
-# coverage for multiple plugins serving the same override graph.
+# Second override-implementing fake with a distinct engine id.
 add_test_plugin(${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET} TestSecondOverridePlugin.cpp)
 
-# Malformed-version fake (RFC 0008 post-review fix #1): exercises the
-# load-time `parsedApiVersion()` rejection so a bad version string is never
-# re-parsed in the dispatch hot path.
+# Malformed-version fake exercises load-time API-version parse rejection.
 add_test_plugin(${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET} TestMalformedVersionPlugin.cpp)
 
-# Version-zero fake (RFC 0008 plan T-missing #2): reports a parseable but
-# too-low API version ("0.0.0") — exercises the parsed-but-too-low
-# rejection path independent of the malformed-version fake's unparseable
-# rejection path.
+# Version-zero fake reports a parseable but too-low API version.
 add_test_plugin(${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET} TestVersionZeroPlugin.cpp)
 
 # Create the default plugin in test_plugins/default
@@ -162,8 +147,3 @@ set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "${TEST_INCOMPATIBLE_VERSION_PLUGIN_NA
 set(TEST_GOOD_HEURISTIC_PLUGIN_NAME "${TEST_GOOD_HEURISTIC_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME "${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME "${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME}" PARENT_SCOPE)
-
-# RFC 0008 override-execute fake-plugin target names (B.6a) are set with
-# `CACHE INTERNAL` in cmake/TestPluginTargets.cmake (included at the top of
-# this file), which already gives them global visibility — re-exporting
-# via PARENT_SCOPE here is redundant and was removed.

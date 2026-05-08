@@ -49,6 +49,150 @@ TEST_F(IntegrationVariantPackDescriptorApi, ValidSetAttributesAndFinalize)
     EXPECT_EQ(hipdnnBackendFinalize(_varpack), HIPDNN_STATUS_SUCCESS);
 }
 
+TEST_F(IntegrationVariantPackDescriptorApi, OverrideAttributesSetGetAndFinalize)
+{
+    std::array<void*, 2> devPtrs
+        = {reinterpret_cast<void*>(0x1234), reinterpret_cast<void*>(0x5678)};
+    std::array<int64_t, 2> uids = {1, 2};
+    void* workspace = reinterpret_cast<void*>(0xdeadbeef);
+    std::array<int64_t, 2> overrideUids = {1, 2};
+    std::array<int64_t, 2> overrideLengths = {4, 4};
+    std::array<int64_t, 8> overrideShapes = {1, 3, 2, 2, 1, 3, 2, 2};
+    std::array<int64_t, 8> overrideStrides = {12, 4, 2, 1, 12, 4, 2, 1};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
+                                        HIPDNN_TYPE_VOID_PTR,
+                                        static_cast<int64_t>(devPtrs.size()),
+                                        static_cast<const void*>(devPtrs.data())),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(uids.size()),
+                                        uids.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
+                                        HIPDNN_TYPE_VOID_PTR,
+                                        1,
+                                        static_cast<const void*>(&workspace)),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(overrideUids.size()),
+                                        overrideUids.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(overrideShapes.size()),
+                                        overrideShapes.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(overrideStrides.size()),
+                                        overrideStrides.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(overrideLengths.size()),
+                                        overrideLengths.data()),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendFinalize(_varpack), HIPDNN_STATUS_SUCCESS);
+
+    std::array<int64_t, 2> retrievedUids{};
+    std::array<int64_t, 2> retrievedLengths{};
+    std::array<int64_t, 8> retrievedShapes{};
+    std::array<int64_t, 8> retrievedStrides{};
+    int64_t elementCount = 0;
+
+    EXPECT_EQ(hipdnnBackendGetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(retrievedUids.size()),
+                                        &elementCount,
+                                        retrievedUids.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(elementCount, static_cast<int64_t>(overrideUids.size()));
+    EXPECT_EQ(retrievedUids, overrideUids);
+
+    EXPECT_EQ(hipdnnBackendGetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(retrievedLengths.size()),
+                                        &elementCount,
+                                        retrievedLengths.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(elementCount, static_cast<int64_t>(overrideLengths.size()));
+    EXPECT_EQ(retrievedLengths, overrideLengths);
+
+    EXPECT_EQ(hipdnnBackendGetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(retrievedShapes.size()),
+                                        &elementCount,
+                                        retrievedShapes.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(elementCount, static_cast<int64_t>(overrideShapes.size()));
+    EXPECT_EQ(retrievedShapes, overrideShapes);
+
+    EXPECT_EQ(hipdnnBackendGetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(retrievedStrides.size()),
+                                        &elementCount,
+                                        retrievedStrides.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(elementCount, static_cast<int64_t>(overrideStrides.size()));
+    EXPECT_EQ(retrievedStrides, overrideStrides);
+}
+
+TEST_F(IntegrationVariantPackDescriptorApi, OverrideAttributesRejectZeroLengthOnFinalize)
+{
+    std::array<void*, 1> devPtrs = {reinterpret_cast<void*>(0x1234)};
+    std::array<int64_t, 1> uids = {1};
+    void* workspace = reinterpret_cast<void*>(0xdeadbeef);
+    std::array<int64_t, 1> overrideUids = {1};
+    std::array<int64_t, 1> overrideLengths = {0};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
+                                        HIPDNN_TYPE_VOID_PTR,
+                                        static_cast<int64_t>(devPtrs.size()),
+                                        static_cast<const void*>(devPtrs.data())),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(uids.size()),
+                                        uids.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
+                                        HIPDNN_TYPE_VOID_PTR,
+                                        1,
+                                        static_cast<const void*>(&workspace)),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(overrideUids.size()),
+                                        overrideUids.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS,
+                                        HIPDNN_TYPE_INT64,
+                                        static_cast<int64_t>(overrideLengths.size()),
+                                        overrideLengths.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_varpack), HIPDNN_STATUS_BAD_PARAM);
+}
+
 TEST_F(IntegrationVariantPackDescriptorApi, ValidSetAttributesAndGetAttributesBeforeFinalize)
 {
     std::array<void*, 3> devPtrs = {reinterpret_cast<void*>(0x1234),

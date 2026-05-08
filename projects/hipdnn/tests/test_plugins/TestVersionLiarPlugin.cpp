@@ -1,13 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Fake plugin for RFC 0008 Test #3 / #20: reports an API version
-// >= K_OVERRIDE_EXECUTE_MIN_API_VERSION (so the applicability version filter
-// does NOT skip it) but DOES NOT export the override-execute symbol. The
-// host must then catch the discrepancy at dispatch time via the
-// `EnginePlugin::hasOverrideExecute()` safety net (RFC §4.6, §7.2) and
-// return `HIPDNN_STATUS_NOT_SUPPORTED` rather than crash on a missing
-// symbol.
+// Fake plugin that reports the override API version but omits the override symbol.
 
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
@@ -36,9 +30,7 @@ public:
         return "1.0.0";
     }
 
-    /// Reports the centralized RFC 0008 §4.5 minimum API version even
-    /// though this plugin does NOT export the override-execute symbol.
-    /// This intentional mismatch exercises the dispatch-time safety net.
+    /// Reports the override-capable API version without exporting the override symbol.
     const char* getPluginApiVersion() const override
     {
         return hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION.data();
@@ -72,8 +64,5 @@ __attribute__((constructor)) static void initializePlugin()
     TestPluginBase::setInstance(std::make_unique<VersionLiarPlugin>());
 }
 
-// Register ONLY the standard plugin API functions. Deliberately do NOT
-// invoke REGISTER_TEST_PLUGIN_OVERRIDE_API() — that omission is exactly
-// the "version lie" this plugin embodies and is verified at build time by
-// Test #20 via `nm`.
+// Register only the standard plugin API functions.
 REGISTER_TEST_PLUGIN_API()

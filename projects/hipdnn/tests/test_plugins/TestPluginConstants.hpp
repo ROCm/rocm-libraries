@@ -115,10 +115,7 @@ inline const std::string& testIncompatibleVersionPluginPath()
     return s_testIncompatibleVersionPluginPath;
 }
 
-// RFC 0008 override-execute fake-plugin paths. Names are injected as
-// defines from `tests/test_plugins/CMakeLists.txt` (B.6a target constants)
-// via `target_compile_definitions(... TEST_OVERRIDE_IMPLEMENTING_PLUGIN_NAME=...)`
-// in each consuming test executable's CMakeLists.txt.
+// Override-execute fake-plugin paths.
 inline const std::string& testOverrideImplementingPluginPath()
 {
     static const std::string s_path
@@ -146,8 +143,6 @@ inline const std::string& testSecondOverridePluginPath()
     return s_path;
 }
 
-// RFC 0008 post-review fix #1: path to the malformed-version fake plugin
-// used by the dispatch-hardening integration tests.
 inline const std::string& testMalformedVersionPluginPath()
 {
     static const std::string s_path
@@ -155,9 +150,6 @@ inline const std::string& testMalformedVersionPluginPath()
     return s_path;
 }
 
-// RFC 0008 plan T-missing #2: path to the version-zero fake plugin used
-// to exercise the parsed-but-too-low rejection path (distinct from the
-// malformed-version plugin's unparseable rejection path).
 inline const std::string& testVersionZeroPluginPath()
 {
     static const std::string s_path = getTestCustomFilepathForPlugin(TEST_VERSION_ZERO_PLUGIN_NAME);

@@ -4,6 +4,7 @@
 #include <cassert>
 
 #include "PluginCore.hpp"
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 
 namespace hipdnn_backend
 {
@@ -17,6 +18,7 @@ PluginBase::PluginBase(SharedLibrary&& lib)
 }
 
 PluginBase::PluginBase()
+    : _name("mock_plugin")
 {
     // This constructor is used for mocking purposes in tests.
 #ifndef NDEBUG
@@ -48,6 +50,8 @@ void PluginBase::resolveSymbols()
 #ifndef NDEBUG
     _initialized = true;
 #endif
+
+    _name = std::string(name());
 }
 
 std::string_view PluginBase::name() const
@@ -72,14 +76,8 @@ std::string_view PluginBase::apiVersion() const
     const char* version;
     if(_funcGetApiVersion == nullptr)
     {
-        // Plugins that do not export hipdnnPluginGetApiVersion are assumed
-        // to conform to the "1.0.0" plugin SDK baseline. Per RFC 0008 §4.5,
-        // the rollout invariant is that the in-tree plugin SDK is bumped
-        // to 1.0.0 before any new feature symbols are added, so any pre-
-        // existing plugin built against an earlier SDK is still compatible
-        // with the 1.0.0 surface and must not be filtered out as version-
-        // zero unknown.
-        return "1.0.0";
+        // Plugins without hipdnnPluginGetApiVersion predate API versioning.
+        return hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE;
     }
     invokePluginFunction("get plugin api version", _funcGetApiVersion, &version);
     return version;
@@ -87,37 +85,24 @@ std::string_view PluginBase::apiVersion() const
 
 const std::string& PluginBase::cachedName() const
 {
-    if(!_cachedName.has_value())
-    {
-        _cachedName = std::string(name());
-    }
-    return *_cachedName;
+    return _name;
 }
 
-const std::optional<hipdnn_data_sdk::utilities::Version>& PluginBase::parsedApiVersion() const
+std::optional<hipdnn_data_sdk::utilities::Version> PluginBase::parsedApiVersion() const
 {
-    if(_cachedParsedApiVersion.has_value())
-    {
-        return *_cachedParsedApiVersion;
-    }
-
     const auto rawVersion = apiVersion();
     try
     {
-        _cachedParsedApiVersion = std::optional<hipdnn_data_sdk::utilities::Version>{
-            hipdnn_data_sdk::utilities::Version{rawVersion}};
+        return hipdnn_data_sdk::utilities::Version{rawVersion};
     }
     catch(const std::exception& e)
     {
-        // Log once on first access. Subsequent reads return the cached
-        // `nullopt` without re-parsing or re-logging.
         HIPDNN_BACKEND_LOG_WARN("Plugin '{}' has malformed API version string '{}': {}",
                                 cachedName(),
                                 std::string(rawVersion),
                                 e.what());
-        _cachedParsedApiVersion = std::optional<hipdnn_data_sdk::utilities::Version>{std::nullopt};
+        return std::nullopt;
     }
-    return *_cachedParsedApiVersion;
 }
 
 hipdnnPluginType_t PluginBase::type() const

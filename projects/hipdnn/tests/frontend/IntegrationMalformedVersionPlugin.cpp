@@ -1,11 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Frontend integration test for RFC 0008 post-review fix #1
-// (backend dispatch hardening). A plugin that reports an unparseable
-// `apiVersion` string must be rejected at load time by the host's
-// `EnginePluginManager::validateBeforeAdding` (which forces population of
-// the lazy `PluginBase::parsedApiVersion()` cache). The bad plugin is
+// Frontend integration test for backend dispatch hardening. A plugin that
+// reports an unparseable `apiVersion` string must be rejected at load time by the host's
+// `EnginePluginManager::validateBeforeAdding`. The bad plugin is
 // caught by the existing `tryCatch` wrapper inside `loadPluginFromFile`,
 // logged, and skipped; well-formed plugins loaded alongside it continue
 // to function and serve dispatch.
@@ -22,6 +20,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <test_plugins/TestPluginCommon.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 #include <array>
@@ -47,7 +46,7 @@ std::shared_ptr<Graph> createSimpleReluGraph(const std::string& graphName,
                                              const std::vector<int64_t>& dims)
 {
     return hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
-        graphName, dims, /*strides=*/{}, /*dynamicShapeEnabled=*/false);
+        graphName, dims, /*strides=*/{}, /*overrideShapeEnabled=*/false);
 }
 
 class IntegrationMalformedVersionPlugin : public ::testing::Test
@@ -79,7 +78,7 @@ protected:
 /// a well-formed plugin must not crash hipdnnCreate, must not throw out of
 /// graph execute, and the well-formed plugin must remain available to
 /// serve the graph. Without the fix, `Version{...}` would be re-parsed in
-/// `getApplicableEngineIds` on every execute and throw `std::invalid_argument`.
+/// `getApplicableEngineIds` and throw `std::invalid_argument`.
 TEST_F(IntegrationMalformedVersionPlugin, BadPluginLoadedAlongsideGoodPluginDoesNotCrashDispatch)
 {
     const std::array<const char*, 2> paths
@@ -134,15 +133,8 @@ TEST_F(IntegrationMalformedVersionPlugin, BadPluginLoadedAloneDoesNotCrashCreate
     ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
 }
 
-/// RFC 0008 plan T-missing #2: the version-zero fake reports a
-/// parseable but too-low API version ("0.0.0"). Distinct from the malformed
-/// fake — `parsedApiVersion()` succeeds and caches the parsed value, but the
-/// version comparison against the post-PR1 baseline rejects it. Loading it
-/// alongside a well-formed plugin must not crash dispatch and must leave the
-/// well-formed plugin available to serve the graph (parsed-but-too-low
-/// rejection path is a quiet filter, not a fault).
 TEST_F(IntegrationMalformedVersionPlugin,
-       VersionZeroPluginLoadedAlongsideGoodPluginDoesNotCrashDispatch)
+       VersionZeroPluginLoadedAlongsideGoodPluginDispatchesThroughGoodPlugin)
 {
     const std::array<const char*, 2> paths
         = {hipdnn_tests::plugin_constants::testVersionZeroPluginPath().c_str(),
@@ -166,20 +158,11 @@ TEST_F(IntegrationMalformedVersionPlugin,
     variantPack[1] = xTensor.memory().deviceData();
     variantPack[2] = yTensor.memory().deviceData();
 
-    // Dispatch must succeed via the well-formed plugin; the version-zero
-    // plugin is filtered out at version-check time and contributes no
-    // applicable engines. Distinct code path from the malformed plugin
-    // (which throws inside `parsedApiVersion()`); this exercises the
-    // parsed-but-too-low rejection branch.
     auto result = graph->execute(_handle, variantPack, nullptr);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }
 
-/// Defensive companion: when only the version-zero plugin is loaded, the
-/// host still constructs cleanly. The plugin is admitted to load (parse
-/// succeeds) but produces no applicable engines because the version
-/// baseline filters it out.
-TEST_F(IntegrationMalformedVersionPlugin, VersionZeroPluginLoadedAloneDoesNotCrashCreate)
+TEST_F(IntegrationMalformedVersionPlugin, VersionZeroPluginLoadedAloneHasNoApplicableEngines)
 {
     const std::array<const char*, 1> paths
         = {hipdnn_tests::plugin_constants::testVersionZeroPluginPath().c_str()};
@@ -188,4 +171,66 @@ TEST_F(IntegrationMalformedVersionPlugin, VersionZeroPluginLoadedAloneDoesNotCra
         hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
         HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    auto graph = createSimpleReluGraph("VersionZero_Alone", dims);
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const auto plansResult = graph->create_execution_plans();
+    if(plansResult.code == ErrorCode::OK)
+    {
+        const auto supportResult = graph->check_support();
+        EXPECT_NE(supportResult.code, ErrorCode::OK)
+            << "Version-zero plugin must not serve graphs requiring the baseline API.";
+    }
+    else
+    {
+        EXPECT_NE(plansResult.code, ErrorCode::OK);
+    }
 }
+
+#ifdef HIPDNN_ENABLE_SDPA
+TEST_F(IntegrationMalformedVersionPlugin, VersionLiarPluginExcludedForOverrideGraph)
+{
+    const auto& liarPath = hipdnn_tests::plugin_constants::testVersionLiarPluginPath();
+    const std::array<const char*, 1> paths = {liarPath.c_str()};
+
+    ASSERT_EQ(
+        hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    auto graph = hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
+        "VersionLiar_OverrideGraph", {1, 3, 4, 4}, /*strides=*/{}, /*overrideShapeEnabled=*/true);
+    resetLastCallRecordIfLoaded(liarPath, "VersionLiar");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const auto plansResult = graph->create_execution_plans();
+    if(plansResult.code == ErrorCode::OK)
+    {
+        const auto supportResult = graph->check_support();
+        EXPECT_NE(supportResult.code, ErrorCode::OK)
+            << "A plugin reporting the override API version but missing the override symbol "
+               "must be ineligible during engine selection.";
+    }
+    else
+    {
+        EXPECT_NE(plansResult.code, ErrorCode::OK);
+    }
+
+    const auto* record = getLastCallRecordIfLoaded(liarPath, "VersionLiar");
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE)
+        << "Missing override symbol must not fall back to legacy execute.";
+}
+#endif

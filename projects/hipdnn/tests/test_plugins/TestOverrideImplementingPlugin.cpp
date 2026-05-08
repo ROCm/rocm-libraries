@@ -1,13 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Fake plugin (RFC 0008): implements both the standard execute entry and
-// the override-aware execute entry, and reports an API version
-// >= K_OVERRIDE_EXECUTE_MIN_API_VERSION so that the host's applicability
-// filter admits it for graphs that opt into dynamic-shape overrides. The
-// TLS LastCallRecord (defined here via DEFINE_TEST_PLUGIN_LAST_CALL_STORAGE)
-// lets integration tests assert that the override entry was the path the
-// host selected.
+// Fake plugin that implements both standard and override-aware execute entries.
 
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
@@ -36,9 +30,7 @@ public:
         return "1.0.0";
     }
 
-    /// Reports the centralized RFC 0008 §4.5 minimum API version so the
-    /// host's `computeMinimumPluginApiVersion()` filter admits this plugin
-    /// for override-flag graphs. Re-spelling the literal here is forbidden.
+    /// Reports the minimum plugin SDK version for override execution.
     const char* getPluginApiVersion() const override
     {
         return hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION.data();

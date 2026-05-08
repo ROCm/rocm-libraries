@@ -1,15 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Unit coverage for the optional override-execute surface on `EnginePlugin`
-// (RFC 0008 §B.8). The full dlopen-based optional-symbol
-// resolution path (`tryAssignSymbol`) is exercised end-to-end by Stream
-// C's frontend integration tests against the override-implementing,
-// override-omitting, and version-liar fake plugins. These unit tests
-// pin the C++ API contract on the host side independent of any plugin
-// loading: that the virtual surface is in place, that the
-// `hasOverrideExecute()` predicate is observable from the manager, and
-// that the dispatch wrapper forwards arguments unchanged.
+// Unit coverage for the optional override-execute virtual surface on `EnginePlugin`.
 
 #include "plugin/EnginePlugin.hpp"
 #include "plugins/mocks/MockEnginePlugin.hpp"
@@ -21,32 +13,11 @@
 #include <vector>
 
 using namespace hipdnn_backend::plugin;
-using ::testing::Return;
-
-TEST(TestEnginePluginOverride, MockReportsHasOverrideExecuteByDefault)
-{
-    // The mock surface defaults to no override support unless a test
-    // explicitly programs it; guards the mock + virtual signature.
-    // NOLINTNEXTLINE(misc-const-correctness) — gmock EXPECT_CALL requires non-const mock.
-    MockEnginePlugin mock;
-    EXPECT_CALL(mock, hasOverrideExecute()).WillOnce(Return(false));
-    EXPECT_FALSE(mock.hasOverrideExecute());
-}
-
-TEST(TestEnginePluginOverride, MockReportsHasOverrideExecuteWhenProgrammed)
-{
-    // NOLINTNEXTLINE(misc-const-correctness) — gmock EXPECT_CALL requires non-const mock.
-    MockEnginePlugin mock;
-    EXPECT_CALL(mock, hasOverrideExecute()).WillOnce(Return(true));
-    EXPECT_TRUE(mock.hasOverrideExecute());
-}
 
 TEST(TestEnginePluginOverride, ExecuteOpGraphWithOverridesForwardsAllArguments)
 {
-    // Validates that the new virtual is reachable via base-class pointer
-    // and that argument forwarding is observable. Stream C's integration
-    // tests cover the actual C-API plumbing through the resource manager
-    // (D2 reconstruction); this test pins the C++ wrapper signature.
+    // Validates that the virtual is reachable through a base pointer and
+    // forwards arguments unchanged.
     // NOLINTNEXTLINE(misc-const-correctness) — gmock EXPECT_CALL requires non-const mock.
     MockEnginePlugin mock;
 

@@ -33,36 +33,24 @@ std::filesystem::path getCurrentModuleDirectory()
 
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath)
 {
-    // We should only load plugins with RTLD_NOW to avoid issues (fail-fast).
-    // RTLD_DEEPBIND can NOT be used as it can cause symbol issues that are hard to debug.
-    // In order to ensure plugins work correctly with RTLD_NOW, plugins must be built with -fvisibility=hidden
-    // or accidental symbol collisions may occur.
-    // We explicitly use RTLD_LOCAL to ensure plugin symbols do not pollute the global namespace, in all environments.
-    // RTLD_LOCAL is the default in most cases, but we are being explicit here for clarity.
-    PluginLibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_NOW | RTLD_LOCAL);
-
-    if(handle == nullptr)
+    try
     {
-        const char* error = dlerror();
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              "Failed to load library: " + libraryPath.string() + " (Error: "
-                                  + (error != nullptr ? std::string(error) : "Unknown error")
-                                  + ")");
+        return hipdnn_data_sdk::utilities::openLibrary(libraryPath);
     }
-
-    return handle;
+    catch(const std::runtime_error& ex)
+    {
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, ex.what());
+    }
 }
 
 void closeLibrary(PluginLibHandle handle)
 {
-    dlclose(handle);
+    hipdnn_data_sdk::utilities::closeLibrary(handle);
 }
 
 void* getSymbol(PluginLibHandle handle, const char* symbolName)
 {
-    // NOLINTBEGIN(misc-const-correctness) converting this to a const void * would require changing the getSymbol signature, which would cascade down to large parts of the codebase
-    void* symbol = dlsym(handle, symbolName);
-    // NOLINTEND(misc-const-correctness)
+    void* symbol = hipdnn_data_sdk::utilities::getSymbol(handle, symbolName);
     if(symbol == nullptr)
     {
         const char* error = dlerror();

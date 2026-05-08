@@ -53,18 +53,14 @@ struct EnginePluginShutdownRegistrar
 
 EnginePluginShutdownRegistrar gEngineShutdownRegistrar;
 
-/// Reads the boolean override-flag attribute from a graph descriptor via the
-/// public C-API getAttribute(). Defaults to false when the attribute is
-/// unsupported by the descriptor (older graph schemas predate the field). Any
-/// other failure is propagated so that real bugs (type mismatch, internal
-/// error) are not silently masked.
-bool readIsDynamicShapeEnabled(const GraphDescriptor& graphDesc)
+/// Missing override flag means false; other descriptor errors propagate.
+bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
 {
     bool flag = false;
     int64_t elementCount = 0;
     try
     {
-        graphDesc.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
+        graphDesc.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
                                HIPDNN_TYPE_BOOLEAN,
                                1,
                                &elementCount,
@@ -87,26 +83,15 @@ bool readIsDynamicShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
-/// Computes the minimum plugin SDK API version required to serve a given
-/// graph. Graphs that opt in to overridable tensor shapes require
-/// `K_OVERRIDE_EXECUTE_MIN_API_VERSION`; all other graphs accept any plugin
-/// at or above the baseline `"1.0.0"`.
-///
-/// The constant is centralized in `<hipdnn_plugin_sdk/PluginVersionConstants.hpp>`
-/// so the version filter, fake plugins, and tests share a single source of
-/// truth.
-///
-/// Both candidate `Version` values are parsed exactly once at first call
-/// (function-local `static const`) so the dispatch hot path does not re-parse
-/// constant strings per plugin per call.
 const hipdnn_data_sdk::utilities::Version&
-    computeMinimumPluginApiVersion(const GraphDescriptor& graphDesc)
+    computeMinimumPluginApiVersion(bool isOverrideShapeEnabled)
 {
-    static const hipdnn_data_sdk::utilities::Version s_sBaselineVersion{std::string_view{"1.0.0"}};
+    static const hipdnn_data_sdk::utilities::Version s_sBaselineVersion{
+        hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
     static const hipdnn_data_sdk::utilities::Version s_sOverrideExecuteMinVersion{
         hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
 
-    if(readIsDynamicShapeEnabled(graphDesc))
+    if(isOverrideShapeEnabled)
     {
         return s_sOverrideExecuteMinVersion;
     }
@@ -365,17 +350,16 @@ std::vector<int64_t>
     // require plugins exporting at least the override-execute SDK surface.
     // Older plugins are silently skipped here so they remain usable for
     // non-override graphs.
-    const auto& requiredVersion = computeMinimumPluginApiVersion(*graphDesc);
+    const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
+    const auto& requiredVersion = computeMinimumPluginApiVersion(isOverrideShapeEnabled);
 
     std::vector<int64_t> engineIds;
 
     for(const auto& [handle, plugin] : _handleToPlugin)
     {
         // Safe to deref: validateBeforeAdding rejected plugins with
-        // unparseable versions at load time, and the value is parsed once
-        // and cached on the plugin instance so the dispatch hot path does
-        // not re-parse the version string per plugin per call.
-        const auto& pluginVersion = *plugin->parsedApiVersion();
+        // unparseable versions at load time.
+        const auto pluginVersion = *plugin->parsedApiVersion();
         if(pluginVersion < requiredVersion)
         {
             HIPDNN_BACKEND_LOG_INFO(
@@ -383,6 +367,15 @@ std::vector<int64_t>
                 plugin->cachedName(),
                 pluginVersion.str(),
                 requiredVersion.str());
+            continue;
+        }
+
+        if(isOverrideShapeEnabled && !plugin->hasOverrideExecute())
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "Skipping plugin '{}' for override-enabled graph because it does not export "
+                "hipdnnEnginePluginExecuteOpGraphWithOverrides",
+                plugin->cachedName());
             continue;
         }
 
@@ -671,19 +664,16 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
         deviceBuffers.push_back(buffer);
     }
 
-    // Override-execute dispatch switch: if the variant pack carries override
-    // tensors, route through the override-aware execute entry; otherwise
-    // preserve the existing dispatch path.
     const auto& overrideUniqueIds = variantPackDesc->getOverrideUniqueIds();
     const auto& overrideShapesFlat = variantPackDesc->getOverrideShapes();
     const auto& overrideStridesFlat = variantPackDesc->getOverrideStrides();
     const auto& overrideLengths64 = variantPackDesc->getOverrideLengths();
 
-    const bool hasOverrides = !overrideUniqueIds.empty();
+    const bool hasOverrides = !overrideUniqueIds.empty() || !overrideShapesFlat.empty()
+                              || !overrideStridesFlat.empty() || !overrideLengths64.empty();
 
     if(hasOverrides)
     {
-        // Sanity-check the variant-pack invariant before doing any narrowing.
         THROW_IF_NE(overrideUniqueIds.size(),
                     overrideLengths64.size(),
                     HIPDNN_STATUS_BAD_PARAM,
@@ -697,31 +687,24 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
             "Engine_plugin_resource_manager::execute_op_graph failed: unknown engine ID");
         const auto* plugin = _handleToPlugin.at(handleIt->second);
 
-        // RFC 0008 §4.6 safety net: a plugin that reported a recent enough API
-        // version but failed to export the override symbol is rejected here
-        // rather than silently falling back to the existing entry (which would
-        // ignore the user's override request).
+        // Never silently fall back to legacy execute when override metadata exists.
         THROW_IF_FALSE(plugin->hasOverrideExecute(),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin does not export "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides although the variant pack "
-                       "carries override-tensor selectors (RFC 0008 §4.6).");
+                       "carries override-tensor selectors.");
 
-        // D1 narrowing: variant-pack stores int64; SDK surface is uint32.
-        // Each rank is bounded by structural tensor constants and cannot
-        // legitimately exceed uint32 limits, but -Wconversion requires the
-        // explicit cast. The bounds check is release-safe (not assert) so a
-        // malformed user-supplied length cannot silently wrap into uint32.
+        // Validate before narrowing variant-pack int64 lengths to the SDK uint32 surface.
         const auto numOverridesSize = overrideUniqueIds.size();
         std::vector<uint32_t> overrideLengthsU32;
         overrideLengthsU32.reserve(numOverridesSize);
         for(size_t i = 0; i < overrideLengths64.size(); ++i)
         {
             const auto value = overrideLengths64[i];
-            THROW_IF_TRUE(value < 0,
+            THROW_IF_TRUE(value <= 0,
                           HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND,
                           "Override variant pack: OVERRIDE_LENGTHS for unique-id "
-                              + std::to_string(overrideUniqueIds[i]) + " is negative ("
+                              + std::to_string(overrideUniqueIds[i]) + " must be positive ("
                               + std::to_string(value) + ")");
             THROW_IF_TRUE(static_cast<uint64_t>(value) > std::numeric_limits<uint32_t>::max(),
                           HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND,
@@ -731,11 +714,7 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
             overrideLengthsU32.push_back(static_cast<uint32_t>(value));
         }
 
-        // D2 ptr-array reconstruction: build per-UID pointers into the
-        // contiguous flat shape/stride buffers using a prefix-sum walk over
-        // the per-UID rank. Both arrays live on the dispatch stack frame for
-        // the duration of the call; their pointee data is owned by the
-        // variant pack.
+        // Reconstruct per-UID pointers into the flat shape/stride buffers.
         std::vector<const int64_t*> overrideShapesPerUid;
         overrideShapesPerUid.reserve(numOverridesSize);
         std::vector<const int64_t*> overrideStridesPerUid;
@@ -744,7 +723,11 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
         size_t expectedFlatTotal = 0;
         for(const auto rank : overrideLengthsU32)
         {
-            expectedFlatTotal += static_cast<size_t>(rank);
+            const auto rankSize = static_cast<size_t>(rank);
+            THROW_IF_TRUE(expectedFlatTotal > std::numeric_limits<size_t>::max() - rankSize,
+                          HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND,
+                          "Override variant pack: OVERRIDE_LENGTHS sum overflow");
+            expectedFlatTotal += rankSize;
         }
         THROW_IF_NE(overrideShapesFlat.size(),
                     expectedFlatTotal,

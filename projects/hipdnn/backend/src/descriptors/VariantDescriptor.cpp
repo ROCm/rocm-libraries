@@ -2,16 +2,87 @@
 // SPDX-License-Identifier:  MIT
 
 #include "VariantDescriptor.hpp"
-#include "DescriptorAttributeUtils.hpp"
 #include "FlatbufferUtilities.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 
-#include <numeric>
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <string>
 #include <unordered_set>
 
 namespace hipdnn_backend
 {
+
+namespace
+{
+
+void setVariantInt64Vector(std::vector<int64_t>& target,
+                           hipdnnBackendAttributeType_t attributeType,
+                           int64_t elementCount,
+                           const void* arrayOfElements,
+                           const char* errorPrefix)
+{
+    THROW_IF_NULL(errorPrefix, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "errorPrefix is null");
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": attributeType mismatch");
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  std::string(errorPrefix) + ": arrayOfElements is null");
+    THROW_IF_FALSE(elementCount > 0,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount must be positive");
+
+    target.resize(static_cast<size_t>(elementCount));
+    std::memcpy(
+        target.data(), arrayOfElements, static_cast<size_t>(elementCount) * sizeof(int64_t));
+}
+
+void getVariantInt64Vector(const std::vector<int64_t>& source,
+                           hipdnnBackendAttributeType_t attributeType,
+                           int64_t requestedElementCount,
+                           int64_t* elementCount,
+                           void* arrayOfElements,
+                           const char* errorPrefix)
+{
+    THROW_IF_NULL(errorPrefix, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "errorPrefix is null");
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": attributeType mismatch");
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = static_cast<int64_t>(source.size());
+        return;
+    }
+
+    THROW_IF_LT(requestedElementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": requestedElementCount is negative");
+
+    const auto copyCount
+        = std::min<size_t>(static_cast<size_t>(requestedElementCount), source.size());
+    if(elementCount != nullptr)
+    {
+        *elementCount = static_cast<int64_t>(copyCount);
+    }
+    std::memcpy(arrayOfElements, source.data(), copyCount * sizeof(int64_t));
+}
+
+} // namespace
+
+bool VariantDescriptor::hasOverrideAttributes() const
+{
+    return !_overrideUniqueIds.empty() || !_overrideLengths.empty() || !_overrideShapes.empty()
+           || !_overrideStrides.empty();
+}
 
 void VariantDescriptor::finalize()
 {
@@ -26,9 +97,7 @@ void VariantDescriptor::finalize()
     // variant packs are rejected before dispatch. The dispatch path keeps its
     // own checks as defense-in-depth. Skip entirely when no overrides were
     // supplied (legacy variant packs).
-    const bool hasAnyOverride = !_overrideUniqueIds.empty() || !_overrideLengths.empty()
-                                || !_overrideShapes.empty() || !_overrideStrides.empty();
-    if(hasAnyOverride)
+    if(hasOverrideAttributes())
     {
         THROW_IF_NE(_overrideUniqueIds.size(),
                     _overrideLengths.size(),
@@ -36,31 +105,53 @@ void VariantDescriptor::finalize()
                     "VariantDescriptor::finalize() failed: OVERRIDE_UNIQUE_IDS and "
                     "OVERRIDE_LENGTHS must have the same size");
 
-        // Sum of per-tensor ranks must equal the flat shape and stride lengths.
-        const auto rankSum = std::accumulate(
-            _overrideLengths.begin(), _overrideLengths.end(), static_cast<int64_t>(0));
-        THROW_IF_NE(static_cast<int64_t>(_overrideShapes.size()),
-                    rankSum,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "VariantDescriptor::finalize() failed: OVERRIDE_SHAPES total length does "
-                    "not match the sum of OVERRIDE_LENGTHS");
-        THROW_IF_NE(static_cast<int64_t>(_overrideStrides.size()),
-                    rankSum,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "VariantDescriptor::finalize() failed: OVERRIDE_STRIDES total length does "
-                    "not match the sum of OVERRIDE_LENGTHS");
-
-        // Each override unique-id must refer to a tensor that actually appears
-        // in the variant pack's UID list.
         const std::unordered_set<int64_t> uniqueIdSet(_uniqueIds.begin(), _uniqueIds.end());
-        for(const auto overrideId : _overrideUniqueIds)
+        std::unordered_set<int64_t> overrideIdSet;
+        overrideIdSet.reserve(_overrideUniqueIds.size());
+        uint64_t rankSum = 0;
+        constexpr auto MAX_OVERRIDE_LENGTH = std::numeric_limits<uint32_t>::max();
+
+        for(size_t i = 0; i < _overrideUniqueIds.size(); ++i)
         {
+            const auto overrideId = _overrideUniqueIds[i];
+            THROW_IF_FALSE(overrideIdSet.insert(overrideId).second,
+                           HIPDNN_STATUS_BAD_PARAM,
+                           "VariantDescriptor::finalize() failed: duplicate "
+                           "OVERRIDE_UNIQUE_IDS entry "
+                               + std::to_string(overrideId));
+
             THROW_IF_TRUE(uniqueIdSet.find(overrideId) == uniqueIdSet.end(),
                           HIPDNN_STATUS_BAD_PARAM,
                           "VariantDescriptor::finalize() failed: OVERRIDE_UNIQUE_IDS entry "
                               + std::to_string(overrideId)
                               + " is not present in VARIANT_PACK_UNIQUE_IDS");
+
+            const auto length = _overrideLengths[i];
+            THROW_IF_FALSE(length > 0,
+                           HIPDNN_STATUS_BAD_PARAM,
+                           "VariantDescriptor::finalize() failed: OVERRIDE_LENGTHS entry "
+                               + std::to_string(length) + " must be positive");
+            THROW_IF_TRUE(static_cast<uint64_t>(length) > MAX_OVERRIDE_LENGTH,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "VariantDescriptor::finalize() failed: OVERRIDE_LENGTHS entry "
+                              + std::to_string(length) + " exceeds uint32_t max");
+            THROW_IF_TRUE(rankSum > std::numeric_limits<uint64_t>::max()
+                                        - static_cast<uint64_t>(length),
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "VariantDescriptor::finalize() failed: OVERRIDE_LENGTHS sum overflow");
+            rankSum += static_cast<uint64_t>(length);
         }
+
+        THROW_IF_NE(static_cast<uint64_t>(_overrideShapes.size()),
+                    rankSum,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "VariantDescriptor::finalize() failed: OVERRIDE_SHAPES total length does "
+                    "not match the sum of OVERRIDE_LENGTHS");
+        THROW_IF_NE(static_cast<uint64_t>(_overrideStrides.size()),
+                    rankSum,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "VariantDescriptor::finalize() failed: OVERRIDE_STRIDES total length does "
+                    "not match the sum of OVERRIDE_LENGTHS");
     }
 
     HipdnnBackendDescriptorImpl<VariantDescriptor>::finalize();
@@ -75,9 +166,6 @@ void VariantDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     THROW_IF_FALSE(isFinalized(),
                    HIPDNN_STATUS_NOT_INITIALIZED,
                    "VariantDescriptor::getAttribute() failed: Not finalized.");
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "VariantDescriptor::getAttribute(): arrayOfElements is null");
 
     switch(attributeName)
     {
@@ -89,6 +177,13 @@ void VariantDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         THROW_IF_NULL(elementCount,
                       HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                       "VariantDescriptor::getAttribute(): elementCount is null");
+        THROW_IF_NULL(arrayOfElements,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "VariantDescriptor::getAttribute(): arrayOfElements is null");
+        THROW_IF_FALSE(requestedElementCount >= 0,
+                       HIPDNN_STATUS_BAD_PARAM,
+                       "VariantDescriptor::getAttribute(): requestedElementCount "
+                       "is negative for DATA_POINTERS");
         *elementCount
             = std::min<int64_t>(requestedElementCount, static_cast<int64_t>(_dataPointers.size()));
         for(size_t i = 0; i < static_cast<size_t>(*elementCount); ++i)
@@ -98,12 +193,12 @@ void VariantDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS:
-        getInt64Vector(_uniqueIds,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "VariantDescriptor::getAttribute()");
+        getVariantInt64Vector(_uniqueIds,
+                              attributeType,
+                              requestedElementCount,
+                              elementCount,
+                              arrayOfElements,
+                              "VariantDescriptor::getAttribute()");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_WORKSPACE:
@@ -115,6 +210,9 @@ void VariantDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                        HIPDNN_STATUS_BAD_PARAM,
                        "VariantDescriptor::getAttribute(): requestedElementCount "
                        "is not 1 for WORKSPACE");
+        THROW_IF_NULL(arrayOfElements,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "VariantDescriptor::getAttribute(): arrayOfElements is null");
         if(elementCount != nullptr)
         {
             *elementCount = 1;
@@ -124,41 +222,39 @@ void VariantDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS:
-        getInt64Vector(_overrideUniqueIds,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "VariantDescriptor::getAttribute()");
+        getVariantInt64Vector(_overrideUniqueIds,
+                              attributeType,
+                              requestedElementCount,
+                              elementCount,
+                              arrayOfElements,
+                              "VariantDescriptor::getAttribute(OVERRIDE_UNIQUE_IDS)");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES:
-        getInt64Vector(_overrideShapes,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "VariantDescriptor::getAttribute()");
+        getVariantInt64Vector(_overrideShapes,
+                              attributeType,
+                              requestedElementCount,
+                              elementCount,
+                              arrayOfElements,
+                              "VariantDescriptor::getAttribute(OVERRIDE_SHAPES)");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES:
-        getInt64Vector(_overrideStrides,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "VariantDescriptor::getAttribute()");
+        getVariantInt64Vector(_overrideStrides,
+                              attributeType,
+                              requestedElementCount,
+                              elementCount,
+                              arrayOfElements,
+                              "VariantDescriptor::getAttribute(OVERRIDE_STRIDES)");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS:
-        // D1 contract: stored as int64_t in the variant pack. The narrowing to
-        // uint32_t happens at the SDK dispatch boundary in Stream B, NOT here.
-        getInt64Vector(_overrideLengths,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "VariantDescriptor::getAttribute()");
+        getVariantInt64Vector(_overrideLengths,
+                              attributeType,
+                              requestedElementCount,
+                              elementCount,
+                              arrayOfElements,
+                              "VariantDescriptor::getAttribute(OVERRIDE_LENGTHS)");
         break;
 
     default:
@@ -191,11 +287,11 @@ void VariantDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS:
-        setInt64Vector(_uniqueIds,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "VariantDescriptor::setAttribute()");
+        setVariantInt64Vector(_uniqueIds,
+                              attributeType,
+                              elementCount,
+                              arrayOfElements,
+                              "VariantDescriptor::setAttribute()");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_WORKSPACE:
@@ -211,37 +307,35 @@ void VariantDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS:
-        setInt64Vector(_overrideUniqueIds,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "VariantDescriptor::setAttribute()");
+        setVariantInt64Vector(_overrideUniqueIds,
+                              attributeType,
+                              elementCount,
+                              arrayOfElements,
+                              "VariantDescriptor::setAttribute(OVERRIDE_UNIQUE_IDS)");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES:
-        setInt64Vector(_overrideShapes,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "VariantDescriptor::setAttribute()");
+        setVariantInt64Vector(_overrideShapes,
+                              attributeType,
+                              elementCount,
+                              arrayOfElements,
+                              "VariantDescriptor::setAttribute(OVERRIDE_SHAPES)");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES:
-        setInt64Vector(_overrideStrides,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "VariantDescriptor::setAttribute()");
+        setVariantInt64Vector(_overrideStrides,
+                              attributeType,
+                              elementCount,
+                              arrayOfElements,
+                              "VariantDescriptor::setAttribute(OVERRIDE_STRIDES)");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS:
-        // D1 contract: stored as int64_t in the variant pack. The narrowing to
-        // uint32_t happens at the SDK dispatch boundary in Stream B, NOT here.
-        setInt64Vector(_overrideLengths,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "VariantDescriptor::setAttribute()");
+        setVariantInt64Vector(_overrideLengths,
+                              attributeType,
+                              elementCount,
+                              arrayOfElements,
+                              "VariantDescriptor::setAttribute(OVERRIDE_LENGTHS)");
         break;
 
     default:
@@ -319,8 +413,7 @@ std::string VariantDescriptor::toString() const
                                  : ", workspace=null";
     // Only emit override field counts when at least one is non-empty so
     // legacy variant-pack log lines stay unchanged.
-    if(!_overrideUniqueIds.empty() || !_overrideLengths.empty() || !_overrideShapes.empty()
-       || !_overrideStrides.empty())
+    if(hasOverrideAttributes())
     {
         str += ", overrideUniqueIds=" + std::to_string(_overrideUniqueIds.size());
         str += ", overrideLengths=" + std::to_string(_overrideLengths.size());

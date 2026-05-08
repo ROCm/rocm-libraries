@@ -6,20 +6,22 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
-#include <dlfcn.h>
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
+#include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
@@ -45,12 +47,7 @@ inline const char* apiVersionWithoutTweak()
     return s_versionStr.c_str();
 }
 
-/**
- * @brief Identifies which execute entry point a fake plugin most recently
- *        serviced. Used by override-execute dispatch tests (RFC 0008) to
- *        assert that the host selected the override-aware path versus the
- *        original path.
- */
+/// Execute entry point most recently serviced by a fake plugin.
 enum class TestPluginExecuteEntry : uint8_t
 {
     NONE = 0,
@@ -58,40 +55,28 @@ enum class TestPluginExecuteEntry : uint8_t
     OP_GRAPH_WITH_OVERRIDES = 2, ///< hipdnnEnginePluginExecuteOpGraphWithOverrides was called.
 };
 
-/// Maximum number of overrides a single capture slot can hold. Override count
-/// in real graphs is small; tests today exercise at most 2. Eight is generous.
 inline constexpr std::size_t K_MAX_TEST_OVERRIDES = 8;
 
-/// Maximum tensor rank captured per override. Matches HIPDNN's structural
-/// tensor rank cap.
 inline constexpr std::size_t K_MAX_TEST_OVERRIDE_RANK = 8;
 
-/**
- * @brief Per-thread record of the most recent execute call observed by a
- *        fake test plugin (RFC 0008 design point D5).
- *
- * Each fake plugin maintains exactly one `thread_local` instance (defined
- * via `DEFINE_TEST_PLUGIN_LAST_CALL_STORAGE(<suffix>)`); tests inspect it
- * through the suffixed `getLastCallRecord_<suffix>()` /
- * `resetLastCallRecord_<suffix>()` C entry points (resolved via
- * `lookupLastCallRecordAccessor` / `lookupLastCallRecordResetter` since
- * the symbols live inside dlopen'd `.so` files). The record captures the
- * override selectors by *value* so tests can assert that the host
- * faithfully forwarded the variant-pack contents and so that any
- * plugin-side use of the captured pointers after host buffers go out of
- * scope is observable.
- *
- * Storage is fixed-capacity `std::array` (not `std::vector`) because the
- * record lives in a `thread_local` inside a dlopen'd plugin .so. Any
- * thread_local with a non-trivial destructor registers a callback through
- * `__cxa_thread_atexit`, and that callback holds a reference into the .so's
- * text segment until thread exit — which prevents `dlclose` from actually
- * unmapping the library and breaks the unloading-mode integration tests
- * (`IntegrationSetPluginUnloadingModeExt.*`). Trivially-destructible POD
- * storage avoids the registration entirely. The static_assert below pins
- * this contract so future changes to the struct surface the constraint at
- * compile time.
- */
+using TestPluginSerializedContextPayload = std::array<uint8_t, 1>;
+
+struct TestPluginFreeDeleter
+{
+    void operator()(const void* ptr) const
+    {
+        std::free(const_cast<void*>(ptr));
+    }
+};
+
+using TestPluginMallocBuffer = std::unique_ptr<void, TestPluginFreeDeleter>;
+using TestPluginConstMallocBuffer = std::unique_ptr<const void, TestPluginFreeDeleter>;
+
+/// Captures the most recent execute call for fake-plugin assertions.
+///
+/// Kept trivially destructible because instances are `thread_local` inside
+/// plugin libraries; non-trivial destructors can register thread-exit
+/// callbacks that keep POSIX libraries mapped after unload.
 struct TestPluginLastCallRecord
 {
     TestPluginExecuteEntry whichEntry = TestPluginExecuteEntry::NONE;
@@ -110,12 +95,13 @@ static_assert(std::is_trivially_destructible_v<TestPluginLastCallRecord>,
               "instance, pinning the plugin .so under glibc and breaking "
               "IntegrationSetPluginUnloadingModeExt.* unload checks.");
 
-/// Macro emitted by exactly one TU per fake plugin to define the
-/// thread-local backing storage and the suffixed C-API observation entry
-/// points. The `suffix` token is concatenated onto every emitted symbol so
-/// each fake plugin's `.so` exports a unique pair of accessors and the
-/// shared `TestPluginCommon.hpp` code does not generate symbol collisions
-/// when several plugin TUs are linked through the same address space.
+#ifdef HIPDNN_TEST_PLUGIN_BUILD
+#define HIPDNN_TEST_PLUGIN_EXPORT HIPDNN_PLUGIN_EXPORT
+#else
+#define HIPDNN_TEST_PLUGIN_EXPORT
+#endif
+
+/// Defines per-plugin test observation storage and exported accessors.
 #define DEFINE_TEST_PLUGIN_LAST_CALL_STORAGE(suffix)                            \
     namespace                                                                   \
     {                                                                           \
@@ -127,70 +113,43 @@ static_assert(std::is_trivially_destructible_v<TestPluginLastCallRecord>,
     {                                                                           \
         return s_record_##suffix;                                               \
     }                                                                           \
-    extern "C" const TestPluginLastCallRecord* getLastCallRecord_##suffix()     \
+    extern "C" HIPDNN_TEST_PLUGIN_EXPORT const TestPluginLastCallRecord*        \
+        getLastCallRecord_##suffix()                                            \
     {                                                                           \
         return &s_record_##suffix;                                              \
     }                                                                           \
-    extern "C" void resetLastCallRecord_##suffix()                              \
+    extern "C" HIPDNN_TEST_PLUGIN_EXPORT void resetLastCallRecord_##suffix()    \
     {                                                                           \
         s_record_##suffix = TestPluginLastCallRecord{};                         \
     }                                                                           \
     /* NOLINTEND(readability-identifier-naming) */
 
-// Forward declarations of the per-plugin observation entry points emitted by
-// the four override-execute fake plugins (RFC 0008). Tests that load these plugins call
-// the suffixed accessor matching the plugin under test. The symbols are
-// defined inside each plugin's `.so` (not linked into the test binary), so
-// callers must resolve them via `dlsym` against the plugin's own dlopen
-// handle — see `lookupLastCallRecordAccessor` / `lookupLastCallRecordResetter`
-// below.
+// Per-plugin observation entry points. Tests resolve these against the
+// plugin's own dynamic-loader handle.
 // NOLINTBEGIN(readability-identifier-naming) - C symbol convention requires
-// the underscore-suffixed form so dlsym() lookups match the per-plugin
+// the underscore-suffixed form so dynamic-loader lookups match the per-plugin
 // suffix passed to DEFINE_TEST_PLUGIN_LAST_CALL_STORAGE.
-extern "C" const TestPluginLastCallRecord* getLastCallRecord_OverrideImplementing();
-extern "C" void resetLastCallRecord_OverrideImplementing();
-extern "C" const TestPluginLastCallRecord* getLastCallRecord_OverrideOmitting();
-extern "C" void resetLastCallRecord_OverrideOmitting();
-extern "C" const TestPluginLastCallRecord* getLastCallRecord_VersionLiar();
-extern "C" void resetLastCallRecord_VersionLiar();
-extern "C" const TestPluginLastCallRecord* getLastCallRecord_SecondOverride();
-extern "C" void resetLastCallRecord_SecondOverride();
+extern "C" HIPDNN_TEST_PLUGIN_EXPORT const TestPluginLastCallRecord*
+    getLastCallRecord_OverrideImplementing();
+extern "C" HIPDNN_TEST_PLUGIN_EXPORT void resetLastCallRecord_OverrideImplementing();
+extern "C" HIPDNN_TEST_PLUGIN_EXPORT const TestPluginLastCallRecord*
+    getLastCallRecord_OverrideOmitting();
+extern "C" HIPDNN_TEST_PLUGIN_EXPORT void resetLastCallRecord_OverrideOmitting();
+extern "C" HIPDNN_TEST_PLUGIN_EXPORT const TestPluginLastCallRecord*
+    getLastCallRecord_VersionLiar();
+extern "C" HIPDNN_TEST_PLUGIN_EXPORT void resetLastCallRecord_VersionLiar();
+extern "C" HIPDNN_TEST_PLUGIN_EXPORT const TestPluginLastCallRecord*
+    getLastCallRecord_SecondOverride();
+extern "C" HIPDNN_TEST_PLUGIN_EXPORT void resetLastCallRecord_SecondOverride();
 // NOLINTEND(readability-identifier-naming)
 
-/// Resolve a fake plugin's `getLastCallRecord_<suffix>` /
-/// `resetLastCallRecord_<suffix>` entry points through the dynamic loader.
-///
-/// The host engine framework loads plugin `.so` files with
-/// `RTLD_NOW | RTLD_LOCAL` (see `backend/src/PlatformUtils.linux.cpp`), so
-/// the symbols are NOT visible via `dlsym(RTLD_DEFAULT, ...)`. To reach
-/// them tests must `dlopen` the plugin path themselves — this just bumps
-/// the existing handle's refcount when the host has already loaded the
-/// library — and pass the resulting handle to `dlsym`. The handle is
-/// intentionally leaked: it stays valid for the lifetime of the test
-/// process, mirroring `TestPluginKnobRecorder`'s pattern.
 using TestPluginGetLastCallRecordFn = const TestPluginLastCallRecord* (*)();
 using TestPluginResetLastCallRecordFn = void (*)();
 
 namespace test_plugin_internal
 {
 
-/// Resolves a plugin path that may be relative against the directory
-/// containing the loaded `libhipdnn_backend.so`. Mirrors the resolution
-/// performed by `hipdnn_backend::plugin::SharedLibrary::load` (see
-/// `backend/src/plugin/SharedLibrary.cpp`), which rebases relative paths
-/// against `getCurrentModuleDirectory()` of the backend module. Anchoring
-/// against the backend rather than the test executable matches how the
-/// host actually loaded the plugin .so via `hipdnnSetEnginePluginPaths_ext`,
-/// so the dlopen here returns a handle to the same library instance and
-/// merely bumps its refcount.
-///
-/// The backend's `getCurrentModuleDirectory()` symbol is hidden, so this
-/// helper recovers the backend's location without linking to it: it
-/// resolves the address of a known exported backend C-API symbol via
-/// `dlsym(RTLD_DEFAULT, ...)` and then asks `dladdr` for the containing
-/// shared object's filename. Falls back to the unmodified path if the
-/// backend cannot be located (e.g., statically linked test build), so the
-/// caller still observes the original `dlopen` failure mode.
+/// Resolves relative plugin paths the same way the backend plugin loader does.
 inline std::filesystem::path resolvePluginPathRelativeToBackend(const std::string& pluginPath)
 {
     std::filesystem::path requestedPath{pluginPath};
@@ -199,69 +158,143 @@ inline std::filesystem::path resolvePluginPathRelativeToBackend(const std::strin
         return requestedPath;
     }
 
-    void* backendSymbol = dlsym(RTLD_DEFAULT, "hipdnnCreate");
-    if(backendSymbol == nullptr)
+#ifdef _WIN32
+    try
+    {
+        const auto backendDir = hipdnn_data_sdk::utilities::getLoadedLibraryDirectory(
+            hipdnn_data_sdk::utilities::getLibraryName("hipdnn_backend").c_str());
+        return std::filesystem::weakly_canonical(backendDir / requestedPath);
+    }
+    catch(const std::runtime_error&)
     {
         return requestedPath;
     }
-
-    Dl_info info{};
-    if(dladdr(backendSymbol, &info) == 0 || info.dli_fname == nullptr || info.dli_fname[0] == '\0')
+#else
+    try
+    {
+        const auto backendDir
+            = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForSymbol("hipdnnCreate");
+        return std::filesystem::weakly_canonical(backendDir / requestedPath);
+    }
+    catch(const std::runtime_error&)
     {
         return requestedPath;
     }
-
-    const auto backendDir = std::filesystem::path(info.dli_fname).parent_path();
-    return std::filesystem::weakly_canonical(backendDir / requestedPath);
+#endif
 }
 
-/// Returns (and caches) the handle for the plugin .so at `pluginPath`.
-/// Returns `nullptr` if dlopen fails (e.g., the plugin was never loaded
-/// and the path is invalid in the current test layout). Relative paths
-/// are rebased against the backend module's directory (matching the
-/// host's plugin loader) so the dlopen succeeds regardless of the test
-/// process's current working directory — which under ctest typically
-/// differs from the directory containing `test_plugins/`.
-inline void* openPluginForSymbolLookup(const std::string& pluginPath)
+using TestPluginLibraryHandle = hipdnn_data_sdk::utilities::SharedLibraryHandle;
+
+inline TestPluginLibraryHandle openPluginIfLoaded(const std::string& pluginPath)
 {
-    static thread_local std::unordered_map<std::string, void*> s_handles;
-    auto iter = s_handles.find(pluginPath);
-    if(iter != s_handles.end())
-    {
-        return iter->second;
-    }
     const auto resolvedPath = resolvePluginPathRelativeToBackend(pluginPath);
-    void* handle = dlopen(resolvedPath.string().c_str(), RTLD_NOW | RTLD_LOCAL);
-    s_handles.emplace(pluginPath, handle);
-    return handle;
+    return hipdnn_data_sdk::utilities::openLoadedLibrary(resolvedPath);
+}
+
+inline void* lookupPluginSymbol(TestPluginLibraryHandle handle, const std::string& symbolName)
+{
+    return hipdnn_data_sdk::utilities::getSymbol(handle, symbolName.c_str());
 }
 
 } // namespace test_plugin_internal
 
-inline TestPluginGetLastCallRecordFn lookupLastCallRecordAccessor(const std::string& pluginPath,
-                                                                  const std::string& suffix)
+class ScopedTestPluginLibrary
 {
-    void* handle = test_plugin_internal::openPluginForSymbolLookup(pluginPath);
-    if(handle == nullptr)
+public:
+    explicit ScopedTestPluginLibrary(std::string pluginPath)
+        : _pluginPath(std::move(pluginPath))
     {
-        return nullptr;
+        const auto resolvedPath
+            = test_plugin_internal::resolvePluginPathRelativeToBackend(_pluginPath);
+        _handle = hipdnn_data_sdk::utilities::openLibrary(resolvedPath);
     }
+
+    ~ScopedTestPluginLibrary()
+    {
+        close();
+    }
+
+    ScopedTestPluginLibrary(const ScopedTestPluginLibrary&) = delete;
+    ScopedTestPluginLibrary& operator=(const ScopedTestPluginLibrary&) = delete;
+
+    ScopedTestPluginLibrary(ScopedTestPluginLibrary&& other) noexcept
+        : _pluginPath(std::move(other._pluginPath))
+        , _handle(std::exchange(other._handle, nullptr))
+    {
+    }
+
+    ScopedTestPluginLibrary& operator=(ScopedTestPluginLibrary&& other) noexcept
+    {
+        if(this != &other)
+        {
+            close();
+            _pluginPath = std::move(other._pluginPath);
+            _handle = std::exchange(other._handle, nullptr);
+        }
+        return *this;
+    }
+
+    template <typename Fn>
+    Fn lookup(const std::string& symbolName) const
+    {
+        if(_handle == nullptr)
+        {
+            return nullptr;
+        }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        return reinterpret_cast<Fn>(test_plugin_internal::lookupPluginSymbol(_handle, symbolName));
+    }
+
+    const std::string& pluginPath() const
+    {
+        return _pluginPath;
+    }
+
+private:
+    void close()
+    {
+        if(_handle != nullptr)
+        {
+            hipdnn_data_sdk::utilities::closeLibrary(_handle);
+            _handle = nullptr;
+        }
+    }
+
+    std::string _pluginPath;
+    test_plugin_internal::TestPluginLibraryHandle _handle = nullptr;
+};
+
+inline TestPluginGetLastCallRecordFn
+    lookupLastCallRecordAccessor(const ScopedTestPluginLibrary& pluginLibrary,
+                                 const std::string& suffix)
+{
     const std::string symbolName = "getLastCallRecord_" + suffix;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    return reinterpret_cast<TestPluginGetLastCallRecordFn>(dlsym(handle, symbolName.c_str()));
+    return pluginLibrary.lookup<TestPluginGetLastCallRecordFn>(symbolName);
 }
 
-inline TestPluginResetLastCallRecordFn lookupLastCallRecordResetter(const std::string& pluginPath,
-                                                                    const std::string& suffix)
+inline TestPluginResetLastCallRecordFn
+    lookupLastCallRecordResetter(const ScopedTestPluginLibrary& pluginLibrary,
+                                 const std::string& suffix)
 {
-    void* handle = test_plugin_internal::openPluginForSymbolLookup(pluginPath);
-    if(handle == nullptr)
-    {
-        return nullptr;
-    }
     const std::string symbolName = "resetLastCallRecord_" + suffix;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    return reinterpret_cast<TestPluginResetLastCallRecordFn>(dlsym(handle, symbolName.c_str()));
+    return pluginLibrary.lookup<TestPluginResetLastCallRecordFn>(symbolName);
+}
+
+inline void resetLastCallRecord(const ScopedTestPluginLibrary& pluginLibrary,
+                                const std::string& suffix)
+{
+    auto* fn = lookupLastCallRecordResetter(pluginLibrary, suffix);
+    if(fn != nullptr)
+    {
+        fn();
+    }
+}
+
+inline const TestPluginLastCallRecord*
+    getLastCallRecord(const ScopedTestPluginLibrary& pluginLibrary, const std::string& suffix)
+{
+    auto* fn = lookupLastCallRecordAccessor(pluginLibrary, suffix);
+    return (fn != nullptr) ? fn() : nullptr;
 }
 
 /// Convenience: call `resetLastCallRecord_<suffix>()` if the symbol is
@@ -269,11 +302,21 @@ inline TestPluginResetLastCallRecordFn lookupLastCallRecordResetter(const std::s
 /// TLS state across all fake plugins regardless of which subset is loaded.
 inline void resetLastCallRecordIfLoaded(const std::string& pluginPath, const std::string& suffix)
 {
-    auto* fn = lookupLastCallRecordResetter(pluginPath, suffix);
+    auto handle = test_plugin_internal::openPluginIfLoaded(pluginPath);
+    if(handle == nullptr)
+    {
+        return;
+    }
+
+    const std::string symbolName = "resetLastCallRecord_" + suffix;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* fn = reinterpret_cast<TestPluginResetLastCallRecordFn>(
+        test_plugin_internal::lookupPluginSymbol(handle, symbolName));
     if(fn != nullptr)
     {
         fn();
     }
+    hipdnn_data_sdk::utilities::closeLibrary(handle);
 }
 
 /// Convenience: call `getLastCallRecord_<suffix>()` if the symbol is
@@ -282,8 +325,19 @@ inline void resetLastCallRecordIfLoaded(const std::string& pluginPath, const std
 inline const TestPluginLastCallRecord* getLastCallRecordIfLoaded(const std::string& pluginPath,
                                                                  const std::string& suffix)
 {
-    auto* fn = lookupLastCallRecordAccessor(pluginPath, suffix);
-    return (fn != nullptr) ? fn() : nullptr;
+    auto handle = test_plugin_internal::openPluginIfLoaded(pluginPath);
+    if(handle == nullptr)
+    {
+        return nullptr;
+    }
+
+    const std::string symbolName = "getLastCallRecord_" + suffix;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* fn = reinterpret_cast<TestPluginGetLastCallRecordFn>(
+        test_plugin_internal::lookupPluginSymbol(handle, symbolName));
+    const TestPluginLastCallRecord* record = (fn != nullptr) ? fn() : nullptr;
+    hipdnn_data_sdk::utilities::closeLibrary(handle);
+    return record;
 }
 
 // Base class for test plugins
@@ -310,30 +364,14 @@ public:
         HIPDNN_PLUGIN_LOG_INFO("executeGraph called");
     }
 
-    /**
-     * @brief Returns the calling thread's mutable last-call record for this
-     *        plugin. Each fake plugin overrides this to return its own
-     *        suffixed thread-local storage emitted by
-     *        `DEFINE_TEST_PLUGIN_LAST_CALL_STORAGE(<suffix>)`. Plugins that
-     *        do not opt into TLS observation can use the default no-op
-     *        scratch instance.
-     */
+    /// Returns the calling thread's mutable last-call record for this plugin.
     virtual TestPluginLastCallRecord& lastCallRecord() const
     {
         thread_local TestPluginLastCallRecord s_unused;
         return s_unused;
     }
 
-    /**
-     * @brief Override-aware execute hook (RFC 0008).
-     *
-     * Default implementation captures every override selector into the
-     * calling thread's per-plugin `TestPluginLastCallRecord` (resolved via
-     * the virtual `lastCallRecord()`) so tests can assert the host
-     * forwarded the variant-pack contents byte-for-byte. Plugins that want
-     * bespoke behavior may override; they should still call this base so
-     * that the LastCallRecord remains populated.
-     */
+    /// Captures override-execute arguments for assertions.
     virtual void executeGraphWithOverrides(uint32_t numOverrides,
                                            const int64_t* overrideUniqueIds,
                                            const uint32_t* overrideLengths,
@@ -513,7 +551,8 @@ public:
         return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
             hipdnn_plugin_sdk::throwIfNull(handle);
 
-            *handle = new HipdnnEnginePluginHandle();
+            auto pluginHandle = std::make_unique<HipdnnEnginePluginHandle>();
+            *handle = pluginHandle.release();
 
             LOG_API_SUCCESS(apiName, "createdHandle=" << static_cast<void*>(*handle));
         });
@@ -526,8 +565,7 @@ public:
         return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
             hipdnn_plugin_sdk::throwIfNull(handle);
 
-            delete handle;
-            handle = nullptr;
+            const std::unique_ptr<HipdnnEnginePluginHandle> pluginHandle(handle);
 
             LOG_API_SUCCESS(apiName, "destroyed");
         });
@@ -608,10 +646,11 @@ public:
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
 
-            auto* tempBuffer = new uint8_t[serializedDetails.size()];
-            std::memcpy(tempBuffer, serializedDetails.data(), serializedDetails.size());
+            TestPluginMallocBuffer tempBuffer(std::malloc(serializedDetails.size()));
+            hipdnn_plugin_sdk::throwIfNull(tempBuffer.get());
+            std::memcpy(tempBuffer.get(), serializedDetails.data(), serializedDetails.size());
 
-            engineDetails->ptr = tempBuffer;
+            engineDetails->ptr = tempBuffer.release();
             engineDetails->size = serializedDetails.size();
 
             LOG_API_SUCCESS(apiName, "engineDetails->ptr=" << engineDetails->ptr);
@@ -637,7 +676,9 @@ public:
 
             hipdnn_plugin_sdk::throwIfNull(engineDetails->ptr);
 
-            delete[] static_cast<const uint8_t*>(engineDetails->ptr);
+            const TestPluginConstMallocBuffer engineDetailsBytes(engineDetails->ptr);
+            engineDetails->ptr = nullptr;
+            engineDetails->size = 0;
 
             LOG_API_SUCCESS(apiName, "engineDetails->ptr=" << engineDetails->ptr);
         });
@@ -732,7 +773,8 @@ public:
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
                 engineConfigWrapper(engineConfig->ptr, engineConfig->size);
 
-            *executionContext = new HipdnnEnginePluginExecutionContext();
+            auto context = std::make_unique<HipdnnEnginePluginExecutionContext>();
+            *executionContext = context.release();
 
             LOG_API_SUCCESS(apiName,
                             "createdExecutionContext=" << static_cast<void*>(*executionContext));
@@ -757,9 +799,115 @@ public:
                                                                "No execution context to destroy");
             }
 
-            delete executionContext;
+            const std::unique_ptr<HipdnnEnginePluginExecutionContext> context(executionContext);
 
             LOG_API_SUCCESS(apiName, "destroyed executionContext");
+        });
+    }
+
+    static hipdnnPluginStatus_t
+        enginePluginSerializeExecutionContext(hipdnnEnginePluginHandle_t handle,
+                                              hipdnnEnginePluginExecutionContext_t executionContext,
+                                              hipdnnPluginConstData_t* serializedContext)
+    {
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
+                                << ", executionContext=" << static_cast<void*>(executionContext)
+                                << ", serializedContext=" << static_cast<void*>(serializedContext));
+
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(handle);
+            hipdnn_plugin_sdk::throwIfNull(executionContext);
+            hipdnn_plugin_sdk::throwIfNull(serializedContext);
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            if(!getInstance()->supportsEngineOperations())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "No execution context available to serialize");
+            }
+
+            auto payload = std::make_unique<TestPluginSerializedContextPayload>();
+            (*payload)[0] = 0x42;
+
+            LOG_API_SUCCESS(apiName, "serialized context");
+
+            serializedContext->ptr = payload.release();
+            serializedContext->size = sizeof(TestPluginSerializedContextPayload);
+        });
+    }
+
+    static hipdnnPluginStatus_t
+        enginePluginDestroySerializedExecutionContext(hipdnnEnginePluginHandle_t handle,
+                                                      hipdnnPluginConstData_t* serializedContext)
+    {
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
+                                << ", serializedContext=" << static_cast<void*>(serializedContext));
+
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(handle);
+            hipdnn_plugin_sdk::throwIfNull(serializedContext);
+            hipdnn_plugin_sdk::throwIfNull(serializedContext->ptr);
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            if(!getInstance()->supportsEngineOperations())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "No serialized execution context to destroy");
+            }
+
+            const std::unique_ptr<const TestPluginSerializedContextPayload> payload(
+                static_cast<const TestPluginSerializedContextPayload*>(serializedContext->ptr));
+            serializedContext->ptr = nullptr;
+            serializedContext->size = 0;
+
+            LOG_API_SUCCESS(apiName, "destroyed serialized context");
+        });
+    }
+
+    static hipdnnPluginStatus_t enginePluginCreateExecutionContextFromSerialized(
+        hipdnnEnginePluginHandle_t handle,
+        const hipdnnPluginConstData_t* engineConfig,
+        const hipdnnPluginConstData_t* serializedContext,
+        hipdnnEnginePluginExecutionContext_t* executionContext)
+    {
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle) << ", engineConfig="
+                                << static_cast<const void*>(engineConfig) << ", serializedContext="
+                                << static_cast<const void*>(serializedContext)
+                                << ", executionContext=" << static_cast<void*>(executionContext));
+
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(handle);
+            hipdnn_plugin_sdk::throwIfNull(engineConfig);
+            hipdnn_plugin_sdk::throwIfNull(serializedContext);
+            hipdnn_plugin_sdk::throwIfNull(serializedContext->ptr);
+            hipdnn_plugin_sdk::throwIfNull(executionContext);
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            if(!getInstance()->supportsEngineOperations())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "No engines available - cannot create execution context from serialized data");
+            }
+
+            const auto* payload
+                = static_cast<const TestPluginSerializedContextPayload*>(serializedContext->ptr);
+            if(serializedContext->size != sizeof(TestPluginSerializedContextPayload)
+               || (*payload)[0] != 0x42)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "Serialized execution context payload is malformed");
+            }
+
+            auto context = std::make_unique<HipdnnEnginePluginExecutionContext>();
+
+            LOG_API_SUCCESS(apiName,
+                            "createdExecutionContext=" << static_cast<void*>(context.get()));
+
+            *executionContext = context.release();
         });
     }
 
@@ -799,13 +947,7 @@ public:
         });
     }
 
-    /**
-     * @brief Shared C-API implementation for the optional override-aware
-     *        execute entry (RFC 0008 §4.5). Plugins that opt in emit a
-     *        forwarder via `REGISTER_TEST_PLUGIN_OVERRIDE_API()`; plugins
-     *        that opt out simply do not emit the symbol so the host's
-     *        `tryAssignSymbol` resolution treats it as unsupported.
-     */
+    /// Shared C-API implementation used by fake plugins that export override execute.
     static hipdnnPluginStatus_t enginePluginExecuteOpGraphWithOverrides(
         hipdnnEnginePluginHandle_t handle,
         hipdnnEnginePluginExecutionContext_t executionContext,
@@ -981,6 +1123,32 @@ private:
         return TestPluginBase::enginePluginDestroyExecutionContext(handle, executionContext);     \
     }                                                                                             \
                                                                                                   \
+    hipdnnPluginStatus_t hipdnnEnginePluginSerializeExecutionContext(                             \
+        hipdnnEnginePluginHandle_t handle,                                                        \
+        hipdnnEnginePluginExecutionContext_t executionContext,                                    \
+        hipdnnPluginConstData_t* serializedContext)                                               \
+    {                                                                                             \
+        return TestPluginBase::enginePluginSerializeExecutionContext(                             \
+            handle, executionContext, serializedContext);                                         \
+    }                                                                                             \
+                                                                                                  \
+    hipdnnPluginStatus_t hipdnnEnginePluginDestroySerializedExecutionContext(                     \
+        hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* serializedContext)            \
+    {                                                                                             \
+        return TestPluginBase::enginePluginDestroySerializedExecutionContext(handle,              \
+                                                                             serializedContext);  \
+    }                                                                                             \
+                                                                                                  \
+    hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized(                  \
+        hipdnnEnginePluginHandle_t handle,                                                        \
+        const hipdnnPluginConstData_t* engineConfig,                                              \
+        const hipdnnPluginConstData_t* serializedContext,                                         \
+        hipdnnEnginePluginExecutionContext_t* executionContext)                                   \
+    {                                                                                             \
+        return TestPluginBase::enginePluginCreateExecutionContextFromSerialized(                  \
+            handle, engineConfig, serializedContext, executionContext);                           \
+    }                                                                                             \
+                                                                                                  \
     hipdnnPluginStatus_t                                                                          \
         hipdnnEnginePluginExecuteOpGraph(hipdnnEnginePluginHandle_t handle,                       \
                                          hipdnnEnginePluginExecutionContext_t executionContext,   \
@@ -993,27 +1161,21 @@ private:
     }                                                                                             \
     } // extern "C"
 
-/**
- * Companion to `REGISTER_TEST_PLUGIN_API()`: emits ONLY the optional
- * `hipdnnEnginePluginExecuteOpGraphWithOverrides` symbol (RFC 0008 §4.5).
- * Plugins that should appear to opt out (Test #3 / #20: TestVersionLiarPlugin
- * and TestOverrideOmittingPlugin) simply do not invoke this macro, so the
- * symbol is absent from the resulting `.so` and the host's `tryAssignSymbol`
- * resolution leaves `_funcExecuteOpGraphWithOverrides` null.
- */
+/// Emits only the optional override-execute C symbol for fake plugins.
 #define REGISTER_TEST_PLUGIN_OVERRIDE_API()                                               \
     extern "C" {                                                                          \
-    hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraphWithOverrides(                   \
-        hipdnnEnginePluginHandle_t handle,                                                \
-        hipdnnEnginePluginExecutionContext_t executionContext,                            \
-        void* workspace,                                                                  \
-        const hipdnnPluginDeviceBuffer_t* deviceBuffers,                                  \
-        uint32_t numDeviceBuffers,                                                        \
-        uint32_t numOverrides,                                                            \
-        const int64_t* overrideUniqueIds,                                                 \
-        const uint32_t* overrideLengths,                                                  \
-        const int64_t* const* overrideShapes,                                             \
-        const int64_t* const* overrideStrides)                                            \
+    HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t                     \
+        hipdnnEnginePluginExecuteOpGraphWithOverrides(                                    \
+            hipdnnEnginePluginHandle_t handle,                                            \
+            hipdnnEnginePluginExecutionContext_t executionContext,                        \
+            void* workspace,                                                              \
+            const hipdnnPluginDeviceBuffer_t* deviceBuffers,                              \
+            uint32_t numDeviceBuffers,                                                    \
+            uint32_t numOverrides,                                                        \
+            const int64_t* overrideUniqueIds,                                             \
+            const uint32_t* overrideLengths,                                              \
+            const int64_t* const* overrideShapes,                                         \
+            const int64_t* const* overrideStrides)                                        \
     {                                                                                     \
         return TestPluginBase::enginePluginExecuteOpGraphWithOverrides(handle,            \
                                                                        executionContext,  \

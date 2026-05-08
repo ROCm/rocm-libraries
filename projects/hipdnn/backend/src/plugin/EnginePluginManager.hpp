@@ -27,15 +27,9 @@ public:
 protected:
     void validateBeforeAdding(const EnginePlugin& plugin) override
     {
-        // Force population of the lazy parsed-API-version cache and reject
-        // plugins whose `apiVersion()` string fails to parse. The cache is
-        // queried on the dispatch hot path
-        // (`EnginePluginResourceManager::getApplicableEngineIds`); rejecting
-        // unparseable versions here means the dispatch path can deref the
-        // cached optional unconditionally without a try/catch on every call.
-        // The bad-version warning has already been logged inside
-        // `parsedApiVersion()` on this first access.
-        const auto& parsedVersion = plugin.parsedApiVersion();
+        // Reject plugins whose `apiVersion()` string fails to parse before
+        // dispatch can observe them.
+        const auto parsedVersion = plugin.parsedApiVersion();
         if(!parsedVersion.has_value())
         {
             throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

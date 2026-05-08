@@ -55,27 +55,16 @@ public:
 
     /**
      * @brief Returns the plugin's API version parsed into a structured
-     *        `Version` object, lazily computed and cached on first access.
+     *        `Version` object, or `std::nullopt` if the version string is
+     *        malformed.
      *
-     * The outer `std::optional` is always engaged after the first call (used
-     * internally as a "computed yet?" sentinel before population). The inner
-     * `std::optional` is engaged when the version string parsed successfully
-     * and is `std::nullopt` if the string was malformed (a bad plugin should
-     * not crash the host on every dispatch).
-     *
-     * Bad-version plugins are logged exactly once on first access. The
-     * loader uses `EnginePluginManager::validateBeforeAdding` to reject
-     * such plugins outright, so callers in the dispatch hot path that rely
-     * on the value being engaged can do so with a safe `*plugin->parsedApiVersion()`.
+     * Plugin managers validate this at load time and reject malformed
+     * plugin API versions before dispatch.
      */
-    const std::optional<hipdnn_data_sdk::utilities::Version>& parsedApiVersion() const;
+    std::optional<hipdnn_data_sdk::utilities::Version> parsedApiVersion() const;
 
     /**
-     * @brief Returns the plugin's name, lazily cached on first access.
-     *
-     * Plugins do not change their name post-load, so this avoids the
-     * `invokePluginFunction` round-trip on every call (used in the dispatch
-     * hot path for log messages and error formatting).
+     * @brief Returns the plugin's name captured during plugin load.
      */
     const std::string& cachedName() const;
 
@@ -142,15 +131,9 @@ private:
     hipdnnPluginStatus_t (*_funcSetLoggingCallback)(hipdnnCallback_t);
     hipdnnPluginStatus_t (*_funcSetLogLevel)(hipdnnSeverity_t);
 
-    // Lazily populated caches. The values returned by `name()` and
-    // `apiVersion()` do not change for the lifetime of the loaded plugin,
-    // so once observed we can serve subsequent reads without re-entering
-    // the plugin shared library or re-parsing the version string. The
-    // outer optional on the parsed version is the "computed yet?" sentinel;
-    // the inner optional carries `nullopt` when the string was malformed.
-    mutable std::optional<std::string> _cachedName;
-    mutable std::optional<std::optional<hipdnn_data_sdk::utilities::Version>>
-        _cachedParsedApiVersion;
+    // The plugin name is captured during construction. Mock/default
+    // construction uses a deterministic fallback so cachedName() remains safe.
+    std::string _name = "uninitialized_plugin";
 };
 
 // The PluginManagerBase is responsible for loading and unloading plugins. This class is the base class for all plugin managers.

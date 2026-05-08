@@ -797,7 +797,7 @@ struct GraphT : public ::flatbuffers::NativeTable {
   std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>> tensors{};
   std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>> nodes{};
   ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt;
-  bool is_dynamic_shape_enabled = false;
+  bool is_override_shape_enabled = false;
   GraphT() = default;
   GraphT(const GraphT &o);
   GraphT(GraphT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -815,7 +815,7 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_TENSORS = 12,
     VT_NODES = 14,
     VT_PREFERRED_ENGINE_ID = 16,
-    VT_IS_DYNAMIC_SHAPE_ENABLED = 18
+    VT_IS_OVERRIDE_SHAPE_ENABLED = 18
   };
   const ::flatbuffers::String *name() const {
     return GetPointer<const ::flatbuffers::String *>(VT_NAME);
@@ -859,11 +859,11 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_preferred_engine_id(int64_t _preferred_engine_id) {
     return SetField<int64_t>(VT_PREFERRED_ENGINE_ID, _preferred_engine_id);
   }
-  bool is_dynamic_shape_enabled() const {
-    return GetField<uint8_t>(VT_IS_DYNAMIC_SHAPE_ENABLED, 0) != 0;
+  bool is_override_shape_enabled() const {
+    return GetField<uint8_t>(VT_IS_OVERRIDE_SHAPE_ENABLED, 0) != 0;
   }
-  bool mutate_is_dynamic_shape_enabled(bool _is_dynamic_shape_enabled = 0) {
-    return SetField<uint8_t>(VT_IS_DYNAMIC_SHAPE_ENABLED, static_cast<uint8_t>(_is_dynamic_shape_enabled), 0);
+  bool mutate_is_override_shape_enabled(bool _is_override_shape_enabled = 0) {
+    return SetField<uint8_t>(VT_IS_OVERRIDE_SHAPE_ENABLED, static_cast<uint8_t>(_is_override_shape_enabled), 0);
   }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -879,7 +879,7 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVector(nodes()) &&
            verifier.VerifyVectorOfTables(nodes()) &&
            VerifyField<int64_t>(verifier, VT_PREFERRED_ENGINE_ID, 8) &&
-           VerifyField<uint8_t>(verifier, VT_IS_DYNAMIC_SHAPE_ENABLED, 1) &&
+           VerifyField<uint8_t>(verifier, VT_IS_OVERRIDE_SHAPE_ENABLED, 1) &&
            verifier.EndTable();
   }
   GraphT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -912,8 +912,8 @@ struct GraphBuilder {
   void add_preferred_engine_id(int64_t preferred_engine_id) {
     fbb_.AddElement<int64_t>(Graph::VT_PREFERRED_ENGINE_ID, preferred_engine_id);
   }
-  void add_is_dynamic_shape_enabled(bool is_dynamic_shape_enabled) {
-    fbb_.AddElement<uint8_t>(Graph::VT_IS_DYNAMIC_SHAPE_ENABLED, static_cast<uint8_t>(is_dynamic_shape_enabled), 0);
+  void add_is_override_shape_enabled(bool is_override_shape_enabled) {
+    fbb_.AddElement<uint8_t>(Graph::VT_IS_OVERRIDE_SHAPE_ENABLED, static_cast<uint8_t>(is_override_shape_enabled), 0);
   }
   explicit GraphBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -935,13 +935,13 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>> tensors = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>>> nodes = 0,
     ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt,
-    bool is_dynamic_shape_enabled = false) {
+    bool is_override_shape_enabled = false) {
   GraphBuilder builder_(_fbb);
   if(preferred_engine_id) { builder_.add_preferred_engine_id(*preferred_engine_id); }
   builder_.add_nodes(nodes);
   builder_.add_tensors(tensors);
   builder_.add_name(name);
-  builder_.add_is_dynamic_shape_enabled(is_dynamic_shape_enabled);
+  builder_.add_is_override_shape_enabled(is_override_shape_enabled);
   builder_.add_io_data_type(io_data_type);
   builder_.add_intermediate_data_type(intermediate_data_type);
   builder_.add_compute_data_type(compute_data_type);
@@ -957,7 +957,7 @@ inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>> *tensors = nullptr,
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> *nodes = nullptr,
     ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt,
-    bool is_dynamic_shape_enabled = false) {
+    bool is_override_shape_enabled = false) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto tensors__ = tensors ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>(*tensors) : 0;
   auto nodes__ = nodes ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>>(*nodes) : 0;
@@ -970,7 +970,7 @@ inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
       tensors__,
       nodes__,
       preferred_engine_id,
-      is_dynamic_shape_enabled);
+      is_override_shape_enabled);
 }
 
 ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder &_fbb, const GraphT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -1033,7 +1033,7 @@ inline bool operator==(const GraphT &lhs, const GraphT &rhs) {
       (lhs.tensors.size() == rhs.tensors.size() && std::equal(lhs.tensors.cbegin(), lhs.tensors.cend(), rhs.tensors.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.nodes.size() == rhs.nodes.size() && std::equal(lhs.nodes.cbegin(), lhs.nodes.cend(), rhs.nodes.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.preferred_engine_id == rhs.preferred_engine_id) &&
-      (lhs.is_dynamic_shape_enabled == rhs.is_dynamic_shape_enabled);
+      (lhs.is_override_shape_enabled == rhs.is_override_shape_enabled);
 }
 
 inline bool operator!=(const GraphT &lhs, const GraphT &rhs) {
@@ -1047,7 +1047,7 @@ inline GraphT::GraphT(const GraphT &o)
         intermediate_data_type(o.intermediate_data_type),
         io_data_type(o.io_data_type),
         preferred_engine_id(o.preferred_engine_id),
-        is_dynamic_shape_enabled(o.is_dynamic_shape_enabled) {
+        is_override_shape_enabled(o.is_override_shape_enabled) {
   tensors.reserve(o.tensors.size());
   for (const auto &tensors_ : o.tensors) { tensors.emplace_back((tensors_) ? new hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT(*tensors_) : nullptr); }
   nodes.reserve(o.nodes.size());
@@ -1062,7 +1062,7 @@ inline GraphT &GraphT::operator=(GraphT o) FLATBUFFERS_NOEXCEPT {
   std::swap(tensors, o.tensors);
   std::swap(nodes, o.nodes);
   std::swap(preferred_engine_id, o.preferred_engine_id);
-  std::swap(is_dynamic_shape_enabled, o.is_dynamic_shape_enabled);
+  std::swap(is_override_shape_enabled, o.is_override_shape_enabled);
   return *this;
 }
 
@@ -1082,7 +1082,7 @@ inline void Graph::UnPackTo(GraphT *_o, const ::flatbuffers::resolver_function_t
   { auto _e = tensors(); if (_e) { _o->tensors.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->tensors[_i]) { _e->Get(_i)->UnPackTo(_o->tensors[_i].get(), _resolver); } else { _o->tensors[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->tensors.resize(0); } }
   { auto _e = nodes(); if (_e) { _o->nodes.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->nodes[_i]) { _e->Get(_i)->UnPackTo(_o->nodes[_i].get(), _resolver); } else { _o->nodes[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->nodes.resize(0); } }
   { auto _e = preferred_engine_id(); _o->preferred_engine_id = _e; }
-  { auto _e = is_dynamic_shape_enabled(); _o->is_dynamic_shape_enabled = _e; }
+  { auto _e = is_override_shape_enabled(); _o->is_override_shape_enabled = _e; }
 }
 
 inline ::flatbuffers::Offset<Graph> Graph::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GraphT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -1100,7 +1100,7 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder
   auto _tensors = _o->tensors.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>> (_o->tensors.size(), [](size_t i, _VectorArgs *__va) { return CreateTensorAttributes(*__va->__fbb, __va->__o->tensors[i].get(), __va->__rehasher); }, &_va ) : 0;
   auto _nodes = _o->nodes.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> (_o->nodes.size(), [](size_t i, _VectorArgs *__va) { return CreateNode(*__va->__fbb, __va->__o->nodes[i].get(), __va->__rehasher); }, &_va ) : 0;
   auto _preferred_engine_id = _o->preferred_engine_id;
-  auto _is_dynamic_shape_enabled = _o->is_dynamic_shape_enabled;
+  auto _is_override_shape_enabled = _o->is_override_shape_enabled;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGraph(
       _fbb,
       _name,
@@ -1110,7 +1110,7 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder
       _tensors,
       _nodes,
       _preferred_engine_id,
-      _is_dynamic_shape_enabled);
+      _is_override_shape_enabled);
 }
 
 inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *obj, NodeAttributes type) {

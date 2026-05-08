@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/detail/BackendLoggingHelpers.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
 #include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
@@ -16,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace hipdnn_frontend::detail
@@ -27,17 +29,12 @@ namespace hipdnn_frontend::detail
 /// Extracts operations and graph-level data types from a backend descriptor and
 /// rebuilds the frontend Graph representation. Tensors are shared across operations
 /// via UID-based lookup.
-///
-/// `outIsDynamicShapeEnabled` corresponds to the
-/// `HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED` graph-level boolean.
-/// It is left as `std::nullopt` when the attribute is absent (legacy graphs)
-/// or set to the recovered value otherwise.
 [[nodiscard]] inline Error
     unpackGraphDescriptor(hipdnnBackendDescriptor_t graphDesc,
                           std::vector<std::shared_ptr<graph::INode>>& outNodes,
                           graph::GraphAttributes& outGraphAttrs,
                           std::optional<int64_t>& outPreferredEngineId,
-                          std::optional<bool>& outIsDynamicShapeEnabled)
+                          bool& outIsOverrideShapeEnabled)
 {
     if(graphDesc == nullptr)
     {
@@ -128,24 +125,24 @@ namespace hipdnn_frontend::detail
         outPreferredEngineId = preferredEngineId;
     }
 
-    // Query the dynamic-shape opt-in flag (optional, RFC 0008).
-    // GraphDescriptor returns the wire default (false) for legacy graphs that
-    // never had the attribute set; we still surface it so callers can round-trip
-    // the flag through serialize/deserialize without losing user intent. We
-    // populate the optional when the attribute is present and yields a value —
-    // i.e., when the backend call succeeds AND the returned elementCount is > 0.
-    bool isDynamicShapeEnabled = false;
-    int64_t dynamicFlagCount = 0;
-    auto dynamicStatus
-        = hipdnnBackend()->backendGetAttribute(graphDesc,
-                                               HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
-                                               HIPDNN_TYPE_BOOLEAN,
-                                               1,
-                                               &dynamicFlagCount,
-                                               &isDynamicShapeEnabled);
-    if(dynamicStatus == HIPDNN_STATUS_SUCCESS && dynamicFlagCount > 0)
+    bool isOverrideShapeEnabled = false;
+    int64_t overrideFlagCount = 0;
+    auto overrideStatus = hipdnnBackend()->backendGetAttribute(
+        graphDesc,
+        HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+        HIPDNN_TYPE_BOOLEAN,
+        1,
+        &overrideFlagCount,
+        &isOverrideShapeEnabled);
+    if(overrideStatus != HIPDNN_STATUS_SUCCESS)
     {
-        outIsDynamicShapeEnabled = isDynamicShapeEnabled;
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to unpack is_override_shape_enabled from graph descriptor: "
+                    + std::string(toString(overrideStatus))};
+    }
+    if(overrideFlagCount > 0)
+    {
+        outIsOverrideShapeEnabled = isOverrideShapeEnabled;
     }
 
     // Query graph name (optional, may not be set)
@@ -169,7 +166,7 @@ namespace hipdnn_frontend::detail
                            std::vector<std::shared_ptr<graph::INode>>& outNodes,
                            graph::GraphAttributes& outGraphAttrs,
                            std::optional<int64_t>& outPreferredEngineId,
-                           std::optional<bool>& outIsDynamicShapeEnabled)
+                           bool& outIsOverrideShapeEnabled)
 {
     if(handle != nullptr)
     {
@@ -191,7 +188,7 @@ namespace hipdnn_frontend::detail
     }
 
     auto unpackErr = unpackGraphDescriptor(
-        graphDesc.get(), outNodes, outGraphAttrs, outPreferredEngineId, outIsDynamicShapeEnabled);
+        graphDesc.get(), outNodes, outGraphAttrs, outPreferredEngineId, outIsOverrideShapeEnabled);
     if(unpackErr.is_bad())
     {
         return std::make_pair(std::unique_ptr<ScopedHipdnnBackendDescriptor>(nullptr), unpackErr);
@@ -213,7 +210,7 @@ namespace hipdnn_frontend::detail
                               std::vector<std::shared_ptr<graph::INode>>& outNodes,
                               graph::GraphAttributes& outGraphAttrs,
                               std::optional<int64_t>& outPreferredEngineId,
-                              std::optional<bool>& outIsDynamicShapeEnabled)
+                              bool& outIsOverrideShapeEnabled)
 {
     ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
     if(!graphDesc.valid())
@@ -229,7 +226,7 @@ namespace hipdnn_frontend::detail
                                   outNodes,
                                   outGraphAttrs,
                                   outPreferredEngineId,
-                                  outIsDynamicShapeEnabled);
+                                  outIsOverrideShapeEnabled);
 }
 
 /// Deserializes a backend graph descriptor from a JSON string and unpacks it into
@@ -244,7 +241,7 @@ namespace hipdnn_frontend::detail
                                   std::vector<std::shared_ptr<graph::INode>>& outNodes,
                                   graph::GraphAttributes& outGraphAttrs,
                                   std::optional<int64_t>& outPreferredEngineId,
-                                  std::optional<bool>& outIsDynamicShapeEnabled)
+                                  bool& outIsOverrideShapeEnabled)
 {
     ScopedHipdnnBackendDescriptor graphDesc(jsonData.c_str(), jsonData.size());
     if(!graphDesc.valid())
@@ -259,7 +256,7 @@ namespace hipdnn_frontend::detail
                                   outNodes,
                                   outGraphAttrs,
                                   outPreferredEngineId,
-                                  outIsDynamicShapeEnabled);
+                                  outIsOverrideShapeEnabled);
 }
 
 } // namespace hipdnn_frontend::detail

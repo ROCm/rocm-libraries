@@ -4,11 +4,7 @@
 #pragma once
 
 // Shared frontend integration-test helpers for override-execute tests
-// (RFC 0008). Consolidates three near-duplicate helpers that previously
-// lived inline in each of:
-//   - tests/frontend/IntegrationOverrideExecute.cpp
-//   - tests/frontend/IntegrationOverrideValidation.cpp
-//   - tests/frontend/IntegrationMalformedVersionPlugin.cpp
+// (RFC 0008).
 //
 // 1. `compileGraph(graph, handle)` — runs the standard 5-step compile
 //    sequence (validate → build_operation_graph → create_execution_plans
@@ -17,20 +13,20 @@
 // 2. `resetAllOverrideFakePluginRecords()` — resets the suffixed
 //    thread-local `LastCallRecord` for every override-execute fake plugin
 //    that might have been loaded by a SetUp() routine. Resetters for
-//    plugins not (yet) loaded are silently skipped (Risk #11 —
-//    TLS-leak-between-tests prevention).
+//    plugins not currently loaded are silently skipped.
 //
-// 3. `buildPointwiseReluGraph(name, dims, strides, dynamicShapeEnabled)`
+// 3. `buildPointwiseReluGraph(name, dims, strides, overrideShapeEnabled)`
 //    — builds a minimal pointwise (RELU) graph with two FLOAT tensors
 //    (UIDs 1 and 2). When `strides` is empty, NCHW packed strides are
-//    computed from `dims`. `dynamicShapeEnabled` controls whether
-//    `set_dynamic_shape_enabled(true)` is applied.
+//    computed from `dims`. `overrideShapeEnabled` controls whether
+//    `set_override_shape_enabled(true)` is applied.
 //
 // Header-only because the helpers are tiny and only consumed by a small
 // number of test translation units.
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend.hpp>
 #include <test_plugins/TestPluginCommon.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
@@ -66,8 +62,7 @@ inline void compileGraph(std::shared_ptr<hipdnn_frontend::graph::Graph>& graph,
 
 /// Reset the suffixed TLS LastCallRecord across every override-execute fake
 /// plugin that may be loaded by the calling fixture. Plugins not currently
-/// loaded in the address space are silently skipped via dlsym lookup (Risk
-/// #11).
+/// loaded in the address space are silently skipped.
 inline void resetAllOverrideFakePluginRecords()
 {
     resetLastCallRecordIfLoaded(
@@ -84,13 +79,13 @@ inline void resetAllOverrideFakePluginRecords()
 /// Build a minimal pointwise (RELU) graph with two FLOAT tensors (UIDs 1
 /// and 2). `dims` describes the declared shape for both tensors; `strides`
 /// describes the declared strides (when empty, NCHW packed strides are
-/// computed from `dims`). `dynamicShapeEnabled == true` opts the graph
+/// computed from `dims`). `overrideShapeEnabled == true` opts the graph
 /// into override-execute (RFC 0008).
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     buildPointwiseReluGraph(const std::string& graphName,
                             const std::vector<int64_t>& dims,
                             const std::vector<int64_t>& strides,
-                            bool dynamicShapeEnabled)
+                            bool overrideShapeEnabled)
 {
     using hipdnn_frontend::DataType;
     using hipdnn_frontend::PointwiseMode;
@@ -105,24 +100,22 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         .set_compute_data_type(DataType::FLOAT);
 
 #ifdef HIPDNN_ENABLE_SDPA
-    if(dynamicShapeEnabled)
+    if(overrideShapeEnabled)
     {
-        graph->set_dynamic_shape_enabled(true);
+        graph->set_override_shape_enabled(true);
     }
 #else
     // The override-execute opt-in setter is `#ifdef HIPDNN_ENABLE_SDPA`-gated
     // (see Graph.hpp). Non-SDPA builds compile this helper for the
     // malformed-version-plugin test, which always passes
-    // `dynamicShapeEnabled=false`; silence the unused-parameter warning.
-    (void)dynamicShapeEnabled;
+    // `overrideShapeEnabled=false`; silence the unused-parameter warning.
+    (void)overrideShapeEnabled;
 #endif
 
     // NCHW packed strides default; assumes 4-D `dims` when `strides` is
     // empty (mirrors the original three inline helpers).
     const std::vector<int64_t> packedStrides
-        = strides.empty()
-              ? std::vector<int64_t>{dims[1] * dims[2] * dims[3], dims[2] * dims[3], dims[3], 1}
-              : strides;
+        = strides.empty() ? hipdnn_data_sdk::utilities::generateStrides(dims) : strides;
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)

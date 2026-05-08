@@ -5,6 +5,8 @@ include(GoogleTest)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
+include(${PROJECT_SOURCE_DIR}/tests/test_plugins/cmake/TestPluginTargets.cmake)
+
 # Main integration test executable WITH HipErrorHandler
 add_executable(
     hipdnn_public_backend_tests
@@ -89,6 +91,7 @@ add_dependencies(
     ${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET}
     ${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}
     ${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}
+    ${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}
 )
 
 clang_tidy_check(hipdnn_public_backend_tests)

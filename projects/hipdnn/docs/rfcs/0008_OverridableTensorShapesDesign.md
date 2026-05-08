@@ -13,7 +13,7 @@
    - 6.1 [Why Phase 2](#61-why-phase-2)
    - 6.2 [Per-tensor `is_dynamic` flag](#62-per-tensor-is_dynamic-flag)
    - 6.3 [Dynamic-tensor semantics](#63-dynamic-tensor-semantics)
-   - 6.4 [Auto-flagging behavior](#64-auto-flagging-behavior)
+   - 6.4 [Dynamic authoring behavior](#64-dynamic-authoring-behavior)
    - 6.5 [Frontend validation relaxation](#65-frontend-validation-relaxation)
    - 6.6 [IsApplicable improvements](#66-isapplicable-improvements)
    - 6.7 [Versioning and plugin-version filtering](#67-versioning-and-plugin-version-filtering)
@@ -35,8 +35,9 @@
 
 ## 1. Executive Summary
 
-This RFC proposes adding **overridable tensor shapes** and **dynamic
-tensors** to hipDNN as two committed phases. Phase 1 introduces a
+This RFC proposes adding **overridable tensor shapes** to hipDNN as a
+Phase 1 implementation, with later dynamic-tensor authoring layered on
+top of the same execute-time override transport. Phase 1 introduces a
 graph-compile-time flag declaring max-shape
 semantics plus an execute-time mechanism that re-supplies per-tensor
 dims and strides without rebuilding the graph. Phase 2 builds on the
@@ -82,7 +83,7 @@ versioning model.
 The desired end-user surface keeps the same execute API. Override values
 are specified on the variant pack descriptor and transported to plugins
 through a new optional plugin C-API used to filter plugin engines on
-dynamic graphs.
+override-enabled graphs.
 
 ### 2.2 hipDNN gap
 
@@ -145,25 +146,24 @@ for lowering and lifting.
 ```cpp
 class Graph {
 public:
-    Graph& set_dynamic_shape_enabled(bool enabled);
-    bool   is_dynamic_shape_enabled() const;
+    Graph& set_override_shape_enabled(bool enabled);
+    bool   is_override_shape_enabled() const;
 };
 ```
 
 Per RFC 0005, appending an optional defaulted field to an existing
-table is wire-compatible. The attribute reuses the already-reserved
-backend enum value `HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED`
-(ID 603).
-
-Note: when Phase 2 lands, `set_dynamic_shape_enabled(false)` may be
-overridden at `build()` time if any tensor in the graph is declared
-dynamic; see [§6.4](#64-auto-flagging-behavior).
+table is wire-compatible. The attribute adds a new operation-graph
+backend enum value `HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT`
+(ID 609). The existing
+`HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED` value is preserved
+for a possible future cuDNN-style dynamic-cache feature and is not used
+by this RFC.
 
 ### 4.2 Frontend execute API
 
 `Graph::execute` gains an overload that takes override shapes and
 strides. Variant packs are runtime; the additions plumb a
-`tensorId → override dims` and `tensorId → override strides` mapping
+`tensorId → override shapes` and `tensorId → override strides` mapping
 through the existing variant-pack channel.
 
 Two overload shapes are provided. The parallel-array form aligns with
@@ -218,7 +218,7 @@ immediately:
    upper bound, and any positive override value is permitted.
 5. **Duplicate UIDs.** The parallel-array overload's `override_uids`
    must contain no duplicates.
-6. **Positive dim values.** Each override dim must be `> 0`.
+6. **Positive shape values.** Each override shape value must be `> 0`.
 7. **Positive stride values.** Each override stride must be `> 0`.
 8. **Stride ordering preserved.** Overrides that reorder the layout
    are rejected at execution time; see
@@ -289,7 +289,7 @@ with three flat parallel arrays plus a single per-UID rank sideband.
 Plugins never see the variant pack, so the host extracts the override
 payload and passes it flat alongside the existing device-buffer array.
 For each `i`, `override_shapes[i]` and `override_strides[i]` are int64
-arrays of length `override_lengths[i]` carrying the override dims and
+arrays of length `override_lengths[i]` carrying the override shapes and
 strides for tensor `override_uids[i]`.
 
 **Pointer lifetime.** All pointer-of-pointer parameters (and their
@@ -342,9 +342,9 @@ for (plugin in plugins) {
 ```
 
 Plugins that do not export `hipdnnPluginGetApiVersion` fall back to
-`"0.0.0"` (the existing default in `PluginCore.cpp`), so they are
-treated as not implementing any of the override-feature contracts and
-are filtered out for any graph whose required version is `> 0.0.0`.
+`"1.0.0"` (the post-baseline default in `PluginCore.cpp`), so they
+remain eligible for non-override graphs but are treated as not
+implementing any of the override-feature contracts.
 
 **Versioning rollout.** Plugins are about to undergo a planned
 baseline bump to `1.0.0` (separate from this RFC); any plugin that
@@ -354,9 +354,9 @@ then tracks the override feature in two further bumps:
 
 | State | `apiVersion()` | Graphs eligible to be served |
 |-------|----------------|------------------------------|
-| Plugin not exporting symbol | `0.0.0` (fallback) | Non-override graphs only |
-| Today (symbol exported)     | `0.0.1` | Non-override graphs only |
-| After baseline bump  | `1.0.0` | Non-override graphs only (existing plugins, no override capability) |
+| Plugin not exporting symbol | `1.0.0` (fallback) | Non-override graphs only |
+| Pre-baseline exported symbol | `0.0.1` | Non-override graphs only |
+| Baseline / current default | `1.0.0` | Non-override graphs only (existing plugins, no override capability) |
 | After Phase 1 ships  | `1.1.0` | Graphs with the override flag set |
 | After Phase 2 ships  | `1.2.0` | Graphs using `is_dynamic` / wildcard / stride-as-order |
 
@@ -366,9 +366,10 @@ set it implements. The `1.1.0 → 1.2.0` step is a backwards-compatible
 minor addition; pre-existing 1.1.0 plugins continue to serve Phase 1
 graphs unchanged.
 
-The version numbers above (`1.0.0` / `1.1.0` / `1.2.0`) are
-placeholders chosen to communicate the staging — the actual numbers
-are TBD and will be finalized when the baseline bump lands.
+The version numbers above (`1.0.0` / `1.1.0` / `1.2.0`) are the
+staged plugin API floors used by this rollout. Future releases may
+continue the same minor-version progression for additional optional
+plugin entry points.
 
 Graphs that do not opt in see no plugin-eligibility change; existing
 plugins continue to serve them. Graphs that opt in see only plugins
@@ -687,15 +688,16 @@ X:
   strides    = { 3, 2, 1, 0 }     # N outermost, W innermost
 ```
 
-### 6.4 Auto-flagging behavior
+### 6.4 Dynamic authoring behavior
 
 If any tensor in a graph is marked dynamic, the graph's
-dynamic-shape-enabled flag is set automatically during
-`Graph::build()` to prevent user error. Users authoring graphs through
-the Phase 2 dynamic-tensor API do not need to also call
-`set_dynamic_shape_enabled(true)`; any prior explicit
-`set_dynamic_shape_enabled(false)` is overridden if dynamic tensors
-are present.
+override-shape-enabled flag must be true before build, because dynamic
+tensor execution still uses the Phase 1 override dims/strides transport.
+Phase 2 may add frontend conveniences for authoring dynamic tensors, but
+it does not repurpose
+`HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED`; that backend enum
+remains reserved for a future dynamic-cache feature if hipDNN chooses to
+support one.
 
 ### 6.5 Frontend validation relaxation
 
@@ -889,7 +891,7 @@ minor version to `1.1.0`.
 
 ### Step 3: Frontend API
 
-`set_dynamic_shape_enabled` setter/getter on `Graph`, `Graph::execute`
+`set_override_shape_enabled` setter/getter on `Graph`, `Graph::execute`
 overload (parallel-array and map-keyed forms), variant-pack
 translation, and pack/unpack of the graph flag.
 
@@ -901,17 +903,16 @@ and the four-corner test matrix verify the end-to-end flow (see
 
 ### Step 5: Phase 2 backend + frontend wiring
 
-Per-tensor `is_dynamic` schema field, backend enum, frontend
+Per-tensor `is_dynamic` schema field, frontend
 setter/getter, `mark_dynamic()` helper, `DYNAMIC_DIM` constant, and
 their round-trip tests.
 
-### Step 6: Phase 2 version-filter extension, auto-flag, validation relaxation
+### Step 6: Phase 2 version-filter extension and validation relaxation
 
 Extend the per-graph plugin-version filter (introduced in Step 2) to
 recognize the `1.2.0` requirement for graphs using `is_dynamic`
-tensors, wildcard dims, or stride-as-order; auto-flag during
-`Graph::build()`; per-op `validate()` "any-dynamic-operand"
-early-return for value-dependent checks.
+tensors, wildcard dims, or stride-as-order; per-op `validate()`
+"any-dynamic-operand" early-return for value-dependent checks.
 
 ### Step 7: Phase 2 tests
 
@@ -992,9 +993,10 @@ filtering or host dispatch:
 
 - **Round-trip** for `is_dynamic` through the flatbuffer schema, backend descriptor,
   and frontend pack/unpack.
-- **Auto-flag** end-to-end: a graph with one dynamic tensor sees
-  `is_dynamic_shape_enabled()` return true after `build()` without
-  any explicit setter call.
+- **Dynamic authoring** end-to-end: graphs using dynamic tensors still
+  build and execute through the override-shape transport, with
+  `is_override_shape_enabled()` set explicitly by the caller or a
+  frontend convenience if one is added later.
 - **Validation relaxation**: rolled out per-op as providers gain
   dynamic dim/stride support. SDPA is the first op to receive the
   dynamic-operand early-return in `validate()` and accompanying
@@ -1117,17 +1119,18 @@ would be additive on top of the current parallel-vector transport.
 - **Stride order**: the axis-permutation interpretation of the
   `strides` field for dynamic tensors, reusing the existing
   stride-generation semantic.
-- **Auto-flag**: the build-time mechanism that sets the graph's
-  dynamic-shape-enabled flag if any tensor in the graph is declared
-  dynamic. See [§6.4](#64-auto-flagging-behavior).
+- **Dynamic authoring behavior**: Phase 2 dynamic tensor declarations
+  still execute through the Phase 1 override-shape transport. See
+  [§6.4](#64-dynamic-authoring-behavior).
 - **Supported plugin SDK API version**: a per-plugin declaration of
   the Plugin SDK API version the plugin was built against, reported via
   the existing `hipdnnPluginGetApiVersion(const char**)` symbol as a
   plain `"MAJOR.MINOR.PATCH"` semver string. The backend parses and
   compares it with
   `hipdnn_data_sdk::utilities::Version` from `VersionUtils.hpp`.
-  Plugins that do not export the symbol fall back to `"0.0.0"` and are
-  treated as not implementing any of the override-feature contracts.
+  Plugins that do not export the symbol fall back to `"1.0.0"` and are
+  treated as baseline plugins that do not implement any override-feature
+  contracts.
 - **Required plugin SDK API version**: the per-graph minimum Plugin
   SDK API version the backend computes from the features the graph
   uses; see [§4.5](#45-applicability-filtering) for the mapping. The

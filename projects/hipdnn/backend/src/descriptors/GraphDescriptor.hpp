@@ -54,10 +54,8 @@ private:
     // Preferred engine ID, empty when unset.
     std::optional<int64_t> _preferredEngineId = std::nullopt;
 
-    // Opt-in flag for overridable tensor shapes (RFC 0008). Defaults to false.
-    // The schema field is `bool = false` so legacy graphs (and any graph that never
-    // explicitly opted in) deserialize to false without emitting wire bytes.
-    bool _isDynamicShapeEnabled = false;
+    // Opt-in flag for overridable tensor shapes (RFC 0008).
+    bool _isOverrideShapeEnabled = false;
 
     // Optional human-readable name for the graph, empty when unset.
     std::string _name;
@@ -79,10 +77,6 @@ private:
                               int64_t elementCount,
                               const void* arrayOfElements);
 
-    void setIsDynamicShapeEnabled(hipdnnBackendAttributeType_t attributeType,
-                                  int64_t elementCount,
-                                  const void* arrayOfElements);
-
     /// Returns operation descriptors via packDescriptor(). Caller owns the returned pointers.
     void getOperations(hipdnnBackendAttributeType_t attributeType,
                        int64_t requestedElementCount,
@@ -93,11 +87,6 @@ private:
                               int64_t requestedElementCount,
                               int64_t* elementCount,
                               void* arrayOfElements) const;
-
-    void getIsDynamicShapeEnabled(hipdnnBackendAttributeType_t attributeType,
-                                  int64_t requestedElementCount,
-                                  int64_t* elementCount,
-                                  void* arrayOfElements) const;
 
     // Build GraphT from operation descriptors and return it
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> buildGraphFromOperations() const;

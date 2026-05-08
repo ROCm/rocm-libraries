@@ -8,6 +8,11 @@
 namespace hipdnn_plugin_sdk
 {
 
+// Baseline engine plugin C ABI version for plugins that do not export
+// `hipdnnPluginGetApiVersion`. This preserves compatibility with existing
+// plugins across the first explicit engine-plugin API versioning rollout.
+inline constexpr std::string_view K_ENGINE_PLUGIN_API_VERSION_BASELINE = "1.0.0";
+
 // Minimum engine plugin C ABI version that advertises support for the
 // override-execute entry point (RFC 0008 §4.5). Override-execute is the
 // additive minor feature introduced in engine plugin API 1.1.0; see

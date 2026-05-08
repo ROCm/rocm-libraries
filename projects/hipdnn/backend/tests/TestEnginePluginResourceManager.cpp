@@ -4,7 +4,11 @@
 #include <array>
 #include <atomic>
 #include <filesystem>
+#include <limits>
 #include <memory>
+#include <set>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_set>
 #include <vector>
@@ -219,7 +223,7 @@ TEST(TestEnginePluginResourceManager, SelfMoveAssignment)
     EXPECT_CALL(*mockPlugin, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101}));
     EXPECT_CALL(*mockPlugin, apiVersion())
-        .WillRepeatedly(::testing::Return(std::string_view{"1.0.0"}));
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
 
     EXPECT_CALL(*mockPlugin, setStream(hipdnnEnginePluginHandle_t(0xdeadbeef), nullptr)).Times(2);
 
@@ -416,7 +420,7 @@ TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsWithLoadedPlugin)
     EXPECT_CALL(*mockPlugin, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
     EXPECT_CALL(*mockPlugin, apiVersion())
-        .WillRepeatedly(::testing::Return(std::string_view{"1.0.0"}));
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
 
     EXPECT_CALL(mockGraphDesc, getSerializedGraph())
         .WillOnce(::testing::Return(fakeSerializedData));
@@ -1430,7 +1434,7 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginOnHandleCollision)
     EXPECT_CALL(*mockPlugin1, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{100}));
     EXPECT_CALL(*mockPlugin1, apiVersion())
-        .WillRepeatedly(::testing::Return(std::string_view{"1.0.0"}));
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
     EXPECT_CALL(*mockPlugin1, destroyHandle(collisionHandle));
 
     // Second plugin returns same handle - should be skipped
@@ -1516,7 +1520,7 @@ TEST(TestEnginePluginResourceManager, ConstructorContinuesAfterBadPluginWithGood
     EXPECT_CALL(*goodPlugin, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{200, 201}));
     EXPECT_CALL(*goodPlugin, apiVersion())
-        .WillRepeatedly(::testing::Return(std::string_view{"1.0.0"}));
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
     EXPECT_CALL(*goodPlugin, destroyHandle(goodHandle));
 
     EXPECT_CALL(mockGraphDesc, getSerializedGraph())
@@ -1695,47 +1699,20 @@ TEST(TestEnginePluginResourceManager, ConstructorHandlesMultipleBadPlugins)
 }
 
 // =============================================================================
-// RFC 0008 §B.9 — applicability filter and dispatch-switch coverage.
-//
-// These tests pin the host-side behavior of the override-aware execute path
-// without requiring real fake plugin .so files. They cover:
-//   - Test #2:  override-omitting plugin filtered out for override-flag graphs
-//               and included for non-override graphs.
-//   - Test #3:  version-liar plugin (advertises K_OVERRIDE_EXECUTE_MIN_API_VERSION
-//               but does NOT export the override symbol) returns NOT_SUPPORTED at
-//               dispatch time. RFC 0008 §4.6 safety net.
-//   - Test #6:  variant-pack lifetime safety — the dispatch wrapper consumes
-//               override vectors via const refs and does not retain pointers
-//               past the call.
-//   - Test #8:  D2 ptr-array reconstruction (RFC §4.3 worked example: 3 tensors
-//               of ranks 3, 4, 4 over a flat shape/stride buffer).
-//   - Test #9:  two override-implementing plugins both serve override-flag
-//               graphs (filter does not prematurely select).
-//   - Test #10: no-plugins-loaded graph fails with NOT_SUPPORTED for
-//               override-flag graphs (no engine matches via the filter).
-//   - Test #18: variant-pack mutation safety — the wrapper reads the override
-//               vectors exactly once at dispatch time.
-//   - Test #19: positive-selection — plugin reporting
-//               K_OVERRIDE_EXECUTE_MIN_API_VERSION is accepted by the filter for
-//               non-override graphs as well.
-//
-// Tests #13/#20 (build-time `nm`-symbol checks) are out of scope for the C++
-// unit suite; they are addressed by Stream C's frontend integration tests
-// against the override-implementing, override-omitting, and version-liar fake
-// plugins (which exercise the dlopen optional-symbol path end-to-end).
+// Override execute applicability and dispatch tests.
 // =============================================================================
 
 namespace
 {
 
-/// Programs `mockGraphDesc.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED, ...)`
+/// Programs `mockGraphDesc.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT, ...)`
 /// to report `flag`. Uses the shared `SetArg4ToBool` action helper from
 /// `MockDescriptor.hpp`. Other attribute lookups remain unhandled (StrictMock
 /// would fail; NaggyMock will warn, which is the existing test convention).
 void programOverrideFlag(MockGraphDescriptor& mockGraphDesc, bool flag)
 {
     EXPECT_CALL(mockGraphDesc,
-                getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
+                getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
                              HIPDNN_TYPE_BOOLEAN,
                              1,
                              ::testing::_,
@@ -1743,116 +1720,183 @@ void programOverrideFlag(MockGraphDescriptor& mockGraphDesc, bool flag)
         .WillRepeatedly(SetArg4ToBool(flag));
 }
 
+enum class OverrideFlagReadMode
+{
+    RETURNS_TRUE,
+    RETURNS_FALSE,
+    THROWS_NOT_SUPPORTED,
+    RETURNS_COUNT_ZERO,
+    THROWS_INTERNAL_ERROR
+};
+
+void programOverrideFlagRead(MockGraphDescriptor& mockGraphDesc, OverrideFlagReadMode mode)
+{
+    switch(mode)
+    {
+    case OverrideFlagReadMode::RETURNS_TRUE:
+        programOverrideFlag(mockGraphDesc, /*flag=*/true);
+        break;
+    case OverrideFlagReadMode::RETURNS_FALSE:
+        programOverrideFlag(mockGraphDesc, /*flag=*/false);
+        break;
+    case OverrideFlagReadMode::THROWS_NOT_SUPPORTED:
+        EXPECT_CALL(mockGraphDesc,
+                    getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                 HIPDNN_TYPE_BOOLEAN,
+                                 1,
+                                 ::testing::_,
+                                 ::testing::_))
+            .WillOnce(::testing::Throw(
+                HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED, "override flag not supported")));
+        break;
+    case OverrideFlagReadMode::RETURNS_COUNT_ZERO:
+        EXPECT_CALL(mockGraphDesc,
+                    getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                 HIPDNN_TYPE_BOOLEAN,
+                                 1,
+                                 ::testing::_,
+                                 ::testing::_))
+            .WillOnce([](hipdnnBackendAttributeName_t,
+                         hipdnnBackendAttributeType_t,
+                         int64_t,
+                         int64_t* elementCount,
+                         void*) { *elementCount = 0; });
+        break;
+    case OverrideFlagReadMode::THROWS_INTERNAL_ERROR:
+        EXPECT_CALL(mockGraphDesc,
+                    getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                 HIPDNN_TYPE_BOOLEAN,
+                                 1,
+                                 ::testing::_,
+                                 ::testing::_))
+            .WillOnce(::testing::Throw(
+                HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "override flag read failed")));
+        break;
+    default:
+        break;
+    }
+}
+
 } // namespace
 
-// Test #2 (positive half): a graph that opts into override-flag execution
-// excludes plugins that report only the post-PR1 baseline version "1.0.0"
-// (override-omitting fakes), even when those plugins would otherwise return
-// applicable engine ids.
-TEST(TestEnginePluginResourceManager, ApplicabilityFilterExcludesBaselinePluginForOverrideGraph)
+struct ApplicabilityFilterCase
 {
-    auto baselinePlugin = std::make_shared<MockEnginePlugin>();
-    std::vector<std::shared_ptr<EnginePlugin>> plugins{baselinePlugin};
+    const char* name;
+    std::string_view apiVersion;
+    OverrideFlagReadMode flagReadMode;
+    int hasOverrideExecute = -1; // -1: not queried, 0: queried false, 1: queried true.
+    std::vector<int64_t> expectedEngineIds;
+    hipdnnStatus_t expectedThrow = HIPDNN_STATUS_SUCCESS;
+};
+
+class TestEnginePluginResourceManagerApplicabilityFilter
+    : public ::testing::TestWithParam<ApplicabilityFilterCase>
+{
+};
+
+TEST_P(TestEnginePluginResourceManagerApplicabilityFilter, SinglePluginVersionAndFlagMatrix)
+{
+    const auto& testCase = GetParam();
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
     auto pluginManager = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
-    EXPECT_CALL(*baselinePlugin, createHandle())
+    EXPECT_CALL(*plugin, createHandle())
         .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
-    EXPECT_CALL(*baselinePlugin, getAllEngineIds())
-        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
-    EXPECT_CALL(*baselinePlugin, name()).WillRepeatedly(::testing::Return("BaselinePlugin"));
-    EXPECT_CALL(*baselinePlugin, apiVersion()).WillRepeatedly(::testing::Return("1.0.0"));
-    EXPECT_CALL(*baselinePlugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
-
-    // Filter excludes the plugin before getApplicableEngineIds is reached.
-    EXPECT_CALL(*baselinePlugin, getApplicableEngineIds(::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("MockPlugin"));
+    EXPECT_CALL(*plugin, apiVersion()).WillRepeatedly(::testing::Return(testCase.apiVersion));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
 
     MockGraphDescriptor mockGraphDesc;
     const hipdnnPluginConstData_t fakeSerializedData
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
     EXPECT_CALL(mockGraphDesc, getSerializedGraph())
         .WillOnce(::testing::Return(fakeSerializedData));
-    programOverrideFlag(mockGraphDesc, /*flag=*/true);
+    programOverrideFlagRead(mockGraphDesc, testCase.flagReadMode);
+
+    if(testCase.hasOverrideExecute >= 0)
+    {
+        EXPECT_CALL(*plugin, hasOverrideExecute())
+            .WillOnce(::testing::Return(testCase.hasOverrideExecute == 1));
+    }
+    else
+    {
+        EXPECT_CALL(*plugin, hasOverrideExecute()).Times(0);
+    }
+
+    if(testCase.expectedThrow == HIPDNN_STATUS_SUCCESS && !testCase.expectedEngineIds.empty())
+    {
+        EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+            .WillOnce(::testing::Return(testCase.expectedEngineIds));
+    }
+    else
+    {
+        EXPECT_CALL(*plugin, getApplicableEngineIds(_, _)).Times(0);
+    }
 
     const EnginePluginResourceManager resourceManager(pluginManager);
+    if(testCase.expectedThrow != HIPDNN_STATUS_SUCCESS)
+    {
+        ASSERT_THROW_HIPDNN_STATUS(resourceManager.getApplicableEngineIds(&mockGraphDesc),
+                                   testCase.expectedThrow);
+        return;
+    }
+
     auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
-    EXPECT_TRUE(engineIds.empty());
+    EXPECT_EQ(engineIds, testCase.expectedEngineIds);
 }
 
-// Test #2 (negative half): the same baseline plugin IS included for a
-// non-override (regular) graph; the filter floors at "1.0.0".
-TEST(TestEnginePluginResourceManager, ApplicabilityFilterIncludesBaselinePluginForRegularGraph)
-{
-    auto baselinePlugin = std::make_shared<MockEnginePlugin>();
-    std::vector<std::shared_ptr<EnginePlugin>> plugins{baselinePlugin};
-    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+INSTANTIATE_TEST_SUITE_P(
+    SinglePlugin,
+    TestEnginePluginResourceManagerApplicabilityFilter,
+    ::testing::Values(
+        ApplicabilityFilterCase{"BaselineExcludedForOverrideGraph",
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                OverrideFlagReadMode::RETURNS_TRUE,
+                                -1,
+                                {}},
+        ApplicabilityFilterCase{"BaselineIncludedForRegularGraph",
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                OverrideFlagReadMode::RETURNS_FALSE,
+                                -1,
+                                {100}},
+        ApplicabilityFilterCase{"BaselineIncludedWhenOverrideFlagUnsupported",
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                OverrideFlagReadMode::THROWS_NOT_SUPPORTED,
+                                -1,
+                                {100}},
+        ApplicabilityFilterCase{"BaselineIncludedWhenOverrideFlagCountZero",
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                OverrideFlagReadMode::RETURNS_COUNT_ZERO,
+                                -1,
+                                {100}},
+        ApplicabilityFilterCase{"OverrideFlagReadFailurePropagates",
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                OverrideFlagReadMode::THROWS_INTERNAL_ERROR,
+                                -1,
+                                {},
+                                HIPDNN_STATUS_INTERNAL_ERROR},
+        ApplicabilityFilterCase{"OverrideCapableIncludedForOverrideGraph",
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                OverrideFlagReadMode::RETURNS_TRUE,
+                                1,
+                                {100}},
+        ApplicabilityFilterCase{"OverrideVersionWithoutSymbolExcludedForOverrideGraph",
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                OverrideFlagReadMode::RETURNS_TRUE,
+                                0,
+                                {}},
+        ApplicabilityFilterCase{"OverrideCapableIncludedForRegularGraph",
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                OverrideFlagReadMode::RETURNS_FALSE,
+                                -1,
+                                {100}}),
+    [](const auto& info) { return std::string(info.param.name); });
 
-    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
-    EXPECT_CALL(*baselinePlugin, createHandle())
-        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
-    EXPECT_CALL(*baselinePlugin, getAllEngineIds())
-        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
-    EXPECT_CALL(*baselinePlugin, apiVersion()).WillRepeatedly(::testing::Return("1.0.0"));
-    EXPECT_CALL(*baselinePlugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
-
-    MockGraphDescriptor mockGraphDesc;
-    const hipdnnPluginConstData_t fakeSerializedData
-        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
-    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
-        .WillOnce(::testing::Return(fakeSerializedData));
-    programOverrideFlag(mockGraphDesc, /*flag=*/false);
-
-    EXPECT_CALL(*baselinePlugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
-        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
-
-    const EnginePluginResourceManager resourceManager(pluginManager);
-    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
-    ASSERT_EQ(engineIds.size(), 1);
-    EXPECT_EQ(engineIds[0], 100);
-}
-
-// Test #19: a plugin reporting exactly K_OVERRIDE_EXECUTE_MIN_API_VERSION is included
-// by the filter for both override-flag and non-override graphs.
-TEST(TestEnginePluginResourceManager, ApplicabilityFilterIncludesOverrideCapablePluginForBothGraphs)
-{
-    auto overridePlugin = std::make_shared<MockEnginePlugin>();
-    std::vector<std::shared_ptr<EnginePlugin>> plugins{overridePlugin};
-    auto pluginManager = std::make_shared<MockEnginePluginManager>();
-
-    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
-    EXPECT_CALL(*overridePlugin, createHandle())
-        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
-    EXPECT_CALL(*overridePlugin, getAllEngineIds())
-        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
-    EXPECT_CALL(*overridePlugin, apiVersion())
-        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
-    EXPECT_CALL(*overridePlugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
-
-    MockGraphDescriptor regularGraph;
-    MockGraphDescriptor overrideGraph;
-    const hipdnnPluginConstData_t fakeSerializedData
-        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
-    EXPECT_CALL(regularGraph, getSerializedGraph()).WillOnce(::testing::Return(fakeSerializedData));
-    EXPECT_CALL(overrideGraph, getSerializedGraph())
-        .WillOnce(::testing::Return(fakeSerializedData));
-    programOverrideFlag(regularGraph, /*flag=*/false);
-    programOverrideFlag(overrideGraph, /*flag=*/true);
-
-    EXPECT_CALL(*overridePlugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
-        .Times(2)
-        .WillRepeatedly(::testing::Return(std::vector<int64_t>{100}));
-
-    const EnginePluginResourceManager resourceManager(pluginManager);
-    auto regularIds = resourceManager.getApplicableEngineIds(&regularGraph);
-    auto overrideIds = resourceManager.getApplicableEngineIds(&overrideGraph);
-    ASSERT_EQ(regularIds.size(), 1);
-    EXPECT_EQ(regularIds[0], 100);
-    ASSERT_EQ(overrideIds.size(), 1);
-    EXPECT_EQ(overrideIds[0], 100);
-}
-
-// Test #9: two plugins, each at K_OVERRIDE_EXECUTE_MIN_API_VERSION, both contribute
-// engines for an override-flag graph (the filter does not short-circuit).
+// Two plugins at K_OVERRIDE_EXECUTE_MIN_API_VERSION both contribute engines for
+// an override-flag graph; the filter does not short-circuit.
 TEST(TestEnginePluginResourceManager,
      ApplicabilityFilterIncludesAllOverrideCapablePluginsForOverrideGraph)
 {
@@ -1887,6 +1931,8 @@ TEST(TestEnginePluginResourceManager,
         .WillOnce(::testing::Return(std::vector<int64_t>{100}));
     EXPECT_CALL(*pluginB, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xbbbbbbbb), _))
         .WillOnce(::testing::Return(std::vector<int64_t>{200}));
+    EXPECT_CALL(*pluginA, hasOverrideExecute()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(*pluginB, hasOverrideExecute()).WillOnce(::testing::Return(true));
 
     const EnginePluginResourceManager resourceManager(pluginManager);
     auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
@@ -1896,8 +1942,8 @@ TEST(TestEnginePluginResourceManager,
     EXPECT_EQ(idSet, (std::set<int64_t>{100, 200}));
 }
 
-// Test #10: with no plugins loaded at all, an override-flag graph yields an
-// empty applicable-engine list (no engines → caller surfaces NOT_SUPPORTED).
+// With no plugins loaded, an override-flag graph yields an empty applicable
+// engine list; the caller surfaces NOT_SUPPORTED.
 TEST(TestEnginePluginResourceManager, ApplicabilityFilterEmptyWhenNoPluginsLoaded)
 {
     std::vector<std::shared_ptr<EnginePlugin>> plugins;
@@ -1919,22 +1965,14 @@ TEST(TestEnginePluginResourceManager, ApplicabilityFilterEmptyWhenNoPluginsLoade
 namespace
 {
 
-/// Sets up the common mock-call expectations for a single-plugin manager that
-/// will be driven through `executeOpGraph(executionPlan, variantPack)` via
-/// finalized mock descriptors. Returns the engine id and handle so the test
-/// can assert further call patterns. The caller is responsible for the
-/// override-related expectations on the variant pack.
+// Common mock setup for executeOpGraph dispatch tests.
 struct DispatchHarness
 {
     std::shared_ptr<MockEnginePlugin> plugin;
     std::shared_ptr<MockEnginePluginManager> pluginManager;
     std::vector<std::shared_ptr<EnginePlugin>> pluginsList;
-    std::unique_ptr<HipdnnBackendDescriptor> engineConfigWrapper;
-    std::unique_ptr<HipdnnBackendDescriptor> engineWrapper;
     std::unique_ptr<HipdnnBackendDescriptor> executionPlanWrapper;
     std::unique_ptr<HipdnnBackendDescriptor> variantWrapper;
-    std::shared_ptr<MockEngineConfigDescriptor> mockEngineConfig;
-    std::shared_ptr<MockEngineDescriptor> mockEngine;
     std::shared_ptr<MockExecutionPlanDescriptor> mockExecutionPlan;
     std::shared_ptr<MockVariantDescriptor> mockVariantPack;
 };
@@ -1948,15 +1986,9 @@ DispatchHarness makeDispatchHarness(int64_t engineId,
     h.pluginsList = {h.plugin};
     h.pluginManager = std::make_shared<MockEnginePluginManager>();
 
-    h.engineConfigWrapper = createDescriptor<MockEngineConfigDescriptor>();
-    h.engineWrapper = createDescriptor<MockEngineDescriptor>();
     h.executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
     h.variantWrapper = createDescriptor<MockVariantDescriptor>();
 
-    h.mockEngineConfig = MockDescriptorUtility::asDescriptorUnsafe<MockEngineConfigDescriptor>(
-        h.engineConfigWrapper.get());
-    h.mockEngine
-        = MockDescriptorUtility::asDescriptorUnsafe<MockEngineDescriptor>(h.engineWrapper.get());
     h.mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
         h.executionPlanWrapper.get());
     h.mockVariantPack
@@ -1979,24 +2011,45 @@ DispatchHarness makeDispatchHarness(int64_t engineId,
     return h;
 }
 
+enum class DispatchExpectedPath
+{
+    LEGACY_EXECUTE,
+    THROW_BEFORE_EXECUTE
+};
+
+struct DispatchCase
+{
+    const char* name;
+    int hasOverrideExecute; // -1: not queried, 0: queried false, 1: queried true.
+    std::vector<int64_t> overrideUniqueIds;
+    std::vector<int64_t> overrideShapes;
+    std::vector<int64_t> overrideStrides;
+    std::vector<int64_t> overrideLengths;
+    DispatchExpectedPath expectedPath;
+    hipdnnStatus_t expectedThrow = HIPDNN_STATUS_SUCCESS;
+};
+
 } // namespace
 
-// Test #3 / #20 (host portion): a plugin that lies about its API version
-// (reports K_OVERRIDE_EXECUTE_MIN_API_VERSION but does NOT export the override symbol)
-// must trigger the dispatch-time safety net per RFC 0008 §4.6: dispatch
-// returns NOT_SUPPORTED instead of silently routing through the legacy entry.
-TEST(TestEnginePluginResourceManager, DispatchSafetyNetRejectsVersionLiarPlugin)
+class TestEnginePluginResourceManagerDispatchMatrix : public ::testing::TestWithParam<DispatchCase>
 {
+};
+
+TEST_P(TestEnginePluginResourceManagerDispatchMatrix, RoutesOrRejectsOverrideDispatch)
+{
+    const auto& testCase = GetParam();
     auto h = makeDispatchHarness(/*engineId=*/100,
                                  hipdnnEnginePluginHandle_t(0xdeadbeef),
                                  hipdnnEnginePluginExecutionContext_t(0xcafebabe));
 
-    std::vector<int64_t> tensorIds{1};
-    std::vector<const void*> dataPtrs{reinterpret_cast<void*>(0x1000)};
-    std::vector<int64_t> overrideUniqueIds{1};
-    std::vector<int64_t> overrideShapes{2, 3, 4};
-    std::vector<int64_t> overrideStrides{12, 4, 1};
-    std::vector<int64_t> overrideLengths{3};
+    std::vector<int64_t> tensorIds{1, 2, 3};
+    std::vector<const void*> dataPtrs{reinterpret_cast<void*>(0x1000),
+                                      reinterpret_cast<void*>(0x2000),
+                                      reinterpret_cast<void*>(0x3000)};
+    std::vector<int64_t> overrideUniqueIds = testCase.overrideUniqueIds;
+    std::vector<int64_t> overrideShapes = testCase.overrideShapes;
+    std::vector<int64_t> overrideStrides = testCase.overrideStrides;
+    std::vector<int64_t> overrideLengths = testCase.overrideLengths;
 
     EXPECT_CALL(*h.mockVariantPack, getWorkspace())
         .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
@@ -2011,23 +2064,110 @@ TEST(TestEnginePluginResourceManager, DispatchSafetyNetRejectsVersionLiarPlugin)
     EXPECT_CALL(*h.mockVariantPack, getOverrideLengths())
         .WillOnce(::testing::ReturnRef(overrideLengths));
 
-    // Version-liar: hasOverrideExecute() returns false, so dispatch must fail.
-    EXPECT_CALL(*h.plugin, hasOverrideExecute()).WillOnce(::testing::Return(false));
+    if(testCase.hasOverrideExecute >= 0)
+    {
+        EXPECT_CALL(*h.plugin, hasOverrideExecute())
+            .WillOnce(::testing::Return(testCase.hasOverrideExecute == 1));
+    }
+    else
+    {
+        EXPECT_CALL(*h.plugin, hasOverrideExecute()).Times(0);
+    }
+
     EXPECT_CALL(*h.plugin, executeOpGraphWithOverrides(_, _, _, _, _, _, _, _, _, _)).Times(0);
-    EXPECT_CALL(*h.plugin, executeOpGraph(_, _, _, _, _)).Times(0);
+
+    if(testCase.expectedPath == DispatchExpectedPath::LEGACY_EXECUTE)
+    {
+        EXPECT_CALL(*h.plugin,
+                    executeOpGraph(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                   hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                   reinterpret_cast<void*>(0x4000),
+                                   ::testing::NotNull(),
+                                   static_cast<uint32_t>(3)));
+    }
+    else
+    {
+        EXPECT_CALL(*h.plugin, executeOpGraph(_, _, _, _, _)).Times(0);
+    }
 
     const EnginePluginResourceManager resourceManager(h.pluginManager);
-    ASSERT_THROW_HIPDNN_STATUS(
-        resourceManager.executeOpGraph(h.executionPlanWrapper.get(), h.variantWrapper.get()),
-        HIPDNN_STATUS_NOT_SUPPORTED);
+    if(testCase.expectedThrow != HIPDNN_STATUS_SUCCESS)
+    {
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.executeOpGraph(h.executionPlanWrapper.get(), h.variantWrapper.get()),
+            testCase.expectedThrow);
+        return;
+    }
+
+    resourceManager.executeOpGraph(h.executionPlanWrapper.get(), h.variantWrapper.get());
 }
 
-// Tests #6 / #8 / #18: when the variant pack carries override tensors and the
-// plugin exports the override symbol, dispatch must:
+INSTANTIATE_TEST_SUITE_P(
+    OverrideDispatch,
+    TestEnginePluginResourceManagerDispatchMatrix,
+    ::testing::Values(DispatchCase{"VersionLiarPluginRejected",
+                                   /*hasOverrideExecute=*/0,
+                                   {1},
+                                   {2, 3, 4},
+                                   {12, 4, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_NOT_SUPPORTED},
+                      DispatchCase{"NoOverridesRoutesToLegacyEntry",
+                                   /*hasOverrideExecute=*/-1,
+                                   {},
+                                   {},
+                                   {},
+                                   {},
+                                   DispatchExpectedPath::LEGACY_EXECUTE},
+                      DispatchCase{"MismatchedOverrideLengthsRejected",
+                                   /*hasOverrideExecute=*/-1,
+                                   {1, 2},
+                                   {2, 3, 4, 5},
+                                   {12, 4, 1, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_BAD_PARAM},
+                      DispatchCase{"OverrideShapesFlatCountMismatchRejected",
+                                   /*hasOverrideExecute=*/1,
+                                   {1},
+                                   {2, 3},
+                                   {12, 4, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_BAD_PARAM},
+                      DispatchCase{"OverrideStridesFlatCountMismatchRejected",
+                                   /*hasOverrideExecute=*/1,
+                                   {1},
+                                   {2, 3, 4},
+                                   {12, 4, 1, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_BAD_PARAM},
+                      DispatchCase{"ZeroOverrideLengthRejected",
+                                   /*hasOverrideExecute=*/1,
+                                   {1},
+                                   {},
+                                   {},
+                                   {0},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND},
+                      DispatchCase{"OverrideLengthExceedsUint32Rejected",
+                                   /*hasOverrideExecute=*/1,
+                                   {1},
+                                   {},
+                                   {},
+                                   {static_cast<int64_t>(std::numeric_limits<uint32_t>::max()) + 1},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND}),
+    [](const auto& info) { return std::string(info.param.name); });
+
+// When the variant pack carries override tensors and the plugin exports the
+// override symbol, dispatch must:
 //   - call `executeOpGraphWithOverrides` (NOT `executeOpGraph`),
 //   - reconstruct per-UID shape/stride pointer arrays from the flat buffers
-//     (D2 worked example: 3 tensors of ranks 3, 4, 4 over a 11-element buffer),
-//   - narrow lengths from int64 to uint32 (D1),
+//     (3 tensors of ranks 3, 4, 4 over an 11-element buffer),
+//   - narrow lengths from int64 to uint32,
 //   - read each variant-pack accessor exactly once (lifetime / mutation safety).
 TEST(TestEnginePluginResourceManager, DispatchRoutesToOverrideEntryWithReconstructedPtrArrays)
 {
@@ -2040,8 +2180,7 @@ TEST(TestEnginePluginResourceManager, DispatchRoutesToOverrideEntryWithReconstru
                                       reinterpret_cast<void*>(0x2000),
                                       reinterpret_cast<void*>(0x3000)};
 
-    // RFC §4.3 worked example: three tensors of ranks {3, 4, 4} → flat buffer
-    // length = 11 with prefix-sum offsets {0, 3, 7}.
+    // Three tensors of ranks {3, 4, 4}: flat-buffer offsets are {0, 3, 7}.
     std::vector<int64_t> overrideUniqueIds{1, 2, 3};
     std::vector<int64_t> overrideLengths{3, 4, 4};
     std::vector<int64_t> overrideShapes{// tensor 1 (rank 3)
@@ -2078,8 +2217,8 @@ TEST(TestEnginePluginResourceManager, DispatchRoutesToOverrideEntryWithReconstru
     EXPECT_CALL(*h.mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
     EXPECT_CALL(*h.mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
 
-    // Test #18 mutation-safety expectation: each accessor is read exactly once
-    // by the dispatch wrapper. WillOnce here doubles as a strict-arity check.
+    // Each accessor is read exactly once by the dispatch wrapper. WillOnce
+    // here doubles as a strict-arity check.
     EXPECT_CALL(*h.mockVariantPack, getOverrideUniqueIds())
         .WillOnce(::testing::ReturnRef(overrideUniqueIds));
     EXPECT_CALL(*h.mockVariantPack, getOverrideShapes())
@@ -2091,7 +2230,7 @@ TEST(TestEnginePluginResourceManager, DispatchRoutesToOverrideEntryWithReconstru
 
     EXPECT_CALL(*h.plugin, hasOverrideExecute()).WillOnce(::testing::Return(true));
 
-    // Capture the call to verify D1 narrowing and D2 reconstruction.
+    // Capture the call to verify length narrowing and pointer reconstruction.
     EXPECT_CALL(*h.plugin,
                 executeOpGraphWithOverrides(hipdnnEnginePluginHandle_t(0xdeadbeef),
                                             hipdnnEnginePluginExecutionContext_t(0xcafebabe),
@@ -2115,8 +2254,7 @@ TEST(TestEnginePluginResourceManager, DispatchRoutesToOverrideEntryWithReconstru
                                         const int64_t* const* shapesPerUid,
                                         const int64_t* const* stridesPerUid) {
             ASSERT_EQ(numOverrides, 3u);
-            // D1: lengths narrowed to uint32 with values matching the
-            // int64 source.
+            // Lengths are narrowed to uint32 with values matching the int64 source.
             EXPECT_EQ(lengths[0], 3u);
             EXPECT_EQ(lengths[1], 4u);
             EXPECT_EQ(lengths[2], 4u);
@@ -2124,12 +2262,12 @@ TEST(TestEnginePluginResourceManager, DispatchRoutesToOverrideEntryWithReconstru
             EXPECT_EQ(uniqueIds[0], overrideUniqueIds[0]);
             EXPECT_EQ(uniqueIds[1], overrideUniqueIds[1]);
             EXPECT_EQ(uniqueIds[2], overrideUniqueIds[2]);
-            // D2: per-UID shape pointers must reference offsets {0, 3, 7}
-            // into the flat shape buffer owned by the variant pack.
+            // Per-UID shape pointers reference offsets {0, 3, 7} into the flat
+            // shape buffer owned by the variant pack.
             EXPECT_EQ(shapesPerUid[0], overrideShapes.data() + 0);
             EXPECT_EQ(shapesPerUid[1], overrideShapes.data() + 3);
             EXPECT_EQ(shapesPerUid[2], overrideShapes.data() + 7);
-            // D2: same offsets for strides.
+            // Stride pointers use the same offsets.
             EXPECT_EQ(stridesPerUid[0], overrideStrides.data() + 0);
             EXPECT_EQ(stridesPerUid[1], overrideStrides.data() + 3);
             EXPECT_EQ(stridesPerUid[2], overrideStrides.data() + 7);
@@ -2148,138 +2286,29 @@ TEST(TestEnginePluginResourceManager, DispatchRoutesToOverrideEntryWithReconstru
     resourceManager.executeOpGraph(h.executionPlanWrapper.get(), h.variantWrapper.get());
 }
 
-// Negative companion to the dispatch test: when the variant pack carries no
-// override tensors, dispatch routes through the legacy `executeOpGraph` entry
-// even on an override-implementing plugin (`hasOverrideExecute()` is not
-// queried, since the override arrays are empty).
-TEST(TestEnginePluginResourceManager, DispatchRoutesToLegacyEntryWhenNoOverridesPresent)
-{
-    auto h = makeDispatchHarness(/*engineId=*/100,
-                                 hipdnnEnginePluginHandle_t(0xdeadbeef),
-                                 hipdnnEnginePluginExecutionContext_t(0xcafebabe));
-
-    std::vector<int64_t> tensorIds{1, 2, 3};
-    std::vector<const void*> dataPtrs{reinterpret_cast<void*>(0x1000),
-                                      reinterpret_cast<void*>(0x2000),
-                                      reinterpret_cast<void*>(0x3000)};
-    // Empty override vectors → non-override dispatch path.
-    std::vector<int64_t> emptyOverrides;
-
-    EXPECT_CALL(*h.mockVariantPack, getWorkspace())
-        .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
-    EXPECT_CALL(*h.mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
-    EXPECT_CALL(*h.mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
-    // The dispatch reads each of the 4 override accessors exactly once up
-    // front, then short-circuits to the legacy path on detecting an empty
-    // unique-id list. Pin the accessor call counts to exactly 1 so a
-    // future regression that re-reads the variant-pack accessors (e.g. a
-    // reentrant override probe) is caught here. RFC 0008 plan T-rec3.
-    EXPECT_CALL(*h.mockVariantPack, getOverrideUniqueIds())
-        .Times(1)
-        .WillOnce(::testing::ReturnRef(emptyOverrides));
-    EXPECT_CALL(*h.mockVariantPack, getOverrideShapes())
-        .Times(1)
-        .WillOnce(::testing::ReturnRef(emptyOverrides));
-    EXPECT_CALL(*h.mockVariantPack, getOverrideStrides())
-        .Times(1)
-        .WillOnce(::testing::ReturnRef(emptyOverrides));
-    EXPECT_CALL(*h.mockVariantPack, getOverrideLengths())
-        .Times(1)
-        .WillOnce(::testing::ReturnRef(emptyOverrides));
-
-    EXPECT_CALL(*h.plugin,
-                executeOpGraph(hipdnnEnginePluginHandle_t(0xdeadbeef),
-                               hipdnnEnginePluginExecutionContext_t(0xcafebabe),
-                               reinterpret_cast<void*>(0x4000),
-                               ::testing::NotNull(),
-                               static_cast<uint32_t>(3)));
-    // Override-execute entry must NOT be reached, and the dispatch-time
-    // safety net (`hasOverrideExecute`) must NOT be queried at all when
-    // the variant pack carries no override tensors. Pinned via Times(0).
-    EXPECT_CALL(*h.plugin, executeOpGraphWithOverrides(_, _, _, _, _, _, _, _, _, _)).Times(0);
-    EXPECT_CALL(*h.plugin, hasOverrideExecute()).Times(0);
-
-    const EnginePluginResourceManager resourceManager(h.pluginManager);
-    resourceManager.executeOpGraph(h.executionPlanWrapper.get(), h.variantWrapper.get());
-}
-
-// Variant-pack sanity: if the lengths-vs-uniqueIds invariant is violated, the
-// dispatch wrapper must fail with BAD_PARAM before reaching the plugin.
-TEST(TestEnginePluginResourceManager, DispatchRejectsMismatchedOverrideLengths)
-{
-    auto h = makeDispatchHarness(/*engineId=*/100,
-                                 hipdnnEnginePluginHandle_t(0xdeadbeef),
-                                 hipdnnEnginePluginExecutionContext_t(0xcafebabe));
-
-    std::vector<int64_t> tensorIds{1};
-    std::vector<const void*> dataPtrs{reinterpret_cast<void*>(0x1000)};
-    std::vector<int64_t> overrideUniqueIds{1, 2};
-    std::vector<int64_t> overrideShapes{2, 3, 4, 5};
-    std::vector<int64_t> overrideStrides{12, 4, 1, 1};
-    std::vector<int64_t> overrideLengths{3}; // mismatch: 1 entry vs 2 uids
-
-    EXPECT_CALL(*h.mockVariantPack, getWorkspace())
-        .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
-    EXPECT_CALL(*h.mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
-    EXPECT_CALL(*h.mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
-    EXPECT_CALL(*h.mockVariantPack, getOverrideUniqueIds())
-        .WillOnce(::testing::ReturnRef(overrideUniqueIds));
-    EXPECT_CALL(*h.mockVariantPack, getOverrideShapes())
-        .WillOnce(::testing::ReturnRef(overrideShapes));
-    EXPECT_CALL(*h.mockVariantPack, getOverrideStrides())
-        .WillOnce(::testing::ReturnRef(overrideStrides));
-    EXPECT_CALL(*h.mockVariantPack, getOverrideLengths())
-        .WillOnce(::testing::ReturnRef(overrideLengths));
-
-    EXPECT_CALL(*h.plugin, executeOpGraphWithOverrides(_, _, _, _, _, _, _, _, _, _)).Times(0);
-    EXPECT_CALL(*h.plugin, executeOpGraph(_, _, _, _, _)).Times(0);
-
-    const EnginePluginResourceManager resourceManager(h.pluginManager);
-    ASSERT_THROW_HIPDNN_STATUS(
-        resourceManager.executeOpGraph(h.executionPlanWrapper.get(), h.variantWrapper.get()),
-        HIPDNN_STATUS_BAD_PARAM);
-}
-
 // =============================================================================
-// `PluginBase::parsedApiVersion()` lazy-cache pinning (RFC 0008 plan T-missing #1).
-//
-// On a malformed `apiVersion()` string the parsed-version cache must engage to
-// `nullopt` and `apiVersion()` must NOT be re-invoked on subsequent reads
-// (otherwise a bad plugin would be re-parsed and re-logged in the dispatch hot
-// path). The post-PR1 implementation in `PluginCore.cpp` uses a
-// `std::optional<std::optional<Version>>` "computed yet?" sentinel; this test
-// pins both halves of that contract.
+// `PluginBase` metadata.
 // =============================================================================
-TEST(TestPluginBase, ParsedApiVersionCachesNulloptForMalformedString)
+TEST(TestPluginBase, MockPluginCachedNameUsesDeterministicFallback)
 {
     const MockEnginePlugin plugin;
 
-    // Malformed version string — the parser will throw on first parse and the
-    // cache must engage to `nullopt`. After that the apiVersion() accessor must
-    // be queried EXACTLY ONCE total across both reads (the second read returns
-    // the cached nullopt sentinel without re-entering the plugin).
+    EXPECT_EQ(plugin.cachedName(), "mock_plugin");
+}
+
+TEST(TestPluginBase, ParsedApiVersionReturnsNulloptForMalformedString)
+{
+    const MockEnginePlugin plugin;
+
     EXPECT_CALL(plugin, apiVersion())
         .Times(1)
         .WillOnce(::testing::Return(std::string_view{"not.a.version"}));
 
-    // First access — triggers parse, populates cache with engaged-outer +
-    // disengaged-inner (the "we tried, it failed" sentinel).
-    const auto& first = plugin.parsedApiVersion();
-    EXPECT_FALSE(first.has_value())
-        << "Malformed version string must yield disengaged inner optional.";
-
-    // Second access — must return the cached nullopt without re-invoking
-    // apiVersion() (enforced by Times(1) on the EXPECT_CALL above).
-    const auto& second = plugin.parsedApiVersion();
-    EXPECT_FALSE(second.has_value()) << "Subsequent reads must return cached nullopt.";
-
-    // Defensive: both calls must return the same cache slot (object identity).
-    EXPECT_EQ(&first, &second) << "Both reads must alias the same cache storage.";
+    const auto parsed = plugin.parsedApiVersion();
+    EXPECT_FALSE(parsed.has_value()) << "Malformed version string must yield nullopt.";
 }
 
-// Companion: a well-formed version string caches the parsed `Version` on first
-// read and is not re-parsed on subsequent reads.
-TEST(TestPluginBase, ParsedApiVersionCachesParsedValueForWellFormedString)
+TEST(TestPluginBase, ParsedApiVersionReturnsParsedValueForWellFormedString)
 {
     const MockEnginePlugin plugin;
 
@@ -2287,11 +2316,9 @@ TEST(TestPluginBase, ParsedApiVersionCachesParsedValueForWellFormedString)
         .Times(1)
         .WillOnce(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
 
-    const auto& first = plugin.parsedApiVersion();
-    ASSERT_TRUE(first.has_value()) << "Well-formed version string must parse successfully.";
-
-    const auto& second = plugin.parsedApiVersion();
-    ASSERT_TRUE(second.has_value()) << "Subsequent reads must return cached parsed value.";
-
-    EXPECT_EQ(&first, &second) << "Both reads must alias the same cache storage.";
+    const auto parsed = plugin.parsedApiVersion();
+    ASSERT_TRUE(parsed.has_value()) << "Well-formed version string must parse successfully.";
+    EXPECT_EQ(parsed->major, 1);
+    EXPECT_EQ(parsed->minor, 1);
+    EXPECT_EQ(parsed->patch, 0);
 }

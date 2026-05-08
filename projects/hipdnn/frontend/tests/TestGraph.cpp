@@ -354,6 +354,274 @@ TEST_F(TestGraph, DeserializeCompiledPlanClearsFrontendGraphState)
     EXPECT_TRUE(graph.getPrivateGraphSubnodes().empty());
 }
 
+#ifdef HIPDNN_ENABLE_SDPA
+TEST_F(TestGraph, PlanOnlyOverrideExecuteWritesOverrideVariantPackAttributes)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = reinterpret_cast<void*>(0x1000);
+    variantPack[2] = reinterpret_cast<void*>(0x2000);
+    void* workspace = reinterpret_cast<void*>(0x3000);
+
+    const std::vector<int64_t> overrideUids{1, 2};
+    const std::vector<std::vector<int64_t>> overrideShapes{{2, 3}, {4, 5, 6}};
+    const std::vector<std::vector<int64_t>> overrideStrides{{3, 1}, {30, 6, 1}};
+
+    auto variantPackDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5000);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, _))
+        .WillOnce(
+            [variantPackDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
+                *desc = variantPackDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(variantPackDesc,
+                                    HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
+                                    HIPDNN_TYPE_VOID_PTR,
+                                    static_cast<int64_t>(variantPack.size()),
+                                    NotNull()));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(variantPackDesc,
+                                    HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS,
+                                    HIPDNN_TYPE_INT64,
+                                    static_cast<int64_t>(variantPack.size()),
+                                    NotNull()));
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            variantPackDesc, HIPDNN_ATTR_VARIANT_PACK_WORKSPACE, HIPDNN_TYPE_VOID_PTR, 1, _));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(variantPackDesc,
+                                    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS,
+                                    HIPDNN_TYPE_INT64,
+                                    static_cast<int64_t>(overrideUids.size()),
+                                    NotNull()))
+        .WillOnce(Invoke([&overrideUids](hipdnnBackendDescriptor_t,
+                                         hipdnnBackendAttributeName_t,
+                                         hipdnnBackendAttributeType_t,
+                                         int64_t count,
+                                         const void* ptr) {
+            EXPECT_EQ(count, static_cast<int64_t>(overrideUids.size()));
+            const auto* uids = static_cast<const int64_t*>(ptr);
+            EXPECT_EQ(std::vector<int64_t>(uids, uids + count), overrideUids);
+            return HIPDNN_STATUS_SUCCESS;
+        }));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(variantPackDesc,
+                                    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS,
+                                    HIPDNN_TYPE_INT64,
+                                    2,
+                                    NotNull()))
+        .WillOnce(Invoke([](hipdnnBackendDescriptor_t,
+                            hipdnnBackendAttributeName_t,
+                            hipdnnBackendAttributeType_t,
+                            int64_t count,
+                            const void* ptr) {
+            EXPECT_EQ(count, 2);
+            const auto* lengths = static_cast<const int64_t*>(ptr);
+            EXPECT_EQ(std::vector<int64_t>(lengths, lengths + count), (std::vector<int64_t>{2, 3}));
+            return HIPDNN_STATUS_SUCCESS;
+        }));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(variantPackDesc,
+                                    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES,
+                                    HIPDNN_TYPE_INT64,
+                                    5,
+                                    NotNull()))
+        .WillOnce(Invoke([](hipdnnBackendDescriptor_t,
+                            hipdnnBackendAttributeName_t,
+                            hipdnnBackendAttributeType_t,
+                            int64_t count,
+                            const void* ptr) {
+            const auto* shapes = static_cast<const int64_t*>(ptr);
+            EXPECT_EQ(std::vector<int64_t>(shapes, shapes + count),
+                      (std::vector<int64_t>{2, 3, 4, 5, 6}));
+            return HIPDNN_STATUS_SUCCESS;
+        }));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(variantPackDesc,
+                                    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES,
+                                    HIPDNN_TYPE_INT64,
+                                    5,
+                                    NotNull()))
+        .WillOnce(Invoke([](hipdnnBackendDescriptor_t,
+                            hipdnnBackendAttributeName_t,
+                            hipdnnBackendAttributeType_t,
+                            int64_t count,
+                            const void* ptr) {
+            const auto* strides = static_cast<const int64_t*>(ptr);
+            EXPECT_EQ(std::vector<int64_t>(strides, strides + count),
+                      (std::vector<int64_t>{3, 1, 30, 6, 1}));
+            return HIPDNN_STATUS_SUCCESS;
+        }));
+    EXPECT_CALL(*_mockBackend, backendFinalize(variantPackDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendExecute(_handle, executionPlan, variantPackDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto result = graph.execute(
+        _handle, variantPack, workspace, overrideUids, overrideShapes, overrideStrides);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, PlanOnlyOverrideExecuteEmptyOverridesUsesLegacyVariantPackAttributes)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = reinterpret_cast<void*>(0x1000);
+    void* workspace = reinterpret_cast<void*>(0x3000);
+    const std::vector<int64_t> emptyUids;
+    const std::vector<std::vector<int64_t>> emptyShapes;
+    const std::vector<std::vector<int64_t>> emptyStrides;
+
+    auto variantPackDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5000);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, _))
+        .WillOnce(
+            [variantPackDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
+                *desc = variantPackDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(variantPackDesc, _, _, _, _))
+        .Times(3)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(variantPackDesc, HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS, _, _, _))
+        .Times(0);
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(variantPackDesc, HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS, _, _, _))
+        .Times(0);
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(variantPackDesc, HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES, _, _, _))
+        .Times(0);
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(variantPackDesc, HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES, _, _, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend, backendFinalize(variantPackDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendExecute(_handle, executionPlan, variantPackDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto result
+        = graph.execute(_handle, variantPack, workspace, emptyUids, emptyShapes, emptyStrides);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, PlanOnlyOverrideExecuteRejectsStructuralValidationBeforeBackendDescriptor)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = reinterpret_cast<void*>(0x1000);
+    const std::vector<int64_t> overrideUids{1};
+    const std::vector<std::vector<int64_t>> overrideShapes{{2, 3}};
+    const std::vector<std::vector<int64_t>> overrideStrides{{1}};
+
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, _))
+        .Times(0);
+
+    auto result = graph.execute(
+        _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST_F(TestGraph, PlanOnlyOverrideExecutePropagatesOverrideAttributeFailure)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = reinterpret_cast<void*>(0x1000);
+    const std::vector<int64_t> overrideUids{1};
+    const std::vector<std::vector<int64_t>> overrideShapes{{2, 3}};
+    const std::vector<std::vector<int64_t>> overrideStrides{{3, 1}};
+
+    auto variantPackDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5000);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, _))
+        .WillOnce(
+            [variantPackDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
+                *desc = variantPackDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(variantPackDesc, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            variantPackDesc, HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES, HIPDNN_TYPE_INT64, 2, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*_mockBackend, backendFinalize(variantPackDesc)).Times(0);
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
+
+    auto result = graph.execute(
+        _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
+
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+#endif
+
 TEST_F(TestGraph, ValidateUnsetNodeComputeTypeSetGraphComputeType)
 {
     Graph graph;

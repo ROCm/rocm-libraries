@@ -71,12 +71,12 @@ public:
      * @brief Reports whether this plugin exports the optional override-execute
      *        symbol (`hipdnnEnginePluginExecuteOpGraphWithOverrides`).
      *
-     * Plugins that do not export the symbol are filtered out for graphs that
-     * opt in to overridable tensor shapes. Per RFC 0008 §4.6, even when a
-     * plugin reports a recent-enough API version, callers must check this
-     * predicate before attempting to dispatch through the override path so
-     * that a version-liar plugin yields a clean `HIPDNN_STATUS_NOT_SUPPORTED`
-     * rather than a missing-symbol crash.
+     * Plugins that report an older API version are filtered out for graphs
+     * that opt in to overridable tensor shapes. Per RFC 0008 §4.6, callers
+     * must still check this predicate before override dispatch so a plugin
+     * that reports a recent-enough API version but omits the optional symbol
+     * yields a clean `HIPDNN_STATUS_NOT_SUPPORTED` rather than a
+     * missing-symbol crash.
      */
     virtual bool hasOverrideExecute() const;
 
