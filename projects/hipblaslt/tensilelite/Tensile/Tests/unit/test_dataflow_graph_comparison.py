@@ -497,23 +497,38 @@ class TestRenderStringIdentity:
         assert "vgprValuA_X0_I0" in rendered    # symbolic b
 
     def test_symbolic_and_numeric_for_same_logical_reg_unchanged(self):
-        """DOCUMENTED LIMITATION: if two captures construct the SAME
-        logical register with DIFFERENT identifiers (one symbolic, one
-        numeric for the same physical reg), the render-strings differ
-        and identities differ. This case doesn't arise in practice
-        because both captures consume the same kernel writer state, but
-        it's worth pinning down expected behavior."""
-        from Tensile.Components.ScheduleCapture import _canonical_render
+        """RESOLUTION CONTRACT (rocm-libraries-bb34): when two captures
+        construct the SAME logical register with DIFFERENT identifiers
+        (one symbolic, one numeric for the same physical reg), the
+        in-stream `name_to_idx` lookup populated by
+        `collect_regset_stream` resolves them to the SAME numeric
+        byte-key in `_byte_keys_for_resource`. The render-strings still
+        differ (this test pins the canonical-render contract for the
+        identity-tuple path, which is unchanged); the byte-key
+        equivalence is asserted separately to lock in the resolution
+        behavior that wic4 / prp2 / oram depend on.
+        """
+        from Tensile.Components.ScheduleCapture import (
+            _canonical_render, _byte_keys_for_resource,
+        )
         from rocisa.instruction import DSLoadB128
         from rocisa.container import vgpr
 
         sym = DSLoadB128(dst=vgpr("ValuA_X0_I0", 4), src=vgpr(0))
         num = DSLoadB128(dst=vgpr(8, 4), src=vgpr(0))
-        # Different render-strings -> different identities. This is by
-        # design: a name-resolution table would be required to canonicalize
-        # them as equivalent, and that's a known follow-up if a real
-        # use case emerges.
+        # Render-strings still differ (the identity tuple is render-based;
+        # operand-level resolution lives at edge-formation time, not at
+        # canonical-render time).
         assert _canonical_render(sym) != _canonical_render(num)
+        # When a RegSet binding for ValuA_X0_I0 -> 8 is in scope, the
+        # symbolic and numeric refs to the same physical reg produce the
+        # SAME numeric byte-keys — the load-bearing equivalence for
+        # cross-form latest-writer dedup in build_dataflow_graph Phase 2.
+        name_to_idx = {"ValuA_X0_I0": 8}
+        sym_keys = _byte_keys_for_resource(sym.dst, name_to_idx=name_to_idx)
+        num_keys = _byte_keys_for_resource(num.dst, name_to_idx=name_to_idx)
+        assert sym_keys == num_keys
+        assert sym_keys == (("v", 8), ("v", 9), ("v", 10), ("v", 11))
 
     def test_category_overrides_isinstance_class_tag(self):
         """A pack-categorized MFMAInstruction (TF32 bf16-emulation pattern)
@@ -564,6 +579,134 @@ class TestRenderStringIdentity:
         # Unrecognized category falls back to isinstance.
         assert _class_tag_from_category("UNKNOWN", pack_mfma) == "MFMA"
         assert _class_tag_from_category(None, pack_mfma) == "MFMA"
+
+
+# =============================================================================
+# In-stream RegSet resolution (rocm-libraries-bb34, Option (e))
+# =============================================================================
+# These tests pin the resolution branch in `_byte_keys_for_resource`. The
+# branch makes symbolic operand references resolve to the same numeric
+# byte-key as the corresponding numeric reference, when a RegSet binding
+# for the symbolic name is in scope. Without resolution (no name_to_idx),
+# the legacy symbolic-keying path is preserved — that's what makes the
+# branch additive rather than a behavior change for symbolic-only refs.
+
+
+class TestRegSetResolution:
+    def test_symbolic_resolves_via_regset_to_numeric_byte_key(self):
+        """A symbolic operand whose bare name is in `name_to_idx` produces
+        the SAME byte-key tuple as a direct numeric reference to the
+        resolved index. This is the core resolution contract."""
+        from Tensile.Components.ScheduleCapture import _byte_keys_for_resource
+        from rocisa.container import vgpr
+
+        sym = vgpr("ValuA_T0_I0", 4)
+        num = vgpr(76, 4)
+        name_to_idx = {"ValuA_T0_I0": 76}
+        sym_keys = _byte_keys_for_resource(sym, name_to_idx=name_to_idx)
+        num_keys = _byte_keys_for_resource(num, name_to_idx=name_to_idx)
+        assert sym_keys == num_keys
+        assert sym_keys == (("v", 76), ("v", 77), ("v", 78), ("v", 79))
+
+    def test_symbolic_not_in_table_falls_through_unchanged(self):
+        """A symbolic operand whose name is NOT in the table preserves
+        the legacy symbolic-keying behavior — three-tuple (rt, name,
+        offset+i). This is the load-bearing safety property: the
+        resolution branch is additive only."""
+        from Tensile.Components.ScheduleCapture import _byte_keys_for_resource
+        from rocisa.container import vgpr
+
+        sym = vgpr("LocalReadAddrA", 1)
+        # Empty / None / missing-name table all preserve symbolic keys.
+        for table in (None, {}, {"SomeOtherName": 42}):
+            keys = _byte_keys_for_resource(sym, name_to_idx=table)
+            assert keys == (("v", "LocalReadAddrA", 0),)
+
+    def test_two_operands_same_phys_reg_collapse_after_resolution(self):
+        """Two operands referencing the SAME physical register under
+        different forms (one symbolic, one numeric) produce identical
+        byte-keys after resolution — this is the latest-writer dedup
+        invariant that makes intra-graph 7a not surface as false-positive
+        edges."""
+        from Tensile.Components.ScheduleCapture import _byte_keys_for_resource
+        from rocisa.container import vgpr
+
+        # Producer writes vgpr(76, 4); consumer reads vgprValuA_T0_I0(4).
+        write_resource = vgpr(76, 4)
+        read_resource = vgpr("ValuA_T0_I0", 4)
+        name_to_idx = {"ValuA_T0_I0": 76}
+
+        write_keys = set(_byte_keys_for_resource(write_resource, name_to_idx=name_to_idx))
+        read_keys = set(_byte_keys_for_resource(read_resource, name_to_idx=name_to_idx))
+        # Full overlap — every byte the consumer reads, the producer
+        # wrote. Without resolution, the read keys would be
+        # ("v", "ValuA_T0_I0", 0..3) and miss the latest-writer entries
+        # at ("v", 76..79), yielding a phantom missing edge.
+        assert write_keys == read_keys
+        assert read_keys == {("v", 76), ("v", 77), ("v", 78), ("v", 79)}
+
+    def test_symbolic_with_offset_resolves_with_offset_added(self):
+        """A symbolic operand with a getTotalOffsets() offset resolves
+        as `name_to_idx[bare] + offset + i` per byte. Mirrors the
+        numeric-form `regIdx + i` exactly.
+        """
+        from Tensile.Components.ScheduleCapture import _byte_keys_for_resource
+        from rocisa.container import vgpr
+
+        sym = vgpr("Base", 2)
+        # Inject a non-zero offset onto the symbolic vgpr's regName —
+        # the resolution branch reads .name and .getTotalOffsets() off
+        # the regName object, and addOffset(n) makes
+        # getTotalOffsets() return n.
+        sym.regName.addOffset(3)
+        name_to_idx = {"Base": 100}
+        keys = _byte_keys_for_resource(sym, name_to_idx=name_to_idx)
+        # Expected: 100 + 3 + 0, 100 + 3 + 1
+        assert keys == (("v", 103), ("v", 104))
+
+    def test_collect_regset_stream_value_and_ref_chain(self):
+        """`collect_regset_stream` resolves both value-form
+        (`name -> int`) and ref-form (`name -> ref + offset`) RegSet
+        bindings, mirroring rocisa's `RegSet::setIdx` semantics. The
+        ref-form chain is replayed in passes so a binding can depend on
+        an anchor declared earlier OR later in emission order — three
+        passes are sufficient for production kernels (verified
+        empirically against TF32/BF16/FP16/FP8 captures)."""
+        from Tensile.Components.ScheduleCapture import collect_regset_stream
+        from rocisa.code import Module, RegSet
+
+        # Stand-in writer with a `module` that holds RegSet directives
+        # in the same shape as KernelWriterAssembly emits them.
+        class _FakeStates:
+            class _MXSA:
+                startVgprValu = None
+            mxsa = _MXSA()
+
+        class _FakeWriter:
+            states = _FakeStates()
+            sgprs = {"KernArgAddress": 0, "WorkGroup0": 2}
+
+            def __init__(self):
+                self.module = Module("kernel-body")
+                # Value-form: vgprValuA_T0_I0 -> idx 76.
+                self.module.add(RegSet("v", "vgprValuA_T0_I0", 76, 0))
+                # Ref-form: vgprValuB_X0_I0_BASE -> vgprValuA_T0_I0 + 16.
+                self.module.add(RegSet("v", "vgprValuB_X0_I0_BASE",
+                                       "vgprValuA_T0_I0", 16))
+                # Two-level ref-form: vgprValuB_X0_I0 ->
+                # vgprValuB_X0_I0_BASE + 0.
+                self.module.add(RegSet("v", "vgprValuB_X0_I0",
+                                       "vgprValuB_X0_I0_BASE", 0))
+
+        writer = _FakeWriter()
+        n2i = collect_regset_stream(writer)
+        # Vgpr resolutions.
+        assert n2i["ValuA_T0_I0"] == 76
+        assert n2i["ValuB_X0_I0_BASE"] == 92
+        assert n2i["ValuB_X0_I0"] == 92
+        # Sgpr pool surfaces under bare names too.
+        assert n2i["KernArgAddress"] == 0
+        assert n2i["WorkGroup0"] == 2
 
 
 # =============================================================================

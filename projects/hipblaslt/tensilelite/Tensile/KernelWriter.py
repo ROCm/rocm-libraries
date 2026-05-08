@@ -6008,6 +6008,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if getattr(self.states, "_captureDefaultSchedule", False):
       from Tensile.Components.ScheduleCapture import (
         FourPartCapture, clone_loop_body, build_cms_four_part_capture,
+        collect_regset_stream,
       )
       from Tensile.Components.CMSValidator import (
         _resolve_arch_profile_for_isa, build_dataflow_graph, compare_graphs,
@@ -6046,6 +6047,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # (rocm-libraries-zkzw).
           isa_tuple = tuple(kernel["ISA"]) if "ISA" in kernel else None
           arch_profile = _resolve_arch_profile_for_isa(isa_tuple)
+          # Harvest the writer's RegSet directives once, here — by this
+          # point both customMainLoopSchedule (which emitted macro-vgpr
+          # RegSets) and _loopBody / _noLoadLoopBody (which emitted body-
+          # level RegSets like LocalReadAddrA / GlobalReadOffsetA) have
+          # finished. Both default- and CMS-side captures see the same
+          # writer-level snapshot, so symbolic operands resolve to the
+          # same numeric byte-keys across the two graphs (the load-bearing
+          # invariant for compare_graphs in build_dataflow_graph Phase 2).
+          # See rocm-libraries-bb34.
+          regset_stream = collect_regset_stream(self)
+          # Seed each default-side body's name_to_idx so symbolic operand
+          # references resolve at edge-formation time. main_loop_prev is
+          # a deepcopy of main_loop, so seeding main first then cloning
+          # preserves the table on the prev copy too.
+          if regset_stream:
+            main.name_to_idx = dict(regset_stream)
+            if ctx.default_n_gl is not None:
+              ctx.default_n_gl.name_to_idx = dict(regset_stream)
+            if ctx.default_n_ll is not None:
+              ctx.default_n_ll.name_to_idx = dict(regset_stream)
           ctx.default = FourPartCapture(
             main_loop={0: main},
             main_loop_prev={0: clone_loop_body(main)},
@@ -6074,6 +6095,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               mfma_classes=pending.mfma_classes,
               num_mfma_per_subiter=pending.num_mfma_per_subiter,
               default_capture=ctx.default,
+              regset_stream=regset_stream,
             )
             self._pending_cms_capture_inputs = None
           # CMS-side capture must use the same profile so both graphs

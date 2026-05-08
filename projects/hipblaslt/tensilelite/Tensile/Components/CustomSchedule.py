@@ -549,6 +549,13 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         # (Upstream Tensile naming uses "Iter" but this is the inner unroll
         # subiteration count.)
         num_mfma_per_subiter=getattr(writer.states, 'numMfmaPerIter', 0),
+        # `regset_stream` is populated at the deferred-expansion site in
+        # KernelWriter.kernelBody (after all RegSet directives have been
+        # emitted by `_loopBody` / `_noLoadLoopBody`). Leaving it empty
+        # here would mean only the macro-vgpr RegSets emitted before
+        # customMainLoopSchedule are visible, missing body-level ones
+        # like LocalReadAddrA / GlobalReadOffsetA. See rocm-libraries-bb34
+        # and INTRA_GRAPH_7A_REGSET_INVESTIGATION.md for the timing audit.
     )
     writer._last_opt1_for_capture = opt1_for_capture
 

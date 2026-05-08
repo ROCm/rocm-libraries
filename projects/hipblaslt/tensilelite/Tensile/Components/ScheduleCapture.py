@@ -251,8 +251,25 @@ class TaggedInstruction:
 
 @dataclass
 class LoopBodyCapture:
-    """One scheduled loop body as a flat ordered stream of tagged instructions."""
+    """One scheduled loop body as a flat ordered stream of tagged instructions.
+
+    `name_to_idx` is a body-local symbolic-name -> base register index map,
+    populated from the writer's RegSet directives during capture (see
+    `collect_regset_stream` and `expand_cms_macro` for the producer side).
+    The map is consumed by `_byte_keys_for_resource` in
+    `build_dataflow_graph` Phase 2: a symbolic operand whose bare name is in
+    the table is resolved to a numeric byte-key, ensuring two operands
+    referring to the same physical register under different syntactic forms
+    (one symbolic, one numeric) collapse to a single key. Symbolic refs
+    whose name is NOT in the table fall through to the legacy
+    symbolic-keying behavior unchanged.
+
+    Each FourPartCapture body has its own `name_to_idx` so cross-body name
+    collisions (e.g., the same vgpr name rebound by an `undefineSgpr` +
+    redefine pair on a different body) cannot bleed across bodies.
+    """
     instructions: list
+    name_to_idx: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -1015,7 +1032,7 @@ def _canonical_render(inst) -> str:
 # _TRAILING_DIGITS_RE) moved to CMSValidator.py in br4.6.
 
 
-def _byte_keys_for_resource(resource):
+def _byte_keys_for_resource(resource, name_to_idx=None):
     """Enumerate byte-grain keys covered by `resource`.
 
     Two resources that overlap return overlapping key sets; resources
@@ -1031,6 +1048,17 @@ def _byte_keys_for_resource(resource):
         ("mem", space, buffer_id, offset_byte)
 
     Returns an empty tuple for unrecognized resource shapes.
+
+    `name_to_idx` is the body-local symbolic-name -> numeric-base lookup
+    populated from the writer's RegSet directives (see
+    `LoopBodyCapture.name_to_idx`). When supplied, a symbolic operand
+    whose bare name appears in the table is resolved to a NUMERIC byte-key
+    (same shape as the `regIdx >= 0` branch), so two operands referring
+    to the same physical register under different syntactic forms
+    (symbolic vs. numeric) collapse to a single byte-key. Symbolic refs
+    whose name is NOT in the table fall through to the legacy
+    symbolic-keying behavior unchanged — preserving correctness for
+    registers genuinely emitted symbolic-only.
     """
     from rocisa.container import RegisterContainer
     if isinstance(resource, MemoryRegion):
@@ -1049,10 +1077,15 @@ def _byte_keys_for_resource(resource):
         return ()
     name = name_obj.name
     base = name_obj.getTotalOffsets() if hasattr(name_obj, "getTotalOffsets") else 0
+    if name_to_idx:
+        bare = name[4:] if name.startswith(("vgpr", "sgpr")) else name
+        resolved = name_to_idx.get(bare)
+        if resolved is not None:
+            return tuple((rt, resolved + base + i) for i in range(count))
     return tuple((rt, name, base + i) for i in range(count))
 
 
-def _resolve_producers(read_resource: Any, consumer: GraphNode, latest_writer: Dict[Any, Tuple[GraphNode, Any]]):
+def _resolve_producers(read_resource: Any, consumer: GraphNode, latest_writer: Dict[Any, Tuple[GraphNode, Any]], name_to_idx=None):
     """Yield (producer_node, overlap) pairs for `consumer`'s read of `read_resource`.
 
     `latest_writer` is the per-byte map maintained by build_dataflow_graph
@@ -1064,9 +1097,14 @@ def _resolve_producers(read_resource: Any, consumer: GraphNode, latest_writer: D
     The yielded `overlap` is the intersection of read_resource with the
     writer's actual write_resource — same precision the old resolver
     yielded, so diagnostic formatters and edge-set dedup still work.
+
+    `name_to_idx` is forwarded to `_byte_keys_for_resource` so symbolic
+    reads resolve to the same numeric byte-keys as the corresponding
+    numeric writes (and vice-versa); see `_byte_keys_for_resource` for
+    semantics.
     """
     writer_groups = {}  # (id(writer), id(write_res)) -> (writer_node, write_res)
-    for bk in _byte_keys_for_resource(read_resource):
+    for bk in _byte_keys_for_resource(read_resource, name_to_idx=name_to_idx):
         entry = latest_writer.get(bk)
         if entry is None:
             continue
@@ -1719,9 +1757,127 @@ def _value_if_expr(item):
     raise ValueError(f"Cannot extract guard expression from {s!r}")
 
 
+def collect_regset_stream(writer):
+    """Harvest the symbolic-name -> numeric-base map from a KernelWriter's
+    RegSet directives.
+
+    The writer emits `RegSet` directives into separate scratch modules
+    (`writer.moduleVgprMacro*` for vgpr macros, `writer.module` for the
+    kernel body) that BYPASS the schedule streams (`LRCodeA`, `PackCodeA`,
+    `globalReadA`, ...) which feed `customMainLoopSchedule`. So the macro
+    walked by `expand_cms_macro` never sees a `RegSet` to consume; this
+    helper provides a parallel collection mechanism.
+
+    For vgprs we replay the `value`/`ref`/`offset` chain in three passes
+    (mirroring the rocisa C++ `RegSet::setIdx` semantics — value-form is
+    `value + offset`, ref-form is `name_to_idx[ref] + offset`). Three
+    passes are enough because RegSet refs only chain one or two levels
+    deep in production. For sgprs we consume the writer's symbolic
+    `sgprs` pool directly (the rocisa per-thread vgpr-name singleton is
+    cleared post-codegen, but `writer.sgprs` survives — see
+    `INTRA_GRAPH_7A_REGSET_INVESTIGATION.md` Q4 for the empirical audit).
+
+    Returns a flat `name -> idx` dict where `name` is the bare name
+    (without the `vgpr` / `sgpr` prefix) and `idx` is the numeric base
+    register index. The same map is used to seed each
+    `LoopBodyCapture.name_to_idx` (every body of the four-part capture
+    sees the same writer-level symbols by construction).
+    """
+    name_to_idx: Dict[str, int] = {}
+
+    # 1. Walk writer's modules and collect every RegSet directive in
+    #    emission order.
+    regsets = []
+
+    def _walk(node):
+        cls = type(node).__name__
+        if cls == "RegSet":
+            regsets.append(node)
+            return
+        for getter in ("flatitems", "items"):
+            if hasattr(node, getter):
+                try:
+                    kids = getattr(node, getter)()
+                except Exception:
+                    continue
+                for k in kids:
+                    _walk(k)
+                return
+        if hasattr(node, "itemList"):
+            for k in node.itemList:
+                _walk(k)
+
+    cand_attrs = [a for a in dir(writer)
+                  if (a.startswith("module") or a.startswith("kernelBody"))
+                  and not a.startswith("__")]
+    for nm in cand_attrs:
+        try:
+            mod = getattr(writer, nm)
+        except Exception:
+            continue
+        if mod is None or callable(mod):
+            continue
+        _walk(mod)
+
+    # 2. Seed anchors that ref-form RegSets dereference.
+    #    `vgprMXSBase` is bound numerically by KernelWriterAssembly.py:865
+    #    (`module.add(RegSet("v", "vgprMXSBase", 0))`); we'll catch it in the
+    #    pass below. The MXS valu-base is set imperatively on the writer
+    #    (see `writer.states.mxsa.startVgprValu`), not via RegSet, so the
+    #    ref-chain replay needs it pre-seeded.
+    mxsa = getattr(getattr(writer, "states", None), "mxsa", None)
+    if mxsa is not None:
+        base = getattr(mxsa, "startVgprValu", None)
+        if base is not None:
+            name_to_idx["Base"] = base
+
+    # 3. Three passes over the collected RegSets — value-form binds
+    #    immediately; ref-form binds once the referenced name is known.
+    for _ in range(3):
+        for rs in regsets:
+            name = getattr(rs, "name", None)
+            if not name:
+                continue
+            if name.startswith("vgpr"):
+                bare = name[4:]
+            elif name.startswith("sgpr"):
+                # sgprs are seeded from writer.sgprs (step 4); skip the
+                # RegSet path because some sgpr RegSets use the bare-name
+                # ref form ("sgprtdmBGroup0" -> "sgprtdmAGroup0") which
+                # would shadow the writer.sgprs binding.
+                continue
+            else:
+                bare = name
+            value = getattr(rs, "value", None)
+            ref = getattr(rs, "ref", None)
+            offset = getattr(rs, "offset", 0) or 0
+            if value is not None and bare not in name_to_idx:
+                name_to_idx[bare] = int(value) + offset
+            elif ref:
+                ref_bare = ref[4:] if ref.startswith(("vgpr", "sgpr")) else ref
+                base = name_to_idx.get(ref_bare)
+                if base is not None and bare not in name_to_idx:
+                    name_to_idx[bare] = base + offset
+
+    # 4. Sgpr pool — `writer.sgprs` is a name -> idx mapping that survives
+    #    `_getKernelSource`. Names here are bare (no "sgpr" prefix), which
+    #    matches the convention used by `_byte_keys_for_resource`'s
+    #    symbolic lookup.
+    sgprs = getattr(writer, "sgprs", None)
+    if sgprs is not None:
+        try:
+            for nm, idx in dict(sgprs).items():
+                if nm not in name_to_idx:
+                    name_to_idx[nm] = int(idx)
+        except Exception:
+            pass
+
+    return name_to_idx
+
+
 def expand_cms_macro(macro, id_value, useGR, usePLR, useGRInc, useLoop,
                      tag_by_origin_id, sync_class=None, snop_class=None,
-                     mfma_classes=()):
+                     mfma_classes=(), name_to_idx=None):
     """Walk a CMS MAINLOOP macro and produce a LoopBodyCapture for the given flags.
 
     Evaluates ValueIf/ValueElseIf/ValueEndif chains against the flag values and
@@ -1827,7 +1983,16 @@ def expand_cms_macro(macro, id_value, useGR, usePLR, useGRInc, useLoop,
             mfma_index=mfma_index,
         )
 
-    return builder.finalize()
+    body = builder.finalize()
+    if name_to_idx:
+        # Body-local copy: callers may mutate per-body without poisoning the
+        # shared writer-level map. Empirically RegSet directives are emitted
+        # before any body's instruction stream begins (see
+        # INTRA_GRAPH_7A_REGSET_INVESTIGATION.md Q1), so seeding the body's
+        # map up-front is equivalent to interleaving RegSet consumption with
+        # instruction emission for current production kernels.
+        body.name_to_idx = dict(name_to_idx)
+    return body
 
 
 # =============================================================================
@@ -1861,6 +2026,13 @@ class CmsCaptureInputs:
     until the default-side capture is available, at which point the
     deferred call to `build_cms_four_part_capture` mirrors the default
     side's body shape.
+
+    `regset_stream` is the symbolic-name -> numeric-base lookup harvested
+    from the writer's `moduleVgprMacro*` modules and `module` (kernel
+    body) at the same scope as the schedule streams (see
+    `collect_regset_stream`). It feeds `LoopBodyCapture.name_to_idx` so
+    the in-pipeline graph builder can resolve symbolic operand references
+    to numeric byte-keys when forming dataflow edges.
     """
     macro: object
     num_codepaths: int
@@ -1869,12 +2041,14 @@ class CmsCaptureInputs:
     snop_class: type
     mfma_classes: tuple
     num_mfma_per_subiter: int = 0
+    regset_stream: dict = field(default_factory=dict)
 
 
 def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
                                   sync_class, snop_class, mfma_classes,
                                   default_capture: 'FourPartCapture',
-                                  num_mfma_per_subiter: int = 0):
+                                  num_mfma_per_subiter: int = 0,
+                                  regset_stream=None):
     """Expand a CMS MAINLOOP macro four ways and assemble a FourPartCapture.
 
     main_loop[cp] expands with all flags=1 and \\ID=cp for each cp.
@@ -1910,6 +2084,7 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
             tag_by_origin_id=tag_by_origin_id,
             sync_class=sync_class, snop_class=snop_class,
             mfma_classes=mfma_classes,
+            name_to_idx=regset_stream,
         )
         main_loop[cp] = body
         main_loop_prev[cp] = clone_loop_body(body)
@@ -1921,6 +2096,7 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
             tag_by_origin_id=tag_by_origin_id,
             sync_class=sync_class, snop_class=snop_class,
             mfma_classes=mfma_classes,
+            name_to_idx=regset_stream,
         )
         n_gl_dict = {0: n_gl_body}
     else:
@@ -1933,6 +2109,7 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
             tag_by_origin_id=tag_by_origin_id,
             sync_class=sync_class, snop_class=snop_class,
             mfma_classes=mfma_classes,
+            name_to_idx=regset_stream,
         )
         n_ll_dict = {0: n_ll_body}
     else:

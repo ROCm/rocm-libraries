@@ -1053,6 +1053,17 @@ def build_dataflow_graph(four_part_capture):
 
         for node in sorted_nodes:
             wrapped = node.tagged_inst.wrapped
+            # Per-body symbolic-name -> numeric-base lookup, populated
+            # from the writer's RegSet directives during capture (see
+            # `LoopBodyCapture.name_to_idx` and `collect_regset_stream`).
+            # Forwarding it to `_byte_keys_for_resource` makes symbolic
+            # operands resolve to the same numeric byte-keys as the
+            # corresponding numeric writes, so cross-form references
+            # (e.g. consumer reads `vgprValuA_T0_I0`, producer writes
+            # `v[76:79]` for the same physical reg) collapse to a single
+            # latest-writer entry. rocm-libraries-bb34.
+            body_capture = captures.get(node.body_label)
+            n2i = getattr(body_capture, "name_to_idx", None) if body_capture is not None else None
 
             # Phase 2a — reads first: emit one edge per distinct
             # (writer, write_resource) that contributes any byte of any
@@ -1061,7 +1072,7 @@ def build_dataflow_graph(four_part_capture):
                 if read_resource is None:
                     continue
                 for producer, overlap in _resolve_producers(
-                    read_resource, node, latest_writer,
+                    read_resource, node, latest_writer, name_to_idx=n2i,
                 ):
                     is_memory = isinstance(overlap, MemoryRegion)
                     edges.append(DataflowEdge(
@@ -1079,7 +1090,7 @@ def build_dataflow_graph(four_part_capture):
             for write_resource in wrapped.writes:
                 if write_resource is None:
                     continue
-                for bk in _byte_keys_for_resource(write_resource):
+                for bk in _byte_keys_for_resource(write_resource, name_to_idx=n2i):
                     latest_writer[bk] = (node, write_resource)
 
     # =========================================================================
