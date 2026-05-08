@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include <bit>
+#include <cstdint>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -77,7 +79,7 @@ class GenericIRInstruction : public LogicalInstruction {
             } else if (op.type == IntrinsicOperand::HexLiteral) {
                 // Output hex literal in hex format
                 float floatVal = static_cast<float>(op.floatValue);
-                uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
+                uint32_t bits = std::bit_cast<uint32_t>(floatVal);
                 out << "0x" << std::hex << bits << std::dec;
             }
         }
