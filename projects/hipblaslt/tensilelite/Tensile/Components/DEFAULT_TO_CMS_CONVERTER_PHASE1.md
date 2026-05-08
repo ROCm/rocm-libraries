@@ -323,78 +323,52 @@ populated. From that it can directly synthesize:
 shape is required.** The default-side capture is already pre-bucketed into
 TaggedInstructions. The converter can consume it as-is.
 
-### 3.3 `nglshift` / `nllshift` derivation rule (resolved)
+### 3.3 `nglshift` / `nllshift` derivation rule — DTL-aware
 
 These two integers are required by `ScheduleInfo`. They control how vlcnt
-gets shifted in the NGL/NLL branches of the dispatcher. To synthesize them
-from the default-side capture, the converter counts the *vmcnt-tracked*
-global-read pair-count (GRA + GRB) in a single codepath of the mainloop.
+gets shifted in the NGL/NLL branches of the dispatcher.
 
-**Correct formula** (validated below):
+**User correction (recorded post-investigation).** An earlier draft of
+this section claimed the halving formula
+`(len(GRA[0]) + len(GRB[0])) // 2` generalizes to all schedules. **It
+does not.** The halving is only valid in **DTL** (DirectToLDS, i.e.
+`TileConfig.direct_to_lds == 1`) cases, because in DTL mode every other
+entry in `GRA[0]` / `GRB[0]` is a *pointer increment*, not a load — so
+the entry count is doubled relative to the load-pair count. In non-DTL
+cases, the entries are not doubled and the formula is different.
+
+**DTL-aware shape** (Phase 2 must implement both branches):
 
 ```python
-nglshift = nllshift = (len(optSchedule['GRA'][0]) + len(optSchedule['GRB'][0])) // 2
+if tile_config.direct_to_lds == 1:
+    # entries are pairs of (load, ptr-increment); halve to get pair count
+    nglshift = nllshift = (len(optSchedule['GRA'][0]) + len(optSchedule['GRB'][0])) // 2
+else:
+    # non-DTL: entries are loads only; no halving
+    # exact formula TBD in Phase 2 (likely just len(GRA[0]) + len(GRB[0]),
+    # but verify against known non-DTL schedules before locking)
+    nglshift = nllshift = ...   # see Phase 2 directive below
 ```
 
-The `[0]` index is critical: `optSchedule['GRA']` is `list[list[int]]` whose
-*outer* list is per-codepath. `len(optSchedule['GRA'])` returns the
-codepath count (1 for single-codepath schedules, 2 for dual-codepath, …),
-not the GR count. The shift is computed per-codepath, so the converter
-takes codepath 0 as the canonical path. (Per the parallel `prp2`
-investigation captured in `VALIDATOR_DESIGN.md`, `isValid` itself only
-walks codepath 0 today — codepath 0 is the established canonical
-choice for single-codepath analyses across the validator stack.)
+**Why the prior audit said "0 mismatches".** The 44 spot-checkable
+branches in the prior audit were almost certainly all DTL cases (the
+example.yaml fixture is DTL — `DirectToLds: [1]`; the worked example in
+§1.5 is DTL — `direct_to_lds=1` in its `TileConfig`). The audit lacked
+a DTL/non-DTL split and therefore could not see the divergence.
 
-The factor of 2 is because each entry in `GRA[0]` / `GRB[0]` represents
-one of a pair of `BufferLoad*` halves (the schedules duplicate each
-load-pair position; see e.g. `'GRA': [[16,16,18,18,…]]` in §1.5). Pair
-count = total entries / 2.
+**Phase 2 implementation directive — non-DTL formula derivation.** Before
+the converter ships, the implementer must:
 
-**Verification — direct inline confirmation in CustomSchedule.py.** Five
-production schedules compute `nglshift` directly from `optSchedule` with
-this exact formula (modulo Python `/` vs `//`, which is irrelevant
-because both sides of the sum are even):
+1. Enumerate the registered schedules with `direct_to_lds == 0` (filter
+   `_SCHEDULE_REGISTRY` by `tile_config.direct_to_lds`).
+2. For each, read the inline `nglshift`/`nllshift` literal and compare
+   against `len(GRA[0]) + len(GRB[0])` (no halving). Confirm match — or
+   discover the actual non-DTL formula.
+3. Implement the DTL-aware branch in the converter. Add a regression
+   test using a non-DTL schedule from this enumeration.
 
-```
-CustomSchedule.py:3051, 3108, 3136, 3169, 5577:
-    nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
-```
-
-This is byte-for-byte the formula above, just written with two divisions
-instead of one. It is the canonical existing pattern.
-
-**Verification — spot checks against requested fixtures.**
-
-- `_get_schedule_96x256x64_16bit` NN/!useLDSTr/TLDS=1 branch
-  (CustomSchedule.py:1816, `numCodePaths=1`, line 1882): `GRA[0]` has 6
-  entries, `GRB[0]` has 16 entries → `(6 + 16) // 2 = 11`. Schedule sets
-  `nglshift = nllshift = 11` (CustomSchedule.py:1691, via
-  `num_gr = (len(grA) + len(grB)) // 2` at line 1858). Match.
-- `_get_schedule_256x96x64_16bit` TN/TLDS=1 branch
-  (CustomSchedule.py:914, `numCodePaths=2`, line 1009): `GRA[0]` has 16
-  entries (line 946), `GRB[0]` has 6 entries (line 944) →
-  `(16 + 6) // 2 = 11`. Schedule sets `nglshift = nllshift = 11`
-  (line 916). Match.
-
-**Verification — full audit across all `_get_schedule_*` functions.**
-A comprehensive grep across all 30+ registered schedules in
-`CustomSchedule.py` confirms zero counterexamples. Where the schedule
-hard-codes `nglshift = N` and the formula is computable from inline GRA/GRB
-lists, all 44 spot-checkable branches match (`OK=44, MISMATCH=0`). The
-remaining branches either compute `nglshift` via an equivalent formulation
-(`num_gr = len(gra) + len(grb)` where `gra`/`grb` are halved
-pre-`duplicate_list_items`-expansion lists, e.g. CustomSchedule.py:2617,
-2641; semantically identical), or use computed list comprehensions whose
-length the regex-based audit could not parse (UNKNOWN — no mismatches were
-hidden, just unparsed by the audit script).
-
-**Conclusion — formula generalizes to all known schedules.** The
-converter can apply this formula unconditionally for the `numCodePaths=1`
-output it produces. No exceptions need to be flagged as Phase 3 hazards.
-
-The earlier draft of this memo gave the formula as
-`(len(GRA) + len(GRB)) // 2` — wrong-as-written for `numCodePaths>=2`
-because it counted codepaths instead of entries. Corrected here.
+The `[0]` indexing remains correct (single-codepath canonical choice) —
+that part of the prior text stands.
 
 `nllZeroDscnt` and `mfmaReorder` are non-default flags used by a few
 schedules; the converter can leave them at defaults (False / []) for the
@@ -543,16 +517,38 @@ at *import time* — the decorator's `__call__` runs immediately. So the
 output file becomes a registered schedule simply by being imported. There is
 no separate "register this schedule" call; just `import path.to.file`.
 
-### 5.4 Multi-arch support is free
+### 5.4 Multi-arch support — explicit isa required (no default)
 
-`TileConfig.isa: tuple = (9, 5, 0)` (CustomSchedule.py:701) defaults to
-gfx950 but is a free constructor parameter accepting any
-`(maj, min, patch)` tuple. The converter passes the arch through from the
-input YAML's `ISA` field (or equivalently the `kernel["ISA"]` derived from
-it) into the registered schedule's `TileConfig` — no per-arch code paths
-are required in the converter. `hasCustomSchedule` already keys lookup on
-`kernel_isa` (CustomSchedule.py:573) so converter output for a non-default
-arch will be matched correctly at kernel-build time.
+`TileConfig.isa` (CustomSchedule.py:708) currently defaults to `(9, 5, 0)`.
+**User direction (recorded post-investigation): the default must be
+removed.** Every `TileConfig` construction must specify `isa` explicitly.
+Rationale: a silent gfx950 default risks emitting a schedule that
+matches a kernel on a different arch by accident; explicit isa makes
+arch coverage auditable.
+
+**Phase 2 implementation directives:**
+
+1. **Drop the `isa = (9, 5, 0)` default in `TileConfig`** (CustomSchedule.py:708).
+   Make `isa` a required positional or required keyword field of the
+   frozen dataclass. After the change, every `TileConfig(...)` call site
+   in `CustomSchedule.py` must pass `isa=` explicitly.
+2. **Coordinate with bkub.** bkub is splitting CustomSchedule.py into
+   per-schedule files (one `_get_schedule_*` per file in `gfx950/`).
+   Each existing registration that relied on the default must be
+   updated to `isa=(9, 5, 0)` explicitly. This update lands either:
+   - inside bkub's split (bkub's implementer adds `isa=(9, 5, 0)` to
+     every `TileConfig(...)` it moves), OR
+   - as a follow-up to bkub before wlrp Phase 2 ships.
+   Either ordering is fine; flag at merge-time.
+3. **Converter behavior.** The converter reads the input YAML's `ISA`
+   field (or `kernel["ISA"]`) and passes it through as
+   `isa=(<maj>, <min>, <patch>)` in the emitted `TileConfig(...)`. It
+   never falls back to a default; if the YAML has no ISA, the converter
+   raises with a clear error.
+
+`hasCustomSchedule` already keys lookup on `kernel_isa`
+(CustomSchedule.py:573) so the dispatch side is unaffected by the
+default removal.
 
 ### 5.5 Dispatch ordering — collision policy with existing schedules
 
@@ -634,8 +630,40 @@ YAML + new schedule .py, run only this comparison."
 
 ### 6.2 What this epic creates
 
-The bead identifies that this epic creates the standalone comparison
-entry. Sketch of the API:
+**User question (recorded post-investigation):** "Why is
+`validate_schedule_against_default` needed?"
+
+**Answer.** Strictly speaking, it isn't *required* — the comparison
+already runs as a side effect of `KernelWriter.kernelBody` when
+`_captureDefaultSchedule=True`. A new entry point earns its keep on
+three grounds:
+
+1. **Single kernel build.** The converter must drive ONE kernel build
+   to obtain `ctx.default` (its input). If validation requires a
+   *second* kernel build (registering the emitted schedule and
+   re-driving with `_captureDefaultSchedule=True`), that's wasted work.
+   `validate_schedule_against_default` lets the converter validate
+   **in-process** against an already-built `ctx.default` + a freshly
+   constructed `ctx.cms` from the emitted schedule.
+2. **Structured return value.** The existing path emits failures via
+   kernel-writer logging. The converter pipeline needs a typed
+   `ValidationReport` it can branch on programmatically — not a log
+   string to scrape.
+3. **Pipeline composability.** The converter is ONE caller; future
+   tooling (the `prp2` skill, CI auto-comparison, hand-tuning workflows)
+   can reuse the same standalone entry. Each new caller should not
+   duplicate the kernel-writer plumbing.
+
+If the existing path's outputs were exposed via a `ValidationReport`
+return value at the existing call site (KernelWriter.py:5204–5302),
+the standalone entry would be unnecessary. **Phase 2 implementer's
+choice:** either add `validate_schedule_against_default` as a thin
+in-process wrapper (recommended; ~30 LOC), or refactor the existing
+path to return a `ValidationReport` and have the converter call
+`KernelWriter.kernelBody` directly with capture enabled. Either is
+defensible; the wrapper is the smaller change.
+
+Sketch of the API:
 
 ```python
 def validate_schedule_against_default(
@@ -673,20 +701,30 @@ a `enable_capture_default_schedule()` method that handles the lifecycle
 correctly. **Phase 2 user decision**: monkey-patch (matches tests) or new
 KernelWriter API (cleaner, but adds a public surface).
 
-### 6.3 Soft-fail filter for `accept_min_quad_cycle_gap`
+### 6.3 Soft-fail policy — always accept timing-too-close
 
-`compare_graphs` returns a `list[Failure]`. To support the bead's contract,
-the converter's wrapper categorizes each Failure:
+**User decision (recorded post-investigation): the converter ALWAYS
+soft-fails `TimingTooCloseFailure` — there is no opt-in flag.** The
+prior `accept_min_quad_cycle_gap=True` kwarg in the proposed API is
+removed. Rationale: the converter's job is to convert what default
+codegen emitted; timing-too-close on the converted result is by
+definition a property the default already had (default codegen produced
+the source instructions, including any min-quad-cycle Pack→MFMA gap
+that triggers the validator). Refusing to emit a converted schedule
+because the default would have triggered the same warning is not
+useful.
 
-- `TimingTooCloseFailure` (CMSValidator.py:2162) — the only soft-fail
-  candidate when `accept_min_quad_cycle_gap=True`.
+Categorization the converter applies to `compare_graphs` output:
+
+- `TimingTooCloseFailure` (CMSValidator.py:2162) — **always soft-fail**:
+  log a warning into the emitted file's docstring, proceed.
 - All others (`OrderInvertedFailure`, `MissingWaitFailure`,
   `WaitInsufficientFailure`, `MissingBarrierFailure`,
-  `OverriddenInputFailure`, `InvalidCounterValueFailure`) — hard fail.
-
-Note: `validate_edge_wait_coverage` failures are independent and are NOT
-covered by `accept_min_quad_cycle_gap` — they should be hard-fail too.
-Phase 2 user input: confirm this.
+  `OverriddenInputFailure`, `InvalidCounterValueFailure`) — **hard
+  fail**: the converter raises and emits nothing.
+- `validate_edge_wait_coverage` failures — **hard fail** (independent
+  of timing). These signal missing waits in the emitted schedule, not
+  timing tightness; soft-failing them would emit known-broken code.
 
 ---
 
@@ -702,12 +740,13 @@ E1. **`numCodePaths=1` policy.** The default codegen yields a single linear
    that the bead places explicitly **out of scope** ("Heuristic improvement
    of the conversion … is the authoring step"). Established.
 
-E2. **`nglshift` / `nllshift` derivation.** Computed as
-   `(len(optSchedule['GRA'][0]) + len(optSchedule['GRB'][0])) // 2`. This
-   formula is verified across all 30+ existing schedules with zero
-   counterexamples (audit in §3.3). Five existing schedules use the
-   identical formula inline (CustomSchedule.py:3051, 3108, 3136, 3169,
-   5577). Established.
+E2. **`nglshift` / `nllshift` derivation — DTL-aware.** The
+   `(len(GRA[0]) + len(GRB[0])) // 2` halving formula is valid only for
+   DTL (`direct_to_lds == 1`) cases, because in DTL mode every other
+   GRA/GRB entry is a pointer increment rather than a load. Non-DTL
+   formula needs to be derived in Phase 2 from a non-DTL schedule
+   audit. See §3.3 for the corrected DTL-aware shape and the Phase 2
+   directive. (The earlier "0 mismatches" audit was DTL-only.)
 
 E3. **SNop representability.** SNops are first-class in the CMS format
    (§2). The converter does not need to drop or warn-on SNops as a
@@ -725,9 +764,11 @@ E4. **Default-codegen SNop well-formedness.** Default-side SNops are
    or the validator profile, *not* a converter problem to handle.)
    Established.
 
-E5. **Multi-arch.** `TileConfig.isa: tuple = (9, 5, 0)` accepts any
-   `(maj, min, patch)` tuple. The converter passes the YAML's `ISA`
-   through (§5.4). Established.
+E5. **Multi-arch — explicit isa, no default.** `TileConfig.isa` must
+   become a required field; the existing `(9, 5, 0)` default is
+   removed. The converter reads ISA from the YAML and passes it
+   through explicitly; missing ISA in input → hard error. See §5.4 for
+   the Phase 2 directive (coordinated with bkub).
 
 E6. **SNop emission-fidelity invariant.** The dispatcher emits
    per-`miIndex` instructions in `optSchedule.items()` insertion order; the
@@ -740,37 +781,131 @@ E7. **Schedule-collision policy.** The converter refuses to emit if a
    exists, unless `--overwrite` is passed (§5.5). Established as
    recommendation; Phase 2 may confirm but no alternative is reasonable.
 
-## 8. Decisions staged for Phase 2 user input
+## 8. Phase 2 decisions — RESOLVED
 
-1. **Where does the converter live?** Options:
-   - `Tensile/Tools/default_to_cms.py` (sibling to existing tools).
-   - `Tensile/Components/SchedConvert/` (new subdirectory, sibling to
-     CustomSchedule.py).
-   - Standalone script under `Tensile/bin/`.
+User decisions recorded; Phase 2 is unblocked.
 
-2. **CLI vs library?** The signature in the bead is a Python function. A
-   thin CLI wrapper (`python -m Tensile.Tools.default_to_cms <yaml>
-   <output> --schedule-name ...`) is cheap to add; recommend doing both.
+1. **Converter file location → `Tensile/Components/CustomSchedule/cms_from_default.py`.**
+   The converter lives **inside the bkub package** (alongside
+   `dispatch.py` / `shared.py` / `gfx950/`). Not `Tensile/Tools/`,
+   not `Tensile/bin/`, not a sibling subdirectory. This makes the
+   converter a first-class component of the CMS subsystem and gives it
+   short relative imports for `RegisterSchedule`, `ScheduleInfo`,
+   `TileConfig`, dtype/layout predicates.
 
-3. **YAML format coverage in Phase 3.** Default format only, or both
-   default and alternate formats (`--alternate-format`)? See §4.2.
+2. **CLI → yes (in addition to the library function).** Phase 2 ships
+   both:
+   - Python API: `cms_from_default.default_schedule_to_cms(...)` (importable).
+   - CLI: `python -m Tensile.Components.CustomSchedule.cms_from_default
+     <input.yaml> <output.py> --schedule-name <name> [--isa <maj.min.patch>]`.
+   The CLI is a thin wrapper over the API.
 
-4. **Multi-Solution YAML handling.** A YAML's `ForkParameters` may
-   expand to N Solutions. Reject? Take `solution_index: int`? Auto-pick
-   the first? Recommend: reject with a clear error; user narrows.
+3. **YAML format → see `Tensile/Components/example.yaml` (committed
+   alongside this memo).** The example.yaml is the canonical input
+   format the converter must accept. It is the **default Tensile YAML
+   format** (top-level `GlobalParameters` + `BenchmarkProblems` with
+   one `[ProblemType, BenchmarkProblemSizeGroup]` pair under
+   `BenchmarkProblems[0]`). Phase 2 does NOT need to support the
+   alternate (`--alternate-format`) shape; if the user wants to convert
+   an alternate-format YAML, they normalize it via Tensile's existing
+   `Tensile()` rewrite path first.
 
-5. **`enable_capture_default_schedule()` lifecycle.** Add a public
-   KernelWriter method, or monkey-patch `setupNewTile` like the unit tests
-   do? Recommend the public method — it's cleaner, ~5 lines of code, and
-   the timing dance is non-obvious for callers.
+4. **Multi-Solution YAML handling → reject with a clear error.** When
+   the input YAML's `ForkParameters` expands to >1 Solution, the
+   converter raises with a message naming the fork dimensions and
+   suggesting which keys to narrow. **No `solution_index` kwarg.** The
+   user must provide a YAML that resolves to exactly one Solution.
 
-6. **Soft-fail scope.** Confirm the bead's intent: only
-   `TimingTooCloseFailure` from `compare_graphs` triggers warn-and-emit
-   when `accept_min_quad_cycle_gap=True`. Wait-coverage failures and all
-   other Failure types remain hard-fail.
+5. **`enable_capture_default_schedule()` lifecycle → public method.**
+   Add a public method to `KernelWriter` that handles the
+   `_captureDefaultSchedule` lifecycle dance internally (the
+   setupNewTile-after, _loopBody-before timing). The unit-test
+   monkey-patch pattern is replaced by callers using this method. The
+   converter and the test suite both consume the new public surface.
 
-7. **Coordination with `rocm-libraries-bkub`** (CustomSchedule.py refactor).
-   §5.6 above. The dependency is shallow: just import targets. No blocking.
+6. **Soft-fail policy → ALWAYS accept timing-too-close.** The
+   converter unconditionally soft-fails `TimingTooCloseFailure` from
+   `compare_graphs`. The previously proposed
+   `accept_min_quad_cycle_gap` kwarg is **removed** — there is no
+   opt-out, no opt-in. All other failure types (incl.
+   `validate_edge_wait_coverage` failures) remain hard-fail. See §6.3
+   for rationale.
+
+7. **Coordination with `rocm-libraries-bkub`** — already implied by
+   decision 1 (the converter file lives in bkub's package). The
+   converter is added in the same package layout bkub establishes; if
+   bkub ships first, the converter takes the new import path; if the
+   converter ships first, it is the first non-`gfx950/` file in the
+   new package. No blocking either direction.
+
+### Phase 2 implementation directives (derived from above)
+
+- **API signature** (final, with kwargs that survived after decision 6):
+  ```python
+  def default_schedule_to_cms(
+      yaml_path: Path,
+      output_path: Path,
+      *,
+      schedule_name: str,
+      isa: tuple[int, int, int] | None = None,   # override; falls back to YAML's ISA
+  ) -> ValidationReport:
+      """Convert a default-codegen schedule into a registered CMS schedule.
+
+      Always soft-fails TimingTooCloseFailure (warning written to output
+      file's docstring); hard-fails all other validator failures.
+
+      Reads the input YAML as the default Tensile format. Raises if the
+      YAML expands to more than one Solution; user must narrow ForkParameters
+      to a single config. Raises if the YAML lacks an ISA and `isa` is None.
+      """
+  ```
+  No `accept_min_quad_cycle_gap` parameter.
+
+- **CLI signature:**
+  ```
+  python -m Tensile.Components.CustomSchedule.cms_from_default \
+      <input.yaml> <output.py> \
+      --schedule-name <name> \
+      [--isa <maj.min.patch>] \
+      [--overwrite]
+  ```
+  `--overwrite` bypasses the schedule-collision check (§5.5).
+
+- **Schedule-collision policy** (§5.5 unchanged): converter scans
+  `_SCHEDULE_REGISTRY` for matching `(TileConfig, dtype_predicate, ...)`
+  and refuses to write when a match exists, unless `--overwrite` /
+  `force=True`.
+
+- **Multi-arch** (§5.4): converter passes `isa=(<maj>, <min>, <patch>)`
+  explicitly to `TileConfig`. `TileConfig.isa` default removed.
+  Coordinate with bkub on the default removal (either bundles into
+  bkub's split, or lands as a follow-up before wlrp Phase 2 ships).
+
+- **`nglshift` / `nllshift`** (§3.3): DTL-aware branch in the
+  converter. Phase 2 implementer enumerates non-DTL schedules,
+  derives the non-DTL formula, implements both branches, adds a
+  regression test using a non-DTL schedule.
+
+- **`validate_schedule_against_default`** (§6.2): implement as a thin
+  in-process wrapper that runs ONE kernel build (with capture enabled
+  via the new public method from decision 5), runs `compare_graphs` +
+  `validate_edge_wait_coverage` against the default capture and a
+  fresh CMS capture from the emitted schedule, returns a
+  `ValidationReport` with categorized failure lists. Do not refactor
+  the existing kernel-writer logging path; keep the new wrapper
+  separate.
+
+- **Multi-Solution rejection error message** (decision 4): name the
+  fork dimensions that produced >1 Solution and suggest which keys to
+  narrow. Example error wording the implementer should produce:
+  ```
+  Input YAML expands to N Solutions (fork dimensions: MatrixInstruction[3],
+  PrefetchGlobalRead[2]). Narrow ForkParameters to a single config and re-run.
+  ```
+
+- **`example.yaml` is committed** alongside this memo as the canonical
+  input format. Phase 2 implementer uses it as the integration-test
+  fixture for the converter.
 
 ---
 
