@@ -45,26 +45,26 @@ using sy2sb_he2hb_tuple = std::tuple<vector<I>, vector<I>>;
 
 // for checkin_lapack tests
 const vector<vector<int>> size_range = {
-     // quick return
-     {0, 1},
-     // invalid
-     {-1, 1},
-     {20, 5},
-     // normal (valid) samples
-     {10, 10},
-     {10, 15},
-     {20, 20}};
+    // quick return
+    {0, 1},
+    // invalid
+    {-1, 1},
+    {20, 5},
+    // normal (valid) samples
+    {10, 10},
+    {10, 15},
+    {20, 20}};
 
 const vector<vector<int64_t>> size_range_64 = {
-     // quick return
-     {0, 1},
-     // invalid
-     {-1, 1},
-     {20, 5},
-     // normal (valid) samples
-     {10, 10},
-     {10, 15},
-     {20, 20}};
+    // quick return
+    {0, 1},
+    // invalid
+    {-1, 1},
+    {20, 5},
+    // normal (valid) samples
+    {10, 10},
+    {10, 15},
+    {20, 20}};
 
 const vector<vector<int>> blk_range = {
     // invalid
@@ -92,30 +92,15 @@ const vector<vector<int64_t>> blk_range_64 = {
     {3, 6},
     {3, 9}};
 
- // for daily_lapack tests
- const vector<vector<int>> large_size_range = {
-    {256, 256},
-    {640, 640},
-    {1024, 1024},
-    {2048, 2048}};
+// for daily_lapack tests
+const vector<vector<int>> large_size_range = {{256, 256}, {640, 640}, {1024, 1024}, {2048, 2048}};
 
-const vector<vector<int64_t>> large_size_range_64 = {
-    {256, 256},
-    {640, 640},
-    {1024, 1024},
-    {2048, 2048}};
+const vector<vector<int64_t>> large_size_range_64
+    = {{256, 256}, {640, 640}, {1024, 1024}, {2048, 2048}};
 
-const vector<vector<int>> large_blk_range = {
-    {16, 32},
-    {16, 64},
-    {32, 64},
-    {32, 128}};
+const vector<vector<int>> large_blk_range = {{16, 32}, {16, 64}, {32, 64}, {32, 128}};
 
-const vector<vector<int64_t>> large_blk_range_64 = {
-    {16, 32},
-    {16, 64},
-    {32, 64},
-    {32, 128}};
+const vector<vector<int64_t>> large_blk_range_64 = {{16, 32}, {16, 64}, {32, 64}, {32, 128}};
 
 template <typename I>
 Arguments sy2sb_he2hb_setup_arguments(sy2sb_he2hb_tuple<I> tup)
@@ -207,17 +192,17 @@ TEST_P(SY2SB_HE2HB_64, __double_complex)
 }
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
-                        SY2SB_HE2HB,
-                        Combine(ValuesIn(large_size_range), ValuesIn(large_blk_range)));
+                         SY2SB_HE2HB,
+                         Combine(ValuesIn(large_size_range), ValuesIn(large_blk_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                        SY2SB_HE2HB,
-                        Combine(ValuesIn(size_range), ValuesIn(blk_range)));
+                         SY2SB_HE2HB,
+                         Combine(ValuesIn(size_range), ValuesIn(blk_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
-                        SY2SB_HE2HB_64,
-                        Combine(ValuesIn(large_size_range_64), ValuesIn(large_blk_range_64)));
+                         SY2SB_HE2HB_64,
+                         Combine(ValuesIn(large_size_range_64), ValuesIn(large_blk_range_64)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                        SY2SB_HE2HB_64,
-                        Combine(ValuesIn(size_range_64), ValuesIn(blk_range_64)));
+                         SY2SB_HE2HB_64,
+                         Combine(ValuesIn(size_range_64), ValuesIn(blk_range_64)));

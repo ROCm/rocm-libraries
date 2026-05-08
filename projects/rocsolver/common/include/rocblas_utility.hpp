@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -570,9 +570,9 @@ __device__ __host__ constexpr auto ceildiv(const Ix x, const Iy y)
 /// @return ceil( x / y )*y, for integers x, y.
 /// That is, round x up to the next multiple of y.
 template <typename Ix, typename Iy>
-__device__ __host__ constexpr auto roundup( Ix x, Iy y )
+__device__ __host__ constexpr auto roundup(Ix x, Iy y)
 {
-    return y * ceildiv( x, y );
+    return y * ceildiv(x, y);
 }
 
 #ifdef ROCSOLVER_LIBRARY

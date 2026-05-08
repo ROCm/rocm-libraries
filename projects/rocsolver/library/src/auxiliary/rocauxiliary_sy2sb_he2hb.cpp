@@ -40,15 +40,13 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
                                           const I ldab,
                                           T* tau)
 {
-    ROCSOLVER_ENTER_TOP("sy2sb_he2hb", "-n", n, "-kd", kd, "-nb", nb,
-                        "--lda", lda, "--ldab", ldab);
+    ROCSOLVER_ENTER_TOP("sy2sb_he2hb", "-n", n, "-kd", kd, "-nb", nb, "--lda", lda, "--ldab", ldab);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_sy2sb_he2hb_argCheck(
-            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    rocblas_status st = rocsolver_sy2sb_he2hb_argCheck(handle, n, kd, nb, A, lda, Aband, ldab, tau);
     if(st != rocblas_status_continue)
         return st;
 
@@ -68,50 +66,41 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
     size_t size_workArr;
     // extra requirements
     size_t size_D, size_V, size_W, size_X, size_Z, size_work;
-    rocsolver_sy2sb_he2hb_getMemorySize<false, T, I>(
-            n, kd, nb, batch_count,
-            &size_scalars, &size_D, &size_V, &size_W, &size_X, &size_Z,
-            &size_work, &size_workArr);
+    rocsolver_sy2sb_he2hb_getMemorySize<false, T, I>(n, kd, nb, batch_count, &size_scalars, &size_D,
+                                                     &size_V, &size_W, &size_X, &size_Z, &size_work,
+                                                     &size_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
     {
-        return rocblas_set_optimal_device_memory_size(
-                handle, size_scalars, size_D, size_V, size_W, size_X, size_Z,
-                size_work, size_workArr);
+        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_D, size_V, size_W,
+                                                      size_X, size_Z, size_work, size_workArr);
     }
 
     // memory workspace allocation
-    rocblas_device_malloc mem(
-            handle, size_scalars, size_D, size_V, size_W, size_X, size_Z,
-            size_work, size_workArr);
+    rocblas_device_malloc mem(handle, size_scalars, size_D, size_V, size_W, size_X, size_Z,
+                              size_work, size_workArr);
 
     if(!mem)
         return rocblas_status_memory_error;
 
-    T* scalars = (T*) mem[0];
-    T* D       = (T*) mem[1];
-    T* V       = (T*) mem[2];
-    T* W       = (T*) mem[3];
-    T* X       = (T*) mem[4];
-    T* Z       = (T*) mem[5];
-    T* work    = (T*) mem[6];
-    T** workArr = (T**) mem[7];
+    T* scalars = (T*)mem[0];
+    T* D = (T*)mem[1];
+    T* V = (T*)mem[2];
+    T* W = (T*)mem[3];
+    T* X = (T*)mem[4];
+    T* Z = (T*)mem[5];
+    T* work = (T*)mem[6];
+    T** workArr = (T**)mem[7];
     if(size_scalars > 0)
         init_scalars(handle, scalars);
 
     // execution
-    return rocsolver_sy2sb_he2hb_template<false, false, T, I>(
-            handle, n, kd, nb,   // opts
-            A, shiftA, lda, strideA, // A
-            Aband, ldab, strideAb, // Aband
-            tau, strideTau,  // tau
-            batch_count, scalars,
-            D,
-            V,
-            W,
-            X,
-            Z,
-            work, workArr);
+    return rocsolver_sy2sb_he2hb_template<false, false, T, I>(handle, n, kd, nb, // opts
+                                                              A, shiftA, lda, strideA, // A
+                                                              Aband, ldab, strideAb, // Aband
+                                                              tau, strideTau, // tau
+                                                              batch_count, scalars, D, V, W, X, Z,
+                                                              work, workArr);
 }
 
 ROCSOLVER_END_NAMESPACE
@@ -125,128 +114,128 @@ ROCSOLVER_END_NAMESPACE
 extern "C" {
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
-                                const rocblas_int n,
-                                const rocblas_int kd,
-                                const rocblas_int nb,
-                                float* A,
-                                const rocblas_int lda,
-                                float* Aband,
-                                const rocblas_int ldab,
-                                float* tau)
+                                                 const rocblas_int n,
+                                                 const rocblas_int kd,
+                                                 const rocblas_int nb,
+                                                 float* A,
+                                                 const rocblas_int lda,
+                                                 float* Aband,
+                                                 const rocblas_int ldab,
+                                                 float* tau)
 {
-    return rocsolver::rocsolver_sy2sb_he2hb_impl<float, rocblas_int>(
-            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<float, rocblas_int>(handle, n, kd, nb, A, lda,
+                                                                     Aband, ldab, tau);
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dsy2sb(rocblas_handle handle,
-                                const rocblas_int n,
-                                const rocblas_int kd,
-                                const rocblas_int nb,
-                                double* A,
-                                const rocblas_int lda,
-                                double* Aband,
-                                const rocblas_int ldab,
-                                double* tau)
+                                                 const rocblas_int n,
+                                                 const rocblas_int kd,
+                                                 const rocblas_int nb,
+                                                 double* A,
+                                                 const rocblas_int lda,
+                                                 double* Aband,
+                                                 const rocblas_int ldab,
+                                                 double* tau)
 {
-    return rocsolver::rocsolver_sy2sb_he2hb_impl<double, rocblas_int>(
-            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<double, rocblas_int>(handle, n, kd, nb, A, lda,
+                                                                      Aband, ldab, tau);
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_che2hb(rocblas_handle handle,
-                                const rocblas_int n,
-                                const rocblas_int kd,
-                                const rocblas_int nb,
-                                rocblas_float_complex* A,
-                                const rocblas_int lda,
-                                rocblas_float_complex* Aband,
-                                const rocblas_int ldab,
-                                rocblas_float_complex* tau)
+                                                 const rocblas_int n,
+                                                 const rocblas_int kd,
+                                                 const rocblas_int nb,
+                                                 rocblas_float_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_float_complex* Aband,
+                                                 const rocblas_int ldab,
+                                                 rocblas_float_complex* tau)
 {
     return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_float_complex, rocblas_int>(
-            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+        handle, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
-                                const rocblas_int n,
-                                const rocblas_int kd,
-                                const rocblas_int nb,
-                                rocblas_double_complex* A,
-                                const rocblas_int lda,
-                                rocblas_double_complex* Aband,
-                                const rocblas_int ldab,
-                                rocblas_double_complex* tau)
+                                                 const rocblas_int n,
+                                                 const rocblas_int kd,
+                                                 const rocblas_int nb,
+                                                 rocblas_double_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_double_complex* Aband,
+                                                 const rocblas_int ldab,
+                                                 rocblas_double_complex* tau)
 {
     return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_double_complex, rocblas_int>(
-            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+        handle, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_ssy2sb_64(rocblas_handle handle,
-                                const int64_t n,
-                                const int64_t kd,
-                                const int64_t nb,
-                                float* A,
-                                const int64_t lda,
-                                float* Aband,
-                                const int64_t ldab,
-                                float* tau)
+                                                    const int64_t n,
+                                                    const int64_t kd,
+                                                    const int64_t nb,
+                                                    float* A,
+                                                    const int64_t lda,
+                                                    float* Aband,
+                                                    const int64_t ldab,
+                                                    float* tau)
 {
 #ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_sy2sb_he2hb_impl<float, int64_t>(
-            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<float, int64_t>(handle, n, kd, nb, A, lda, Aband,
+                                                                 ldab, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dsy2sb_64(rocblas_handle handle,
-                                const int64_t n,
-                                const int64_t kd,
-                                const int64_t nb,
-                                double* A,
-                                const int64_t lda,
-                                double* Aband,
-                                const int64_t ldab,
-                                double* tau)
+                                                    const int64_t n,
+                                                    const int64_t kd,
+                                                    const int64_t nb,
+                                                    double* A,
+                                                    const int64_t lda,
+                                                    double* Aband,
+                                                    const int64_t ldab,
+                                                    double* tau)
 {
 #ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_sy2sb_he2hb_impl<double, int64_t>(
-            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<double, int64_t>(handle, n, kd, nb, A, lda, Aband,
+                                                                  ldab, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_che2hb_64(rocblas_handle handle,
-                                const int64_t n,
-                                const int64_t kd,
-                                const int64_t nb,
-                                rocblas_float_complex* A,
-                                const int64_t lda,
-                                rocblas_float_complex* Aband,
-                                const int64_t ldab,
-                                rocblas_float_complex* tau)
+                                                    const int64_t n,
+                                                    const int64_t kd,
+                                                    const int64_t nb,
+                                                    rocblas_float_complex* A,
+                                                    const int64_t lda,
+                                                    rocblas_float_complex* Aband,
+                                                    const int64_t ldab,
+                                                    rocblas_float_complex* tau)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_float_complex, int64_t>(
-            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+        handle, n, kd, nb, A, lda, Aband, ldab, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zhe2hb_64(rocblas_handle handle,
-                                const int64_t n,
-                                const int64_t kd,
-                                const int64_t nb,
-                                rocblas_double_complex* A,
-                                const int64_t lda,
-                                rocblas_double_complex* Aband,
-                                const int64_t ldab,
-                                rocblas_double_complex* tau)
+                                                    const int64_t n,
+                                                    const int64_t kd,
+                                                    const int64_t nb,
+                                                    rocblas_double_complex* A,
+                                                    const int64_t lda,
+                                                    rocblas_double_complex* Aband,
+                                                    const int64_t ldab,
+                                                    rocblas_double_complex* tau)
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_double_complex, int64_t>(
-            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+        handle, n, kd, nb, A, lda, Aband, ldab, tau);
 #else
     return rocblas_status_not_implemented;
 #endif

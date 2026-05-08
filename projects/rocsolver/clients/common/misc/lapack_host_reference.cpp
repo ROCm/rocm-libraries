@@ -6828,7 +6828,7 @@ void cpu_sytrd_hetrd<rocblas_double_complex, double>(rocblas_fill uplo,
 }
 
 // sy2sb & he2hb
-template<>
+template <>
 void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      rocblas_int n,
                      rocblas_int kd,
@@ -6845,7 +6845,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
     ssytrd_sy2sb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
 }
 
-template<>
+template <>
 void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      rocblas_int n,
                      rocblas_int kd,
@@ -6862,7 +6862,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
     dsytrd_sy2sb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
 }
 
-template<>
+template <>
 void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      rocblas_int n,
                      rocblas_int kd,
@@ -6879,7 +6879,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
     chetrd_he2hb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
 }
 
-template<>
+template <>
 void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      rocblas_int n,
                      rocblas_int kd,

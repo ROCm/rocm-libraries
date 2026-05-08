@@ -37,16 +37,15 @@
 // or complex value in dist x dist*i.
 //
 template <typename T, typename DistType>
-T rand_value( DistType& dist )
+T rand_value(DistType& dist)
 {
-    if constexpr (rocblas_is_complex<T>)
+    if constexpr(rocblas_is_complex<T>)
     {
-        return T( dist( rocblas_rng ),
-                  dist( rocblas_rng ) );
+        return T(dist(rocblas_rng), dist(rocblas_rng));
     }
     else
     {
-        return dist( rocblas_rng );
+        return dist(rocblas_rng);
     }
 }
 
@@ -56,21 +55,21 @@ T rand_value( DistType& dist )
 // todo: pass dist into routine, with default = uniform [-1, 1]?
 //
 template <typename T>
-void gerand( rocblas_int m, rocblas_int n, T* A, rocblas_int lda )
+void gerand(rocblas_int m, rocblas_int n, T* A, rocblas_int lda)
 {
-    using S = decltype( std::real( T{} ) );
-    std::uniform_real_distribution<S> dist( S(-1), S(1) );
+    using S = decltype(std::real(T{}));
+    std::uniform_real_distribution<S> dist(S(-1), S(1));
 
-    if (m < 0 || n < 0 || lda < m)
+    if(m < 0 || n < 0 || lda < m)
         throw rocblas_status_invalid_size;
-    if (! A)
+    if(!A)
         throw rocblas_status_invalid_pointer;
 
-    for (rocblas_int j = 0; j < n; ++j)
+    for(rocblas_int j = 0; j < n; ++j)
     {
-        for (rocblas_int i = 0; i < m; ++i)
+        for(rocblas_int i = 0; i < m; ++i)
         {
-            A[i + j*lda] = rand_value<T>( dist );
+            A[i + j * lda] = rand_value<T>(dist);
         }
     }
 }
@@ -86,47 +85,47 @@ void gerand( rocblas_int m, rocblas_int n, T* A, rocblas_int lda )
 // todo: pass dist into routine, with default = uniform [-1, 1]?
 //
 template <typename T>
-void herand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
+void herand(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda)
 {
-    using S = decltype( std::real( T{} ) );
-    std::uniform_real_distribution<S> dist( S(-1), S(1) );
+    using S = decltype(std::real(T{}));
+    std::uniform_real_distribution<S> dist(S(-1), S(1));
 
-    if (n < 0 || lda < n)
+    if(n < 0 || lda < n)
         throw rocblas_status_invalid_size;
-    if (! A)
+    if(!A)
         throw rocblas_status_invalid_pointer;
 
-    if (uplo == rocblas_fill_lower)
+    if(uplo == rocblas_fill_lower)
     {
-        for (rocblas_int j = 0; j < n; ++j)
+        for(rocblas_int j = 0; j < n; ++j)
         {
-            A[ j + j*lda ] = rand_value<S>( dist );  // diagonal real
-            for (rocblas_int i = j+1; i < n; ++i)  // strictly lower
+            A[j + j * lda] = rand_value<S>(dist); // diagonal real
+            for(rocblas_int i = j + 1; i < n; ++i) // strictly lower
             {
-                A[i + j*lda] = rand_value<T>( dist );
+                A[i + j * lda] = rand_value<T>(dist);
             }
         }
     }
-    else if (uplo == rocblas_fill_upper)
+    else if(uplo == rocblas_fill_upper)
     {
-        for (rocblas_int j = 0; j < n; ++j)
+        for(rocblas_int j = 0; j < n; ++j)
         {
-            for (rocblas_int i = 0; i < j; ++i)  // strictly upper
+            for(rocblas_int i = 0; i < j; ++i) // strictly upper
             {
-                A[i + j*lda] = rand_value<T>( dist );
+                A[i + j * lda] = rand_value<T>(dist);
             }
-            A[ j + j*lda ] = rand_value<S>( dist );  // diagonal real
+            A[j + j * lda] = rand_value<S>(dist); // diagonal real
         }
     }
-    else if (uplo == rocblas_fill_full)
+    else if(uplo == rocblas_fill_full)
     {
-        for (rocblas_int j = 0; j < n; ++j)
+        for(rocblas_int j = 0; j < n; ++j)
         {
-            A[ j + j*lda ] = rand_value<S>( dist );  // diagonal real
-            for (rocblas_int i = j+1; i < n; ++i)  // strictly lower
+            A[j + j * lda] = rand_value<S>(dist); // diagonal real
+            for(rocblas_int i = j + 1; i < n; ++i) // strictly lower
             {
-                A[i + j*lda] = rand_value<T>( dist );
-                A[j + i*lda] = sconj( A[i + j*lda] );
+                A[i + j * lda] = rand_value<T>(dist);
+                A[j + i * lda] = sconj(A[i + j * lda]);
             }
         }
     }
@@ -143,45 +142,45 @@ void herand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
 // todo: pass dist into routine, with default = uniform [-1, 1]?
 //
 template <typename T>
-void syrand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
+void syrand(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda)
 {
-    using S = decltype( std::real( T{} ) );
-    std::uniform_real_distribution<S> dist( S(-1), S(1) );
+    using S = decltype(std::real(T{}));
+    std::uniform_real_distribution<S> dist(S(-1), S(1));
 
-    if (n < 0 || lda < n)
+    if(n < 0 || lda < n)
         throw rocblas_status_invalid_size;
-    if (! A)
+    if(!A)
         throw rocblas_status_invalid_pointer;
 
-    if (uplo == rocblas_fill_lower)
+    if(uplo == rocblas_fill_lower)
     {
-        for (rocblas_int j = 0; j < n; ++j)
+        for(rocblas_int j = 0; j < n; ++j)
         {
-            for (rocblas_int i = j; i < n; ++i)  // lower
+            for(rocblas_int i = j; i < n; ++i) // lower
             {
-                A[i + j*lda] = rand_value<T>( dist );
+                A[i + j * lda] = rand_value<T>(dist);
             }
         }
     }
-    else if (uplo == rocblas_fill_upper)
+    else if(uplo == rocblas_fill_upper)
     {
-        for (rocblas_int j = 0; j < n; ++j)
+        for(rocblas_int j = 0; j < n; ++j)
         {
-            for (rocblas_int i = 0; i <= j; ++i)  // upper
+            for(rocblas_int i = 0; i <= j; ++i) // upper
             {
-                A[i + j*lda] = rand_value<T>( dist );
+                A[i + j * lda] = rand_value<T>(dist);
             }
         }
     }
-    else if (uplo == rocblas_fill_full)
+    else if(uplo == rocblas_fill_full)
     {
-        for (rocblas_int j = 0; j < n; ++j)
+        for(rocblas_int j = 0; j < n; ++j)
         {
-            A[ j + j*lda ] = rand_value<T>( dist );  // diagonal
-            for (rocblas_int i = j+1; i < n; ++i)  // strictly lower
+            A[j + j * lda] = rand_value<T>(dist); // diagonal
+            for(rocblas_int i = j + 1; i < n; ++i) // strictly lower
             {
-                A[i + j*lda] = rand_value<T>( dist );
-                A[j + i*lda] = A[i + j*lda];
+                A[i + j * lda] = rand_value<T>(dist);
+                A[j + i * lda] = A[i + j * lda];
             }
         }
     }
@@ -205,59 +204,56 @@ void syrand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
 // todo: pass dist into routine, with default = uniform [-1, 1]?
 //
 template <typename T>
-void hbrand( rocblas_int n, rocblas_int kl, rocblas_int ku,
-             T* Aband, rocblas_int ldab )
+void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int ldab)
 {
-    using S = decltype( std::real( T{} ) );
-    std::uniform_real_distribution<S> dist( S(-1), S(1) );
+    using S = decltype(std::real(T{}));
+    std::uniform_real_distribution<S> dist(S(-1), S(1));
 
-    if (n < 0 || kl < 0 || ku < 0 || ldab < kl + ku + 1)
+    if(n < 0 || kl < 0 || ku < 0 || ldab < kl + ku + 1)
         throw rocblas_status_invalid_size;
-    if (! Aband)
+    if(!Aband)
         throw rocblas_status_invalid_pointer;
 
     // Index of main diagonal.
     rocblas_int idiag = ku;
 
-    for (rocblas_int j = 0; j < n; ++j)
+    for(rocblas_int j = 0; j < n; ++j)
     {
         // Diagonal is real.
         // Random on [-1, 1].
-        Aband[idiag + j*ldab] = rand_value<S>( dist );
+        Aband[idiag + j * ldab] = rand_value<S>(dist);
 
-        if (kl >= ku)
+        if(kl >= ku)
         {
             // Fill in lower band and copy conjugate to upper band.
             // k is index of diagonal, k > 0 is a subdiagonal, k < 0 is a superdiagonal.
             // idiag+k is row index in Aband array. A[ i, j ] is Aband[ idiag+j+k, j ].
-            for (rocblas_int k = 1; k < kl + 1 && k + j < n; ++k)
+            for(rocblas_int k = 1; k < kl + 1 && k + j < n; ++k)
             {
                 // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
-                Aband[idiag + k + j*ldab] = rand_value<T>( dist );
+                Aband[idiag + k + j * ldab] = rand_value<T>(dist);
 
                 // Within the requested ku bandwidth, copy conj of lower band
                 // to upper band, A{j, j+k} = conj( A{j+k, j} ).
-                if (k < ku)
+                if(k < ku)
                 {
-                    Aband[idiag - k + (j + k)*ldab]
-                        = sconj( Aband[idiag + k + j*ldab] );
+                    Aband[idiag - k + (j + k) * ldab] = sconj(Aband[idiag + k + j * ldab]);
                 }
             }
         }
         else // kl < ku
         {
             // Fill in upper band and copy conjugate to lower band.
-            for (rocblas_int k = 1; k < ku + 1 && k + j < n; ++k)
+            for(rocblas_int k = 1; k < ku + 1 && k + j < n; ++k)
             {
                 // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
-                Aband[idiag - k + (j + k)*ldab] = rand_value<T>( dist );
+                Aband[idiag - k + (j + k) * ldab] = rand_value<T>(dist);
 
                 // Within the requested kl bandwidth, copy conj of upper band
                 // to lower band, A{j, j+k} = conj( A{j+k, j} ).
-                if (k < kl)
+                if(k < kl)
                 {
-                    Aband[idiag + k + j*ldab]
-                        = sconj( Aband[idiag - k + (j + k)*ldab] );
+                    Aband[idiag + k + j * ldab] = sconj(Aband[idiag - k + (j + k) * ldab]);
                 }
             }
         }
@@ -265,19 +261,19 @@ void hbrand( rocblas_int n, rocblas_int kl, rocblas_int ku,
 
     // Mark entries outside the band structure as nan,
     // to ensure we don't use them.
-    for (rocblas_int j = 0; j < ku; ++j)
+    for(rocblas_int j = 0; j < ku; ++j)
     {
-        for (rocblas_int k = 0; k < ku - j; ++k)
+        for(rocblas_int k = 0; k < ku - j; ++k)
         {
-            Aband[k + j*ldab] = nan( "" );
+            Aband[k + j * ldab] = nan("");
         }
     }
     // For lower band, work from right-most column (n-1) to left.
-    for (rocblas_int j = 0; j < kl; ++j)
+    for(rocblas_int j = 0; j < kl; ++j)
     {
-        for (rocblas_int k = j; k < kl; ++k)
+        for(rocblas_int k = j; k < kl; ++k)
         {
-            Aband[idiag + 1 + k + (n - 1 - j)*ldab] = nan( "" );
+            Aband[idiag + 1 + k + (n - 1 - j) * ldab] = nan("");
         }
     }
 }
