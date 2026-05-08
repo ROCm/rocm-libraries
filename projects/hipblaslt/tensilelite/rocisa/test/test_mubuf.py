@@ -49,11 +49,14 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture(scope="module", autouse=True)
 def _isa_context():
     import os
+    import shutil
 
     rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
-    assembler = os.path.normpath(os.path.join(rocm_path, "bin", "amdclang++"))
-    if os.name == "nt" and not assembler.endswith(".exe"):
-        assembler += ".exe"
+    search_path = os.pathsep.join([
+        os.path.join(rocm_path, "bin"),
+        os.path.join(rocm_path, "lib", "llvm", "bin"),
+    ])
+    assembler = shutil.which("amdclang++", path=search_path) or "amdclang++"
     rocisa.rocIsa.getInstance().init(_ISA, assembler, False)
     rocisa.rocIsa.getInstance().setKernel(_ISA, 32)
 
