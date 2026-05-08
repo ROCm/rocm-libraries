@@ -88,7 +88,7 @@ Golden data uses the existing format already established by `LoadGraphAndTensors
 {Operation}/{Layout}/{DataType}/{TestName}.tensor{uid}.bin   # Raw tensor data, one file per UID
 ```
 
-For example, `BatchnormFwdInference/nchw/fp32/Small` is a batchnorm inference test with small tensors in NCHW layout at fp32 precision:
+For example, the file `Small.json` in `BatchnormFwdInference/nchw/fp32/` is a batchnorm inference test with small tensors in NCHW layout at fp32 precision:
 
 ```
 BatchnormFwdInference/nchw/fp32/
