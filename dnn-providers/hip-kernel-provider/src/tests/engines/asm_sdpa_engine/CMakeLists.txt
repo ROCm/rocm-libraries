@@ -13,7 +13,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
 
 # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
 target_include_directories(hip_kernel_provider_tests PRIVATE
-    ${CMAKE_CURRENT_BINARY_DIR}/../../engines/asm_sdpa_engine/generated
+    ${CMAKE_CURRENT_BINARY_DIR}/../../../engines/asm_sdpa_engine/generated
 )
 
 # Ensure codegen runs before compiling the tests
