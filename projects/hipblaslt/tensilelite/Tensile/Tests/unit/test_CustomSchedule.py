@@ -24,7 +24,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
-from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidationContext, ValidationConcern, active_concerns
+from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidationContext
 from Tensile.Common import IsaVersion
 from cms_test_utils import make_mock_id_map, make_mock_mfma_code
 
@@ -126,32 +126,6 @@ class TestCustomScheduleValidation:
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert not has_schedule
         assert schedule_info is None
-
-    def test_active_concerns_gfx950_with_packs(self):
-        """gfx950 kernel with packs includes PACK_DATA_READY."""
-        kernel = create_base_kernel()
-        idmap = {"LRA0": [], "PackA0": [], "GRA": [], "GRIncA": [], "SYNC": []}
-        concerns = active_concerns(kernel, idmap)
-        assert ValidationConcern.PACK_DATA_READY in concerns
-        assert ValidationConcern.LR_DATA_READY in concerns
-        assert ValidationConcern.INSTRUCTION_ORDERING in concerns
-        assert ValidationConcern.SCHEDULE_COMPLETENESS in concerns
-        assert ValidationConcern.SCALAR_REGISTER_SAFETY in concerns
-
-    def test_active_concerns_gfx950_tf32(self):
-        """gfx950 kernel with TF32 includes QUAD_CYCLE_TIMING."""
-        kernel = create_base_kernel()
-        kernel["UseF32XEmulation"] = True
-        idmap = {"LRA0": [], "PackA0": [], "GRA": []}
-        concerns = active_concerns(kernel, idmap)
-        assert ValidationConcern.QUAD_CYCLE_TIMING in concerns
-
-    def test_active_concerns_unknown_isa(self):
-        """Unknown ISA returns empty set (graceful fallback)."""
-        kernel = create_base_kernel()
-        kernel["ISA"] = (99, 99, 99)
-        concerns = active_concerns(kernel, {})
-        assert concerns == set()
 
 class TestSchedulePositionOrdering:
     """Test that SchedulePosition comparison handles vmfma_index=-1 correctly.

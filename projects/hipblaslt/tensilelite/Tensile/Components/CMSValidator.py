@@ -36,7 +36,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from collections import defaultdict
-from enum import Enum, auto
+from enum import Enum
 from typing import TYPE_CHECKING, ClassVar, Dict, List, Optional, Tuple, Union
 
 from rocisa.instruction import (
@@ -82,92 +82,6 @@ if TYPE_CHECKING:
 # any realistic schedule size (num_vmfma is typically ~48-200).
 POSITION_INF = SchedulePosition(loop_index=9_999, vmfma_index=9_999, sub_index=9_999)
 POSITION_NEG_INF = SchedulePosition(loop_index=-9_999, vmfma_index=-9_999, sub_index=-9_999)
-
-class ValidationConcern(Enum):
-    """Abstract correctness properties the validator must check.
-
-    Each concern is a unit of coverage tracking — if isValid returns True,
-    every required concern was checked by at least one rule.
-    """
-    # Universal (any ISA)
-    INSTRUCTION_ORDERING = auto()
-    SCHEDULE_COMPLETENESS = auto()
-    # Data readiness
-    LR_DATA_READY = auto()
-    PACK_DATA_READY = auto()
-    # LDS coherence
-    LDS_WRITE_AFTER_READ = auto()
-    LDS_READ_AFTER_WRITE = auto()
-    # DTL=0 specific
-    LW_ORDERING = auto()
-    GR_VGPR_READY = auto()
-    # Scalar safety
-    SCALAR_REGISTER_SAFETY = auto()
-    # Timing
-    QUAD_CYCLE_TIMING = auto()
-
-
-# All concerns that kernels on a given ISA can require.
-ISA_CONCERN_CATALOG: dict[tuple, set[ValidationConcern]] = {
-    (9, 5, 0): {    # CDNA 4 (gfx950)
-        ValidationConcern.INSTRUCTION_ORDERING,
-        ValidationConcern.SCHEDULE_COMPLETENESS,
-        ValidationConcern.LR_DATA_READY,
-        ValidationConcern.PACK_DATA_READY,
-        ValidationConcern.LDS_WRITE_AFTER_READ,
-        ValidationConcern.LDS_READ_AFTER_WRITE,
-        ValidationConcern.SCALAR_REGISTER_SAFETY,
-        ValidationConcern.QUAD_CYCLE_TIMING,
-    },
-}
-
-
-def active_concerns(kernel: dict, idmap: dict) -> set[ValidationConcern]:
-    """Determine which concerns must be covered for this specific kernel.
-
-    Intersects kernel-derived requirements with the ISA's concern catalog.
-    Returns an empty set if the ISA is not in the catalog (graceful fallback
-    for ISAs that haven't been characterized yet).
-    """
-    if "ISA" not in kernel:
-        return set()  # No ISA specified — no concern-based validation
-    isa = tuple(kernel["ISA"])
-    if isa not in ISA_CONCERN_CATALOG:
-        return set()  # Unknown ISA — no concern-based validation
-    isa_concerns = ISA_CONCERN_CATALOG[isa]
-
-    active = {
-        ValidationConcern.INSTRUCTION_ORDERING,
-        ValidationConcern.SCHEDULE_COMPLETENESS,
-    }
-
-    has_local_reads = any(k.startswith("LR") and not k.startswith("LRS") for k in idmap)
-    if has_local_reads:
-        active.add(ValidationConcern.LR_DATA_READY)
-
-    has_packs = any(k.startswith("Pack") for k in idmap)
-    if has_packs:
-        active.add(ValidationConcern.PACK_DATA_READY)
-
-    dtl = kernel.get("DirectToLds", 0)
-    if dtl:
-        active.add(ValidationConcern.LDS_WRITE_AFTER_READ)
-        active.add(ValidationConcern.LDS_READ_AFTER_WRITE)
-    else:
-        active.add(ValidationConcern.LW_ORDERING)
-        active.add(ValidationConcern.GR_VGPR_READY)
-        active.add(ValidationConcern.LDS_WRITE_AFTER_READ)
-        active.add(ValidationConcern.LDS_READ_AFTER_WRITE)
-
-    has_grinc = any(k.startswith("GRInc") for k in idmap)
-    if has_grinc:
-        active.add(ValidationConcern.SCALAR_REGISTER_SAFETY)
-
-    if has_packs and kernel.get("UseF32XEmulation", False):
-        active.add(ValidationConcern.QUAD_CYCLE_TIMING)
-
-    return active & isa_concerns
-
 
 # --- Loop Names ---
 MAIN_LOOP_PREV = "ML-1"
@@ -3956,22 +3870,10 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> None:
 
     Note 2: A raised ``ValidationError`` is not proof that the schedule
     is invalid. It may be a false positive.
-
-    Rule dispatch uses the concern-based framework: ``active_concerns()``
-    determines which ``ValidationConcern`` values apply to this kernel,
-    and only rules whose concerns intersect are executed.
     """
     kernel = context.kernel
 
     context.mfma_reorder = scheduleInfo.mfmaReorder or []
-
-    # Determine required concerns from kernel config + ISA catalog.
-    required = active_concerns(kernel, context.id_map)
-
-    # Unknown/missing ISA (not in catalog) → run all rules (legacy behavior).
-    # This ensures tests and kernels without ISA metadata get full validation.
-    if not required:
-        required = set(ValidationConcern)
 
     # Cross-scheduler comparison rule. Only fires when both default and CMS
     # captures are present in the context (i.e. capture was enabled when
