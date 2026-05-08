@@ -119,6 +119,8 @@ def main():
 
     problems = parse_problems(args.problems)
     num_splits_list = [int(x) for x in args.num_splits.split(",")]
+    if not all(n > 0 for n in num_splits_list):
+        parser.error("--num-splits values must all be positive integers")
     build_dir = Path(args.build_dir).resolve()
 
     if args.clean and build_dir.exists():
@@ -178,7 +180,7 @@ def main():
             except Exception as e:
                 print(f"  Warning: Failed to load runner: {e}")
                 setup.success = False
-                
+
     if args.compile_only:
         print(f"\n{'=' * 70}")
         print(f"  Compile-only mode. {built} kernels ready.")
@@ -202,27 +204,24 @@ def main():
 
     for prob_idx, prob in enumerate(problems):
         first_dtype = all_configs[0].data_type if all_configs else "fp16"
-        first_mask = all_configs[0].mask if all_configs else "no"
         np_dtype = dtype_map.get(first_dtype, np.float16)
         Q = (np.random.randn(*prob.q_shape()) * 0.1).astype(np_dtype)
         K = (np.random.randn(*prob.k_shape()) * 0.1).astype(np_dtype)
         V = (np.random.randn(*prob.v_shape()) * 0.1).astype(np_dtype)
 
         _MASK_INT = {"no": 0, "top_left": 1, "bottom_right": 2, "generic": 3}
-        first_mask_int = _MASK_INT.get(first_mask, 0)
+        ref_cache = {}  # mask_int -> ref array
 
-        ref = None
-        if args.verify:
-            ref = cpu_attention_fwd(
-                Q.astype(np.float32),
-                K.astype(np.float32),
-                V.astype(np.float32),
-                prob.scale,
-                mask_type=first_mask_int,
-            )
-
-        h_str = f"H={prob.nhead_q}" if prob.nhead_q == prob.nhead_k else f"Hq={prob.nhead_q} Hk={prob.nhead_k}"
-        s_str = f"S={prob.seqlen_q}" if prob.seqlen_q == prob.seqlen_k else f"Sq={prob.seqlen_q} Sk={prob.seqlen_k}"
+        h_str = (
+            f"H={prob.nhead_q}"
+            if prob.nhead_q == prob.nhead_k
+            else f"Hq={prob.nhead_q} Hk={prob.nhead_k}"
+        )
+        s_str = (
+            f"S={prob.seqlen_q}"
+            if prob.seqlen_q == prob.seqlen_k
+            else f"Sq={prob.seqlen_q} Sk={prob.seqlen_k}"
+        )
         prob_str = f"B={prob.batch} {h_str} {s_str} D={prob.hdim_q}"
         print(f"\n  Problem [{prob_idx}]: {prob_str}")
         print(
@@ -284,12 +283,25 @@ def main():
                 if is_causal and result.time_ms > 0:
                     sq, sk = prob.seqlen_q, prob.seqlen_k
                     causal_ratio = (min(sq, sk) + 1) / (2.0 * sk)
-                    tflops = prob.num_ops * causal_ratio / (result.time_ms * 1e-3) / 1e12
+                    tflops = (
+                        prob.num_ops * causal_ratio / (result.time_ms * 1e-3) / 1e12
+                    )
 
                 max_err = 0.0
                 status = "OK"
-                if ref is not None and result.output is not None:
-                    max_err = float(np.abs(result.output.astype(np.float32) - ref).max())
+                if args.verify and result.output is not None:
+                    if mask_int not in ref_cache:
+                        ref_cache[mask_int] = cpu_attention_fwd(
+                            Q.astype(np.float32),
+                            K.astype(np.float32),
+                            V.astype(np.float32),
+                            prob.scale,
+                            mask_type=mask_int,
+                        )
+                    ref = ref_cache[mask_int]
+                    max_err = float(
+                        np.abs(result.output.astype(np.float32) - ref).max()
+                    )
                     status = "PASS" if max_err < 0.01 else "FAIL"
 
                 splits_tag = f"  [ns={ns}]" if api_family == "splitkv" else ""
@@ -349,8 +361,16 @@ def main():
             best = max(results, key=lambda x: x["tflops"])
             prob = json.loads(key)
             ns_tag = f"  [ns={best['num_splits']}]" if best.get("num_splits") else ""
-            h_str = f"H={prob['nhead_q']}" if prob['nhead_q'] == prob['nhead_k'] else f"Hq={prob['nhead_q']} Hk={prob['nhead_k']}"
-            s_str = f"S={prob['seqlen_q']}" if prob['seqlen_q'] == prob['seqlen_k'] else f"Sq={prob['seqlen_q']} Sk={prob['seqlen_k']}"
+            h_str = (
+                f"H={prob['nhead_q']}"
+                if prob["nhead_q"] == prob["nhead_k"]
+                else f"Hq={prob['nhead_q']} Hk={prob['nhead_k']}"
+            )
+            s_str = (
+                f"S={prob['seqlen_q']}"
+                if prob["seqlen_q"] == prob["seqlen_k"]
+                else f"Sq={prob['seqlen_q']} Sk={prob['seqlen_k']}"
+            )
             print(
                 f"    B={prob['batch']} {h_str}"
                 f" {s_str} D={prob['hdim_q']}"

@@ -16,6 +16,7 @@ Usage:
     result = runner.run(Q, K, V, problem)
 """
 
+import copy
 import ctypes
 import json
 import os
@@ -1225,8 +1226,6 @@ def _make_splitkv_combine_config(splitkv_cfg: FmhaKernelConfig) -> FmhaKernelCon
     final output.  Must be in the same .so as the split kernel for the
     2-stage splitkv pipeline (same pattern as bwd dot_do_o + dq_dk_dv).
     """
-    import copy
-
     comb = copy.copy(splitkv_cfg)
     comb.family = "fwd_splitkv_combine"
     comb.pipeline = "splitkv_combine"
@@ -1262,8 +1261,6 @@ def _make_bwd_dot_do_o_config(dq_cfg: FmhaKernelConfig) -> FmhaKernelConfig:
     Tile/wave/warp are fixed; signature fields (hdim, dtype, mode, features,
     padding) are inherited from the dq_dk_dv config.
     """
-    import copy
-
     dot = copy.copy(dq_cfg)
     dot.family = "bwd_dot_do_o"
     dot.pipeline = "qr"
