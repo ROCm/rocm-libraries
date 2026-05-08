@@ -466,7 +466,6 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
-        SKIP_IF_WORKAROUND_ISSUE_5409();
 
         const auto& [convTestCase, doBias, activTestCase]
             = DeterministicTestBase<FusedConvTestCase>::GetParam();
@@ -525,6 +524,11 @@ protected:
         yTensorAttr->set_output(true);
 
         auto result = graphObj.build(_handle);
+        // Inline rather than the IntegrationGraphVerificationHarness hook
+        // pattern: this fixture inherits from a different base
+        // (DeterministicTestBase), so the harness's
+        // shouldSkipOnEngineConfigResult override isn't available here.
+        SKIP_IF_WORKAROUND_ISSUE_6979(result);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
         GraphTensorBundle bundle1;

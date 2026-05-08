@@ -7,13 +7,14 @@ operation:
   descriptor_type:
     enum_name: "HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT"
 
-  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT"
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE"
 
   frontend:
     packer_function: "createBatchnormInferenceVarianceExtOperation"
     unpacker_function: "unpackBatchnormInferenceVarianceExtOperation"
     node_class: "BatchnormInferenceNodeVarianceExt"
     attributes_class: "BatchnormInferenceAttributesVarianceExt"
+    attributes_filename: "BatchnormInferenceAttributesVarianceExt"
 
     inputs:
       - name: "x"
@@ -69,49 +70,43 @@ operation:
     graph_return_type: "single"
     graph_return_outputs:
       - "y"
+    node_type_enum: "NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT"
 
   tensor_fields:
     - name: "x"
       fbs_field: "x_tensor_uid"
       attr_suffix: "X_EXT"
       required: true
-      frontend_getter: "get_x()"
 
     - name: "mean"
       fbs_field: "mean_tensor_uid"
       attr_suffix: "MEAN_EXT"
       required: true
-      frontend_getter: "get_mean()"
 
     - name: "variance"
       fbs_field: "variance_tensor_uid"
       attr_suffix: "VARIANCE_EXT"
       required: true
-      frontend_getter: "get_variance()"
 
     - name: "scale"
       fbs_field: "scale_tensor_uid"
       attr_suffix: "SCALE_EXT"
       required: true
-      frontend_getter: "get_scale()"
 
     - name: "bias"
       fbs_field: "bias_tensor_uid"
       attr_suffix: "BIAS_EXT"
       required: true
-      frontend_getter: "get_bias()"
 
     - name: "y"
       fbs_field: "y_tensor_uid"
       attr_suffix: "Y_EXT"
       required: true
-      frontend_getter: "get_y()"
 
     - name: "epsilon"
       fbs_field: "epsilon_tensor_uid"
       attr_suffix: "EPSILON_EXT"
       required: true
-      frontend_getter: "get_epsilon()"
 
   data_fields: []
 

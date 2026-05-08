@@ -9,11 +9,15 @@ from codegen.models import (
     DataField,
     EnumDef,
     EnumValue,
+    ExtraDataTypeField,
     FrontendConfig,
     FrontendTensorConfig,
     OperationConfig,
     TensorArrayField,
     TensorField,
+    _derive_frontend_setter_name,
+    _frontend_member_name,
+    _frontend_uses_member_access,
     _to_camel_case,
     _to_snake_case,
 )
@@ -259,28 +263,13 @@ class TestTensorField:
         tf = make_tensor_field(name="x")
         assert tf.getter_name == "getXDesc"
 
-    def test_frontend_setter_from_getter(self):
-        tf = make_tensor_field(name="x", frontend_getter="get_x()")
+    def test_frontend_setter_derived_from_name(self):
+        tf = make_tensor_field(name="x")
         assert tf.frontend_setter == "set_x"
 
-    def test_frontend_setter_from_getter_multi_word(self):
-        tf = make_tensor_field(
-            name="inv_variance", frontend_getter="get_inv_variance()"
-        )
+    def test_frontend_setter_derived_from_name_multi_word(self):
+        tf = make_tensor_field(name="inv_variance")
         assert tf.frontend_setter == "set_inv_variance"
-
-    def test_frontend_setter_falls_back_to_name(self):
-        tf = make_tensor_field(name="x", frontend_getter="")
-        assert tf.frontend_setter == "set_x"
-
-    def test_frontend_setter_falls_back_to_name_multi_word(self):
-        tf = make_tensor_field(name="inv_variance", frontend_getter="")
-        assert tf.frontend_setter == "set_inv_variance"
-
-    def test_frontend_setter_non_get_prefix(self):
-        """When frontend_getter does not start with 'get_', return base as-is."""
-        tf = make_tensor_field(name="x", frontend_getter="fetch_x()")
-        assert tf.frontend_setter == "fetch_x"
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +327,7 @@ class TestDataField:
         "field_type, expected",
         [
             ("scalar_float", True),
+            ("scalar_int32", True),
             ("scalar_int64", True),
             ("bool", True),
             ("vector_int64", False),
@@ -381,7 +371,7 @@ class TestDataField:
         df = make_data_field(type="bool", required=True, fbs_optional=True)
         assert df.is_optional_scalar is True
 
-    # --- frontend_getter_returns_optional ---
+    # --- frontend_getter_returns_optional (deprecated, Phase 0.8 compat) ---
 
     def test_frontend_getter_returns_optional_default_false(self):
         df = make_data_field()
@@ -390,6 +380,26 @@ class TestDataField:
     def test_frontend_getter_returns_optional_set_true(self):
         df = make_data_field(frontend_getter_returns_optional=True)
         assert df.frontend_getter_returns_optional is True
+
+    # --- frontend_returns_optional (replaces frontend_getter_returns_optional) ---
+
+    def test_frontend_returns_optional_default_false(self):
+        """Default behavior: frontend getter returns plain T (not optional)."""
+        df = make_data_field()
+        assert df.frontend_returns_optional is False
+
+    def test_frontend_returns_optional_follows_fbs_optional_true(self):
+        """When fbs_optional is true, the frontend getter returns optional."""
+        df = make_data_field(fbs_optional=True)
+        assert df.frontend_returns_optional is True
+
+    def test_frontend_returns_optional_ignores_legacy_flag(self):
+        """The legacy frontend_getter_returns_optional flag no longer drives behavior."""
+        df = make_data_field(
+            fbs_optional=False,
+            frontend_getter_returns_optional=True,
+        )
+        assert df.frontend_returns_optional is False
 
     # --- effective_sentinel_value ---
 
@@ -437,6 +447,7 @@ class TestDataField:
         "field_type, expected",
         [
             ("scalar_float", "float"),
+            ("scalar_int32", "int32_t"),
             ("scalar_int64", "int64_t"),
             ("bool", "bool"),
         ],
@@ -461,6 +472,7 @@ class TestDataField:
             ("vector_int64", "HIPDNN_TYPE_INT64"),
             ("enum", "HIPDNN_TYPE_INT64"),
             ("scalar_float", "HIPDNN_TYPE_FLOAT"),
+            ("scalar_int32", "HIPDNN_TYPE_INT32"),
             ("scalar_int64", "HIPDNN_TYPE_INT64"),
             ("bool", "HIPDNN_TYPE_BOOLEAN"),
         ],
@@ -563,6 +575,51 @@ class TestDataField:
         df = make_data_field(frontend_getter="fetch_mode()")
         assert df.frontend_setter_name == "fetch_mode"
 
+    # --- frontend_uses_member_access / frontend_member_name ---
+
+    def test_frontend_uses_member_access_true_for_bare_name(self):
+        """A frontend_getter without parens indicates a public member."""
+        df = make_data_field(frontend_getter="alibi_mask")
+        assert df.frontend_uses_member_access is True
+        assert df.frontend_member_name == "alibi_mask"
+
+    def test_frontend_uses_member_access_false_for_method_call(self):
+        """A frontend_getter with parens indicates a getter method."""
+        df = make_data_field(frontend_getter="get_padding()")
+        assert df.frontend_uses_member_access is False
+
+    def test_frontend_uses_member_access_false_when_unset(self):
+        """No frontend_getter means default setter-call codegen."""
+        df = make_data_field(frontend_getter="")
+        assert df.frontend_uses_member_access is False
+
+    def test_frontend_member_name_strips_trailing_parens(self):
+        """frontend_member_name is only meaningful for member access, but
+        defensively strips any trailing ``()`` so callers get a clean name."""
+        df = make_data_field(frontend_getter="dropout_probability")
+        assert df.frontend_member_name == "dropout_probability"
+
+    # --- mode_converter_returns_optional ---
+
+    def test_mode_converter_returns_optional_true_for_sentinel_required(self):
+        """Mode converters return optional<T> when the enum has a sentinel."""
+        ed = EnumDef(values=[EnumValue(name="NOT_SET", value=0, sentinel=True)])
+        df = make_data_field(type="mode", enum_def=ed)
+        assert df.effective_mode_sentinel == "required"
+        assert df.mode_converter_returns_optional is True
+
+    def test_mode_converter_returns_optional_false_for_sentinel_none(self):
+        """mode_sentinel: 'none' means the converter returns plain T —
+        the packer must skip the optional unwrap."""
+        df = make_data_field(type="mode", mode_sentinel="none")
+        assert df.mode_converter_returns_optional is False
+
+    def test_mode_converter_returns_optional_false_for_non_mode_field(self):
+        """Only mode fields have a backend converter; vector/scalar fields
+        always return False."""
+        df = make_data_field(type="vector_int64")
+        assert df.mode_converter_returns_optional is False
+
     # --- has_enum_def ---
 
     def test_has_enum_def_true(self):
@@ -578,6 +635,64 @@ class TestDataField:
         ed = EnumDef(values=[])
         df = make_data_field(enum_def=ed)
         assert df.has_enum_def is False
+
+    # --- mode_sentinel / sentinel-check policy (Phase 0.3) ---
+
+    def test_has_sentinel_in_enum_def_true_via_sentinel_flag(self):
+        """A value with sentinel=True is detected as a sentinel."""
+        ed = EnumDef(
+            values=[
+                EnumValue(name="NOT_SET", value=0, sentinel=True),
+                EnumValue(name="ADD", value=1),
+            ]
+        )
+        df = make_data_field(type="mode", enum_def=ed)
+        assert df.has_sentinel_in_enum_def is True
+
+    def test_has_sentinel_in_enum_def_true_via_conventional_name(self):
+        """A value named NOT_SET / UNSET is detected even without sentinel=True."""
+        ed = EnumDef(
+            values=[EnumValue(name="NOT_SET", value=0), EnumValue(name="ADD", value=1)]
+        )
+        df = make_data_field(type="mode", enum_def=ed)
+        assert df.has_sentinel_in_enum_def is True
+
+    def test_has_sentinel_in_enum_def_false_when_no_sentinel(self):
+        """An enum_def with no sentinel-flagged or sentinel-named entries returns False."""
+        ed = EnumDef(
+            values=[EnumValue(name="ADD", value=0), EnumValue(name="MUL", value=1)]
+        )
+        df = make_data_field(type="mode", enum_def=ed)
+        assert df.has_sentinel_in_enum_def is False
+
+    def test_emit_mode_sentinel_check_required_with_sentinel(self):
+        """mode_sentinel='required' with a sentinel emits the finalize check."""
+        ed = EnumDef(values=[EnumValue(name="NOT_SET", value=0, sentinel=True)])
+        df = make_data_field(type="mode", enum_def=ed, mode_sentinel="required")
+        assert df.effective_mode_sentinel == "required"
+        assert df.emit_mode_sentinel_check is True
+
+    def test_emit_mode_sentinel_check_explicit_none_skips_check(self):
+        """mode_sentinel='none' suppresses the finalize check even with a sentinel."""
+        ed = EnumDef(values=[EnumValue(name="NOT_SET", value=0, sentinel=True)])
+        df = make_data_field(type="mode", enum_def=ed, mode_sentinel="none")
+        assert df.effective_mode_sentinel == "none"
+        assert df.emit_mode_sentinel_check is False
+
+    def test_emit_mode_sentinel_check_no_sentinel_no_emit_by_default(self):
+        """Auto-detected 'none' (no sentinel + unset policy) does not emit the check."""
+        ed = EnumDef(
+            values=[EnumValue(name="ADD", value=0), EnumValue(name="MUL", value=1)]
+        )
+        df = make_data_field(type="mode", enum_def=ed, mode_sentinel=None)
+        assert df.effective_mode_sentinel == "none"
+        assert df.emit_mode_sentinel_check is False
+
+    def test_emit_mode_sentinel_check_optional_skips_when_no_sentinel(self):
+        """mode_sentinel='optional' is silent when there's no sentinel in enum_def."""
+        ed = EnumDef(values=[EnumValue(name="ADD", value=0)])
+        df = make_data_field(type="mode", enum_def=ed, mode_sentinel="optional")
+        assert df.emit_mode_sentinel_check is False
 
 
 # ---------------------------------------------------------------------------
@@ -603,6 +718,83 @@ class TestTensorArrayField:
             name="multi_word_field", fbs_field="mwf_uid", attr_name="ATTR"
         )
         assert taf.member_name == "_multi_word_fieldDescs"
+
+    def test_camel_name_snake_case(self):
+        taf = TensorArrayField(
+            name="peer_stats", fbs_field="peer_stats_tensor_uid", attr_name="ATTR"
+        )
+        assert taf.camel_name == "peerStats"
+
+    def test_camel_name_single_word(self):
+        taf = TensorArrayField(name="stats", fbs_field="stats_uid", attr_name="ATTR")
+        assert taf.camel_name == "stats"
+
+    def test_camel_name_matches_data_field_rule(self):
+        """TensorArrayField.camel_name must match DataField.camel_name behavior
+        (both delegate to _to_camel_case).
+        """
+        from codegen.models import _to_camel_case
+
+        for snake in ("peer_stats", "multi_word_field", "x", "a_b_c_d"):
+            taf = TensorArrayField(name=snake, fbs_field="x", attr_name="ATTR")
+            assert taf.camel_name == _to_camel_case(snake)
+
+    def test_frontend_setter_name_from_get_prefix(self):
+        taf = TensorArrayField(
+            name="peer_stats",
+            fbs_field="peer_stats_tensor_uid",
+            attr_name="ATTR",
+            frontend_getter="get_peer_stats()",
+        )
+        assert taf.frontend_setter_name == "set_peer_stats"
+
+    def test_frontend_setter_name_default(self):
+        taf = TensorArrayField(
+            name="peer_stats", fbs_field="peer_stats_tensor_uid", attr_name="ATTR"
+        )
+        assert taf.frontend_setter_name == "set_peer_stats"
+
+
+class TestExtraDataTypeField:
+    """Tests for ExtraDataTypeField computed properties."""
+
+    def test_member_access_true_for_bare_name(self):
+        edt = ExtraDataTypeField(
+            name="mma_core_mode", attr_name="ATTR", frontend_getter="mma_core_mode"
+        )
+        assert edt.frontend_uses_member_access is True
+        assert edt.frontend_member_name == "mma_core_mode"
+
+    def test_member_access_false_for_method_call(self):
+        edt = ExtraDataTypeField(
+            name="extra", attr_name="ATTR", frontend_getter="get_extra()"
+        )
+        assert edt.frontend_uses_member_access is False
+        assert edt.frontend_setter_name == "set_extra"
+
+    def test_setter_name_falls_back_to_name(self):
+        edt = ExtraDataTypeField(name="extra", attr_name="ATTR", frontend_getter="")
+        assert edt.frontend_setter_name == "set_extra"
+
+    def test_setter_name_non_get_prefix(self):
+        edt = ExtraDataTypeField(
+            name="extra", attr_name="ATTR", frontend_getter="fetch_extra()"
+        )
+        assert edt.frontend_setter_name == "fetch_extra"
+
+    def test_camel_name(self):
+        edt = ExtraDataTypeField(name="mma_core_mode", attr_name="ATTR")
+        assert edt.camel_name == "mmaCoreMode"
+
+    def test_effective_error_label_default(self):
+        edt = ExtraDataTypeField(name="mma_core_mode", attr_name="ATTR")
+        assert edt.effective_error_label == "mma_core_mode"
+
+    def test_effective_error_label_override(self):
+        edt = ExtraDataTypeField(
+            name="mma_core_mode", attr_name="ATTR", error_label="MMA Core"
+        )
+        assert edt.effective_error_label == "MMA Core"
 
 
 # ---------------------------------------------------------------------------
@@ -683,6 +875,42 @@ class TestFrontendConfig:
     def test_effective_attributes_include_all_empty(self):
         fc = FrontendConfig()
         assert fc.effective_attributes_include == ""
+
+    # --- effective_attributes_filename / _full (Phase 0.4) ---
+
+    def test_effective_attributes_filename_uses_explicit_override(self):
+        """attributes_filename YAML override wins over class-derived defaults."""
+        fc = make_frontend_config(
+            attributes_class="ConvFpropAttributes",
+            attributes_filename="MyCustomFile",
+        )
+        assert fc.effective_attributes_filename == "MyCustomFile"
+        assert fc.effective_attributes_filename_full == "MyCustomFileAttributes"
+
+    def test_effective_attributes_filename_default_strips_attributes_suffix(self):
+        """Without override, basename derives from attributes_class minus 'Attributes'."""
+        fc = make_frontend_config(
+            attributes_class="ConvFpropAttributes",
+            attributes_filename=None,
+        )
+        assert fc.effective_attributes_filename == "ConvFprop"
+        assert fc.effective_attributes_filename_full == "ConvFpropAttributes"
+
+    def test_effective_attributes_filename_default_falls_back_to_node_class(self):
+        """When attributes_class is empty, derive from node_class minus 'Node'."""
+        fc = make_frontend_config(
+            attributes_class="",
+            node_class="ConvolutionFpropNode",
+            attributes_filename=None,
+        )
+        assert fc.effective_attributes_filename == "ConvolutionFprop"
+        assert fc.effective_attributes_filename_full == "ConvolutionFpropAttributes"
+
+    def test_effective_attributes_filename_full_empty_when_unresolvable(self):
+        """No override, attributes_class, or node_class -> empty string (no spurious 'Attributes')."""
+        fc = FrontendConfig()
+        assert fc.effective_attributes_filename == ""
+        assert fc.effective_attributes_filename_full == ""
 
     # --- Input/output filtering ---
 
@@ -1327,21 +1555,14 @@ class TestTensorFieldFrontendMap:
         assert "x" in result
         assert result["x"].name == "x"
 
-    def test_getter_based_match(self):
-        """Frontend getter 'get_x()' matches frontend tensor 'x' via getter_name."""
-        tensor_fields = [
-            make_tensor_field(name="tensor_x", frontend_getter="get_input()")
-        ]
-        inputs = [make_frontend_tensor_config(name="input", getter_name="get_input")]
-        frontend = make_frontend_config(inputs=inputs)
-        cfg = make_minimal_config(tensor_fields=tensor_fields, frontend=frontend)
-        result = cfg.tensor_field_frontend_map
-        assert "tensor_x" in result
-        assert result["tensor_x"].name == "input"
-
     def test_abbreviated_in_to_input(self):
-        """Backend 'in_0' maps to frontend 'input_0' via abbreviation matching."""
-        tensor_fields = [make_tensor_field(name="in_0", frontend_getter="get_in_0()")]
+        """Backend 'in_0' maps to frontend 'input_0' via abbreviation matching.
+
+        No ``frontend_getter`` override is set — this exercises the
+        fallback path explicitly. With C5 the override layer would beat
+        abbreviation fallback if set.
+        """
+        tensor_fields = [make_tensor_field(name="in_0")]
         inputs = [
             make_frontend_tensor_config(name="input_0", getter_name="get_input_0")
         ]
@@ -1352,8 +1573,12 @@ class TestTensorFieldFrontendMap:
         assert result["in_0"].name == "input_0"
 
     def test_abbreviated_out_to_output(self):
-        """Backend 'out_0' maps to frontend 'output_0' via abbreviation matching."""
-        tensor_fields = [make_tensor_field(name="out_0", frontend_getter="get_out_0()")]
+        """Backend 'out_0' maps to frontend 'output_0' via abbreviation matching.
+
+        No ``frontend_getter`` override is set — this exercises the
+        fallback path explicitly.
+        """
+        tensor_fields = [make_tensor_field(name="out_0")]
         outputs = [
             make_frontend_tensor_config(name="output_0", getter_name="get_output_0")
         ]
@@ -1364,10 +1589,14 @@ class TestTensorFieldFrontendMap:
         assert result["out_0"].name == "output_0"
 
     def test_no_match_excluded_from_map(self):
-        """Tensor fields without a frontend match are absent from the map."""
+        """Tensor fields without a frontend_getter override AND without a
+        name-match (or abbreviation) against frontend inputs/outputs are
+        absent from the map. With C5, an explicit override always
+        synthesizes an entry — coverage of that path lives in
+        ``test_override_synthesizes_when_no_frontend_tensor``."""
         tensor_fields = [
             make_tensor_field(name="x", frontend_getter="get_x()"),
-            make_tensor_field(name="unmatched", frontend_getter="get_unmatched()"),
+            make_tensor_field(name="unmatched"),
         ]
         inputs = [make_frontend_tensor_config(name="x")]
         frontend = make_frontend_config(inputs=inputs)
@@ -1398,6 +1627,73 @@ class TestTensorFieldFrontendMap:
         assert result["x"].name == "x"
         assert result["y"].name == "y"
 
+    # --- C5: tensor_fields[].frontend_getter override resolution ---
+
+    def test_override_synthesizes_when_no_frontend_tensor(self):
+        """An override resolves to a synthetic FrontendTensorConfig even
+        when no matching FrontendTensorConfig exists in
+        frontend.inputs/outputs. Setter is derived as set_<name> when the
+        getter follows the get_<name> convention; the synthetic carries
+        the override verbatim through effective_getter_name."""
+        tensor_fields = [
+            make_tensor_field(name="x", frontend_getter="get_x()"),
+            make_tensor_field(name="epsilon", frontend_getter="get_epsilon"),
+        ]
+        # Only x is a frontend input; epsilon is not graph I/O.
+        inputs = [make_frontend_tensor_config(name="x")]
+        frontend = make_frontend_config(inputs=inputs)
+        cfg = make_minimal_config(tensor_fields=tensor_fields, frontend=frontend)
+        result = cfg.tensor_field_frontend_map
+        assert "epsilon" in result
+        assert result["epsilon"].effective_getter_name == "get_epsilon"
+        assert result["epsilon"].effective_setter_name == "set_epsilon"
+
+    def test_override_beats_name_match(self):
+        """When both an override and a same-name FrontendTensorConfig
+        exist, the override wins. Explicit beats implicit."""
+        tensor_fields = [
+            make_tensor_field(name="x", frontend_getter="get_special"),
+        ]
+        inputs = [
+            make_frontend_tensor_config(name="x", getter_name="get_x"),
+            # The 'special' frontend tensor exists with the divergent name.
+            make_frontend_tensor_config(name="special", getter_name="get_special"),
+        ]
+        frontend = make_frontend_config(inputs=inputs)
+        cfg = make_minimal_config(tensor_fields=tensor_fields, frontend=frontend)
+        result = cfg.tensor_field_frontend_map
+        # Resolved entry uses get_special (the override) — not get_x.
+        assert result["x"].effective_getter_name == "get_special"
+
+    def test_sdpa_attn_mask_resolves_to_get_bias(self, sdpa_config):
+        """SDPA's attn_mask tensor_field carries a divergent override
+        (frontend_getter: 'get_bias()') because SdpaAttributes exposes
+        this tensor through the bias accessor. Asserts the divergence is
+        preserved end-to-end through the override path; without this test
+        only the integration render check would catch a regression
+        implicitly."""
+        result = sdpa_config.tensor_field_frontend_map
+        assert "attn_mask" in result
+        assert result["attn_mask"].effective_getter_name == "get_bias"
+        # Synthesized setter follows the get_<name> -> set_<name> rule.
+        assert result["attn_mask"].effective_setter_name == "set_bias"
+
+    def test_override_setter_derivation_for_non_get_prefix(self):
+        """When the override does NOT start with ``get_``, the synthetic
+        leaves setter_name blank — effective_setter_name then falls back
+        to ``set_<tensor_name>``. This keeps SDPA-style hand-maintained
+        bare-member accessors compatible."""
+        tensor_fields = [
+            make_tensor_field(name="bareflag", frontend_getter="bareflag"),
+        ]
+        frontend = make_frontend_config(
+            inputs=[make_frontend_tensor_config(name="other")]
+        )
+        cfg = make_minimal_config(tensor_fields=tensor_fields, frontend=frontend)
+        result = cfg.tensor_field_frontend_map
+        assert result["bareflag"].effective_getter_name == "bareflag"
+        assert result["bareflag"].effective_setter_name == "set_bareflag"
+
     # --- Reverse map ---
 
     def test_reverse_map_basic(self):
@@ -1412,10 +1708,14 @@ class TestTensorFieldFrontendMap:
         assert result == {"x": "x"}
 
     def test_reverse_map_abbreviated(self):
-        """Reverse map handles abbreviated name mappings correctly."""
+        """Reverse map handles abbreviated name mappings correctly.
+
+        No ``frontend_getter`` overrides are set so the abbreviation
+        fallback resolves both directions.
+        """
         tensor_fields = [
-            make_tensor_field(name="in_0", frontend_getter="get_in_0()"),
-            make_tensor_field(name="out_0", frontend_getter="get_out_0()"),
+            make_tensor_field(name="in_0"),
+            make_tensor_field(name="out_0"),
         ]
         inputs = [
             make_frontend_tensor_config(name="input_0", getter_name="get_input_0")
@@ -1434,10 +1734,13 @@ class TestTensorFieldFrontendMap:
         assert cfg.frontend_to_tensor_field_map == {}
 
     def test_reverse_map_partial_match(self):
-        """Unmatched tensors are absent from both maps."""
+        """Unmatched tensors (no override and no name/abbrev match) are
+        absent from both maps. Coverage of the override-synthesizes path
+        lives in ``test_override_synthesizes_when_no_frontend_tensor``.
+        """
         tensor_fields = [
             make_tensor_field(name="x", frontend_getter="get_x()"),
-            make_tensor_field(name="z", frontend_getter="get_z()"),
+            make_tensor_field(name="z"),
         ]
         inputs = [make_frontend_tensor_config(name="x")]
         frontend = make_frontend_config(inputs=inputs)
@@ -1545,3 +1848,76 @@ class TestTensorConstPrefix:
         """No constants_include derives prefix from operation name."""
         cfg = make_minimal_config()
         assert cfg.tensor_const_prefix == "K_TESTOP_"
+
+
+# ---------------------------------------------------------------------------
+# Module-level frontend naming helpers shared by DataField, TensorArrayField,
+# and ExtraDataTypeField.
+# ---------------------------------------------------------------------------
+
+
+class TestFrontendNamingHelpers:
+    """Tests for the shared frontend naming helper functions."""
+
+    # ------------------------------------------------------------------
+    # _derive_frontend_setter_name
+    # ------------------------------------------------------------------
+
+    def test_setter_from_get_with_parens(self):
+        """`get_foo()` -> `set_foo`."""
+        assert _derive_frontend_setter_name("get_foo()", "fallback") == "set_foo"
+
+    def test_setter_from_get_without_parens(self):
+        """`get_foo` (no parens) -> `set_foo`."""
+        assert _derive_frontend_setter_name("get_foo", "fallback") == "set_foo"
+
+    def test_setter_from_bare_member_name(self):
+        """A bare member name (no `get_` prefix, no parens) is returned as-is."""
+        assert _derive_frontend_setter_name("alibi_mask", "fallback") == "alibi_mask"
+
+    def test_setter_empty_uses_fallback(self):
+        """Empty getter -> `set_<fallback>`."""
+        assert _derive_frontend_setter_name("", "my_field") == "set_my_field"
+
+    def test_setter_no_get_prefix_returned_as_is(self):
+        """Non-empty getter without `get_` prefix is returned unmodified."""
+        assert (
+            _derive_frontend_setter_name("weird_no_get_prefix", "fallback")
+            == "weird_no_get_prefix"
+        )
+
+    # ------------------------------------------------------------------
+    # _frontend_uses_member_access
+    # ------------------------------------------------------------------
+
+    def test_member_access_empty_is_false(self):
+        """Empty getter -> not member access."""
+        assert _frontend_uses_member_access("") is False
+
+    def test_member_access_method_call_is_false(self):
+        """Method-call syntax `get_foo()` -> not member access."""
+        assert _frontend_uses_member_access("get_foo()") is False
+
+    def test_member_access_bare_name_is_true(self):
+        """Bare name `foo` -> member access."""
+        assert _frontend_uses_member_access("foo") is True
+
+    def test_member_access_name_with_parens_is_false(self):
+        """`foo()` -> not member access (it has parens)."""
+        assert _frontend_uses_member_access("foo()") is False
+
+    # ------------------------------------------------------------------
+    # _frontend_member_name
+    # ------------------------------------------------------------------
+
+    def test_member_name_bare(self):
+        """Bare member name returned as-is."""
+        assert _frontend_member_name("alibi_mask") == "alibi_mask"
+
+    def test_member_name_strips_parens_only(self):
+        """Trailing `()` is stripped; the `get_` prefix is NOT rewritten.
+
+        This matches the existing property body behavior — callers that need
+        the rewritten setter form should use ``_derive_frontend_setter_name``.
+        """
+        assert _frontend_member_name("get_foo()") == "get_foo"
