@@ -229,7 +229,8 @@
  * ============================================================================
  *
  *   - Minimum ROCm version: ROCm 6.0+
- *   - GPU architectures: RDNA4 gfx1201 (RX9070)
+ *   - GPU architectures: gfx9 / gfx11 / gfx12
+ *       (tested on RDNA4 gfx1201 / RX9070)
  *   - Data types: float16 input, float32 compute, float16 output
  *   - Matrix dimensions:
  *       M must be a multiple of MACRO_TILE_X (64)
@@ -1008,8 +1009,12 @@ static void printDeviceInfo()
 // ---------------------------------------------------------------------------
 // Host driver
 // ---------------------------------------------------------------------------
-ROCWMMA_HOST void
-    run_lora_sample(uint32_t m, uint32_t n, uint32_t k, float alpha = 1.0f, bool printInfo = false)
+ROCWMMA_HOST void run_lora_sample(uint32_t m,
+                                  uint32_t n,
+                                  uint32_t k,
+                                  float    alpha          = 1.0f,
+                                  bool     printInfo      = false,
+                                  bool     skipValidation = false)
 {
     if(printInfo)
         printDeviceInfo();
@@ -1218,9 +1223,25 @@ ROCWMMA_HOST void
               << std::setw(10) << warmups << std::setw(10) << recordRuns << "\n";
 
 #if !NDEBUG
+    if(skipValidation)
+    {
+        std::cout << "Skipping validation as requested.\n";
+        return;
+    }
+
     std::cout << "\nValidating against CPU reference...\n";
 
     CHECK_HIP_ERROR(hipMemcpy(matY.data(), d_y, m * n * sizeof(OutputT), hipMemcpyDeviceToHost));
+
+    uint64_t refFlops = (uint64_t)(m) * (uint64_t)(n) * (uint64_t)(k)
+                        + (uint64_t)(m) * (uint64_t)(LORA_RANK) * (uint64_t)(k)
+                        + (uint64_t)(m) * (uint64_t)(n) * (uint64_t)(LORA_RANK);
+    // threshold:512M flops
+    if(refFlops > (512ULL * 1024ULL * 1024ULL))
+    {
+        std::cout << "[Note] Running CPU reference validation for large problem (" << m << "x" << n
+                  << "x" << k << ").Please wait.  This may take a while...\n";
+    }
 
     std::vector<OutputT> matYref(static_cast<size_t>(m) * n,
                                  std::numeric_limits<OutputT>::signaling_NaN());
@@ -1260,6 +1281,7 @@ ROCWMMA_HOST void
 //   128)
 //   ./simple_lora_adapter_fusion --all    # Also run full LLaMA-2 attention
 //   sizes
+//   ./simple_lora_adapter_fusion --skip-validation # Skip validation
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv)
 {
@@ -1267,17 +1289,20 @@ int main(int argc, char** argv)
     std::cout << "This sample demonstrates: fused base GEMM + low-rank adapter delta"
               << " (Y = X*W + alpha*(X*A)*B) using rocWMMA" << std::endl;
 
-    bool runAll = false;
+    bool runAll         = false;
+    bool skipValidation = false;
     for(int i = 1; i < argc; ++i)
     {
         std::string arg(argv[i]);
         if(arg == "--all")
             runAll = true;
+        if(arg == "--skip-validation")
+            skipValidation = true;
     }
 
     // Quick validation case: small enough for any GPU; all multiples of tile
     // size. run_lora_sample(seq_len, hidden_out, hidden_in, alpha)
-    run_lora_sample(64, 256, 128, /*alpha=*/0.5f, /*printInfo=*/true);
+    run_lora_sample(64, 256, 128, /*alpha=*/0.5f, /*printInfo=*/true, skipValidation);
 
     if(runAll)
     {
@@ -1287,11 +1312,11 @@ int main(int argc, char** argv)
         //                       + alpha * (X * A_lora) * B_lora
         // with sample-chosen seq_len = 64, rank = 16, and alpha = 0.5.
         // LLaMA-2-7B uses hidden_size = 4096.
-        run_lora_sample(64, 4096, 4096, /*alpha=*/0.5f);
+        run_lora_sample(64, 4096, 4096, /*alpha=*/0.5f, /*printInfo=*/false, skipValidation);
 
         // LLaMA-2-inspired attention projection shape.
         // LLaMA-2-13B uses hidden_size = 5120.
-        run_lora_sample(64, 5120, 5120, /*alpha=*/0.5f);
+        run_lora_sample(64, 5120, 5120, /*alpha=*/0.5f, /*printInfo=*/false, skipValidation);
 
         // LLaMA-2-inspired FFN gate/up projection shape.
         // Uses the logical GEMM convention:
@@ -1299,12 +1324,13 @@ int main(int argc, char** argv)
         //   intermediate]
         //                             + alpha * (X * A_lora) * B_lora
         // LLaMA-2-7B uses hidden_size = 4096 and intermediate_size = 11008.
-        run_lora_sample(64, 11008, 4096, /*alpha=*/0.5f);
+        run_lora_sample(64, 11008, 4096, /*alpha=*/0.5f, /*printInfo=*/false, skipValidation);
     }
     else
     {
         std::cout << "\nTip: pass --all to also run LLaMA-2 7b/13b attention/FFN "
                      "sizes.\n";
+        std::cout << "Tip: pass --skip-validation to skip validation.\n";
     }
 
     std::cout << "Sample completed successfully!" << std::endl;
