@@ -163,7 +163,7 @@ namespace TensileLite
         argMap.insert(std::pair<ActivationType, int>(ActivationType::Leakyrelu, 1));
         argMap.insert(std::pair<ActivationType, int>(ActivationType::Tanh, 2));
         argMap.insert(std::pair<ActivationType, int>(ActivationType::Geluscaling, 1));
-        if(d == ActivationType::All)
+        if(d == ActivationType::All || d == ActivationType::Hipblaslt_all)
         {
             int maxArgs = 0;
             for(auto iter = argMap.begin(); iter != argMap.end(); iter++)

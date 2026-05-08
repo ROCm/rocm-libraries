@@ -374,6 +374,30 @@ class ProblemSizes:
     for sizeRange in self.ranges:
       s += "  %s" % sizeRange
     return s
+# Get real Dataype for A and B when using mix-types (i.g. Float8BFloat8);
+def getRealDataTypeA(dataType):
+    if dataType.isFloat8BFloat8():
+        return DataType(DataTypeEnum.Float8)
+    elif dataType.isBFloat8Float8():
+        return DataType(DataTypeEnum.BFloat8)
+    elif dataType.isFloat8BFloat8_fnuz():
+        return DataType(DataTypeEnum.Float8_fnuz)
+    elif dataType.isBFloat8Float8_fnuz():
+        return DataType(DataTypeEnum.BFloat8_fnuz)
+    else:
+        return dataType
+    
+def getRealDataTypeB(dataType):
+    if dataType.isFloat8BFloat8():
+        return DataType(DataTypeEnum.BFloat8)
+    elif dataType.isBFloat8Float8():
+        return DataType(DataTypeEnum.Float8)
+    elif dataType.isFloat8BFloat8_fnuz():
+        return DataType(DataTypeEnum.BFloat8_fnuz)
+    elif dataType.isBFloat8Float8_fnuz():
+        return DataType(DataTypeEnum.Float8_fnuz)
+    else:
+        return dataType
 
 ################################################################################
 # ProblemType
@@ -389,6 +413,8 @@ _defaultProblemType = {
     "DataType": 0,  # data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeA": 0,  # A data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeB": 0,  # B data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
+    "MacDataTypeA": 0, # A data type which is used for mac/mfma/wmma computation.
+    "MacDataTypeB": 0, # B data type which is used for mac/mfma/wmma computation.
     "DataTypeE": 0,  # E data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeAmaxD": 0,  # AmaxD data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DestDataType": 0,  # destination data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
@@ -453,7 +479,9 @@ _defaultProblemType = {
     "SetConstStrideBias": [],
     # Summation dimension indices
     "MirrorDimsA": [],
+    "MirrorDimsMXSA": [],
     "MirrorDimsB": [],
+    "MirrorDimsMXSB": [],
     "MirrorDimsMetadata": [],
     # for LD description
     "NumIndicesLD": 4,
@@ -469,6 +497,13 @@ _defaultProblemType = {
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
     "SwizzleTensorB": False,
+    "isMixMode": False,  # True means this is a mix-mode problem, i.e. Float8BFloat6 or BFloat6Float8
+    "MetadataLayout": 0,
+    # MX Block
+    "MXBlockA": 0,
+    "MXBlockB": 0,
+    "DataTypeMXSA": "E8",
+    "DataTypeMXSB": "E8",
 }
 
 # The supported typed GEMM, each entry is (Ti, To, Tc).
@@ -537,6 +572,61 @@ _validGEMMTypes = [
     ("B8N", "F8N", "S"),
     ("F8B8N", "F8N", "S"),
     ("B8F8N", "F8N", "S"),
+    ("F4", "S", "S"),
+    ("F4", "B", "S"),
+    ("F6", "S", "S"),
+    ("B6", "S", "S"),
+]
+
+_validMXGEMMTypes = [
+    ("F8", "S", "S"),
+    ("F8B8", "S", "S"),
+    ("B8", "S", "S"),
+    ("B8F8", "S", "S"),
+    ("F6", "S", "S"),
+    ("F6B6", "S", "S"),
+    ("B6", "S", "S"),
+    ("B6F6", "S", "S"),
+    ("F4", "S", "S"),
+    ("F8", "H", "S"),
+    ("F8B8", "H", "S"),
+    ("B8", "H", "S"),
+    ("B8F8", "H", "S"),
+    ("F6", "H", "S"),
+    ("F6B6", "H", "S"),
+    ("B6", "H", "S"),
+    ("B6F6", "H", "S"),
+    ("F4", "H", "S"),
+    ("F8", "B", "S"),
+    ("F8B8", "B", "S"),
+    ("B8", "B", "S"),
+    ("B8F8", "B", "S"),
+    ("F6", "B", "S"),
+    ("F6B6", "B", "S"),
+    ("B6", "B", "S"),
+    ("B6F6", "B", "S"),
+    ("F4", "B", "S"),
+    ("F8", "F8", "S"),
+    ("F8B8", "F8", "S"),
+    ("B8", "F8", "S"),
+    ("B8F8", "F8", "S"),
+    ("F6", "F8", "S"),
+    ("F6B6", "F8", "S"),
+    ("B6", "F8", "S"),
+    ("B6F6", "F8", "S"),
+    ("F4", "F8", "S"),
+    ("F8", "B8", "S"),
+    ("F8B8", "B8", "S"),
+    ("B8", "B8", "S"),
+    ("B8F8", "B8", "S"),
+    ("F6", "B8", "S"),
+    ("F6B6", "B8", "S"),
+    ("B6", "B8", "S"),
+    ("B6F6", "B8", "S")
+]
+
+_validMXGEMMBlock = [
+    16, 32
 ]
 
 
@@ -593,11 +683,39 @@ _HPATypes = [
     ("B8N", "F8N", "S"),
     ("F8B8N", "F8N", "S"),
     ("B8F8N", "F8N", "S"),
+    ("F4", "S", "S"),
+    ("F4", "B", "S"),
+    ("F4", "H", "S"),
+    ("F4", "F8", "S"),
+    ("F6", "S", "S"),
+    ("F6", "H", "S"),
+    ("F6", "B", "S"),
+    ("F6", "F8", "S"),
+    ("F6", "B8", "S"),
+    ("B6", "S", "S"),
+    ("B6", "H", "S"),
+    ("B6", "B", "S"),
+    ("B6", "F8", "S"),
+    ("B6", "B8", "S"),
+    ("F6B6", "S", "S"),
+    ("F6B6", "H", "S"),
+    ("F6B6", "B", "S"),
+    ("F6B6", "F8", "S"),
+    ("F6B6", "B8", "S"),
+    ("B6F6", "S", "S"),
+    ("B6F6", "H", "S"),
+    ("B6F6", "B", "S"),
+    ("B6F6", "F8", "S"),
+    ("B6F6", "B8", "S"),
 ]
 
 def problemTypeToEnum(problemType):
   problemType["DataType"] = \
           problemType["DataType"].value
+  problemType["MacDataTypeA"] = \
+          problemType["MacDataTypeA"].value
+  problemType["MacDataTypeB"] = \
+          problemType["MacDataTypeB"].value
   problemType["DataTypeA"] = \
           problemType["DataTypeA"].value
   problemType["DataTypeB"] = \
@@ -621,6 +739,16 @@ def problemTypeToEnum(problemType):
   if "DataTypeMetadata" in problemType:
       problemType["DataTypeMetadata"] = \
           problemType["DataTypeMetadata"].value
+  if "DataTypeMXSA" in problemType:
+      problemType["DataTypeMXSA"] = \
+          problemType["DataTypeMXSA"].value
+  else:
+      problemType["DataTypeMXSA"] = DataTypeEnum.E8
+  if "DataTypeMXSB" in problemType:
+      problemType["DataTypeMXSB"] = \
+          problemType["DataTypeMXSB"].value
+  else:
+      problemType["DataTypeMXSB"] = DataTypeEnum.E8
 
 class ProblemType(Mapping):
   ########################################
@@ -640,18 +768,36 @@ class ProblemType(Mapping):
       self["DataType"]  = DataType(config["DataType"])
       self["DataTypeA"] = self["DataType"]
       self["DataTypeB"] = self["DataType"]
+      self["MacDataTypeA"] = self["DataType"]
+      self["MacDataTypeB"] = self["DataType"]
     else:
       raise Exception("NO data type specified")
       self["DataType"]  = DataType(0)
       self["DataTypeA"] = DataType(0)
       self["DataTypeB"] = DataType(0)
+      self["MacDataTypeA"] = DataType(0)
+      self["MacDataTypeB"] = DataType(0)
+
+    if "MacDataTypeA" in config:
+      self["MacDataTypeA"] = DataType(config["MacDataTypeA"])
+    self["MacDataTypeA"] = getRealDataTypeA(self["MacDataTypeA"])
+
+    if "MacDataTypeB" in config:
+      self["MacDataTypeB"] = DataType(config["MacDataTypeB"])
+    self["MacDataTypeB"] = getRealDataTypeB(self["MacDataTypeB"])
 
     if "DataTypeA" in config:
       self["DataTypeA"] = DataType(config["DataTypeA"])
+    else:
+      self["DataTypeA"] = self["MacDataTypeA"]
+    self["DataTypeA"] = getRealDataTypeA(self["DataTypeA"])
 
     if "DataTypeB" in config:
       self["DataTypeB"] = DataType(config["DataTypeB"])
-
+    else:
+      self["DataTypeB"] = self["MacDataTypeB"]
+    self["DataTypeB"] = getRealDataTypeB(self["DataTypeB"])
+    
     if "DestDataType" in config:
       self["DestDataType"] = DataType(config["DestDataType"])
     else:
@@ -676,6 +822,16 @@ class ProblemType(Mapping):
         else:
           raise Exception("NO compute data type, or dest data type, or data type specified")
           self["DataType"] = DataType(0)
+    self["isMixMode"] = True if not self["Sparse"] and self["MacDataTypeA"].value != self["MacDataTypeB"].value else False
+    if "DataTypeMXSA" in config:
+      self["DataTypeMXSA"] = DataType(config["DataTypeMXSA"])
+    else:
+      self["DataTypeMXSA"] = DataType(DataTypeEnum.E8)
+
+    if "DataTypeMXSB" in config:
+      self["DataTypeMXSB"] = DataType(config["DataTypeMXSB"])
+    else:
+      self["DataTypeMXSB"] = DataType(DataTypeEnum.E8)
 
     # Just like DataTypeE is DestDataType by default; DataTypeAmaxD if ComputeDataType by default.
     # So far we don't have to set it in config yamls
@@ -785,7 +941,7 @@ class ProblemType(Mapping):
         if self["ActivationType"] != 'none' and self["UseE"] == False:
           printWarning("Use E is enabled cause Activation is enabled.")
           self["UseE"] = True
-        elif self["ActivationType"] != 'none' and self["UseE"] == False:
+        elif self["ActivationType"] == 'none' and self["UseE"] == True:
           printWarning("Use E is disabled cause Activation is disabled.")
           self["UseE"] = False
         # if self["UseScaleAlphaVec"]:
@@ -822,6 +978,8 @@ class ProblemType(Mapping):
   #   See the discussion in ValidParameters.py for validGEMMTypes
   ################################################################################
   def _checkIfSupportedGEMMType(self):
+    # Here we use "DataType" instead of "MacDataTypeA(B)" for validation. It is totally fine cause we passed "MacDataTypeA(B)" into Client side.
+    # Ex: MacDataTypeA: b6, MacDataTypeB: f4 -> we can either choose "DataType: f4" or "DataType: b6"
     inType = self["DataType"]
     outType = self["DestDataType"]
     computeType = self["ComputeDataType"]
@@ -830,15 +988,35 @@ class ProblemType(Mapping):
     if gemmType not in _validGEMMTypes:
       raise Exception("This typed-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet."%(gemmType[0], gemmType[1], gemmType[2]))
 
+    if self["MXBlockA"] or self["MXBlockB"]:
+      if gemmType not in _validMXGEMMTypes:
+        raise Exception("This typed-MX-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet." % (gemmType[0], gemmType[1], gemmType[2]))
+      if self["MXBlockA"] == 0:
+        if self["MXBlockB"] not in _validMXGEMMBlock:
+          raise Exception("MXShape is not supported")
+      elif self["MXBlockB"] == 0:
+        if self["MXBlockA"] not in _validMXGEMMBlock:
+          raise Exception("MXShape is not supported")
+      elif (self["MXBlockA"] != self["MXBlockB"]):
+        raise Exception("MXShape is not supported")
+      elif (self["MXBlockA"] not in _validMXGEMMBlock):
+        raise Exception("MXShape is not supported")
+
   ########################################
   def initGEMM(self):
     sumIdx = 3 if self["Batched"] else 2
     self["IndexAssignmentsA"] = [0, sumIdx] # N
     self["IndexAssignmentsB"] = [sumIdx, 1] # N
     if self.state["Sparse"] == 2:
-      self["IndexAssignmentsMetadata"] = [sumIdx, 1] # N (ref B)
+      if self.state["MetadataLayout"]:
+        self["IndexAssignmentsMetadata"] = [1, sumIdx] # T (ref B)
+      else:
+        self["IndexAssignmentsMetadata"] = [sumIdx, 1] # N (ref B)
     else:
-      self["IndexAssignmentsMetadata"] = [sumIdx, 0] # T (ref A)
+      if self.state["MetadataLayout"]:
+        self["IndexAssignmentsMetadata"] = [0, sumIdx] # N (ref A)
+      else:
+        self["IndexAssignmentsMetadata"] = [sumIdx, 0] # T (ref A)
     if self["TransposeA"]:
       self["IndexAssignmentsA"] = [sumIdx, 0] # T
     if self["TransposeB"]:
@@ -855,6 +1033,11 @@ class ProblemType(Mapping):
     self["IndexAssignmentsLD"][0] = self["NumIndicesC"] + 1
     for i in range(1, len(self["IndexAssignmentsLD"])):
       self["IndexAssignmentsLD"][i] = self["IndexAssignmentsLD"][i-1] + 1
+
+    if self["MXBlockA"]:
+      self["IndexAssignmentsMXSA"] = deepcopy(self["IndexAssignmentsA"])
+    if self["MXBlockB"]:
+      self["IndexAssignmentsMXSB"] = deepcopy(self["IndexAssignmentsB"])
 
   ########################################
   def isGEMM(self):
@@ -921,10 +1104,20 @@ class ProblemType(Mapping):
       if state["IndexAssignmentsA"][i] == state["IndexUnroll"]:
         state["IndexUnrollA"] = i
         break
+    if state["MXBlockA"]:
+      for i in range(0, len(state["IndexAssignmentsMXSA"])):
+        if state["IndexAssignmentsMXSA"][i] == state["IndexUnroll"]:
+          state["IndexUnrollMXSA"] = i
+          break
     for i in range(0, len(state["IndexAssignmentsB"])):
       if state["IndexAssignmentsB"][i] == state["IndexUnroll"]:
         state["IndexUnrollB"] = i
         break
+    if state["MXBlockB"]:
+      for i in range(0, len(state["IndexAssignmentsMXSB"])):
+        if state["IndexAssignmentsMXSB"][i] == state["IndexUnroll"]:
+          state["IndexUnrollMXSB"] = i
+          break
     for i in range(0, len(state["IndexAssignmentsMetadata"])):
       if state["IndexAssignmentsMetadata"][i] == state["IndexUnroll"]:
         state["IndexUnrollM"] = i
@@ -938,7 +1131,11 @@ class ProblemType(Mapping):
     else:
       dimList = state["IndicesFree"]
     state["Index01A"] = [i for i in state["IndexAssignmentsA"] if i in dimList][0]
+    if state["MXBlockA"]:
+      state["Index01MXSA"] = [i for i in state["IndexAssignmentsMXSA"] if i in dimList][0]
     state["Index01B"] = [i for i in state["IndexAssignmentsB"] if i in dimList][0]
+    if state["MXBlockB"]:
+      state["Index01MXSB"] = [i for i in state["IndexAssignmentsMXSB"] if i in dimList][0]
     #print2("Index01A: %u" % state["Index01A"])
     #print2("Index01B: %u" % state["Index01B"])
     # Store code is optimized for 0 as the fastest-moving in memory
@@ -964,7 +1161,11 @@ class ProblemType(Mapping):
     unrollIdxA = state["IndexAssignmentsA"].index(state["IndexUnroll"])
     unrollIdxB = state["IndexAssignmentsB"].index(state["IndexUnroll"])
     state["TLUA"] = strideIdxA < unrollIdxA
+    if state["MXBlockA"]:
+      state["TLUMXSA"] = state["TLUA"]
     state["TLUB"] = strideIdxB < unrollIdxB
+    if state["MXBlockB"]:
+      state["TLUMXSB"] = state["TLUB"]
     #state["TLUB"] = True # hack
 
     if printIndexAssignmentInfo:
@@ -1005,9 +1206,12 @@ class ProblemType(Mapping):
       name.append("C")
 
     # DataTypes
-    if self["DataType"] != self["DataTypeA"] or self["DataType"] != self["DataTypeB"]:
+    macTypeStr = self["MacDataTypeA"].toChar()
+    if self["MacDataTypeA"] != self["MacDataTypeB"]:
+      macTypeStr = self["MacDataTypeA"].toChar() + self["MacDataTypeB"].toChar()
+    if self["MacDataTypeA"] != self["DataTypeA"] or self["MacDataTypeB"] != self["DataTypeB"]:
       name.append(self["DataTypeA"].toChar() + self["DataTypeB"].toChar())
-    name.append(self["DataType"].toChar()) # Type of A/B
+    name.append(macTypeStr) # Type of A/B, split Type of A/B when A!=B
 
     # Special condition for some newly supported kernels:
     #   HHS, HSS, BSS and I8II kernels, use a clearer naming _TiToTc_
@@ -1018,6 +1222,12 @@ class ProblemType(Mapping):
 
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
       name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
+
+    if self["MXBlockA"]:
+      name.append("MXA" + self["DataTypeMXSA"].toChar() + "B" + str(self["MXBlockA"]))
+
+    if self["MXBlockB"]:
+      name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + str(self["MXBlockB"]))
 
     if self["SwizzleTensorA"]:
       name.append("STA")
@@ -1054,9 +1264,9 @@ class ProblemType(Mapping):
       name.append("AmaxD")
     if self["Sparse"]:
       if self["Sparse"] == 2:
-        name.append("SPB")
+        name.append("SPBML%d"%(self["MetadataLayout"]))
       else:
-        name.append("SPA")
+        name.append("SPAML%d"%(self["MetadataLayout"]))
 
     # precision and other
     # name += "_SB" if self["StridedBatched"] else "_GB"
@@ -1126,9 +1336,8 @@ def getBiasDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   bList = []
   for d in ["DataType", "ComputeDataType", "DestDataType"]:
     dtype = DataType(problem[d])
-    # filter out int8/f8/b8, because it is not supported by bias datatype
-    # TODO
-    if not dtype.isInt8() and not dtype.is8bitFloat():
+    # filter out sizeof(dtype) <= 1, because it is not supported by bias datatype
+    if dtype.numBytes() > 1:
       bList.append(dtype)
 
   biasDataTypeList = list(set(bList))

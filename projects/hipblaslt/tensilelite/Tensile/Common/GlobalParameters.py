@@ -178,6 +178,8 @@ globalParameters["DataInitTypeScaleC"] = 2
 globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
+globalParameters["DataInitTypeMXSA"] = 1
+globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -341,10 +343,14 @@ defaultBenchmarkCommonParameters = [
     {"InnerUnroll": [1]},
     {"KernelLanguage": ["Assembly"]},
     {"LdsPadA": [-1]},
+    {"LdsPadMXSA": [ 0 ] },
     {"LdsPadB": [-1]},
+    {"LdsPadMXSB": [ 0 ] },
     {"LdsPadMetadata": [0]},
     {"LdsBlockSizePerPadA": [-1]},
+    {"LdsBlockSizePerPadMXSA": [ 0 ] },
     {"LdsBlockSizePerPadB": [-1]},
+    {"LdsBlockSizePerPadMXSB": [ 0 ] },
     {"LdsBlockSizePerPadMetadata": [0]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
@@ -357,6 +363,8 @@ defaultBenchmarkCommonParameters = [
     {"GlobalReadVectorWidthA": [-1]},
     {"GlobalReadVectorWidthB": [-1]},
     {"LocalReadVectorWidth": [-1]},
+    {"LocalReadVectorWidthA": [-1]},
+    {"LocalReadVectorWidthB": [-1]},
     {"WaveSeparateGlobalReadA": [0]},
     {"WaveSeparateGlobalReadB": [0]},
     {"WaveSeparateGlobalReadMetadata": [0]},
@@ -377,6 +385,8 @@ defaultBenchmarkCommonParameters = [
     {"BufferStore": [True]},
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
+    {"DirectToVgprMXSA": [False]},
+    {"DirectToVgprMXSB": [False]},
     {"DirectToVgprSparseMetadata": [False]},
     # Restricted address remap features (default off unless explicitly enabled in the solution config):
     {"BAddrInterleave": [False]},
@@ -420,7 +430,9 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporalD": [0]},
     {"NonTemporalC": [0]},
     {"NonTemporalA": [0]},
+    {"NonTemporalMXSA": [ 0 ] },
     {"NonTemporalB": [0]},
+    {"NonTemporalMXSB": [ 0 ] },
     {"NonTemporalWS": [0]},
     {"NonTemporalMetadata": [0]},
     {"NonTemporal": [-1]},
@@ -459,7 +471,9 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
     {"MinGRIncPerMfma": [-1]},
-    {"UsePLRPack": [0]}
+    {"UsePLRPack": [0]},
+    {"TDMInst": [0]},
+    {"TDMSplit": [False]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

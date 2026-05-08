@@ -67,11 +67,12 @@ class BoundIndex:
 
 
 class ProblemType:
-    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputType', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
+    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputTypeA', 'computeInputTypeB', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
                  'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
-                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB']
+                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -132,14 +133,24 @@ class ProblemType:
 
         rv.transA = bool(d['TransposeA'])
         rv.transB = bool(d['TransposeB'])
+        # it will either be set as d['MacDataType'] or a specified input
+        if 'MacDataTypeA' in d: 
+            rv.computeInputTypeA = DataType(d['MacDataTypeA'])
+        else:
+            rv.computeInputTypeA = srcType
+        if 'MacDataTypeB' in d:
+            rv.computeInputTypeB = DataType(d['MacDataTypeB'])
+        else:
+            rv.computeInputTypeB = srcType
+
         if 'DataTypeA' in d: #it will either be set as d['DataType'] or a specified input
             rv.aType = DataType(d['DataTypeA'])
         else:
-            rv.aType = srcType
+            rv.aType = rv.computeInputTypeA
         if 'DataTypeB' in d:
             rv.bType = DataType(d['DataTypeB'])
         else:
-            rv.bType = srcType
+            rv.bType = rv.computeInputTypeB
 
         if rv.aType.isFloat8BFloat8() or rv.bType.isFloat8BFloat8():
             rv.aType = DataType("F8")
@@ -164,7 +175,6 @@ class ProblemType:
         else:
             rv.amaxDType = computeType
 
-        rv.computeInputType = srcType
         rv.cType = dstType
         rv.dType = dstType
         # we already checked the src/dst/compute types are supported and well-assigned in SolutionStruct
@@ -269,6 +279,15 @@ class ProblemType:
 
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
+
+        rv.mxBlockA = d.get('MXBlockA', 0)
+        rv.mxBlockB = d.get('MXBlockB', 0)
+        rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
+        rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
+
+        rv.metadataLayout = 0
+        if 'MetadataLayout' in d:
+            rv.metadataLayout = d['MetadataLayout']
         return rv
 
     def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):
@@ -370,7 +389,7 @@ class ProblemType:
             # predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
 
         if includeType:
-            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputType)))
+            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputTypeA, self.computeInputTypeB)))
             predicates.append(ProblemPredicate("HighPrecisionAccumulate", value=self.highPrecisionAccumulate))
             predicates.append(ProblemPredicate("Activation", value=self.activationType))
             predicates.append(ProblemPredicate("ActivationComputeType", value=self.activationComputeDataType))
@@ -389,6 +408,12 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
+            predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
+            if self.mxBlockA:
+                predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))
+            predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
+            if self.mxBlockB:
+                predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
 
         return predicates
 

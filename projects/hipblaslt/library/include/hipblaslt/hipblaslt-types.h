@@ -38,6 +38,13 @@
 #endif
 
 #include "hipblaslt_float8.h"
+#if defined(__HIP__)
+#include "hipblaslt_bfloat6.h"
+#include "hipblaslt_float6.h"
+#include "hipblaslt_float4.h"
+#endif
+#include "hipblaslt_e8.h"
+#include "hipblaslt_e5m3.h"
 #include <float.h>
 
 // Generic API
@@ -71,5 +78,5 @@ typedef int32_t hipblasLtInt32;
 int const HIP_R_6F_E2M3_EXT = 31;
 int const HIP_R_6F_E3M2_EXT = 32;
 int const HIP_R_4F_E2M1_EXT = 33;
-
+int const HIP_R_8F_E5M3_EXT = 34;
 #endif /* _HIPBLASLT_TYPES_H_ */

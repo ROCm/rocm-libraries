@@ -192,13 +192,22 @@ inline hipError_t synchronize(HipHostBuffer&         hBuf,
                               size_t                 col         = 0,
                               size_t                 lda         = 0,
                               size_t                 elementSize = 1,
-                              bool                   needSwizzle = false)
+                              bool                   needSwizzle = false,
+                              hipStream_t            stream      = 0)
 {
     if(row > lda)
         hipblaslt_cerr << "invalid values of lda in synchronize()" << std::endl;
     hipError_t hip_err;
-    if(hipSuccess != (hip_err = hipDeviceSynchronize()))
-        return hip_err;
+    if(stream)
+    {
+        if(hipSuccess != (hip_err = hipStreamSynchronize(stream)))
+            return hip_err;
+    }
+    else
+    {
+        if(hipSuccess != (hip_err = hipDeviceSynchronize()))
+            return hip_err;
+    }
 
     if(!needSwizzle)
         return hipMemcpy(

@@ -1413,7 +1413,7 @@ namespace TensileLite
                 };
                 TypesEqual() = default;
 
-                std::array<rocisa::DataType, 5> value;
+                std::array<rocisa::DataType, 6> value;
 
                 static std::string Type()
                 {
@@ -1425,7 +1425,8 @@ namespace TensileLite
                     return problem.a().dataType() == value[0] && problem.b().dataType() == value[1]
                            && problem.c().dataType() == value[2]
                            && problem.d().dataType() == value[3]
-                           && problem.computeInputType() == value[4];
+                           && problem.computeInputTypeA() == value[4]
+                           && problem.computeInputTypeB() == value[5];
                 }
 
                 virtual std::string toString() const override
@@ -1439,8 +1440,10 @@ namespace TensileLite
                                        value[2],
                                        ", d:",
                                        value[3],
-                                       ", compute input type:",
-                                       value[4]);
+                                       ", compute input typeA:",
+                                       value[4],
+                                       ", compute input typeB:",
+                                       value[5]);
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
@@ -1468,11 +1471,16 @@ namespace TensileLite
                                         "==",
                                         "sol_d",
                                         value[3],
-                                        "prob_compute",
-                                        problem.computeInputType(),
+                                        "prob_compute_a",
+                                        problem.computeInputTypeA(),
                                         "==",
-                                        "sol_compute",
-                                        value[4]);
+                                        "sol_compute_a",
+                                        value[4],
+                                        "prob_compute_b",
+                                        problem.computeInputTypeB(),
+                                        "==",
+                                        "sol_compute_b",
+                                        value[5]);
                 }
             };
 
@@ -1531,11 +1539,11 @@ namespace TensileLite
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return (problem.a().strides()[1] * min(value.depthUorMT0, problem.a().sizes()[1]) + value.shiftPtrElemA)
-                                   * problem.a().elementBytes()
+                    return multiplyElementSize((problem.a().strides()[1] * min(value.depthUorMT0, problem.a().sizes()[1]) + value.shiftPtrElemA),
+                                   problem.a().elementBytes())
                                < TWO_POW_32
-                           && (problem.b().strides()[1] * min(value.depthUorMT1, problem.b().sizes()[1]) + value.shiftPtrElemB)
-                                      * problem.b().elementBytes()
+                           && multiplyElementSize((problem.b().strides()[1] * min(value.depthUorMT1, problem.b().sizes()[1]) + value.shiftPtrElemB)
+                                      ,problem.b().elementBytes())
                                   < TWO_POW_32;
                 }
 
@@ -1599,7 +1607,7 @@ namespace TensileLite
                     else
                     {
                         const uint64_t TWO_POW_32 = 4294967296;
-                        return problem.c().strides()[1] * problem.c().elementBytes() * min(value, problem.c().sizes()[1])
+                        return multiplyElementSize(problem.c().strides()[1] * min(value, problem.c().sizes()[1]), problem.c().elementBytes())
                                < TWO_POW_32;
                     }
                 }
@@ -1646,7 +1654,7 @@ namespace TensileLite
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return problem.d().strides()[1] * problem.d().elementBytes() * min(value, problem.d().sizes()[1])
+                    return multiplyElementSize(problem.d().strides()[1] * min(value, problem.d().sizes()[1]), problem.d().elementBytes())
                            < TWO_POW_32;
                 }
 
@@ -2996,6 +3004,143 @@ namespace TensileLite
                                         0);
                 }
             };
+
+            struct MXBlockA
+                : public Predicate_CRTP<MXBlockA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockA() = default;
+                MXBlockA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockA(), "==", "sol", value);
+                }
+            };
+
+            struct MXBlockB
+                : public Predicate_CRTP<MXBlockB, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockB() = default;
+                MXBlockB(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockB";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockB() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockB(), "==", "sol", value);
+                }
+            };
+
+            struct DataTypeMXSA
+                : public Predicate_CRTP<DataTypeMXSA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                rocisa::DataType value;
+
+                DataTypeMXSA() = default;
+                DataTypeMXSA(rocisa::DataType value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "DataTypeMXSA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxTypeA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxTypeA(), "==", "sol", value);
+                }
+            };
+
+            struct DataTypeMXSB
+                : public Predicate_CRTP<DataTypeMXSB, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                rocisa::DataType value;
+
+                DataTypeMXSB() = default;
+                DataTypeMXSB(rocisa::DataType value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "DataTypeMXSB";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxTypeB() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxTypeB(), "==", "sol", value);
+                }
+            };
+
         } // namespace Contraction
 
         /**
