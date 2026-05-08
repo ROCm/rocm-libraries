@@ -917,6 +917,10 @@ void testLargeIndicesInclusiveScanByKey()
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanByKey)
 {
+#if defined(__SANITIZE_ADDRESS__)
+    GTEST_SKIP() << "Skip LargeIndices test under ASan";
+#endif
+
 #if HAS_VALGRIND_H
     //Disable large tests to reduce valgrind run time
     if(RUNNING_ON_VALGRIND)
@@ -927,6 +931,10 @@ TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanByKey)
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanByKeyWithGraphs)
 {
+#if defined(__SANITIZE_ADDRESS__)
+    GTEST_SKIP() << "Skip LargeIndices test under ASan";
+#endif
+
 #if HAS_VALGRIND_H
     //Disable large tests to reduce valgrind run time
     if(RUNNING_ON_VALGRIND)
@@ -970,6 +978,10 @@ void testLargeIndicesExclusiveScanByKey()
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanByKey)
 {
+#if defined(__SANITIZE_ADDRESS__)
+    GTEST_SKIP() << "Skip LargeIndices test under ASan";
+#endif
+
 #if HAS_VALGRIND_H
     //Disable large tests to reduce valgrind run time
     if(RUNNING_ON_VALGRIND)
@@ -980,6 +992,10 @@ TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanByKey)
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanByKeyWithGraphs)
 {
+#if defined(__SANITIZE_ADDRESS__)
+    GTEST_SKIP() << "Skip LargeIndices test under ASan";
+#endif
+
 #if HAS_VALGRIND_H
     //Disable large tests to reduce valgrind run time
     if(RUNNING_ON_VALGRIND)

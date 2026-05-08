@@ -58,6 +58,8 @@ inline fusilli::ErrorOr<fusilli::DataType> hipDnnDataTypeToFusilliDataType(
     return ok(fusilli::DataType::Int32);
   case hipdnn_flatbuffers_sdk::data_objects::DataType::INT4:
     return ok(fusilli::DataType::Int4);
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
+    return ok(fusilli::DataType::Boolean);
   case hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET:
     return ok(fusilli::DataType::NotSet);
   default:
@@ -836,6 +838,7 @@ importGraph(const hipdnnPluginConstData_t *opGraph) {
   FUSILLI_CHECK_ERROR(gc.importGraph());
   FUSILLI_CHECK_ERROR(gc.fusilliGraph.validate());
   return HipdnnEnginePluginExecutionContext{.graph = std::move(gc.fusilliGraph),
+                                            .serializedOpGraph = {},
                                             .uidToFusilliTensorAttr =
                                                 std::move(gc.uidToIOTensor)};
 }

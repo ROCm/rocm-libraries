@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <iostream>
 #include <sstream>
+#include <string_view>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -103,6 +104,19 @@ static bool canUseLessOperand(const StinkyInstruction* inst) {
     return false;
 }
 
+// Workaround: v_wmma_scale_f32_16x16x128_f8f6f4 has matrix-format-dependent
+// packed source widths. For src0/src1, accept dynamic widths (256/384/512 bits)
+// even though the static format metadata uses a fixed maximum width.
+static bool allowDynamicWmmaScaleSrcWidth(const HwInstDesc* hwDesc, bool isDest,
+                                          unsigned operandIndex, unsigned expectedWidth,
+                                          unsigned actualWidth) {
+    if (!hwDesc || !hwDesc->mnemonic || isDest) return false;
+    if (operandIndex > 1) return false;  // only src0/src1 are dynamic
+    if (expectedWidth != 16) return false;
+    if (std::string_view(hwDesc->mnemonic) != "v_wmma_scale_f32_16x16x128_f8f6f4") return false;
+    return actualWidth == 8 || actualWidth == 12 || actualWidth == 16;
+}
+
 static std::string checkRegisterWidths(const StinkyInstruction* inst,
                                        const AsmVerifierConfig& config) {
     const HwInstDesc* hwDesc = inst->getHwInstDesc();
@@ -143,8 +157,10 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
             // M64 operands are 64-bit lane masks that may be truncated to
             // 32 bits in wave32 mode, so width 1 is valid when expected is 2.
             bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;
+            bool dynamicWmmaWidth = allowDynamicWmmaScaleSrcWidth(hwDesc, isDest, operandIndex,
+                                                                  expectedWidth, reg.reg.num);
 
-            if (reg.reg.num != expectedWidth && !m64Truncated) {
+            if (reg.reg.num != expectedWidth && !m64Truncated && !dynamicWmmaWidth) {
                 errors << "Instruction '";
                 inst->dump(errors);
                 errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "

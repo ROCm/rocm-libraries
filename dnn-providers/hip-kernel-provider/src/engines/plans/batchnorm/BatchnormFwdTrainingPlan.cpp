@@ -26,6 +26,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     , _y(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.y_tensor_uid())))
     , _scale(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.scale_tensor_uid())))
     , _bias(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.bias_tensor_uid())))
+    , _activationOut(nullptr)
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
@@ -65,6 +66,27 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
         _nextRunningVariance = &(hip_kernel_utils::findTensorAttributes(
             tensorMap, attributes.next_running_variance_tensor_uid().value()));
         _hasRunningStats = true;
+    }
+}
+
+BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+    : BatchnormFwdTrainingParams(attributes, tensorMap)
+{
+    // Initialize activation attributes
+    _optActivation = hip_kernel_utils::parseActivation(pointwiseAttributes);
+    _activationOut = tensorMap.at(pointwiseAttributes.out_0_tensor_uid());
+
+    // Validate that activation input matches batchnorm output
+    if(pointwiseAttributes.in_0_tensor_uid() != attributes.y_tensor_uid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "BatchnormFwdTrainingParams: Activation input must match batchnorm output");
     }
 }
 
@@ -144,6 +166,18 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::nextRunningVariance() const
 {
     return _nextRunningVariance;
+}
+
+const std::optional<hip_kernel_utils::ActivationParams>&
+    BatchnormFwdTrainingParams::optActivation() const
+{
+    return _optActivation;
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdTrainingParams::activationOut() const
+{
+    return _activationOut;
 }
 
 BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams)
@@ -355,6 +389,12 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     // Get activation mode
     int nrnOpId = 0;
 
+    if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
+    {
+        const auto& activation = *_trainingParams.optActivation();
+        nrnOpId = static_cast<int>(activation.mode);
+    }
+
     // Prepare compilation options
     HipKernelCompileOptions options(_trainingParams.x(), deviceProperties);
     options.add("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
@@ -455,8 +495,6 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
     // Get device buffer pointers
     auto xBuffer = hip_kernel_utils::findDeviceBuffer(
         _trainingParams.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer = hip_kernel_utils::findDeviceBuffer(
-        _trainingParams.y()->uid(), deviceBuffers, numDeviceBuffers);
     auto scaleBuffer = hip_kernel_utils::findDeviceBuffer(
         _trainingParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
     auto biasBuffer = hip_kernel_utils::findDeviceBuffer(
@@ -516,9 +554,24 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
             "BatchnormFwdTrainingPlan: expAvgFactor (momentum) = " << expAvgFactor);
     }
 
-    // Get activation parameters
+    // Get output buffer and activation parameters
     float activationAlpha = 0.0f;
     float activationBeta = 0.0f;
+    hipdnnPluginDeviceBuffer_t yBuffer = {-1, nullptr};
+    if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
+    {
+        yBuffer = hip_kernel_utils::findDeviceBuffer(
+            _trainingParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
+
+        const auto& activation = *_trainingParams.optActivation();
+        activationAlpha = static_cast<float>(activation.alpha);
+        activationBeta = static_cast<float>(activation.beta);
+    }
+    else
+    {
+        yBuffer = hip_kernel_utils::findDeviceBuffer(
+            _trainingParams.y()->uid(), deviceBuffers, numDeviceBuffers);
+    }
 
     if(_kernelVariant != 2)
     {

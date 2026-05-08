@@ -28,6 +28,8 @@
 #include <optional>
 #include <string>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 // Register type enumeration for different register classes
 enum class RegType {
@@ -58,6 +60,13 @@ inline RegType stringToRegType(const std::string& str) {
 /// Check if a register type is valid (not UNKNOWN)
 inline bool isValidRegType(RegType type) {
     return type != RegType::UNKNOWN;
+}
+
+/// Check if a register type is an allocatable register (VGPR, SGPR, AGPR).
+/// Excludes special registers (SCC, VCC, EXEC, M0, LDS).
+inline bool isAllocatableReg(RegType type) {
+    return type == RegType::V || type == RegType::S || type == RegType::A || type == RegType::ACC ||
+           type == RegType::AGPR;
 }
 
 /// Validate if a string represents a valid register type
@@ -99,7 +108,7 @@ inline std::string regTypeToString(RegType type) {
 }
 
 // Represents a register or a literal value in the StinkyTofu IR.
-struct StinkyRegister {
+struct STINKYTOFU_EXPORT StinkyRegister {
     // Bit 31 of reg.idx marks a virtual register. Virtual registers are
     // placeholders used in instruction templates; they must be resolved to
     // physical registers via resolveVirtualToPhysical() before the IR

@@ -24,15 +24,17 @@ from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister
-from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SBarrier, \
+from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
     SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
-    VReadfirstlaneB32, VCvtBF16toFP32, BufferStoreB32
+    VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, \
+    SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
+from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
 from ..Common import print2, ceilDivide, log2
 from ..Component import Component
@@ -107,6 +109,143 @@ class XCCMappingOn(XCCMapping):
         return module
 
 
+class StreamKMemoryOrdering(Component):
+    """
+    Memory-ordering fences and flag accessors for the StreamK partial-tile
+    handshake.
+
+    StreamK uses a producer/consumer protocol: one workgroup writes a partial
+    tile to a workspace and signals completion via a flag, and other
+    workgroups poll the flag and read the partials. The required cross-CU
+    memory ordering depends on the target ISA:
+
+    - Most arches: `s_waitcnt vscnt(0)` before the flag store and an SMEM
+      flag load with `glc/dlc/scope:SCOPE_DEV` are sufficient because
+      ordering between L1/L2 and the device-scope coherence point is
+      implicit.
+
+    - gfx1250: the L2 has independent partitions and SMEM is not coherent
+      with the VMEM flag store, so an explicit `global_wb scope:SCOPE_DEV`
+      is required on the release side and a `global_inv scope:SCOPE_DEV`
+      on the acquire side. Additionally, XNACK-replay can reorder a
+      volatile/atomic VMEM op past in-flight VMEM, so `s_wait_xcnt 0` must
+      precede such ops. The flag itself must be read via VMEM (not SMEM)
+      to observe the producer's release-side fence.
+
+    Selection is driven by the `HasInvWbDevFences` arch capability. The
+    XNACK-replay drain in `preVolatileVmem` is gated separately on
+    `RequiresXCntForVolatileVMEM` and lives on the abstract base so a
+    future arch needing only one of the two can be supported by adding a
+    single capability flag.
+    """
+    def __call__(self):
+        assert(0)
+
+    def preVolatileVmem(self, writer, comment="") -> Module:
+        """Drain in-flight VMEM (XNACK-replay) before a volatile/atomic VMEM op.
+
+        Required on arches with `RequiresXCntForVolatileVMEM`. No-op
+        elsewhere.
+        """
+        module = Module("StreamK pre-volatile VMEM drain")
+        if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
+            module.add(MacroInstruction(name="s_wait_xcnt 0", args=[], comment=comment))
+        return module
+
+    @abc.abstractmethod
+    def releaseFence(self, writer) -> Module:
+        """Memory fence ordering prior partial-tile stores before the flag store."""
+        pass
+
+    @abc.abstractmethod
+    def acquireFence(self, writer) -> Module:
+        """Memory fence after observing the flag and before reading partials."""
+        pass
+
+    @abc.abstractmethod
+    def readFlag(self, writer, dst, soffset) -> Module:
+        """Read the StreamK completion flag into SGPR `dst` for compare."""
+        pass
+
+    @abc.abstractmethod
+    def flagBufferMubuf(self) -> MUBUFModifiers:
+        """MUBUF modifiers for buffer load/store of the flag word."""
+        pass
+
+
+class StreamKMemoryOrderingDefault(StreamKMemoryOrdering):
+    """No-op cross-CU fences; SMEM flag with glc/dlc/SCOPE_DEV.
+
+    Used on every arch that does not require explicit cross-L2 fences.
+    """
+    archCaps = {"HasInvWbDevFences": False}
+
+    def releaseFence(self, writer) -> Module:
+        module = Module("StreamK release fence (default)")
+        module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
+        return module
+
+    def acquireFence(self, writer) -> Module:
+        return Module("StreamK acquire fence (default, no-op)")
+
+    def readFlag(self, writer, dst, soffset) -> Module:
+        module = Module("StreamK read flag (SMEM)")
+        module.add(SLoadB32(dst=sgpr(dst), base=sgpr("AddressFlags", 2),
+                            soffset=soffset,
+                            smem=SMEMModifiers(glc=True, dlc=True,
+                                               scope=CacheScope.SCOPE_DEV),
+                            comment="get flag"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
+        return module
+
+    def flagBufferMubuf(self) -> MUBUFModifiers:
+        return MUBUFModifiers(offen=True, glc=True, dlc=True,
+                              scope=CacheScope.SCOPE_DEV)
+
+
+class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
+    """Explicit cross-L2 release/acquire fences via global_wb/global_inv
+    scope:SCOPE_DEV plus a VMEM-coherent flag read.
+
+    Selected on arches whose L2 is partitioned across CUs/XCDs and whose
+    SMEM is not coherent with the VMEM flag write (e.g. gfx1250).
+    """
+    archCaps = {"HasInvWbDevFences": True}
+
+    def releaseFence(self, writer) -> Module:
+        module = Module("StreamK release fence (dev-scope)")
+        module.add(SWaitCnt(vlcnt=0,
+            comment="release: drain in-flight loads before global_wb"))
+        module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
+        module.add(MacroInstruction(name="global_wb scope:SCOPE_DEV", args=[],
+            comment="release: writeback partials to L2-coherent point"))
+        module.add(SWaitCnt(vlcnt=0, vscnt=0,
+            comment="release: wait for global_wb"))
+        return module
+
+    def acquireFence(self, writer) -> Module:
+        module = Module("StreamK acquire fence (dev-scope)")
+        module.add(MacroInstruction(name="global_inv scope:SCOPE_DEV", args=[],
+            comment="acquire: invalidate partials after flag"))
+        module.add(SWaitCnt(vlcnt=0, comment="acquire: wait for global_inv"))
+        return module
+
+    def readFlag(self, writer, dst, soffset) -> Module:
+        streamk = Component.StreamK.find(writer)
+        module = Module("StreamK read flag (VMEM)")
+        flagVgpr = writer.vgprPool.checkOut(1, "flagAcq")
+        module.add(streamk.getFlagValue(writer, dst=vgpr(flagVgpr),
+            soffset=soffset, comment="acquire: get flag (VMEM)"))
+        module.add(SWaitCnt(vlcnt=0, comment="acquire: wait VMEM flag load"))
+        module.add(VReadfirstlaneB32(dst=sgpr(dst), src=vgpr(flagVgpr),
+            comment="move VMEM flag to SGPR for compare"))
+        writer.vgprPool.checkIn(flagVgpr)
+        return module
+
+    def flagBufferMubuf(self) -> MUBUFModifiers:
+        return MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV)
+
+
 class StreamK(Component):
     """
     StreamK code.
@@ -120,10 +259,18 @@ class StreamK(Component):
 
         For MX scale tensors, DepthU is divided by the MX block size because
         there is one scale element per MXBlock data elements.
+        For MXSA/MXSB (MX swizzled/pre-shuffle case), the swizzled block size
+        is 32 * 256 so an additional *32 multiplier is needed.
         """
         key = "_DepthU%s" % tc
         if key in kernel:
-            return kernel[key]
+            _DepthU = kernel[key]
+            if tc in ("MXSA", "MXSB") and kernel.get("UseSubtileImpl"):
+                # UseSubtileImpl MX swizzled(pre shuffle) case: swizzled block size is 32 * 256,
+                # so the effective K stride for the scale tensor is DepthU * 32.
+                # Non-subtile MX kernels use the raw _DepthU (scale elements per tile in K).
+                _DepthU = (_DepthU * 32)
+            return _DepthU
         return kernel["DepthU"]
 
     def shiftSrd(self, writer, srdIdx) -> Module:
@@ -177,12 +324,15 @@ class StreamK(Component):
 
         # Always reset pointers to handle odd-exit case which moves LRO to the upper bank
         if kernel["PrefetchGlobalRead"]: # not self.prefetchAcrossPersistent
-            module.add(writer.localReadResetOffsets(kernel, tPA))
-            if kernel["ProblemType"]["MXBlockA"] and "MX" in tPA:
-                module.add(writer.localReadResetOffsets(kernel, tPA["MX"]))
-            if kernel["ProblemType"]["MXBlockB"] and "MX" in tPB:
-                module.add(writer.localReadResetOffsets(kernel, tPB["MX"]))
-            module.add(writer.localReadResetOffsets(kernel, tPB))
+            if not kernel["UseSubtileImpl"]:
+                module.add(writer.localReadResetOffsets(kernel, tPA))
+                if kernel["ProblemType"]["MXBlockA"] and "MX" in tPA:
+                    module.add(writer.localReadResetOffsets(kernel, tPA["MX"]))
+                if kernel["ProblemType"]["MXBlockB"] and "MX" in tPB:
+                    module.add(writer.localReadResetOffsets(kernel, tPB["MX"]))
+                module.add(writer.localReadResetOffsets(kernel, tPB))
+            else:
+                module.add(localReadResetOffsetsSubtile(writer, kernel))
 
         module.addComment0("StreamK calculate tile idx and map to WG")
 
@@ -472,6 +622,7 @@ class StreamK(Component):
         if kernel["StreamKAtomic"]:
             return module
 
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
         skStoreLabel = Label(label=writer.labels.getNameInc("SK_Store"), comment="")
 
@@ -593,11 +744,11 @@ class StreamK(Component):
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sFlagIdx), shiftHex=log2(4), comment="flag offset based on wg index"))
 
             module.add(skFixupWaitForFlag) # loop to wait for flag
-            module.add(SLoadB32(dst=sgpr(tmpSgpr+1), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV), comment="get flag"))
-            module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
+            module.add(memOrder.readFlag(writer, dst=tmpSgpr+1, soffset=sgpr(tmpSgpr)))
             if kernel["DebugStreamK"] & 2 == 0: # Don't wait for partials if not being written
                 module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=1, comment="check if ready"))
                 module.add(SCBranchSCC0(labelName=skFixupWaitForFlag.getLabelName(), comment="if flag not set, wait and check again"))
+                module.add(memOrder.acquireFence(writer))
 
             module.add(SBarrier(comment="wait for all workgroups before resetting flag"))
             skipFlagReset = Label(label=writer.labels.getNameInc("SK_SkipFlagReset"), comment="")
@@ -681,11 +832,11 @@ class StreamK(Component):
 
                 # Check flag
                 module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sCtaIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
-                module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV), comment="get flag"))
-                module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
+                module.add(memOrder.readFlag(writer, dst=tmpSgpr+2, soffset=sgpr(tmpSgpr)))
                 if kernel["DebugStreamK"] & 2 == 0:
                     module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
                     module.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(), comment="if flag not set, wait and check again"))
+                    module.add(memOrder.acquireFence(writer))
 
                 # TODO Barrier here to sync all threads in workgroup, but maybe better to have separate flag for each wavefront (to be tested)
                 module.add(SBarrier(comment="wait for all workgroups before resetting flag"))
@@ -703,7 +854,34 @@ class StreamK(Component):
                 writer.sgprPool.checkIn(tmpSgpr)
 
                 fixupEdge = [False] # Test no edge variant
-                module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
+                # Fixup writes to workspace (no bias LDS barriers), safe to defer.
+                deferFixup = (
+                    kernel.get("UseSubtileImpl")
+                )
+                if deferFixup:
+                    fixupDeferredLabel = Label(label=writer.labels.getNameInc("Fixup_E0_Deferred"), comment="")
+                    fixupReturnLabel = Label(label=writer.labels.getNameInc("Fixup_E0_Deferred_Return"), comment="")
+                    # Keep original Fixup_E0 label inline as a stub
+                    fixupInlineLabel = Label(label=writer.labels.getNameInc("Fixup_E%u" % 0), comment="")
+                    module.add(fixupInlineLabel)
+                    with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                        module.add(SLongBranchPositive(fixupDeferredLabel, tmpSgprInfo, comment="jump to deferred fixup block"))
+                    module.addComment0("=" * 60)
+                    module.addComment0(" Fixup block deferred to after persistent loop")
+                    module.addComment0(" (would have been inline here in non-deferred version)")
+                    module.addComment0("=" * 60)
+                    module.add(fixupReturnLabel)
+                    # Collect fixup code in deferred module
+                    fixupModule = Module("Fixup_DeferredBlock")
+                    fixupModule.add(fixupDeferredLabel)
+                    fixupModule.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
+                    with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                        posLabel = writer.labels.getNameInc("FixupDeferredReturnDir")
+                        fixupModule.add(SLongBranch(fixupReturnLabel, tmpSgprInfo, posLabel, comment="return from deferred fixup block"))
+                    writer.states.deferredFixupModule = fixupModule
+                else:
+                    fixupModule = None
+                    module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
 
                 if kernel["StreamK"] >= 2:
                     sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters")
@@ -766,14 +944,44 @@ class StreamK(Component):
             with self.allocTmpSgpr(4) as tmpSgprInfo:
                 module.add(writer.checkIsEdge(kernel, tmpSgprInfo, partialsLabels[True], partialsLabels[True]))
 
-        for edge in edges:
-            module.add(partialsLabels[edge])
-            sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-            if writer.isStreamKConstantsToVgprEnabled(kernel):
-                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
-            module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx)))
-            writer.releaseStreamKConstSgpr(sIdx)
-            module.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, endLabel))
+        # WritePartials writes to workspace (no bias LDS barriers), safe to defer.
+        deferPartials = (
+            kernel.get("UseSubtileImpl")
+        )
+        if deferPartials:
+            partialsDeferredLabel = Label(label=writer.labels.getNameInc("GW_Partials_E0_Deferred"), comment="")
+            partialsReturnLabel = Label(label=writer.labels.getNameInc("GW_Partials_E0_Deferred_Return"), comment="")
+            # Inline stub
+            for edge in edges:
+                module.add(partialsLabels[edge])
+            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                module.add(SLongBranchPositive(partialsDeferredLabel, tmpSgprInfo, comment="writePartials (deferred)"))
+            module.addComment0("=" * 60)
+            module.addComment0(" WritePartials block deferred to after persistent loop")
+            module.addComment0(" (would have been inline here in non-deferred version)")
+            module.addComment0("=" * 60)
+            module.add(partialsReturnLabel)
+            module.add(SBranch(labelName=endLabel.getLabelName(), comment="jump to end"))
+            # Deferred block
+            partialsModule = Module("Partials_DeferredBlock")
+            partialsModule.add(partialsDeferredLabel)
+            for edge in edges:
+                sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
+                if writer.isStreamKConstantsToVgprEnabled(kernel):
+                    partialsModule.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+                partialsModule.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx)))
+                writer.releaseStreamKConstSgpr(sIdx)
+                partialsModule.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, partialsReturnLabel))
+            writer.states.deferredPartialsModule = partialsModule
+        else:
+            for edge in edges:
+                module.add(partialsLabels[edge])
+                sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
+                if writer.isStreamKConstantsToVgprEnabled(kernel):
+                    module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+                module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx)))
+                writer.releaseStreamKConstSgpr(sIdx)
+                module.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, endLabel))
 
         return module
 
@@ -804,6 +1012,7 @@ class StreamK(Component):
 
     def partialsWriteProcedure(self, writer, kernel, vectorWidths, elements, alpha, beta, edge, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Common partialsWriteProcedure")
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
 
         # PreLoopVmcntCaseStr = ""
         # # not generate Case 2 if StoreCInUnroll with StoreVectorWidth==1 (Case 2 will be same as Case 3)
@@ -925,6 +1134,15 @@ class StreamK(Component):
         else:
             numElementsPerBatch = len(elements[edgeI]) # max, do 'em all
 
+        # Cap batch size to align on MIWaveTile[0] boundaries (see refineOccupancy).
+        if kernel.get("UseSubtileImpl") and kernel.get("EnableMatrixInstruction"):
+            miwt0 = kernel["MIWaveTile"][0]
+            totalElems = kernel["MIWaveTile"][0] * kernel["MIWaveTile"][1]
+            if numElementsPerBatch >= totalElems:
+                numElementsPerBatch = totalElems
+            elif miwt0 > 1 and numElementsPerBatch >= miwt0:
+                numElementsPerBatch = (numElementsPerBatch // miwt0) * miwt0
+
         # assert(writer.states.numVgprValuC % gwvw == 0) # sanity check
 
         numElementsPerBatch = numElementsPerBatch if not kernel["NumElementsPerBatchStore"] else min(kernel["NumElementsPerBatchStore"],numElementsPerBatch)
@@ -1009,7 +1227,7 @@ class StreamK(Component):
             #     kStr += PreLoopVmcntCaseStr
 
             # Set flag
-            module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
+            module.add(memOrder.releaseFence(writer))
             module.add(SBarrier(comment="store all data before setting flag"))
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
             if writer.isStreamKConstantsToVgprEnabled(kernel):
@@ -1031,7 +1249,12 @@ class StreamK(Component):
                 module.add(skipFlagSet)
             module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
 
-        module.add(SBranch(labelName=endLabel.getLabelName(), comment="jump to end"))
+        if "Deferred" in endLabel.getLabelName():
+            posLabel = writer.labels.getNameInc("PartialsDeferredReturnDir")
+            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                module.add(SLongBranch(endLabel, tmpSgprInfo, posLabel, comment="jump to end"))
+        else:
+            module.add(SBranch(labelName=endLabel.getLabelName(), comment="jump to end"))
 
         # Finish one write path, reset currPreLoopVmcntCase to Undefined
         # self.currPreLoopVmcntCase = PreLoopVmcntCase.Undefined
@@ -1040,6 +1263,7 @@ class StreamK(Component):
 
     def setFlagValue(self, writer, src, soffset, comment=""):
         module = Module("Buffer Store Flag Value")
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
         tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
         tmpVgprOff = writer.vgprPool.checkOut(1, "vaddr_off")
         module.add(VMovB32(dst=vgpr(tmpVgprOff), src=0, comment="zero vaddr offset"))
@@ -1047,10 +1271,36 @@ class StreamK(Component):
         module.add(SMovB32(dst=sgpr(tmpSgprBuffer+2), src="BufferOOB"))
         module.add(SMovB32(dst=sgpr(tmpSgprBuffer+3), src="Srd127_96"))
         module.add(self.shiftSrd(writer, tmpSgprBuffer))
-        module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset, \
-                                  mubuf=MUBUFModifiers(offen=True, glc=True, dlc=True, scope=CacheScope.SCOPE_DEV), \
-                                  comment=comment))
+        module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before volatile VMEM store"))
+        module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
+                                  mubuf=memOrder.flagBufferMubuf(), comment=comment))
         module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
+        writer.vgprPool.checkIn(tmpVgprOff)
+        writer.sgprPool.checkIn(tmpSgprBuffer)
+
+        return module
+
+    def getFlagValue(self, writer, dst, soffset, comment=""):
+        """Buffer-load primitive for the StreamK flag.
+
+        Used by `StreamKMemoryOrderingDevScopeFences.readFlag` to perform a
+        VMEM-coherent flag load. Default arches read the flag via SMEM
+        directly in `StreamKMemoryOrderingDefault.readFlag` and never call
+        this helper.
+        """
+        module = Module("Buffer Load Flag Value")
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
+        tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+        tmpVgprOff = writer.vgprPool.checkOut(1, "vaddr_off")
+        module.add(VMovB32(dst=vgpr(tmpVgprOff), src=0, comment="zero vaddr offset"))
+        module.add(SMovB64(dst=sgpr(tmpSgprBuffer, 2), src=sgpr("AddressFlags", 2)))
+        module.add(SMovB32(dst=sgpr(tmpSgprBuffer+2), src="BufferOOB"))
+        module.add(SMovB32(dst=sgpr(tmpSgprBuffer+3), src="Srd127_96"))
+        module.add(self.shiftSrd(writer, tmpSgprBuffer))
+        module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before volatile VMEM load"))
+        module.add(BufferLoadB32(dst=dst, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
+                                 mubuf=memOrder.flagBufferMubuf(),
+                                 comment=comment))
         writer.vgprPool.checkIn(tmpVgprOff)
         writer.sgprPool.checkIn(tmpSgprBuffer)
 
@@ -1120,7 +1370,8 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
+                        startVgprValuOffset = 0 if kernel.get("UseSubtileImpl") else writer.states.c.startVgprValu
+                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
                         #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
@@ -1188,8 +1439,14 @@ class StreamK(Component):
             element = batchElements[elementIdx]
             addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
             addr = addrCalc.addrDVgpr
-            sumIdx = ss.elementSumIdx[elementIdx]
-
+            # For UseSubtileImpl, vgprValuC is remapped; add the base offset so the
+            # WS store reads from the correct accumulator VGPRs.  For the regular path
+            # (non-subtile), startVgprValu is already accounted for by the vgprValuC
+            # assembler macro, so no offset is needed (matches rebase behaviour).
+            if kernel.get("UseSubtileImpl"):
+                sumIdx = ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu
+            else:
+                sumIdx = ss.elementSumIdx[elementIdx]
             storeWidth = kernel["StoreVectorWidth"]
             # storeWidth = 2
             if batchIdx == 0 and elementIdx == 0:
@@ -2222,9 +2479,9 @@ class StreamKTwoTileOriginal(StreamK):
 
         return module
 
-    def computeLoadSrd(self, writer, kernel, tc, sTmp):
+    def computeLoadSrd(self, writer, kernel, tP, sTmp):
         module = Module("StreamK TwoTileOriginal computeLoadSrd")
-        module.add(self.computeLoadSrdCommon(writer, kernel, tc, sTmp))
+        module.add(self.computeLoadSrdCommon(writer, kernel, tP, sTmp))
         return module
 
     def computeStoreSrdStart(self, writer, kernel):

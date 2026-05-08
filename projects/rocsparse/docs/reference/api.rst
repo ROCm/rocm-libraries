@@ -174,6 +174,8 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_csc_descr`         |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_const_bsr_descr`         |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_bell_descr`        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_sell_descr`        |

@@ -62,8 +62,8 @@ const Token& IRLexer::peek() const {
     if (currentTokenIndex < tokens.size()) {
         return tokens[currentTokenIndex];
     }
-    // Return EOF if past the end
-    static Token eofToken(TokenKind::Eof, "", 0, 0);
+    // Return EOF if past the end; line/column=1 so error diagnostics are valid
+    static Token eofToken(TokenKind::Eof, "", 1, 1);
     return eofToken;
 }
 
@@ -72,8 +72,8 @@ const Token& IRLexer::peekAhead(size_t offset) const {
     if (lookAheadIndex < tokens.size()) {
         return tokens[lookAheadIndex];
     }
-    // Return EOF if past the end
-    static Token eofToken(TokenKind::Eof, "", 0, 0);
+    // Return EOF if past the end; line/column=1 so error diagnostics are valid
+    static Token eofToken(TokenKind::Eof, "", 1, 1);
     return eofToken;
 }
 
