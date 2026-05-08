@@ -56,12 +56,9 @@ condition. This is the same defect under a different name — both indicate
 the schedule cannot guarantee LDS coherence at the LR1 read.
 """
 
-import pytest
-
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     BODY_LABEL_ML_PREV,
-    UnexplainedMissingEdgeError,
 )
 from Tensile.Components.CMSValidator import (
     MissingBarrierFailure,
@@ -383,13 +380,20 @@ class TestGRBeforeLR1_WaitAfterConsumer(GraphNativeValidationTest):
     def test_swap_global_read_order_failure(self):
         """SwapGlobalReadOrder=True legacy scenario: GRBs (which actually
         load A under swap) must precede LRA1 — but in this subj, GRB sits
-        at slot=3 AFTER LRA1 at slot=2. Graph-side: compare_graphs emits
-        OrderInvertedFailure for the GRB -> LRA1 cross-graph edge whose
-        positions are reversed in subj relative to ref.
+        at slot=4 AFTER both LR1 consumers. Graph-side: compare_graphs
+        emits OrderInvertedFailure for every GRB -> LR1 cross-graph edge
+        whose positions are reversed in subj relative to ref.
 
-        The wait-after-consumer view of this defect is one symptom of the
-        order inversion. The graph reports the more fundamental issue: the
-        producer is positioned after its consumer."""
+        Fixture shape: ref places both GRs at slot=0 (so all four
+        gr_to_lr_lds_reuse edges form), and the LR1 consumers after the
+        shared SWait/SBarrier window. Subj keeps GRA's pattern intact
+        (GRA at slot=0, both LR1 consumers BEFORE GRB at slot=4) so
+        GRA -> LRA1 and GRA -> LRB1 still form in subj — only the
+        GRB -> LR1 edges are missing, and they are missing precisely
+        because GRB sits AFTER its consumers. Phase 1 of
+        diagnose_missing_edge classifies every miss as OrderInverted; no
+        unexplained fall-through.
+        """
         ref_cap = make_capture(BODY_LABEL_ML, [
             _gr(slot=0, category="GRA"),
             _gr(slot=0, category="GRB", vgpr_base=44),
@@ -403,30 +407,26 @@ class TestGRBeforeLR1_WaitAfterConsumer(GraphNativeValidationTest):
             make_swait(slot=1, vlcnt=0),
             make_sbarrier(slot=1, sequence=1),
             _lr1(slot=2, category="LRA1"),
-            _gr(slot=3, category="GRB", vgpr_base=44),
-            # GRB's covering wait/barrier sit AFTER LRA1 — but the more
-            # fundamental defect is that GRB is positioned AFTER its
-            # cross-graph LRA1 consumer in subj's edge set.
-            make_swait(slot=4, vlcnt=0),
-            make_sbarrier(slot=4, sequence=1),
-            _lr1(slot=5, category="LRB1", vgpr_base=12),
+            # LRB1 placed BEFORE GRB so GRA's pattern window (which the
+            # _collect_pattern walker terminates at the next producer of
+            # the same kind) still picks LRB1 up — keeping GRA -> LRB1
+            # present in subj. Without this, GRA -> LRB1 would be missing
+            # AND order-preserved, which falls through every classifier
+            # branch and trips UnexplainedMissingEdgeError.
+            _lr1(slot=3, category="LRB1", vgpr_base=12),
+            _gr(slot=4, category="GRB", vgpr_base=44),
+            # GRB now sits AFTER both LR1 consumers — the OrderInverted
+            # defect this fixture is meant to exercise.
+            make_swait(slot=5, vlcnt=0),
+            make_sbarrier(slot=5, sequence=1),
         ])
-        # The unexplained branch in compare_graphs now raises
-        # unconditionally (rocm-libraries-6bue): an unclassified missing
-        # edge in this fixture is treated as a validator bug rather than
-        # being absorbed into a soft synthetic Failure. This fixture is
-        # intentionally "broken" enough that some cross-graph misses
-        # currently fall through every classifier branch (the OrderInverted
-        # detection on the GRB->LRA1 edge is real, but other GR->LR1 misses
-        # in this scenario are not classified by any of the existing
-        # branches). Pinning the new contract here: any future fixture
-        # change that lets the classifier explain every miss should turn
-        # this into an explicit OrderInvertedFailure assertion again.
-        with pytest.raises(UnexplainedMissingEdgeError):
-            self.compare(
-                self.wrap_single_body(ref_cap),
-                self.wrap_single_body(subj_cap),
-            )
+        failures = self.compare(
+            self.wrap_single_body(ref_cap),
+            self.wrap_single_body(subj_cap),
+        )
+        f = self.assert_failures_contain(failures, cls=OrderInvertedFailure)
+        assert f.producer.category in {"GRA", "GRB"}
+        assert f.consumer.category in {"LRA1", "LRB1"}
 
 
 # =============================================================================

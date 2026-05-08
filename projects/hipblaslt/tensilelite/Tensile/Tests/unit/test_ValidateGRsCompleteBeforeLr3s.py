@@ -39,11 +39,8 @@ to assert the same Failures with LR3 categories, demonstrating the
 unification.
 """
 
-import pytest
-
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
-    UnexplainedMissingEdgeError,
 )
 from Tensile.Components.CMSValidator import (
     MissingBarrierFailure,
@@ -239,9 +236,18 @@ class TestGRBeforeLR3_Negatives(GraphNativeValidationTest):
         assert f.consumer.category == "LRA3"
 
     def test_LR3_swap_global_read_order_failure(self):
-        """SwapGlobalReadOrder=True LR3 variant. GRB at slot=3 sits AFTER
-        LRA3 at slot=2 in subj -> OrderInverted on the cross-graph
-        GRB -> LRA3 edge."""
+        """SwapGlobalReadOrder=True LR3 variant. GRB at slot=4 sits AFTER
+        both LR3 consumers in subj -> OrderInverted on every GRB -> LR3
+        cross-graph edge.
+
+        Mirrors the LR1 variant's fixture shape — see
+        test_swap_global_read_order_failure in
+        test_ValidateGRsCompleteBeforeLr1s.py for the rationale. The key
+        difference vs the original P3-flagged shape is LRB3 is placed
+        BEFORE GRB so GRA -> LRB3 still forms in subj (otherwise that
+        edge falls through every classifier branch and trips
+        UnexplainedMissingEdgeError).
+        """
         ref_cap = make_capture(BODY_LABEL_ML, [
             _gr(slot=0, category="GRA"),
             _gr(slot=0, category="GRB", vgpr_base=44),
@@ -255,19 +261,20 @@ class TestGRBeforeLR3_Negatives(GraphNativeValidationTest):
             make_swait(slot=1, vlcnt=0),
             make_sbarrier(slot=1, sequence=1),
             _lr3(slot=2, category="LRA3"),
-            _gr(slot=3, category="GRB", vgpr_base=44),
-            make_swait(slot=4, vlcnt=0),
-            make_sbarrier(slot=4, sequence=1),
-            _lr3(slot=5, category="LRB3", vgpr_base=12),
+            # LRB3 placed BEFORE GRB so GRA -> LRB3 still forms in subj
+            # (the _collect_pattern walker terminates GRA's pattern window
+            # at the next producer of the same kind).
+            _lr3(slot=3, category="LRB3", vgpr_base=12),
+            _gr(slot=4, category="GRB", vgpr_base=44),
+            # GRB now sits AFTER both LR3 consumers — the OrderInverted
+            # defect this fixture exercises.
+            make_swait(slot=5, vlcnt=0),
+            make_sbarrier(slot=5, sequence=1),
         ])
-        # Mirror of test_swap_global_read_order_failure in
-        # test_ValidateGRsCompleteBeforeLr1s: this fixture is intentionally
-        # broken enough that some cross-graph misses fall through every
-        # classifier branch. Post rocm-libraries-6bue, an unclassified miss
-        # raises UnexplainedMissingEdgeError unconditionally — that is the
-        # contract this test now pins.
-        with pytest.raises(UnexplainedMissingEdgeError):
-            self.compare(
-                self.wrap_single_body(ref_cap),
-                self.wrap_single_body(subj_cap),
-            )
+        failures = self.compare(
+            self.wrap_single_body(ref_cap),
+            self.wrap_single_body(subj_cap),
+        )
+        f = self.assert_failures_contain(failures, cls=OrderInvertedFailure)
+        assert f.producer.category in {"GRA", "GRB"}
+        assert f.consumer.category in {"LRA3", "LRB3"}
