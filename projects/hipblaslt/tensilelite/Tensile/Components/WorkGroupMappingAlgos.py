@@ -308,7 +308,7 @@ def DefaultWGM(writer, kernel, sgprWGM):
     tmpWGM = writer.sgprPool.checkOut(1)
 
     module.add(SMovB32(dst=sgpr(tmpWGM), src=sgpr(sgprWGM), comment="Restore WGM"))
-    if(kernel["StreamK"] == 0 and kernel["WorkGroupMappingXCC"] == -1):
+    if(kernel["WorkGroupMappingXCC"] == -1):
         # New bit layout: WGM is in bits [9:0] (10-bit signed, range -511..511).
         # Sign-extend from bit 9: (val & 0x3FF) ^ 0x200 - 0x200
         module.add(SAndB32(dst=sgpr(tmpWGM), src0=sgpr(tmpWGM), src1=hex(0x3FF), comment="extract bits [9:0]"))
