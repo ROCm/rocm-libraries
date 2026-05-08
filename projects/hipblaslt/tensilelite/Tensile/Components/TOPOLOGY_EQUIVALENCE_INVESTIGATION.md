@@ -8,6 +8,55 @@ comparison. **Phase 1 — research only. No code changes.**
 
 ---
 
+## Design constraints (decided 2026-05-08)
+
+These two user decisions narrow the design space substantially. **Sections
+1–5 below are the original catalog and historical analysis** — they remain
+correct and useful as background. **Section 6 has been rewritten** to
+reflect the recommendation under these constraints; many open questions
+that the original §6 raised resolve themselves automatically.
+
+1. **No caching.** No on-graph digest cache, no disk-cache, no per-build
+   memoization. The graph-comparison path runs from scratch every call.
+   Rationale: the validator's call sites only do one compare per
+   `(reference, subject)` pair per Python invocation, and disk-caching the
+   topology digest saves only ~10µs against multi-second invocation
+   overhead — not worth the implementation complexity. If this becomes a
+   bottleneck, revisit; until then, simplicity wins.
+
+2. **Keep emitting Failures like today.** The existing diagnostic
+   `Failure` hierarchy (`OrderInvertedFailure`, `OverriddenInputFailure`,
+   `MissingWaitFailure`, `WaitInsufficientFailure`,
+   `MissingBarrierFailure`, `TimingTooCloseFailure`,
+   `InvalidCounterValueFailure`, `UnexplainedMissingEdgeError`) and the
+   `diagnose_missing_edge` pipeline that produces them are unchanged. Any
+   new approach must produce a *missing-edge set* that
+   `diagnose_missing_edge` can consume.
+
+**Implications for the catalog:**
+- **B (cached digest)** loses its primary justification. Without caching,
+  computing a hash per graph + comparing two ints is *more* work than
+  A's set-diff (you walk the edges to build the hash AND have to do the
+  set-diff anyway on mismatch). Demoted.
+- **F (Merkle per-node hash)** loses its fast-path advantage. F's
+  per-node descent localization is also incompatible with constraint 2:
+  per-node mismatch is not the granularity the existing `Failure` types
+  describe (they're per-edge with semantic kind labels). Demoted.
+- **G (iceberg fingerprint)** depended on a cached pre-check. Demoted.
+- **K (parallel emit-stream walk)** survives technically (O(E) walk in
+  lockstep), but its native output ("graph A's node 17 differs from
+  graph B's node 17") doesn't match `Failure`-type granularity. K would
+  need a new diagnostic mapper to produce typed Failures. Demoted vs A.
+- **A (multiset of edge signatures)** becomes the obviously-right
+  primary. Its slow-path output (a missing-edge set) is exactly the
+  shape `diagnose_missing_edge` expects. The existing diagnostic
+  pipeline runs unchanged.
+- **J (sorted-tuple compare)** stays as a cousin of A; mostly equivalent
+  in this regime, marginal short-circuit advantage on mismatch. Either
+  works.
+
+---
+
 ## 0. Today's situation in one screen
 
 `Tensile/Components/CMSValidator.py`:
@@ -851,169 +900,140 @@ constructions that depend on the old form-distinction behavior.
 
 ---
 
-## 6. Recommendation
+## 6. Recommendation (revised 2026-05-08 under no-cache + keep-Failures constraints)
 
-**Adopt B + F**: cache a top-level structural digest on each
-`DataflowGraph` for the O(1) fast-path equality test, and a
-per-node Merkle hash table for descend-on-mismatch localization.
-F's mismatch output is formatted with role-pair grouping (the
-mechanism formerly called Approach H — now subsumed into F's
-output layer rather than tracked as a separate approach).
+**Adopt Approach A** (multiset of structural edge signatures) as the
+sole cross-graph mechanism. Replace the current edge identity-tuple
+shape from register-name-based to structural; everything downstream
+(set-diff, `diagnose_missing_edge`, the entire `Failure` hierarchy)
+runs unchanged.
 
-### Why this hybrid
+### What this actually is
 
-1. **99%-identical fast path is the dominant axis.** B is the only
-   approach with a true O(1) on-match return after warm cache; F
-   matches it. No other approach has a free short-circuit.
+A one-file-and-a-half change:
 
-2. **Mismatch localization survives.** F's per-node hash descent
-   pinpoints the exact divergent producer/consumer in O(V) without
-   re-walking edges; once located, the existing
-   `diagnose_missing_edge` classifier runs unchanged.
+1. **Builder side** (`ScheduleCapture.py`): the edge identity tuple
+   used for set construction switches from
+   `(src_render_string, sink_render_string, edge_kind)` to
+   `(src_role, src_position, sink_role, sink_position, edge_kind,
+   byte_offset)`. `_canonical_render` stays for human-facing
+   `Failure` rendering but drops out of the matching path.
+2. **Compare side** (`CMSValidator.py`): the existing set-diff
+   inside `compare_graphs` is unchanged; it just operates on the
+   new tuple shape. `diagnose_missing_edge` consumes the same
+   missing-edge set it did before and produces the same `Failure`
+   objects.
+3. **Intra-graph 7a fix** in the builder (see Open Question #1
+   below for the mechanism choice). Required because A's correctness
+   depends on the builder canonicalizing symbolic vs numeric
+   references to the same physical register *within* one graph
+   before the edge-set is built.
 
-3. **`Failure` hierarchy survives.** All current diagnostic
-   `Failure` classes are register-name-free at their formatting
-   surface (they consume `FailureNodeLabel`s from
-   `cms_node_label`). The matching surface is the only thing that
-   changes.
+### Why A under these constraints
 
-4. **Intra-graph (7a) is solvable independently.** The 7a fix lives
-   in the builder's `_byte_keys_for_resource` and the latest-writer
-   resolver's keying strategy — independent of which cross-graph
-   approach we adopt. The choice of mechanism for the 7a fix is left
-   open (see Open Question #6); the cross-graph 7b recommendation
-   (B+F) does not depend on it.
+1. **No-cache constraint kills B/F/G's primary advantage.** Without
+   a cache to amortize the digest-build cost across calls, the
+   hash-then-compare pattern is strictly more work than direct
+   set-diff for the matching case (you have to walk the edges to
+   build the hash, and then walk them again on mismatch for the
+   set-diff). At N=1 calls per graph pair, A wins on simplicity at
+   no perf cost.
 
-5. **Implementation cost is bounded.** ~250 LoC plus the 7a builder
-   fix; touches `compare_graphs`, `_identity_for`,
-   `DataflowGraph`, `_byte_keys_for_resource`. No new dependencies
-   (BLAKE2b is in `hashlib`).
+2. **Keep-Failures constraint kills K/F's diagnostic alternatives.**
+   K's "first divergence index" and F's per-node descent both
+   produce mismatch granularities that don't match the existing
+   `Failure` types' per-edge-with-semantic-kind shape. Mapping
+   K-style or F-style output to `Failure` objects requires a new
+   diagnostic mapper. A's missing-edge-set output is *exactly* what
+   `diagnose_missing_edge` already consumes — zero new diagnostic
+   code.
 
-6. **Determinism is straightforward.** BLAKE2b is byte-stable
-   across Python versions and runs; structural signatures are
-   built from sortable tuples; no `hash()` builtin.
+3. **Implementation reduces to a near-trivial swap.** ~30-50 LoC of
+   net change for the 7b cross-graph piece (the identity-tuple
+   shape change + a few touched call sites). The 7a builder fix is
+   separate complexity (estimate depends on which mechanism Open
+   Question #1 picks).
 
-### Open questions for the user
+4. **No new dependencies, no caching plumbing, no `DataflowGraph`
+   API surface change.** The matching path is purely in-place.
 
-These need a yes/no before implementation lands:
+### Open questions (after constraint pruning)
 
-1. **Should the structural identity tuple include `loop_index`?**
-   Today's `_identity_for` does (it's the second element). Topology
-   under the new scheme keys on `(role, position)`, and `position`
-   already encodes `loop_index` as its first lex component. If
-   `loop_index` stays in the identity tuple, cross-body register
-   reuse (same role+vmfma+sub but different body_label) stays
-   distinct. If removed, two structurally-identical positions in
-   ML-1 vs ML collide. **Recommended: keep loop_index.**
+Most of the original §6 open questions resolved themselves under
+the two constraints. The remaining ones:
 
-2. **Should we keep `_canonical_render` for diagnostics?** The
-   rendered string is currently the *only* way to show a human
-   "here is the exact instruction that differs." Even with
-   structural matching, we still want the rendered text for the
-   `Failure` formatter. Keep `_canonical_render` as a display-only
-   helper, drop it from the matching path. **Recommended: keep for
-   display.**
-
-3. **How to surface "structurally identical but rendered text
-   differs"?** Once topology matching is in place, two graphs may
-   match topologically but their `_canonical_render` strings differ
-   (e.g., genuinely different register allocation between subject
-   and reference). Three options:
-   - (a) Treat as equal silently. Information is lost; differences
-     in register allocation are invisible.
-   - (b) Treat as equal with a warning summarizing the rendered-text
-     diff at the validator boundary.
-   - (c) Treat as equal only when registers match symbolically; flag
-     as "topology equal but allocation differs" otherwise.
-   **Recommended: (b)** — equal means equal; render diffs become a
-   non-blocking diagnostic.
-
-4. **Per-class digest or per-graph digest?** Today the bead's reframe
-   says `(src_role, sink_role, edge_kind, byte_offset)` is the edge
-   key. Should the digest be over this tuple, or over a richer
-   tuple including position? **Recommended: include position** —
-   without it, two PackA0 instructions at different vmfma_indices
-   would collide in the digest, hiding real reorder bugs.
-
-5. **What should `diagnose_missing_edge` do when an edge is
-   "missing" because subject's structural identity for the
-   producer is at a different position than reference's?** Today
-   identity-mismatch raises `CaptureConsistencyError` early. With
-   structural matching, "subject has the producer at vmfma=14 but
-   reference has it at vmfma=15" becomes representable. Is that an
-   `OrderInvertedFailure` (yes if the consumer relationship
-   inverted), a new `PositionShiftedFailure` (no — the bead
-   explicitly forbids new diagnostic shapes without need), or
-   simply absorbed into `OrderInvertedFailure` semantics?
-   **Recommended: absorb into existing classes**; do not invent a
-   new Failure type unless a real kernel triggers it.
-
-6. **OPEN — How should the intra-graph 7a builder fix work?** The 7a
-   problem (symbolic and numeric references to the same physical
-   register live in different byte-key namespaces inside one graph)
-   needs a builder-side fix. The recommendation is deliberately
-   silent on which mechanism. Candidates:
+1. **How should the intra-graph 7a builder fix work?** A's
+   correctness still requires that the builder canonicalize
+   symbolic vs numeric references to the same physical register
+   within one graph (otherwise A produces a missing-edge set that
+   includes false positives from name-form divergence). The
+   mechanism is open — same four candidates as before:
 
    - **(a) Builder consumes kernel-writer state at edge-formation
-     time.** The builder reads `regName.name → allocated index` from
-     the writer state and rewrites symbolic references to numeric in
-     the byte-key. **Previously rejected** in the c70/d0xd reframe;
-     listed here for completeness.
+     time.** Reads `regName.name → allocated index` from the writer
+     state and rewrites symbolic refs to numeric. **Previously
+     rejected** in the c70/d0xd reframe; listed for completeness.
    - **(b) Local first-write-wins canonicalization within the
-     captured body.** No kernel-writer state is consulted. Walk the
-     captured body in emission order; the first write that touches a
-     given physical-register byte-range assigns a fresh local ID, and
-     every subsequent reference to a name or numeric form covering
-     that byte-range adopts the same local ID. Self-contained inside
-     the capture; no out-of-band state.
-   - **(c) Container-instance identity.** Use the `id()` of the
-     rocisa container as the namespace key. Already noted in §1
-     under Approach F as unavailable in practice — distinct
-     constructor calls (`vgpr("ValuA_X0_I0", 4)` vs `vgpr(8, 4)`)
-     produce two distinct Python objects, so identity-based keying
-     gives two different keys for the same physical register. Listed
-     for completeness; does not solve 7a on its own.
-   - **(d) Deferred resolution at edge-formation by checking earlier
-     byte-range writes in the same body.** Rather than rewrite
-     names, the edge builder asks "is there a prior write inside this
-     body to any byte-key that overlaps the byte-range I am about to
-     read?" If yes, that prior write is the producer regardless of
-     whether its container was symbolic or numeric. Producer
+     captured body.** No writer state. Walk the captured body in
+     emission order; first write to a byte-range assigns a fresh
+     local ID; subsequent name- or numeric-form references covering
+     that byte-range adopt the same local ID. Self-contained inside
+     the capture.
+   - **(c) Container-instance identity.** Use `id()` of the rocisa
+     container. Distinct constructor calls produce distinct objects
+     for the same physical register, so this does not solve 7a on
+     its own. Listed for completeness.
+   - **(d) Deferred resolution at edge-formation by byte-range
+     overlap search.** Rather than rewrite names, the edge builder
+     asks "is there a prior write inside this body to any byte-key
+     overlapping the byte-range I'm about to read?" Producer
      resolution becomes a byte-range search; names are never
      normalized.
 
-   **No tentative recommendation.** The choice is left to the user.
+   **No recommendation.** This is the single load-bearing decision
+   left for Phase 2. (b) and (d) are the most promising; (b) needs
+   a single emission-order walk per body, (d) needs a per-edge
+   byte-range search.
 
-7. **OPEN — When is the cached digest computed?** The B/F
-   recommendation depends on a digest cached on `DataflowGraph`. The
-   memo doesn't pin down when. Three options:
+2. **A or J?** A uses a Python set; J uses a sorted tuple compared
+   directly. Performance is essentially identical at the µs scale;
+   J short-circuits faster on mismatch (C-implemented tuple `==`),
+   A's slow-path output is more naturally what `diagnose_missing_edge`
+   consumes (a set). **Tentative recommendation: A**, on diagnostic
+   output shape. Either works.
 
-   - **(a) Eager at build end.** Every graph pays one O(E) digest
-     cost at construction whether it is ever compared or not. After
-     that, every comparison is O(1).
-   - **(b) Lazy on first comparison.** The first comparison still
-     pays full O(E) to compute and cache; subsequent comparisons of
-     the same graph are O(1). Graphs that are built but never
-     compared pay nothing.
-   - **(c) Incremental during construction.** Every `add_edge`
-     updates a running hash (BLAKE2b supports incremental update);
-     the digest is always available. `add_edge` becomes slightly
-     more expensive (one hash update per edge), but no separate
-     finalization pass is needed.
+#### Resolved by constraint pruning (no decision needed)
 
-   **Tentative recommendation: (a) eager at build end**, given the
-   bead's 99%-identical assumption — graphs almost always end up in
-   a compare call inside the validator pipeline, so paying O(E) once
-   at build is virtually free relative to the comparator workload.
-   This is tentative pending user decision.
+- **`loop_index` in identity tuple.** Yes — keep, encoded in
+  `position`. Cross-body register reuse must stay distinct.
+- **Keep `_canonical_render`?** Yes — for `Failure` rendering only,
+  off the matching path.
+- **Topology matches but rendered text differs?** Resolved: equal
+  is equal. Rendered text isn't in the identity tuple anymore so
+  this case can no longer surface in the matching path. If you want
+  a "registers differ but topology matches" diagnostic, file a
+  follow-up bead — it's a separate audit, not a `compare_graphs`
+  concern.
+- **Position in identity tuple?** Yes — already in A's signature
+  (`src_position`, `sink_position`). Without it, structurally
+  identical positions across vmfma indices would collide.
+- **Position-only differences → new Failure type?** No, absorb into
+  `OrderInvertedFailure`.
+- **Digest computation timing?** Moot — no digest, no caching.
 
-### Estimate
+### Estimate (revised)
 
-- **Implementation:** ~250 LoC topology-equivalence + ~150 LoC for
-  the intra-graph 7a builder fix = ~400 LoC across `CMSValidator.py`
-  and `ScheduleCapture.py`. Single bead, single PR.
-- **Tests updated:** ~25-40 of 653 unit tests (~4-6%).
-- **No new dependencies** (BLAKE2b is in `hashlib`).
+| Component | Original (B+F+cache) | Revised (A, no cache) |
+|-----------|----------------------|------------------------|
+| Cross-graph (7b) implementation | ~250 LoC | **~30-50 LoC** |
+| Intra-graph (7a) builder fix | ~150 LoC | ~150 LoC (unchanged; depends on OQ#1 choice) |
+| `DataflowGraph` API surface change | new digest cache attr | **none** |
+| New diagnostic plumbing | F descent + role-pair formatter | **none** |
+| Tests updated | ~25-40 of 666 | ~15-30 of 666 (lower because the `Failure`-emission tests don't change at all) |
+| New dependencies | none (BLAKE2b is stdlib) | **none** |
+
 - **Failure hierarchy: unchanged.**
-- **Backward-compatibility shims: none** (per the bead's no-fallback
+- **`diagnose_missing_edge` pipeline: unchanged.**
+- **No backward-compatibility shims** (per the bead's no-fallback
   directive).
+- **Single bead, single PR.**
