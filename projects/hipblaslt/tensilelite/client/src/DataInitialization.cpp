@@ -2681,7 +2681,7 @@ namespace TensileLite
                             auto tiledSize    = desc.sizes()[0];
                             size_t dimk       = 128 / MX;
                             auto tmpTensor    = Tensor({unrolledSize, tiledSize}, desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{(unrolledSize + dimk - 1) / dimk * dimk};
+                            ::Tensor::Manipulation::Shape paddedShape{(unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
 
                             memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
                             //Temporary hack
