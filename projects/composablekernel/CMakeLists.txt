@@ -757,6 +757,9 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
    endif()
    if(CK_ENABLE_ROCM_CK)
        add_subdirectory(rocm_ck)
+       if(TARGET check)
+           add_dependencies(check build-smoke-rocm-ck)
+       endif()
    endif()
    if(BUILD_TESTING)
        rocm_package_setup_component(tests
