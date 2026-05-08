@@ -32,7 +32,7 @@
 
 namespace stinkytofu {
 // Forward declarations
-class StinkyInstruction;
+struct StinkyInstruction;
 class AsmIRBuilder;
 enum class GfxArchID : uint32_t;
 

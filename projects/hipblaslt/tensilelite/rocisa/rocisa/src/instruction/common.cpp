@@ -1931,11 +1931,13 @@ void common_inst(nb::module_ m_common)
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
                       const std::optional<rocisa::SDWAModifiers>&,
-                      const std::string&>(),
+                      const std::string&,
+                      const std::optional<rocisa::DPPModifiers>&>(),
              nb::arg("dst"),
              nb::arg("src"),
              nb::arg("sdwa")    = std::nullopt,
-             nb::arg("comment") = "")
+             nb::arg("comment") = "",
+             nb::arg("dpp")     = std::nullopt)
         .def("__deepcopy__",
              [](const rocisa::VMovB32& self, nb::dict&) { return new rocisa::VMovB32(self); });
 
@@ -1970,6 +1972,26 @@ void common_inst(nb::module_ m_common)
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VSwapB32& self, nb::dict&) { return new rocisa::VSwapB32(self); });
+
+    nb::class_<rocisa::VPermlane16SwapB32, rocisa::CommonInstruction>(m_common, "VPermlane16SwapB32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VPermlane16SwapB32& self, nb::dict&) { return new rocisa::VPermlane16SwapB32(self); });
+
+    nb::class_<rocisa::VPermlane32SwapB32, rocisa::CommonInstruction>(m_common, "VPermlane32SwapB32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VPermlane32SwapB32& self, nb::dict&) { return new rocisa::VPermlane32SwapB32(self); });
 
     nb::class_<rocisa::VBfeI32, rocisa::CommonInstruction>(m_common, "VBfeI32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,

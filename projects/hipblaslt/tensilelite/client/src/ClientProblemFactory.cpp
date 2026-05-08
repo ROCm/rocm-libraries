@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -55,6 +55,7 @@ namespace TensileLite
             , m_useUserArgs(false)
             , m_mxBlockA(args["mx-a-block"].as<int>())
             , m_mxBlockB(args["mx-b-block"].as<int>())
+            , m_padMXScaleTensor(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
             , m_metadataLayout(args["metadata-layout"].as<int>())
@@ -64,6 +65,15 @@ namespace TensileLite
             , m_dOps(args["d-ops"].as<TensorOps>())
         {
             using std::static_pointer_cast;
+
+            if(m_mxBlockA || m_mxBlockB)
+            {
+                hipDeviceProp_t prop;
+                int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
+                hipGetDeviceProperties(&prop, deviceIdx);
+                std::string archName(prop.gcnArchName);
+                m_padMXScaleTensor = (archName.find("gfx950") != std::string::npos);
+            }
 
             std::vector<bool> isComplex;
             if(args.count("problem-identifier"))
@@ -130,6 +140,15 @@ namespace TensileLite
                     m_tensorStrides[i] = std::vector<std::vector<size_t>>();
                 }
             }
+
+            // MX scale element types: use dedicated options (see main.cpp mx-a-type / mx-b-type).
+            // Do not rely on the generic tensor loop alone — args.count("mx-a-type") is often false
+            // when the value only comes from program_options default_value or from the INI merge.
+            m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA]
+                = args["mx-a-type"].as<rocisa::DataType>();
+            m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB]
+                = args["mx-b-type"].as<rocisa::DataType>();
+
             // Get constant types
             for(size_t i = 0; i < constants.size(); i++)
             {
@@ -441,11 +460,11 @@ namespace TensileLite
                             rv.back().setUseDeviceUserArguments(m_useUserArgs);
                             if(m_mxBlockA)
                             {
-                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA);
+                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensor);
                             }
                             if(m_mxBlockB)
                             {
-                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB);
+                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensor);
                             }
                         }
                     }

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,16 +26,22 @@
 
 #pragma once
 
-// Workaround: ROCm's amd_hip_ocp_host.hpp has a static_assert size mismatch
-// (fp6x32_packed vs __amd_fp6x32_storage_t) in its host-fallback path, which
-// is taken for all non-gfx950/gfx1250 device targets.
 #include <Tensile/Macros.hpp>
 
-#if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx950__) || defined(__gfx1250__)) && !defined(WIN32) && !defined(_WIN32)
 #define TENSILE_USE_BF6
-#endif
 
 #ifdef TENSILE_USE_BF6
+
+#ifdef _WIN32
+
+#include <cstdint>
+
+namespace TensileLite
+{
+    typedef struct BFloat6{ uint8_t data;} BFloat6;
+} // end of namespace TensileLite
+
+#else // _WIN32
 
 #ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
@@ -59,8 +65,7 @@ namespace TensileLite
         stochastic
     };
 
-    struct BFloat6x16_Storage
-    {
+    struct BFloat6x32_Storage {
         uint8_t v0 : 6;
         uint8_t v1 : 6;
         uint8_t v2 : 6;
@@ -77,77 +82,58 @@ namespace TensileLite
         uint8_t v13 : 6;
         uint8_t v14 : 6;
         uint8_t v15 : 6;
+        uint8_t v16 : 6;
+        uint8_t v17 : 6;
+        uint8_t v18 : 6;
+        uint8_t v19 : 6;
+        uint8_t v20 : 6;
+        uint8_t v21 : 6;
+        uint8_t v22 : 6;
+        uint8_t v23 : 6;
+        uint8_t v24 : 6;
+        uint8_t v25 : 6;
+        uint8_t v26 : 6;
+        uint8_t v27 : 6;
+        uint8_t v28 : 6;
+        uint8_t v29 : 6;
+        uint8_t v30 : 6;
+        uint8_t v31 : 6;
     } __attribute__((packed));
 
     // data type
-    struct BFloat6x16
+    struct BFloat6x32
     {
-        BFloat6x16_Storage      data;
-        constexpr static size_t packed_size = 16;
+        BFloat6x32_Storage data;
 
         // default constructor
-        HIP_HOST_DEVICE BFloat6x16() = default;
+        HIP_HOST_DEVICE BFloat6x32() = default;
 
         // constructor from float
-        explicit HIP_HOST_DEVICE BFloat6x16(float                 val,
-                                            hip_bf6_rounding_mode rm
-                                            = hip_bf6_rounding_mode::standard,
-                                            uint32_t rng = 0)
+        explicit HIP_HOST_DEVICE BFloat6x32(float                 val,
+                                            hip_bf6_rounding_mode rm  = hip_bf6_rounding_mode::standard,
+                                            uint32_t              rng = 0)
         {
-            __amd_floatx16_storage_t f32x16;
+            union {
+                BFloat6x32_Storage real;
+                __amd_fp6x32_storage_t tmp;
+            } cvt;
+            __amd_floatx32_storage_t f32x32;
 
-            for(int i = 0; i < packed_size; i++)
-                f32x16[i] = val;
+            for (int i=0; i<32; i++)
+                f32x32[i] = val;
 
-            if(rm == hip_bf6_rounding_mode::standard)
-            {
-#ifdef HIPBLASLT_USE_HIP_FP6X16
-                union
-                {
-                    BFloat6x16_Storage     real;
-                    __amd_fp6x16_storage_t tmp;
-                } cvt;
-                cvt.tmp = __amd_cvt_floatx16_to_fp6x16_scale(f32x16, __AMD_OCP_E3M2, 0);
-                data    = cvt.real;
-#else
-                union
-                {
-                    __amd_floatx32_storage_t fp32x32;
-                    __amd_floatx16_storage_t fp32x16[2];
-                } in;
-                union
-                {
-                    BFloat6x16_Storage     real[2];
-                    __amd_fp6x32_storage_t fp6x32;
-                } out;
-                in.fp32x16[0] = f32x16;
-                out.fp6x32
-                    = __amd_cvt_floatx32_to_fp6x32_scale(in.fp32x32, __AMD_OCP_E3M2, 0);
-                data = out.real[0];
-#endif
+            if (rm == hip_bf6_rounding_mode::standard) {
+                cvt.tmp = __amd_cvt_floatx32_to_fp6x32_scale(f32x32, __AMD_OCP_E3M2, 0);
+                data = cvt.real;
             }
-            else
-            {
-                // TODO: update below code if hip_ext_ocp.h supports __amd_cvt_floatx16_to_fp6x16_sr_scale
-                union
-                {
-                    __amd_floatx32_storage_t fp32x32;
-                    __amd_floatx16_storage_t fp32x16[2];
-                } in;
-                union
-                {
-                    BFloat6x16_Storage     real[2];
-                    __amd_fp6x32_storage_t fp6x32;
-                } out;
-                in.fp32x16[0] = f32x16;
-                out.fp6x32
-                    = __amd_cvt_floatx32_to_fp6x32_sr_scale(in.fp32x32, __AMD_OCP_E3M2, rng, 0);
-                data = out.real[0];
+            else {
+                cvt.tmp = __amd_cvt_floatx32_to_fp6x32_sr_scale(f32x32, __AMD_OCP_E3M2, rng, 0);
+                data = cvt.real;
             }
         }
 
         // constructor from float
-        explicit HIP_HOST_DEVICE BFloat6x16(float                 v0,
+        explicit HIP_HOST_DEVICE BFloat6x32(float                 v0,
                                             float                 v1,
                                             float                 v2,
                                             float                 v3,
@@ -163,88 +149,85 @@ namespace TensileLite
                                             float                 v13,
                                             float                 v14,
                                             float                 v15,
-                                            hip_bf6_rounding_mode rm
-                                            = hip_bf6_rounding_mode::standard,
-                                            uint32_t rng = 0)
+                                            float                 v16,
+                                            float                 v17,
+                                            float                 v18,
+                                            float                 v19,
+                                            float                 v20,
+                                            float                 v21,
+                                            float                 v22,
+                                            float                 v23,
+                                            float                 v24,
+                                            float                 v25,
+                                            float                 v26,
+                                            float                 v27,
+                                            float                 v28,
+                                            float                 v29,
+                                            float                 v30,
+                                            float                 v31,
+                                            hip_bf6_rounding_mode rm  = hip_bf6_rounding_mode::standard,
+                                            uint32_t              rng = 0)
         {
-            __amd_floatx16_storage_t f32x16;
+            union {
+                BFloat6x32_Storage real;
+                __amd_fp6x32_storage_t tmp;
+            } cvt;
+            __amd_floatx32_storage_t f32x32;
 
-            f32x16[0]  = v0;
-            f32x16[1]  = v1;
-            f32x16[2]  = v2;
-            f32x16[3]  = v3;
-            f32x16[4]  = v4;
-            f32x16[5]  = v5;
-            f32x16[6]  = v6;
-            f32x16[7]  = v7;
-            f32x16[8]  = v8;
-            f32x16[9]  = v9;
-            f32x16[10] = v10;
-            f32x16[11] = v11;
-            f32x16[12] = v12;
-            f32x16[13] = v13;
-            f32x16[14] = v14;
-            f32x16[15] = v15;
+            f32x32[0] = v0;
+            f32x32[1] = v1;
+            f32x32[2] = v2;
+            f32x32[3] = v3;
+            f32x32[4] = v4;
+            f32x32[5] = v5;
+            f32x32[6] = v6;
+            f32x32[7] = v7;
+            f32x32[8] = v8;
+            f32x32[9] = v9;
+            f32x32[10] = v10;
+            f32x32[11] = v11;
+            f32x32[12] = v12;
+            f32x32[13] = v13;
+            f32x32[14] = v14;
+            f32x32[15] = v15;
+            f32x32[16] = v16;
+            f32x32[17] = v17;
+            f32x32[18] = v18;
+            f32x32[19] = v19;
+            f32x32[20] = v20;
+            f32x32[21] = v21;
+            f32x32[22] = v22;
+            f32x32[23] = v23;
+            f32x32[24] = v24;
+            f32x32[25] = v25;
+            f32x32[26] = v26;
+            f32x32[27] = v27;
+            f32x32[28] = v28;
+            f32x32[29] = v29;
+            f32x32[30] = v30;
+            f32x32[31] = v31;
 
-            if(rm == hip_bf6_rounding_mode::standard)
-            {
-#ifdef HIPBLASLT_USE_HIP_FP6X16
-                union
-                {
-                    BFloat6x16_Storage     real;
-                    __amd_fp6x16_storage_t tmp;
-                } cvt;
-                cvt.tmp = __amd_cvt_floatx16_to_fp6x16_scale(f32x16, __AMD_OCP_E3M2, 0);
-                data    = cvt.real;
-#else
-                union
-                {
-                    __amd_floatx32_storage_t fp32x32;
-                    __amd_floatx16_storage_t fp32x16[2];
-                } in;
-                union
-                {
-                    BFloat6x16_Storage     real[2];
-                    __amd_fp6x32_storage_t fp6x32;
-                } out;
-                in.fp32x16[0] = f32x16;
-                out.fp6x32
-                    = __amd_cvt_floatx32_to_fp6x32_scale(in.fp32x32, __AMD_OCP_E3M2, 0);
-                data = out.real[0];
-#endif
+            if (rm == hip_bf6_rounding_mode::standard) {
+                cvt.tmp = __amd_cvt_floatx32_to_fp6x32_scale(f32x32, __AMD_OCP_E3M2, 0);
+                data = cvt.real;
             }
-            else
-            {
-                // TODO: update below code if hip_ext_ocp.h supports __amd_cvt_floatx16_to_fp6x16_sr_scale
-                union
-                {
-                    __amd_floatx32_storage_t fp32x32;
-                    __amd_floatx16_storage_t fp32x16[2];
-                } in;
-                union
-                {
-                    BFloat6x16_Storage     real[2];
-                    __amd_fp6x32_storage_t fp6x32;
-                } out;
-                in.fp32x16[0] = f32x16;
-                out.fp6x32
-                    = __amd_cvt_floatx32_to_fp6x32_sr_scale(in.fp32x32, __AMD_OCP_E3M2, rng, 0);
-                data = out.real[0];
+            else {
+                cvt.tmp = __amd_cvt_floatx32_to_fp6x32_sr_scale(f32x32, __AMD_OCP_E3M2, rng, 0);
+                data = cvt.real;
             }
         }
 
         inline HIP_HOST_DEVICE float getElement(size_t idx) const
         {
-            // TODO: update below code if hip_ext_ocp.h supports __amd_cvt_fp6x16_to_floatx16_scale
-            __amd_floatx32_storage_t fp32x32;
-            union
-            {
-                BFloat6x16_Storage     real[2];
-                __amd_fp6x32_storage_t fp6x32;
-            } in;
-            in.real[0] = data;
-            fp32x32    = __amd_cvt_fp6x32_to_floatx32_scale(in.fp6x32, __AMD_OCP_E3M2, 0);
-            if(idx < packed_size)
+            union {
+                BFloat6x32_Storage real;
+                __amd_fp6x32_storage_t tmp;
+            } cvt;
+
+            cvt.real = data;
+
+            __amd_floatx32_storage_t fp32x32 = __amd_cvt_fp6x32_to_floatx32_scale(cvt.tmp, __AMD_OCP_E3M2, 0);
+            if (idx < 32)
                 return fp32x32[idx];
             else
                 return 0.0;
@@ -253,10 +236,38 @@ namespace TensileLite
         // check for zero
         inline HIP_HOST_DEVICE bool is_zero() const
         {
-            return data.v0 == 0 && data.v1 == 0 && data.v2 == 0 && data.v3 == 0 && data.v4 == 0
-                   && data.v5 == 0 && data.v6 == 0 && data.v7 == 0 && data.v8 == 0 && data.v9 == 0
-                   && data.v10 == 0 && data.v11 == 0 && data.v12 == 0 && data.v13 == 0
-                   && data.v14 == 0 && data.v15 == 0;
+            return data.v0 == 0 &&
+                   data.v1 == 0 &&
+                   data.v2 == 0 &&
+                   data.v3 == 0 &&
+                   data.v4 == 0 &&
+                   data.v5 == 0 &&
+                   data.v6 == 0 &&
+                   data.v7 == 0 &&
+                   data.v8 == 0 &&
+                   data.v9 == 0 &&
+                   data.v10 == 0 &&
+                   data.v11 == 0 &&
+                   data.v12 == 0 &&
+                   data.v13 == 0 &&
+                   data.v14 == 0 &&
+                   data.v15 == 0 &&
+                   data.v16 == 0 &&
+                   data.v17 == 0 &&
+                   data.v18 == 0 &&
+                   data.v19 == 0 &&
+                   data.v20 == 0 &&
+                   data.v21 == 0 &&
+                   data.v22 == 0 &&
+                   data.v23 == 0 &&
+                   data.v24 == 0 &&
+                   data.v25 == 0 &&
+                   data.v26 == 0 &&
+                   data.v27 == 0 &&
+                   data.v28 == 0 &&
+                   data.v29 == 0 &&
+                   data.v30 == 0 &&
+                   data.v31 == 0;
         }
 
         // check for nan
@@ -275,31 +286,33 @@ namespace TensileLite
 
 namespace std
 {
-    inline std::string to_string(const TensileLite::BFloat6x16& a)
+    inline std::string to_string(const TensileLite::BFloat6x32& a)
     {
-        // TODO: update below code if hip_ext_ocp.h supports __amd_cvt_fp6x16_to_floatx16_scale
-        union
-        {
-            TensileLite::BFloat6x16_Storage real[2];
-            __amd_fp6x32_storage_t          fp6x32;
-        } in;
-        in.real[0]  = a.data;
-        auto result = __amd_cvt_fp6x32_to_floatx32_scale(in.fp6x32, __AMD_OCP_E3M2, 0);
+        union {
+            TensileLite::BFloat6x32_Storage real;
+            __amd_fp6x32_storage_t tmp;
+        } cvt;
+
+        cvt.real = a.data;
+
+        auto result = __amd_cvt_fp6x32_to_floatx32_scale(cvt.tmp, __AMD_OCP_E3M2, 0);
 
         std::string str = std::to_string(static_cast<float>(result[0]));
 
-        for(int i = 1; i < a.packed_size; i++)
-            str = str + " " + std::to_string(static_cast<float>(result[i]));
+        for (int i=1; i<32; i++)
+          str = str + " " + std::to_string(static_cast<float>(result[i]));
 
         return str;
     }
 
-    inline ostream& operator<<(ostream& stream, const TensileLite::BFloat6x16 a)
+    inline ostream& operator<<(ostream& stream, const TensileLite::BFloat6x32 a)
     {
         return stream << to_string(a);
     }
 } // namespace std
 
 TENSILE_HIDDEN_END
+
+#endif // _WIN32
 
 #endif // TENSILE_USE_BF6

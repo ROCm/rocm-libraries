@@ -223,15 +223,36 @@ bool hardware_t::has_MALL() const {
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1151:
-    case architecture_t::gfx1250: return true;
+      return true;
     case architecture_t::gfx1150:
     case architecture_t::gfx1152:
-    case architecture_t::gfx1153: return false;
+    case architecture_t::gfx1153:
+    case architecture_t::gfx1250:
     case architecture_t::Count:
       // Count is not a valid architecture, this is to silence compiler warning
       return false;
   }
 }
+
+bool hardware_t::has_native_TF32() const {
+  switch (arch) {
+    case architecture_t::gfx942:
+      return true;
+    case architecture_t::gfx90a:
+    case architecture_t::gfx950:
+    case architecture_t::gfx1201:
+    case architecture_t::gfx1100:
+    case architecture_t::gfx1150:
+    case architecture_t::gfx1151:
+    case architecture_t::gfx1152:
+    case architecture_t::gfx1153:
+    case architecture_t::gfx1250:
+    case architecture_t::Count:
+      // Count is not a valid architecture, this is to silence compiler warning
+      return false;
+  }
+}
+
 
 std::string hardware_t::get_before_first_colon(const std::string& input) {
   size_t pos = input.find(':');

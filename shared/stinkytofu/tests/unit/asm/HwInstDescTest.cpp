@@ -266,6 +266,97 @@ TEST_F(HwInstDescTest, SOPP_SBranch) {
 }
 
 // ---------------------------------------------------------------------------
+// XDL WMMA: v_wmma_f32_16x16x32_f16
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, WMMA_XDL_F32_16x16x32_F16) {
+    auto* desc = getDescByMnemonic("v_wmma_f32_16x16x32_f16");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_TRUE(desc->has(IF_WMMA));
+    EXPECT_TRUE(desc->has(IF_WMMA_XDL));
+}
+
+// ---------------------------------------------------------------------------
+// Non-XDL WMMA: v_wmma_f32_16x16x4_f32 — FP32 input
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, WMMA_NonXDL_F32_16x16x4_F32) {
+    auto* desc = getDescByMnemonic("v_wmma_f32_16x16x4_f32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_TRUE(desc->has(IF_WMMA));
+    EXPECT_FALSE(desc->has(IF_WMMA_XDL));
+}
+
+// ---------------------------------------------------------------------------
+// Non-XDL WMMA: v_wmma_f32_16x16x16_f16
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, WMMA_NonXDL_F32_16x16x16_F16) {
+    auto* desc = getDescByMnemonic("v_wmma_f32_16x16x16_f16");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_TRUE(desc->has(IF_WMMA));
+    EXPECT_FALSE(desc->has(IF_WMMA_XDL));
+}
+
+// ---------------------------------------------------------------------------
+// XDL SWMMAC: v_swmmac_f32_16x16x64_bf16
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, SWMMA_XDL_F32_16x16x64_BF16) {
+    auto* desc = getDescByMnemonic("v_swmmac_f32_16x16x64_bf16");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_TRUE(desc->has(IF_SWMMA));
+    EXPECT_TRUE(desc->has(IF_WMMA_XDL));
+}
+
+// ---------------------------------------------------------------------------
+// Non-XDL SWMMAC: v_swmmac_f32_16x16x32_bf16
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, SWMMA_NonXDL_F32_16x16x32_BF16) {
+    auto* desc = getDescByMnemonic("v_swmmac_f32_16x16x32_bf16");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_TRUE(desc->has(IF_SWMMA));
+    EXPECT_FALSE(desc->has(IF_WMMA_XDL));
+}
+
+// ---------------------------------------------------------------------------
+// XDL MXWMMA: v_wmma_scale_f32_16x16x128_f8f6f4
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, MXWMMA_XDL_Scale_F32_16x16x128) {
+    auto* desc = getDescByMnemonic("v_wmma_scale_f32_16x16x128_f8f6f4");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_TRUE(desc->has(IF_MXWMMA));
+    EXPECT_TRUE(desc->has(IF_WMMA_XDL));
+}
+
+// ---------------------------------------------------------------------------
+// Transcendental 32-bit: v_rcp_f32 — TRANS pipe, not Trans64
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, Trans32_VRcpF32) {
+    auto* desc = getDescByMnemonic("v_rcp_f32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_TRUE(desc->has(IF_Transcendental));
+    EXPECT_FALSE(desc->has(IF_Trans64));
+}
+
+// ---------------------------------------------------------------------------
+// Transcendental 64-bit: v_rcp_f64 — tracked as VALU, not TRANS pipe
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, Trans64_VRcpF64) {
+    auto* desc = getDescByMnemonic("v_rcp_f64");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_TRUE(desc->has(IF_Transcendental));
+    EXPECT_TRUE(desc->has(IF_Trans64));
+}
+
+// ---------------------------------------------------------------------------
+// Grandchild format flag inheritance: v_mul_lo_u32 (VOP3_2SRC_COMMUTATIVE -> VOP3_2SRC -> VOP3)
+// Verifies VALU flag propagates through multi-level parent chain.
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, VOP3_2SRC_Commutative_InheritsVALU) {
+    auto* desc = getDescByMnemonic("v_mul_lo_u32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_TRUE(desc->has(IF_VALU));
+    EXPECT_TRUE(desc->has(IF_Commutative));
+}
+
+// ---------------------------------------------------------------------------
 // VOPC: v_cmp_eq_f32 — compare, promotable to VOP3
 // ---------------------------------------------------------------------------
 TEST_F(HwInstDescTest, VOPC_VCmpEqF32) {

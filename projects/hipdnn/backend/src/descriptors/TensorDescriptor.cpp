@@ -270,6 +270,13 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
         _data.value.Set(Int64Value(val));
         break;
     }
+    case DataType::BOOLEAN:
+    {
+        bool val;
+        std::memcpy(&val, bytes, sizeof(bool));
+        _data.value.Set(BoolValue(val));
+        break;
+    }
     case DataType::UINT8:
     case DataType::INT8:
     case DataType::FP8_E4M3:
@@ -384,6 +391,16 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
         std::memcpy(output, &nativeVal, sizeof(int64_t));
         break;
     }
+    case DataType::BOOLEAN:
+    {
+        const auto* val = _data.value.AsBoolValue();
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        auto nativeVal = val->value();
+        std::memcpy(output, &nativeVal, sizeof(bool));
+        break;
+    }
     case DataType::UINT8:
     case DataType::INT8:
     {
@@ -479,6 +496,9 @@ std::string TensorDescriptor::toString() const
             break;
         case TensorValue::Int64Value:
             str += std::to_string(_data.value.AsInt64Value()->value());
+            break;
+        case TensorValue::BoolValue:
+            str += _data.value.AsBoolValue()->value() ? "true" : "false";
             break;
         case TensorValue::Float8Value:
             str += std::to_string(_data.value.AsFloat8Value()->value());

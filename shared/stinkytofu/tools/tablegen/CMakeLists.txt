@@ -14,6 +14,7 @@ set(SOURCES
 )
 
 add_executable(tablegen "${SOURCES}")
+target_link_libraries(tablegen PRIVATE stinkytofu-warnings)
 # tablegen compiles IRLexer/PatternParser directly (not via libstinkytofu),
 # so it needs stinkytofu_EXPORTS to get dllexport instead of dllimport.
 target_compile_definitions(tablegen PRIVATE stinkytofu_EXPORTS)
@@ -26,6 +27,7 @@ add_executable(tablegen_inst_gen
     GenInstructions.cpp
     GenInstructionsMain.cpp
 )
+target_link_libraries(tablegen_inst_gen PRIVATE stinkytofu-warnings)
 # No link to gfxisa - this executable only parses .def files and writes .inc
 
 target_include_directories(tablegen PRIVATE
