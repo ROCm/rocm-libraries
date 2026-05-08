@@ -232,6 +232,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     std::map<int, int> crossBBDsResiduals_;
 
+    void advanceTime(int cycles);
     void updateWMMAStatus(DAGNode* node);
     int getMaxDsLatency(DAGNode* node);
     std::pair<DAGNode*, int> findMostReadyWMMA();
@@ -262,13 +263,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void onFinishBB() override;
 };
 
-// After any picked instruction (including barriers): advance co-issue timeline
-// position and decay DS latency counters by the instruction's issueCycles.
-void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
-    coIssueCyclePos_++;
-
-    const int cycles = node->inst->issueCycles;
-
+// Advance the co-issue timeline and decay DS latency counters by \p cycles.
+void CDNA5ReadyQueue::advanceTime(int cycles) {
+    coIssueCyclePos_ += cycles;
     for (auto it = wmmaRegisterLatencyCounters.begin(); it != wmmaRegisterLatencyCounters.end();) {
         it->second -= cycles;
         if (it->second <= 0)
@@ -276,6 +273,11 @@ void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
         else
             ++it;
     }
+}
+
+// After any picked instruction (including barriers): advance by issueCycles.
+void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
+    advanceTime(node->inst->issueCycles);
 }
 
 // True if VALU can be picked in the current co-issue timeline position.
@@ -364,6 +366,9 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
         wmmaQueue.pop();
     }
 
+    // Decay DS latency for the WMMA's own issue cycle before resetting the timeline.
+    advanceTime(node->inst->issueCycles);
+
     activeCoIssueMask_ = node->inst->hwInstDesc->coIssueMask;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
@@ -375,6 +380,9 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
 
     dsInsertedSinceLastWmma_ = 0;
     totalWmmaRemaining_--;
+    minDsPerWmma_ = (totalWmmaRemaining_ > 0)
+                        ? (int)std::ceil((float)totalDsRemaining_ / totalWmmaRemaining_)
+                        : 0;
 
     globalReadCounter = 0;
     return node;
@@ -636,8 +644,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             return popNonWmmaByKind(pickKind);
         }
 
-        // Nothing productive can fill remaining slots — fast-forward past timeline.
-        coIssueCyclePos_ = activeWmmaLatency_;
+        // Nothing productive can fill remaining slots — fast-forward past timeline
+        // and decay DS latency for the skipped cycles.
+        advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
     }
 
     // Phase D — outside WMMA timeline: pick smallest-id from any non-WMMA queue.

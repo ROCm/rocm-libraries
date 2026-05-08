@@ -96,7 +96,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
 };
 
 // v_wmma_f32_16x16x16_bf16 (format WMMA): issue=1, latency=8, coIssueMask=0x00F0
-TEST_F(DAGSchedulerPassTest, CostOverwrite_VWmmaF3216x16x16Bf16_HasIssue4Latency8) {
+TEST_F(DAGSchedulerPassTest, CostOverwrite_VWmmaF3216x16x16Bf16_HasIssue1Latency8CoIssueF0) {
     const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, arch);
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->issue, 1) << "v_wmma_f32_16x16x16_bf16: issue should be 1";

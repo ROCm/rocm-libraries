@@ -301,6 +301,11 @@ class DefTParser {
             if (inst.latency == 0) inst.latency = arch_.defaultLatency;
             if (inst.coIssueMask < 0 && fmt.coIssueMask >= 0) inst.coIssueMask = fmt.coIssueMask;
             if (inst.coIssueMask < 0) inst.coIssueMask = 0;
+            if (inst.coIssueMask > 0xFFFF) {
+                std::cerr << "error: " << inst.mnemonic << ": .coissue value 0x" << std::hex
+                          << inst.coIssueMask << " exceeds uint16_t range\n";
+                return false;
+            }
 
             // Apply operand fields: instruction overrides format
             if (!inst.operandFields.empty()) {
