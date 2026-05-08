@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -40,6 +41,7 @@
 
 namespace {
 using namespace stinkytofu;
+constexpr const char* kEstimateAsmTotalCyclesMetadataKey = "EstimateAsmCyclesPass.totalCycles";
 
 class AsmCycleEstimator {
    public:
@@ -239,6 +241,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             calculateMathClocksInUnrolledLoop(bb, passCtx);
         }
         // std::cout << "[EstimateAsmCycles] Total Asm Cycles: " << totalCycles_ << "\n";
+        func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
 
         return PreservedAnalyses::all();
     }
@@ -280,19 +283,29 @@ class EstimateAsmCyclesPassImpl : public Pass {
     }
 
     static std::optional<WmmaCoExecProfile> getWmmaCoExecProfile(const StinkyInstruction& inst) {
-        if (!inst.getHwInstDesc()) return std::nullopt;
+        WmmaCoExecProfile profile;
+        // Default profile for unknown/non-WMMA instructions:
+        // one-cycle window with no co-exec slot.
+        profile.windowCycles = 1;
+        profile.valuCoExecSlots.assign(1, false);
+
+        if (!inst.getHwInstDesc()) return profile;
 
         const std::string mnemonic = toUpperASCII(inst.getHwInstDesc()->mnemonic);
-        if (mnemonic.find("V_WMMA_") != 0) return std::nullopt;
-        if (inst.latencyCycles <= 0) return std::nullopt;
+        if (mnemonic.find("V_WMMA_") != 0) return profile;
 
-        WmmaCoExecProfile profile;
+        // Keep a valid default when latency is absent/invalid.
+        if (inst.latencyCycles <= 0) return profile;
+
         profile.windowCycles = inst.latencyCycles;
         profile.valuCoExecSlots.assign(static_cast<size_t>(profile.windowCycles), true);
         // First execute cycle is non-insertable, the remaining cycles are co-exec slots.
         profile.valuCoExecSlots[0] = false;
         profile.windowCycles = static_cast<int>(profile.valuCoExecSlots.size());
-        if (profile.windowCycles == 0) return std::nullopt;
+        if (profile.windowCycles == 0) {
+            profile.windowCycles = 1;
+            profile.valuCoExecSlots.assign(1, false);
+        }
         return profile;
     }
 
