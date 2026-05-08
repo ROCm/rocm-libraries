@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <exception>
 #include <mutex>
+#include <csignal>
 
 #pragma STDC CX_LIMITED_RANGE ON
 
@@ -257,7 +258,14 @@ void log_profile(const char* func, Ts&&... xs)
     static argument_profile<decltype(tup)> profile(get_logger_os());
 
     // Add at_quick_exit handler in case the program exits early
-    static int aqe = at_quick_exit([] { profile.~argument_profile(); });
+    static int aqe = at_quick_exit([] { profile.dump(); });
+
+    // Register signal handlers to flush profile on early termination
+    // Works on both Windows and Linux
+    static int sig = [] {
+        signal(SIGTERM, [](int) { profile.dump(); ::_exit(0); });
+        return 0;
+    }();
 
     // Profile the tuple
     profile(std::move(tup));

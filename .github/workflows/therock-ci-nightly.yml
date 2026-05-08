@@ -63,16 +63,12 @@ jobs:
         run: |
           python .github/scripts/therock_configure_ci.py
 
-      - name: Fetch Linux targets for build and test
-        env:
-          THEROCK_PACKAGE_PLATFORM: "linux"
-          # TODO(geomin12): Allow dynamic values of AMDGPU_FAMILIES, with opt-in options
-          AMDGPU_FAMILIES: "gfx94X, gfx950"
-          # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
-          ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
-          LOAD_TEST_RUNNERS_FROM_VAR: true
+      # TODO(#7170): Remove hard-coded targets after testing is stabilized and switch back to fetch_package_targets.py
+      # Temporary: Hard-code Linux targets for 2-GPU runner testing
+      - name: Set Linux targets for build and test
         id: configure_linux
-        run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
+        run: |
+          echo 'package_targets=[{"amdgpu_family": "gfx94X-dcgpu", "test_machine": "linux-gfx942-2gpu-core42-ossci-rocm"}, {"amdgpu_family": "gfx950-dcgpu", "test_machine": ""}]' >> "$GITHUB_OUTPUT"
 
       - name: Fetch Windows targets for build and test
         env:

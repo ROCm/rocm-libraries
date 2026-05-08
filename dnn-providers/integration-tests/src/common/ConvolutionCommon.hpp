@@ -94,20 +94,21 @@ struct ConvTestCase
     {
         std::vector<std::string> tags;
 
-        bool is1x1 = std::all_of(wDims.begin() + 2, wDims.end(), [](int64_t d) { return d == 1; });
+        const bool is1x1
+            = std::all_of(wDims.begin() + 2, wDims.end(), [](int64_t d) { return d == 1; });
         if(is1x1)
         {
-            tags.push_back("1x1 Filter");
+            tags.emplace_back("1x1 Filter");
         }
 
         if(wDims.size() >= 2 && wDims[1] > 0 && xDims[1] / wDims[1] > 1)
         {
-            tags.push_back("Grouped");
+            tags.emplace_back("Grouped");
         }
 
         if(xDims[0] > 1)
         {
-            tags.push_back("Batched");
+            tags.emplace_back("Batched");
         }
 
         bool nonSquare = false;
@@ -121,31 +122,31 @@ struct ConvTestCase
         }
         if(nonSquare)
         {
-            tags.push_back("Non-square");
+            tags.emplace_back("Non-square");
         }
 
-        bool hasPadding
+        const bool hasPadding
             = std::any_of(
                   convPrePadding.begin(), convPrePadding.end(), [](int64_t v) { return v != 0; })
               || std::any_of(
                   convPostPadding.begin(), convPostPadding.end(), [](int64_t v) { return v != 0; });
         if(hasPadding)
         {
-            tags.push_back("Padding");
+            tags.emplace_back("Padding");
         }
 
-        bool hasStride
+        const bool hasStride
             = std::any_of(convStride.begin(), convStride.end(), [](int64_t v) { return v != 1; });
         if(hasStride)
         {
-            tags.push_back("Stride");
+            tags.emplace_back("Stride");
         }
 
-        bool hasDilation = std::any_of(
+        const bool hasDilation = std::any_of(
             convDilation.begin(), convDilation.end(), [](int64_t v) { return v != 1; });
         if(hasDilation)
         {
-            tags.push_back("Dilation");
+            tags.emplace_back("Dilation");
         }
 
         if(tags.empty())

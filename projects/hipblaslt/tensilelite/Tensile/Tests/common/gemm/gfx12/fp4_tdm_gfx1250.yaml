@@ -15,11 +15,9 @@ GlobalParameters:
   DataInitTypeB: 3
   DataInitTypeC: 0
   DataInitTypeD: 3
-  DataInitTypeMXSA: 3
-  DataInitTypeMXSB: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
-  NumWarmups: 0
+  NumWarmups: 1
   EnqueuesPerSync: 1
   PrintWinnersOnly: False
   MinKForGSU: 1
@@ -34,9 +32,7 @@ BenchmarkProblems:
   -
     - # ProblemType
       OperationType: GEMM
-      MacDataTypeA: B6
-      MacDataTypeB: F4
-      DataType: B6  # can be F4 or B6
+      DataType: F4
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate:  True
@@ -47,10 +43,6 @@ BenchmarkProblems:
       Activation: False
       SupportUserArgs: True
       UseBias: 0
-      MXBlockA: 32
-      MXBlockB: 32
-      DataTypeMXSA: E8
-      DataTypeMXSB: E8
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -59,40 +51,41 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  1, 1]
-          # - [16, 16, 128, 1,  1,  1, 1,  2, 2]
-          - [16, 16, 128, 1,  1,  2, 4,  2, 1]
-          # - [16, 16, 128, 1,  1,  8, 8,  1, 1]
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 2,  1, 1]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
         - DepthU: [128, 256]
-        # - UseSgprForGRO: [0, 1]
-        - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
+        - LocalReadVectorWidth: [32]
+        - ScheduleIterAlg: [0]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - VectorWidthA: [1]
-        - VectorWidthB: [1]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1, 1]
+        - VectorWidthB: [-1, 1]
+        - GlobalReadVectorWidthA: [32]
+        - GlobalReadVectorWidthB: [32]
         - InnerUnroll: [1]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - TransposeLDS: [-1]
-        - LDSTrInst: [True, False]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
         - GlobalReadPerMfma: [1]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [0,1]
+        - SourceSwap: [1]
         - WavefrontSize: [32]
+        - TDMInst: [3]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 512]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [126, 128, 1, 40] # edge/tail cases
+          - Exact: [128, 126, 1, 264] # edge/tail cases
 
   #######################################
   # NN - standard
@@ -100,9 +93,7 @@ BenchmarkProblems:
   -
     - # ProblemType
       OperationType: GEMM
-      MacDataTypeA: B6
-      MacDataTypeB: F4
-      DataType: B6  # can be F4 or B6
+      DataType: F4
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate:  True
@@ -113,10 +104,6 @@ BenchmarkProblems:
       Activation: False
       SupportUserArgs: True
       UseBias: 0
-      MXBlockA: 32
-      MXBlockB: 32
-      DataTypeMXSA: E8
-      DataTypeMXSB: E8
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -125,40 +112,42 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  1, 1]
-          # - [16, 16, 128, 1,  1,  1, 1,  2, 2]
-          - [16, 16, 128, 1,  1,  2, 4,  2, 1]
-          # - [16, 16, 128, 1,  1,  8, 8,  1, 1]
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 2,  1, 1]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
         - DepthU: [128, 256]
-        # - UseSgprForGRO: [0, 1]
-        - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
+        - LDSTrInst: [True]
+        - LocalReadVectorWidth: [32]
+        - ScheduleIterAlg: [0]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - VectorWidthA: [1]
-        - VectorWidthB: [1]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [1, 2]
+        - GlobalReadVectorWidthA: [32]
+        - GlobalReadVectorWidthB: [32]
         - InnerUnroll: [1]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
         - TransposeLDS: [-1]
-        - LDSTrInst: [True, False]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
         - GlobalReadPerMfma: [1]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [0,1]
+        - SourceSwap: [1]
         - WavefrontSize: [32]
+        - TDMInst: [3]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 512]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [126, 128, 1, 40] # edge/tail cases
+          - Exact: [128, 126, 1, 264] # edge/tail cases
 
   #######################################
   # NT - standard
@@ -166,9 +155,7 @@ BenchmarkProblems:
   -
     - # ProblemType
       OperationType: GEMM
-      MacDataTypeA: B6
-      MacDataTypeB: F4
-      DataType: B6  # can be F4 or B6
+      DataType: F4
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate:  True
@@ -179,10 +166,6 @@ BenchmarkProblems:
       Activation: False
       SupportUserArgs: True
       UseBias: 0
-      MXBlockA: 32
-      MXBlockB: 32
-      DataTypeMXSA: E8
-      DataTypeMXSB: E8
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -191,40 +174,42 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  1, 1]
-          # - [16, 16, 128, 1,  1,  1, 1,  2, 2]
-          - [16, 16, 128, 1,  1,  2, 4,  2, 1]
-          # - [16, 16, 128, 1,  1,  8, 8,  1, 1]
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 2,  1, 1]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
         - DepthU: [128, 256]
-        # - UseSgprForGRO: [0, 1]
-        - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
+        - LDSTrInst: [True]
+        - LocalReadVectorWidth: [32]
+        - ScheduleIterAlg: [0]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - VectorWidthA: [1]
-        - VectorWidthB: [1]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [1, 2]
+        - GlobalReadVectorWidthA: [32]
+        - GlobalReadVectorWidthB: [32]
         - InnerUnroll: [1]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
         - TransposeLDS: [-1]
-        - LDSTrInst: [True, False]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
         - GlobalReadPerMfma: [1]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [0,1]
+        - SourceSwap: [1]
         - WavefrontSize: [32]
+        - TDMInst: [3]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 512]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [126, 128, 1, 40] # edge/tail cases
+          - Exact: [128, 126, 1, 264] # edge/tail cases
 
   #######################################
   # TT - standard
@@ -232,9 +217,7 @@ BenchmarkProblems:
   -
     - # ProblemType
       OperationType: GEMM
-      MacDataTypeA: B6
-      MacDataTypeB: F4
-      DataType: B6  # can be F4 or B6
+      DataType: F4
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate:  True
@@ -245,10 +228,6 @@ BenchmarkProblems:
       Activation: False
       SupportUserArgs: True
       UseBias: 0
-      MXBlockA: 32
-      MXBlockB: 32
-      DataTypeMXSA: E8
-      DataTypeMXSB: E8
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -257,37 +236,39 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  1, 1]
-          # - [16, 16, 128, 1,  1,  1, 1,  2, 2]
-          - [16, 16, 128, 1,  1,  2, 4,  2, 1]
-          # - [16, 16, 128, 1,  1,  8, 8,  1, 1]
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 2,  1, 1]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
         - DepthU: [128, 256]
-        # - UseSgprForGRO: [0, 1]
-        - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
+        - LDSTrInst: [True]
+        - LocalReadVectorWidth: [32]
+        - ScheduleIterAlg: [0]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - VectorWidthA: [1]
-        - VectorWidthB: [1]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [1, 2]
+        - GlobalReadVectorWidthA: [32]
+        - GlobalReadVectorWidthB: [32]
         - InnerUnroll: [1]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
         - TransposeLDS: [-1]
-        - LDSTrInst: [True, False]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
         - GlobalReadPerMfma: [1]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [0,1]
+        - SourceSwap: [1]
         - WavefrontSize: [32]
+        - TDMInst: [3]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 512]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [126, 128, 1, 40] # edge/tail cases
+          - Exact: [128, 126, 1, 264] # edge/tail cases

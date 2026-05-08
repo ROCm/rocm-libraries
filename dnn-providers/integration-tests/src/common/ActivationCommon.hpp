@@ -68,27 +68,27 @@ struct ActivTestCase
         std::vector<std::string> tags;
         if(reluLowerClip.has_value())
         {
-            tags.push_back("LowerClip");
+            tags.emplace_back("LowerClip");
         }
         if(reluUpperClip.has_value())
         {
-            tags.push_back("UpperClip");
+            tags.emplace_back("UpperClip");
         }
         if(reluLowerClipSlope.has_value())
         {
-            tags.push_back("LowerClipSlope");
+            tags.emplace_back("LowerClipSlope");
         }
         if(swishBeta.has_value())
         {
-            tags.push_back("SwishBeta");
+            tags.emplace_back("SwishBeta");
         }
         if(eluAlpha.has_value())
         {
-            tags.push_back("EluAlpha");
+            tags.emplace_back("EluAlpha");
         }
         if(softplusBeta.has_value())
         {
-            tags.push_back("SoftplusBeta");
+            tags.emplace_back("SoftplusBeta");
         }
 
         if(tags.empty())
