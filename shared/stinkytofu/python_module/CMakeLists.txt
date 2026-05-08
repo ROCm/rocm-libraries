@@ -160,6 +160,7 @@ if(DEFINED SKBUILD)
     install(TARGETS stinkytofu_python DESTINATION stinkytofu)
     install(FILES $<TARGET_FILE:stinkytofu> DESTINATION stinkytofu)
     install(FILES stinkytofu/__init__.py DESTINATION stinkytofu)
+    install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc" DESTINATION stinkytofu)
 endif()
 
 message(STATUS "StinkyTofu Python module configured successfully")
