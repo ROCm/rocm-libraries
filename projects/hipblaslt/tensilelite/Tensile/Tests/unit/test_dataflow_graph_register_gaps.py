@@ -22,21 +22,16 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Documented coverage gaps in ScheduleCapture._writes / _reads.
+"""Documented coverage of ScheduleCapture._writes / _reads.
 
-The dataflow graph (`build_dataflow_graph` + `compare_graphs`) only tracks
+The dataflow graph (`build_dataflow_graph` + `compare_graphs`) tracks
 register dataflow for LR (DSLoad*), GR (BufferLoad*/GlobalLoad*), LW
-(DSStore*), and MFMA. Every other rocisa instruction class returns `[]`
-from both `_writes(inst)` and `_reads(inst)` (ScheduleCapture.py:1607-1629),
-so reordering instructions of those classes within a CMS body is silently
-invisible to `compare_graphs`.
-
-Each test below asserts the DESIRED behavior: the graph detects a
-reordered chain and surfaces it as failures from `compare_graphs`. Today
-those assertions all fail (graph returns `[]`), so the tests are marked
-`xfail(strict=True)`. When `_writes`/`_reads` are extended to cover the
-relevant class, the corresponding test will XPASS and force removal of
-the xfail marker.
+(DSStore*), and MFMA, plus a `_GenericALURule` catch-all (wx9.4.4)
+that publishes per-instance reads/writes for ALU ops (Pack/VSwap/VXor/
+SAdd/SMov/etc.). All tests below assert the DESIRED behavior: the graph
+detects a reordered chain and surfaces it as failures from
+`compare_graphs`. With the catch-all rule live, every test in this file
+PASSES — they exist to pin against regression.
 
 Audit summary that produced this list:
 - **P0** (silent miscompares possible)
@@ -51,8 +46,8 @@ Audit summary that produced this list:
   - `VSwap` bidirectional RMW reorder                -> test_vswap_pair_reorder_detected
                                                         + test_vswap_pair_allocation_invariant
 
-Each test lives in its own class so a future fix can drop the xfail on
-exactly one gap at a time.
+Each test lives in its own class so a regression to a single coverage
+slice can be diagnosed in isolation.
 
 VCC dataflow tracking is intentionally not provided by the validator
 (permanent design choice — see `CMSValidator_LIMITATIONS.md` §"VCC
@@ -153,24 +148,11 @@ def _tag(inst, *, category: str, mfma_index: int, sequence: int) -> TaggedInstru
 # LRSAddrChain, and LWSAddrChain tests below now PASS; their xfail
 # markers were dropped along with the rule landing.
 #
-# The remaining xfails in this file are gated on test-fixture changes,
-# not production rule changes — see _FIXTURE_GAP_XFAIL_REASON below.
-
-_FIXTURE_GAP_XFAIL_REASON = (
-    "Detection requires a test-fixture extension that wx9.4.4 did NOT "
-    "deliver. The production `_GenericALURule` correctly publishes the "
-    "writer's reads/writes (e.g. m0, vgpr dsts), but: "
-    "(a) DTLm0Tracking uses dataflow_fixtures.make_gr (real BufferLoadB128 "
-    "with mubuf.lds=False) — so no instruction "
-    "in the fixture reads m0, and the m0 setter has no consumer to form "
-    "an edge with. Needs a real (lds=True) BufferLoadB128 in the fixture. "
-    "(b) VSwapPair / VCCCarryChain reorder two ALU instructions whose "
-    "writes are independent in the REFERENCE order; the broken dependency "
-    "only forms an edge in the SUBJECT order, but compare_graphs only "
-    "flags edges present in REFERENCE but missing from SUBJECT. Detecting "
-    "these requires either symmetric VSwap semantics (both regs are "
-    "read-AND-written) or a bidirectional edge comparison."
-)
+# wx9.3 phase 3 closed the VSwapPair edge-identity gap by adding
+# operand-slot discrimination to cross-graph edge identity, and the
+# DTLm0Tracking tests now use a real DTL BufferLoadB128 fixture
+# (make_dtl_buffer_load) — both classes of test now PASS too.
+# This file contains no xfail-marked tests.
 
 
 # =============================================================================
@@ -194,14 +176,16 @@ class TestDTLm0Tracking:
     following BufferLoad. Reordering breaks LDS placement."""
 
     def test_dtl_m0_update_before_buffer_load(self):
+        """Stripped to the minimum: SMovB32 (m0 writer) + DTL BufferLoad
+        (m0 reader). The realistic GEMM frame (SWait + MFMA) is
+        unnecessary — the property is purely about m0 producer/consumer
+        ordering."""
         # Reference: m0 set, then DTL BufferLoad consumes m0.
         m0_set = SMovB32(dst=mgpr(0), src=sgpr("LocalWriteAddrA", 1))
         ref_cap = make_capture(BODY_LABEL_ML, [
             _tag(m0_set, category="GRA", mfma_index=0, sequence=0),
             make_dtl_buffer_load(vaddr_vgpr_start=40, srd_sgpr_start=20,
                                  slot=0, category="GRA", sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         # Subject: same instructions, m0-update issued AFTER the BufferLoad.
         # The load sees stale m0.
@@ -210,8 +194,6 @@ class TestDTLm0Tracking:
             make_dtl_buffer_load(vaddr_vgpr_start=40, srd_sgpr_start=20,
                                  slot=0, category="GRA", sequence=0),
             _tag(m0_set2, category="GRA", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
@@ -224,7 +206,12 @@ class TestDTLm0Tracking:
 
     def test_dtl_m0_add_update_before_buffer_load(self):
         """Same as above but the m0 update is the SAddU32 form
-        (DTL + IncLdsBufSwitch / DTL + ExpandPointerSwap path)."""
+        (DTL + IncLdsBufSwitch / DTL + ExpandPointerSwap path).
+
+        Stripped to the minimum: same minimization as the SMovB32 variant —
+        the realistic GEMM frame is unnecessary for m0 producer/consumer
+        ordering.
+        """
         m0_add = SAddU32(dst=mgpr(0),
                          src0=sgpr("LocalWriteAddrA", 1),
                          src1=sgpr("LDSBufferWriteInc", 1))
@@ -232,8 +219,6 @@ class TestDTLm0Tracking:
             _tag(m0_add, category="GRA", mfma_index=0, sequence=0),
             make_dtl_buffer_load(vaddr_vgpr_start=40, srd_sgpr_start=20,
                                  slot=0, category="GRA", sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         m0_add2 = SAddU32(dst=mgpr(0),
                           src0=sgpr("LocalWriteAddrA", 1),
@@ -242,8 +227,6 @@ class TestDTLm0Tracking:
             make_dtl_buffer_load(vaddr_vgpr_start=40, srd_sgpr_start=20,
                                  slot=0, category="GRA", sequence=0),
             _tag(m0_add2, category="GRA", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
@@ -367,12 +350,15 @@ class TestMFMASelfRAW:
     # MFMARule.writes = (acc,) closes this gap as of Sub-task 10.
     def test_mfma_acc_chain_reorder(self):
         """Two MFMAs share accumulator v0..v3. MFMA #1 must complete before
-        MFMA #2 reads its acc. Reversing them is a real WAW/RAW violation."""
+        MFMA #2 reads its acc. Reversing them is a real WAW/RAW violation.
+
+        Stripped to the minimum: just the two MFMAs that share the
+        accumulator. The realistic GEMM frame (LR + SWait) is unnecessary
+        — the property is purely about MFMA-to-MFMA accumulator dataflow.
+        """
         # Reference: MFMA1 (c_dst=0..3) then MFMA2 (a_src=0..1 reads same acc
         # by overlap). Use distinct slot numbers so they're separate nodes.
         ref_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, a_src_count=2),
             make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
@@ -381,8 +367,6 @@ class TestMFMASelfRAW:
         # Subject: same instructions, MFMAs swapped. Now the consumer MFMA
         # (reads v0..v1) issues before the producer (writes v0..v3).
         subj_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
                       slot=2, a_src_count=2),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
@@ -418,8 +402,6 @@ class TestMFMAQuadCycleGap:
         actual = 0 < expected = 3` and synthesized a failure that does
         not exist in the cycle-accurate timeline."""
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
             make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
@@ -460,8 +442,6 @@ class TestMFMAQuadCycleGap:
         give exactly QUAD_CYCLES_STANDARD_MFMA_FINISH quad-cycles of gap —
         meets the threshold, so no TimingTooCloseFailure is emitted."""
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, a_src_count=2),
             make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
@@ -492,13 +472,11 @@ class TestMFMAQuadCycleGap:
         sees every intermediate instruction's issue cost directly)
         instead of the earlier slot-delta approximation.
 
-        For body=[LR, SWait, MFMA@2, MFMA@4] the simulator yields:
+        For body=[MFMA@2, MFMA@4] the simulator yields:
         MFMA1 issues at 0, mfma_free_at=4; MFMA2 issues at max(1,4)=4 →
         gap = 4-0-1 = 3. Same value under any `nmps`."""
         def _build_cap():
             return make_capture(BODY_LABEL_ML, [
-                make_lr(8, 4, 64, slot=0, category="LRA0"),
-                make_swait(slot=1, dscnt=0),
                 make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                           slot=2, sequence=0, a_src_count=2),
                 make_mfma(c_dst_start=20, a_src_start=0, b_src_start=32,
@@ -555,18 +533,16 @@ class TestMFMAQuadCycleGap:
         the unified simulator computes a real cycle count.
 
         Arithmetic for this fixture:
-          unified stream = [ML-1 MFMA_filler, ML LR, ML SWait, ML MFMA1,
-                            NGL MFMA2, NLL MFMA_filler]
-          Walk from MFMA1 (producer, idx=3) to MFMA2 (consumer, idx=4):
-            i=3 MFMA1: current_issue=max(0,0)=0; mfma_free_at=0+1+3=4;
-                       p_issue_start=0; current_issue += 1 = 1.
-            i=4 MFMA2: current_issue=max(1,4)=4; same class (3==3), no
-                       type-switch stall; c_issue_start=4. Break.
+          unified stream = [ML-1 MFMA_filler, ML MFMA1, NGL MFMA2,
+                            NLL MFMA_filler]
+          Walk from MFMA1 (producer) to MFMA2 (consumer):
+            MFMA1: current_issue=max(0,0)=0; mfma_free_at=0+1+3=4;
+                   p_issue_start=0; current_issue += 1 = 1.
+            MFMA2: current_issue=max(1,4)=4; same class (3==3), no
+                   type-switch stall; c_issue_start=4. Break.
           gap = 4 - 0 - 1 = 3 (== QUAD_CYCLES_STANDARD_MFMA_FINISH).
         """
         ml_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             # Producer writes v0..v3 in ML.
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
@@ -772,8 +748,6 @@ class TestMFMAQuadCycleGap:
         ref_alu = VXorB32(dst=vgpr(0, 2), src0=vgpr(40, 1), src1=vgpr(41, 1))
         subj_alu = VXorB32(dst=vgpr(0, 2), src0=vgpr(40, 1), src1=vgpr(41, 1))
         ref_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             # P: writes v0..v3.
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
@@ -784,8 +758,6 @@ class TestMFMAQuadCycleGap:
             _tag(ref_alu, category="PackA0", mfma_index=2, sequence=2),
         ])
         subj_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
             # ALU reordered to sit BETWEEN P and C — now latest writer of v0.
@@ -830,8 +802,6 @@ class TestMFMAQuadCycleGap:
         same slot reads v0 — overlaps the MFMA producer's accumulator."""
         alu_consumer = VXorB32(dst=vgpr(20, 1), src0=vgpr(0, 1), src1=vgpr(21, 1))
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
             # Same vmfma_index, sub_index 1 — zero gap. ALU consumer reads v0
@@ -888,8 +858,6 @@ class TestMFMAQuadCycleGap:
         An earlier slot-delta approximation produced a phantom failure
         with actual=0 here that does not exist in the real timeline."""
         ref_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             # REF: P writes v0..v3, C immediately reads v0..v1. NO shadowing
             # ALU between them — P->C survives as the missing-from-subj edge.
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
@@ -899,8 +867,6 @@ class TestMFMAQuadCycleGap:
         ])
         subj_alu = VXorB32(dst=vgpr(0, 2), src0=vgpr(40, 1), src1=vgpr(41, 1))
         subj_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
             # SUBJ: ALU reordered between P and C — becomes latest writer
@@ -942,8 +908,6 @@ class TestMFMAQuadCycleGap:
         edge."""
         def _build():
             return make_capture(BODY_LABEL_ML, [
-                make_lr(8, 4, 64, slot=0, category="LRA0"),
-                make_swait(slot=1, dscnt=0),
                 # P at slot=2.
                 make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                           slot=2, sequence=0, a_src_count=2),
@@ -1012,8 +976,6 @@ class TestMFMAQuadCycleGap:
         cross-subiter (nmps=2) configurations produce the same `actual`."""
         def _build_cap():
             return make_capture(BODY_LABEL_ML, [
-                make_lr(8, 4, 64, slot=0, category="LRA0"),
-                make_swait(slot=1, dscnt=0),
                 # Producer at vmfma=0 (subiter 0 under both nmps values).
                 make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                           slot=0, sequence=0, a_src_count=2),
@@ -1083,8 +1045,6 @@ class TestMFMAQuadCycleGap:
           P→C3 (slot 2 → slot 4): walk includes C1 (free=8) + C2 (free=12); C3 max(9,12)=12 → gap=11.
         All ≥ expected=3 → no failures. Sanity check: at least 3 edges exist."""
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
             make_mfma(c_dst_start=40, a_src_start=0, b_src_start=32,
@@ -1129,8 +1089,6 @@ class TestMFMAQuadCycleGap:
 
         alu_consumer = VXorB32(dst=vgpr(20, 1), src0=vgpr(0, 1), src1=vgpr(21, 1))
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
             _tag(alu_consumer, category="PackA0", mfma_index=2, sequence=1),
@@ -1185,8 +1143,6 @@ class TestMFMAQuadCycleGap:
         expected=1 → ok=True → NO failure. (An earlier slot_delta=0
         approximation reported a phantom actual=0 failure here.)"""
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2,
                       variant=[4, 4, 4, 16]),
@@ -1230,8 +1186,6 @@ class TestMFMAQuadCycleGap:
         With the previous wrong finish=3 default this would have been
         mis-flagged as too close."""
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, a_src_count=2,
                       variant=[4, 4, 4, 16]),
@@ -1340,7 +1294,6 @@ class TestMFMAQuadCycleGap:
                               src0=vgpr(50, 1), src1=vgpr(51, 1))
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(50, 2, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
             # MFMA at the SAME vmfma_index — sub_index breaks the tie.
             # Reads v40..v41 (a_src spans v40..v41 with a_src_count=2),
@@ -1584,8 +1537,6 @@ class TestMFMAQuadCycleGap:
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
                               src0=vgpr(0, 1), src1=vgpr(1, 1))
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             self._make_real_pack_mfma(
                 acc_start=0, acc_count=4, a_start=8, a_count=2,
                 b_start=32, b_count=2, slot=2, sequence=0,
@@ -1632,8 +1583,6 @@ class TestMFMAQuadCycleGap:
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
                               src0=vgpr(0, 1), src1=vgpr(1, 1))
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             self._make_real_pack_mfma(
                 acc_start=0, acc_count=4, a_start=8, a_count=2,
                 b_start=32, b_count=2, slot=2, sequence=0,
@@ -1681,8 +1630,6 @@ class TestMFMAQuadCycleGap:
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
                               src0=vgpr(0, 1), src1=vgpr(1, 1))
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             self._make_real_pack_mfma(
                 acc_start=0, acc_count=4, a_start=8, a_count=2,
                 b_start=32, b_count=2, slot=2, sequence=0,
@@ -1750,8 +1697,6 @@ class TestMFMAQuadCycleGap:
           FROM_STANDARD=5 → +1 stall → consumer issues at 5.
           delivered gap = 5-0-1 = 4."""
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
             make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
@@ -1780,8 +1725,6 @@ class TestMFMAQuadCycleGap:
           FROM_4X4=3 → +1 stall → consumer issues at 3.
           delivered gap = 3-0-1 = 2."""
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2,
                       variant=[4, 4, 4, 16]),
@@ -1813,8 +1756,6 @@ class TestMFMAQuadCycleGap:
         invariant that consecutive standard MFMAs at slot_delta=1 yield
         actual == expected == 3 exactly."""
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             # Producer: standard MFMA at slot=2 (default variant).
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
@@ -1844,8 +1785,6 @@ class TestMFMAQuadCycleGap:
 
         # Sanity sibling: same-class 4x4→4x4 chain — no +1 either.
         cap_pack = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2,
                       variant=[4, 4, 4, 16]),
@@ -1975,8 +1914,6 @@ class TestMFMAQuadCycleGap:
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
                               src0=vgpr(0, 1), src1=vgpr(1, 1))
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             self._make_real_pack_mfma(
                 acc_start=0, acc_count=4, a_start=8, a_count=2,
                 b_start=32, b_count=2, slot=2, sequence=0,
@@ -2039,8 +1976,6 @@ class TestMFMAQuadCycleGap:
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
                               src0=vgpr(0, 1), src1=vgpr(1, 1))
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             self._make_real_pack_mfma(
                 acc_start=0, acc_count=4, a_start=8, a_count=2,
                 b_start=32, b_count=2, slot=2, sequence=0,
@@ -2602,8 +2537,6 @@ class TestMFMAQuadCycleGap:
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
                               src0=vgpr(0, 1), src1=vgpr(1, 1))
         ml_prev_instructions = [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             self._make_real_pack_mfma_cross_body(
                 acc_start=0, acc_count=4, a_start=8, a_count=2,
                 b_start=32, b_count=2, slot=2, sequence=0,
@@ -2818,8 +2751,6 @@ class TestCumulativeIssueCycles:
                         src1=vgpr(70 + i, 1))
                 for i in range(5)]
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             # Producer MFMA at slot=2 seq=0.
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
@@ -2863,8 +2794,6 @@ class TestCumulativeIssueCycles:
             FROM_4X4=3 → +1 → issues at 8.
         From producer (issue=0) to final consumer (issue=8): gap=7."""
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             # Producer (standard) at slot=2.
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
@@ -2914,8 +2843,6 @@ class TestCumulativeIssueCycles:
                         src1=vgpr(70 + i, 1))
                 for i in range(4)]
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
             *[_tag(alus[i], category="PackA0",
@@ -2975,8 +2902,6 @@ class TestCumulativeIssueCycles:
         finish-bound), so wait_state ∈ {3, 5} catch the regression.
         """
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
             make_snop(slot=3, wait_state=wait_state),
@@ -3015,8 +2940,6 @@ class TestCumulativeIssueCycles:
         test fails meaningfully if wait_state stops contributing.
         """
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
             make_snop(slot=3, wait_state=3),
@@ -3067,8 +2990,6 @@ class TestCumulativeIssueCycles:
         values.
         """
         cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             # 4x4 PackMFMA producer at slot=2.
             make_mfma(c_dst_start=80, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2,
@@ -3117,14 +3038,16 @@ class TestCumulativeIssueCycles:
 
 class TestGRIncSRDChain:
     def test_grinc_srd_waw_before_buffer_load(self):
+        """Stripped to the minimum: SAddU32 (SRD writer) + BufferLoad
+        (SRD reader). The realistic GEMM frame (SWait + MFMA) is
+        unnecessary — the property is purely about SRD producer/consumer
+        ordering."""
         # Reference: SAddU32(Srd+0) then BufferLoad(reads Srd+0..3).
         srd_add = SAddU32(dst=sgpr(20, 1), src0=sgpr(20, 1), src1=sgpr(100, 1))
         ref_cap = make_capture(BODY_LABEL_ML, [
             _tag(srd_add, category="GRIncA", mfma_index=0, sequence=0),
             make_gr(8, 4, srd_sgpr_start=20, immediate_offset=0,
                     slot=0, category="GRA", sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         # Subject: BufferLoad before SAddU32. Stale SRD.
         srd_add2 = SAddU32(dst=sgpr(20, 1), src0=sgpr(20, 1), src1=sgpr(100, 1))
@@ -3132,8 +3055,6 @@ class TestGRIncSRDChain:
             make_gr(8, 4, srd_sgpr_start=20, immediate_offset=0,
                     slot=0, category="GRA", sequence=0),
             _tag(srd_add2, category="GRIncA", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
@@ -3157,21 +3078,22 @@ class TestGRIncSRDChain:
 class TestPackRAW:
     def test_pack_cvt_raw_from_lr(self):
         """LR writes v8..v11; pack VCvtPkF32toBF16 reads v8..v9. Reordering
-        the pack before the LR consumes uninitialized data."""
+        the pack before the LR consumes uninitialized data.
+
+        Stripped to the minimum: LR + VCvtPkF32toBF16 sharing v8..v9.
+        The realistic GEMM frame (SWait + MFMA) is unnecessary — the
+        property is purely about LR-vs-Pack RAW ordering.
+        """
         from rocisa.instruction import VCvtPkF32toBF16
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1), src0=vgpr(8, 1), src1=vgpr(9, 1))
         ref_cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             _tag(cvt, category="PackA0", mfma_index=0, sequence=0),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 40, 32, slot=2, a_src_count=2),
         ])
         cvt2 = VCvtPkF32toBF16(dst=vgpr(40, 1), src0=vgpr(8, 1), src1=vgpr(9, 1))
         subj_cap = make_capture(BODY_LABEL_ML, [
             _tag(cvt2, category="PackA0", mfma_index=0, sequence=0),
             make_lr(8, 4, 64, slot=0, category="LRA0", sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 40, 32, slot=2, a_src_count=2),
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
@@ -3319,15 +3241,18 @@ class TestLRSAddrChain:
     def test_lrs_vxor_before_lr_invisible(self):
         """LRS XOR-swap of `LocalReadAddrA` (vgpr 40) reordered after its
         consuming DSLoadB128 — load consumes pre-swap address, fetching the
-        wrong LDS half."""
+        wrong LDS half.
+
+        Stripped to the minimum: LRS VXorB32 + DSLoadB128 sharing vgpr 40.
+        The realistic GEMM frame (SWait + MFMA) is unnecessary — the
+        property is purely about VXor-vs-DSLoad RAW ordering.
+        """
         # Reference: LRS swap, then DSLoad reading the just-swapped vgpr.
         lrs = VXorB32(dst=vgpr(40, 1), src0=vgpr(60, 1), src1=vgpr(40, 1))
         ld_ref = DSLoadB128(dst=vgpr(8, 4), src=vgpr(40, 1))
         ref_cap = make_capture(BODY_LABEL_ML, [
             _tag(lrs, category="LRSA0", mfma_index=0, sequence=0),
             _tag(ld_ref, category="LRA0", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         # Subject: same instructions, swap reordered after the load.
         lrs2 = VXorB32(dst=vgpr(40, 1), src0=vgpr(60, 1), src1=vgpr(40, 1))
@@ -3335,8 +3260,6 @@ class TestLRSAddrChain:
         subj_cap = make_capture(BODY_LABEL_ML, [
             _tag(ld_subj, category="LRA0", mfma_index=0, sequence=0),
             _tag(lrs2, category="LRSA0", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
@@ -3360,15 +3283,18 @@ class TestLRSAddrChain:
 class TestLWSAddrChain:
     def test_lws_vxor_before_lw_invisible(self):
         """LWS XOR-swap of `LocalWriteAddrA` (vgpr 50) reordered after its
-        consuming DSStoreB128 — store writes to pre-swap LDS half."""
+        consuming DSStoreB128 — store writes to pre-swap LDS half.
+
+        Stripped to the minimum: LWS VXorB32 + DSStoreB128 sharing vgpr 50.
+        The realistic GEMM frame (SWait + MFMA) is unnecessary — the
+        property is purely about VXor-vs-DSStore RAW ordering.
+        """
         # Reference: LWS swap, then DSStore using the just-swapped vgpr.
         lws = VXorB32(dst=vgpr(50, 1), src0=vgpr(70, 1), src1=vgpr(50, 1))
         st_ref = DSStoreB128(dstAddr=vgpr(50, 1), src=vgpr(8, 4))
         ref_cap = make_capture(BODY_LABEL_ML, [
             _tag(lws, category="LWSA", mfma_index=0, sequence=0),
             _tag(st_ref, category="LWA", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 100, 32, slot=2, a_src_count=4),
         ])
         # Subject: store before swap.
         lws2 = VXorB32(dst=vgpr(50, 1), src0=vgpr(70, 1), src1=vgpr(50, 1))
@@ -3376,8 +3302,6 @@ class TestLWSAddrChain:
         subj_cap = make_capture(BODY_LABEL_ML, [
             _tag(st_subj, category="LWA", mfma_index=0, sequence=0),
             _tag(lws2, category="LWSA", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 100, 32, slot=2, a_src_count=4),
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
