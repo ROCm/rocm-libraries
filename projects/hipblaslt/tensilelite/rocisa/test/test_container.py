@@ -28,7 +28,7 @@ import os
 isa = (9, 0, 10)
 rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
 global_isa = rocisa.rocIsa.getInstance()
-_assembler = os.path.join(rocm_path, "bin", "amdclang++")
+_assembler = os.path.normpath(os.path.join(rocm_path, "bin", "amdclang++"))
 if os.name == "nt" and not _assembler.endswith(".exe"):
     _assembler += ".exe"
 global_isa.init(isa, _assembler, False)
