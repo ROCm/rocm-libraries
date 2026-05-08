@@ -117,7 +117,7 @@ Test cases are auto-discovered: `getGoldenReferenceParams()` scans a subdirector
 #### What Needs to Change for Full Genericity
 
 - Remove hardcoded `EXPECT_EQ(tensorMap.size(), 6)` — only works for batchnorm's 6 tensors, blocks other operations
-- Add tolerance lookup by operation type + data type, so a single test class handles all operations without per-operation subclasses
+- Wire the existing [dynamic tolerance functions](#tolerance-framework) into the golden runner, so a single test class handles all operations without per-operation subclasses
 
 ---
 
@@ -148,7 +148,6 @@ The golden data format is **reference-source-agnostic**. Any tool that produces 
 | Python frameworks | PyTorch, TensorFlow, JAX |
 | In-house references | `CpuReferenceGraphExecutor`, `GpuReferenceGraphExecutor` |
 | AMD internal tools | AITER, AOTriton |
-| Third-party engines | cuDNN (via shim), oneDNN |
 
 PyTorch is the recommended starting point because it is independent of the C++ codebase (breaks the circular dependency in Problem #1). For operations where another source is more trusted (e.g., AITER's SDPA kernels), that source should be preferred. The format is the contract, not the tool.
 
@@ -172,37 +171,15 @@ Three modes control which test suites run. `computed` and `golden` are separate 
 
 ### Tolerance Framework
 
-#### Single Source of Truth
+Tolerances are **always defined in code**, never stored in the data bundle. This eliminates dual-source-of-truth bugs where the code changes but golden data retains the old tolerance.
 
-Tolerances are **always defined in code**, never stored in the data bundle. The data bundle contains only the graph definition and tensor values. This eliminates dual-source-of-truth bugs where the code formula changes but golden data retains the old tolerance.
+The codebase already has a dynamic tolerance framework ([`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp)) that computes bounds from tensor properties using Higham's floating-point error analysis. Tolerances scale with reduction dimension, data type precision, and actual tensor magnitudes. Per-operation functions exist for matmul, convolution, batchnorm, layernorm, RMS norm, and pointwise operations. These are used in the computed (test-as-code) tests today.
 
-The current approach passes tolerances as arguments to `goldenReferenceTestSuite(atol, rtol)`, with values determined per test class:
-
-```cpp
-// Current pattern (from TestCpuFpReferenceBatchnorm.cpp):
-class TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32 : public TestGoldenReferenceCpu
-{
-protected:
-    void runTest() { goldenReferenceTestSuite(/*atol=*/1e-5, /*rtol=*/1e-5); }
-};
-```
-
-**Proposed improvement**: tolerance lookup by operation type + data type, so a single generic test class can handle all operations:
-
-```cpp
-// Future: single test class for all operations
-// Operation type extracted from the loaded FlatBuffers graph via node.attributes_type()
-// (returns the NodeAttributes enum: PointwiseAttributes, ConvolutionFwdAttributes, etc.)
-auto opType = graph->nodes()->Get(0)->attributes_type();
-auto [atol, rtol] = getToleranceForOperation(opType, graph->io_data_type());
-goldenReferenceTestSuite(atol, rtol);
-```
-
-The exact format of the tolerance configuration (lookup table, config file, or constexpr map) is an implementation detail. The operation type is available from the loaded graph via the FlatBuffers-generated `NodeAttributes` enum (see [`graph_generated.h`](../../flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/graph_generated.h)). The principle is: tolerances come from code keyed by operation type and data type, not from the data bundle.
+For golden tests, the same dynamic tolerance functions apply — the loaded bundle contains all the information they need (tensor dims, data types, and values). The remaining work is to wire the dynamic tolerance functions into the golden test runner so a single generic test class can handle all operations without per-operation subclasses.
 
 **Acceptance criteria**:
 - [ ] Golden data bundles contain no tolerance fields
-- [ ] Changing tolerance values in code takes effect immediately for both computed and golden modes
+- [ ] Golden tests use the existing dynamic tolerance functions, not hardcoded `(atol, rtol)` pairs
 - [ ] Failure message includes: tensor UID, max absolute error, max relative error, mismatch count
 
 ---
@@ -649,7 +626,7 @@ Comparison testing can confirm that two implementations agree, not that either i
 
 ## Future Work
 
-1. **Per-operation tolerance configuration**: Structured `(operation_type, data_type) → (atol, rtol)` lookup so the generic runner doesn't need per-operation test classes.
+1. **Dynamic tolerance integration**: Wire the existing `DynamicTolerances` functions (matmul, conv, batchnorm, layernorm, RMS norm, pointwise) into the golden test runner so a single generic test class handles all operations.
 2. **Automatic test discovery**: Recursive scanning of `hipdnn_reference_data/` to auto-generate test instantiations, eliminating manual `INSTANTIATE_TEST_SUITE_P`.
 3. **C++ graph export**: Utility to export a graph from an existing test-as-code `buildGraph()` to the bundle format, enabling conversion of computed tests to golden tests.
 4. **Bundle inspection and validation tool**: CLI that reads bundles, reports tensor metadata and statistics, and validates integrity across a directory tree.
