@@ -233,7 +233,9 @@ hipdnn_reference_data/
 
 ### How Test Discovery Works
 
-`getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32")` resolves the full path as `<exe_dir>/../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/`, scans it for `.json` files, and returns each as a gtest parameter. To add a test case to an existing folder, drop in a new `.json` + `.bin` set — the next run picks it up automatically. To select tests, use `--gtest_filter` with the file path (operation, layout, data type, or test name).
+`getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32")` resolves the full path as `<exe_dir>/../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/` and scans it for `.json` files. Each `.json` file becomes a separate gtest parameter — one file, one test case.
+
+To add a test case to an existing folder, drop in a new `.json` + `.bin` set — the next run picks it up automatically. To select tests, use `--gtest_filter` with the file path (operation, layout, data type, or test name).
 
 ---
 
