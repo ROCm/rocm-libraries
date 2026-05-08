@@ -2,3 +2,4 @@ pyyaml
 msgpack
 joblib
 rich
+filelock
