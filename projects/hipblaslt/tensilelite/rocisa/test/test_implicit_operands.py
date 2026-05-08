@@ -33,7 +33,7 @@ Background (bead rocm-libraries-dzl):
     to producer/consumer dataflow edges.
 
 This test file is the per-opcode source of truth: each entry in the table
-constructs one of the 43 SCC-touching SALU classes and asserts the
+constructs one of the 55 SCC-touching SALU classes and asserts the
 expected (reads_scc, writes_scc) pair. If a future rocisa change toggles
 the wrong flag on the wrong opcode, the corresponding row fails.
 
@@ -61,7 +61,9 @@ from rocisa.instruction import (
     SCmpGtU32,
     SCmpLeI32,
     SCmpLeU32,
+    SCmpLgI32,
     SCmpLgU32,
+    SCmpLgU64,
     SCmpLtI32,
     SCmpLtU32,
     # SBitcmp1* (cmp.hpp)
@@ -77,17 +79,26 @@ from rocisa.instruction import (
     SAddU32,
     SSubI32,
     SSubU32,
+    SSubU64,
     SAndB32,
     SAndB64,
     SAndN2B32,
     SOrB32,
+    SOrB64,
     SXorB32,
+    SMaxI32,
+    SMaxU32,
+    SMinI32,
+    SMinU32,
     SLShiftLeftB32,
     SLShiftRightB32,
     SLShiftLeftB64,
     SLShiftRightB64,
     SAShiftRightI32,
+    SLShiftLeft1AddU32,
     SLShiftLeft2AddU32,
+    SLShiftLeft3AddU32,
+    SLShiftLeft4AddU32,
     # Carry-chain RW (common.hpp)
     SAddCU32,
     SSubBU32,
@@ -98,7 +109,9 @@ from rocisa.instruction import (
     SOrSaveExecB64,
     # SCC readers (common.hpp)
     SCSelectB32,
+    SCSelectB64,
     SCMovB32,
+    SCMovB64,
     # Branch readers (branch.hpp)
     SCBranchSCC0,
     SCBranchSCC1,
@@ -115,14 +128,14 @@ from rocisa.instruction import (
 
 
 # ---------------------------------------------------------------------------
-# SCC opcode coverage table: 43 entries.
+# SCC opcode coverage table: 55 entries.
 #
 # Each row is (label, factory, expected_reads_scc, expected_writes_scc).
 # `label` is informative and used by pytest's id parametrization. `factory`
 # constructs one instance with whatever arguments the class needs.
 # ---------------------------------------------------------------------------
 
-# 12 SCmp* (writes_scc only)
+# 14 SCmp* (writes_scc only)
 _SCMP_ROWS = [
     ("SCmpEQI32", lambda: SCmpEQI32(src0=sgpr(0), src1=sgpr(1)), False, True),
     ("SCmpEQU32", lambda: SCmpEQU32(src0=sgpr(0), src1=sgpr(1)), False, True),
@@ -133,7 +146,9 @@ _SCMP_ROWS = [
     ("SCmpGtU32", lambda: SCmpGtU32(src0=sgpr(0), src1=sgpr(1)), False, True),
     ("SCmpLeI32", lambda: SCmpLeI32(src0=sgpr(0), src1=sgpr(1)), False, True),
     ("SCmpLeU32", lambda: SCmpLeU32(src0=sgpr(0), src1=sgpr(1)), False, True),
+    ("SCmpLgI32", lambda: SCmpLgI32(src0=sgpr(0), src1=sgpr(1)), False, True),
     ("SCmpLgU32", lambda: SCmpLgU32(src0=sgpr(0), src1=sgpr(1)), False, True),
+    ("SCmpLgU64", lambda: SCmpLgU64(src0=sgpr(0, 2), src1=sgpr(2, 2)), False, True),
     ("SCmpLtI32", lambda: SCmpLtI32(src0=sgpr(0), src1=sgpr(1)), False, True),
     ("SCmpLtU32", lambda: SCmpLtU32(src0=sgpr(0), src1=sgpr(1)), False, True),
 ]
@@ -151,7 +166,7 @@ _SBITCMP_ROWS = [
     ("SBitcmp1B32", lambda: SBitcmp1B32(src0=sgpr(0), src1=sgpr(1)), False, True),
 ]
 
-# 16 dst+srcs writes-only ALUs (writes_scc only)
+# 25 dst+srcs writes-only ALUs (writes_scc only)
 _SALU_WRITES_ROWS = [
     ("SAbsI32", lambda: SAbsI32(dst=sgpr(0), src=sgpr(1)), False, True),
     ("SAddI32", lambda: SAddI32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
@@ -162,13 +177,21 @@ _SALU_WRITES_ROWS = [
     ("SAndB64", lambda: SAndB64(dst=sgpr(0, 2), src0=sgpr(2, 2), src1=sgpr(4, 2)), False, True),
     ("SAndN2B32", lambda: SAndN2B32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
     ("SOrB32", lambda: SOrB32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
+    ("SOrB64", lambda: SOrB64(dst=sgpr(0, 2), src0=sgpr(2, 2), src1=sgpr(4, 2)), False, True),
     ("SXorB32", lambda: SXorB32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
+    ("SMaxI32", lambda: SMaxI32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
+    ("SMaxU32", lambda: SMaxU32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
+    ("SMinI32", lambda: SMinI32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
+    ("SMinU32", lambda: SMinU32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
     ("SLShiftLeftB32", lambda: SLShiftLeftB32(dst=sgpr(0), shiftHex=1, src=sgpr(1)), False, True),
     ("SLShiftRightB32", lambda: SLShiftRightB32(dst=sgpr(0), shiftHex=1, src=sgpr(1)), False, True),
     ("SLShiftLeftB64", lambda: SLShiftLeftB64(dst=sgpr(0, 2), shiftHex=1, src=sgpr(2, 2)), False, True),
     ("SLShiftRightB64", lambda: SLShiftRightB64(dst=sgpr(0, 2), shiftHex=1, src=sgpr(2, 2)), False, True),
     ("SAShiftRightI32", lambda: SAShiftRightI32(dst=sgpr(0), shiftHex=1, src=sgpr(1)), False, True),
+    ("SLShiftLeft1AddU32", lambda: SLShiftLeft1AddU32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
     ("SLShiftLeft2AddU32", lambda: SLShiftLeft2AddU32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
+    ("SLShiftLeft3AddU32", lambda: SLShiftLeft3AddU32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
+    ("SLShiftLeft4AddU32", lambda: SLShiftLeft4AddU32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), False, True),
 ]
 
 # 2 carry-chain RW (reads_scc + writes_scc)
@@ -185,10 +208,12 @@ _SAVEEXEC_ROWS = [
     ("SOrSaveExecB64", lambda: SOrSaveExecB64(dst=sgpr(0, 2), src=sgpr(2, 2)), False, True),
 ]
 
-# 2 SCC readers (reads_scc only)
+# 4 SCC readers (reads_scc only)
 _SCC_READER_ROWS = [
     ("SCSelectB32", lambda: SCSelectB32(dst=sgpr(0), src0=sgpr(1), src1=sgpr(2)), True, False),
+    ("SCSelectB64", lambda: SCSelectB64(dst=sgpr(0, 2), src0=sgpr(2, 2), src1=sgpr(4, 2)), True, False),
     ("SCMovB32", lambda: SCMovB32(dst=sgpr(0), src=sgpr(1)), True, False),
+    ("SCMovB64", lambda: SCMovB64(dst=sgpr(0, 2), src=sgpr(2, 2)), True, False),
 ]
 
 # 2 SCondBranchSCC* (reads_scc only)
@@ -209,12 +234,16 @@ SCC_OPCODE_TABLE = (
 )
 
 
-# Coverage sanity check: the original dzl bead enumerates 43 SCC-touching
-# classes. If this number drifts, either the bead's accounting changed or
-# someone forgot to add/remove a row. Either is worth a deliberate update.
-def test_scc_opcode_table_covers_43_classes():
-    assert len(SCC_OPCODE_TABLE) == 43, (
-        f"Expected 43 SCC-touching classes per rocm-libraries-dzl, "
+# Coverage sanity check: dzl's original 43 SCC-touching classes plus the 12
+# ISA-mandated additions surfaced by the rocm-libraries-hkq0 audit
+# (SCmpLgI32, SCmpLgU64, SCMovB64, SCSelectB64, SOrB64, SMaxI32,
+# SMaxU32, SMinI32, SMinU32, SLShiftLeft1AddU32, SLShiftLeft3AddU32,
+# SLShiftLeft4AddU32) sum to 55. If this number drifts, either the audit's
+# accounting changed or someone forgot to add/remove a row. Either is worth
+# a deliberate update.
+def test_scc_opcode_table_covers_55_classes():
+    assert len(SCC_OPCODE_TABLE) == 55, (
+        f"Expected 55 SCC-touching classes (43 from dzl + 12 from hkq0 audit), "
         f"got {len(SCC_OPCODE_TABLE)}. Update the table and this assertion "
         f"together when adding/removing SCC opcodes."
     )
@@ -333,7 +362,7 @@ def test_m0_resource_renders_as_m0():
 
 
 if __name__ == "__main__":
-    test_scc_opcode_table_covers_43_classes()
+    test_scc_opcode_table_covers_55_classes()
     for row in SCC_OPCODE_TABLE:
         test_scc_flag_metadata(*row)
     for row in _NON_SCC_ROWS:

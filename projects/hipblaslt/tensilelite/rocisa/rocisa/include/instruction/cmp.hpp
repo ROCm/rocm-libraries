@@ -467,6 +467,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_lg_i32");
+            writes_scc = true;
         }
 
         SCmpLgI32(const SCmpLgI32& other)
@@ -494,6 +495,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_lg_u64");
+            writes_scc = true;
         }
 
         SCmpLgU64(const SCmpLgU64& other)
