@@ -74,9 +74,9 @@ The golden reference infrastructure is already built and working for batchnorm. 
 
 ### Self-Contained Bundles
 
-A golden data bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition -- operation type, all tensor metadata (dims, strides, data_type), all operation-specific parameters, and graph-level type configuration. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
+A golden data bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
 
-This is test-as-data: the graph definition lives on disk, not in C++. The loader is operation-agnostic -- it handles any graph without per-operation code. See [Adding New Golden Reference Tests](#adding-new-golden-reference-tests) for how to add test cases, and [What Needs to Change for Full Genericity](#what-needs-to-change-for-full-genericity) for remaining runner work.
+This is test-as-data: the graph definition lives on disk, not in C++.
 
 ### Golden Data Format
 
@@ -106,86 +106,19 @@ BatchnormFwdInference/nchw/fp32/
 
 ![Validation Pipeline](images/validation_pipeline.png)
 
-The existing test runners (`TestGoldenReferenceCpu` and `TestGoldenReferenceGpu`) already implement the generic pattern. Here is how `TestGoldenReferenceCpu` works:
+The CPU and GPU runners (`TestGoldenReferenceCpu`, `TestGoldenReferenceGpu`) follow the same four-step pattern:
 
-```cpp
-class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::path>
-{
-protected:
-    GraphAndTensorMap _graphAndTensors;
-    std::unordered_map<int64_t, std::unique_ptr<ITensor>> _referenceOutputTensors;
+1. **Load** — read the bundle from disk (`loadGraphAndTensors`)
+2. **Split** — separate golden outputs from inputs (`extractAndClearOutputTensorData`)
+3. **Execute** — run the engine under test (CPU reference or MIOpen GPU plugin)
+4. **Compare** — check engine output against golden output (`validateTensors`)
 
-    void SetUp() override
-    {
-        const auto& path = GetParam();
-        if(path.empty()) { GTEST_SKIP(); }
-
-        // Step 1: Load graph definition + all tensor data from disk
-        _graphAndTensors = loadGraphAndTensors(path);
-
-        // Step 2: Separate output tensors (reference truth), zero the output slots
-        _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
-    }
-
-    void goldenReferenceTestSuite(float absoluteTolerance, float relativeTolerance)
-    {
-        // Step 3: Execute CPU reference on the loaded graph + inputs
-        auto tensorMap = _graphAndTensors.hostBufferMap();
-        CpuReferenceGraphExecutor().execute(
-            _graphAndTensors.graphBuffer.data(),
-            _graphAndTensors.graphBuffer.size(), tensorMap);
-
-        // Step 4: Compare CPU output against saved reference output
-        EXPECT_TRUE(_graphAndTensors.validateTensors(
-            _referenceOutputTensors, absoluteTolerance, relativeTolerance));
-    }
-};
-```
-
-`TestGoldenReferenceGpu` follows the same pattern but executes via `hipdnnEnginePluginExecuteOpGraphImpl` on the GPU.
-
-Test cases are discovered automatically via `getGoldenReferenceParams()`:
-
-```cpp
-inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
-{
-    return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
-        getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data" / subDirectory,
-        ".json"));
-}
-```
-
-This scans a subdirectory of `hipdnn_reference_data/` for `.json` files and returns each file path as a gtest parameter. Adding a new test case is as simple as adding a new `.json` + `.bin` bundle to the directory.
+Test cases are auto-discovered: `getGoldenReferenceParams()` scans a subdirectory for `.json` files and returns each as a gtest parameter. Adding a bundle to an existing folder is picked up on the next run.
 
 #### What Needs to Change for Full Genericity
 
-The current CPU runner has a hardcoded check that should be removed:
-
-```cpp
-// Current code in goldenReferenceTestSuite():
-EXPECT_EQ(tensorMap.size(), 6);  // Only works for batchnorm (5 inputs + 1 output)
-```
-
-This must be removed so the runner works with any operation regardless of tensor count.
-
-Additionally, tolerances are currently passed as arguments to `goldenReferenceTestSuite()`. For full genericity across all operations, tolerances should come from a per-operation configuration -- a lookup table keyed by operation type and data type. This can be a simple function:
-
-```cpp
-// Proposed: tolerance lookup by operation type + data type
-std::pair<float, float> getToleranceForOperation(
-    const std::string& operationType, const std::string& dataType);
-```
-
-#### `GraphAndTensorMap` Key Methods
-
-The `GraphAndTensorMap` struct (defined in `LoadGraphAndTensors.hpp`) provides the core data manipulation methods used by both runners:
-
-| Method | What it does |
-|--------|-------------|
-| `extractAndClearOutputTensorData()` | Moves output tensors out of the map (these are the reference truth), replaces them with zero-filled tensors (these will receive the engine's output) |
-| `validateTensors(refTensors, atol, rtol)` | Per-element comparison of engine output against reference, using `CpuFpReferenceValidation::allClose()` |
-| `hostBufferMap()` | Returns `{uid → raw_host_pointer}` map for CPU execution |
-| `deviceBuffers()` | Returns `vector<hipdnnPluginDeviceBuffer_t>` for GPU execution |
+- Remove hardcoded `EXPECT_EQ(tensorMap.size(), 6)` — only works for batchnorm's 6 tensors, blocks other operations
+- Add tolerance lookup by operation type + data type, so a single test class handles all operations without per-operation subclasses
 
 ---
 
@@ -193,97 +126,18 @@ The `GraphAndTensorMap` struct (defined in `LoadGraphAndTensors.hpp`) provides t
 
 ![Generation Pipeline](images/generation_pipeline.png)
 
-Golden data is generated by Python scripts in [`reference_data_scripts/`](../../reference_data_scripts/), using PyTorch as the reference executor. The Python framework mirrors the C++ graph structure so that the generated JSON is directly loadable by `loadGraphAndTensors()`.
+Golden data is generated by Python scripts in [`reference_data_scripts/`](../../reference_data_scripts/), using PyTorch as the reference executor. Each generator follows the same four-step pattern:
 
-#### How It Works
+1. **Create** input tensors with random data (`TensorAttributes.random()`)
+2. **Build** a node (e.g., `BatchnormInference`) with those tensors
+3. **Execute** the PyTorch equivalent operation (`node.execute()`)
+4. **Save** the bundle (`Graph.save()` writes `.json` + `.tensor{uid}.bin`)
 
-1. A generator script creates `TensorAttributes` objects with random data for each input tensor
-2. It constructs a node object (e.g., `BatchnormInference`) with those tensors
-3. It calls `node.execute()` which runs the PyTorch equivalent operation
-4. It wraps the node in a `Graph` and calls `graph.save(base_filename)`
-5. `Graph.save()` writes the JSON (via `graph.as_dict()`) and binary tensor files (via `dump_data_as_binary()`)
-
-Example from `generate_batchnorm_reference.py`:
-
-```python
-def save_batchnorm_inference_execution(x_size, io_data_type, ...):
-    x = TensorAttributes.random(min_val, max_val, io_data_type, x_size)
-    mean = TensorAttributes.random(min_val, max_val, intermediate_data_type, derived_sizes)
-    # ... create all input tensors ...
-    y = TensorAttributes.empty()
-
-    node = BatchnormInference(x, mean, inv_variance, scale, bias, y)
-    node.execute(using_gpu)  # Runs torch.nn.functional.batch_norm
-
-    graph = Graph([node], io_data_type=io_data_type, ...)
-    graph.save(base_filename)  # Writes {base_filename}.json + .tensor{uid}.bin
-```
-
-#### Writing a New Generator
-
-To add golden data for a new operation (e.g., convolution forward):
-
-1. **Create a node class** in `reference_data_scripts/utilities/`:
-   ```python
-   # reference_data_scripts/utilities/conv_forward.py
-   @register_node
-   class ConvForward:
-       type_str = "ConvolutionForwardAttributes"
-
-       class Input:
-           def __init__(self, x: TensorAttributes, w: TensorAttributes): ...
-
-       class Output:
-           def __init__(self, y: TensorAttributes): ...
-
-       def execute(self, using_gpu: bool):
-           self.outputs.y.tensor = torch.nn.functional.conv2d(
-               self.inputs.x.tensor, self.inputs.w.tensor,
-               padding=self.padding, stride=self.stride, dilation=self.dilation)
-
-       def as_dict(self): ...       # JSON serialization matching C++ schema
-       @staticmethod
-       def from_dict(d, tensors): ...  # Deserialization
-   ```
-
-2. **Create a generator script** in `reference_data_scripts/`:
-   ```python
-   # reference_data_scripts/generate_conv_reference.py
-   def save_conv_forward(x_size, w_size, padding, stride, dilation, dtype, base_filename):
-       x = TensorAttributes.random(-1, 1, dtype, x_size)
-       w = TensorAttributes.random(-1, 1, dtype, w_size)
-       y = TensorAttributes.empty()
-       node = ConvForward(x, w, y, padding=padding, stride=stride, dilation=dilation)
-       node.execute(using_gpu=False)
-       graph = Graph([node], dtype=dtype)
-       graph.save(base_filename)
-   ```
-
-3. **Run the generator** to produce data bundles:
-   ```bash
-   python generate_conv_reference.py \
-     --base-filename ../hipdnn_reference_data/ConvFwd/nchw/fp32/Small \
-     --io-type float --x-size 1 16 16 16 --w-size 16 16 3 3 \
-     --padding 1 1 --stride 1 1 --dilation 1 1
-   ```
-
-4. **Commit** the generated `.json` + `.bin` files to `hipdnn_reference_data/`.
-
-The `@register_node` decorator (from `common.py`) adds the node class to `NODE_REGISTRY`, keyed by `type_str`. This enables `Graph.from_file()` to deserialize any graph JSON back into executable Python objects.
+To add a new operation, create a node class and generator script following the existing [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern. See [Adding New Golden Reference Tests](#adding-new-golden-reference-tests) for the full workflow.
 
 #### Current Coverage
 
-| Operation | Generator exists | Data bundles exist | Notes |
-|-----------|:---:|:---:|-------|
-| BatchnormFwdInference | Yes | Yes (6 cases) | nchw/{fp32,fp16,bfp16}, ncdhw/fp32 |
-| ConvFwd / ConvBwd / ConvWrw | No | No | Needed |
-| Matmul | No | No | Needed |
-| SDPA Fwd / Bwd | No | No | Needed -- primary motivation for golden ref |
-| Pointwise (all modes) | No | No | Needed |
-| Layernorm / RMSNorm | No | No | Needed |
-| Reduction | No | No | Needed |
-| BatchnormTrain / BatchnormBwd | No | No | Needed |
-| BlockScaleDequantize / Quantize | No | No | Needed |
+Only batchnorm has generators and data today (6 bundles across 4 layout/datatype combinations). Generators are needed for: convolution (fwd/bwd/wrw), matmul, SDPA (fwd/bwd), pointwise, layernorm, RMS norm, reduction, batchnorm train/bwd, and block scale dequantize/quantize.
 
 ---
 
