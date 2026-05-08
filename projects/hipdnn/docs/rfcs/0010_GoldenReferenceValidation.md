@@ -62,23 +62,21 @@ Golden reference validation uses two pipelines that share a common data format -
 
 ### Existing Infrastructure
 
-The core test-as-data infrastructure is already built and working for batchnorm. What's missing: only batchnorm has data; no CI integration; no formalized folder convention; the GPU runner has no tests; there is no coverage for convolution, matmul, SDPA, layernorm, RMS norm, reduction, or pointwise operations. The table below summarizes each component:
+The golden reference infrastructure is already built and working for batchnorm. What this RFC adds: golden data for operations beyond batchnorm; a formalized folder convention; data integrity checks; a CI strategy with explicit verification modes and golden data fetching; and GPU runner test instantiations. The table below summarizes each existing component:
 
-| Component | File(s) | What it does |
-|-----------|---------|-------------|
-| Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | **Read**: loads `{Name}.json` + `.tensor{uid}.bin` → `GraphAndTensorMap`. **Split**: `extractAndClearOutputTensorData()` separates golden outputs from inputs. **Compare**: `validateTensors()` checks engine output against golden data |
-| CPU golden runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | **Discover**: `getGoldenReferenceParams()` scans a folder for `.json` files → gtest parameters. **Run**: loads bundle, executes CPU reference, validates outputs. One fixture covers all operations |
-| GPU golden runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern as CPU runner but executes via MIOpen GPU engine plugin. Defined but no tests yet |
-| Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | **Build**: `Graph` + `TensorAttributes` define the computation. **Compute**: run PyTorch (or any reference) to produce outputs. **Write**: `Graph.save()` emits `{Name}.json` + `.tensor{uid}.bin` |
-| Golden data | [`hipdnn_reference_data/BatchnormFwdInference/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm bundles across nchw/{fp32,fp16,bfp16} and ncdhw/fp32, in `Small`, `Large`, `MIOpen` sizes |
+| Component | File(s) | Role |
+|-----------|---------|------|
+| Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | Reads bundles from disk, separates inputs from expected outputs, validates results |
+| CPU runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | Discovers and runs golden tests using the CPU reference executor |
+| GPU runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern, executes via MIOpen GPU plugin (defined, no tests yet) |
+| Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | Generates bundles: defines graphs, runs PyTorch, writes output files |
+| Golden data | [`hipdnn_reference_data/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm bundles across 4 layout/datatype combinations |
 
 ### Self-Contained Bundles
 
 A golden data bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition -- operation type, all tensor metadata (dims, strides, data_type), all operation-specific parameters, and graph-level type configuration. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
 
-The graph JSON serialization covers all 18 operation types (ConvFwd/Bwd/Wrw, BatchnormInf/Train/Bwd, Pointwise all modes, Matmul, Layernorm, RMSNorm, SDPA Fwd/Bwd, Reduction, BlockScaleDequantize/Quantize). No separate manifest or metadata file is needed -- the graph JSON already contains everything the runner needs to execute and validate.
-
-This is the architectural difference from a test-as-code approach: the graph definition lives on disk, not in C++. The test runner is generic -- it loads whatever bundle it finds and validates it. To add a new test case, see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests) -- for an existing operation/layout/datatype it is just "drop the bundle in the folder," for a new combination it requires a one-time `INSTANTIATE_TEST_SUITE_P`.
+This is test-as-data: the graph definition lives on disk, not in C++. The loader is operation-agnostic -- it handles any graph without per-operation code. See [Adding New Golden Reference Tests](#adding-new-golden-reference-tests) for how to add test cases, and [What Needs to Change for Full Genericity](#what-needs-to-change-for-full-genericity) for remaining runner work.
 
 ### Golden Data Format
 
@@ -101,66 +99,6 @@ BatchnormFwdInference/nchw/fp32/
   Small.tensor4.bin         # bias (input)
   Small.tensor5.bin         # y (output — golden reference)
 ```
-
-#### Graph JSON Structure
-
-The JSON file contains the complete graph definition. Here is an example from an existing batchnorm test case:
-
-```json
-{
-  "nodes": [
-    {
-      "inputs": {
-        "x_tensor_uid": 0,
-        "mean_tensor_uid": 1,
-        "inv_variance_tensor_uid": 2,
-        "scale_tensor_uid": 3,
-        "bias_tensor_uid": 4
-      },
-      "outputs": { "y_tensor_uid": 5 },
-      "type": "BatchnormInferenceAttributes",
-      "compute_data_type": "float",
-      "name": ""
-    }
-  ],
-  "tensors": [
-    { "name": "", "uid": 0, "strides": [60, 20, 5, 1],
-      "dims": [2, 3, 4, 5], "data_type": "float", "virtual": false },
-    { "name": "", "uid": 1, "strides": [3, 1, 1, 1],
-      "dims": [1, 3, 1, 1], "data_type": "float", "virtual": false },
-    ...
-  ],
-  "io_data_type": "float",
-  "compute_data_type": "float",
-  "intermediate_data_type": "float",
-  "name": ""
-}
-```
-
-#### Why This Format Is Sufficient
-
-No separate manifest is needed. The graph JSON already contains:
-
-- **Operation type** (`"type": "BatchnormInferenceAttributes"`) -- what operation to run
-- **Tensor metadata** (dims, strides, data_type) -- shape and type of every tensor
-- **Operation parameters** (encoded in the node's input/output UIDs and attributes) -- all computation-determining parameters
-- **Graph-level types** (io_data_type, compute_data_type, intermediate_data_type) -- precision configuration
-- **Tensor UIDs** -- the key linking each `.bin` file to its role in the graph
-
-#### Tensor Identity
-
-Tensors are identified by **UID** (from the graph JSON), not by name. The file naming convention is `{TestName}.tensor{uid}.bin`. `loadGraphAndTensors()` iterates over `graph->tensors()`, reads each tensor's UID from the JSON, and loads the corresponding `.bin` file:
-
-```cpp
-for(auto attributes : *graph->tensors())
-{
-    auto tensorPath = basePath.string() + ".tensor"
-                      + std::to_string(attributes->uid()) + ".bin";
-    tensorMap[attributes->uid()] = tensorFromFileAndAttributes(tensorPath, *attributes);
-}
-```
-
-UIDs are internal to each bundle -- there is no cross-bundle dependency on UID assignment. Each bundle is self-contained.
 
 ---
 
@@ -601,7 +539,7 @@ void goldenReferenceTestSuite(float atol, float rtol)
 
 ## Folder Convention
 
-Golden data is organized under `hipdnn_reference_data/` with a three-level hierarchy:
+Golden data is organized under `hipdnn_reference_data/` with a three-level hierarchy. The folder path is a human convention for organization and gtest discovery -- the loader does not validate that the folder path matches the graph content. The generator is responsible for placing bundles in the correct folder.
 
 ```
 hipdnn_reference_data/
