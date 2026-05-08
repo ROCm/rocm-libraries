@@ -203,7 +203,7 @@ Three checks catch the real failure modes:
 
 ## Folder Convention
 
-The folder path tells you what a test covers. The file inside tells the engine what to compute. Together they drive test discovery: `getGoldenReferenceParams()` takes a folder path and returns every `.json` file in it as a gtest parameter.
+Golden data lives in [`projects/hipdnn/hipdnn_reference_data/`](../../hipdnn_reference_data/). The folder path tells you what a test covers. The file inside tells the engine what to compute. Together they drive test discovery: `getGoldenReferenceParams()` takes a folder path and returns every `.json` file in it as a gtest parameter.
 
 ```
 hipdnn_reference_data/
@@ -247,7 +247,7 @@ hipdnn_reference_data/
 
 ### How Test Discovery Works
 
-`getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32")` scans that directory for `.json` files and returns each as a gtest parameter. To add a test case to an existing folder, drop in a new `.json` + `.bin` set — the next run picks it up automatically. To select tests, use `--gtest_filter` with the file path (operation, layout, data type, or test name).
+`getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32")` resolves the full path as `<exe_dir>/../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/`, scans it for `.json` files, and returns each as a gtest parameter. To add a test case to an existing folder, drop in a new `.json` + `.bin` set — the next run picks it up automatically. To select tests, use `--gtest_filter` with the file path (operation, layout, data type, or test name).
 
 ---
 
@@ -295,7 +295,7 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 ## Data Management
 
-Golden data lives in `hipdnn_reference_data/` at the project root (see [Folder Convention](#folder-convention)). CMake copies it to the build tree at configure time and installs it to `<prefix>/lib/hipdnn_reference_data/`. At runtime, `getGoldenReferenceParams()` resolves the path as `<exe_dir>/../lib/hipdnn_reference_data/` — the standard ROCm layout where executables are in `bin/` and data is in `lib/`. The `--golden-data-dir` CLI flag and `HIPDNN_TEST_GOLDEN_DATA_DIR` env var override this default.
+Golden data lives in `projects/hipdnn/hipdnn_reference_data/` (see [Folder Convention](#folder-convention)). CMake copies it to the build tree at configure time and installs it to `<prefix>/lib/hipdnn_reference_data/`. At runtime, `getGoldenReferenceParams()` resolves the path as `<exe_dir>/../lib/hipdnn_reference_data/` — the standard ROCm layout where executables are in `bin/` and data is in `lib/`. The `--golden-data-dir` CLI flag and `HIPDNN_TEST_GOLDEN_DATA_DIR` env var override this default.
 
 **Note**: because CMake uses `file(COPY)` at configure time, adding new golden data requires re-running CMake (not just rebuilding) to update the build tree.
 
