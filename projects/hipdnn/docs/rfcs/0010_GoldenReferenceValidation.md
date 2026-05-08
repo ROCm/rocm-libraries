@@ -38,13 +38,15 @@ The integration test suite validates engine outputs by computing references at r
 3. **Non-determinism**: GPU reference results can vary across runs, making failure investigation harder
 4. **Slowness**: CPU reference execution for large tensors is the bottleneck in full-tier tests
 
-A prior effort established a golden reference pattern -- golden data bundles (graph JSON + tensor `.bin` files) loaded from disk and validated against engine outputs. The initial infrastructure is in place for batchnorm. This RFC extends that pattern to all operation types, formalizes the folder convention, adds data integrity checks, and integrates with CI.
+A prior effort established a golden reference pattern -- golden data bundles (graph JSON + tensor `.bin` files) loaded from disk and validated against engine outputs. The initial infrastructure is in place for batchnorm. This RFC extends golden data coverage to all operation types, formalizes the folder convention, adds data integrity checks, and integrates with CI.
 
 ---
 
 ## Design Overview
 
-Golden reference validation uses two pipelines -- [**generation**](#generation-pipeline) and [**validation**](#generic-test-runner) -- that share a common data format: the **golden data bundle** (`{Name}.json` + `{Name}.tensor{uid}.bin`). A bundle is a self-contained test case: the graph JSON defines the computation, the `.bin` files carry the tensor data (inputs and expected outputs). Generation produces bundles; validation loads a bundle, deserializes the graph JSON into a FlatBuffers graph object, executes it through the engine under test (CPU reference or MIOpen GPU plugin), and compares the result to the expected output.
+Golden reference validation uses two pipelines -- [**generation**](#generation-pipeline) and [**validation**](#generic-test-runner) -- that share a common data format: the **golden data bundle** (`{Name}.json` + `{Name}.tensor{uid}.bin`). A bundle is a self-contained test case: the graph JSON defines the computation, the `.bin` files carry the tensor data (inputs and expected outputs).
+
+The graph JSON is a complete computation description — operation type, tensor shapes, data types, and all operation parameters. Generation produces bundles. Validation loads a bundle — graph from `{Name}.json`, tensor data from `{Name}.tensor{uid}.bin` — executes the graph through the engine under test, and compares the result to the expected output. The test fixture determines which engine runs the graph (CPU reference, MIOpen GPU plugin, etc.); the bundle itself is engine-agnostic.
 
 **[Generation](#generation-pipeline) (run once, any tool):**
 1. Define graph and create input tensors
@@ -75,8 +77,6 @@ The golden reference infrastructure is already built and working for batchnorm. 
 ### Self-Contained Bundles
 
 All of these components operate on a single shared artifact -- the golden data bundle. A bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
-
-This is test-as-data: the graph definition lives on disk, not in C++.
 
 ### Golden Data Format
 
@@ -238,7 +238,9 @@ hipdnn_reference_data/
 | Operation | PascalCase, direction suffix | `BatchnormFwdInference`, `ConvFwd`, `ConvBwd`, `MatmulFwd`, `SdpaFwd`, `PointwiseRelu` |
 | Layout | Lowercase | `nchw`, `nhwc`, `ncdhw`, `ndhwc` |
 | DataType | Lowercase abbreviation | `fp32`, `fp16`, `bfp16` |
-| TestName | PascalCase, describes tensor size/source | `Small`, `Large`, `MIOpen`, `Smoke` |
+| TestName | PascalCase, free-form label | `Small`, `Medium`, `Large` |
+
+When TestName describes tensor size, align with integration test tiers: `Small` for smoke, `Medium` for standard, `Large` for comprehensive/full.
 
 ### Example: Current Data
 
