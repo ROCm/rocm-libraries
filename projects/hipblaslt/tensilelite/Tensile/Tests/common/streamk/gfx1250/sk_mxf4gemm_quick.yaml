@@ -209,7 +209,7 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [0]
+        - 1LDSBuffer: [1, 0]
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]

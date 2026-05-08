@@ -25,6 +25,7 @@ protected:
     int _oldStderr;
     std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logLevelGuard;
     std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logFileGuard;
+    bool _stderrContentRetrieved = false;
 
 public:
     void SetUp() override
@@ -57,9 +58,17 @@ public:
         }
     }
 
-    static std::string getStderrContent()
+    std::string getStderrContent()
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        EXPECT_FALSE(_stderrContentRetrieved)
+            << "getStderrContent() can only be called once per test";
+        if(_stderrContentRetrieved)
+        {
+            return {};
+        }
+        _stderrContentRetrieved = true;
+
+        hipdnn_backend::logging::loggerShutdown();
 
         return testing::internal::GetCapturedStderr();
     }
@@ -230,7 +239,6 @@ TEST_F(TestBackendLogger, LogFileCanBeSpecifiedByEnvVar)
 
     HIPDNN_BACKEND_LOG_INFO("Logging to custom file");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     hipdnn_backend::logging::loggerShutdown();
 
     auto stdErrContent = getStderrContent();
@@ -406,7 +414,6 @@ TEST_F(TestBackendLogger, ConcurrentLoggingToFile)
     }
 
     // Flush and shutdown to ensure all messages are written to file
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     hipdnn_backend::logging::loggerShutdown();
 
     // Read and verify the log file

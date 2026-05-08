@@ -78,7 +78,7 @@ enum class PointwiseMode
     NOT_SET = 0, ///< Mode not specified
     ABS = 1, ///< Absolute value: |x|
     ADD = 2, ///< Addition: x + y
-    ADD_SQUARE = 3, ///< Add and square: (x + y)²
+    ADD_SQUARE = 3, ///< Add x to y squared: x + y²
     BINARY_SELECT = 4, ///< Ternary select based on condition
     CEIL = 5, ///< Ceiling function
     CMP_EQ = 6, ///< Compare equal: x == y
@@ -173,6 +173,7 @@ enum class DataType
     FP6_E2M3 = 13, ///< 6-bit floating point (2 exponent, 3 mantissa bits)
     FP6_E3M2 = 14, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
     INT64 = 15, ///< 64-bit signed integer
+    BOOLEAN = 16, ///< 8-bit boolean
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -326,6 +327,10 @@ DataType getDataTypeEnumFromType()
     else if constexpr(std::is_same_v<T, fp8_e5m2>)
     {
         return DataType::FP8_E5M2;
+    }
+    else if constexpr(std::is_same_v<T, bool>)
+    {
+        return DataType::BOOLEAN;
     }
     else
     {
@@ -676,6 +681,8 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_FP6_E3M2_EXT;
     case DataType::INT64:
         return HIPDNN_DATA_INT64;
+    case DataType::BOOLEAN:
+        return HIPDNN_DATA_BOOLEAN;
     case DataType::NOT_SET:
     default:
         return std::nullopt;
@@ -724,6 +731,8 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::FP6_E3M2, {}};
     case HIPDNN_DATA_INT64:
         return {DataType::INT64, {}};
+    case HIPDNN_DATA_BOOLEAN:
+        return {DataType::BOOLEAN, {}};
     default:
         return {DataType::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -911,6 +920,8 @@ inline const char* to_string(const DataType& type)
         return "fp6_e3m2";
     case DataType::INT64:
         return "int64";
+    case DataType::BOOLEAN:
+        return "boolean";
     default:
         return "unknown";
     }

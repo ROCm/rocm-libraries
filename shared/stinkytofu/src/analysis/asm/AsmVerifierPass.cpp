@@ -26,14 +26,14 @@
 #include <algorithm>
 #include <iostream>
 #include <sstream>
+#include <string_view>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
 char StinkyIRVerifierPass::ID = 0;
 
-void StinkyIRVerifierPass::run(Function& func, PassContext&) {
+PreservedAnalyses StinkyIRVerifierPass::run(Function& func, PassContext&, AnalysisManager& /*AM*/) {
     std::string error = validateStinkyIR(func, config_);
     if (!error.empty()) {
         if (config_.abortOnError) {
@@ -42,6 +42,7 @@ void StinkyIRVerifierPass::run(Function& func, PassContext&) {
         }
         std::cerr << "[StinkyIRVerifier] " << error;
     }
+    return PreservedAnalyses::all();
 }
 
 // ===========================================================================
@@ -65,11 +66,55 @@ static RegType fieldTypeToRegType(FieldType ft) {
     }
 }
 
+static bool isScalarRegType(RegType type) {
+    switch (type) {
+        case RegType::S:
+        case RegType::SCC:
+        case RegType::VCC:
+        case RegType::VCC_LO:
+        case RegType::VCC_HI:
+        case RegType::EXEC:
+        case RegType::EXEC_LO:
+        case RegType::EXEC_HI:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool isExpectedTypeMatch(FieldType fieldType, RegType expectedType, RegType actualType) {
+    if (expectedType == RegType::UNKNOWN) return true;
+
+    switch (fieldType) {
+        case FieldType::sreg:
+        case FieldType::sreg_m0:
+        case FieldType::sgpr:
+        case FieldType::sdst:
+        case FieldType::ssrc:
+            return isScalarRegType(actualType);
+        default:
+            return actualType == expectedType;
+    }
+}
+
 // TODO: We should fix this by adding a new field to the HwInstDesc to indicate if the instruction
 // can use less operands.
 static bool canUseLessOperand(const StinkyInstruction* inst) {
     if (inst->getUnifiedOpcode() == GFX::tensor_load_to_lds) return true;
     return false;
+}
+
+// Workaround: v_wmma_scale_f32_16x16x128_f8f6f4 has matrix-format-dependent
+// packed source widths. For src0/src1, accept dynamic widths (256/384/512 bits)
+// even though the static format metadata uses a fixed maximum width.
+static bool allowDynamicWmmaScaleSrcWidth(const HwInstDesc* hwDesc, bool isDest,
+                                          unsigned operandIndex, unsigned expectedWidth,
+                                          unsigned actualWidth) {
+    if (!hwDesc || !hwDesc->mnemonic || isDest) return false;
+    if (operandIndex > 1) return false;  // only src0/src1 are dynamic
+    if (expectedWidth != 16) return false;
+    if (std::string_view(hwDesc->mnemonic) != "v_wmma_scale_f32_16x16x128_f8f6f4") return false;
+    return actualWidth == 8 || actualWidth == 12 || actualWidth == 16;
 }
 
 static std::string checkRegisterWidths(const StinkyInstruction* inst,
@@ -91,7 +136,6 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
         if (field.fieldSizeBits == 0) continue;
 
         unsigned expectedWidth = field.fieldSizeBits / 32;
-        if (expectedWidth <= 1) continue;
 
         if (operandIndex >= regs.size() && !canUseLessOperand(inst)) {
             errors << "Instruction '" << hwDesc->mnemonic << "' missing operand "
@@ -104,22 +148,31 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
         }
 
         const StinkyRegister& reg = regs[operandIndex];
+        // Non-register operands (e.g. the "off" keyword used as MUBUF vaddr,
+        // or integer/double literals) carry no register-level constraints.
         if (reg.dataType != StinkyRegister::Type::Register) continue;
 
-        // M64 operands are 64-bit lane masks that may be truncated to
-        // 32 bits in wave32 mode, so width 1 is valid when expected is 2.
-        bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;
+        // Width check: only meaningful for operands wider than one DWORD.
+        if (expectedWidth > 1) {
+            // M64 operands are 64-bit lane masks that may be truncated to
+            // 32 bits in wave32 mode, so width 1 is valid when expected is 2.
+            bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;
+            bool dynamicWmmaWidth = allowDynamicWmmaScaleSrcWidth(hwDesc, isDest, operandIndex,
+                                                                  expectedWidth, reg.reg.num);
 
-        if (reg.reg.num != expectedWidth && !m64Truncated) {
-            errors << "Instruction '";
-            inst->dump(errors);
-            errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
-                   << "has register width " << reg.reg.num << ", expected " << expectedWidth
-                   << "\n";
+            if (reg.reg.num != expectedWidth && !m64Truncated && !dynamicWmmaWidth) {
+                errors << "Instruction '";
+                inst->dump(errors);
+                errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
+                       << "has register width " << reg.reg.num << ", expected " << expectedWidth
+                       << "\n";
+            }
         }
 
+        // Type check: applies to all fields — a 32-bit VGPR field must still
+        // receive a VGPR, not a SGPR (and vice versa).
         RegType expectedType = fieldTypeToRegType(field.fieldType);
-        if (expectedType != RegType::UNKNOWN && reg.reg.type != expectedType) {
+        if (!isExpectedTypeMatch(field.fieldType, expectedType, reg.reg.type)) {
             errors << "Instruction '";
             inst->dump(errors);
             errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "

@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "TestHelpers.hpp"
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
@@ -45,6 +46,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
     std::unique_ptr<Function> func;
     BasicBlock* bb = nullptr;
     std::unique_ptr<Pass> pass;
+    AnalysisManager am;
 
     void SetUp() override {
         config.arch[0] = 12;
@@ -54,6 +56,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
         setFunctionArch(*func, arch);
         bb = func->createBasicBlock("entry");
         pass = createStinkyDAGSchedulerPass();
+        registerAllAnalyses(am);
     }
 
     void TearDown() override {
@@ -65,7 +68,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
     void runPass() {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
-        pass->run(*func, ctx);
+        pass->run(*func, ctx, am);
     }
 
     void runPassWithUnrollGemm() {
@@ -74,7 +77,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         ctx.setPassFeatureConfig(pfc);
-        pass->run(*func, ctx);
+        pass->run(*func, ctx, am);
     }
 
     // Create v_wmma_f32_16x16x16_bf16: dest v[destStart:destStart+7], src0
@@ -92,13 +95,14 @@ class DAGSchedulerPassTest : public ::testing::Test {
     }
 };
 
-// .cost overwrite: v_wmma_f32_16x16x16_bf16 (format WMMA) has explicit .cost in def -> issue=4,
-// latency=8
-TEST_F(DAGSchedulerPassTest, CostOverwrite_VWmmaF3216x16x16Bf16_HasIssue4Latency8) {
+// v_wmma_f32_16x16x16_bf16 (format WMMA): issue=1, latency=8, coIssueMask=0x00F0
+TEST_F(DAGSchedulerPassTest, CostOverwrite_VWmmaF3216x16x16Bf16_HasIssue1Latency8CoIssueF0) {
     const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, arch);
     ASSERT_NE(desc, nullptr);
-    EXPECT_EQ(desc->issue, 4) << "v_wmma_f32_16x16x16_bf16 .cost overwrite: issue should be 4";
-    EXPECT_EQ(desc->latency, 8) << "v_wmma_f32_16x16x16_bf16 .cost overwrite: latency should be 8";
+    EXPECT_EQ(desc->issue, 1) << "v_wmma_f32_16x16x16_bf16: issue should be 1";
+    EXPECT_EQ(desc->latency, 8) << "v_wmma_f32_16x16x16_bf16: latency should be 8";
+    EXPECT_EQ(desc->coIssueMask, 0x00F0)
+        << "v_wmma_f32_16x16x16_bf16: coIssueMask should be 0x00F0";
 }
 
 // Empty block: pass should not crash

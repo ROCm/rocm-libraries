@@ -131,6 +131,7 @@ DEF_FORMAT(VOP1,
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 2,  // dst + src
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
@@ -150,6 +151,7 @@ DEF_FORMAT(VOP2,
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 3,  // dst + src0 + src1
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
@@ -171,6 +173,7 @@ DEF_FORMAT(VOP3,
     .unit = VALU,
     .encoding = {64},
     .maxOperands = 4,  // dst + src0 + src1 + src2
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
@@ -180,6 +183,24 @@ DEF_FORMAT(VOP3,
     },
 )
 
+// Vector 2-source VOP3 (64-bit encoding)
+// Used for VOP3-encoded instructions that only take src0/src1.
+DEF_FORMAT(VOP3_2SRC,
+    .parent = VOP3,
+    .maxOperands = 3,  // dst + src0 + src1
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+    },
+)
+
+// Vector 2-source VOP3 (64-bit encoding), commutative ops.
+DEF_FORMAT(VOP3_2SRC_COMMUTATIVE,
+    .parent = VOP3_2SRC,
+    .flags = {Commutative},
+)
+
 // Vector compare (32-bit encoding)
 // Used for: v_cmp_eq_f32, v_cmp_lt_i32, etc.
 DEF_FORMAT(VOPC,
@@ -187,6 +208,7 @@ DEF_FORMAT(VOPC,
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 3,  // dst(vcc/sdst) + src0 + src1
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vcc, M64},
@@ -239,6 +261,7 @@ DEF_FORMAT(VOP2_COMMUTATIVE,
 // Vector 1-operand transcendental: v_rcp_f32, v_rsq_f32, v_exp_f32, etc.
 DEF_FORMAT(VOP1_TRANSCENDENTAL,
     .parent = VOP1,
+    .cost = {1, 8},
     .flags = {Transcendental},
 )
 
@@ -323,6 +346,7 @@ DEF_FORMAT(SOP1,
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 2,  // dst + src
+    .cost = {1, 2},
     .flags = {SALU},
     .fields = {
         {D0, sdst, sdst, 32},
@@ -337,6 +361,7 @@ DEF_FORMAT(SOP2,
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 3,  // dst + src0 + src1
+    .cost = {1, 2},
     .flags = {SALU},
     .fields = {
         {D0, sdst, sdst, 32},
@@ -352,6 +377,7 @@ DEF_FORMAT(SOPC,
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 2,  // src0 + src1 (result to SCC)
+    .cost = {1, 2},
     .flags = {SALU, ImplicitWriteSCC},
     .fields = {
         {S0, ssrc0, ssrc, 32},
@@ -396,6 +422,7 @@ DEF_FORMAT(SOPK,
     .microcode = MC_SOPK,
     .unit = SALU,
     .encoding = {32},
+    .cost = {1, 2},
     .flags = {SALU},
 )
 
@@ -410,7 +437,8 @@ DEF_FORMAT(WMMA,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
     .maxOperands = 4,
-    .cost = {4, 8},
+    .cost = {1, 8},
+    .coissue = 0x00F0,
     .flags = {WMMA},
     .fields = {
         {D0, vdst, vgpr, 256},
@@ -422,17 +450,20 @@ DEF_FORMAT(WMMA,
 
 DEF_FORMAT(WMMA_INT8,
     .parent = WMMA,
-    .cost = {8, 16},
+    .cost = {1, 16},
+    .coissue = 0xFF00,
 )
 
 DEF_FORMAT(WMMA_FLOAT8MIX_16x16x64,
     .parent = WMMA,
-    .cost = {3, 4},
+    .cost = {1, 4},
+    .coissue = 0x0008,
 )
 
 DEF_FORMAT(WMMA_FLOAT8MIX_16x16x128,
     .parent = WMMA,
-    .cost = {5, 8},
+    .cost = {1, 8},
+    .coissue = 0x00E0,
 )
 
 // Sparse Wave Matrix Multiply-Accumulate
@@ -441,7 +472,8 @@ DEF_FORMAT(SWMMA,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
     .maxOperands = 5,
-    .cost = {6, 8},
+    .cost = {1, 8},
+    .coissue = 0x00C0,
     .flags = {SWMMA},
     .fields = {
         {D0, vdst, vgpr, 256, RW},
@@ -453,7 +485,8 @@ DEF_FORMAT(SWMMA,
 
 DEF_FORMAT(SWMMA_INT8,
     .parent = SWMMA,
-    .cost = {12, 16},
+    .cost = {1, 16},
+    .coissue = 0xF000,
 )
 
 // MX Format Wave Matrix Multiply-Accumulate (v_mxwmma_*, v_wmma_scale*)
@@ -462,7 +495,8 @@ DEF_FORMAT(MXWMMA,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
     .maxOperands = 4,
-    .cost = {6, 8},
+    .cost = {1, 8},
+    .coissue = 0x00C0,
     .flags = {MXWMMA},
 )
 

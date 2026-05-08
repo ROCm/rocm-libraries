@@ -42,6 +42,15 @@ RUN apt-get update && apt-get install -y \
     gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Install DVC
+RUN mkdir -p /etc/apt/keyrings && \
+    wget -qO - https://dvc.org/deb/iterative.asc | gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | tee /etc/apt/sources.list.d/dvc.list && \
+    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
+    apt-get update && apt-get install -y dvc && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # ============================================================================
 # Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
 #
@@ -271,6 +280,16 @@ RUN apt-get update && apt-get install -y \
     doxygen \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
+
+
+# Install DVC
+RUN mkdir -p /etc/apt/keyrings && \
+    wget -qO - https://dvc.org/deb/iterative.asc | gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | tee /etc/apt/sources.list.d/dvc.list && \
+    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
+    apt-get update && apt-get install -y dvc && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install flatc version 25.9.23
 RUN wget -q https://github.com/google/flatbuffers/releases/download/v25.9.23/Linux.flatc.binary.g++-13.zip -O /tmp/flatc.zip \

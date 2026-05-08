@@ -240,7 +240,7 @@ namespace
 {
 
 // Helper function to create PointwiseAttributes
-const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes*
+flatbuffers::FlatBufferBuilder
     createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode,
                               flatbuffers::Optional<float> reluLowerClip = flatbuffers::nullopt,
                               flatbuffers::Optional<float> reluUpperClip = flatbuffers::nullopt,
@@ -265,16 +265,18 @@ const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes*
                                                                           eluAlpha,
                                                                           softplusBeta);
     builder.Finish(attrOffset);
-    return flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
-        builder.GetBufferPointer());
+    return builder;
 }
 
 } // namespace
 
 TEST(TestParseActivation, ReluDefault)
 {
-    auto attrs
+    auto builder
         = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -284,8 +286,11 @@ TEST(TestParseActivation, ReluDefault)
 
 TEST(TestParseActivation, ReluClippedUpperOnly)
 {
-    auto attrs = createPointwiseAttributes(
+    auto builder = createPointwiseAttributes(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, flatbuffers::nullopt, 5.0f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -295,8 +300,11 @@ TEST(TestParseActivation, ReluClippedUpperOnly)
 
 TEST(TestParseActivation, ReluClampLowerAndUpper)
 {
-    auto attrs = createPointwiseAttributes(
+    auto builder = createPointwiseAttributes(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, 0.5f, 10.0f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -307,11 +315,14 @@ TEST(TestParseActivation, ReluClampLowerAndUpper)
 
 TEST(TestParseActivation, ReluLeaky)
 {
-    auto attrs
+    auto builder
         = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
                                     flatbuffers::nullopt,
                                     flatbuffers::nullopt,
                                     0.01f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -322,20 +333,26 @@ TEST(TestParseActivation, ReluLeaky)
 TEST(TestParseActivation, ThrowsOnReluUnsupportedLowerClipOnly)
 {
     // lower clip without upper clip is not supported
-    auto attrs = createPointwiseAttributes(
+    auto builder = createPointwiseAttributes(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, 0.5f, flatbuffers::nullopt);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     EXPECT_THROW(parseActivation(*attrs), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestParseActivation, EluCustomAlpha)
 {
-    auto attrs
+    auto builder
         = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD,
                                     flatbuffers::nullopt,
                                     flatbuffers::nullopt,
                                     flatbuffers::nullopt,
                                     1.50f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -345,13 +362,16 @@ TEST(TestParseActivation, EluCustomAlpha)
 
 TEST(TestParseActivation, SoftplusValidBeta)
 {
-    auto attrs = createPointwiseAttributes(
+    auto builder = createPointwiseAttributes(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         1.0f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -360,21 +380,27 @@ TEST(TestParseActivation, SoftplusValidBeta)
 
 TEST(TestParseActivation, SoftplusInvalidBeta)
 {
-    auto attrs = createPointwiseAttributes(
+    auto builder = createPointwiseAttributes(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         2.0f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     EXPECT_THROW(parseActivation(*attrs), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestParseActivation, Sigmoid)
 {
-    auto attrs = createPointwiseAttributes(
+    auto builder = createPointwiseAttributes(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
     EXPECT_EQ(params.mode, ActivationMode::LOGISTIC);
@@ -382,8 +408,11 @@ TEST(TestParseActivation, Sigmoid)
 
 TEST(TestParseActivation, TanhWithDefaults)
 {
-    auto attrs
+    auto builder
         = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_BWD);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -394,8 +423,11 @@ TEST(TestParseActivation, TanhWithDefaults)
 
 TEST(TestParseActivation, Passthru)
 {
-    auto attrs
+    auto builder
         = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
