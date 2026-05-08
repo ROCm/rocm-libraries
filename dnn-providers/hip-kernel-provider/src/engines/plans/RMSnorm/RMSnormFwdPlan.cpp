@@ -175,7 +175,7 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     // Determine input/output data type configuration
     const auto inputDataType = _params.x()->data_type();
     const auto outputDataType = _params.y()->data_type();
-    const auto scaleDataType = _params.scale()->data_type(); // applies to both scale and bias
+    const auto scaleDataType = _params.scale()->data_type();
     const auto computeDataType = (_params.invRMS() == nullptr)
                                      ? hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
                                      : _params.invRMS()->data_type();
