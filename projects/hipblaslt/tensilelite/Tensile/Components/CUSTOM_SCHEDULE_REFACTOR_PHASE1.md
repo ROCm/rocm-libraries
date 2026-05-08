@@ -530,58 +530,60 @@ externally-visible `CustomSchedule.py` behavior surfaced today.
 
 ---
 
-## 8. Phase 2 decisions staged for the user
+## 8. Phase 2 decisions — RESOLVED
 
-1. **Cross-schedule alias handling (§4).** The 3 schedules that delegate
-   to a sibling via `switch_A_B_schedule` are the only intra-file
-   cross-references. There are three viable options on the table — pick
-   one (registry-lookup-by-name is functionally broken, see §4 callout,
-   and is excluded):
+User decisions recorded; Phase 2 is unblocked.
 
-   - **Option 1 — Co-locate alias with callee.** Put the 15-line alias
-     in the same file as its callee. No new files, no new import edges.
-     Cost: 3 affected files each grow by 15-30 lines and host two
-     registered schedules instead of one.
-   - **Option 2 — Extract `_<name>_body.py` siblings.** 3 new body-builder
-     files; alias and original both import the body. Preserves "one
-     registered schedule per file." Cost: 3 new files + 3 unidirectional
-     import edges.
-   - **Option 3 — Direct cross-file imports.** Alias file imports the
-     callee's bare function name from the callee's per-schedule file.
-     Cheapest if the "no schedule-to-schedule imports" constraint is
-     implementer-imposed rather than bead-mandated. Cost: 3 new import
-     edges between *registered* schedules (option 2 imports a
-     non-registered helper instead).
+1. **Cross-schedule alias handling (§4) → Option 3: Direct cross-file imports.**
+   Each of the 3 alias files imports the callee's bare `_get_schedule_*`
+   function name directly from the callee's per-schedule file. No
+   `_body.py` siblings; no co-location. The "no schedule-to-schedule
+   imports" constraint earlier framed in the memo is dropped; the 3
+   import edges stay between *registered* schedule files.
 
-   The current memo recommended option 2; user input is required to
-   choose between 1 / 2 / 3.
+   Implementation note for Phase 2: the alias caller invokes the bare
+   (un-wrapped) function name per the load-bearing decorator behavior at
+   §4. That contract is unchanged — option 3 simply means the import
+   crosses a file boundary instead of relying on module-namespace
+   adjacency. Cycle-check: the 3 alias edges are unidirectional
+   (smaller-tile alias → larger-tile callee in two cases, transpose in
+   the third) and do not form cycles; verify with a grep after the move.
 
-2. **Backward-compat shim or clean break.** The bead says "Phase 2
-   decides whether to keep `CustomSchedule.py` as a shim re-export or
-   delete it entirely." Default recommendation: convert the file into a
-   shim (`from .CustomSchedule.dispatch import *; from .CustomSchedule.shared import *`)
-   for one release cycle, then delete in a follow-up. This avoids
-   touching every test/import site in the same PR as the structural move.
+2. **Backward-compat shim or clean break → Clean break.**
+   `CustomSchedule.py` is deleted in the same PR as the structural move.
+   No `from .CustomSchedule.dispatch import *` shim. All call sites move
+   to `from Tensile.Components.CustomSchedule import ...` (the package
+   re-exports — see §5). Test/import-site updates land in the same PR.
 
-3. **Per-arch subdirectories now or later?** Recommended: create
-   `gfx950/` immediately even though it's the only arch — the directory
-   shape is then ready when gfx1151 schedules land. Open question: is
-   the user OK with the one-deep arch directory, or would they prefer
-   flat schedule files at `CustomSchedule/_*.py` until a second arch
-   appears?
+3. **Per-arch subdirectories now or later? → Per-arch subdir now.**
+   Create `gfx950/` immediately. `gfx1151/` slots in later without
+   restructuring. The directory shape is final from day one.
 
-4. **Function-name preservation.** Recommended: do not rename any
-   `_get_schedule_*` function during the structural move
-   (test_CustomSchedule_LayoutAutoDetection snapshot, MOCK_AUDIT.md and
-   YAML comments all reference these names). Confirm.
+4. **Function-name preservation → Confirmed: do not rename.**
+   No `_get_schedule_*` function is renamed during the structural move.
+   `test_CustomSchedule_LayoutAutoDetection.py:187-225` snapshot, doc
+   references, and YAML comments all stay valid.
 
-5. **Schedule-data-format normalization (out of scope, but flagged).**
-   Some schedules use the `SyncSchedule()` builder (TF32-heavy, 11
-   sites); others use the inline `syncTable = [-1, SWaitCnt(...), 7,
-   SWaitCnt(...), ...]` slice pattern (16bit-heavy). Both produce the
-   same `optSchedule['SYNC']` shape. **Phase 1 explicitly does not
-   propose normalizing these** — that would be a behavior-change PR, not
-   a structural one. Flagging for a future epic.
+5. **Schedule-data-format normalization → IGNORE.**
+   Do not flag an epic. Do not file a follow-up bead. The
+   `SyncSchedule` vs inline `syncTable` divergence is left as-is and is
+   not tracked anywhere downstream of this memo.
+
+### Phase 2 implementation directives (derived from above)
+
+- **Per-schedule files** live at
+  `Tensile/Components/CustomSchedule/gfx950/_<MT0>x<MT1>x<DU>_<dtype>[_suffix].py`,
+  one per registered `_get_schedule_*` (38 files at present).
+- **Shared utilities** live at `Tensile/Components/CustomSchedule/shared.py`.
+- **Dispatch + decorator + registries** live at
+  `Tensile/Components/CustomSchedule/dispatch.py`.
+- **`__init__.py`** uses an explicit import list (no `pkgutil` walk).
+- **3 alias files** each carry one `from .._<callee> import _get_schedule_<callee>`
+  line at the top of the alias file body; the alias function calls the
+  imported bare name directly.
+- **`CustomSchedule.py` is deleted in the same PR** as the move; all
+  external import sites are updated in that PR.
+- **No function renames.**
 
 ---
 
