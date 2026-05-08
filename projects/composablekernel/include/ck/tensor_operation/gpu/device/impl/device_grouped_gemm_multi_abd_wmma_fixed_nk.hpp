@@ -55,7 +55,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                       const BElementwiseOperation b_element_op,
                                       const CDEElementwiseOperation cde_element_op)
 {
-#if defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     using EpilogueType = typename std::conditional<GridwiseGemm::IsBWaveTransferApplicable &&
                                                        GridwiseGemm::UseDirectStore,
                                                    typename GridwiseGemm::EpilogueDirectStore,
@@ -161,6 +161,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
             id_off += grid_size_grp;
             id_local += grid_size_grp;
+            block_sync_lds();
         }
     }
 #else
@@ -701,7 +702,7 @@ struct DeviceGroupedGemm_Wmma_Multi_ABD_Fixed_NK
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx13_supported())
         {
             return false;
         }
@@ -738,6 +739,59 @@ struct DeviceGroupedGemm_Wmma_Multi_ABD_Fixed_NK
             {
                 supported = false;
             }
+        }
+
+        for(std::size_t i = 0; i < arg.gemm_desc_kernel_arg_.size(); ++i)
+        {
+            const auto& gk = arg.gemm_desc_kernel_arg_[i];
+            const KernelArgument a{gk.p_as_grid,
+                                   gk.p_bs_grid,
+                                   gk.p_ds_grid,
+                                   static_cast<EDataType*>(gk.p_e_grid),
+                                   gk.M,
+                                   gk.N,
+                                   gk.K,
+                                   gk.StrideAs,
+                                   gk.StrideBs,
+                                   gk.StrideDs,
+                                   gk.StrideE,
+                                   arg.k_batch_,
+                                   arg.a_element_op_,
+                                   arg.b_element_op_,
+                                   arg.c_element_op_};
+
+            if(ck::is_gfx12_supported() && !GridwiseGemm::CheckValidityAWaveTransfer(a.M, a.K))
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Wave Transfer not applicable for matrix A" << __FILE__ << ":"
+                              << __LINE__ << ", in function: " << __func__ << std::endl;
+                }
+                return false;
+            }
+
+            if(ck::is_gfx12_supported() && !GridwiseGemm::CheckValidityBWaveTransfer(a.N, a.K))
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Wave Transfer not applicable for matrix B" << __FILE__ << ":"
+                              << __LINE__ << ", in function: " << __func__ << std::endl;
+                }
+                return false;
+            }
+
+            bool group_arg_valid = GridwiseGemm::CheckValidity(a);
+
+            if(not group_arg_valid)
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "[" << __func__ << "] group id: " << i
+                              << " has invalid GridwiseGemm settings!" << std::endl;
+                    a.Print();
+                }
+            }
+            supported = supported && group_arg_valid;
         }
 
         return supported;

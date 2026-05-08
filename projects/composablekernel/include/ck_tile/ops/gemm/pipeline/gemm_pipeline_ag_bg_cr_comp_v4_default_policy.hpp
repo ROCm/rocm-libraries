@@ -34,7 +34,7 @@ struct GemmPipelineAgBgCrCompV4DefaultPolicy
             : vector_size * 4 == thread_elements              ? WGAttrNumAccessEnum::Quad
                                                               : WGAttrNumAccessEnum::Invalid;
 #else
-        constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Single;
+        constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Default;
 #endif
         using WarpGemm = WarpGemmDispatcher<typename Problem::ADataType,
                                             typename Problem::BDataType,

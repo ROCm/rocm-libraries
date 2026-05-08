@@ -737,8 +737,11 @@ struct GeneratorTensor_Sequential<ck::f4x2_pk_t, Dim>
     {
         std::array<ck::index_t, sizeof...(Ts)> dims = {{static_cast<ck::index_t>(Xs)...}};
 
-        float tmp = dims[Dim];
-        return ck::type_convert<ck::f4x2_t>(ck::float2_t(tmp));
+        float tmp0_1 = dims[Dim] - 1;
+        float tmp0   = dims[Dim];
+        float tmp1   = dims[Dim] + 1;
+        return dims[Dim] % 2 == 1 ? ck::type_convert<ck::f4x2_t>(ck::float2_t{tmp0_1, tmp0})
+                                  : ck::type_convert<ck::f4x2_t>(ck::float2_t{tmp0, tmp1});
     }
 };
 

@@ -84,7 +84,7 @@ struct UniversalGemmBasePolicy
     template <typename Problem>
     using BLdsDataType_ = typename LdsDataTypes_<Problem>::BType;
 
-#if defined(__gfx950__) || defined(__gfx125__)
+#if defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
     // The combination of pk_int4_t and transposed loading causes numerical errors.
     // Therefore do not use transposed loading in this case.
     // Also, transpose load (ds_read_tr) requires specific tile distribution patterns
@@ -93,42 +93,56 @@ struct UniversalGemmBasePolicy
     // - For 2-byte types (fp16/bf16): K warp tile <= 32
     template <typename T>
     static constexpr bool supports_transpose_load =
-#if defined(__gfx950__)
+#if !defined(__gfx13__)
         std::is_same_v<T, pk_fp4_t> ||
 #endif
         std::is_same_v<T, fp16_t> || std::is_same_v<T, bf16_t> || std::is_same_v<T, fp8_t> ||
-        std::is_same_v<T, bf8_t>;
+        std::is_same_v<T, bf8_t> || std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>;
 
     template <typename Problem>
     static constexpr bool is_a_load_tr = []() {
-        using ADataType                 = remove_cvref_t<typename Problem::ADataType>;
-        using BDataType                 = remove_cvref_t<typename Problem::BDataType>;
-        using WarpTile                  = typename Problem::BlockGemmShape::WarpTile;
-        constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
-        constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
+        using ADataType = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType = remove_cvref_t<typename Problem::BDataType>;
         if constexpr(!supports_transpose_load<ADataType> || std::is_same_v<BDataType, pk_int4_t>)
             return false;
-        else if constexpr(kKWarpTile > kMaxKWarpTile)
+        else if constexpr(!std::is_same_v<remove_cvref_t<typename Problem::ALayout>,
+                                          tensor_layout::gemm::ColumnMajor>)
             return false;
         else
-            return std::is_same_v<remove_cvref_t<typename Problem::ALayout>,
-                                  tensor_layout::gemm::ColumnMajor>;
+        {
+            // TODO: disable gfx13's constraint after fixing tile_example_gemm_mixed_prec which tile
+            // shape is wrong
+#if defined(__gfx950__) || defined(__gfx13__)
+            using WarpTile                  = typename Problem::BlockGemmShape::WarpTile;
+            constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
+            constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
+            return kKWarpTile <= kMaxKWarpTile;
+#else
+            return true;
+#endif
+        }
     }();
 
     template <typename Problem>
     static constexpr bool is_b_load_tr = []() {
-        using BLdsDataType              = BLdsDataType_<Problem>;
-        using BDataType                 = remove_cvref_t<typename Problem::BDataType>;
-        using WarpTile                  = typename Problem::BlockGemmShape::WarpTile;
-        constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
-        constexpr index_t kMaxKWarpTile = (sizeof(BLdsDataType) == 1) ? 64 : 32;
+        using BLdsDataType = BLdsDataType_<Problem>;
+        using BDataType    = remove_cvref_t<typename Problem::BDataType>;
         if constexpr(!supports_transpose_load<BLdsDataType> || std::is_same_v<BDataType, pk_int4_t>)
             return false;
-        else if constexpr(kKWarpTile > kMaxKWarpTile)
+        else if constexpr(!std::is_same_v<remove_cvref_t<typename Problem::BLayout>,
+                                          tensor_layout::gemm::RowMajor>)
             return false;
         else
-            return std::is_same_v<remove_cvref_t<typename Problem::BLayout>,
-                                  tensor_layout::gemm::RowMajor>;
+        {
+#if defined(__gfx950__) || defined(__gfx13__)
+            using WarpTile                  = typename Problem::BlockGemmShape::WarpTile;
+            constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
+            constexpr index_t kMaxKWarpTile = (sizeof(BLdsDataType) == 1) ? 64 : 32;
+            return kKWarpTile <= kMaxKWarpTile;
+#else
+            return true;
+#endif
+        }
     }();
 #else
     template <typename Problem>
@@ -1068,7 +1082,7 @@ struct UniversalGemmBasePolicy
 
         constexpr index_t PackedSize = numeric_traits<A>::PackedSize;
 
-        constexpr index_t KPack = static_cast<index_t>(BlockGemm::Traits::KPack);
+        constexpr index_t KPack = static_cast<index_t>(BlockGemm::Traits::KPackA);
         constexpr index_t VecElems =
             static_cast<index_t>(Problem::VectorLoadSize / sizeof(A) * PackedSize) *
                                      numeric_traits<A>::PackedSize;
@@ -1084,7 +1098,7 @@ struct UniversalGemmBasePolicy
 
         constexpr index_t PackedSize = numeric_traits<B>::PackedSize;
 
-        constexpr index_t KPack = static_cast<index_t>(BlockGemm::Traits::KPack);
+        constexpr index_t KPack = static_cast<index_t>(BlockGemm::Traits::KPackB);
         constexpr index_t VecElems =
             static_cast<index_t>(Problem::VectorLoadSize / sizeof(B) * PackedSize) *
                                      numeric_traits<B>::PackedSize;
@@ -1439,7 +1453,7 @@ struct UniversalGemmPipelineAgBgCrPolicy
             : vector_size * 4 == thread_elements              ? WGAttrNumAccessEnum::Quad
                                                               : WGAttrNumAccessEnum::Invalid;
 #else
-        constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Single;
+        constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Default;
 #endif
 
         using ATypeToUse = remove_cvref_t<typename Problem::AComputeDataType>;

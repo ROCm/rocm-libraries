@@ -224,10 +224,54 @@ void preShuffleScaleBuffer_gfx1250(const ScaleType* src,
     }
 }
 
+template <bool KLast>
+void preShuffleScaleBuffer_gfx13(ck::e8m0_bexp_t* src, ck::e8m0_bexp_t* dst, int MN, int K)
+{
+    int MNXdlPack   = 2;
+    int KXdlPack    = 2;
+    int XdlMNThread = 16;
+    int XdlKThread  = 32 / XdlMNThread; // =2
+
+    // remove KStep, so K0 = K / (XdlKThread * KXdlPack) = K/4
+    int K0 = K / (XdlKThread * KXdlPack);
+
+    for(int n = 0; n < MN; ++n)
+    {
+        for(int k = 0; k < K; ++k)
+        {
+            int n0    = n / (XdlMNThread * MNXdlPack);
+            int tempn = n % (XdlMNThread * MNXdlPack);
+            int n1    = tempn % XdlMNThread;
+            int n2    = tempn / XdlMNThread;
+
+            int k0    = k / (XdlKThread * KXdlPack);
+            int tempk = k % (XdlKThread * KXdlPack);
+
+            int k1 = tempk % XdlKThread; // lowest dim now
+            int k2 = tempk / XdlKThread; // [0, KXdlPack)
+
+            // layout: [n0][k0][n1][k2][n2][k1]
+            int outputIndex =
+                (((((n0 * K0 + k0) * XdlMNThread + n1) * KXdlPack + k2) * MNXdlPack + n2) *
+                     XdlKThread +
+                 k1);
+
+            if constexpr(KLast)
+                dst[outputIndex] = src[n * K + k];
+            else
+                dst[outputIndex] = src[k * MN + n];
+        }
+    }
+}
+
 template <typename T>
 void preShuffleBuffer(const T* src, T* dst, int N, int K, int NXdl)
 {
+#if defined(CK_USE_GFX13)
+    const int KPack = 16 / ck::packed_size_v<T>;
+#else
     const int KPack = 16;
+#endif
     const int NLane = NXdl;
     const int KLane = ck::get_warp_size() / NLane;
     const int K_pk  = K / ck::packed_size_v<T>;
@@ -240,17 +284,25 @@ void preShuffleBuffer(const T* src, T* dst, int N, int K, int NXdl)
     {
         for(int k = 0; k < K_pk; ++k)
         {
-            int n0 = n / NLane;
-            int n1 = n % NLane;
+            int outputIndex = 0;
+            int n0          = n / NLane;
+            int n1          = n % NLane;
 
             int k0 = k / (KLane * KPack);
             tempk  = k % (KLane * KPack);
             int k1 = tempk / KPack;
             int k2 = tempk % KPack;
 
-            int outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
+            if(ck::is_gfx13_supported())
+            {
+                outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
+                              n1 * KPack * KLane + k1 * KPack + k2;
+            }
+            else
+            {
+                outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
                               k1 * KPack * NLane + n1 * KPack + k2;
-
+            }
             dst[outputIndex] = src[n * K_pk + k];
         }
     }
@@ -431,17 +483,7 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
         }
     }
 
-    if(ck::get_warp_size() == 64)
-    {
-        preShuffleScaleBuffer_gfx950<ck::is_same_v<ALayout, Row>>(a_m_k_scale.mData.data(),
-                                                                  a_shuffled_scale.mData.data(),
-                                                                  Scale_Padded_M,
-                                                                  K / ScaleBlockSize);
-
-        preShuffleScaleBuffer_gfx950<ck::is_same_v<BRefLayout, Col>>(
-            b_k_n_scale.mData.data(), b_shuffled_scale.mData.data(), N, K / ScaleBlockSize);
-    }
-    else if(ck::get_warp_size() == 32)
+    if(ck::is_gfx125_supported())
     {
         preShuffleScaleBuffer_gfx1250<ck::e8m0_bexp_t, ScaleBlockSize, ck::is_same_v<ALayout, Row>>(
             a_m_k_scale.mData.data(),
@@ -454,9 +496,25 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
                                       ck::is_same_v<BRefLayout, Col>>(
             b_k_n_scale.mData.data(), b_shuffled_scale.mData.data(), N, K / ScaleBlockSize);
     }
+    else if(ck::is_gfx13_supported())
+    {
+        preShuffleScaleBuffer_gfx13<ck::is_same_v<ALayout, Row>>(a_m_k_scale.mData.data(),
+                                                                 a_shuffled_scale.mData.data(),
+                                                                 Scale_Padded_M,
+                                                                 K / ScaleBlockSize);
+
+        preShuffleScaleBuffer_gfx13<ck::is_same_v<BRefLayout, Col>>(
+            b_k_n_scale.mData.data(), b_shuffled_scale.mData.data(), N, K / ScaleBlockSize);
+    }
     else
     {
-        throw std::runtime_error("wrong! Scale pre-shuffle unsupported warp size");
+        preShuffleScaleBuffer_gfx950<ck::is_same_v<ALayout, Row>>(a_m_k_scale.mData.data(),
+                                                                  a_shuffled_scale.mData.data(),
+                                                                  Scale_Padded_M,
+                                                                  K / ScaleBlockSize);
+
+        preShuffleScaleBuffer_gfx950<ck::is_same_v<BRefLayout, Col>>(
+            b_k_n_scale.mData.data(), b_shuffled_scale.mData.data(), N, K / ScaleBlockSize);
     }
 
     if constexpr(BPreShuffle)

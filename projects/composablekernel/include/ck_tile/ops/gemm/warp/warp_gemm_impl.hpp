@@ -19,7 +19,8 @@ struct WarpGemmImpl
     ///
     /// @note  Note that WarpGemm may run MFMA instruction multiple times (on different K).
     ///        In such situation this value reflects this fact.
-    static constexpr index_t kKPack      = WarpGemmAttribute::kKPack;
+    static constexpr index_t kAKPack     = WarpGemmAttribute::kAKPack;
+    static constexpr index_t kBKPack     = WarpGemmAttribute::kBKPack;
     static constexpr index_t kKPerThread = WarpGemmAttribute::kKPerThread;
 
     using ADataType = typename WarpGemmAttribute::ADataType;

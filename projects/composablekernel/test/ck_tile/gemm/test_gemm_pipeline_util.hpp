@@ -51,6 +51,9 @@ constexpr ck_tile::index_t get_k_warp_tile()
     {
         return is_8bit ? 64 : 32;
     }
+#elif defined(CK_USE_GFX13)
+    constexpr bool is_8bit = sizeof(PrecType) == 1;
+    return is_8bit ? 32 : 16;
 #else
     return 16;
 #endif

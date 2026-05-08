@@ -153,7 +153,7 @@ struct TransformIntoStructuralSparsity
 {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-braces"
-    static constexpr T valid_sequences[] = {
+    static constexpr int valid_sequences[] = {
         0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0,
     };
 #pragma clang diagnostic pop
@@ -164,18 +164,17 @@ struct TransformIntoStructuralSparsity
         std::for_each(first, last, [=, *this, idx = 0](T& elem) mutable {
             auto tmp_idx = idx;
             idx += 1;
+            constexpr int sequence_size = sizeof(valid_sequences) / sizeof(valid_sequences[0]);
+            const int mask              = valid_sequences[tmp_idx % sequence_size];
             if constexpr(std::is_same_v<T, ck::f8_t> || std::is_same_v<T, ck::bf8_t>)
             {
                 using FloatType = decltype(static_cast<float>(elem));
-                elem            = static_cast<T>(
-                    static_cast<FloatType>(elem) *
-                    static_cast<FloatType>(
-                        valid_sequences[tmp_idx % (sizeof(valid_sequences) / sizeof(T))]));
+                elem = static_cast<T>(static_cast<FloatType>(elem) * static_cast<FloatType>(mask));
                 return elem;
             }
             else
             {
-                return elem *= valid_sequences[tmp_idx % (sizeof(valid_sequences) / sizeof(T))];
+                return elem *= static_cast<T>(mask);
             }
         });
     }

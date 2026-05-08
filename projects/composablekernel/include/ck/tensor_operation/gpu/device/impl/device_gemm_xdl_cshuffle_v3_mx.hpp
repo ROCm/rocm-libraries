@@ -481,7 +481,7 @@ struct DeviceGemmMX_Xdl_CShuffleV3 : public DeviceGemmMX<ALayout,
         const auto ck_logging_enabled = ck::EnvIsEnabled(CK_ENV(CK_LOGGING));
 
         // Only gfx950 and gfx1250 architectures support MX GEMMs
-        if(ck::get_device_name() != "gfx950" && !is_gfx125_supported())
+        if(ck::get_device_name() != "gfx950" && !is_gfx125_supported() && !is_gfx13_supported())
         {
             if(ck_logging_enabled)
             {

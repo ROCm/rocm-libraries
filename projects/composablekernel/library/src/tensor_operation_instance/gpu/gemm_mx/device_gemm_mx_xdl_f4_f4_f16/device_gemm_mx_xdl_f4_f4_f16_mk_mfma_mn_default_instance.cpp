@@ -8,9 +8,15 @@ namespace tensor_operation {
 namespace device {
 namespace instance {
 
+#if defined(__gfx13__) && defined(CK_USE_GFX13)
+using BLayoutForMkMfmaMn = Col;
+#else
+using BLayoutForMkMfmaMn = MFMA;
+#endif
+
 void add_device_gemm_mx_xdl_f4_f4_f16_mk_mfma_mn_default_instances(
     std::vector<std::unique_ptr<DeviceGemmMX<Row,
-                                             MFMA,
+                                             BLayoutForMkMfmaMn,
                                              Row,
                                              F4,
                                              E8M0PK,

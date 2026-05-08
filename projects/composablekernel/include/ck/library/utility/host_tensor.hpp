@@ -1210,5 +1210,194 @@ struct Tensor
     Data mData;
 };
 
+template <typename Layout, typename DataType>
+void dump_tensor_layout_aware(Tensor<DataType> mat)
+{
+    std::cout << "mat [ " << std::endl;
+    auto print_hex = [](auto v) {
+        using V = std::decay_t<decltype(v)>;
+        if constexpr(std::is_integral_v<V>)
+        {
+            std::cout << "0x" << std::hex << static_cast<int>(v) << std::dec;
+        }
+        else
+        {
+            std::cout << std::hexfloat << static_cast<double>(v) << std::defaultfloat;
+        }
+    };
+
+    auto len = mat.GetLengths();
+    if constexpr(ck::is_same_v<Layout, ck::tensor_layout::gemm::ColumnMajor>)
+    {
+        for(uint32_t j = 0; j < len[1]; ++j)
+        {
+            std::cout << "    [";
+            for(uint32_t i = 0; i < len[0]; i++)
+            {
+                if constexpr(ck::is_same_v<DataType, ck::f4x2_pk_t>)
+                {
+                    std::vector<std::size_t> packed_idx({i, j});
+                    int nibble_id = static_cast<int>(i & 1);
+
+                    packed_idx[0] = i & ~1;
+                    const auto v  = mat(packed_idx);
+                    if(nibble_id == 0)
+                        print_hex(v.template unpack<>(ck::Number<0>{}));
+                    else
+                        print_hex(v.template unpack<>(ck::Number<1>{}));
+                }
+                else
+                {
+                    std::vector<std::size_t> idx({i, j});
+                    print_hex(ck::type_convert<float>(mat(idx)));
+                }
+
+                if(j + 1 < len[1])
+                    std::cout << ", ";
+            }
+            std::cout << "]" << std::endl;
+        }
+    }
+    else if constexpr(ck::is_same_v<Layout, ck::tensor_layout::gemm::RowMajor>)
+    {
+        for(uint32_t i = 0; i < len[0]; i++)
+        {
+            std::cout << "    [";
+            for(uint32_t j = 0; j < len[1]; ++j)
+            {
+                if constexpr(ck::is_same_v<DataType, ck::f4x2_pk_t>)
+                {
+                    std::vector<std::size_t> packed_idx({i, j});
+                    int nibble_id = static_cast<int>(j & 1);
+
+                    packed_idx[1] = j & ~1;
+                    const auto v  = mat(packed_idx);
+                    if(nibble_id == 0)
+                        print_hex(v.template unpack<>(ck::Number<0>{}));
+                    else
+                        print_hex(v.template unpack<>(ck::Number<1>{}));
+                }
+                else
+                {
+                    std::vector<std::size_t> idx({i, j});
+                    print_hex(ck::type_convert<float>(mat(idx)));
+                }
+
+                if(j + 1 < len[1])
+                    std::cout << ", ";
+            }
+            std::cout << "]" << std::endl;
+        }
+    }
+    std::cout << "]" << std::endl;
+}
+
+template <typename DataType>
+void dump_tensor(Tensor<DataType> mat)
+{
+    dump_tensor_layout_aware<ck::tensor_layout::gemm::RowMajor>(mat);
+}
+
+/// b0 host tensor layout: {experts, K, N*2} (Col). Flatten to 2D view matching preShuffleBuffer's
+/// outer "n" dimension: row r in [0, N*2*experts) with e = r / (N*2), n_pos = r % (N*2); column
+/// k in [0, K) is the contraction (packed f4x2) index - i.e. b0(e, k, n_pos).
+template <typename DataType>
+void dump_tensor_b0_nflat_k(const Tensor<DataType>& b0,
+                            ck::index_t N,
+                            ck::index_t experts,
+                            ck::index_t K,
+                            ck::index_t max_rows = 0)
+{
+    auto print_hex = [](auto v) {
+        using V = std::decay_t<decltype(v)>;
+        if constexpr(std::is_integral_v<V>)
+        {
+            std::cout << "0x" << std::hex << static_cast<int>(v) << std::dec;
+        }
+        else
+        {
+            std::cout << std::hexfloat << static_cast<double>(v) << std::defaultfloat;
+        }
+    };
+
+    const ck::index_t n_gate_up     = N * 2;
+    const ck::index_t nrows         = n_gate_up * experts;
+    const ck::index_t rows_to_print = (max_rows == 0 || max_rows > nrows) ? nrows : max_rows;
+
+    std::cout << "b0 2D view (N*2*experts=" << nrows << ", K=" << K << "), printing "
+              << rows_to_print << " row(s) [ " << std::endl;
+
+    constexpr ck::index_t kValuesPerLine = 8;
+    constexpr ck::index_t kLinesPerBlank = 4;
+
+    for(ck::index_t r = 0; r < rows_to_print; ++r)
+    {
+        const ck::index_t e     = r / n_gate_up;
+        const ck::index_t n_pos = r % n_gate_up;
+        std::cout << "    r=" << r << " (e=" << e << ", n_pos=" << n_pos << ") [" << std::endl;
+
+        ck::index_t val_idx      = 0;
+        ck::index_t lines_in_blk = 0;
+
+        auto emit_separator_or_newline = [&]() {
+            if(val_idx == 0)
+            {
+                std::cout << "        ";
+                return;
+            }
+            if(val_idx % kValuesPerLine == 0)
+            {
+                std::cout << std::endl;
+                lines_in_blk++;
+                if(lines_in_blk == kLinesPerBlank)
+                {
+                    std::cout << std::endl << std::endl;
+                    lines_in_blk = 0;
+                }
+                std::cout << "        ";
+            }
+            else
+            {
+                std::cout << ", ";
+            }
+        };
+
+        if constexpr(ck::is_same_v<DataType, ck::f4x2_pk_t>)
+        {
+            for(ck::index_t kk = 0; kk < K; kk += 2)
+            {
+                const auto v = b0(e, kk, n_pos);
+                emit_separator_or_newline();
+                print_hex(v.template unpack<>(ck::Number<0>{}));
+                val_idx++;
+                emit_separator_or_newline();
+                print_hex(v.template unpack<>(ck::Number<1>{}));
+                val_idx++;
+            }
+        }
+        else
+        {
+            for(ck::index_t kk = 0; kk < K; ++kk)
+            {
+                emit_separator_or_newline();
+                std::cout << ck::type_convert<float>(b0(e, kk, n_pos));
+                val_idx++;
+            }
+        }
+
+        if(val_idx > 0)
+        {
+            std::cout << std::endl;
+        }
+        std::cout << "    ]" << std::endl;
+    }
+    if(rows_to_print < nrows)
+    {
+        std::cout << "    ... (" << (nrows - rows_to_print)
+                  << " more rows omitted; pass max_rows=0 for all)" << std::endl;
+    }
+    std::cout << "]" << std::endl;
+}
+
 } // namespace ck
 #pragma clang diagnostic pop

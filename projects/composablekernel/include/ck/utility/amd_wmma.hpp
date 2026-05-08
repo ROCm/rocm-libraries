@@ -1107,12 +1107,42 @@ struct intrin_wmma_f16_16x16_bf8bf8_w32<16, 16, clamp, 8>
 };
 
 constexpr index_t VOP5M_MOD1_OFFSET = 6;
-// this field in mod1
+
 template <typename SrcAType, typename SrcBType>
 constexpr int32_t get_f8f6f4_data_format()
 {
-    int32_t srcAType = static_cast<int32_t>(SrcAType::RawType);
-    int32_t srcBType = static_cast<int32_t>(SrcBType::RawType);
+    // Use generic lambda with a dummy parameter instead of explicit template
+    constexpr auto get_src_type = [](auto dummy) constexpr {
+        using T = decltype(dummy);
+        if constexpr(is_same_v<T, f8_t>)
+        {
+            return 0;
+        }
+        else if constexpr(is_same_v<T, bf8_t>)
+        {
+            return 1;
+        }
+        else if constexpr(is_same_v<T, f6x16_pk_t> || is_same_v<T, f6x32_pk_t>)
+        {
+            return static_cast<int32_t>(MTX_FMT::MTX_FMT_FP6_E2M3);
+        }
+        else if constexpr(is_same_v<T, bf6x16_pk_t> || is_same_v<T, bf6x32_pk_t>)
+        {
+            return static_cast<int32_t>(MTX_FMT::MTX_FMT_FP6_E3M2);
+        }
+        else if constexpr(is_same_v<T, f4x2_pk_t>)
+        {
+            return static_cast<int32_t>(MTX_FMT::MTX_FMT_FP4_E2M1);
+        }
+        else
+        {
+            return static_cast<int32_t>(T::RawType);
+        }
+    };
+
+    constexpr int32_t srcAType = get_src_type(SrcAType{});
+    constexpr int32_t srcBType = get_src_type(SrcBType{});
+
     return (srcAType | (srcBType << 3)) << VOP5M_MOD1_OFFSET;
 }
 
@@ -1137,8 +1167,38 @@ template <typename SrcAType, typename SrcBType, index_t ABlockSel, index_t BBloc
 struct intrin_wmma_f32_16x16_f8f6f4_w32<16, 16, SrcAType, SrcBType, ABlockSel, BBlockSel, clamp>
 {
     template <class FloatC>
-    __device__ static void Run(const typename SrcAType::vec_t& reg_a,
-                               const typename SrcBType::vec_t& reg_b,
+    __device__ static void Run(const f4x32_t& reg_a,
+                               const f4x32_t& reg_b,
+                               const int32_t& a_scale,
+                               const int32_t& b_scale,
+                               FloatC& reg_c)
+    {
+#if defined(__gfx13__)
+        int32x4_t arg_a = bit_cast<int32x4_t>(reg_a);
+        int32x4_t arg_b = bit_cast<int32x4_t>(reg_b);
+        using arg_type  = int32x8_t;
+
+        reg_c.template AsType<float8_t>()(Number<0>{}) =
+            __builtin_amdgcn_wmma_f32_16x16x64_f8f6f4_clamp(
+                arg_type{arg_a[0], arg_a[1], arg_a[2], arg_a[3], 0, 0, 0, 0},
+                arg_type{arg_b[0], arg_b[1], arg_b[2], arg_b[3], 0, 0, 0, 0},
+                reg_c.template AsType<float8_t>()[Number<0>{}],
+                a_scale,
+                b_scale,
+                get_f8f6f4_data_format<SrcAType, SrcBType>() | scale_select<ABlockSel, BBlockSel>(),
+                clamp);
+#else
+        ignore = reg_a;
+        ignore = reg_b;
+        ignore = reg_c;
+        ignore = a_scale;
+        ignore = b_scale;
+#endif
+    }
+
+    template <class FloatA, class FloatB, class FloatC>
+    __device__ static void Run(const FloatA& reg_a,
+                               const FloatB& reg_b,
                                const int32_t& a_scale,
                                const int32_t& b_scale,
                                FloatC& reg_c)
@@ -1146,8 +1206,8 @@ struct intrin_wmma_f32_16x16_f8f6f4_w32<16, 16, SrcAType, SrcBType, ABlockSel, B
 #if defined(__gfx13__)
         reg_c.template AsType<float8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_f32_16x16x64_f8f6f4_clamp(
-                reg_a,
-                reg_b,
+                bit_cast<int32x8_t>(reg_a),
+                bit_cast<int32x8_t>(reg_b),
                 reg_c.template AsType<float8_t>()[Number<0>{}],
                 a_scale,
                 b_scale,

@@ -3197,7 +3197,14 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
     {
         typedef __attribute__((__vector_size__(2 * sizeof(index_t)))) index_t llvm_i32x2_t;
         auto lds_ptr = reinterpret_cast<__LDS_ADDR llvm_i32x2_t*>(in_ptr_);
+#if defined(__gfx950__)
         return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_read_tr4_b64_v2i32(lds_ptr));
+#elif defined(__gfx125__)
+        return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_load_tr4_b64_v2i32(lds_ptr));
+#else
+        ignore = lds_ptr;
+        static_assert(false, "amd_transpose_load_to_vgpr is not supported for this architecture");
+#endif
     }
     else
     {

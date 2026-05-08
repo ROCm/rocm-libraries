@@ -11,10 +11,18 @@ namespace ck_tile {
 // Number of groups of consecutive elements to fill in a ABKLane
 enum class WGAttrNumAccessEnum
 {
-    Single  = 1,
-    Double  = 2,
-    Quad    = 4,
-    Invalid = -1
+    Single = 1,
+    Double = 2,
+    Quad   = 4,
+    Octa   = 8,
+    // the below PackedFlag is used in packed data type with tr_load
+    PackedFlag   = 0x8000,
+    PackedSingle = PackedFlag | Single,
+    PackedDouble = PackedFlag | Double,
+    PackedQuad   = PackedFlag | Quad,
+    PackedOcta   = PackedFlag | Octa,
+    Default      = 0,
+    Invalid      = -1
 };
 
 template <WGAttrNumAccessEnum AttrNumAccess>
@@ -71,7 +79,8 @@ struct WarpGemmAttributeMfma
     static constexpr index_t kN          = Impl::kN;
     static constexpr index_t kK          = Impl::kK;
     static constexpr index_t kKPerThread = Impl::kABKPerLane;
-    static constexpr index_t kKPack      = Impl::kABKPerLane;
+    static constexpr index_t kAKPack     = Impl::kABKPerLane;
+    static constexpr index_t kBKPack     = Impl::kABKPerLane;
     static constexpr index_t kCMLane     = Impl::kCMLane;
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return 1; }
@@ -212,7 +221,8 @@ struct WarpGemmAttributeMfmaIterateK
     static constexpr index_t kN          = Impl::kN;
     static constexpr index_t kK          = Impl::kK * kKIter;
     static constexpr index_t kKPerThread = Impl::kABKPerLane * kKIter;
-    static constexpr index_t kKPack      = Impl::kABKPerLane * kKIter;
+    static constexpr index_t kAKPack     = Impl::kABKPerLane * kKIter;
+    static constexpr index_t kBKPack     = Impl::kABKPerLane * kKIter;
     static constexpr index_t kCMLane     = Impl::kCMLane;
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return kKIter; }
@@ -590,7 +600,8 @@ struct WarpGemmAttributeMfmaIterateKAndTransposedCDistribution
     static constexpr index_t kN          = Impl::kM;
     static constexpr index_t kK          = Impl::kK * kKIter;
     static constexpr index_t kKPerThread = Impl::kABKPerLane * kKIter;
-    static constexpr index_t kKPack      = Impl::kABKPerLane * kKIter;
+    static constexpr index_t kAKPack     = Impl::kABKPerLane * kKIter;
+    static constexpr index_t kBKPack     = Impl::kABKPerLane * kKIter;
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return kKIter; }
 

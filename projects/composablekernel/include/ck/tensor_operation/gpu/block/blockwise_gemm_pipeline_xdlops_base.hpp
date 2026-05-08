@@ -55,8 +55,19 @@ struct BlockwiseGemmXdlops_pipeline_base
     static constexpr index_t B_K1 =
         BTileDesc{}.GetLength(Number < BTileDesc{}.GetNumOfDimension() == 4 ? 3 : 2 > {});
 
-    static constexpr auto xdlops_gemm =
-        XdlopsGemm<ComputeDataType, MPerXDL, NPerXDL, KPack, ComputeDataType, TransposeC>{};
+    static constexpr bool is_half = std::is_same_v<AccDataType, ck::half_t>;
+
+    using XdlopsAccDataType = conditional_t<is_half, AccDataType, float>;
+    using XdlopsGemmType    = XdlopsGemm<ComputeDataType,
+                                         MPerXDL,
+                                         NPerXDL,
+                                         KPack,
+                                         ComputeDataType,
+                                         TransposeC,
+                                         false,
+                                         XdlopsAccDataType>;
+
+    static constexpr auto xdlops_gemm = XdlopsGemmType{};
 
     using ComputeDataTypeBuf =
         conditional_t<std::is_same<ComputeDataType, ck::tf32_t>::value, float, ComputeDataType>;

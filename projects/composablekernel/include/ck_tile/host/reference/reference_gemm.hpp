@@ -692,29 +692,22 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
         {
             if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
             {
-                if(k % 2 == 1)
-                    continue; // skip odd k
-
-                auto a_f4x2  = a_m_k(m, k);
+                auto a_f4x2         = a_m_k(m, k);
+                std::size_t raw_off = m * a_m_k.get_stride(0) + k * a_m_k.get_stride(1);
+                auto a_val =
+                    (raw_off % 2 == 0)
+                        ? ck_tile::type_convert<AccDataType>(a_f4x2.template unpack<>(number<0>{}))
+                        : ck_tile::type_convert<AccDataType>(a_f4x2.template unpack<>(number<1>{}));
                 auto a_scale = ck_tile::type_convert<AccDataType>(scale_a(m, k / ScaleBlockSize));
-                auto a_f4_lo =
-                    ck_tile::type_convert<AccDataType>(a_f4x2.template unpack<>(number<0>{}));
-                auto a_f4_hi =
-                    ck_tile::type_convert<AccDataType>(a_f4x2.template unpack<>(number<1>{}));
-
-                a_m_k_scaled(m, k)     = a_f4_lo * a_scale;
-                a_m_k_scaled(m, k + 1) = a_f4_hi * a_scale;
+                a_m_k_scaled(m, k) = a_val * a_scale;
             }
             else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
             {
-                if(k % pk_fp6x16_t::packed_size != 0)
-                    continue;
+                std::size_t raw_off = m * a_m_k.get_stride(0) + k * a_m_k.get_stride(1);
+                std::size_t idx     = raw_off % pk_fp6x16_t::packed_size;
                 auto a_scale = ck_tile::type_convert<AccDataType>(scale_a(m, k / ScaleBlockSize));
-                for(std::size_t k_ = 0; k_ < pk_fp6x16_t::packed_size; k_++)
-                {
-                    a_m_k_scaled(m, k + k_) =
-                        pk_fp6x16_t::fp6_e2m3_to_float(a_m_k(m, k).unpack(k_)) * a_scale;
-                }
+                a_m_k_scaled(m, k) =
+                    pk_fp6x16_t::fp6_e2m3_to_float(a_m_k(m, k).unpack(idx)) * a_scale;
             }
             else
             {
@@ -731,29 +724,22 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
         {
             if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
             {
-                if(k % 2 == 1)
-                    continue; // skip odd k
-
-                auto b_f4x2  = b_k_n(k, n);
+                auto b_f4x2         = b_k_n(k, n);
+                std::size_t raw_off = k * b_k_n.get_stride(0) + n * b_k_n.get_stride(1);
+                auto b_val =
+                    (raw_off % 2 == 0)
+                        ? ck_tile::type_convert<AccDataType>(b_f4x2.template unpack<>(number<0>{}))
+                        : ck_tile::type_convert<AccDataType>(b_f4x2.template unpack<>(number<1>{}));
                 auto b_scale = ck_tile::type_convert<AccDataType>(scale_b(k / ScaleBlockSize, n));
-                auto b_f4_lo =
-                    ck_tile::type_convert<AccDataType>(b_f4x2.template unpack<>(number<0>{}));
-                auto b_f4_hi =
-                    ck_tile::type_convert<AccDataType>(b_f4x2.template unpack<>(number<1>{}));
-
-                b_k_n_scaled(k, n)     = b_f4_lo * b_scale;
-                b_k_n_scaled(k + 1, n) = b_f4_hi * b_scale;
+                b_k_n_scaled(k, n) = b_val * b_scale;
             }
             else if constexpr(std::is_same_v<BDataType, pk_fp6x16_t>)
             {
-                if(k % pk_fp6x16_t::packed_size != 0)
-                    continue;
+                std::size_t raw_off = k * b_k_n.get_stride(0) + n * b_k_n.get_stride(1);
+                std::size_t idx     = raw_off % pk_fp6x16_t::packed_size;
                 auto b_scale = ck_tile::type_convert<AccDataType>(scale_b(k / ScaleBlockSize, n));
-                for(std::size_t k_ = 0; k_ < pk_fp6x16_t::packed_size; k_++)
-                {
-                    b_k_n_scaled(k + k_, n) =
-                        pk_fp6x16_t::fp6_e2m3_to_float(b_k_n(k, n).unpack(k_)) * b_scale;
-                }
+                b_k_n_scaled(k, n) =
+                    pk_fp6x16_t::fp6_e2m3_to_float(b_k_n(k, n).unpack(idx)) * b_scale;
             }
             else
             {

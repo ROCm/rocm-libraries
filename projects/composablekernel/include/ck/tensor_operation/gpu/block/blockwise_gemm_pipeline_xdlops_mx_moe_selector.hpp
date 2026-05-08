@@ -36,7 +36,6 @@ template <BlockGemmPipelineVersion BlkGemmPipelineVer,
           bool TransposeC = false>
 constexpr auto BlockGemmMXPipeline_Selector()
 {
-
     // Hardware MX GEMM pipeline
     if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
     {

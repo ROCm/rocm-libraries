@@ -45,7 +45,8 @@ struct BlockGemmARegBRegCRegV1
         static constexpr index_t NIterPerWarp = NPerBlock / (NWarp * WarpGemm::kN);
         static constexpr index_t KIterPerWarp = KPerBlock / WarpGemm::kK;
 
-        static constexpr index_t KPack = WarpGemm::kKPack;
+        static constexpr index_t KPackA = WarpGemm::kAKPack;
+        static constexpr index_t KPackB = WarpGemm::kBKPack;
     };
 
     public:

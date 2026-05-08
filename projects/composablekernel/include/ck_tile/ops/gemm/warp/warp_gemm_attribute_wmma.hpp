@@ -10,32 +10,122 @@
 
 namespace ck_tile {
 
-// TODO: currently only support 16 bit input, which means only support tr16_b128; will use ADataType
-// to determine the layout in the future
-template <typename Impl>
+template <typename Impl, WGAttrNumAccessEnum AttrNumAccess_ = WGAttrNumAccessEnum::Single>
 struct AWarpDstrEncodingTrait
 {
-    using type = tile_distribution_encoding<
-        sequence<Impl::kRepeat>,
-        tuple<sequence<Impl::kAMBlock, Impl::kAMLane>,
-              sequence<Impl::kAK0PerLane, Impl::kABKLane, Impl::kAK1PerLane>>,
-        tuple<typename Impl::kABPs2RHssMajor>,
-        tuple<typename Impl::kABPs2RHssMinor>,
-        typename Impl::kABYs2RHsMajor,
-        typename Impl::kABYs2RHsMinor>;
+    static constexpr auto AttrNumAccess  = AttrNumAccess_;
+    static constexpr auto AttrNumAccessV = static_cast<index_t>(AttrNumAccess);
+
+    using ADataType                    = typename Impl::ADataType;
+    static constexpr index_t kKPerLane = Impl::kAK0PerLane * Impl::kAK1PerLane;
+
+    static constexpr auto get_encoding()
+    {
+        if constexpr(AttrNumAccessV == 0)
+        {
+            return tile_distribution_encoding<
+                sequence<Impl::kRepeat>,
+                tuple<sequence<Impl::kAMBlock, Impl::kAMLane>,
+                      sequence<Impl::kAK0PerLane, Impl::kABKLane, Impl::kAK1PerLane>>,
+                tuple<typename Impl::kABPs2RHssMajor>,
+                tuple<typename Impl::kABPs2RHssMinor>,
+                typename Impl::kABYs2RHsMajor,
+                typename Impl::kABYs2RHsMinor>{};
+        }
+        else
+        {
+            constexpr bool UsePackNumAccess =
+                (AttrNumAccessV & static_cast<index_t>(WGAttrNumAccessEnum::PackedFlag)) != 0;
+            if constexpr(UsePackNumAccess)
+            {
+                constexpr index_t PackNumAccessV =
+                    AttrNumAccessV & ~static_cast<index_t>(WGAttrNumAccessEnum::PackedFlag);
+                return tile_distribution_encoding<
+                    sequence<Impl::kRepeat>,
+                    tuple<sequence<Impl::kAMBlock, Impl::kAMLane>,
+                          sequence<Impl::kAK0PerLane,
+                                   Impl::kABKLane,
+                                   PackNumAccessV,
+                                   Impl::kAK1PerLane / PackNumAccessV>>,
+                    tuple<typename Impl::kABPs2RHssMajor>,
+                    tuple<typename Impl::kABPs2RHssMinor>,
+                    sequence<1, 2, 2, 2>,
+                    sequence<0, 0, 2, 3>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<
+                    sequence<Impl::kRepeat>,
+                    tuple<sequence<Impl::kAMBlock, Impl::kAMLane>,
+                          sequence<AttrNumAccessV, Impl::kABKLane, kKPerLane / AttrNumAccessV>>,
+                    tuple<typename Impl::kABPs2RHssMajor>,
+                    tuple<typename Impl::kABPs2RHssMinor>,
+                    sequence<1, 2, 2>,
+                    sequence<0, 0, 2>>{};
+            }
+        }
+    }
+
+    using type = decltype(get_encoding());
 };
 
-template <typename Impl>
+template <typename Impl, WGAttrNumAccessEnum AttrNumAccess_ = WGAttrNumAccessEnum::Single>
 struct BWarpDstrEncodingTrait
 {
-    using type = tile_distribution_encoding<
-        sequence<Impl::kRepeat>,
-        tuple<sequence<Impl::kBNBlock, Impl::kBNLane>,
-              sequence<Impl::kBK0PerLane, Impl::kABKLane, Impl::kBK1PerLane>>,
-        tuple<typename Impl::kABPs2RHssMajor>,
-        tuple<typename Impl::kABPs2RHssMinor>,
-        typename Impl::kABYs2RHsMajor,
-        typename Impl::kABYs2RHsMinor>;
+    static constexpr auto AttrNumAccess  = AttrNumAccess_;
+    static constexpr auto AttrNumAccessV = static_cast<index_t>(AttrNumAccess);
+
+    using BDataType                    = typename Impl::BDataType;
+    static constexpr index_t kKPerLane = Impl::kBK0PerLane * Impl::kBK1PerLane;
+
+    static constexpr auto get_encoding()
+    {
+        if constexpr(AttrNumAccessV == 0)
+        {
+            return tile_distribution_encoding<
+                sequence<Impl::kRepeat>,
+                tuple<sequence<Impl::kBNBlock, Impl::kBNLane>,
+                      sequence<Impl::kBK0PerLane, Impl::kABKLane, Impl::kBK1PerLane>>,
+                tuple<typename Impl::kABPs2RHssMajor>,
+                tuple<typename Impl::kABPs2RHssMinor>,
+                typename Impl::kABYs2RHsMajor,
+                typename Impl::kABYs2RHsMinor>{};
+        }
+        else
+        {
+            constexpr bool UsePackNumAccess =
+                (AttrNumAccessV & static_cast<index_t>(WGAttrNumAccessEnum::PackedFlag)) != 0;
+            if constexpr(UsePackNumAccess)
+            {
+                constexpr index_t PackNumAccessV =
+                    AttrNumAccessV & ~static_cast<index_t>(WGAttrNumAccessEnum::PackedFlag);
+                return tile_distribution_encoding<
+                    sequence<Impl::kRepeat>,
+                    tuple<sequence<Impl::kBNBlock, Impl::kBNLane>,
+                          sequence<Impl::kBK0PerLane,
+                                   Impl::kABKLane,
+                                   PackNumAccessV,
+                                   Impl::kBK1PerLane / PackNumAccessV>>,
+                    tuple<typename Impl::kABPs2RHssMajor>,
+                    tuple<typename Impl::kABPs2RHssMinor>,
+                    sequence<1, 2, 2, 2>,
+                    sequence<0, 0, 2, 3>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<
+                    sequence<Impl::kRepeat>,
+                    tuple<sequence<Impl::kBNBlock, Impl::kBNLane>,
+                          sequence<AttrNumAccessV, Impl::kABKLane, kKPerLane / AttrNumAccessV>>,
+                    tuple<typename Impl::kABPs2RHssMajor>,
+                    tuple<typename Impl::kABPs2RHssMinor>,
+                    sequence<1, 2, 2>,
+                    sequence<0, 0, 2>>{};
+            }
+        }
+    }
+
+    using type = decltype(get_encoding());
 };
 
 template <typename Impl>
@@ -64,7 +154,10 @@ struct CTransposedWarpDstrEncodingTrait
         typename Impl::kCTYs2RHsMinor>;
 };
 
-template <typename WarpGemmAttributeWmmaImpl_, bool kTransC = false>
+template <typename WarpGemmAttributeWmmaImpl_,
+          bool kTransC                       = false,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB = WGAttrNumAccessEnum::Single>
 struct WarpGemmAttributeWmma
 {
     using Impl = remove_cvref_t<WarpGemmAttributeWmmaImpl_>;
@@ -97,14 +190,13 @@ struct WarpGemmAttributeWmma
 
     static_assert(Impl::kAK0PerLane * Impl::kAK1PerLane == Impl::kBK0PerLane * Impl::kBK1PerLane);
     static constexpr index_t kKPerThread = Impl::kAK0PerLane * Impl::kAK1PerLane;
-    static constexpr index_t kKPack      = Impl::kAK1PerLane;
+    static constexpr index_t kAKPack     = Impl::kAK1PerLane;
+    static constexpr index_t kBKPack     = Impl::kBK1PerLane;
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return 1; }
 
-    // 16 bit input, kAMLane = 16, kABK0PerLane = 4, kABKLane = 2, kABK1PerLane = 2
-    // 8  bit input, kAMLane = 16, kABK0PerLane = 2, kABKLane = 2, kABK1PerLane = 4
-    using AWarpDstrEncoding = typename AWarpDstrEncodingTrait<Impl>::type;
-    using BWarpDstrEncoding = typename BWarpDstrEncodingTrait<Impl>::type;
+    using AWarpDstrEncoding = typename AWarpDstrEncodingTrait<Impl, AttrNumAccessA>::type;
+    using BWarpDstrEncoding = typename BWarpDstrEncodingTrait<Impl, AttrNumAccessB>::type;
 
     // kCM0PerLane = 1, kCMLane = 2, kCM1PerLane = 2, kCNLane = 16
     using CWarpDstrEncoding =

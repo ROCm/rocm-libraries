@@ -111,6 +111,10 @@ struct WarpGemmAttributeWmmaImpl
 };
 
 using DeviceIp = remove_cvref_t<decltype(ck_tile::get_device_arch())>;
+
+using WarpGemmAttributeWmmaImpl_f32_16x16x4_f32 =
+    WarpGemmAttributeWmmaImpl<WmmaTraits<gfx125_t, float, float, float, 16, 16, 4>>;
+
 using WarpGemmAttributeWmmaImpl_f32_16x16x16_f16_f16 =
     WarpGemmAttributeWmmaImpl<WmmaTraits<DeviceIp, fp16_t, fp16_t, float, 16, 16, 16>>;
 

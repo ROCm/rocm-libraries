@@ -97,6 +97,145 @@ struct DefaultTranspose
             sequence<0>>;
     };
 
+#elif defined(__gfx1250__) // now this branch just for gfx1250
+    template <index_t LaneGroupSize, index_t NumBitType>
+    struct Quad
+    {
+        static_assert(LaneGroupSize == 16 || LaneGroupSize == 32 || LaneGroupSize == 64,
+                      "LaneGroupSize must be 16, 32, or 64");
+
+        // gfx1250 load transpose instructions use 128 bits for 16-bit types, 64 bits for 8-bit
+        static constexpr index_t InstructionBits = (NumBitType >= 16) ? 128 : 64;
+        // Subtile major dimension is fixed
+        static constexpr index_t SubtileMajorDimension = 16;
+        // Number of subtile major
+        static constexpr index_t NumSubtilesMajor = LaneGroupSize / 16;
+        // number of elements loaded by each lane with single instruction, but also number
+        // of consecutive lanes in a subtile. Subtile is squared (NLanes x NElementsPerLane)
+        static constexpr index_t SubtileMinorDimension = InstructionBits / NumBitType;
+        // Number of subtiles minor inside each subtile major
+        static constexpr index_t NumSubtilesMinor = 16 / SubtileMinorDimension;
+
+        static constexpr auto make_input_encoding()
+        {
+            if constexpr(NumBitType >= 16)
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<SubtileMinorDimension>,
+                          sequence<NumSubtilesMajor, NumSubtilesMinor, SubtileMinorDimension>>,
+                    tuple<sequence<2, 2, 1>>,
+                    tuple<sequence<0, 1, 0>>,
+                    sequence<2>,
+                    sequence<2>>{};
+            }
+            else if constexpr(NumBitType == 8)
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<NumSubtilesMinor, SubtileMinorDimension / NumSubtilesMinor>,
+                          sequence<NumSubtilesMajor, NumSubtilesMinor, SubtileMinorDimension>>,
+                    tuple<sequence<2, 1, 2, 1>>,
+                    tuple<sequence<0, 0, 1, 1>>,
+                    sequence<2>,
+                    sequence<2>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<2, NumSubtilesMajor, 2, 8>, sequence<16>>,
+                    tuple<sequence<1, 1, 1>>,
+                    tuple<sequence<2, 0, 3>>,
+                    sequence<1, 2>,
+                    sequence<1, 0>>{};
+            }
+        }
+        using InputEncoding = decltype(make_input_encoding());
+
+        static constexpr auto make_output_encoding()
+        {
+            if constexpr(NumBitType >= 8)
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<LaneGroupSize>, sequence<SubtileMinorDimension>>,
+                    tuple<sequence<1>>,
+                    tuple<sequence<0>>,
+                    sequence<2>,
+                    sequence<0>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<16>, sequence<2, NumSubtilesMajor, 16>>,
+                    tuple<sequence<2, 1>>,
+                    tuple<sequence<0, 0>>,
+                    sequence<2, 2>,
+                    sequence<1, 2>>{};
+            }
+        }
+        using OutputEncoding = decltype(make_output_encoding());
+    };
+
+#else // gfx13
+    template <index_t LaneGroupSize, index_t NumBitType>
+    struct Quad
+    {
+        static_assert(NumBitType == 16 || NumBitType == 8,
+                      "Only 8-bit and 16-bit data types are supported");
+        static constexpr auto make_input_encoding()
+        {
+            if constexpr(NumBitType >= 16)
+            {
+                return tile_distribution_encoding<sequence<>,
+                                                  tuple<sequence<2, 2, 4>, sequence<2, 8>>,
+                                                  tuple<sequence<1, 1, 2, 1>>,
+                                                  tuple<sequence<0, 1, 0, 2>>,
+                                                  sequence<2>,
+                                                  sequence<1>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<LaneGroupSize / 16, 2, 8>, sequence<2, 8>>,
+                    tuple<sequence<1, 2, 1>>,
+                    tuple<sequence<1, 0, 2>>,
+                    sequence<1, 2>,
+                    sequence<0, 1>>{};
+            }
+        }
+
+        using InputEncoding = decltype(make_input_encoding());
+
+        static constexpr auto make_output_encoding()
+        {
+            if constexpr(NumBitType >= 16)
+            {
+                return tile_distribution_encoding<sequence<>,
+                                                  tuple<sequence<16>, sequence<4, 2, 2>>,
+                                                  tuple<sequence<1, 2>>,
+                                                  tuple<sequence<0, 1>>,
+                                                  sequence<2, 2>,
+                                                  sequence<0, 2>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<16>, sequence<LaneGroupSize / 16 * 2, 2, 4>>,
+                    tuple<sequence<1, 2>>,
+                    tuple<sequence<0, 1>>,
+                    sequence<2, 2>,
+                    sequence<0, 2>>{};
+            }
+        }
+        using OutputEncoding = decltype(make_output_encoding());
+    };
+#endif
+
     static constexpr index_t PackedSize      = numeric_traits<remove_cvref_t<DataType>>::PackedSize;
     static constexpr index_t NumBitsDataType = (sizeof(DataType) * 8) / PackedSize;
 
@@ -106,97 +245,6 @@ struct DefaultTranspose
 
     template <index_t LaneGroupSize>
     using QuadOutputEncoding = typename Quad<LaneGroupSize, NumBitsDataType>::OutputEncoding;
-#else // now this branch just for gfx1250
-    template <index_t LaneGroupSize>
-    struct Quad16
-    {
-#if defined(__gfx125__)
-        static_assert(LaneGroupSize == 16, "LaneGroupSize must be 16");
-
-        using InputEncoding =
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<8>, sequence<LaneGroupSize / 16, 2, 8>>,
-                                       tuple<sequence<2, 2, 1>>,
-                                       tuple<sequence<0, 1, 0>>,
-                                       sequence<2>,
-                                       sequence<2>>;
-
-        using OutputEncoding =
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<LaneGroupSize>, sequence<8>>,
-                                       tuple<sequence<1>>,
-                                       tuple<sequence<0>>,
-                                       sequence<2>,
-                                       sequence<0>>;
-#else // gfx13
-        static_assert(LaneGroupSize == 32 || LaneGroupSize == 64, "LaneGroupSize must be 32 or 64");
-        using InputEncoding = tile_distribution_encoding<sequence<>,
-                                                         tuple<sequence<2, 2, 4>, sequence<2, 8>>,
-                                                         tuple<sequence<1, 1, 2, 1>>,
-                                                         tuple<sequence<0, 1, 0, 2>>,
-                                                         sequence<2>,
-                                                         sequence<1>>;
-
-        using OutputEncoding = tile_distribution_encoding<sequence<>,
-                                                          tuple<sequence<16>, sequence<4, 2, 2>>,
-                                                          tuple<sequence<1, 2>>,
-                                                          tuple<sequence<0, 1>>,
-                                                          sequence<2, 2>,
-                                                          sequence<0, 2>>;
-#endif
-    };
-
-    template <index_t LaneGroupSize>
-    struct Quad8
-    {
-#if defined(__gfx125__)
-        static_assert(LaneGroupSize == 16, "LaneGroupSize must be 16");
-        using InputEncoding =
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<2, 4>, sequence<LaneGroupSize / 16, 2, 8>>,
-                                       tuple<sequence<2, 1, 2, 1>>,
-                                       tuple<sequence<0, 0, 1, 1>>,
-                                       sequence<2>,
-                                       sequence<2>>;
-
-        using OutputEncoding =
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<LaneGroupSize>, sequence<8>>,
-                                       tuple<sequence<1>>,
-                                       tuple<sequence<0>>,
-                                       sequence<2>,
-                                       sequence<0>>;
-#else // gfx13
-        static_assert(LaneGroupSize == 32 || LaneGroupSize == 64, "LaneGroupSize must be 32 or 64");
-        using InputEncoding =
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<2, 8>, sequence<LaneGroupSize / 32, 2, 8>>,
-                                       tuple<sequence<1, 2, 1>>,
-                                       tuple<sequence<0, 1, 1>>,
-                                       sequence<2, 2>,
-                                       sequence<0, 2>>;
-
-        using OutputEncoding =
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<16>, sequence<LaneGroupSize / 32 * 2, 2, 4>>,
-                                       tuple<sequence<1, 2>>,
-                                       tuple<sequence<0, 1>>,
-                                       sequence<2, 2>,
-                                       sequence<0, 2>>;
-#endif
-    };
-
-    // Select based on data size
-    template <index_t LaneGroupSize>
-    using QuadInputEncoding = std::conditional_t<sizeof(DataType) == 2,
-                                                 typename Quad16<LaneGroupSize>::InputEncoding,
-                                                 typename Quad8<LaneGroupSize>::InputEncoding>;
-
-    template <index_t LaneGroupSize>
-    using QuadOutputEncoding = std::conditional_t<sizeof(DataType) == 2,
-                                                  typename Quad16<LaneGroupSize>::OutputEncoding,
-                                                  typename Quad8<LaneGroupSize>::OutputEncoding>;
-#endif
 
     /**
      * @brief Get the number of elements read by the DS_READ_TR hardware instruction.
@@ -292,7 +340,6 @@ struct DefaultTranspose
     template <typename InDstrEncode, bool ReverseDirection = false>
     struct ValidationTraits
     {
-#if defined(__gfx950__)
         static constexpr bool value =
             ValidationTraitsImpl<InDstrEncode, ReverseDirection, 64>::value ||
             ValidationTraitsImpl<InDstrEncode, ReverseDirection, 32>::value ||
@@ -302,20 +349,6 @@ struct DefaultTranspose
             : ValidationTraitsImpl<InDstrEncode, ReverseDirection, 32>::value ? 32
             : ValidationTraitsImpl<InDstrEncode, ReverseDirection, 16>::value ? 16
                                                                               : 0;
-#elif defined(__gfx125__)
-        static constexpr bool value =
-            ValidationTraitsImpl<InDstrEncode, ReverseDirection, 16>::value;
-        static constexpr index_t LaneGroupSize =
-            ValidationTraitsImpl<InDstrEncode, ReverseDirection, 16>::value ? 16 : 0;
-#else // gfx13
-        static constexpr bool value =
-            ValidationTraitsImpl<InDstrEncode, ReverseDirection, 32>::value ||
-            ValidationTraitsImpl<InDstrEncode, ReverseDirection, 64>::value;
-        static constexpr index_t LaneGroupSize =
-            ValidationTraitsImpl<InDstrEncode, ReverseDirection, 32>::value   ? 32
-            : ValidationTraitsImpl<InDstrEncode, ReverseDirection, 64>::value ? 64
-                                                                              : 0;
-#endif
     };
 };
 template <typename TileDistribution_, typename DataType_, typename Policy>

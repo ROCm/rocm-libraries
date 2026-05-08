@@ -1529,6 +1529,10 @@ struct GridwiseGemm_xdl_cshuffle_v3
         auto b_thread_offset_n = get_thread_local_1d_id() % NPerXdl +
                                  (get_thread_local_1d_id() / WaveSize) % NWaves * NPerXdl;
         auto b_thread_offset_k = (get_thread_local_1d_id() % 16) / NPerXdl * KPerThread;
+#elif defined(__gfx13__)
+        auto b_thread_offset_n = (get_thread_local_1d_id() % WaveSize >> 1) +
+                                 (get_thread_local_1d_id() / WaveSize) % NWaves * NPerXdl;
+        auto b_thread_offset_k = (get_thread_local_1d_id() % WaveSize) / NPerXdl * KPerThread;
 #else
         auto b_thread_offset_n = get_thread_local_1d_id() % NPerXdl +
                                  (get_thread_local_1d_id() / WaveSize) % NWaves * NPerXdl;

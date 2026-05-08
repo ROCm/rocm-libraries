@@ -261,7 +261,9 @@ using KernelTypesCompTDMWmma = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F4,        F4,          F32,       F16,        I64,         I64,          I128,       I16,        I16, Intrawave,        CompTDMV1>,
     std::tuple<    Row,     Col,     Row,       F8,        F4,          F32,       F16,        I64,         I64,          I128,       I16,        I16, Intrawave,        CompTDMV1>,
     std::tuple<    Row,     Col,     Row,       F4,        F4,          F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1>,
-    std::tuple<    Row,     Col,     Row,       F8,        F4,          F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1>
+    std::tuple<    Row,     Col,     Row,       F8,        F4,          F32,       F16,        I64,         I64,          I128,       I32,        I32, Intrawave,        CompTDMV1>,
+    std::tuple<    Row,     Row,     Row,       F8,        F8,          F32,       F16,        I64,         I64,          I128,       I16,        I16, Intrawave,        CompTDMV1>,
+    std::tuple<    Col,     Row,     Row,       F8,        F8,          F32,       F16,        I64,         I64,          I128,       I16,        I16, Intrawave,        CompTDMV1>
 >;
 
 using KernelTypesCompAsyncWmma = ::testing::Types<

@@ -135,6 +135,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
 
             id_off += grid_size_grp;
             id_local += grid_size_grp;
+            block_sync_lds();
         }
     }
 #else

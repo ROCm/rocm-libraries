@@ -95,8 +95,8 @@ struct GemmWPABQuantPipelineAgBgCrPolicy : public UniversalWeightPreshufflePipel
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
 
-#if defined(__gfx125__) || defined(__gfx13__)
-        constexpr auto NumAccess = WGAttrNumAccessEnum::Single;
+#if defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
+        constexpr auto NumAccess = WGAttrNumAccessEnum::Default;
 #else
         constexpr index_t WaveSize = get_warp_size();
         constexpr index_t KLane    = WarpTile::at(I2) * WarpTile::at(I0) / WaveSize;

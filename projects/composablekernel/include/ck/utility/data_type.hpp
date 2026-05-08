@@ -111,6 +111,7 @@ struct f4x2_pk_t
     }
 
     __host__ __device__ inline f4x2_pk_t& pack(const type x0, const type x1)
+        [[clang::lifetimebound]]
     {
         this->data = (x1 << 4) | (x0 & 0b00001111);
         return *this;

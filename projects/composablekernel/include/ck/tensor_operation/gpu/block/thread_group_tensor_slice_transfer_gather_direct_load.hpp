@@ -52,7 +52,8 @@ template <typename ThreadGroup,
           index_t DstVectorDim,
           index_t ScalarPerVector,
           typename IndexType,
-          index_t GatherDim = 1>
+          index_t GatherDim = 1,
+          bool UseXor       = true>
 struct ThreadGroupTensorSliceTransfer_Gather_DirectLoad
 {
     static constexpr index_t nDim = remove_reference_t<SrcDesc>::GetNumOfDimension();
@@ -264,27 +265,44 @@ struct ThreadGroupTensorSliceTransfer_Gather_DirectLoad
 
         // Loop over the destination block and copy data.
         static_ford<decltype(dst_access_lengths)>{}([&](auto ordered_dst_access_idx) {
-            IndexType gather_offset = gather_offsets_[ordered_dst_access_idx[Number<GatherDim>{}]];
-            // src_coord_xor_          = src_coord_;
-            // src_coord_xor_.GetIndex().At(I0) =
-            //     src_coord_.GetIndex().At(I0) ^ ((threadIdx.x % 64) / 8);
-            Index new_index = src_coord_.GetIndex();
-            new_index(I0)   = src_coord_.GetIndex().At(I0) ^ ((threadIdx.x % 64) / 8);
-            src_coord_xor_  = make_tensor_coordinate(src_desc, new_index);
+            IndexType gather_offset = [&]() {
+                if constexpr(ordered_dst_access_idx[I0] & 1)
+                {
+                    // backward
+                    constexpr auto offset0 = dst_access_lengths[Number<GatherDim>{}] - 1 -
+                                             ordered_dst_access_idx[Number<GatherDim>{}];
+                    return gather_offsets_[Number<offset0>{}];
+                }
+                else
+                {
+                    // forward
+                    return gather_offsets_[ordered_dst_access_idx[Number<GatherDim>{}]];
+                }
+            }();
 
-            const IndexType src_offset = src_coord_xor_.GetOffset() + gather_offset;
-            // Check if src data is not in the logic padding area.
-            // Leave the HW for oob checking
-            // const bool is_src_valid =
-            //     coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc,
-            //     src_coord_);
+            const IndexType src_offset = [&]() {
+                if constexpr(UseXor)
+                {
+                    Index new_index = src_coord_.GetIndex();
+                    new_index(I0)   = src_coord_.GetIndex().At(I0) ^ ((threadIdx.x % 64) / 8);
+                    src_coord_xor_  = make_tensor_coordinate(src_desc, new_index);
+                    return src_coord_xor_.GetOffset() + gather_offset;
+                }
+                else
+                {
+                    return src_coord_.GetOffset() + gather_offset;
+                }
+            }();
 #if defined(__gfx125__) || defined(__gfx13__)
             // Check if src data is not in the logic padding area.
             // Leave the HW for oob checking
             const bool is_src_valid =
                 coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc, src_coord_);
             src_buf.template AsyncCopyToLds<remove_cvref_t<decltype(dst_buf)>, ScalarPerVector, 0>(
-                dst_buf, src_offset, dst_coord_.GetOffset(), is_src_valid);
+                dst_buf,
+                src_offset,
+                dst_coord_.GetOffset(),
+                is_src_valid && (src_offset < src_buf.element_space_size_));
 #else
             // Leave the HW for oob checking
             const IndexType dst_offset = __builtin_amdgcn_readfirstlane(dst_coord_.GetOffset());

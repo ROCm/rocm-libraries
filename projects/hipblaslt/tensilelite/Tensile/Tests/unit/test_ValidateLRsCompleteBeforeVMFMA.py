@@ -172,7 +172,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 @ idx=4 issued too late, must be guaranteed before MFMA @ idx=0 but only guaranteed @ idx=1."
+            "LRA1 @ idx=4 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=1."
         )
 
     def test_complex_LR1(self):
@@ -330,7 +330,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         }
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 but only guaranteed @ idx=3."
+            "LRA1 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3."
         )
 
         # 3. SwaitCnt after all LRs
@@ -672,7 +672,7 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR0s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA3 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 but only guaranteed @ idx=3.")
+        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA3 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3.")
 
 
 class TestIndexForForceUnrollSubIter:

@@ -165,7 +165,7 @@ struct GroupedConvUniversalPipelineAgBgCrPolicy
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
 #if defined(__gfx125__) || defined(__gfx13__)
-        constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Single;
+        constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Default;
 #else
         constexpr index_t vector_size =
             DS_READ_TR_SIZE() / sizeof(typename Problem::AComputeDataType);

@@ -1236,8 +1236,8 @@ struct tile_window_with_static_distribution
         static constexpr index_t TransposeVecSize =
             Policy::template GetTransposeVecSize<LaneGroupSizeTr>();
 
-        // TODO: fix using vector_t = thread_buffer<typename Base::DataType, TransposeVecSize>;
-        using vector_t = typename Traits::vector_t;
+        using vector_t =
+            thread_buffer<typename Base::DataType, TransposeVecSize / Traits::PackedSize>;
 
         constexpr auto tile_dstr = typename Base::TileDstr{};
 

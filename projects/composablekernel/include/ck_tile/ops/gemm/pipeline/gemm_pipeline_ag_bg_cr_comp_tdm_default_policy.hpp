@@ -367,8 +367,68 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
 
         constexpr auto pipeline_tune_params = GetPipelineSubTileNum<Problem>();
         constexpr index_t sub_tile_num      = pipeline_tune_params.value;
-        constexpr auto wg_attr_num_access   = WGAttrNumAccessEnum::Single;
 
+#if defined(__gfx125__)
+        // Compute WGAttrNumAccess for a single operand (A or B).
+        //
+        // For normal types:
+        //   vec_size       = instruction K-pack (kAKPack / kBKPack)
+        //   total_elements = K_warp_tile / 2  (2 lanes share K)
+        //
+        // For packed types (f4/f6) with transpose load:
+        //   vec_size       = PackedSize * elements_per_vgpr  (one VGPR worth of packed data)
+        //   total_elements = instruction K-pack              (kAKPack / kBKPack)
+        constexpr auto compute_num_access = []<typename DataType>(bool is_load_tr,
+                                                                  index_t instr_kpack,
+                                                                  index_t k_warp_tile) constexpr {
+            constexpr index_t packed_size   = numeric_traits<DataType>::PackedSize;
+            constexpr index_t bits_per_elem = sizeof(DataType) * 8 / packed_size;
+            // in gfx1250 always use double vgpr for fp4 and fp8 in tr load
+            constexpr index_t elems_per_dvgpr = 64 / bits_per_elem;
+
+            const bool is_packed =
+                is_load_tr && ((packed_size > 1) || ((bits_per_elem == 8) && (instr_kpack > 8)));
+            const auto vec_size       = is_packed ? elems_per_dvgpr : instr_kpack;
+            const auto total_elements = is_packed ? instr_kpack : (k_warp_tile / 2);
+            const auto ratio          = total_elements / vec_size;
+
+            // Map the ratio to WGAttrNumAccessEnum;
+            // is_packed selects between Packed* and non-Packed variants.
+            switch(ratio)
+            {
+            case 1:
+                return is_packed ? WGAttrNumAccessEnum::PackedSingle : WGAttrNumAccessEnum::Single;
+            case 2:
+                return is_packed ? WGAttrNumAccessEnum::PackedDouble : WGAttrNumAccessEnum::Double;
+            case 4: return is_packed ? WGAttrNumAccessEnum::PackedQuad : WGAttrNumAccessEnum::Quad;
+            case 8: return is_packed ? WGAttrNumAccessEnum::PackedOcta : WGAttrNumAccessEnum::Octa;
+            default: return WGAttrNumAccessEnum::Invalid;
+            }
+        };
+
+        // Probe the default warp gemm to get instruction K-pack sizes
+        using WarpGemmProbe      = WarpGemmDispatcher<typename Problem::ADataType,
+                                                      typename Problem::BDataType,
+                                                      typename Problem::CDataType,
+                                                      WarpTile::at(Base::I0),
+                                                      WarpTile::at(Base::I1),
+                                                      WarpTile::at(Base::I2),
+                                                      Problem::TransposeC,
+                                                      false,
+                                                      false>;
+        constexpr index_t k_warp = WarpTile::at(Base::I2);
+
+        constexpr auto a_wg_attr_num_access =
+            compute_num_access.template operator()<typename Problem::ADataType>(
+                Base::template is_a_load_tr<Problem>, WarpGemmProbe::kAKPack, k_warp);
+
+        constexpr auto b_wg_attr_num_access =
+            compute_num_access.template operator()<typename Problem::BDataType>(
+                Base::template is_b_load_tr<Problem>, WarpGemmProbe::kBKPack, k_warp);
+#else
+        constexpr auto a_wg_attr_num_access = WGAttrNumAccessEnum::Default;
+        constexpr auto b_wg_attr_num_access = WGAttrNumAccessEnum::Default;
+#endif
         using WarpGemm = WarpGemmDispatcher<typename Problem::ADataType,
                                             typename Problem::BDataType,
                                             typename Problem::CDataType, // AccDataType
@@ -378,7 +438,8 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
                                             Problem::TransposeC,
                                             false,
                                             false,
-                                            wg_attr_num_access>;
+                                            a_wg_attr_num_access,
+                                            b_wg_attr_num_access>;
 
         using BlockGemmPolicy = BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::ADataType,
                                                                     typename Problem::BDataType,

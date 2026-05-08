@@ -55,6 +55,7 @@ struct BlockwiseGemmXdlops_mx_pipeline_base
     static constexpr index_t A_K0 = ATileDesc{}.GetLength(I0);
     static constexpr index_t B_K0 = BTileDesc{}.GetLength(I0);
     static constexpr index_t A_K1 = ATileDesc{}.GetLength(I2);
+
     // static constexpr index_t B_K1 = BTileDesc{}.GetLength(I2);
     static constexpr index_t B_K1 =
         BTileDesc{}.GetLength(Number < BTileDesc{}.GetNumOfDimension() == 4 ? 3 : 2 > {});
@@ -67,13 +68,19 @@ struct BlockwiseGemmXdlops_mx_pipeline_base
                                                    TransposeC,
                                                    true>{};
 
+    static constexpr index_t AKPack      = KPack;
+    static constexpr index_t BKPack      = KPack * APackedSize / BPackedSize;
     static constexpr index_t AMmaKStride = KPack;
     static constexpr index_t BMmaKStride = KPack;
 
     // store rows/cols into thread registers in chunks of 16 for FP8
     // e.g. [k0,...,k15,k64,...,k79] or [k0,...,k15,k32,...,k47]
     // or in chunks of 32 / APackedSize for FP6/FP4
+#if defined(__gfx13__)
+    static constexpr index_t KThreadChunk = 16 / APackedSize;
+#else
     static constexpr index_t KThreadChunk = (APackedSize == 1) ? 16 : 32 / APackedSize;
+#endif
 
     static_assert(APackedSize == BPackedSize, "APackedSize must be equal to BPackedSize for now");
 
@@ -464,11 +471,11 @@ struct BlockwiseGemmXdlops_mx_pipeline_base
     // Read buffer + Compute buffer
     // A[M0, M1, M2, KPack]
     static constexpr auto a_thread_desc_ = make_naive_tensor_descriptor_packed(make_tuple(
-        Number<MRepeat / MXdlPack>{}, I1, Number<MXdlPack>{}, Number<KRepeat>{}, Number<KPack>{}));
+        Number<MRepeat / MXdlPack>{}, I1, Number<MXdlPack>{}, Number<KRepeat>{}, Number<AKPack>{}));
 
     // B[N0, N1, N2, KPack]
     static constexpr auto b_thread_desc_ = make_naive_tensor_descriptor_packed(make_tuple(
-        Number<NRepeat / NXdlPack>{}, I1, Number<NXdlPack>{}, Number<KRepeat>{}, Number<KPack>{}));
+        Number<NRepeat / NXdlPack>{}, I1, Number<NXdlPack>{}, Number<KRepeat>{}, Number<BKPack>{}));
 
     // C[M, N, NumRegXdlops]
     static constexpr auto c_thread_desc_ =

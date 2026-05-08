@@ -41,10 +41,6 @@ TYPED_TEST(TEST_SUITE_NAME, SmallM)
                     // TestCkTileGemmPipelineCompTDMWmma can handle non-dword-aligned cases
                     this->Run(M, N, K);
                 }
-                else if(M * sizeof(typename TestFixture::ADataType) % 4 == 0) // oob fit dword
-                {
-                    this->Run(M, N, K);
-                }
                 else
                 {
                     EXPECT_THROW((this->Run(M, N, K)), std::runtime_error);
@@ -109,10 +105,6 @@ TYPED_TEST(TEST_SUITE_NAME, MidLargeM)
                     if constexpr(suite_name == "TestCkTileGemmPipelineCompTDMWmma")
                     {
                         // TestCkTileGemmPipelineCompTDMWmma can handle non-dword-aligned cases
-                        this->Run(M, N, K);
-                    }
-                    else if(M * sizeof(typename TestFixture::ADataType) % 4 == 0) // oob fit dword
-                    {
                         this->Run(M, N, K);
                     }
                     else

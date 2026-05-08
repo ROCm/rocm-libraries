@@ -72,6 +72,22 @@ constexpr ck::index_t KPerBlock      = 256 / DataPackedSize; // 256 f4 = 128 fp4
 static constexpr ck::index_t MPerBlock = 128;
 static constexpr bool MulRoutedWeight  = true;
 
+#if defined(CK_USE_GFX13)
+constexpr ck::index_t AK1                                  = 8;
+constexpr ck::index_t BK1                                  = 8;
+constexpr ck::index_t ABlockTransferSrcScalarPerVector     = 8;
+constexpr ck::index_t ABlockTransferDstScalarPerVector_AK1 = 8;
+constexpr ck::index_t BBlockTransferSrcScalarPerVector     = 8;
+constexpr ck::index_t BBlockTransferDstScalarPerVector_BK1 = 8;
+#else
+constexpr ck::index_t AK1                                  = 16;
+constexpr ck::index_t BK1                                  = 16;
+constexpr ck::index_t ABlockTransferSrcScalarPerVector     = 16;
+constexpr ck::index_t ABlockTransferDstScalarPerVector_AK1 = 16;
+constexpr ck::index_t BBlockTransferSrcScalarPerVector     = 16;
+constexpr ck::index_t BBlockTransferDstScalarPerVector_BK1 = 16;
+#endif
+
 // clang-format off
 using DeviceOpInstance                     = ck::tensor_operation::device::DeviceMoeGemmMX<      
     A0Layout,    B0Layout,    DsLayout,    ELayout, 
@@ -79,11 +95,20 @@ using DeviceOpInstance                     = ck::tensor_operation::device::Devic
     AElementOp,  BElementOp, CDEElementOp, GemmSpec,   
     ScaleBlockSize,      256,   
     MPerBlock,  128,    KPerBlock,
-    16,   16,
+    AK1,
+    BK1,
     16,   16,
     4,    4,
-    S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 1,
-    S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 1,
+    S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 
+    2,
+    ABlockTransferSrcScalarPerVector,
+    ABlockTransferDstScalarPerVector_AK1,
+    1,
+    S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 
+    2, 
+    BBlockTransferSrcScalarPerVector,
+    BBlockTransferDstScalarPerVector_BK1,
+    1,
     2,    4,   S<1, 4, 1, 64>, S<2, 1, 1, 1>,
     ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, 0, false, false, MulRoutedWeight, ck::index_t, A0DataType>;
 // clang-format on
@@ -337,6 +362,18 @@ int main(int argc, char* argv[])
             N * experts,
             K / ScaleBlockSize);
     }
+    else if(ck::is_gfx13_supported())
+    {
+        preShuffleScaleBuffer_gfx13<ck::is_same_v<A0Layout, Row>>(a_scale_sorted.mData.data(),
+                                                                  a_scale_preshuffled.mData.data(),
+                                                                  sorted_size,
+                                                                  K / ScaleBlockSize);
+
+        preShuffleScaleBuffer_gfx13<ck::is_same_v<B0Layout, Col>>(b1_e_n_k.mData.data(),
+                                                                  b_scale_preshuffled.mData.data(),
+                                                                  N * 2 * experts,
+                                                                  K / ScaleBlockSize);
+    }
     else
     {
         preShuffleScaleBuffer_gfx950<ck::is_same_v<A0Layout, Row>>(a_scale_sorted.mData.data(),
@@ -400,9 +437,9 @@ int main(int argc, char* argv[])
     }
 
     if(!(ck::get_device_name() == "gfx942" || ck::get_device_name() == "gfx950" ||
-         ck::is_gfx125_supported()))
+         ck::is_gfx125_supported() || ck::is_gfx13_supported()))
     {
-        std::cout << "This kernel support gfx942, gfx950 and gfx125x only" << std::endl;
+        std::cout << "This kernel support gfx942, gfx950, gfx125x and gfx13 only" << std::endl;
     }
 
     if(time_kernel)
