@@ -101,13 +101,6 @@ add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 # of a mismatch
 target_compile_options( rocfft-test PRIVATE -Xarch_device -O3 )
 
-# callback functions need to be built as relocatable device code
-# (causes failure at link stage on Windows)
-if (NOT WIN32)
-  target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
-  target_link_options( rocfft-test PRIVATE -fgpu-rdc )
-endif()
-
 option( BUILD_FFTW "Download and build FFTW" OFF )
 
 # look for installed FFTW if we weren't asked to build it

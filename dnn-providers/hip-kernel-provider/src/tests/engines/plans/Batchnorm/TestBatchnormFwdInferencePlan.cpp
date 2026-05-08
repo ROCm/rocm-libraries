@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cstdio>
+#include <utility>
+
 #include <gtest/gtest.h>
 
 #include "engines/plans/batchnorm/BatchnormFwdInferencePlan.hpp"
@@ -165,7 +167,7 @@ TEST(TestBatchnormFwdInferenceParams, IsNotCopyConstructible)
 namespace
 {
 
-BatchnormFwdInferencePlan
+std::pair<flatbuffers::FlatBufferBuilder, BatchnormFwdInferencePlan>
     createPlanFromGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
                         const std::vector<int64_t>& dims = {1, 3, 224, 224},
                         hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
@@ -180,7 +182,7 @@ BatchnormFwdInferencePlan
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
 
     BatchnormFwdInferenceParams params(attr, graph.getTensorMap());
-    return BatchnormFwdInferencePlan{std::move(params)};
+    return {std::move(builder), BatchnormFwdInferencePlan{std::move(params)}};
 }
 
 hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
@@ -200,21 +202,21 @@ hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
 
 TEST(TestBatchnormFwdInferencePlan, ExecuteWithoutCompileThrows)
 {
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdInferencePlan, GetWorkspaceSizeReturnsZero)
 {
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
 TEST(TestBatchnormFwdInferencePlan, IsMoveConstructible)
 {
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
 
     BatchnormFwdInferencePlan moved(std::move(plan));
     HipKernelHandle handle;
@@ -245,7 +247,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileCallsCompilerWithCorrectKernelName)
     EXPECT_CALL(mockCompiler, compile("BatchNormFwdInferSpatial.cpp", ::testing::_))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -267,7 +269,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileIncludesOffloadArchOption)
                 compile(::testing::_, ::testing::Contains(std::string("--offload-arch=gfx942"))))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps("gfx942");
 
     plan.compile(mockCompiler, deviceProps);
@@ -290,7 +292,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileFp32SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -322,9 +324,9 @@ TEST(TestBatchnormFwdInferencePlan, CompileFp16SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph({150528, 50176, 224, 1},
-                                    {1, 3, 224, 224},
-                                    hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1},
+                                           {1, 3, 224, 224},
+                                           hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -357,9 +359,10 @@ TEST(TestBatchnormFwdInferencePlan, CompileBfp16SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph({150528, 50176, 224, 1},
-                                    {1, 3, 224, 224},
-                                    hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    auto [fbb, plan]
+        = createPlanFromGraph({150528, 50176, 224, 1},
+                              {1, 3, 224, 224},
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -393,7 +396,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileNchwLayoutSetsCorrectDefine)
         });
 
     // NCHW strides: N=C*H*W, C=H*W, H=W, W=1
-    auto plan = createPlanFromGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+    auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -424,7 +427,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileNhwcLayoutSetsCorrectDefine)
         });
 
     // NHWC strides: N=H*W*C, H=W*C, W=C, C=1
-    auto plan = createPlanFromGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
+    auto [fbb, plan] = createPlanFromGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
