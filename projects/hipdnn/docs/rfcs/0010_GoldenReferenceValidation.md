@@ -1,7 +1,7 @@
 # RFC 0010: Golden Reference Validation
 
 > Owner: Integration Test Team
-> Last updated: 2026-05-07
+> Last updated: 2026-05-08
 
 ## Table of Contents
 1. [Summary](#summary)
@@ -161,9 +161,9 @@ Three modes control which test suites run. `computed` and `golden` are separate 
 |------|-----------|-----------------|
 | `computed` | Test-as-code tests (`IntegrationGraphVerificationHarness`) — graph built by `buildGraph()` in C++ | CPU/GPU reference executor at runtime |
 | `golden` | Test-as-data tests (`TestGoldenReferenceCpu` / `TestGoldenReferenceGpu`) — graph loaded from disk | Pre-computed data from bundle |
-| `both` | Both suites, independently — both must pass | Both |
+| `both` | Both suites, independently — both must pass | Runtime executor + pre-computed data |
 
-**Floating-point edge cases**: NaN in golden data is a generation error — the [generation-time validation](#generation-time-check-output-validation-python) rejects it before writing. `-0.0` vs `+0.0` uses value comparison, not bitwise.
+**Floating-point edge cases**: NaN in golden data is a generation error — the [generation-time validation](#data-integrity) rejects it before writing. `-0.0` vs `+0.0` uses value comparison, not bitwise.
 
 **Architecture note**: all current golden data comes from Python or the CPU reference executor (architecture-independent). If GPU-generated data is added, an architecture guard will be needed. See [Future Work](#future-work).
 
@@ -188,159 +188,34 @@ For golden tests, the same dynamic tolerance functions apply — the loaded bund
 
 Key-value consistency is mostly guaranteed by construction: `Graph.save()` writes the JSON and `.bin` files from the same in-memory graph in a single call, and `loadGraphAndTensors()` reads UIDs from the JSON and loads the corresponding `.bin` files. The UIDs match because they come from the same source. Corruption can only happen after generation (partial downloads, disk errors, manual edits).
 
-Two checks catch the real failure modes:
+Three checks catch the real failure modes:
 
-#### Load-Time Check: File Size Validation (C++)
+1. **File size validation (C++, load time)** — before reading tensor data, verify that each `.bin` file's size matches `product(dims) * sizeOfDataType(data_type)` from the graph JSON. Catches truncated downloads, wrong-file swaps, and stale files. Cheap — one `stat()` call per tensor. `loadGraphAndTensors()` does not perform this check today; a truncated file silently produces garbage.
 
-Before loading tensor data, verify that the file size matches what the graph JSON declares:
+2. **Output validation (Python, generation time)** — `Graph.save()` rejects NaN, Inf, and zero-variance output tensors before writing any files. Built into `Graph.save()` itself so no generator can bypass it. A degenerate output (all NaN, all-same-value) makes the test meaningless — everything passes within tolerance.
 
-```cpp
-auto expectedBytes = product(attributes->dims()) * sizeOfDataType(attributes->data_type());
-auto actualBytes = std::filesystem::file_size(tensorPath);
-if(actualBytes != expectedBytes)
-{
-    FAIL() << "Tensor file size mismatch for UID " << attributes->uid()
-           << "\n  Expected: " << expectedBytes << " bytes"
-           << " (dims=" << formatDims(attributes->dims())
-           << ", dtype=" << attributes->data_type() << ")"
-           << "\n  Actual:   " << actualBytes << " bytes"
-           << "\n  File:     " << tensorPath;
-}
-```
-
-This catches truncated files (the most common corruption from partial downloads or crashed writes), oversized files (wrong tensor written to the wrong path), and complete mismatches (binary file from a different bundle). It's cheap — a single `stat()` call per tensor, no data reading.
-
-`loadGraphAndTensors()` does not perform this check today. A truncated file silently produces garbage in the tail of the tensor. This must be added.
-
-A missing `.bin` file for a UID in the JSON already causes `fillTensorFromFile()` to throw, but the error message should be improved to name the UID and suggest the bundle may be incomplete.
-
-After loading, the loader should also verify that the number of `.bin` files on disk with the bundle's base name matches the number of tensor UIDs in the graph JSON. Extra `.bin` files (e.g., a stale `Small.tensor6.bin` left from a previous generation with a different tensor count) indicate a corrupted or partially-regenerated bundle and should produce a warning.
-
-#### Generation-Time Check: Output Validation (Python)
-
-`Graph.save()` must validate all output tensors before writing. This is not an opt-in per-script check — it is built into `Graph.save()` itself so that no generator can bypass it:
-
-```python
-class Graph:
-    def save(self, base_filename):
-        self._validate_outputs()       # Runs BEFORE any file I/O
-        self._write_json(base_filename)
-        self._write_tensors(base_filename)
-
-    def _validate_outputs(self):
-        for uid, tensor_attr in self.output_tensors.items():
-            t = tensor_attr.tensor
-            if torch.isnan(t).any():
-                raise ValueError(f"Tensor UID {uid} contains NaN — check input ranges or reference op")
-            if torch.isinf(t).any():
-                raise ValueError(f"Tensor UID {uid} contains Inf — check input ranges or reference op")
-            if t.numel() > 1 and t.std() == 0:
-                raise ValueError(f"Tensor UID {uid} has zero variance (all-same values)")
-```
-
-A tensor of all NaN, all Inf, or all-same-value makes the test meaningless — everything passes within tolerance. Because the check is inside `Graph.save()`, it is impossible to write a bundle with degenerate outputs.
-
-#### Load-Time Check: NaN/Inf Rejection (C++)
-
-As a safety net (catches bundles generated before this check existed, or by external tools), `loadGraphAndTensors()` must also reject NaN/Inf in output tensors after loading:
-
-```cpp
-for(auto uid : outputTensorUids)
-{
-    auto* data = static_cast<const float*>(tensorMap.at(uid)->hostPtr());
-    auto size = tensorMap.at(uid)->numElements();
-    for(size_t i = 0; i < size; ++i)
-    {
-        if(std::isnan(data[i]) || std::isinf(data[i]))
-        {
-            FAIL() << "Golden output tensor UID " << uid
-                   << " contains NaN/Inf at index " << i
-                   << " — regenerate the bundle";
-        }
-    }
-}
-```
-
-This is more expensive than the file-size check (it reads the data), but only runs on output tensors (not inputs) and catches the exact failure mode: NaN in golden data means the reference was wrong.
+3. **NaN/Inf rejection (C++, load time)** — safety net for bundles generated before check #2 existed or by external tools. `loadGraphAndTensors()` scans output tensors after loading and fails if any contain NaN or Inf.
 
 **Acceptance criteria**:
-- [ ] `loadGraphAndTensors()` validates file size before reading tensor data
-- [ ] File size mismatch: hard FAIL with expected vs actual bytes, dims, data type, and file path
-- [ ] Missing `.bin` file: hard FAIL naming the UID and file path
-- [ ] `Graph.save()` calls `_validate_outputs()` internally — no generator can bypass it
-- [ ] `loadGraphAndTensors()` rejects NaN/Inf in output tensors after loading (safety net for legacy/external bundles)
-- [ ] Both checks produce actionable error messages naming the tensor UID
+- [ ] All three checks implemented with actionable error messages naming the tensor UID
+- [ ] File size mismatch and NaN/Inf in golden data are hard FAILs, not warnings
 
 ---
 
 ### Harness Integration
 
-Two test patterns coexist in the codebase today. The long-term direction is convergence toward Pattern 2 (test-as-data) as the primary pattern, with Pattern 1 (test-as-code) maintained for backward compatibility:
+Two test patterns coexist in the codebase:
 
-#### Pattern 1: Test-as-Code (`IntegrationGraphVerificationHarness`)
+| Pattern | Harness | Graph source | Reference source |
+|---------|---------|-------------|-----------------|
+| Test-as-code | `IntegrationGraphVerificationHarness` | Built by `buildGraph()` in C++ | CPU/GPU executor at runtime |
+| Test-as-data | `TestGoldenReferenceCpu` / `TestGoldenReferenceGpu` | Loaded from JSON on disk | Pre-computed data from bundle |
 
-Used for **computed** verification. The graph is built in C++ by `buildGraph()`. Inputs are randomly generated. The CPU/GPU reference executor runs at test time. This is the existing pattern, unchanged by this RFC.
-
-```cpp
-template <typename DataType, typename TestCaseType>
-class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType>
-{
-    void verifyGraph(graph::Graph& graph, unsigned int seed) { ... }
-};
-```
-
-Every existing test (conv, matmul, SDPA, etc.) uses this pattern. This RFC does not modify it.
-
-#### Pattern 2: Test-as-Data (`TestGoldenReferenceCpu` / `TestGoldenReferenceGpu`)
-
-Used for **golden** verification. The graph is loaded from JSON on disk. No `buildGraph()`. No runtime reference computation. This is the pattern established by the existing golden reference infrastructure and extended by this RFC.
-
-```cpp
-class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::path>
-{
-    void SetUp() override
-    {
-        _graphAndTensors = loadGraphAndTensors(GetParam());
-        _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
-    }
-    void goldenReferenceTestSuite(float atol, float rtol) { ... }
-};
-```
-
-New golden tests should use Pattern 2. Existing computed tests continue using Pattern 1. Over time, as golden data coverage grows, Pattern 2 becomes the primary validation path and Pattern 1 serves as a cross-validation supplement.
-
-#### Engine Setup for GPU Runner
-
-The GPU runner (`TestGoldenReferenceGpu`) handles engine setup internally:
-
-```cpp
-void SetUp() override
-{
-    hipdnnEnginePluginCreateImpl(&_handle);
-    _engineConfigBuffer = createValidEngineConfig(1).Release();
-    _graphAndTensors = loadGraphAndTensors(path);
-    _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
-}
-```
-
-The execution creates a plugin execution context, executes the graph, marks device-modified output tensors, and validates:
-
-```cpp
-void goldenReferenceTestSuite(float atol, float rtol)
-{
-    hipdnnEnginePluginCreateExecutionContextImpl(_handle, &engineConfig, &opGraph, &ctx);
-    hipdnnEnginePluginExecuteOpGraphImpl(_handle, ctx, nullptr, deviceBuffers.data(), ...);
-    for(auto uid : _graphAndTensors.outputTensorUids)
-        _graphAndTensors.tensorMap.at(uid)->markDeviceModified();
-    EXPECT_TRUE(_graphAndTensors.validateTensors(_referenceOutputTensors, atol, rtol));
-}
-```
+Every existing test (conv, matmul, SDPA, etc.) uses test-as-code. This RFC does not modify it. New golden tests use test-as-data. Both patterns coexist in the same test binary. Over time, as golden data coverage grows, test-as-data becomes the primary validation path.
 
 **Acceptance criteria**:
-- [ ] Pattern 1 (computed) tests are unchanged -- zero modifications to existing test fixtures
-- [ ] Pattern 2 (golden) tests work for any operation type (after removing `EXPECT_EQ(tensorMap.size(), 6)`)
-- [ ] Both patterns can coexist in the same test binary
-- [ ] `getGoldenReferenceParams()` discovers test cases by scanning for `.json` files
+- [ ] Test-as-code tests are unchanged — zero modifications to existing test fixtures
+- [ ] Test-as-data tests work for any operation type (after removing `EXPECT_EQ(tensorMap.size(), 6)`)
 
 ---
 
@@ -390,23 +265,7 @@ hipdnn_reference_data/
 
 To add a new test case to an existing operation/layout/datatype, drop a new `.json` + `.bin` bundle into the directory. The next test run picks it up automatically.
 
-### gtest Filtering
-
-Because test names include the file path, standard gtest filtering works:
-
-```bash
-# Run all batchnorm golden tests
-./test_binary --gtest_filter="*BatchnormFwd*"
-
-# Run only fp32 nchw batchnorm golden tests
-./test_binary --gtest_filter="*nchw*fp32*"
-```
-
-### Adding a New Operation
-
-1. Create the folder hierarchy: `hipdnn_reference_data/{Operation}/{Layout}/{DataType}/`
-2. Generate data bundles using a Python script (see [Generation Pipeline](#generation-pipeline))
-3. Add C++ test instantiation (see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests))
+Because test names include the file path, standard `--gtest_filter` works for selecting by operation, layout, or data type.
 
 ---
 
@@ -424,29 +283,12 @@ Because test names include the file path, standard gtest filtering works:
 - `HIPDNN_TEST_VERIFICATION_MODE` -- overridden by `--verification-mode` CLI flag
 - `HIPDNN_TEST_GOLDEN_DATA_DIR` -- overridden by `--golden-data-dir` CLI flag
 
-Generation is performed by Python scripts (see [Generation Pipeline](#generation-pipeline)), not by the C++ test binary. The test binary is purely a consumer of golden data.
-
-#### Implementation
-
-Each golden test fixture checks the verification mode in `SetUp()` and skips itself if disabled:
-
-```cpp
-void SetUp() override
-{
-    if(TestConfig::instance().verificationMode() == VerificationMode::Computed)
-    {
-        GTEST_SKIP() << "Golden tests disabled (--verification-mode=computed)";
-    }
-    // ... load graph and tensors ...
-}
-```
-
-Computed test fixtures use the same pattern in reverse, skipping when mode is `golden`. In `both` mode, neither fixture skips -- both suites run.
+Generation is performed by Python scripts (see [Generation Pipeline](#generation-pipeline)), not by the C++ test binary. The test binary is purely a consumer of golden data. Each test fixture checks the verification mode in `SetUp()` and skips itself if the mode excludes it.
 
 **Acceptance criteria**:
 - [ ] Both CLI flags parsed and stored in `TestConfig` singleton
 - [ ] Environment variable fallbacks work when CLI flag is absent
-- [ ] `--verification-mode golden` with missing golden data directory: hard FAIL with path and suggestion
+- [ ] `--verification-mode golden` with missing golden data directory: hard FAIL with path
 - [ ] `--verification-mode computed` ignores golden data entirely (no fetch, no directory check)
 
 ---
@@ -463,133 +305,25 @@ Computed test fixtures use the same pattern in reverse, skipping when mode is `g
 | Post-submit (full) | `both` | Yes | Cross-validates golden against computed |
 | Nightly | `golden` | Yes | Regression gate against locked baselines |
 
-#### CI Pipeline Integration
-
-```yaml
-# Excerpt from integration test CI job
-- name: Pull golden reference data
-  if: inputs.verification_mode != 'computed'
-  run: |
-    # Tool-specific fetch command (e.g., dvc pull, aws s3 sync, etc.)
-    cd projects/hipdnn
-    ./scripts/fetch_golden_data.sh
-
-- name: Run integration tests
-  run: |
-    ./hipdnn_integration_tests \
-      --verification-mode ${{ inputs.verification_mode }} \
-      --golden-data-dir ${{ github.workspace }}/projects/hipdnn/hipdnn_reference_data \
-      --gtest_filter=${{ inputs.gtest_filter }}
-```
-
-Pre-submit jobs omit the golden data fetch step entirely, keeping them fast and independent of remote storage availability.
+Pre-submit jobs omit the golden data fetch step entirely, keeping them fast and independent of remote storage availability. Post-submit and nightly jobs fetch golden data before running tests.
 
 ### Adding New Golden Reference Tests
 
-Adding a test case to an **existing** operation/layout/datatype requires zero C++ changes: generate the data bundle and drop it into the folder. The runner discovers it on the next run.
+Adding a test case to an **existing** operation/layout/datatype requires zero C++ changes: generate the data bundle, drop it into the folder, and the runner discovers it on the next run.
 
-Adding a **new** operation requires a one-time C++ `INSTANTIATE_TEST_SUITE_P` (Step 4 below).
+Adding a **new** operation:
 
-#### Step 1: Generate the data bundle
-
-Use an existing generation script, or write a new one following the pattern in `generate_batchnorm_reference.py` (see [Writing a New Generator](#writing-a-new-generator)). Any tool that produces a valid bundle (matching the schema in [Golden Data Format](#golden-data-format)) works -- PyTorch, AITER, AOTriton, or any other stable reference source.
-
-#### Step 2: Run the generator
-
-```bash
-cd reference_data_scripts/
-python generate_conv_reference.py \
-  --base-filename ../hipdnn_reference_data/ConvFwd/nchw/fp32/Small \
-  --io-type float --x-size 1 16 16 16 --w-size 16 16 3 3 \
-  --padding 1 1 --stride 1 1 --dilation 1 1
-```
-
-#### Step 3: Commit the bundle to `hipdnn_reference_data/`
-
-```bash
-git add hipdnn_reference_data/ConvFwd/nchw/fp32/Small.*
-git commit -m "Add conv fwd golden reference data (nchw fp32 Small)"
-```
-
-For large tensor data, use git-lfs, DVC, or another storage solution (see [Data Management](#data-management)).
-
-#### Step 4: Add C++ test instantiation (new operations only)
-
-If this is the first golden test for a new operation, add a test instantiation. If the operation already has golden tests (e.g., adding a new size to `BatchnormFwdInference/nchw/fp32/`), skip this step -- the runner discovers the new bundle automatically.
-
-```cpp
-// In a test .cpp file (CPU runner):
-using TestConvFwdGoldenFp32 = hipdnn_test_sdk::utilities::TestGoldenReferenceCpu;
-
-TEST_P(TestConvFwdGoldenFp32, Correctness)
-{
-    goldenReferenceTestSuite(/*atol=*/1e-5, /*rtol=*/1e-5);
-}
-
-INSTANTIATE_TEST_SUITE_P(,
-    TestConvFwdGoldenFp32,
-    hipdnn_test_sdk::utilities::getGoldenReferenceParams("ConvFwd/nchw/fp32"));
-```
-
-For GPU golden tests, use `TestGoldenReferenceGpu` instead:
-
-```cpp
-// GPU runner:
-using TestConvFwdGoldenGpuFp32 = test_helpers::TestGoldenReferenceGpu;
-
-TEST_P(TestConvFwdGoldenGpuFp32, Correctness)
-{
-    goldenReferenceTestSuite(/*atol=*/1e-5, /*rtol=*/1e-5);
-}
-
-INSTANTIATE_TEST_SUITE_P(,
-    TestConvFwdGoldenGpuFp32,
-    test_helpers::getGoldenReferenceParams("ConvFwd/nchw/fp32"));
-```
-
-#### Step 5: Verify
-
-```bash
-# Run the new golden tests
-./test_binary --gtest_filter="*ConvFwdGolden*"
-```
+1. **Generate** — write a generation script following the [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
+2. **Commit** — add the bundle to `hipdnn_reference_data/{Operation}/{Layout}/{DataType}/`. For large tensors, use git-lfs or DVC (see [Data Management](#data-management))
+3. **Instantiate** — add a one-time `INSTANTIATE_TEST_SUITE_P` in a test `.cpp` file, using `TestGoldenReferenceCpu` or `TestGoldenReferenceGpu` as the fixture and `getGoldenReferenceParams("{Operation}/{Layout}/{DataType}")` as the parameter source
 
 ---
 
 ## Data Management
 
-### Repository Layout
+Golden data lives in `hipdnn_reference_data/` at the project root (see [Folder Convention](#folder-convention)). At install time, it is placed at `<exe_dir>/../lib/hipdnn_reference_data/`, which is where `getGoldenReferenceParams()` looks by default.
 
-Golden data lives in `hipdnn_reference_data/` at the project root, following the [Folder Convention](#folder-convention):
-
-```
-projects/hipdnn/
-  hipdnn_reference_data/
-    BatchnormFwdInference/
-      nchw/
-        fp32/
-          Small.json + .tensor{0..5}.bin
-          Large.json + .tensor{0..5}.bin
-          MIOpen.json + .tensor{0..5}.bin
-        fp16/
-          Small.json + .tensor{0..5}.bin
-        bfp16/
-          Small.json + .tensor{0..5}.bin
-      ncdhw/
-        fp32/
-          Small.json + .tensor{0..5}.bin
-    ConvFwd/
-      nchw/
-        fp32/
-          ...
-    ...
-```
-
-At install time, golden data is placed at `<exe_dir>/../lib/hipdnn_reference_data/`, which is where `getGoldenReferenceParams()` looks by default.
-
-### Storage Options
-
-Golden data can grow large (a single test case with `8x512x64x64` fp32 tensors is ~64 MB). For large datasets, external storage is needed. The golden data format is tool-agnostic -- any of the following work:
+Golden data can grow large (a single test case with `8x512x64x64` fp32 tensors is ~64 MB). For large datasets, external storage is needed:
 
 | Option | Pros | Cons |
 |--------|------|------|
@@ -600,10 +334,6 @@ Golden data can grow large (a single test case with `8x512x64x64` fp32 tensors i
 
 This RFC does not prescribe a specific storage tool. The existing batchnorm data (small tensors) is committed directly to git.
 
-**Acceptance criteria**:
-- [ ] CI pipeline: golden data fetch step skipped entirely for `--verification-mode computed`
-- [ ] CI pipeline: golden data fetch failure is **hard failure** if `--verification-mode golden`
-
 ---
 
 ## Risk Register
@@ -611,7 +341,7 @@ This RFC does not prescribe a specific storage tool. The existing batchnorm data
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
 | FlatBuffers schema change | Old JSON bundles unreadable by `loadGraphAndTensors()` | Medium | Regenerate from Python scripts (Python framework is schema-independent) |
-| Reference script bug freezes wrong data | Silent incorrect baseline | Medium | Cross-validate against C++ CPU ref; review generated data before committing; [generation-time validation](#generation-time-check-output-validation-python) rejects degenerate outputs |
+| Reference script bug freezes wrong data | Silent incorrect baseline | Medium | Cross-validate against C++ CPU ref; review generated data before committing; [generation-time validation](#data-integrity) rejects degenerate outputs |
 | PyTorch version drift | Different versions produce slightly different outputs | Low | Pin PyTorch version in `requirements.txt`; regenerate when upgrading |
 | Large golden data sets slow CI | CI feedback loop degrades | Low | Storage caching, selective fetch by test filter, compression (future) |
 | Remote storage unavailable | Golden-mode CI fails | Low | Computed-mode CI is independent of storage; CI fallback to computed-only |
