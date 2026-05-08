@@ -202,6 +202,8 @@ namespace TensileLite
                 return "TrigIndAbsSin";
             case InitMode::TrigIndAbsCos:
                 return "TrigIndAbsCos";
+            case InitMode::UniformLowPrecision:
+                return "UniformLowPrecision";
 
             case InitMode::Count:
                 break;
@@ -273,6 +275,8 @@ namespace TensileLite
                 mode = InitMode::TrigIndAbsSin;
             else if(strValue == ToString(InitMode::TrigIndAbsCos))
                 mode = InitMode::TrigIndAbsCos;
+            else if(strValue == ToString(InitMode::UniformLowPrecision))
+                mode = InitMode::UniformLowPrecision;
             else if(std::all_of(strValue.begin(), strValue.end(), isdigit))
             {
                 int value = atoi(strValue.c_str());
