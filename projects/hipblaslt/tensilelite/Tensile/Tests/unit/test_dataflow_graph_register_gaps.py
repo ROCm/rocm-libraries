@@ -1351,7 +1351,6 @@ class TestMFMAQuadCycleGap:
                               src0=vgpr(50, 1), src1=vgpr(51, 1))
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(50, 2, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
             # Two intervening LRs (cost 1 each) so the cycle-exact walk
             # accumulates 2 quad-cycles between the CVT and the MFMA,
@@ -1438,7 +1437,6 @@ class TestMFMAQuadCycleGap:
         # an empty failure list).
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(50, 2, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             _tag(VCvtPkF32toBF16(dst=vgpr(60, 1),
                                  src0=vgpr(50, 1), src1=vgpr(51, 1)),
                  category="PackA0", mfma_index=2, sequence=0),
@@ -1856,7 +1854,6 @@ class TestMFMAQuadCycleGap:
                               src0=vgpr(50, 1), src1=vgpr(51, 1))
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(50, 2, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
             # ONE intervening LR (cost 1) — bumps the walk from gap=0 to
             # gap=1 between the CVT and the MFMA.
@@ -2047,7 +2044,6 @@ class TestMFMAQuadCycleGap:
                                src0=vgpr(40, 1), src1=vgpr(41, 1))
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(50, 2, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             _tag(cvt0, category="PackA0", mfma_index=2, sequence=0),
             # Second CVT at the SAME vmfma_index — zero gap. RAW on v40.
             _tag(cvt1, category="PackA0", mfma_index=2, sequence=1),
@@ -2093,7 +2089,7 @@ class TestMFMAQuadCycleGap:
 
         cumulative_issue_cycles walk over the concatenated stream
         (ML-1 then ML, in `_BODY_BUILD_ORDER`):
-          * ML-1: [LR, SWait, CVT@p_idx]; ML: [LR, LR, MFMA@c_idx].
+          * ML-1: [LR, CVT@p_idx]; ML: [LR, LR, MFMA@c_idx].
           * CVT at p_idx → p_issue_start=0, current_issue += 1.
           * 2 LRs in ML each cost 1 → current_issue = 3.
           * MFMA at c_idx → c_issue_start=3; gap = 3 - 0 - 1 = 2.
@@ -2109,7 +2105,6 @@ class TestMFMAQuadCycleGap:
         # Producer body: ML-1 (loop_index=0). CVT writes v40.
         ml_prev_cap = make_capture(BODY_LABEL_ML_PREV, [
             make_lr(50, 2, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
         ])
         # Consumer body: ML (loop_index=1). Two LRs (cost 1 each) + MFMA
@@ -2187,7 +2182,7 @@ class TestMFMAQuadCycleGap:
         different body pair.
 
         cumulative_issue_cycles walk over [ML, NGL] concatenation:
-          * ML: [LR, SWait, CVT@p_idx]
+          * ML: [LR, CVT@p_idx]
           * NGL: [LR, LR, MFMA@c_idx]
           * CVT (cost 1), 2 LRs (cost 2), MFMA → gap = 3 - 0 - 1 = 2.
         expected=2, actual=2, ok=True.
@@ -2200,7 +2195,6 @@ class TestMFMAQuadCycleGap:
         # Producer body: ML (loop_index=1). CVT writes v40.
         ml_cap = make_capture(BODY_LABEL_ML, [
             make_lr(50, 2, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
         ])
         # Consumer body: NGL (loop_index=2). 2 LRs + MFMA reads v40..v41.
@@ -2268,7 +2262,6 @@ class TestMFMAQuadCycleGap:
                               src0=vgpr(50, 1), src1=vgpr(51, 1))
         ml_prev_cap = make_capture(BODY_LABEL_ML_PREV, [
             make_lr(50, 2, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
         ])
         # Consumer body: ML, MFMA at the very first slot — NO intervening
@@ -2412,7 +2405,6 @@ class TestMFMAQuadCycleGap:
                               src0=vgpr(50, 1), src1=vgpr(51, 1))
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(50, 2, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, dscnt=0),
             _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
             make_lr(60, 1, 80, slot=3, category="LRA1"),
             make_lr(61, 1, 84, slot=4, category="LRA1"),
