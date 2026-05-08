@@ -473,9 +473,11 @@ def findAvailableArchs():
     if "TENSILE_ROCM_PATH" in os.environ:
         rocmpath = os.environ.get("TENSILE_ROCM_PATH")
     rocmAgentEnum = os.path.join(rocmpath, "bin/rocm_agent_enumerator")
+    if not os.path.exists(rocmAgentEnum):
+        return availableArchs
     try:
         output = subprocess.check_output([rocmAgentEnum, "-t", "GPU"])
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except subprocess.CalledProcessError:
         return availableArchs
     lines = output.decode().splitlines()
     for line in lines:
