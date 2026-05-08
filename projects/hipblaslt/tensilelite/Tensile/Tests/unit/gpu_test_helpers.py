@@ -42,8 +42,38 @@ from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
 from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
 
+# ---- GPU target detection ----
+def _detect_gfx_target():
+    """Detect the GPU architecture from the current device.
+
+    Uses rocm_agent_enumerator or TENSILE_GPU_TARGET env var override.
+    Falls back to "gfx950" if detection fails.
+    """
+    override = os.environ.get("TENSILE_GPU_TARGET")
+    if override:
+        return override
+
+    rocmpath = os.environ.get("ROCM_PATH", "/opt/rocm")
+    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
+    try:
+        output = subprocess.check_output(
+            [enumerator, "-t", "GPU"], stderr=subprocess.DEVNULL
+        )
+        archs = [
+            line.strip()
+            for line in output.decode().splitlines()
+            if line.strip() and "gfx000" not in line
+        ]
+        if archs:
+            return archs[0]
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+
+    return "gfx950"
+
+
 # ---- Constants ----
-GFX_TARGET = "gfx950"
+GFX_TARGET = _detect_gfx_target()
 WAVESIZE   = 64
 NUM_WAVES  = 4
 NUM_THREADS = WAVESIZE * NUM_WAVES  # 256
@@ -191,15 +221,29 @@ def generate_set_directives(sgprs):
     return "\n".join(f".set sgpr{name}, {idx}" for name, idx in sgprs.items())
 
 
+def _gfx_to_isa(name):
+    """Convert gfx name to ISA tuple, e.g. 'gfx950' -> (9, 5, 0)."""
+    import re
+    match = re.search(r"gfx([0-9a-fA-F]{3,})", name)
+    if not match:
+        return (9, 5, 0)  # fallback
+    ipart = match.group(1)
+    step = int(ipart[-1], 16)
+    minor = int(ipart[-2])
+    major = int(ipart[:-2])
+    return (major, minor, step)
+
+
 def init_rocisa():
     """Initialize rocIsa singleton if needed."""
     from rocisa import rocIsa
     ri = rocIsa.getInstance()
+    isa = _gfx_to_isa(GFX_TARGET)
     if not ri.isInit():
         import shutil
         asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
-        ri.init((9, 5, 0), asmpath)
-    ri.setKernel((9, 5, 0), WAVESIZE)
+        ri.init(isa, asmpath)
+    ri.setKernel(isa, WAVESIZE)
 
 
 # ---- Kernel assembly generator ----
