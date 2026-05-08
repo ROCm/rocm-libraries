@@ -383,13 +383,13 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // Because Wi is coupled with Wj, it is jm rows tall instead of qm.
             if constexpr (use_her2k)
             {
-                rocsolver_hemm(
+                rocblasCall_symm_hemm(
                     handle, rocblas_side_left, rocblas_fill_lower,
                     jm, qn, // opts
                     &one,  A, idx2D( j+kd, j+kd, lda ) + shiftA, lda, strideA,  // A
                            W, idx2D( j+kd, i-j,  ldw ), ldw, strideW,  // Wi, jm rows
                     &zero, X, idx2D( j+kd, i-j,  ldx ), ldx, strideX,  // Xi
-                    batch_count, workArr );
+                    batch_count );
             }
             else
             {
@@ -455,13 +455,13 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         if constexpr (use_her2k)
         {
             // A -= ZV^H + VZ^H
-            rocsolver_her2k(
+            rocblasCall_syr2k_her2k<BATCHED, T>(
                 handle, rocblas_fill_lower, rocblas_operation_none,
                 n-i, jb, // opts
-                &negone, Z, idx2D( i, 0, ldz ), ldz,  // Zj, n-i rows
-                         V, idx2D( i, 0, ldv ), ldv,  // Vj, n-i rows
-                &one,    A, idx2D( i, i, lda ), lda,  // Ai
-                batch_count, workArr);
+                &negone, Z, idx2D( i, 0, ldz ), ldz, strideZ,  // Zj, n-i rows
+                         V, idx2D( i, 0, ldv ), ldv, strideV,  // Vj, n-i rows
+                &rone,   A, idx2D( i, i, lda ), lda, strideA,  // Ai
+                batch_count);
         }
         else
         {
