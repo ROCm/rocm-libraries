@@ -24,6 +24,8 @@
  #
  ###############################################################################
 
+include(CMakeDependentOption)
+
 # Find / configure LLVM
 add_subdirectory(llvm)
 
