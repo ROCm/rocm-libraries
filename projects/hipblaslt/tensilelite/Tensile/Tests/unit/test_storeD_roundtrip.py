@@ -24,9 +24,8 @@ sys.path.insert(0, TENSILE_ROOT)
 
 try:
     from hip import hip  # type: ignore
-    HAS_HIP = True
-except ImportError:
-    HAS_HIP = False
+except (ImportError, RuntimeError):
+    hip = None  # ROCm runtime not available; GPU tests will be skipped
 
 from unittest.mock import MagicMock
 
@@ -46,6 +45,7 @@ from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
 from gpu_test_helpers import (
     TileConfig,
     GFX_TARGET,
+    HAS_GFX950,
     WAVESIZE,
     NUM_WAVES,
     NUM_THREADS,
@@ -60,7 +60,7 @@ from gpu_test_helpers import (
     init_rocisa,
 )
 
-pytestmark = pytest.mark.gpu
+pytestmark = pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 
 # ---------------------------------------------------------------------------
 # Test configurations: (mt_a, mt_b, depth_u)

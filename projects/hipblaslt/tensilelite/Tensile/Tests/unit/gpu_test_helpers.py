@@ -27,9 +27,8 @@ sys.path.insert(0, TENSILE_ROOT)
 
 try:
     from hip import hip, hiprtc  # type: ignore
-    HAS_HIP = True
-except ImportError:
-    HAS_HIP = False
+except (ImportError, RuntimeError):
+    hip = None  # ROCm runtime not available; GPU tests will be skipped
 
 from unittest.mock import MagicMock
 from types import SimpleNamespace
@@ -77,6 +76,8 @@ def _detect_gfx_target():
 
 # ---- Constants ----
 GFX_TARGET = _detect_gfx_target()
+# Use gfx950-specific kernel assembly (added for subtile MFMA tests)
+HAS_GFX950 = GFX_TARGET == "gfx950"
 WAVESIZE   = 64
 NUM_WAVES  = 4
 NUM_THREADS = WAVESIZE * NUM_WAVES  # 256

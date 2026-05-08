@@ -15,7 +15,8 @@ import pytest
 from types import SimpleNamespace
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     BPE, LOAD_WIDTH, WAVESIZE, NUM_THREADS, NUM_WAVES,
     create_writer,
@@ -228,7 +229,7 @@ class TestLraTileAssignmentUnit:
                 f"tileInfo{tileInfo.tc}: loadRatioLR should be > 0"
 
 
-@pytest.mark.gpu
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestLraTileAssignmentGPU:
 
     @pytest.fixture(params=TILE_CONFIGS, ids=lambda c: c.label)
@@ -312,49 +313,46 @@ if __name__ == "__main__":
                   f"loadRatioLR={tileInfoB.loadRatioLR}, "
                   f"sharedVgprLROffset={tileInfoB.sharedVgprLROffset}")
 
-            if HAS_HIP:
-                # Test all sharedVgprLROffset vgprs for both matrices
-                for tc, tileInfo in [("A", tileInfoA), ("B", tileInfoB)]:
-                    for idx, reg in enumerate(tileInfo.sharedVgprLROffset):
-                        results = export_register(writer, lra_asm, reg, False, cfg, tmp_path,
-                                                  f"lr_offset{tc}_v{reg}_{cfg.label}")
+            # Test all sharedVgprLROffset vgprs for both matrices
+            for tc, tileInfo in [("A", tileInfoA), ("B", tileInfoB)]:
+                for idx, reg in enumerate(tileInfo.sharedVgprLROffset):
+                    results = export_register(writer, lra_asm, reg, False, cfg, tmp_path,
+                                              f"lr_offset{tc}_v{reg}_{cfg.label}")
 
-                        if args.grid:
-                            print_offset_grid(f"Matrix {tc} LR GPU offset[{idx}] v{reg} ({cfg.label})",
-                                              results, WAVESIZE, NUM_WAVES)
+                    if args.grid:
+                        print_offset_grid(f"Matrix {tc} LR GPU offset[{idx}] v{reg} ({cfg.label})",
+                                          results, WAVESIZE, NUM_WAVES)
 
-                            if args.debug:
-                                expected = [compute_expected_lr_offset(tid, cfg, tileInfo, writer.ldsStartOffsetB)[idx]
-                                            for tid in range(NUM_THREADS)]
-                                print_offset_grid(f"Matrix {tc} LR EXPECTED offset[{idx}] ({cfg.label})",
-                                                  expected, WAVESIZE, NUM_WAVES)
+                        if args.debug:
+                            expected = [compute_expected_lr_offset(tid, cfg, tileInfo, writer.ldsStartOffsetB)[idx]
+                                        for tid in range(NUM_THREADS)]
+                            print_offset_grid(f"Matrix {tc} LR EXPECTED offset[{idx}] ({cfg.label})",
+                                              expected, WAVESIZE, NUM_WAVES)
 
-                                mismatches = sum(1 for t in range(NUM_THREADS)
-                                                 if results[t] != expected[t])
-                                if mismatches:
-                                    print(f"\n--- Matrix {tc} LR offset[{idx}] DIFF ({mismatches} mismatches) ---")
-                                    for w in range(NUM_WAVES):
-                                        print(f"  w{w}: ", end="")
-                                        for lane in range(WAVESIZE):
-                                            tid = w * WAVESIZE + lane
-                                            if results[tid] != expected[tid]:
-                                                print(f" t{tid}:{results[tid]}!={expected[tid]}", end="")
-                                        print()
-                                else:
-                                    print(f"\n  Matrix {tc} LR offset[{idx}]: all match.")
+                            mismatches = sum(1 for t in range(NUM_THREADS)
+                                             if results[t] != expected[t])
+                            if mismatches:
+                                print(f"\n--- Matrix {tc} LR offset[{idx}] DIFF ({mismatches} mismatches) ---")
+                                for w in range(NUM_WAVES):
+                                    print(f"  w{w}: ", end="")
+                                    for lane in range(WAVESIZE):
+                                        tid = w * WAVESIZE + lane
+                                        if results[tid] != expected[tid]:
+                                            print(f" t{tid}:{results[tid]}!={expected[tid]}", end="")
+                                    print()
+                            else:
+                                print(f"\n  Matrix {tc} LR offset[{idx}]: all match.")
 
-                        errors = 0
-                        for tid in range(NUM_THREADS):
-                            exp = compute_expected_lr_offset(tid, cfg, tileInfo, writer.ldsStartOffsetB)[idx]
-                            if results[tid] != exp:
-                                errors += 1
-                                if not args.grid:
-                                    print(f"  FAIL {tc} LR offset[{idx}] v{reg} tid={tid}: "
-                                          f"got {results[tid]}, expected {exp}")
-                            elif not args.grid and tid < 64:
-                                print(f"  OK   {tc} LR offset[{idx}] v{reg} tid={tid}: {results[tid]}")
+                    errors = 0
+                    for tid in range(NUM_THREADS):
+                        exp = compute_expected_lr_offset(tid, cfg, tileInfo, writer.ldsStartOffsetB)[idx]
+                        if results[tid] != exp:
+                            errors += 1
+                            if not args.grid:
+                                print(f"  FAIL {tc} LR offset[{idx}] v{reg} tid={tid}: "
+                                      f"got {results[tid]}, expected {exp}")
+                        elif not args.grid and tid < 64:
+                            print(f"  OK   {tc} LR offset[{idx}] v{reg} tid={tid}: {results[tid]}")
 
-                        print(f"  Matrix {tc} LR offset[{idx}] v{reg}: "
-                              f"{NUM_THREADS} threads, {errors} errors")
-            else:
-                print("HIP not available - assembly generated but not executed")
+                    print(f"  Matrix {tc} LR offset[{idx}] v{reg}: "
+                          f"{NUM_THREADS} threads, {errors} errors")
