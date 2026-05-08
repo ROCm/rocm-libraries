@@ -24,8 +24,9 @@ class RMSnormFwdParams
 {
 public:
     RMSnormFwdParams(
-        const hipdnn_data_sdk::data_objects::RMSNormAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     RMSnormFwdParams(const RMSnormFwdParams&) = delete;
@@ -34,20 +35,20 @@ public:
     RMSnormFwdParams(RMSnormFwdParams&&) = default;
     RMSnormFwdParams& operator=(RMSnormFwdParams&&) = default;
 
-    const hipdnn_data_sdk::data_objects::TensorAttributes* x() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* scale() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* bias() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* y() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* invRMS() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* epsilon() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* x() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scale() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* bias() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* y() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invRMS() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* epsilon() const;
 
 private:
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _x;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _scale;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _bias;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _y;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _invRMS;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _epsilon;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invRMS;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _epsilon;
 };
 
 class RMSnormFwdPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
@@ -71,6 +72,10 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
+    int64_t getOuterSize(unsigned normalizeDim) const;
+    int64_t getInnerSize(unsigned normalizeDim) const;
+    unsigned getNormalizeDim() const;
+
     RMSnormFwdParams _params;
 
     // Populated by compile()

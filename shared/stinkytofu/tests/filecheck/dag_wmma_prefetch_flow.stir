@@ -1,0 +1,81 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+#
+# Full LDS prefetch flow through the DAG scheduler (gfx1250):
+#
+#   buffer_load  ->  ds_store  ->  s_barrier(signal/wait)  ->  ds_load  ->  v_wmma
+#
+# StinkyBuildImplicitDependencyPass ties the ds_store / barrier / ds_load on
+# each memory token together via LDS pseudo registers. Given that def-use
+# constraint, StinkyDAGSchedulerPass MUST preserve the producer -> barrier ->
+# consumer ordering for each token group. Within the pre-barrier region the
+# scheduler is free to interleave the independent chains (token 0 vs token 1)
+# and order buffer_loads; within the post-barrier region the ds_loads may be
+# interleaved as they feed a common WMMA.
+#
+# Input (single block):
+#   buffer_load_b128 v[50:53]           (global, no memtoken, feeds ds_store(t=0))
+#   buffer_load_b128 v[54:57]           (feeds ds_store(t=0))
+#   buffer_load_b128 v[58:61]           (feeds ds_store(t=1))
+#   buffer_load_b128 v[62:65]           (feeds ds_store(t=1))
+#   ds_store_b128    (v10, v[50:53])    tokens=[0]
+#   ds_store_b128    (v10, v[54:57])    tokens=[0]
+#   ds_store_b128    (v11, v[58:61])    tokens=[1]
+#   ds_store_b128    (v11, v[62:65])    tokens=[1]
+#   s_barrier_signal (-1)               tokens=[0, 1]
+#   s_barrier_wait   (-1)               tokens=[0, 1]
+#   ds_load_b128     v[20:23]           tokens=[0]   (operand A first half)
+#   ds_load_b128     v[24:27]           tokens=[0]   (operand A second half)
+#   ds_load_b128     v[30:33]           tokens=[1]   (operand B first half)
+#   ds_load_b128     v[34:37]           tokens=[1]   (operand B second half)
+#   v_wmma_f32_16x16x16_bf16  v[20:27] x v[30:37]
+#
+# Required ordering after BuildImplicitDep + DAGScheduler:
+#   - at least one buffer_load appears before any ds_store (value dependency)
+#   - every ds_store appears before both barrier instructions
+#   - the barrier_signal appears before the barrier_wait
+#   - every ds_load appears after the barrier_wait  (LDS token edge)
+#   - the WMMA is the last memory-sensitive instruction in the block
+#
+# CHECK-LABEL: @dag_wmma_prefetch_flow
+#
+# ---- Pre-barrier stage: at least one buffer_load must precede the ds_stores ----
+# CHECK:      buffer_load_b128
+#
+# ---- Pre-barrier stage: ds_stores (all of them) must precede the barrier ----
+# CHECK:      ds_store_b128
+#
+# ---- LDS synchronization barrier ----
+# CHECK:      s_barrier_signal
+# CHECK:      s_barrier_wait
+#
+# ---- Post-barrier stage: every ds_load appears after the barrier ----
+# CHECK:      ds_load_b128
+#
+# ---- WMMA is the terminator of the memory-producer/consumer chain ----
+# CHECK:      v_wmma_f32_16x16x16_bf16
+#
+# ---- Nothing memory-related may appear after the WMMA in this block ----
+# CHECK-NOT: buffer_load_b128
+# CHECK-NOT: ds_store_b128
+# CHECK-NOT: ds_load_b128
+# CHECK-NOT: s_barrier_signal
+# CHECK-NOT: s_barrier_wait
+
+st.func @dag_wmma_prefetch_flow() {
+^entry:
+  v[50:53] = "st.buffer_load_b128"(v8, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[54:57] = "st.buffer_load_b128"(v8, s[0:3], s0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[58:61] = "st.buffer_load_b128"(v9, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[62:65] = "st.buffer_load_b128"(v9, s[0:3], s0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  "st.ds_store_b128"(v10, v[50:53]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b128"(v10, v[54:57]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b128"(v11, v[58:61]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.ds_store_b128"(v11, v[62:65]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0, 1] } }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0, 1] } }
+  v[20:23] = "st.ds_load_b128"(v12) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:27] = "st.ds_load_b128"(v12) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[30:33] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[34:37] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+}

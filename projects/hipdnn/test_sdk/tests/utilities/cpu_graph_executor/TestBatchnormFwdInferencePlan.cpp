@@ -5,31 +5,32 @@
 
 #include "BatchnormGraphUtils.hpp"
 #include "BatchnormTensorBundles.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerancesBatchNorm.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferencePlan.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
 class TestBatchnormFwdPlan : public ::testing::Test
 {
 protected:
-    static void initTensorValues(hipdnn_data_sdk::data_objects::TensorAttributesT& tensorAttr,
-                                 DataType dataType,
-                                 const std::vector<int64_t>& dims,
-                                 const std::vector<int64_t>& strides,
-                                 int64_t uid)
+    static void
+        initTensorValues(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorAttr,
+                         DataType dataType,
+                         const std::vector<int64_t>& dims,
+                         const std::vector<int64_t>& strides,
+                         int64_t uid)
     {
         tensorAttr.data_type = dataType;
         tensorAttr.dims = dims;
@@ -40,7 +41,10 @@ protected:
 
 TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
-    auto tolerance = batchnorm::getToleranceInference<float>();
+    // Tensor ranges from BatchnormFwdTensorBundle:
+    // x=[0,1], scale=[0,1], bias=[0,1], mean=[0,1], invVar=[1,3]
+    auto tolerance = batchnorm::calculateBatchnormInferenceTolerance<float, float>(
+        0.0, 1.0, 0.0, 1.0, 1.0, 3.0, 0.0, 1.0, 0.0, 1.0);
     const std::vector<int64_t> dims = {6, 3, 32, 32};
     const unsigned int seed = getGlobalTestSeed();
     auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
@@ -49,14 +53,15 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                                  DataType::FLOAT,
                                                  dims,
                                                  TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     BatchnormFwdTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     BatchnormFwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
 
     const auto& attributes
-        = node.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
     BatchnormFwdInferenceParams params(*tensorMap.at(attributes.x_tensor_uid()),
                                        *tensorMap.at(attributes.y_tensor_uid()),
@@ -107,8 +112,9 @@ TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
                                                  DataType::FLOAT,
                                                  dims,
                                                  TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
                                            DataType::FLOAT,
@@ -134,8 +140,9 @@ TEST(TestBatchnormFwdInferencePlanBuilder, IsApplicable)
                                                  DataType::FLOAT,
                                                  dims,
                                                  TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
                                            DataType::FLOAT,

@@ -455,7 +455,7 @@ Tests:
              shipsec1,
              bmwcra_1]
   host_memory_gb: 64
-  device_memory_gb: 32
+  device_memory_gb: 47
 
 - name: spsm_csr_file
   category: stress

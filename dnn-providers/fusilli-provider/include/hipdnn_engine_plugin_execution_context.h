@@ -26,9 +26,19 @@
 
 #include <fusilli.h>
 
+#include <cstdint>
+#include <unordered_map>
+#include <vector>
+
 struct HipdnnEnginePluginExecutionContext {
   // Fusilli graph.
   fusilli::Graph graph;
+
+  // Plugin-specific bytes used to recreate this context. Fusilli does not
+  // currently expose native compiled graph serialization, so the sample payload
+  // stores the original hipDNN operation graph bytes and recompiles them during
+  // deserialization.
+  std::vector<uint8_t> serializedOpGraph;
 
   // Map from hipDNN tensor UID to fusilli::TensorAttrs for graph boundary
   // tensors (inputs and outputs).

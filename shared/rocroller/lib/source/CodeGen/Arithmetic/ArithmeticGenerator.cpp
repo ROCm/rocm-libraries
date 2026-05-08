@@ -206,7 +206,7 @@ namespace rocRoller
         auto dependency = (dst != nullptr && !dst->isSCC()) ? Scheduling::Dependency::SCC
                                                             : Scheduling::Dependency::Count;
 
-        co_yield Instruction(reduce, {wfp}, {wfp, m_context->getExec()}, {}, "")
+        co_yield Instruction(reduce, {wfp}, {wfp, m_context->getEXEC()}, {}, "")
             .lock(Scheduling::Dependency::SCC, "Start Compare writing to non-SCC dest");
 
         if(dependency == Scheduling::Dependency::SCC)

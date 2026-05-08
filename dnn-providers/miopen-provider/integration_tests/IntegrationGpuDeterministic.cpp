@@ -10,12 +10,14 @@
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/BatchnormCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
+#include "../tests/common/TestWorkarounds.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -522,6 +524,11 @@ protected:
         yTensorAttr->set_output(true);
 
         auto result = graphObj.build(_handle);
+        // Inline rather than the IntegrationGraphVerificationHarness hook
+        // pattern: this fixture inherits from a different base
+        // (DeterministicTestBase), so the harness's
+        // shouldSkipOnEngineConfigResult override isn't available here.
+        SKIP_IF_WORKAROUND_ISSUE_6979(result);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
         GraphTensorBundle bundle1;

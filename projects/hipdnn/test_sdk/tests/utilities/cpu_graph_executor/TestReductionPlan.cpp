@@ -6,9 +6,9 @@
 #include "PointwiseGraphUtils.hpp"
 #include "ReductionGraphUtils.hpp"
 #include "ReductionTensorBundles.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceReduction.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
@@ -17,9 +17,9 @@
 using namespace hipdnn_sdk_test_utils;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 
 class TestReductionPlan : public ::testing::Test
@@ -70,7 +70,7 @@ TEST_F(TestReductionPlan, ExecutePlan)
         cpuRefOutputValidation.allClose(directTensorBundle.yTensor, planTensorBundle.yTensor));
 }
 
-TEST_F(TestReductionPlan, NotSetModeThrows)
+TEST_F(TestReductionPlan, NotSetModeFailsSerialization)
 {
     const std::vector<int64_t> xDims = {2, 3, 4, 4};
     const std::vector<int64_t> yDims = {2, 3, 1, 1};
@@ -82,14 +82,8 @@ TEST_F(TestReductionPlan, NotSetModeThrows)
         tensorBundle, DataType::FLOAT, DataType::FLOAT, hipdnn_frontend::ReductionMode::NOT_SET);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
-
-    const ReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> planBuilder;
-    auto plan = planBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
-
-    auto variantPack = std::get<1>(graphTuple);
-    EXPECT_THROW(plan->execute(variantPack), std::invalid_argument);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    EXPECT_FALSE(serErr.is_good());
 }
 
 TEST(TestReductionPlanBuilder, IsApplicable)
@@ -102,9 +96,9 @@ TEST(TestReductionPlanBuilder, IsApplicable)
     auto graphTuple = buildReductionGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-
-    const GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
 
     // Correct case
     const ReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> floatPlanBuilder;
@@ -130,10 +124,11 @@ TEST(TestReductionPlanBuilder, IsApplicable)
                                                         1,
                                                         TensorLayout::NCHW);
 
-    auto flatbufferGraphPointwise
-        = std::get<0>(graphPointwiseTuple)->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapPointwise(flatbufferGraphPointwise.data(),
-                                          flatbufferGraphPointwise.size());
+    auto [serializedGraphPointwise, serErrPointwise]
+        = std::get<0>(graphPointwiseTuple)->to_binary();
+    ASSERT_TRUE(serErrPointwise.is_good()) << serErrPointwise.get_message();
+    const GraphWrapper graphWrapPointwise(serializedGraphPointwise.data(),
+                                          serializedGraphPointwise.size());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrapPointwise.getNode(0),
                                                graphWrapPointwise.getTensorMap()));
 }
@@ -152,9 +147,9 @@ TEST(TestReductionPlanBuilder, BuildNodePlan)
         auto graphTuple = buildReductionGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
         auto& graph = std::get<0>(graphTuple);
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-
-        const GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
         EXPECT_NO_THROW(patient.buildNodePlan(graphWrap, graphWrap.getNode(0)));
     }
 
@@ -171,8 +166,9 @@ TEST(TestReductionPlanBuilder, BuildNodePlan)
                                                    TensorLayout::NCHW);
 
         auto& graph = std::get<0>(graphTuple);
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        const GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
         EXPECT_THROW(patient.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::runtime_error);
     }
 }
@@ -187,9 +183,9 @@ TEST(TestReductionPlanBuilder, PlanConstruction)
     auto graphTuple = buildReductionGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-
-    const GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
 
     const ReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
 

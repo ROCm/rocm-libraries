@@ -68,14 +68,43 @@ typedef enum class _hipblaslt_scaling_format
     Scalar                  = 1,
     Vector                  = 2,
     Block_32_UE8M0          = 3,
+    Block_16_UE8M0          = 4,
+    Block_32_UE4M3          = 5,
+    Block_16_UE4M3          = 6,
+    Block_32_UE5M3          = 7,
+    Block_16_UE5M3          = 8,
     Block_32_UE8M0_32_8_EXT = 1001,
 } hipblaslt_scaling_format;
+
+inline hipDataType scaleDataType(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_16_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return HIP_R_8F_UE8M0;
+    case hipblaslt_scaling_format::Block_32_UE4M3:
+    case hipblaslt_scaling_format::Block_16_UE4M3:
+        return HIP_R_8F_E4M3;
+    case hipblaslt_scaling_format::Block_32_UE5M3:
+    case hipblaslt_scaling_format::Block_16_UE5M3:
+        return static_cast<hipDataType>(HIP_R_8F_E5M3_EXT);
+    default:
+        return HIP_R_8F_UE8M0;
+    }
+}
 
 inline bool isBlockScaling(hipblaslt_scaling_format s)
 {
     switch(s)
     {
     case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_16_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE4M3:
+    case hipblaslt_scaling_format::Block_16_UE4M3:
+    case hipblaslt_scaling_format::Block_32_UE5M3:
+    case hipblaslt_scaling_format::Block_16_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
         return true;
     default:
@@ -88,8 +117,14 @@ inline int blockSize(hipblaslt_scaling_format s)
     switch(s)
     {
     case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE4M3:
+    case hipblaslt_scaling_format::Block_32_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
         return 32;
+    case hipblaslt_scaling_format::Block_16_UE8M0:
+    case hipblaslt_scaling_format::Block_16_UE4M3:
+    case hipblaslt_scaling_format::Block_16_UE5M3:
+        return 16;
     default:
         return 1;
     }
@@ -132,25 +167,21 @@ inline std::vector<size_t> preTileSizeForScaleB(hipblaslt_scaling_format s)
     }
 }
 
-// Compute scale buffer size accounting for padding by preSwizzleScalesGFX950.
+// Compute scale buffer size with padding for block-scaled MX formats.
 // dataRow, dataCol are the raw data matrix dimensions (A_row/A_col or B_row/B_col).
-// When pre-swizzle is active, the output may be larger than the unpadded size
-// because rows are padded to a multiple of 32 and cols to a multiple of 8.
+// Scale dimensions are padded to ensure kernels that process data in 32-element (M/N)
+// or 256-element (K) blocks always have valid scale entries:
+//   scaleRows = ceil(dataRow / blockSize) rounded up to multiple of 8
+//   scaleCols = dataCol rounded up to multiple of 32
+// When pre-swizzle is active, additional layout requirements may apply but are
+// already satisfied by the rounding above.
 inline size_t scaleBufferSize(int64_t dataRow, int64_t dataCol, hipblaslt_scaling_format s)
 {
     auto   bs        = blockSize(s);
-    size_t scaleRows = dataRow / bs;
-    size_t scaleCols = dataCol;
+    size_t scaleRows = ((dataRow + bs - 1) / bs + 7) / 8 * 8;
+    size_t scaleCols = ((dataCol + 31) / 32) * 32;
 
-    auto preSwizzle = preSwizzleSizeForScale(s);
-    if(preSwizzle.empty())
-        return scaleRows * scaleCols;
-
-    // preSwizzleScalesGFX950 is called with {scaleCols, scaleRows}.
-    // It pads numRows (=scaleCols) to multiple of 32, numCols (=scaleRows) to multiple of 8.
-    size_t paddedNumRows = ((scaleCols + 31) / 32) * 32;
-    size_t paddedNumCols = ((scaleRows + 7) / 8) * 8;
-    return paddedNumRows * paddedNumCols;
+    return scaleRows * scaleCols;
 }
 
 inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,

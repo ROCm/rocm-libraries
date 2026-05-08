@@ -239,42 +239,10 @@ static inline auto to_string(const std::size_t& v) { return std::to_string(v); }
 /// of code between different COMgr versions.
 ///
 /// \todo Request comgr to expose this stuff via API.
-static std::string to_string(const amd_comgr_language_t val)
+template <typename T>
+static std::string to_string(const T val)
 {
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_LANGUAGE_NONE,
-                    AMD_COMGR_LANGUAGE_OPENCL_1_2,
-                    AMD_COMGR_LANGUAGE_OPENCL_2_0,
-                    AMD_COMGR_LANGUAGE_HIP);
-    return oss.str();
-}
-
-static std::string to_string(const amd_comgr_data_kind_t val)
-{
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_DATA_KIND_UNDEF,
-                    AMD_COMGR_DATA_KIND_SOURCE,
-                    AMD_COMGR_DATA_KIND_INCLUDE,
-                    AMD_COMGR_DATA_KIND_LOG,
-                    AMD_COMGR_DATA_KIND_EXECUTABLE);
-    return oss.str();
-}
-
-static std::string to_string(const amd_comgr_action_kind_t val)
-{
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS,
-                    AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE,
-                    AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
-                    AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
-                    AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC);
-    return oss.str();
+    return (std::ostringstream() << val).str();
 }
 
 static bool PrintVersionImpl()
@@ -286,11 +254,7 @@ static bool PrintVersionImpl()
     return true;
 }
 
-static void PrintVersion()
-{
-    static const auto once = PrintVersionImpl();
-    std::ignore            = once;
-}
+static void PrintVersion() { std::ignore = PrintVersionImpl(); }
 
 static std::string GetStatusText(const amd_comgr_status_t status, const bool unknown_error = false)
 {

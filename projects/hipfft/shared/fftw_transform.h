@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -122,16 +122,13 @@ using fftw_complex_t = typename fftw_trait<T>::complex_t;
 template <typename T>
 using fftw_real_t = typename fftw_trait<T>::real_t;
 
-// Copies the half-precision input buffer to a single-precision
-// buffer.  Note that the input buffer is already sized like it's a
-// single-precision buffer (but only half of it is filled), because
-// we allocate a single-precision buffer for FFTW to plan with.
+// Copies the half-precision input buffer to a single-precision buffer.
 static hostbuf half_to_single_copy(const hostbuf& in)
 {
-    auto out      = in.copy();
+    hostbuf out;
+    out.alloc(2 * in.size());
     auto in_begin = reinterpret_cast<const rocfft_fp16*>(in.data());
-    std::copy_n(
-        in_begin, in.size() / sizeof(rocfft_fp16) / 2, reinterpret_cast<float*>(out.data()));
+    std::copy_n(in_begin, in.size() / sizeof(rocfft_fp16), reinterpret_cast<float*>(out.data()));
     return out;
 }
 

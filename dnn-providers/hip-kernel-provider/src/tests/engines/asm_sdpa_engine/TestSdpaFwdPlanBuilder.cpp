@@ -3,10 +3,11 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
+#include "GraphTest.hpp"
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
@@ -29,32 +30,16 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
     // Create a batchnorm inference graph - this does not use SDPA attributes
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-struct GraphTest
-{
-    std::shared_ptr<flatbuffers::DetachedBuffer> buffer;
-    std::string message;
-
-    GraphTest(flatbuffers::FlatBufferBuilder&& builder, std::string inMessage)
-        : buffer(std::make_shared<flatbuffers::DetachedBuffer>(builder.Release()))
-        , message(std::move(inMessage))
-    {
-    }
-
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
-    {
-        return hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(buffer->data(), buffer->size());
-    }
-};
-
-auto createSdpaFwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
-                        hipdnn_data_sdk::data_objects::DataType dataType
-                        = hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
+                        const std::vector<int64_t>& vDims = {4, 8, 256, 128},
+                        hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                         bool withAttnMask = false,
                         bool withScale = false,
                         bool withStats = false,
@@ -62,58 +47,81 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
                         bool paddingMask = false,
                         bool causalMask = false)
 {
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
-                                                               strides,
-                                                               dims,
-                                                               strides,
-                                                               dims,
-                                                               strides,
-                                                               dims,
-                                                               strides,
-                                                               dataType,
-                                                               withAttnMask,
-                                                               withScale,
-                                                               withStats,
-                                                               alibiMask,
-                                                               paddingMask,
-                                                               causalMask);
+    if(qDims.size() != 4 || vDims.size() != 4)
+    {
+        throw std::runtime_error("Q, K and V tensors must have a dimension of 4");
+    }
+    std::vector<int64_t> kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
+    std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims,
+        hipdnn_data_sdk::utilities::generateStrides(qDims),
+        kDims,
+        hipdnn_data_sdk::utilities::generateStrides(kDims),
+        vDims,
+        hipdnn_data_sdk::utilities::generateStrides(vDims),
+        oDims,
+        hipdnn_data_sdk::utilities::generateStrides(oDims),
+        dataType,
+        withAttnMask,
+        withScale,
+        withStats,
+        alibiMask,
+        paddingMask,
+        causalMask);
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    std::string deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }
 
-    std::vector<std::pair<GraphTest, bool>> applicabilityTests
-        = {{GraphTest{createSdpaFwdGraph(), "Valid test"}, true},
-           {GraphTest{createSdpaFwdGraph({4, 8, 256, 100}), "Final dimension not 128"}, false},
-           {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, DataType::HALF),
-                      "Half precision tensor data type"},
-            false},
-           {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, true),
-                      "attn_mask = true"},
-            false},
-           {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, false, true),
-                      "scale = true"},
-            true},
-           {GraphTest{
-                createSdpaFwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, true),
-                "alibi_mask = true"},
-            false},
-           {GraphTest{createSdpaFwdGraph(
-                          {4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, false, true),
-                      "padding_mask = true"},
-            false},
-           {GraphTest{
-                createSdpaFwdGraph(
-                    {4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, false, false, true),
-                "causal_mask = true"},
-            false}};
+    std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+        {GraphTest{createSdpaFwdGraph(), "Valid test with q head dim 128"}, true},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 192}), "Valid test with q head dim 192"}, true},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 100}), "Final dimension not 128"}, false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, {4, 8, 256, 128}, DataType::HALF),
+                   "Half precision tensor data type"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, {4, 8, 256, 128}, DataType::BFLOAT16, true),
+                   "attn_mask = true"},
+         false},
+        {GraphTest{createSdpaFwdGraph(
+                       {4, 8, 256, 128}, {4, 8, 256, 128}, DataType::BFLOAT16, false, true),
+                   "scale = true"},
+         true},
+        {GraphTest{
+             createSdpaFwdGraph(
+                 {4, 8, 256, 128}, {4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, true),
+             "alibi_mask = true"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      false,
+                                      true,
+                                      false,
+                                      false,
+                                      true),
+                   "padding_mask = true"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      false,
+                                      true,
+                                      false,
+                                      false,
+                                      false,
+                                      true),
+                   "causal_mask = true"},
+         false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
     {
@@ -127,8 +135,8 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
     // Create an SDPA graph with known dimensions (withStats = false by default)
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
 
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the workspace size from the plan builder
     HipKernelSettings settings;

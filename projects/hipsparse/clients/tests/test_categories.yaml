@@ -1,0 +1,102 @@
+# ########################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+# hipSPARSE Test Categories Configuration
+# Organizes GTest suites into CTest categories for CI/CD pipeline efficiency.
+#
+# The hipsparse-test binary uses INSTANTIATE_TEST_SUITE_P with category prefixes:
+#   quick/testclass.category/suffix
+#   pre_checkin/testclass.category/suffix
+#   nightly/testclass.category/suffix
+#   stress/testclass.category/suffix
+#   known_bug/testclass.category/suffix
+
+test_categories:
+  quick:
+    description: "Fast sanity checks (target: < 5 min)"
+    test_patterns:
+      - "quick/*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "quick"
+      - "pre-commit"
+
+  standard:
+    description: "Pre-checkin validation (target: < 30 min)"
+    test_patterns:
+      - "quick/*"
+      - "pre_checkin/*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "standard"
+      - "pr"
+
+  comprehensive:
+    description: "Nightly comprehensive tests (target: < 4 hours)"
+    test_patterns:
+      - "quick/*"
+      - "pre_checkin/*"
+      - "nightly/*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+
+  full:
+    description: "Test full suite including stress tests"
+    test_patterns:
+      - "quick/*"
+      - "pre_checkin/*"
+      - "nightly/*"
+      - "stress/*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "full"
+      - "weekly"
+
+# GPU-specific CTest suites (hipsparse-test_{category}_gfx1151_suite) exclude f64 real/complex
+# parameterized tests on Strix Halo (gfx1151). Run those *_gfx1151_* tests on that hardware;
+# other GPUs use the standard category suites without these exclusions.
+exclude_gpu:
+  exclude_gpu_gfx1151:
+    test_patterns:
+      - "*f64_r*"
+      - "*f64_c*"
+    labels:
+      - quick
+      - standard
+      - comprehensive
+      - full
+      - ex_gpu_gfx1151
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300
+    standard: 1800
+    comprehensive: 14400
+    full: 28800

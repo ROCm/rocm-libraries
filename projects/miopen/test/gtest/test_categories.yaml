@@ -347,7 +347,7 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "*GPU_Dropout_FP16*"
   - "*GPU_GroupConv3D_BackwardData_FP16.GroupConv3D_BackwardData_half_Test*"
   - "*GPU_GroupConv3D_BackwardData_BFP16.GroupConv3D_BackwardData_bfloat16_Test*"
-  - "*GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_BFP16.ConvHipImplicitGemmGroupWrwXdlops*"
+  - "*GPU_UnitTestConvSolverImplicitGemmGroup*" # issue: ALMIOPEN-1841
   - "Smoke/GPU_MultiMarginLoss*"
   - "*CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_FP16.ConvHipImplicitGemmGroupWrwXdlops*"
   # Slow tests to exclude (from #3362)
@@ -400,6 +400,16 @@ exclude_gpu:
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx950"
+
+  exclude_gpu_gfx94X:
+    test_patterns:
+      - "*GPU_GetitemBwd_FP32*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx94X"
 
 execution_settings:
   default_timeout: 300  # 5 minutes per test

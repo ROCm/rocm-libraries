@@ -289,11 +289,7 @@ namespace hipdnn_frontend::detail
     return {{}, std::move(knob)};
 }
 
-/// Unpacks knob info descriptors from a backend engine descriptor via the
-/// C-API descriptor path (HIPDNN_ATTR_ENGINE_KNOB_INFO as descriptors).
-///
-/// This is the C-API-based alternative to the flatbuffer path used by
-/// getKnobsForEngine() in Knob.hpp.
+/// Unpacks knob descriptors from a backend engine descriptor into Knob objects.
 ///
 /// @param engineDesc A finalized engine backend descriptor
 /// @param outKnobs Output vector of Knob objects

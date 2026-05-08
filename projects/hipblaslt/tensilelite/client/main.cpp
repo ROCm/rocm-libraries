@@ -61,6 +61,7 @@
 #include "Profiler.hpp"
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <fstream>
@@ -210,10 +211,16 @@ namespace TensileLite
                 ("amaxD-type",               po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "amaxD data type")
                 ("alpha-type",               po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "alpha data type")
                 ("beta-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "beta data type")
-                ("compute-input-type",       po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "compute input data type")
+                ("compute-input-type-A",     po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "compute input data type A")
+                ("compute-input-type-B",     po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "compute input data type B")
                 ("f32-xdl-math-op",          po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Use xf32 compute for float input and output matrices.")
+                ("mx-a-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix A")
+                ("mx-b-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix B")
+                ("mx-a-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix A")
+                ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
+                ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
                 ("sparse",                   po::value<int>()->default_value(0), "A or B matrix is sparse matrix.")
@@ -237,6 +244,8 @@ namespace TensileLite
                 ("init-scaleC",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleC")
                 ("init-scaleD",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleD")
                 ("init-scaleAlphaVec",       po::value<InitMode>()->default_value(InitMode::One), "Initialization for scaleAlphaVec")
+                ("init-mx-a",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for A")
+                ("init-mx-b",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for B")
                 ("pristine-on-gpu",          po::value<bool>()->default_value(true), "Keep a pristine copy of inputs on GPU for performance")
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
                 ("offset-a",                 po::value<size_t>()->default_value(0), "buffer a start offset")
@@ -374,6 +383,7 @@ namespace TensileLite
                 ("output-amaxD",              po::value<bool>()->default_value(false), "Output AmaxD.")
                 ("timing-instrumentation",    po::value<bool>()->default_value(false)->implicit_value(true), "Enable detailed timing instrumentation output to stderr.")
                 ("rocprof-counter",           vector_default_empty<std::string>(), "Rocprof counters.")
+                ("metadata-layout",           po::value<int32_t>()->default_value(0), "Sparse Metadata Layout")
                 ;
             // clang-format on
 
@@ -1071,7 +1081,7 @@ int main(int argc, const char* argv[])
                 size_t warmupInvocations    = listeners.numWarmupRuns();
                 size_t syncs                = listeners.numSyncs();
                 size_t enq                  = listeners.numEnqueuesPerSync();
-                size_t maxRotatingBufferNum = max(warmupInvocations, syncs * enq);
+                size_t maxRotatingBufferNum = std::max(warmupInvocations, syncs * enq);
 
                 std::vector<std::shared_ptr<ProblemInputs>> inputArr;
                 {
