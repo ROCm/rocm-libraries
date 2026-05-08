@@ -126,7 +126,7 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(
 //------------------------------------------------------------------------------
 // Reduces A to Aband with bandwidth kd, using outer block size nb.
 // Householder vectors overwrite A below bandwidth, with associated tau.
-// T, U, V, W, Z are workspaces.
+// D, V, W, X, Z are workspaces.
 template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_template(
     rocblas_handle handle,
