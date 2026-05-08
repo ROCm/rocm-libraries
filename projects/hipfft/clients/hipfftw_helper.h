@@ -2111,6 +2111,37 @@ public:
                       == default_distances(
                           dft_kind, plan_placement, fft_io::fft_io_out, lengths, batches);
     }
+
+    operator fft_params() const
+    {
+        fft_params ret;
+        ret.length         = convert_vector_to<decltype(ret.length)::value_type>(lengths);
+        ret.precision      = prec;
+        ret.placement      = plan_placement;
+        ret.transform_type = dft_kind;
+        if(batch_rank != 1 || batches[0] < 0)
+            throw std::runtime_error(
+                "Conversion to fft_params impossible for batch_rank != 1 or negative batch sizes");
+        ret.nbatch        = batches[0];
+        ret.run_callbacks = false;
+        ret.scale_factor  = 1.0;
+        ret.istride       = convert_vector_to<decltype(ret.istride)::value_type>(istrides);
+        ret.ostride       = convert_vector_to<decltype(ret.ostride)::value_type>(ostrides);
+        if(idist[0] < 0 || odist[0] < 0)
+            throw std::runtime_error("Conversion to fft_params impossible for negative distances");
+        ret.idist = idist[0];
+        ret.odist = odist[0];
+        ret.validate(); // sets itype, otype, isize, osize, etc. from the above
+        // other ret's members should be irrelevant/fine with default values
+        return ret;
+    }
+
+    fft_params make_params_for_reference_cpu() const
+    {
+        fft_params converted = *this;
+        return converted.make_params_for_reference_cpu();
+    }
+
     // public ad-hoc exceptions, specific to hipfftw_helper
     struct type_conversion_exception : std::runtime_error
     {
