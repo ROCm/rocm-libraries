@@ -734,6 +734,12 @@ class Solution(collections.abc.Mapping):
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
 
+    # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
+    if state["ISA"] == (12, 5, 0):
+      if ((state["LdsBlockSizePerPadMXSA"] > 0) or (state["LdsBlockSizePerPadMXSB"] > 0 )):
+        reject(state, "LdsBlockSizePerPadMXSA/LdsBlockSizePerPadMXSB support -1 and 0 for gfx1250")
+        return
+
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 
@@ -1842,6 +1848,7 @@ class Solution(collections.abc.Mapping):
         and (sizeDataTypeA == sizeDataType) and (sizeDataTypeB == sizeDataType)
         and ((TLUA == False or state["enableLDSTrA"] or sizeDataTypeA >= 4) and (TLUB == False or state["enableLDSTrB"] or sizeDataTypeB >= 4) )
         and (not state["ProblemType"]["Sparse"] or state["TransposeLDSMetadata"])
+        and not state["TDMInst"]
       )
 
     def _applySubIterSetting(enable):
@@ -2014,15 +2021,6 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
       return
 
-    if tdmInst > 0:
-      # TODO: remove this restriction when PGR=2 is fully supported
-      # if state["PrefetchGlobalRead"] > 1:
-      #   reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
-      #   return
-
-      if (state["ProblemType"]["TransposeA"], state["ProblemType"]["TransposeB"]) != (True, False):
-        reject(state, printRejectionReason, "Currently TDM only supports TN")
-
     # DepthU == -1?
     if state["DepthU"] == -1:
       depthuList = [1024,512,256,128,64,32,16]
@@ -2185,10 +2183,12 @@ class Solution(collections.abc.Mapping):
       return 2
 
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
+
     # Some restrictions for float4 and 6bitFloat:
     # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
-    if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" \
-      and (state["ProblemType"]["DataType"].isFloat4() or state["ProblemType"]["DataType"].is6bitFloat()):
+    isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
+    isFloat6 = state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat()
+    if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" and (isFloat4 or isFloat6):
       if state["ProblemType"]["MacDataTypeA"].isFloat4() or state["ProblemType"]["MacDataTypeB"].isFloat4():
         if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSA == False")
@@ -2469,7 +2469,10 @@ class Solution(collections.abc.Mapping):
         multiple = 256 if isa[:2] == (12, 5) else 128
         if LdsBlockSizePerPad == -1:
           vw = state["VectorWidthA"] if "A" in tc else state["VectorWidthB"]
-          LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * bpe * vw), multiple)
+          if state["ISA"] == (12, 5, 0):
+            LdsBlockSizePerPad = 0
+          else:
+            LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * bpe * vw), multiple)
         return LdsBlockSizePerPad
 
       def getLdsBpe(tc: str) -> float:
@@ -4585,6 +4588,8 @@ class Solution(collections.abc.Mapping):
     # If GLVW==1 or Assert*ElementMultiple for the coalesced dim is > GRVW, then shifting is not
     # necessary and the shift/unshift code will not be generated
     state["EdgeType"] = "ShiftPtr" # Use ShiftPtr by default
+    if state["enableTDMA"] and state["enableTDMB"]:
+      state["EdgeType"] = "None"
 
     # Precise bounds check uses the "num_records" field in the buffer to
     # precisely detect when we are inbounds or not.  Only a one-dimensional

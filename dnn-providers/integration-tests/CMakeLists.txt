@@ -128,6 +128,7 @@ target_include_directories(${INTEGRATION_TESTS_EXE} SYSTEM PRIVATE
 target_link_libraries(${INTEGRATION_TESTS_EXE}
     PRIVATE
         hip::host
+        hipdnn_gpu_ref
         hipdnn_test_sdk
         hipdnn_plugin_sdk
         GTest::gtest
