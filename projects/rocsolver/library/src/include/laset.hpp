@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 
 #include <hip/hip_runtime.h>
@@ -165,7 +166,7 @@ inline void laset(rocblas_handle handle,
     I const nbz = std::min(max_blocks, batch_count);
 
     laset_kernel<T, I, Istride, UA>
-        <<<dim3(nbx, nby, nbx), dim3(nx, ny, 1), 0, stream>>>(uplo_c, m, n, alpha, beta,
+        <<<dim3(nbx, nby, nbz), dim3(nx, ny, 1), 0, stream>>>(uplo_c, m, n, alpha, beta,
 
                                                               A_, shiftA, lda, strideA,
 
