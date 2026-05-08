@@ -381,7 +381,7 @@ size_t grid_k_split_aware(const problem_t& problem,
         continue;
 
       // Skip grids whose per-CTA k-iter fragment crosses a cache line boundary
-      if (causes_partial_cachelines(frac_grid)) 
+      if (causes_partial_cachelines(frac_grid))
         continue;
 
       if (frac_grid <= virt_cu_count) {
