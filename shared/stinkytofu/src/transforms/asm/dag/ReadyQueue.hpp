@@ -242,10 +242,7 @@ struct MFMAIssueConfig {
 };
 
 struct WMMAIssueConfig {
-    int latency = 0;                // original mfma latency
-    int avgIssueInterval = 0;       // average issue interval for mfma
-    int totalIssuedCycles = 0;      // total issued cycles in the region
-    int totalWmmaIssuedCycles = 0;  // total wmma issued cycles in the region
-    int issuedCount = 0;            // total wmma issued count in the region
+    int latency = 0;      // WMMA latencyCycles (for barrier threshold math)
+    int issuedCount = 0;  // WMMA count in region (for barrier threshold math)
 };
 }  // namespace
