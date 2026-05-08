@@ -690,11 +690,15 @@ class TestMultiWriteProducer:
         # the future MFMA-acc-write / VAddCO-dst+VCC cases.)
         wreg_a = vgpr(8, 4)
         wreg_b = vgpr(12, 4)
-        # Per-byte latest-writer map: v8..v11 from wreg_a, v12..v15 from wreg_b.
+        # Per-byte latest-writer map: v8..v11 from wreg_a (write-slot 0),
+        # v12..v15 from wreg_b (write-slot 1). The third tuple element is
+        # the producer's positional write-slot (rocm-libraries-wx9.3
+        # phase 3, memo §6.1 step 1) — threaded through the resolver into
+        # the cross-graph edge identity via `DataflowEdge.src_operand_slot`.
         latest_writer = {}
         for i in range(4):
-            latest_writer[("v", 8 + i)] = (producer, wreg_a)
-            latest_writer[("v", 12 + i)] = (producer, wreg_b)
+            latest_writer[("v", 8 + i)] = (producer, wreg_a, 0)
+            latest_writer[("v", 12 + i)] = (producer, wreg_b, 1)
 
         # Consumer reads v[8:15] — overlaps both writes.
         read_reg = vgpr(8, 8)
@@ -702,17 +706,30 @@ class TestMultiWriteProducer:
             read_reg, consumer, latest_writer,
         ))
 
-        # Should yield TWO pairs, both attributing to `producer` but with
-        # different overlap registers (v[8:11] and v[12:15]).
+        # Should yield TWO 4-tuples, both attributing to `producer` but with
+        # different overlap registers (v[8:11] and v[12:15]) and different
+        # write-slots (0 and 1). Per rocm-libraries-wx9.3 phase 3, the
+        # resolver yields
+        # `(producer, overlap, intra_operand_byte_offsets, src_operand_slot)`.
         assert len(results) == 2, (
             f"multi-write producer should yield one edge per overlapping "
-            f"write; got {len(results)} pair(s)"
+            f"write; got {len(results)} 4-tuple(s)"
         )
-        assert all(p is producer for p, _ in results)
-        overlap_starts = sorted(reg.regIdx for _, reg in results)
+        assert all(p is producer for p, _, _, _ in results)
+        overlap_starts = sorted(reg.regIdx for _, reg, _, _ in results)
         assert overlap_starts == [8, 12]
-        overlap_widths = sorted(reg.regNum for _, reg in results)
+        overlap_widths = sorted(reg.regNum for _, reg, _, _ in results)
         assert overlap_widths == [4, 4]
+        # Intra-operand offsets within the v[8:15] consumer read:
+        # bytes 0..3 satisfied by wreg_a (v[8:11]), bytes 4..7 by wreg_b.
+        offsets_by_start = {reg.regIdx: offs for _, reg, offs, _ in results}
+        assert offsets_by_start[8] == (0, 1, 2, 3)
+        assert offsets_by_start[12] == (4, 5, 6, 7)
+        # Producer's write-slot rides alongside each yielded edge: wreg_a
+        # was published at write-slot 0, wreg_b at write-slot 1.
+        slots_by_start = {reg.regIdx: slot for _, reg, _, slot in results}
+        assert slots_by_start[8] == 0
+        assert slots_by_start[12] == 1
 
     def test_multi_write_producer_only_one_overlap_yields_one_edge(self):
         """Producer writes v[8:11] AND v[100:103]. Consumer reads v[8:9].
@@ -736,14 +753,16 @@ class TestMultiWriteProducer:
             body_label=BODY_LABEL_ML, name="narrow-read-MFMA",
         )
 
-        # Per-byte map: v8..v11 from wreg_a; v100..v103 from wreg_b.
-        # Consumer reads v8..v9 — only v8/v9 are in latest_writer for the read.
+        # Per-byte map: v8..v11 from wreg_a (write-slot 0); v100..v103 from
+        # wreg_b (write-slot 1). Consumer reads v8..v9 — only v8/v9 are in
+        # latest_writer for the read. The third tuple element is the
+        # producer's positional write-slot (rocm-libraries-wx9.3 phase 3).
         wreg_a = vgpr(8, 4)
         wreg_b = vgpr(100, 4)
         latest_writer = {}
         for i in range(4):
-            latest_writer[("v", 8 + i)] = (producer, wreg_a)
-            latest_writer[("v", 100 + i)] = (producer, wreg_b)
+            latest_writer[("v", 8 + i)] = (producer, wreg_a, 0)
+            latest_writer[("v", 100 + i)] = (producer, wreg_b, 1)
 
         results = list(_resolve_producers(
             vgpr(8, 2), consumer, latest_writer,
@@ -751,6 +770,11 @@ class TestMultiWriteProducer:
         assert len(results) == 1
         assert results[0][1].regIdx == 8
         assert results[0][1].regNum == 2  # intersection of v[8:11] and v[8:9]
+        # Intra-operand offsets within the consumer's 2-byte read: 0 and 1.
+        assert results[0][2] == (0, 1)
+        # Write-slot rides through the yield (wreg_a was published at
+        # write-slot 0).
+        assert results[0][3] == 0
 
 
 # =============================================================================

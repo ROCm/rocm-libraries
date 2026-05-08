@@ -157,12 +157,23 @@ class WrappedInstruction:
     `__str__` delegates to the underlying instance so `_canonical_render`
     sees the same render-string whether or not the inst is wrapped.
     """
-    __slots__ = ("_rocisa_inst", "reads", "writes")
+    __slots__ = ("_rocisa_inst", "reads", "writes",
+                 "read_slots", "write_slots")
 
     def __init__(self, rocisa_inst):
         self._rocisa_inst = rocisa_inst
         self.reads = ()
         self.writes = ()
+        # Positional operand-slot indices, parallel to `reads` / `writes`.
+        # Each slot is the 0-based position of the operand in the producing
+        # rocisa instruction's per-side accessor (`getDstParams()` for
+        # writes, `getSrcParams()` for reads). Allocation-invariant by
+        # construction (small integer, not a register reference).
+        # Threaded into the cross-graph edge-identity tuple via
+        # `DataflowEdge.src_operand_slot` / `sink_operand_slot` (see
+        # rocm-libraries-wx9.3 phase 3, memo §6.1 step 1).
+        self.read_slots = ()
+        self.write_slots = ()
 
     @property
     def rocisa_inst(self):
@@ -191,6 +202,8 @@ class WrappedInstruction:
         new = WrappedInstruction(deepcopy(self._rocisa_inst, memo))
         new.reads = deepcopy(self.reads, memo)
         new.writes = deepcopy(self.writes, memo)
+        new.read_slots = self.read_slots
+        new.write_slots = self.write_slots
         memo[id(self)] = new
         return new
 
@@ -198,6 +211,8 @@ class WrappedInstruction:
         new = WrappedInstruction(self._rocisa_inst)
         new.reads = self.reads
         new.writes = self.writes
+        new.read_slots = self.read_slots
+        new.write_slots = self.write_slots
         return new
 
 
@@ -1085,38 +1100,64 @@ def _byte_keys_for_resource(resource, name_to_idx=None):
     return tuple((rt, name, base + i) for i in range(count))
 
 
-def _resolve_producers(read_resource: Any, consumer: GraphNode, latest_writer: Dict[Any, Tuple[GraphNode, Any]], name_to_idx=None):
-    """Yield (producer_node, overlap) pairs for `consumer`'s read of `read_resource`.
+def _resolve_producers(read_resource: Any, consumer: GraphNode, latest_writer: Dict[Any, Tuple[GraphNode, Any, int]], name_to_idx=None):
+    """Yield (producer_node, overlap, intra_operand_byte_offsets,
+    src_operand_slot) tuples for `consumer`'s read of `read_resource`.
 
     `latest_writer` is the per-byte map maintained by build_dataflow_graph
-    Phase 2: byte_key -> (writer_node, write_resource). For each byte the
-    read covers, look up the latest writer; group bytes by
-    (writer_node, write_resource) so distinct writes (e.g., a multi-write
-    producer feeding a wide read) each emit one edge.
+    Phase 2: byte_key -> (writer_node, write_resource, write_slot). For
+    each byte the read covers, look up the latest writer; group bytes by
+    (writer_node, write_resource, write_slot) so distinct writes (e.g., a
+    multi-write producer feeding a wide read) each emit one edge — and
+    so a writer that emitted the SAME register from two different
+    positional slots (the symmetric VSwap case: dst at slot 0, src at
+    slot 1, both naming the same physical reg in the swap-with-self
+    edge) yields two distinct producer entries.
 
     The yielded `overlap` is the intersection of read_resource with the
     writer's actual write_resource — same precision the old resolver
-    yielded, so diagnostic formatters and edge-set dedup still work.
+    yielded, so diagnostic formatters still work.
+
+    The yielded `intra_operand_byte_offsets` is the sorted tuple of byte
+    POSITIONS WITHIN `read_resource` (0..N-1) that this writer satisfies.
+    Allocation-invariant by construction: the position is relative to the
+    read operand's start, not an absolute physical-register byte-key.
+
+    The yielded `src_operand_slot` is the writer's POSITIONAL operand
+    index — the slot at which the producer's `getDstParams()` (or
+    legacy positional emit) emitted this write. Allocation-invariant by
+    construction (small integer, not a register reference). This — paired
+    with the consumer's read-side slot, threaded into the cross-graph
+    edge identity by `build_dataflow_graph` — is what makes a within-
+    graph reorder of two instructions sharing a register detectable
+    while keeping across-graph register-renames equal. See
+    `DataflowEdge.src_operand_slot` / `sink_operand_slot` and
+    rocm-libraries-wx9.3 phase 3, memo §6.1 step 1.
 
     `name_to_idx` is forwarded to `_byte_keys_for_resource` so symbolic
     reads resolve to the same numeric byte-keys as the corresponding
     numeric writes (and vice-versa); see `_byte_keys_for_resource` for
     semantics.
     """
-    writer_groups = {}  # (id(writer), id(write_res)) -> (writer_node, write_res)
-    for bk in _byte_keys_for_resource(read_resource, name_to_idx=name_to_idx):
+    # Group key includes write_slot so a producer that wrote the SAME
+    # physical register from two distinct positional slots yields two
+    # producer entries (carries the slot through the edge identity).
+    writer_groups = {}
+    for i, bk in enumerate(_byte_keys_for_resource(read_resource, name_to_idx=name_to_idx)):
         entry = latest_writer.get(bk)
         if entry is None:
             continue
-        writer_node, write_res = entry
-        key = (id(writer_node), id(write_res))
+        writer_node, write_res, write_slot = entry
+        key = (id(writer_node), id(write_res), write_slot)
         if key not in writer_groups:
-            writer_groups[key] = (writer_node, write_res)
+            writer_groups[key] = (writer_node, write_res, write_slot, [i])
+        else:
+            writer_groups[key][3].append(i)
 
-    for writer_node, write_res in writer_groups.values():
+    for writer_node, write_res, write_slot, offsets in writer_groups.values():
         overlap = _intersection(read_resource, write_res)
         if overlap is not None:
-            yield (writer_node, overlap)
+            yield (writer_node, overlap, tuple(offsets), write_slot)
 
 
 # _identity_for moved to CMSValidator.py in br4.6.
@@ -1167,16 +1208,43 @@ def _operands_via_accessors(inst):
     `_GenericALURule`. Returns `((), ())` if the instance lacks either
     accessor (e.g. a stray non-rocisa duck-typed object).
     """
+    reads, _, writes, _ = _operands_with_slots(inst)
+    return reads, writes
+
+
+def _operands_with_slots(inst):
+    """Return `(reads, read_slots, writes, write_slots)` from
+    `inst.getSrcParams()` / `inst.getDstParams()` filtered through
+    `Register.is_register`.
+
+    The slot index is the 0-based POSITION of the operand within the
+    per-side accessor (`getSrcParams()` for reads, `getDstParams()` for
+    writes). Slots are preserved through `Register.is_register` filtering
+    so non-register positional params (modifiers, ints, None) cause holes
+    in the slot sequence rather than re-indexing — that preserves the
+    positional contract the cross-graph edge identity depends on
+    (rocm-libraries-wx9.3 phase 3, memo §6.1 step 1).
+
+    Convention: for `MFMA(acc, a, b, [acc2])`, write-slot 0 = acc,
+    read-slot 0 = a, read-slot 1 = b, read-slot 2 = acc2. For
+    `VSwap(dst, src)` (symmetric R+W), write-slot 0 = dst, write-slot 1 =
+    src, read-slot 0 = dst, read-slot 1 = src — same operand has the
+    same slot on both sides because `getDstParams() == getSrcParams()`.
+    """
     if not (hasattr(inst, "getSrcParams") and hasattr(inst, "getDstParams")):
-        return (), ()
+        return (), (), (), ()
     try:
         srcs = inst.getSrcParams()
         dsts = inst.getDstParams()
     except Exception:
-        return (), ()
-    reads = tuple(r for r in srcs if Register.is_register(r))
-    writes = tuple(w for w in dsts if Register.is_register(w))
-    return reads, writes
+        return (), (), (), ()
+    read_pairs = [(i, r) for i, r in enumerate(srcs) if Register.is_register(r)]
+    write_pairs = [(i, w) for i, w in enumerate(dsts) if Register.is_register(w)]
+    reads = tuple(r for _, r in read_pairs)
+    read_slots = tuple(i for i, _ in read_pairs)
+    writes = tuple(w for _, w in write_pairs)
+    write_slots = tuple(i for i, _ in write_pairs)
+    return reads, read_slots, writes, write_slots
 
 
 class _DSLoadRule:
@@ -1185,7 +1253,7 @@ class _DSLoadRule:
     """
     def applies(self, inst, category=None): return _is_lr(inst)
     def extract(self, inst, category=None):
-        return _operands_via_accessors(inst)
+        return _operands_with_slots(inst)
 
 
 class _DSStoreRule:
@@ -1194,7 +1262,7 @@ class _DSStoreRule:
     """
     def applies(self, inst, category=None): return _is_lw(inst)
     def extract(self, inst, category=None):
-        return _operands_via_accessors(inst)
+        return _operands_with_slots(inst)
 
 
 class _BufferLoadRule:
@@ -1220,16 +1288,22 @@ class _BufferLoadRule:
     def applies(self, inst, category=None):
         return _is_gr(inst)
     def extract(self, inst, category=None):
-        reads, writes = _operands_via_accessors(inst)
+        reads, read_slots, writes, write_slots = _operands_with_slots(inst)
         # DTL-mode loads (dst=None, mubuf->lds=True) implicitly read m0.
         # `is_dtl` is set in the rocisa MUBUFReadInstruction constructor
         # from `mubuf->lds`. All instances reaching this point are real
         # rocisa BufferLoad subclasses (test fixtures construct real
         # BufferLoadB128 too).
+        # The implicit m0 read gets a synthetic slot index past the last
+        # explicit src slot — preserves slot uniqueness within the
+        # instruction's read sequence without overlapping any positional
+        # accessor index.
         if inst.is_dtl:
             from rocisa.instruction import m0_resource
+            implicit_slot = (max(read_slots) + 1) if read_slots else 0
             reads = reads + (m0_resource(),)
-        return reads, writes
+            read_slots = read_slots + (implicit_slot,)
+        return reads, read_slots, writes, write_slots
 
 
 class _MFMARule:
@@ -1259,7 +1333,7 @@ class _MFMARule:
         return True
 
     def extract(self, inst, category=None):
-        return _operands_via_accessors(inst)
+        return _operands_with_slots(inst)
 
 
 class _NoDataflowRule:
@@ -1281,7 +1355,7 @@ class _NoDataflowRule:
             or _is_ssetprio(inst)
         )
     def extract(self, inst, category=None):
-        return (), ()
+        return (), (), (), ()
 
 
 class _VSwapRule:
@@ -1325,7 +1399,7 @@ class _VSwapRule:
         return type(inst).__name__.startswith("VSwap")
 
     def extract(self, inst, category=None):
-        return _operands_via_accessors(inst)
+        return _operands_with_slots(inst)
 
 
 # =============================================================================
@@ -1409,27 +1483,44 @@ class _SCCRule:
         # those the entire param list is reads. Branch instructions have
         # no `dst` attribute at all and getParams() returns the label
         # string only — also no register dst, no register srcs.
+        # Slot indices are positional within `params` (preserved through
+        # the Register.is_register filter so non-register positional args
+        # leave holes rather than re-pack).
         has_dst = getattr(inst, "dst", None) is not None
         if not has_dst:
-            reg_reads = tuple(p for p in params if Register.is_register(p))
-            reg_writes = ()
+            read_pairs = [(i, p) for i, p in enumerate(params)
+                          if Register.is_register(p)]
+            write_pairs = []
         else:
+            write_pairs = []
             if params and Register.is_register(params[0]):
-                reg_writes = (params[0],)
-                reg_reads = tuple(p for p in params[1:] if Register.is_register(p))
+                write_pairs.append((0, params[0]))
+                read_pairs = [(i + 1, p)
+                              for i, p in enumerate(params[1:])
+                              if Register.is_register(p)]
             else:
-                reg_writes = ()
-                reg_reads = tuple(p for p in params if Register.is_register(p))
+                read_pairs = [(i, p) for i, p in enumerate(params)
+                              if Register.is_register(p)]
+
+        reg_reads = tuple(p for _, p in read_pairs)
+        read_slots = tuple(i for i, _ in read_pairs)
+        reg_writes = tuple(p for _, p in write_pairs)
+        write_slots = tuple(i for i, _ in write_pairs)
 
         # Direct attribute access: only SCC-relevant rocisa instances
         # reach `extract()` (gated by `applies()` above). The flags are
         # bound on every rocisa instruction class in the same bead, so
-        # they're guaranteed to exist here.
+        # they're guaranteed to exist here. Implicit SCC operands get
+        # synthetic slot indices past the explicit positional sequence.
         if inst.reads_scc:
+            scc_slot = (max(read_slots) + 1) if read_slots else 0
             reg_reads = reg_reads + (scc_resource(),)
+            read_slots = read_slots + (scc_slot,)
         if inst.writes_scc:
+            scc_slot = (max(write_slots) + 1) if write_slots else 0
             reg_writes = reg_writes + (scc_resource(),)
-        return reg_reads, reg_writes
+            write_slots = write_slots + (scc_slot,)
+        return reg_reads, read_slots, reg_writes, write_slots
 
 
 class _GenericALURule:
@@ -1518,7 +1609,7 @@ class _GenericALURule:
         return hasattr(inst, "getSrcParams") and hasattr(inst, "getDstParams")
 
     def extract(self, inst, category=None):
-        return _operands_via_accessors(inst)
+        return _operands_with_slots(inst)
 
 
 # Order matters: more specific rules first; _GenericALURule is the
@@ -1540,7 +1631,8 @@ _OPERAND_RULES = (
 
 def _populate_wrapper(wrapper, category=None) -> None:
     """Run the operand rules over wrapper._rocisa_inst, accumulating
-    reads and writes into wrapper.reads / wrapper.writes.
+    reads and writes into wrapper.reads / wrapper.writes (and, in
+    parallel, wrapper.read_slots / wrapper.write_slots).
 
     `category` (the TaggedInstruction.category) lets a rule discriminate
     on emission-time bucket — e.g. MFMARule excludes Pack-categorized
@@ -1549,6 +1641,10 @@ def _populate_wrapper(wrapper, category=None) -> None:
 
     Only the FIRST matching rule contributes; this prevents e.g. an MFMA
     from being processed by multiple rules.
+
+    Rules return a 4-tuple `(reads, read_slots, writes, write_slots)`.
+    Every production rule and test fixture conforms to this shape; the
+    dispatch forbids fallback paths.
 
     Idempotent: rules are pure functions of (inst, category).
     """
@@ -1563,15 +1659,21 @@ def _populate_wrapper(wrapper, category=None) -> None:
     if not (hasattr(inst, "reads_scc") and hasattr(inst, "writes_scc")):
         wrapper.reads = ()
         wrapper.writes = ()
+        wrapper.read_slots = ()
+        wrapper.write_slots = ()
         return
     for rule in _OPERAND_RULES:
         if rule.applies(inst, category):
-            reads, writes = rule.extract(inst, category)
+            reads, read_slots, writes, write_slots = rule.extract(inst, category)
             wrapper.reads = tuple(reads)
             wrapper.writes = tuple(writes)
+            wrapper.read_slots = tuple(read_slots)
+            wrapper.write_slots = tuple(write_slots)
             return
     wrapper.reads = ()
     wrapper.writes = ()
+    wrapper.read_slots = ()
+    wrapper.write_slots = ()
 
 
 # Lazy-populated factory map: regType character -> RegisterContainer factory

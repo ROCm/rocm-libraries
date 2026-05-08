@@ -48,7 +48,8 @@ Audit summary that produced this list:
   - LW LDS-address vgpr read (LWS -> LW RAW)         -> test_lws_vxor_before_lw_invisible
 - **P1** (uncatchable scheduling bugs)
   - `Pack` VCvt*/VLShift*/VPerm/VPack RAW from LR    -> test_pack_cvt_raw_from_lr
-  - `VSwap` bidirectional RMW reorder                -> test_vswap_pair_reorder_invisible
+  - `VSwap` bidirectional RMW reorder                -> test_vswap_pair_reorder_detected
+                                                        + test_vswap_pair_allocation_invariant
 
 Each test lives in its own class so a future fix can drop the xfail on
 exactly one gap at a time.
@@ -3191,38 +3192,105 @@ class TestPackRAW:
 #
 # `_VSwapRule` (ScheduleCapture.py, before `_GenericALURule`)
 # publishes both operands as reads AND writes. With the symmetric model the
-# shared register carries WAR/WAW/RAW edges in BOTH orderings, and swapping
-# the pair flips which instruction is producer vs consumer on each edge —
-# so the edge KEY (producer.identity, consumer.identity, register, kind)
-# differs between REF and SUBJ and the one-directional `compare_graphs`
-# (`missing = ref - subj`) detects the reorder. xfail marker dropped.
+# shared register carries WAR/WAW/RAW edges in BOTH orderings.
+#
+# UPDATE (rocm-libraries-wx9.3 phase 3, memo §6.1 step 1): the cross-graph
+# edge identity now includes the producer's and consumer's POSITIONAL
+# operand-slot indices:
+#
+#     (src_role, src_position, src_operand_slot,
+#      sink_role, sink_position, sink_operand_slot,
+#      edge_kind, intra_operand_byte_offset)
+#
+# Operand-slot is allocation-invariant (a small integer position, not a
+# register reference) AND order-sensitive: when two VSwaps sharing a
+# register are reordered, the shared register lands at a DIFFERENT
+# operand-slot on each end of the resulting edge. So:
+#
+#   - Across graphs (allocation rename): the same VSwap-pair topology with
+#     different absolute registers still yields IDENTICAL edge identities —
+#     pinned by `test_vswap_pair_allocation_invariant` below.
+#   - Within a graph (instruction reorder): the two orderings produce
+#     DIFFERENT edge identities and `compare_graphs` surfaces an
+#     `OrderInvertedFailure` — pinned by `test_vswap_pair_reorder_detected`
+#     below. This is the case the previous wx9.3 implementation got wrong.
 
 
 class TestVSwapPair:
-    def test_vswap_pair_reorder_invisible(self):
+    def test_vswap_pair_reorder_detected(self):
+        """A within-graph reorder of two VSwaps sharing a register MUST be
+        detected (rocm-libraries-wx9.3 phase 3, memo §6.1 step 1).
+
+        Stripped to the minimum: two VSwapB32 instances tagged as PackA0 at
+        sub=0 and sub=1, no LR, no MFMA, no SWait. The `_wrap` helper still
+        fills the other 3 bodies with filler MFMAs because
+        `build_dataflow_graph` requires non-empty bodies.
+
+        REF:  VSwap(v0, v1) at sub=0; VSwap(v1, v2) at sub=1
+        SUBJ: VSwap(v1, v2) at sub=0; VSwap(v0, v1) at sub=1
+
+        The shared register `v1` is operand-1 of producer and operand-0 of
+        consumer in REF; in SUBJ those slots flip — so the edge identity
+        flips and `compare_graphs` returns an `OrderInvertedFailure`.
+        """
         sw1 = VSwapB32(dst=vgpr(0, 1), src=vgpr(1, 1))
         sw2 = VSwapB32(dst=vgpr(1, 1), src=vgpr(2, 1))
         ref_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
             _tag(sw1, category="PackA0", mfma_index=0, sequence=0),
             _tag(sw2, category="PackA0", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         sw1b = VSwapB32(dst=vgpr(0, 1), src=vgpr(1, 1))
         sw2b = VSwapB32(dst=vgpr(1, 1), src=vgpr(2, 1))
         subj_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
             _tag(sw2b, category="PackA0", mfma_index=0, sequence=0),
             _tag(sw1b, category="PackA0", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
-        assert compare_graphs(g_ref, g_subj), (
-            "Two VSwapB32 instructions sharing v1 reordered — final v1 "
-            "value differs but the graph cannot tell."
+        failures = compare_graphs(g_ref, g_subj)
+        assert failures, (
+            "Within-graph VSwap pair reorder MUST be detected as a failure "
+            "under the operand-slot-aware edge identity; got no failures."
+        )
+        assert any(isinstance(f, OrderInvertedFailure) for f in failures), (
+            "Within-graph VSwap pair reorder MUST surface "
+            f"OrderInvertedFailure; got: {[type(f).__name__ for f in failures]}"
+        )
+
+    def test_vswap_pair_allocation_invariant(self):
+        """Across-graph allocation-rename of a VSwap pair MUST NOT be
+        flagged as a difference (rocm-libraries-wx9.3 phase 3, memo §6.1
+        step 1).
+
+        Graph A: VSwap(v0, v1) at sub=0; VSwap(v1, v2) at sub=1
+        Graph B: VSwap(v1, v2) at sub=0; VSwap(v2, v3) at sub=1
+
+        Both graphs share the same producer-consumer topology: the second
+        VSwap's first operand equals the first VSwap's second operand
+        (operand-1 of producer is operand-0 of consumer). The only
+        difference is which physical registers happen to hold the data —
+        operand-slot identity is by construction allocation-invariant
+        (small integer positions, not register references), so the edge
+        identities match exactly and `compare_graphs(g_a, g_b) == []`.
+        """
+        sw1a = VSwapB32(dst=vgpr(0, 1), src=vgpr(1, 1))
+        sw2a = VSwapB32(dst=vgpr(1, 1), src=vgpr(2, 1))
+        cap_a = make_capture(BODY_LABEL_ML, [
+            _tag(sw1a, category="PackA0", mfma_index=0, sequence=0),
+            _tag(sw2a, category="PackA0", mfma_index=0, sequence=1),
+        ])
+        sw1b = VSwapB32(dst=vgpr(1, 1), src=vgpr(2, 1))
+        sw2b = VSwapB32(dst=vgpr(2, 1), src=vgpr(3, 1))
+        cap_b = make_capture(BODY_LABEL_ML, [
+            _tag(sw1b, category="PackA0", mfma_index=0, sequence=0),
+            _tag(sw2b, category="PackA0", mfma_index=0, sequence=1),
+        ])
+        g_a = build_dataflow_graph(_wrap(cap_a))
+        g_b = build_dataflow_graph(_wrap(cap_b))
+        assert compare_graphs(g_a, g_b) == [], (
+            "Across-graph allocation rename of a VSwap pair must yield no "
+            "failures (operand-slot identity is allocation-invariant). "
+            f"Got: {[type(f).__name__ for f in compare_graphs(g_a, g_b)]}"
         )
 
 

@@ -943,3 +943,152 @@ class TestVgprChainReorderDetection:
             "Expected at least one OrderInvertedFailure for the reversed "
             f"vgpr chain; got {[type(f).__name__ for f in failures]}."
         )
+
+
+# =============================================================================
+# Allocation invariance + legitimate-reorder + OrderInverted (rocm-libraries-wx9.3)
+# =============================================================================
+# The Phase 2 contract (memo §6.1, clarified 2026-05-08):
+#
+#   edge_key = (src_role, src_position, sink_role, sink_position,
+#               edge_kind, intra_operand_byte_offset)
+#
+# `intra_operand_byte_offset` is the offset WITHIN the connected operand
+# (0..N-1 for an N-byte read), NOT an absolute physical-register byte-key.
+# This is what makes the edge identity allocation-invariant: two graphs
+# with the same topology but different physical register allocations
+# produce identical edge keys.
+
+
+class TestEdgeIdentityAllocationInvariance:
+    """Edge identities are allocation-invariant.
+
+    Two graphs with the same topology but different absolute register
+    allocations (e.g. LR's destination is `vgpr(8, 4)` in one and
+    `vgpr(12, 4)` in the other, with the consuming MFMA's `a` input
+    pointed at the same vgpr accordingly) must produce the SAME edge
+    identity tuples.
+    """
+
+    def test_lr_to_mfma_identities_equal_under_allocation_change(self):
+        # Allocation A: LR writes vgpr(8,4); MFMA reads vgpr(8,4).
+        cap_a = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 8, 32, slot=2, a_src_count=4),
+        ])
+        # Allocation B: LR writes vgpr(12,4); MFMA reads vgpr(12,4).
+        cap_b = make_capture(BODY_LABEL_ML, [
+            make_lr(12, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 12, 32, slot=2, a_src_count=4),
+        ])
+        g_a = build_dataflow_graph(_wrap(cap_a))
+        g_b = build_dataflow_graph(_wrap(cap_b))
+
+        # Edge identities must match exactly. The byte_offset component must
+        # encode intra-operand position (0..3 for the 4-byte LR->MFMA dataflow)
+        # — NOT absolute physical-register byte-keys (('v', 8) vs ('v', 12)).
+        assert g_a.edge_keys() == g_b.edge_keys(), (
+            "Edge identities must be allocation-invariant: same topology, "
+            "different register allocations -> same edge keys.\n"
+            f"A: {sorted(g_a.edge_keys())}\nB: {sorted(g_b.edge_keys())}"
+        )
+        # Sanity: the keys are not empty (we actually built edges).
+        assert len(g_a.edge_keys()) > 0
+
+
+class TestLegitimateCmsReorderNoFailure:
+    """A legitimate CMS reorder (producer-before-consumer relative order
+    preserved, but at different stream positions) produces no failures.
+
+    The classifier-pipeline branch in `diagnose_missing_edge` returns []
+    when both endpoints exist in subj with the same relative order as in
+    ref, even when the edge identity (which now includes positions) doesn't
+    match between graphs.
+    """
+
+    def test_reorder_preserving_producer_before_consumer_no_failures(self):
+        # Reference: LR at slot=0, SWait at slot=1, MFMA at slot=2.
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 8, 32, slot=2, a_src_count=4),
+        ])
+        # Subject: same instructions, MFMA pushed out to slot=5; LR stays
+        # at slot=0; SWait moves to slot=4. Producer still before consumer
+        # in subj (slot 0 < slot 5). The CMS-reordered edge has different
+        # positions on subj side — but order is preserved.
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=4, dscnt=0),
+            make_mfma(0, 8, 32, slot=5, a_src_count=4),
+        ])
+        g_ref = build_dataflow_graph(_wrap(ref_cap))
+        g_subj = build_dataflow_graph(_wrap(subj_cap))
+        # Legitimate CMS reorder -> no failures.
+        failures = compare_graphs(g_ref, g_subj)
+        assert failures == [], (
+            "Legitimate CMS reorder (producer-before-consumer preserved) "
+            f"must yield no failures; got: {[type(f).__name__ for f in failures]}"
+        )
+
+
+class TestGenuineOrderInversionStillDetected:
+    """A genuine producer/consumer inversion (consumer-before-producer in
+    subj, producer-before-consumer in ref) must still surface
+    `OrderInvertedFailure`.
+    """
+
+    def test_inverted_lr_mfma_pair_emits_order_inverted(self):
+        # Reference: LR writes v100 then MFMA reads it.
+        # Use a vgpr ALU chain so reordering doesn't violate sync semantics
+        # (LR/MFMA reorder would also fire MissingWait). Use a within-body
+        # pure-ALU producer/consumer pair which Phase 1 OrderInverted catches.
+        from rocisa.instruction import VAddU32
+        from rocisa.container import vgpr
+        from Tensile.Components.ScheduleCapture import (
+            TaggedInstruction, WrappedInstruction, SlotKey, SLOT_KIND_MFMA,
+        )
+
+        def _vadd_pair(producer_seq, consumer_seq):
+            # producer: writes v100. consumer: reads v100 -> writes v101.
+            prod = VAddU32(dst=vgpr(100), src0=vgpr(50), src1=vgpr(51))
+            cons = VAddU32(dst=vgpr(101), src0=vgpr(100), src1=vgpr(52))
+            tagged_p = TaggedInstruction(
+                wrapped=WrappedInstruction(prod), category="LRA0",
+                slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                             mfma_index=0, sequence=producer_seq),
+            )
+            tagged_c = TaggedInstruction(
+                wrapped=WrappedInstruction(cons), category="LRA0",
+                slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                             mfma_index=0, sequence=consumer_seq),
+            )
+            return tagged_p, tagged_c
+
+        # Reference: producer at sequence=0, consumer at sequence=1.
+        ref_p, ref_c = _vadd_pair(0, 1)
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            ref_p, ref_c,
+            make_swait(slot=2, dscnt=0),
+            make_mfma(0, 8, 32, slot=3, a_src_count=4),
+        ])
+        # Subject: SAME nodes (so identities match), but stream positions
+        # inverted: producer at sequence=1, consumer at sequence=0. This is
+        # a real reorder of a real dependency.
+        subj_p, subj_c = _vadd_pair(1, 0)
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            subj_c, subj_p,
+            make_swait(slot=2, dscnt=0),
+            make_mfma(0, 8, 32, slot=3, a_src_count=4),
+        ])
+        g_ref = build_dataflow_graph(_wrap(ref_cap))
+        g_subj = build_dataflow_graph(_wrap(subj_cap))
+        failures = compare_graphs(g_ref, g_subj)
+        assert any(isinstance(f, OrderInvertedFailure) for f in failures), (
+            "Genuine producer/consumer inversion must surface "
+            f"OrderInvertedFailure; got: {[type(f).__name__ for f in failures]}"
+        )

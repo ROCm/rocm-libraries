@@ -128,7 +128,13 @@ class _FakePackRule:
         writes = (inst.dst,) if isinstance(inst.dst, RegisterContainer) else ()
         reads = tuple(r for r in (inst.src, inst.scratch_in)
                       if isinstance(r, RegisterContainer))
-        return reads, writes
+        # Slots are placeholders here: the _FakePack fixture is shape-only
+        # (no positional operand semantics from a real rocisa accessor to
+        # mirror), so we use range(len(...)) as the natural identity slots
+        # matching the production rule contract.
+        read_slots = tuple(range(len(reads)))
+        write_slots = tuple(range(len(writes)))
+        return reads, read_slots, writes, write_slots
 
 
 @contextmanager

@@ -346,11 +346,46 @@ class DataflowEdge:
       raw_intrawave        — producer SWait drains the in-wave counter
       lr_to_gr_lds_reuse   — LR0 -> SWait -> SBarrier -> GR (write reuses LDS slot)
       gr_to_lr_lds_reuse   — GR -> SWait -> SBarrier -> LR1 (read of just-written LDS)
+
+    `intra_operand_byte_offset` is the allocation-invariant tuple of byte
+    positions WITHIN the connected operand satisfied by this edge. For an
+    LR's 4-byte destination feeding the four bytes of an MFMA's `a` input,
+    the tuple is `(0, 1, 2, 3)`. For a single-byte SCC RAW edge the tuple
+    is `(0,)`. NOT an absolute physical-register byte-key — that would
+    break allocation invariance (`vgpr(8,4)` vs `vgpr(12,4)` for the same
+    logical operand would collide on absolute keys but match on intra-
+    operand offsets). See rocm-libraries-wx9.3 memo §6.1.
+
+    `src_operand_slot` is the producer's POSITIONAL operand-slot index
+    (the position within `inst.getDstParams()` for the writer, or the
+    legacy positional emit-order for test-fixture rules). For
+    `MFMA(acc, a, b, [acc2])` the writer has `acc` at slot 0. For
+    `VSwap(dst, src)` (symmetric R+W) `dst` is at slot 0 and `src` at
+    slot 1 — the same operand has the same slot on both sides because
+    `getDstParams() == getSrcParams()`.
+
+    `sink_operand_slot` is the consumer's POSITIONAL operand-slot index
+    (the position within `inst.getSrcParams()` for the reader). For an
+    `MFMA(acc, a, b, acc2)` consuming `a`, sink slot is 0; consuming
+    `b`, sink slot is 1.
+
+    Both slot fields are ALLOCATION-INVARIANT by construction: they are
+    small integers describing positional structure, not register
+    references. They are ORDER-SENSITIVE: when two instructions sharing
+    a register are reordered, the shared register lands at different
+    operand-slots on each end of the resulting edge — so the within-
+    graph reorder shows up as a different edge identity (memo §6.1
+    step 1). This is what makes `compare_graphs` simultaneously
+    register-rename-equal across graphs and reorder-detecting within
+    one graph.
     """
     producer: GraphNode
     consumer: GraphNode
     resource: object                    # RegisterContainer | MemoryRegion (opaque)
     edge_kind: str                      # 'raw_intrawave' | 'lr_to_gr_lds_reuse' | 'gr_to_lr_lds_reuse'
+    intra_operand_byte_offset: tuple = ()  # allocation-invariant byte positions
+    src_operand_slot: int = 0           # positional operand-slot of the producer's write
+    sink_operand_slot: int = 0          # positional operand-slot of the consumer's read
 
 
 @dataclass
@@ -383,8 +418,43 @@ class DataflowGraph:
     arch_profile: Optional[ArchProfile] = None
 
     def edge_keys(self):
-        """Edge-equality keys for cross-graph diff: (p_id, c_id, resource, kind)."""
-        return {(e.producer.identity, e.consumer.identity, e.resource, e.edge_kind)
+        """Edge-equality keys for cross-graph diff.
+
+        Per rocm-libraries-wx9.3 phase 3 (memo §6.1 step 1), the edge
+        identity tuple is:
+
+            (src_role, src_position, src_operand_slot,
+             sink_role, sink_position, sink_operand_slot,
+             edge_kind, intra_operand_byte_offset)
+
+        * `src_role` / `sink_role` are the producer/consumer scheduler-role
+          tags (`identity[0]` — LR/LW/GR/MFMA/PACK/...). Allocation-invariant.
+        * `src_position` / `sink_position` are SchedulePositions. Position-
+          sensitive so cross-body register reuse remains distinct; legitimate
+          CMS reorders are absorbed by `diagnose_missing_edge`'s pipeline
+          branch when both endpoints exist with preserved relative order.
+        * `src_operand_slot` / `sink_operand_slot` are positional integer
+          indices (0, 1, 2, ...) describing WHICH positional operand of
+          the producer was written and WHICH positional operand of the
+          consumer was read for this edge. Allocation-invariant by
+          construction (small integer, not a register reference) AND
+          order-sensitive (it flips when two instructions sharing a
+          register are reordered, because the shared register lands in
+          different operand positions on each end). This pair is what
+          simultaneously yields across-graph allocation invariance and
+          within-graph reorder detection — see `DataflowEdge.src_operand_slot`
+          for the convention and the worked VSwap-pair example.
+        * `intra_operand_byte_offset` is the tuple of byte positions WITHIN
+          the connected operand (0..N-1) — allocation-invariant. NOT the
+          absolute physical-register byte-key.
+
+        The render-string (`identity[2]`) and the `resource` object stay on
+        DataflowEdge for human-facing `Failure` rendering only — they drop
+        out of the matching path entirely.
+        """
+        return {(e.producer.identity[0], e.producer.position, e.src_operand_slot,
+                 e.consumer.identity[0], e.consumer.position, e.sink_operand_slot,
+                 e.edge_kind, e.intra_operand_byte_offset)
                 for e in self.edges}
 
 
@@ -962,7 +1032,11 @@ def build_dataflow_graph(four_part_capture):
         # the divergence. Adding per-subiter scoping would HIDE such
         # scheduling bugs to make diagnostics look cleaner — the wrong
         # tradeoff.
-        latest_writer = {}  # byte_key -> (writer_node, write_resource)
+        # latest_writer entries now carry the producer's positional
+        # write-slot so the cross-graph edge identity can encode WHICH
+        # operand-slot of the producer published this byte
+        # (rocm-libraries-wx9.3 phase 3, memo §6.1 step 1).
+        latest_writer = {}  # byte_key -> (writer_node, write_resource, write_slot)
         sorted_nodes = sorted(nodes_by_identity.values(), key=lambda n: n.position)
 
         for node in sorted_nodes:
@@ -980,12 +1054,18 @@ def build_dataflow_graph(four_part_capture):
             n2i = getattr(body_capture, "name_to_idx", None) if body_capture is not None else None
 
             # Phase 2a — reads first: emit one edge per distinct
-            # (writer, write_resource) that contributes any byte of any
-            # read of this node.
-            for read_resource in wrapped.reads:
+            # (writer, write_resource, write_slot) that contributes any
+            # byte of any read of this node. The reader's positional
+            # read-slot rides alongside the resource via wrapped.read_slots.
+            read_slots = getattr(wrapped, "read_slots", None) or tuple(
+                range(len(wrapped.reads))
+            )
+            for read_idx, read_resource in enumerate(wrapped.reads):
                 if read_resource is None:
                     continue
-                for producer, overlap in _resolve_producers(
+                sink_slot = (read_slots[read_idx] if read_idx < len(read_slots)
+                             else read_idx)
+                for producer, overlap, intra_offsets, src_slot in _resolve_producers(
                     read_resource, node, latest_writer, name_to_idx=n2i,
                 ):
                     is_memory = isinstance(overlap, MemoryRegion)
@@ -995,17 +1075,25 @@ def build_dataflow_graph(four_part_capture):
                         resource=overlap,
                         edge_kind=("lds_raw_intrawave" if is_memory
                                    else "raw_intrawave"),
+                        intra_operand_byte_offset=intra_offsets,
+                        src_operand_slot=src_slot,
+                        sink_operand_slot=sink_slot,
                     ))
 
             # Phase 2b — writes second: update latest_writer for every
             # byte this node covers. Done AFTER reads so a single
             # instruction reading and writing the same register sees its
             # PREVIOUS writer, not itself.
-            for write_resource in wrapped.writes:
+            write_slots = getattr(wrapped, "write_slots", None) or tuple(
+                range(len(wrapped.writes))
+            )
+            for write_idx, write_resource in enumerate(wrapped.writes):
                 if write_resource is None:
                     continue
+                w_slot = (write_slots[write_idx] if write_idx < len(write_slots)
+                          else write_idx)
                 for bk in _byte_keys_for_resource(write_resource, name_to_idx=n2i):
-                    latest_writer[bk] = (node, write_resource)
+                    latest_writer[bk] = (node, write_resource, w_slot)
 
     # =========================================================================
     # SBarrier-edge collectors (cross-wave LDS-reuse)
@@ -1147,11 +1235,30 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
                 else:  # gr_to_lr_lds_reuse
                     resource = getattr(producer.rocisa_inst, "dst", None)
 
+                # Intra-operand byte offset for LDS-reuse edges: the
+                # resource is the producer's dst (an LDS slot pin). The
+                # offset tuple covers all bytes of that resource — the
+                # whole slot participates in the cross-wave handoff. This
+                # is allocation-invariant by construction because the
+                # tuple is intra-operand byte indices (0..N-1), not
+                # absolute register byte-keys.
+                bks = _byte_keys_for_resource(resource) if resource is not None else ()
+                intra_offsets = tuple(range(len(bks)))
+
+                # SBarrier-mediated LDS-reuse edges: the producer's
+                # written resource is dst (write-slot 0); the consumer
+                # reads its dst (read-slot 0). Both slot indices are
+                # fixed at 0 — there's no other positional choice for
+                # these patterns. Required for the cross-graph edge
+                # identity (wx9.3 phase 3).
                 edges.append(DataflowEdge(
                     producer=producer,
                     consumer=node,
                     resource=resource,
                     edge_kind=edge_kind,
+                    intra_operand_byte_offset=intra_offsets,
+                    src_operand_slot=0,
+                    sink_operand_slot=0,
                 ))
 
             # Pattern reset: a NEW producer of producer_categories ends this
@@ -2328,9 +2435,16 @@ def compare_graphs(
     missing_keys = ref_keys - subj_keys
 
     # Map missing keys back to reference edge objects for diagnosis.
+    # Same edge-key shape as DataflowGraph.edge_keys() (memo §6.1 step 1,
+    # wx9.3 phase 3):
+    # (src_role, src_position, src_operand_slot,
+    #  sink_role, sink_position, sink_operand_slot,
+    #  edge_kind, intra_operand_byte_offset).
     failures = []
     ref_edges_by_key = {
-        (e.producer.identity, e.consumer.identity, e.resource, e.edge_kind): e
+        (e.producer.identity[0], e.producer.position, e.src_operand_slot,
+         e.consumer.identity[0], e.consumer.position, e.sink_operand_slot,
+         e.edge_kind, e.intra_operand_byte_offset): e
         for e in reference.edges
     }
     for key in missing_keys:
@@ -2376,6 +2490,33 @@ def diagnose_missing_edge(
             f"p_id={p_id} (found={p_node is not None}), "
             f"c_id={c_id} (found={c_node is not None})."
         )
+
+    # Legitimate-CMS-reorder branch (rocm-libraries-wx9.3 memo §6.1).
+    # The new edge identity tuple includes the producer/consumer
+    # SchedulePositions (memo §6.1, point 1), so a CMS reorder that pushes
+    # an edge's endpoints to different stream slots in subj surfaces here
+    # as a "missing" key even when the same logical producer-consumer
+    # dataflow exists in subj. The legitimate case: subj contains an edge
+    # with the same (producer.identity, consumer.identity, edge_kind,
+    # intra_operand_byte_offset). Edge formation only emits an edge when
+    # the writer was seen before the reader in stream order
+    # (build_dataflow_graph Phase 2's latest_writer is updated AFTER
+    # reads), so the existence of such an edge in subj already implies
+    # the relative order is preserved — no inversion. Return [] without
+    # firing any Failure. This is a classifier-pipeline tweak; the
+    # `Failure` hierarchy is unchanged (memo §6.1, point 2).
+    edge_kind = ref_edge.edge_kind
+    intra = ref_edge.intra_operand_byte_offset
+    src_slot = ref_edge.src_operand_slot
+    sink_slot = ref_edge.sink_operand_slot
+    for e in subj_graph.edges:
+        if (e.producer.identity == p_id
+                and e.consumer.identity == c_id
+                and e.edge_kind == edge_kind
+                and e.intra_operand_byte_offset == intra
+                and e.src_operand_slot == src_slot
+                and e.sink_operand_slot == sink_slot):
+            return []
 
     # Phase 1 — gating: order check, default schedule as canonical reference.
     # The default schedule IS the canonical order. If default emitted the
