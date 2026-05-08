@@ -242,7 +242,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void computeBarrierAfterThresholds(IRList::iterator regionStart, IRList::iterator regionEnd);
     std::unordered_map<StinkyInstruction*, int> computeBarrierBeforeThresholds(
         IRList::iterator regionStart, IRList::iterator regionEnd);
-    bool nonBarrierNodesStillReady() const;
     bool isValuPickable() const;
     DAGNode* popNonWmmaByKind(int pickKind);
 
@@ -427,13 +426,6 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode** outNode, int* kindOu
     *outNode = best;
     *kindOut = kind;
     return true;
-}
-
-bool CDNA5ReadyQueue::nonBarrierNodesStillReady() const {
-    DAGNode* n = nullptr;
-    int kind = -1;
-    if (findSmallestPickableNonWmma(&n, &kind)) return true;
-    return !wmmaQueue.empty();
 }
 
 // Drain barrierQueue to find the lowest-id barrier whose WMMA threshold is met,
