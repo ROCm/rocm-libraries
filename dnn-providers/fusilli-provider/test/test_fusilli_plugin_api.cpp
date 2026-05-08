@@ -26,12 +26,14 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unistd.h>
 #include <vector>
 
+#include "fusilli_serialized_plan_payload.h"
 #include "graph_import.h"
 #include "hipdnn_engine_plugin_execution_context.h"
 #include "utils.h"
@@ -115,6 +117,14 @@ buildMatmulActivGraph(const std::vector<int64_t> &aDims,
                              serErr.get_message());
   }
   return serializedGraph;
+}
+
+flatbuffers::DetachedBuffer buildFusilliEngineConfig() {
+  flatbuffers::FlatBufferBuilder configBuilder;
+  auto engineConfig = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(
+      configBuilder, hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID);
+  configBuilder.Finish(engineConfig);
+  return configBuilder.Release();
 }
 
 // Build an inference-phase rmsnorm graph using the frontend API.
@@ -728,6 +738,136 @@ TEST(TestFusilliPluginApi, CreateExecutionContext) {
   // Clean up.
   EXPECT_EQ(hipdnnEnginePluginDestroyExecutionContext(handle, executionContext),
             HIPDNN_PLUGIN_STATUS_SUCCESS);
+  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestFusilliPluginApi, SerializeExecutionContextAddsPayloadHeader) {
+  hipdnnEnginePluginHandle_t handle = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  auto serializedGraph = buildMatmulActivGraph(
+      {4, 8}, {8, 5}, {4, 5}, hipdnn_frontend::PointwiseMode::RELU_FWD);
+  hipdnnPluginConstData_t opGraph{serializedGraph.data(),
+                                  serializedGraph.size()};
+
+  auto engineConfigBuffer = buildFusilliEngineConfig();
+  hipdnnPluginConstData_t engineConfig{engineConfigBuffer.data(),
+                                       engineConfigBuffer.size()};
+
+  hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreateExecutionContext(
+                handle, &engineConfig, &opGraph, &executionContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(executionContext, nullptr);
+
+  hipdnnPluginConstData_t serializedContext{nullptr, 0};
+  ASSERT_EQ(hipdnnEnginePluginSerializeExecutionContext(
+                handle, executionContext, &serializedContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(serializedContext.ptr, nullptr);
+  ASSERT_GT(serializedContext.size,
+            fusilli_plugin::serialized_plan_payload::HEADER_SIZE);
+
+  const auto *bytes = static_cast<const uint8_t *>(serializedContext.ptr);
+  EXPECT_EQ(std::memcmp(bytes,
+                        fusilli_plugin::serialized_plan_payload::MAGIC.data(),
+                        fusilli_plugin::serialized_plan_payload::MAGIC.size()),
+            0);
+  EXPECT_EQ(bytes[8], static_cast<uint8_t>(1));
+  EXPECT_EQ(bytes[9], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[12], static_cast<uint8_t>(1));
+  EXPECT_EQ(bytes[13], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[14], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[15], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[16],
+            static_cast<uint8_t>(
+                fusilli_plugin::serialized_plan_payload::HEADER_SIZE));
+  EXPECT_EQ(bytes[17], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[18], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[19], static_cast<uint8_t>(0));
+
+  EXPECT_EQ(hipdnnEnginePluginDestroySerializedExecutionContext(
+                handle, &serializedContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  EXPECT_EQ(hipdnnEnginePluginDestroyExecutionContext(handle, executionContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestFusilliPluginApi,
+     CreateExecutionContextFromSerializedRejectsUnsupportedPayloadVersion) {
+  hipdnnEnginePluginHandle_t handle = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  auto serializedGraph = buildMatmulActivGraph(
+      {4, 8}, {8, 5}, {4, 5}, hipdnn_frontend::PointwiseMode::RELU_FWD);
+  hipdnnPluginConstData_t opGraph{serializedGraph.data(),
+                                  serializedGraph.size()};
+
+  auto engineConfigBuffer = buildFusilliEngineConfig();
+  hipdnnPluginConstData_t engineConfig{engineConfigBuffer.data(),
+                                       engineConfigBuffer.size()};
+
+  hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreateExecutionContext(
+                handle, &engineConfig, &opGraph, &executionContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(executionContext, nullptr);
+
+  hipdnnPluginConstData_t serializedContext{nullptr, 0};
+  ASSERT_EQ(hipdnnEnginePluginSerializeExecutionContext(
+                handle, executionContext, &serializedContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(serializedContext.ptr, nullptr);
+
+  std::vector<uint8_t> incompatiblePayload(
+      static_cast<const uint8_t *>(serializedContext.ptr),
+      static_cast<const uint8_t *>(serializedContext.ptr) +
+          serializedContext.size);
+  incompatiblePayload[8] = 2;
+  incompatiblePayload[9] = 0;
+
+  EXPECT_EQ(hipdnnEnginePluginDestroySerializedExecutionContext(
+                handle, &serializedContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  EXPECT_EQ(hipdnnEnginePluginDestroyExecutionContext(handle, executionContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+  hipdnnPluginConstData_t incompatibleSerializedContext{
+      incompatiblePayload.data(), incompatiblePayload.size()};
+  hipdnnEnginePluginExecutionContext_t restoredExecutionContext = nullptr;
+  EXPECT_EQ(hipdnnEnginePluginCreateExecutionContextFromSerialized(
+                handle, &engineConfig, &incompatibleSerializedContext,
+                &restoredExecutionContext),
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+  EXPECT_EQ(restoredExecutionContext, nullptr);
+
+  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestFusilliPluginApi,
+     CreateExecutionContextFromSerializedRejectsLegacyRawGraphPayload) {
+  hipdnnEnginePluginHandle_t handle = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  auto serializedGraph = buildMatmulActivGraph(
+      {4, 8}, {8, 5}, {4, 5}, hipdnn_frontend::PointwiseMode::RELU_FWD);
+  hipdnnPluginConstData_t rawGraphPayload{serializedGraph.data(),
+                                          serializedGraph.size()};
+
+  auto engineConfigBuffer = buildFusilliEngineConfig();
+  hipdnnPluginConstData_t engineConfig{engineConfigBuffer.data(),
+                                       engineConfigBuffer.size()};
+
+  hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
+  EXPECT_EQ(hipdnnEnginePluginCreateExecutionContextFromSerialized(
+                handle, &engineConfig, &rawGraphPayload, &executionContext),
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+  EXPECT_EQ(executionContext, nullptr);
+
   EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 

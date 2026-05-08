@@ -31,10 +31,12 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Version.h"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
@@ -192,15 +194,20 @@ std::vector<std::string> extractPassOrderSnapshotAfterPasses(int argc, char** ar
 }  // namespace
 
 int main(int argc, char** argv) {
+    BackendRegistry::registerAllBackends();
+
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
-        std::cerr << "  --arch <arch>    Target architecture (gfx1250)\n";
+        std::cerr << "  --arch <arch>    Target architecture. Supported:";
+        for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
+        std::cerr << "\n";
         std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
                      "(stinkytofu-analysis)\n";
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Input formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
@@ -226,9 +233,9 @@ int main(int argc, char** argv) {
         std::cerr << "                            passes; passes that rewrite or insert\n";
         std::cerr << "                            instructions may leave comments stale.\n\n";
         std::cerr << "Example:\n";
-        std::cerr << "  " << argv[0] << " --arch gfx1250 input.stir --StinkyDAGSchedulerPass\n";
+        std::cerr << "  " << argv[0] << " --arch <arch> input.stir --StinkyDAGSchedulerPass\n";
         std::cerr << "  " << argv[0]
-                  << " --arch gfx1250 input.s   --StinkyDAGSchedulerPass --emit-asm\n";
+                  << " --arch <arch> input.s   --StinkyDAGSchedulerPass --emit-asm\n";
         return 1;
     }
 
@@ -238,16 +245,27 @@ int main(int argc, char** argv) {
         printAvailablePasses();
         return 0;
     }
+    if (firstArg == "--version") {
+        std::cout << "stinkytofu-opt " << STINKYTOFU_VERSION_MAJOR << "."
+                  << STINKYTOFU_VERSION_MINOR << "." << STINKYTOFU_VERSION_PATCH;
+        constexpr char tweak[] = STINKYTOFU_VERSION_TWEAK;
+        if (tweak[0] != '\0') std::cout << "-" << tweak;
+        std::cout << "\n";
+        return 0;
+    }
     if (firstArg == "--help") {
         std::cerr << "stinkytofu-opt - StinkyTofu IR optimizer\n\n";
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
-        std::cerr << "  --arch <arch>    Target architecture (gfx1250)\n";
+        std::cerr << "  --arch <arch>    Target architecture. Supported:";
+        for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
+        std::cerr << "\n";
         std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
                      "(stinkytofu-analysis)\n";
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Input formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
@@ -283,17 +301,26 @@ int main(int argc, char** argv) {
 
     if (firstArg == "--arch") {
         if (argc < 4) {
-            std::cerr << "Error: --arch requires an architecture argument\n";
-            std::cerr << "Supported architectures: gfx1250\n";
+            std::cerr << "Error: --arch requires an architecture argument. Supported:";
+            for (const auto& key : BackendRegistry::getRegisteredArchKeys())
+                std::cerr << " " << key;
+            std::cerr << "\n";
             return 1;
         }
 
         std::string archStr = argv[2];
-        if (archStr == "gfx1250") {
-            arch = {12, 5, 0};
-        } else {
+        if (!BackendRegistry::parseArchKey(archStr, arch)) {
+            std::cerr << "Error: Invalid architecture format '" << archStr
+                      << "'. Expected gfx<major><minor><stepping> (e.g. gfx1250)\n";
+            return 1;
+        }
+
+        if (!BackendRegistry::getArchPipeline(arch)) {
             std::cerr << "Error: Unsupported architecture '" << archStr << "'\n";
-            std::cerr << "Supported architectures: gfx1250\n";
+            std::cerr << "Supported architectures:";
+            for (const auto& key : BackendRegistry::getRegisteredArchKeys())
+                std::cerr << " " << key;
+            std::cerr << "\n";
             return 1;
         }
 
@@ -360,6 +387,9 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
+        if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
+            stinkytofu::PassManagerDebugConfig::addDebugOnly(argv[++i]);
+        }
         if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
         if (std::string(argv[i]) == "--from-label" && i + 1 < argc) fromLabel = argv[++i];
         if (std::string(argv[i]) == "--to-label" && i + 1 < argc) toLabel = argv[++i];

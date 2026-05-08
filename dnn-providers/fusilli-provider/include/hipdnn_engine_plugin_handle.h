@@ -29,7 +29,9 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
+#include <vector>
 
 struct HipdnnEnginePluginHandle {
 public:
@@ -47,6 +49,18 @@ public:
   // Destroy the flatbuffers::DetachedBuffer associated with ptr.
   void eraseEngineDetailsBuffer(const void *ptr) {
     _engineDetailsBuffers.erase(ptr);
+  }
+
+  // Take ownership of serialized execution context bytes and store them
+  // associated with their memory address.
+  void storeSerializedExecutionContextBuffer(
+      const void *ptr, std::unique_ptr<std::vector<uint8_t>> &&buffer) {
+    _serializedExecutionContextBuffers[ptr] = std::move(buffer);
+  }
+
+  // Destroy the serialized execution context bytes associated with ptr.
+  void eraseSerializedExecutionContextBuffer(const void *ptr) {
+    _serializedExecutionContextBuffers.erase(ptr);
   }
 
   // Get or create fusilli::Handle just in time. As the engine API may set the
@@ -77,6 +91,10 @@ private:
   // Storage for engine details.
   std::unordered_map<const void *, std::unique_ptr<flatbuffers::DetachedBuffer>>
       _engineDetailsBuffers;
+
+  // Storage for serialized execution context bytes.
+  std::unordered_map<const void *, std::unique_ptr<std::vector<uint8_t>>>
+      _serializedExecutionContextBuffers;
 };
 
 #endif // FUSILLI_PLUGIN_SRC_HIPDNN_ENGINE_PLUGIN_HANDLE_H

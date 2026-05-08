@@ -50,7 +50,7 @@ public:
     // Defined in ExampleProviderHandle.cpp to avoid circular dependency
     hipdnn_plugin_sdk::
         EngineManager<ExampleProviderHandle, ExampleProviderSettings, ExampleProviderContext>&
-        getEngineManager();
+        getEngineManager() const;
 
     // When requested by the user, engine details are serialized as a
     // FlatBuffer (ExampleProviderEngine::getDetails()) and a pointer to the heap
