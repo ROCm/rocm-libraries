@@ -3,41 +3,24 @@
 
 #pragma once
 
-#include <array>
 #include <iostream>
-#include <tuple>
-#include <utility>
-#include <vector>
 
 #include <miopen/algorithm.hpp>
 #include <miopen/any_solver.hpp>
 #include <miopen/conv/tensors.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/convolution.hpp>
-#include <miopen/invoke_params.hpp>
-#include <miopen/miopen.h>
-#include <miopen/mlo_internal.hpp>
-#include <miopen/solution.hpp>
-#include <miopen/stringutils.hpp>
-#include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
 #include <miopen/tensor_ops.hpp>
 
 #include "compare_helper.hpp"
-#include "cpu_bias.hpp"
 #include "cpu_conv.hpp"
-#include "driver.hpp"
 #include "get_handle.hpp"
-#include "gtest/gtest.h"
 #include "gpu_conv.hpp"
+#include "gtest/gtest.h"
 #include "miopen/find_db.hpp"
-#include "random.hpp"
-#include "network_data.hpp"
 #include "tensor_holder.hpp"
-#include "tensor_util.hpp"
-#include "test.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
 #include "workspace.hpp"
 
 #define TEST_DIRECT_SUPPORTED_CONFIG_ONLY (!MIOPEN_USE_ROCBLAS)
