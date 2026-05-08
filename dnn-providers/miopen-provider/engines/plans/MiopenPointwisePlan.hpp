@@ -5,8 +5,8 @@
 
 #include <unordered_map>
 
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
@@ -20,8 +20,9 @@ class MiopenPointwisePlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 {
 public:
     MiopenPointwisePlan(
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     MiopenPointwisePlan(const MiopenPointwisePlan&) = delete;

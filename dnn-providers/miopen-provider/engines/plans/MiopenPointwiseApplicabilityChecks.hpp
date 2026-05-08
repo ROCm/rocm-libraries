@@ -5,8 +5,8 @@
 
 #include <unordered_map>
 
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 namespace miopen_plugin
@@ -15,13 +15,15 @@ namespace miopen_plugin
 namespace pointwise_applicability
 {
 
-bool isSupported(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph);
+bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph);
 
-void checkPointwiseModeSupported(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs);
+void checkPointwiseModeSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs);
 
 void checkPointwiseTensorsSupported(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
 } // namespace pointwise_applicability

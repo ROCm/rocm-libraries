@@ -10,8 +10,9 @@ namespace miopen_plugin
 {
 
 MiopenPointwisePlan::MiopenPointwisePlan(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _input(miopen_utils::createTensor(tensorMap, attributes.in_0_tensor_uid()))
     , _output(miopen_utils::createTensor(tensorMap, attributes.out_0_tensor_uid()))
