@@ -22,6 +22,7 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
+import pytest
 import yaml
 from pprint import pformat
 
@@ -33,10 +34,21 @@ from Tensile.Toolchain.Validators import validateToolchain
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, validateMIParameters
 from Tensile.SolutionStructs.Validators.WorkGroup import validateWorkGroup
 
-cxxCompiler = validateToolchain("amdclang++")
-isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, cxxCompiler)
 
-def test_convert_9_item_custom_kernel_config():
+@pytest.fixture(scope="session")
+def isaInfoMap():
+    """Build the ISA info map once per session, lazily.
+
+    Building this map probes the compiler for every supported ISA, which is
+    slow and (more importantly) mutates rocisa singleton state. Doing it
+    inside a fixture keeps the side effects out of pytest collection time
+    so they cannot leak into unrelated tests' state.
+    """
+    cxxCompiler = validateToolchain("amdclang++")
+    return makeIsaInfoMap(SUPPORTED_ISA, cxxCompiler)
+
+
+def test_convert_9_item_custom_kernel_config(isaInfoMap):
     input_conf = yaml.load(
 """
 ProblemType:
@@ -122,7 +134,7 @@ WorkGroup: [16, 16, 1]
     assert format9 == mi
 
 
-def testConvert9ItemCustomKernelConfig():
+def testConvert9ItemCustomKernelConfig(isaInfoMap):
 
     inputConf = yaml.load(
 """

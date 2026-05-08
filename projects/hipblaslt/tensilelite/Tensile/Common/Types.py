@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -31,6 +32,15 @@ class IsaInfo:
     archCaps: dict
     regCaps: dict
     asmBugs: dict
+
+    def __post_init__(self):
+        # Defensive deep-copy: the rocisa singleton hands back references to
+        # internal state. Without this, two IsaInfo instances built from the
+        # same (re)init can alias and leak mutations across tests.
+        self.asmCaps = deepcopy(self.asmCaps)
+        self.archCaps = deepcopy(self.archCaps)
+        self.regCaps = deepcopy(self.regCaps)
+        self.asmBugs = deepcopy(self.asmBugs)
 
 
 class SemanticVersion(NamedTuple):
