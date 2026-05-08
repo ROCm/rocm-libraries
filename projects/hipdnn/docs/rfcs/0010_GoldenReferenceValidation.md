@@ -113,7 +113,7 @@ The CPU and GPU runners (`TestGoldenReferenceCpu`, `TestGoldenReferenceGpu`) fol
 2. **Execute** — run the engine under test (CPU reference or MIOpen GPU plugin)
 3. **Compare** — check engine output against golden output — PASS or FAIL
 
-Test cases are auto-discovered: `getGoldenReferenceParams()` scans a subdirectory for `.json` files and returns each as a gtest parameter. Adding a bundle to an existing folder is picked up on the next run.
+Test cases are auto-discovered: `getGoldenReferenceParams()` scans a subdirectory for `.json` files and returns each as a gtest parameter. Adding a bundle to an existing folder is picked up on the next run. Golden tests are not special — the runner must respect the same test-filtering mechanism used by all other tests (e.g., a configuration matrix that determines which operations, shapes, or data types to run or skip). No hard-coded workarounds for skipping golden tests.
 
 ---
 
