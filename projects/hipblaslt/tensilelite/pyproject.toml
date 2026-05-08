@@ -76,6 +76,7 @@ dependencies = [
     "nanobind",
     "cmake",
     "numpy",
+    "hip-python",
 ]
 
 [project.scripts]
