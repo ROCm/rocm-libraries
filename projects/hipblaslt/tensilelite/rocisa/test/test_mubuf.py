@@ -51,7 +51,10 @@ def _isa_context():
     import os
 
     rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
-    rocisa.rocIsa.getInstance().init(_ISA, rocm_path + "/bin/amdclang++", False)
+    assembler = os.path.join(rocm_path, "bin", "amdclang++")
+    if os.name == "nt" and not assembler.endswith(".exe"):
+        assembler += ".exe"
+    rocisa.rocIsa.getInstance().init(_ISA, assembler, False)
     rocisa.rocIsa.getInstance().setKernel(_ISA, 32)
 
 

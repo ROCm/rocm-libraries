@@ -40,7 +40,10 @@ def getGfxName(isa):
 def test_rocisa():
     rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
     global_isa = rocisa.rocIsa.getInstance()
-    global_isa.init(isa, rocm_path + "/bin/amdclang++", False)
+    assembler = os.path.join(rocm_path, "bin", "amdclang++")
+    if os.name == "nt" and not assembler.endswith(".exe"):
+        assembler += ".exe"
+    global_isa.init(isa, assembler, False)
     global_isa.setKernel(isa, 64)
 
     ki = global_isa.getKernel()

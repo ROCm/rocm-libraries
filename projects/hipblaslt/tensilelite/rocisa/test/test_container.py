@@ -28,7 +28,10 @@ import os
 isa = (9, 0, 10)
 rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
 global_isa = rocisa.rocIsa.getInstance()
-global_isa.init(isa, rocm_path + "/bin/amdclang++", False)
+_assembler = os.path.join(rocm_path, "bin", "amdclang++")
+if os.name == "nt" and not _assembler.endswith(".exe"):
+    _assembler += ".exe"
+global_isa.init(isa, _assembler, False)
 global_isa.setKernel(isa, 64)
 
 def test_containers():

@@ -20,6 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+import os
 import pytest
 
 import rocisa
@@ -35,7 +36,11 @@ def gfx(version=(9,5,0), wavefront_size = 64):
     def decorator(func):
         def wrapper():
             ti = rocIsa.getInstance()
-            ti.init(version, "amdclang++")
+            rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+            assembler = os.path.join(rocm_path, "bin", "amdclang++")
+            if os.name == "nt" and not assembler.endswith(".exe"):
+                assembler += ".exe"
+            ti.init(version, assembler)
             ti.setKernel(version, wavefront_size)
             return func()
         return wrapper
