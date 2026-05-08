@@ -918,16 +918,57 @@ A one-file-and-a-half change:
    `(src_role, src_position, sink_role, sink_position, edge_kind,
    byte_offset)`. `_canonical_render` stays for human-facing
    `Failure` rendering but drops out of the matching path.
+
+   **CRITICAL — what `byte_offset` MUST mean here**: the
+   *intra-operand* offset within the connected operand (e.g., for a
+   4-vgpr LR feeding an MFMA's `a` input, the four edges have
+   `byte_offset` 0, 1, 2, 3 — those are positions WITHIN the LR's
+   destination, not absolute physical-register byte-keys). The
+   identity MUST be allocation-invariant: two graphs with the same
+   topology but different physical register allocations
+   (`vgpr(8, 4)` in one, `vgpr(12, 4)` in another for the same
+   logical operand) MUST produce identical edge keys.
+
+   This rules out using `_byte_keys_for_resource` outputs directly
+   in the identity — those produce absolute byte-keys
+   (`('v', 8)` vs `('v', 12)`) and would break allocation
+   invariance, defeating the whole point of topology-equivalent
+   comparison. The byte-keys are useful internally for finding
+   the producer-consumer pair (`_resolve_producers` work), but
+   the *identity* of the resulting edge must be expressed in
+   allocation-invariant terms: role + position + intra-operand
+   offset.
+
 2. **Compare side** (`CMSValidator.py`): the existing set-diff
    inside `compare_graphs` is unchanged; it just operates on the
-   new tuple shape. `diagnose_missing_edge` consumes the same
-   missing-edge set it did before and produces the same `Failure`
-   objects.
+   new tuple shape. `diagnose_missing_edge` requires ONE small
+   pipeline addition: when both endpoints of a "missing" edge
+   exist in the subject graph with the same relative order as in
+   the reference (no inversion) AND wait/barrier coverage is
+   satisfied, return `[]` (legitimate reorder, no failure). This
+   is a classifier-pipeline branch, NOT a `Failure`-hierarchy
+   change — permissible under keep-Failures because the produced
+   `Failure` types stay the same; only the routing logic absorbs
+   one new "no failure" condition.
+
+   Without this branch, putting positions in the edge key surfaces
+   every legitimate CMS reorder as `UnexplainedMissingEdgeError`
+   (because subject-side both endpoints exist with the edge
+   actually satisfied, so neither Phase 1 OrderInverted nor
+   Phase 2 wait-coverage fire — fall-through to the unconditional
+   raise).
+
 3. **Intra-graph 7a fix** in the builder (see Open Question #1
-   below for the mechanism choice). Required because A's correctness
-   depends on the builder canonicalizing symbolic vs numeric
-   references to the same physical register *within* one graph
-   before the edge-set is built.
+   below for the mechanism choice). **NOTE (2026-05-08)**: bb34
+   has since landed Option (e) (in-stream RegSet resolution),
+   which canonicalizes symbolic vs numeric references at edge-
+   formation time. So 7a is already solved when wx9.3 implements
+   on top of bb34 — the builder's `_byte_keys_for_resource`
+   output now collapses both forms to numeric byte-keys. wx9.3's
+   identity construction can rely on that collapse for
+   producer-consumer matching, but still must NOT propagate the
+   numeric byte-keys into the edge identity (per the
+   allocation-invariance requirement above).
 
 ### Why A under these constraints
 
