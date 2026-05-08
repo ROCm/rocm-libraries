@@ -2254,6 +2254,8 @@ custom.config:
   MatrixInstruction: [16, 16, 32, 1]
   EnableMatrixInstruction: True
   MIWaveTile: [8, 8]
+  AssertFree0ElementMultiple: 256
+  AssertFree1ElementMultiple: 256
   WavefrontSize: 64
 amdhsa.kernels:
   - .args:

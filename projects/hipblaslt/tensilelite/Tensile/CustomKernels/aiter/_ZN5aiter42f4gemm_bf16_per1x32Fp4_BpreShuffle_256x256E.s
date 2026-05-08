@@ -3499,12 +3499,13 @@ custom.config:
             { type: uint32, semantic: StrideScaleA1, padding: 12 },
             { type: uint32, semantic: SplitK, padding: 12 } ]
     macrotile: [256, 256, 256]
-    padProblemSizeToTile: [true, true]
     threads: [256, 1, 1]
     grid: [TilesX, TilesY, One]
   MatrixInstruction: [16, 16, 128, 1]
   EnableMatrixInstruction: True
   MIWaveTile: [8, 8]
+  AssertFree0ElementMultiple: 256
+  AssertFree1ElementMultiple: 256
   WavefrontSize: 64
 amdhsa.kernels:
   - .args:

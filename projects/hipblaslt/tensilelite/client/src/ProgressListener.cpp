@@ -39,13 +39,6 @@ namespace TensileLite
         ProgressListener::ProgressListener(po::variables_map const& args)
             : m_runOnce(args["selection-only"].as<bool>())
         {
-            if(args.count("original-problem-size"))
-            {
-                auto const& parsed
-                    = args["original-problem-size"].as<std::vector<std::vector<size_t>>>();
-                if(!parsed.empty())
-                    m_originalProblemSizes = parsed;
-            }
         }
 
         bool ProgressListener::needMoreBenchmarkRuns() const
@@ -115,21 +108,7 @@ namespace TensileLite
             else if(auto gemmProblem = dynamic_cast<const ContractionProblemGemm*>(problem))
             {
                 writeReport(*gemmProblem);
-                // Report the original (unpadded) problem sizes when macrotile padding
-                // was applied, also override LDD/LDC to keep strides consistent.
-                if(m_currentProblemIdx < m_originalProblemSizes.size())
-                {
-                    auto const& origSizes = m_originalProblemSizes[m_currentProblemIdx];
-                    m_reporter->report(ResultKey::ProblemSizes, origSizes);
-                    if(origSizes.size() >= 1
-                       && origSizes[0] != gemmProblem->d().sizes()[0])
-                    {
-                        m_reporter->report(ResultKey::LDD, origSizes[0]);
-                        m_reporter->report(ResultKey::LDC, origSizes[0]);
-                    }
-                }
-                else
-                    m_reporter->report(ResultKey::ProblemSizes, gemmProblem->problemSizes());
+                m_reporter->report(ResultKey::ProblemSizes, gemmProblem->problemSizes());
             }
             else
             {
@@ -137,10 +116,7 @@ namespace TensileLite
             }
         }
 
-        void ProgressListener::postProblem()
-        {
-            m_currentProblemIdx++;
-        }
+        void ProgressListener::postProblem() {}
 
         void ProgressListener::preSolution(ContractionSolution* const solution)
         {

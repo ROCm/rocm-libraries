@@ -394,10 +394,7 @@ def checkConstStride(constStrideMap, keyIdx):
   return finalVal
 
 
-def _ceilTo(val, multiple):
-    return ((val + multiple - 1) // multiple) * multiple
-
-def problemSizeParams(problemType, problem, factorDim, macroTile=None):
+def problemSizeParams(problemType, problem, factorDim):
 
     numIndices = len(problemType.indices)
     rv = []
@@ -465,27 +462,8 @@ def problemSizeParams(problemType, problem, factorDim, macroTile=None):
             ', '.join(map(str, problem.sizes))))
 
     sizes = list(problem.sizes[:numIndices])
-    originalSizes = None
-    # When a custom kernel declares padProblemSizeToTile: [padM, padN],
-    # pad the requested dimensions to macrotile boundaries.  Save the
-    # original sizes so the client can report/validate the unpadded region.
-    if macroTile is not None:
-        mt0, mt1, padFlags = macroTile
-        padM = _ceilTo(sizes[0], mt0) if padFlags[0] else sizes[0]
-        padN = _ceilTo(sizes[1], mt1) if padFlags[1] else sizes[1]
-        if padM != sizes[0] or padN != sizes[1]:
-            originalSizes = list(sizes)
-            sizes[0] = padM
-            sizes[1] = padN
-            if cstrides and cstrides[1] != -1:
-                cstrides[1] = max(cstrides[1], padM)
-            if dstrides and dstrides[1] != -1:
-                dstrides[1] = max(dstrides[1], padM)
-
     problemSizeArg = ('problem-size', ','.join(map(str, sizes)))
     rv.insert(0, problemSizeArg)
-    if originalSizes is not None:
-        rv.append(('original-problem-size', ','.join(map(str, originalSizes))))
 
     rv.append(('a-strides', ",".join(map(str, astrides))))
     rv.append(('b-strides', ",".join(map(str, bstrides))))
@@ -574,7 +552,7 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
-def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile=None, probSolMap={}, macroTile=None):
+def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile=None, probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
 
@@ -645,7 +623,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
 
         probIdx = 0
         for problem in problemSizes.problems:
-            for key,value in problemSizeParams(problemType, problem, factorDimArgs.factorDims, macroTile):
+            for key,value in problemSizeParams(problemType, problem, factorDimArgs.factorDims):
                 param(key,value)
             if probIdx in probSolMap:
                 solutionIdx = probSolMap[probIdx]
@@ -752,8 +730,7 @@ def writeClientConfig(
       gfxName: str,
       configBase = "ClientParameters",
       libraryFile = None,
-      probSolMap = {},
-      macroTile = None
+      probSolMap = {}
     ):
 
     sourceDir = os.path.join(stepBaseDir, "source")
@@ -773,7 +750,7 @@ def writeClientConfig(
       resultsFileName = os.path.join(stepBaseDir, "../Data", stepName+".csv")
 
     newSolution = next(iter(newLibrary.solutions.values()))
-    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, probSolMap, macroTile)
+    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, probSolMap)
 
     return filename
 

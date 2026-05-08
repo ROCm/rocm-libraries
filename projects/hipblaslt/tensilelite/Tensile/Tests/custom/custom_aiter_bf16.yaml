@@ -57,11 +57,12 @@ BenchmarkProblems:
                     { type: uint32,  semantic: SplitK,        padding: 12 },
                     { type: uint32,  semantic: OutputBF16,    padding: 12 } ]
             macrotile: [256, 256, 64]
-            padProblemSizeToTile: [true, true] # M, N
             threads: [256, 1, 1]
             grid: [TilesX, TilesY, One]
         - MatrixInstruction:
           - [16,16,32,1, 1, 8,8, 2,2] # 256 x 256
+        - AssertFree0ElementMultiple: [256]
+        - AssertFree1ElementMultiple: [256]
         - PreloadKernArgs: [False]
         - DepthU: [64]
         - VectorWidthA: [-1]

@@ -57,6 +57,7 @@ import os
 import sys
 
 from Tensile.Common.Utilities import deriveWaveParams
+from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters
 
 
 FEATURE_FLAGS = [
@@ -66,6 +67,12 @@ FEATURE_FLAGS = [
     "SupportsScaleAlpha",
     "SupportsGSU",
 ]
+
+PREDICATE_FORK_PARAMETER_KEYS = (
+    "AssertFree0ElementMultiple",
+    "AssertFree1ElementMultiple",
+    "AssertSummationElementMultiple",
+)
 
 
 def _parse_tensile_yaml(path, kernel_name=None):
@@ -125,6 +132,19 @@ def _parse_tensile_yaml(path, kernel_name=None):
             wf_list = entry["WavefrontSize"]
             if wf_list:
                 config["WavefrontSize"] = wf_list[0]
+
+        for pred_key in PREDICATE_FORK_PARAMETER_KEYS:
+            if pred_key not in entry:
+                continue
+            values = entry[pred_key]
+            if not isinstance(values, list) or len(values) != 1:
+                raise RuntimeError(
+                    f"Custom kernel predicate '{pred_key}' must be a single-valued "
+                    f"ForkParameter (got {values!r}); a custom kernel must commit "
+                    f"to one constraint, not a search space."
+                )
+            checkParametersAreValid((pred_key, values), validParameters)
+            config[pred_key] = values[0]
 
     if kernel_name and "CustomKernel" not in config:
         raise RuntimeError(
@@ -243,6 +263,11 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
             num_threads = threads[0] * threads[1] * threads[2]
             _, mi_wave_tile = deriveWaveParams(mi, num_threads, macrotile, wavefront_size)
             lines.append(f"  MIWaveTile: {_fmt_yaml_inline(mi_wave_tile)}")
+
+    if config:
+        for pred_key in PREDICATE_FORK_PARAMETER_KEYS:
+            if pred_key in config:
+                lines.append(f"  {pred_key}: {_fmt_yaml_inline(config[pred_key])}")
 
     lines.append(f"  WavefrontSize: {wavefront_size}")
 

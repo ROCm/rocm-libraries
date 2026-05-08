@@ -325,18 +325,6 @@ def writeBenchmarkFiles(
                 for f in codeObjectFiles]
 
         with timing_context("python_benchpost_client_config"):
-            # If the custom kernel declares padProblemSizeToTile, extract
-            # the macrotile dims and per-axis flags so problemSizeParams()
-            # can pad M/N to tile boundaries.
-            macroTile = None
-            for sol in solutions:
-                if "CustomKernel" in sol and sol["CustomKernel"]:
-                    ck = sol["CustomKernel"]
-                    padFlags = ck.get("padProblemSizeToTile", None)
-                    if padFlags:
-                        macroTile = (sol["MacroTile0"], sol["MacroTile1"], padFlags)
-                    break
-
             if "TileAwareSelection" in problemType and problemType["TileAwareSelection"]:
                 maxMacroTile0 = 0
                 maxMacroTile1 = 0
@@ -362,14 +350,12 @@ def writeBenchmarkFiles(
                 writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, True, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
-                                  macroTile=macroTile)
+                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap)
             else:
                 writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, False, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
-                                  macroTile=macroTile)
+                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap)
 
     if len(solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")

@@ -151,9 +151,6 @@ namespace TensileLite
             bool m_printTensorAmaxD;
             bool m_printAny;
 
-            std::vector<std::vector<size_t>> m_originalProblemSizes;
-            size_t                           m_currentProblemIdx = 0;
-
             int m_numBenchmarkRuns = 0;
 
             bool   m_validatedSolution = false;

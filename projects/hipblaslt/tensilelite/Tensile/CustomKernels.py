@@ -353,7 +353,11 @@ def getCustomKernelConfig(
         if k in mergedValid:
             checkParametersAreValid((k, [v]), mergedValid)
 
-    metadata_keys = [k for k in kernelConfig if k not in mergedValid and k not in _PASSTHROUGH_KEYS]
+    metadata_keys = [
+        k for k in kernelConfig
+        if k not in mergedValid
+        and k not in _PASSTHROUGH_KEYS
+    ]
     for k in metadata_keys:
         kernelConfig.pop(k)
 
