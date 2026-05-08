@@ -44,14 +44,14 @@ A prior effort established a golden reference pattern -- golden data bundles (gr
 
 ## Design Overview
 
-Golden reference validation uses two pipelines that share a common data format -- the **golden data bundle** (`{Name}.json` + `{Name}.tensor{uid}.bin`). A bundle is a self-contained test case: the graph JSON defines the computation, the `.bin` files carry the tensor data (inputs and expected outputs). No C++ code, `buildGraph()` function, or test fixture is referenced. The test runner is generic -- it loads whatever bundle it finds and validates it.
+Golden reference validation uses two pipelines -- [**generation**](#generation-pipeline) and [**validation**](#generic-test-runner) -- that share a common data format: the **golden data bundle** (`{Name}.json` + `{Name}.tensor{uid}.bin`). A bundle is a self-contained test case: the graph JSON defines the computation, the `.bin` files carry the tensor data (inputs and expected outputs). Generation produces bundles; validation loads a bundle, deserializes the graph JSON into a FlatBuffers graph object, executes it through the engine under test (CPU reference or MIOpen GPU plugin), and compares the result to the expected output.
 
-**Generation (run once, any tool):**
+**[Generation](#generation-pipeline) (run once, any tool):**
 1. Define graph and create input tensors
 2. Run a reference source (PyTorch, CPU ref, etc.) to produce outputs
 3. Write the bundle
 
-**Validation (C++, every CI run):**
+**[Validation](#generic-test-runner) (C++, every CI run):**
 1. Load bundle from disk, extract golden outputs
 2. Execute engine under test
 3. Compare engine output to golden output — PASS or FAIL
@@ -74,7 +74,7 @@ The golden reference infrastructure is already built and working for batchnorm. 
 
 ### Self-Contained Bundles
 
-A golden data bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
+All of these components operate on a single shared artifact -- the golden data bundle. A bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
 
 This is test-as-data: the graph definition lives on disk, not in C++.
 
@@ -156,30 +156,17 @@ PyTorch is the recommended starting point because it is independent of the C++ c
 
 ### Verification Modes
 
-Three modes control which test suites run:
+Three modes control which test suites run. `computed` and `golden` are separate gtest suites with different test fixtures, parameterization, and data sources.
 
 | Mode | What runs | Reference source |
 |------|-----------|-----------------|
-| `computed` | Existing test-as-code tests (`IntegrationGraphVerificationHarness`) | CPU/GPU reference executor at runtime |
-| `golden` | Data-driven tests (`TestGoldenReferenceCpu` / `TestGoldenReferenceGpu`) | Pre-computed data from disk |
-| `both` | Both test suites | Both; both must pass |
+| `computed` | Test-as-code tests (`IntegrationGraphVerificationHarness`) — graph built by `buildGraph()` in C++ | CPU/GPU reference executor at runtime |
+| `golden` | Test-as-data tests (`TestGoldenReferenceCpu` / `TestGoldenReferenceGpu`) — graph loaded from disk | Pre-computed data from bundle |
+| `both` | Both suites, independently — both must pass | Both |
 
-**Key distinction**: `computed` and `golden` are **separate gtest suites**, not merged within a single test. They have different test fixtures, different parameterization, and different data sources.
+**Floating-point edge cases**: NaN in golden data is a generation error — the [generation-time validation](#generation-time-check-output-validation-python) rejects it before writing. `-0.0` vs `+0.0` uses value comparison, not bitwise.
 
-- **COMPUTED** tests use `IntegrationGraphVerificationHarness`. The graph is built by `buildGraph()` in C++. Inputs are randomly generated. The CPU/GPU reference executor runs at test time. This is the existing behavior, unchanged.
-
-- **GOLDEN** tests use `TestGoldenReferenceCpu` or `TestGoldenReferenceGpu`. The graph is loaded from JSON on disk. Inputs come from the data bundle. No `buildGraph()`. No runtime reference computation.
-
-- **BOTH** means both test suites run in CI. They are independent -- both must pass. There is no complex truth table or advisory mode. If either suite fails, the CI fails.
-
-#### Floating-Point Edge Cases
-
-- **NaN in golden data is a generation error.** Golden reference tensors should never contain NaN. If the reference executor produces NaN, the generator script is wrong (bad input range, numerical overflow, or a bug in the reference operation). The [generation-time validation](#generation-time-check-output-validation-python) rejects NaN before writing. If the engine under test produces NaN where the golden reference is a finite value, that is a hard FAIL.
-- **-0.0 vs +0.0**: Mathematically equal, bitwise different. The comparator uses value comparison, not bitwise comparison.
-
-#### Architecture Note
-
-All current golden data is generated from Python (PyTorch) or the CPU reference executor, which produce architecture-independent results. If GPU-generated golden data is introduced in the future, an architecture guard will be needed to skip tests when the current GPU does not match the generation architecture. See [Future Work](#future-work).
+**Architecture note**: all current golden data comes from Python or the CPU reference executor (architecture-independent). If GPU-generated data is added, an architecture guard will be needed. See [Future Work](#future-work).
 
 ---
 
