@@ -2232,6 +2232,50 @@ namespace rocisa
         }
     };
 
+    struct GlobalStoreB8 : public GLOBALStoreInstruction
+    {
+        GlobalStoreB8(const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& src,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                      const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B8, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreB8(const GlobalStoreB8& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreB8>(*this);
+        }
+    };
+
+    struct GlobalStoreB16 : public GLOBALStoreInstruction
+    {
+        GlobalStoreB16(const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& src,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                       const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B16, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreB16(const GlobalStoreB16& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreB16>(*this);
+        }
+    };
+
     struct GlobalStoreD16HIB16 : public GLOBALStoreInstruction
     {
         GlobalStoreD16HIB16(const std::shared_ptr<RegisterContainer>& vaddr,
@@ -2251,28 +2295,6 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<GlobalStoreD16HIB16>(*this);
-        }
-    };
-
-    struct GlobalStoreD16B16 : public GLOBALStoreInstruction
-    {
-        GlobalStoreD16B16(const std::shared_ptr<RegisterContainer>& vaddr,
-                          const std::shared_ptr<RegisterContainer>& src,
-                          const std::shared_ptr<RegisterContainer>& saddr,
-                          std::optional<GLOBALModifiers>            modifier = std::nullopt,
-                          const std::string&                        comment  = "")
-            : GLOBALStoreInstruction(InstType::INST_D16_B16, vaddr, src, saddr, modifier, comment)
-        {
-        }
-
-        GlobalStoreD16B16(const GlobalStoreD16B16& other)
-            : GLOBALStoreInstruction(other)
-        {
-        }
-
-        std::shared_ptr<Item> clone() const override
-        {
-            return std::make_shared<GlobalStoreD16B16>(*this);
         }
     };
 

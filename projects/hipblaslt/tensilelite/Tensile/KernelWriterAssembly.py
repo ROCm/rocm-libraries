@@ -70,7 +70,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
   GlobalLoadB32, GlobalLoadB64, GlobalLoadB96, GlobalLoadB128, GlobalLoadD16B16, GlobalLoadD16HIB16, \
   GlobalLoadD16U8, GlobalLoadD16HIU8, \
-  GlobalStoreB32, GlobalStoreB64, GlobalStoreB128, GlobalStoreD16B16, GlobalStoreD16HIB16
+  GlobalStoreB8, GlobalStoreB16, GlobalStoreB32, GlobalStoreB64, GlobalStoreB128, GlobalStoreD16HIB16
 
 from .Component import Component, TensorDataMover
 from .Components.TensorDataMover import TensorDataMoverLoad
@@ -12887,6 +12887,42 @@ class KernelWriterAssembly(KernelWriter):
   # Add tile assignment fields to store srd
   # This is based on WG not the WI/TT assignment
   ##############################################################################
+  def computeGSUFlatOffset(self, kernel, module, addrDVgpr):
+    """Add per-GSU partition offset to a flat address VGPR pair for MultipleBuffer/MBSK.
+    Mirrors computeStoreSrdStartCommon (which updates SrdD for buffer stores).
+    No-op when GSU==1 or _GlobalAccumulation is not MultipleBuffer/MBSK."""
+    if kernel["_GlobalAccumulation"] not in ("MultipleBuffer", "MultipleBufferSingleKernel"):
+      return
+    gsuFlatLabel = Label(label=self.labels.getNameInc("GSU_FlatAddr"), comment="")
+    with self.allocTmpSgpr(1) as tmpSgprGSU:
+      module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+      module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
+      module.add(SCBranchSCC1(labelName=gsuFlatLabel.getLabelName(), comment="skip GSU offset if GSU == 1"))
+    numDim = kernel["ProblemType"]["NumIndicesC"]
+    with self.allocTmpSgpr(4, alignment=1) as tmpSgprInfo:
+      if tmpSgprInfo.idx % 2 == 0:
+        tmpSgprX2 = tmpSgprInfo.idx
+        tmpSgpr0, tmpSgpr1, tmpSgpr2, tmpSgpr3 = (tmpSgprInfo.idx+i for i in range(4))
+      else:
+        tmpSgprX2 = tmpSgprInfo.idx+1
+        tmpSgpr0, tmpSgpr1, tmpSgpr2, tmpSgpr3 = tmpSgprInfo.idx+1, tmpSgprInfo.idx+2, tmpSgprInfo.idx+0, tmpSgprInfo.idx+3
+      module.addComment("Flat store: GSU offset for per-GSU partition")
+      module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpSgpr0), sgpr(tmpSgpr1), sgpr("SizesFree+0"), sgpr("GSUSumIdx"), comment="Free0"))
+      for i in range(1, numDim):
+        module.add(SSubU32(dst=sgpr(tmpSgpr2), src0=sgpr("SizesFree+%u"%i), src1=1, comment="Free%u" % i))
+        module.add(SMulI32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgpr2), src1=sgpr("GSUSumIdx"), comment="Free%u" % i))
+        module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpSgpr2), sgpr(tmpSgpr3), sgpr(tmpSgpr2), sgpr("StrideC%s"%self.states.indexChars[i]), comment="Free%u" % i))
+        module.add(SAddU32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgpr0), src1=sgpr(tmpSgpr2), comment="Free%u" % i))
+        module.add(SAddCU32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr1), src1=sgpr(tmpSgpr3), comment="Free%u" % i))
+      module.add(SLShiftLeftB64(dst=sgpr(tmpSgprX2,2), src=sgpr(tmpSgprX2,2), shiftHex=log2(self.states.bpeCinternal), comment="scale by bpe"))
+      tmpVgprGSU = self.vgprPool.checkOut(2)
+      module.add(VMovB32(dst=vgpr(tmpVgprGSU+0), src=sgpr(tmpSgprX2), comment="sgpr -> vgpr"))
+      module.add(VMovB32(dst=vgpr(tmpVgprGSU+1), src=sgpr(tmpSgpr1), comment="sgpr -> vgpr"))
+      module.add(VAddCOU32(dst=vgpr(addrDVgpr+0), dst1=VCC(), src0=vgpr(tmpVgprGSU+0), src1=vgpr(addrDVgpr+0), comment="add lo GSU offset to flat addr"))
+      module.add(VAddCCOU32(dst=vgpr(addrDVgpr+1), dst1=VCC(), src0=vgpr(tmpVgprGSU+1), src1=vgpr(addrDVgpr+1), src2=VCC(), comment="add hi GSU offset to flat addr"))
+      self.vgprPool.checkIn(tmpVgprGSU)
+    module.add(gsuFlatLabel)
+
   def computeStoreSrdStart(self, kernel, srdTcList: list, sgprBpeList = [], useSize: list = [], noMultipleBuffer = False):
     module = Module("computeStoreSrdStart")
 
@@ -13262,6 +13298,7 @@ class KernelWriterAssembly(KernelWriter):
           dst=vgpr(self.vgprs.addrD+1), \
           src=sgpr("AddressD+1"), \
           comment="sgpr -> vgpr"))
+      self.computeGSUFlatOffset(kernel, module, self.vgprs.addrD)
       self.vgprs.addrC = self.vgprPool.checkOut(2)
       module.add(VMovB32(
           dst=vgpr(self.vgprs.addrC+0), \
@@ -13433,6 +13470,7 @@ class KernelWriterAssembly(KernelWriter):
           dst=vgpr(self.vgprs.addrD+1), \
           src=sgpr("AddressD+1"), \
           comment="sgpr -> vgpr"))
+      self.computeGSUFlatOffset(kernel, module, self.vgprs.addrD)
       self.vgprs.addrC = self.vgprPool.checkOut(2, 'addrC')
       module.add(VMovB32(
           dst=vgpr(self.vgprs.addrC+0), \
@@ -15978,6 +16016,17 @@ class KernelWriterAssembly(KernelWriter):
         modifier2 = GLOBALModifiers(offset=16)
         rv.add(GlobalLoadB64(dst=vgpr(_vgprOffset(destVgpr, 4), 2), vaddr=addr0, saddr=saddr_off, modifier=modifier2, comment=comment))
         return rv
+      elif bpl >= 32 and bpl % 16 == 0:
+        # split into multiple dwordx4 loads using GLOBALModifiers offset
+        rv = Module("emulated flat load %u bytes" % bpl)
+        rounds = int(bpl // 16)
+        shiftRpv = rpv // rounds
+        rv.add(GlobalLoadB128(dst=vgpr(destVgpr, shiftRpv), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment))
+        for i in range(1, rounds):
+          modifierN = GLOBALModifiers(offset=16*i)
+          vgprOff = _vgprOffset(destVgpr, int(shiftRpv * i))
+          rv.add(GlobalLoadB128(dst=vgpr(vgprOff, shiftRpv), vaddr=addr0, saddr=saddr_off, modifier=modifierN, comment=comment))
+        return rv
       else:
         assert 0, "chooseGlobalRead: bad bpl"
 
@@ -16056,16 +16105,30 @@ class KernelWriterAssembly(KernelWriter):
     else:
       modifier = GLOBALModifiers(offset=0)
       saddr_off = vgpr("off", 1, False, False, True)
-      if bps==2 and hi16:
+      if bps==1 and hi16:
+        module.add(GlobalStoreD16HIB16(vaddr=addr0, src=vgpr(srcVgpr, rpv*4), saddr=saddr_off, modifier=modifier, comment=comment))
+      elif bps==1 and not hi16:
+        module.add(GlobalStoreB8(vaddr=addr0, src=vgpr(srcVgpr, rpv*4), saddr=saddr_off, modifier=modifier, comment=comment))
+      elif bps==2 and hi16:
         module.add(GlobalStoreD16HIB16(vaddr=addr0, src=vgpr(srcVgpr*2), saddr=saddr_off, modifier=modifier, comment=comment))
       elif bps==2 and not hi16:
-        module.add(GlobalStoreD16B16(vaddr=addr0, src=vgpr(srcVgpr, rpv*2), saddr=saddr_off, modifier=modifier, comment=comment))
+        module.add(GlobalStoreB16(vaddr=addr0, src=vgpr(srcVgpr, rpv*2), saddr=saddr_off, modifier=modifier, comment=comment))
       elif bps==4:
         module.add(GlobalStoreB32(vaddr=addr0, src=vgpr(srcVgpr, rpv), saddr=saddr_off, modifier=modifier, comment=comment))
       elif bps==8:
         module.add(GlobalStoreB64(vaddr=addr0, src=vgpr(srcVgpr, rpv), saddr=saddr_off, modifier=modifier, comment=comment))
       elif bps==16:
         module.add(GlobalStoreB128(vaddr=addr0, src=vgpr(srcVgpr, rpv), saddr=saddr_off, modifier=modifier, comment=comment))
+      elif bps >= 32 and bps % 16 == 0:
+        # split into multiple dwordx4 stores using GLOBALModifiers offset
+        rounds = int(bps // 16)
+        shiftByte = 16
+        shiftRpv = rpv // rounds
+        module.add(GlobalStoreB128(vaddr=addr0, src=vgpr(srcVgpr, shiftRpv), saddr=saddr_off, modifier=modifier, comment=comment))
+        for i in range(1, rounds):
+          modifierN = GLOBALModifiers(offset=shiftByte*i)
+          vgprOff = _vgprOffset(srcVgpr, int(shiftRpv * i))
+          module.add(GlobalStoreB128(vaddr=addr0, src=vgpr(vgprOff, shiftRpv), saddr=saddr_off, modifier=modifierN, comment=comment))
       else:
          assert 0, "bad bps"
 

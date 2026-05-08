@@ -3738,16 +3738,17 @@ class Solution(collections.abc.Mapping):
     state["NumGlobalWriteVectorsPerThread"] = state["NumElementsPerThread"] \
         // state["GlobalWriteVectorWidth"]
 
-    # Non-buffer (global) stores only support up to dwordx4 (16 bytes) per instruction.
-    # Buffer stores support up to 32 bytes by splitting into two dwordx4 stores.
-    if not state["BufferStore"]:
-      gwvw = state["GlobalWriteVectorWidth"]
-      destBytes = state["ProblemType"]["DestDataType"].numBytes()
-      computeBytes = state["ProblemType"]["ComputeDataType"].numBytes()
-      effectiveBps = max(destBytes, computeBytes) * gwvw if state["_GlobalAccumulation"] else destBytes * gwvw
-      if effectiveBps > 16:
-        reject(state, printRejectionReason, "BufferStore=0 does not support store operations > 16 bytes (bps=%u)" % effectiveBps)
+
+    # NumWaveSplitK requires BufferStore for thread masking in emitLdChange
+    if state["NumWaveSplitK"] > 1:
+      if not state["BufferStore"]:
+        reject(state, printRejectionReason, "NumWaveSplitK > 1 requires BufferStore")
         return
+
+    # SingleBuffer GSU workspace addressing not yet implemented for flat stores
+    if not state["BufferStore"] and state["_GlobalAccumulation"] == "SingleBuffer":
+      reject(state, printRejectionReason, "GlobalAccumulation SingleBuffer requires BufferStore")
+      return
 
     # LocalSplitU but can't NumThreads%MacroTile doesn't support sideways store
     if state["LocalSplitU"] > 1:

@@ -906,6 +906,21 @@ void mem_inst(nb::module_ m_mem)
 
     nb::class_<rocisa::GLOBALStoreInstruction, rocisa::GlobalWriteInstruction>(m_mem, "GLOBALStoreInstruction");
 
+    nb::class_<rocisa::GlobalStoreB8, rocisa::GLOBALStoreInstruction>(m_mem, "GlobalStoreB8")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      std::optional<rocisa::GLOBALModifiers>,
+                      const std::string&>(),
+             nb::arg("vaddr"),
+             nb::arg("src"),
+             nb::arg("saddr"),
+             nb::arg("modifier") = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::GlobalStoreB8& self, const nb::dict&) {
+            return new rocisa::GlobalStoreB8(self);
+        });
+
     nb::class_<rocisa::GlobalStoreD16HIB16, rocisa::GLOBALStoreInstruction>(m_mem, "GlobalStoreD16HIB16")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -921,7 +936,7 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::GlobalStoreD16HIB16(self);
         });
 
-    nb::class_<rocisa::GlobalStoreD16B16, rocisa::GLOBALStoreInstruction>(m_mem, "GlobalStoreD16B16")
+    nb::class_<rocisa::GlobalStoreB16, rocisa::GLOBALStoreInstruction>(m_mem, "GlobalStoreB16")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -932,8 +947,8 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("saddr"),
              nb::arg("modifier") = std::nullopt,
              nb::arg("comment") = "")
-        .def("__deepcopy__", [](const rocisa::GlobalStoreD16B16& self, const nb::dict&) {
-            return new rocisa::GlobalStoreD16B16(self);
+        .def("__deepcopy__", [](const rocisa::GlobalStoreB16& self, const nb::dict&) {
+            return new rocisa::GlobalStoreB16(self);
         });
 
     nb::class_<rocisa::GlobalStoreB32, rocisa::GLOBALStoreInstruction>(m_mem, "GlobalStoreB32")

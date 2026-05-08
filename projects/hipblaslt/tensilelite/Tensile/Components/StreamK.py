@@ -1490,7 +1490,7 @@ class StreamK(Component):
         lastData = -1
         for elementIdx in range(0, len(batchElements)):
             if not ss.sharedColDVgprs:
-                addrCalc: AddrCalculation = ss.elementAddres[elementIdx]
+                addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 addrDVgpr = addrCalc.addrDVgpr
                 addrCVgpr = addrCalc.addrCVgpr
                 writer.vgprPool.checkIn(addrDVgpr)
@@ -2158,7 +2158,7 @@ class StreamK(Component):
         lastData = -1
         for elementIdx in range(0, len(batchElements)):
             if not ss.sharedColDVgprs:
-                addrCalc: AddrCalculation = ss.elementAddres[elementIdx]
+                addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 addrDVgpr = addrCalc.addrDVgpr
                 addrCVgpr = addrCalc.addrCVgpr
                 writer.vgprPool.checkIn(addrDVgpr)
