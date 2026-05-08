@@ -127,6 +127,7 @@ struct FormatDef {
     int maxOperands = 0;
     int cycle = 0;  // 0 = not specified (inherit from parent or arch default)
     int latency = 0;
+    int coIssueMask = -1;  // -1 = not specified (inherit from parent); VALU co-issue bitmask
     std::vector<std::string> flags;
 
     // Default operand field descriptions for instructions using this format
@@ -157,6 +158,7 @@ struct InstructionDef {
     std::string format;  // e.g., "VOP3"
     int cycle = 0;       // 0 = not specified (inherit from format, then arch default)
     int latency = 0;
+    int coIssueMask = -1;  // -1 = not specified (inherit from format); VALU co-issue bitmask
     std::vector<CostOverrideEntry> costOverrides;     // modifier-keyed overrides
     std::vector<OperandSpec> operands;                // Operand specifications
     std::vector<OperandFieldEntry> operandFields;     // Operand field descriptions
@@ -244,6 +246,7 @@ class DefTParser {
         if (fmt.encoding.empty()) fmt.encoding = p.encoding;
         if (fmt.cycle == 0) fmt.cycle = p.cycle;
         if (fmt.latency == 0) fmt.latency = p.latency;
+        if (fmt.coIssueMask < 0) fmt.coIssueMask = p.coIssueMask;
         // Flags: parent first, then child (child adds MFMA etc.)
         fmt.flags = p.flags;
         fmt.flags.insert(fmt.flags.end(), it->second.flags.begin(), it->second.flags.end());
@@ -265,6 +268,7 @@ class DefTParser {
                 inst.finalOperandFields = inst.operandFields;
                 if (inst.cycle == 0) inst.cycle = arch_.defaultCycle;
                 if (inst.latency == 0) inst.latency = arch_.defaultLatency;
+                if (inst.coIssueMask < 0) inst.coIssueMask = 0;
                 continue;
             }
 
@@ -295,6 +299,13 @@ class DefTParser {
             if (inst.latency == 0 && fmt.latency > 0) inst.latency = fmt.latency;
             if (inst.cycle == 0) inst.cycle = arch_.defaultCycle;
             if (inst.latency == 0) inst.latency = arch_.defaultLatency;
+            if (inst.coIssueMask < 0 && fmt.coIssueMask >= 0) inst.coIssueMask = fmt.coIssueMask;
+            if (inst.coIssueMask < 0) inst.coIssueMask = 0;
+            if (inst.coIssueMask > 0xFFFF) {
+                std::cerr << "error: " << inst.mnemonic << ": .coissue value 0x" << std::hex
+                          << inst.coIssueMask << " exceeds uint16_t range\n";
+                return false;
+            }
 
             // Apply operand fields: instruction overrides format
             if (!inst.operandFields.empty()) {
@@ -494,6 +505,7 @@ class DefTParser {
             parseField(block, ".unit", fmt.unit);
             parseFieldInt(block, ".maxOperands", fmt.maxOperands);
             parseFieldCost(block, ".cost", fmt.cycle, fmt.latency);
+            parseFieldIntAuto(block, ".coissue", fmt.coIssueMask);
             parseFieldFlags(block, ".flags", fmt.flags);
             parseFieldOperandFields(block, ".fields", fmt.fields);
             parseField(block, ".promotedFormat", fmt.promotedFormat);
@@ -663,6 +675,7 @@ class DefTParser {
 
                 // Parse per-entry optional fields (same helpers as DEF_T)
                 parseFieldCost(entryFields, ".cost", inst.cycle, inst.latency);
+                parseFieldIntAuto(entryFields, ".coissue", inst.coIssueMask);
                 parseFieldCostOverrides(entryFields, inst.costOverrides);
                 parseFieldOperandFields(entryFields, ".operand_fields", inst.operandFields);
                 parseFieldOperandFields(entryFields, ".alt_operand_fields", inst.altOperandFields);
@@ -799,6 +812,7 @@ class DefTParser {
             // Parse optional fields
             parseField(block, ".format", inst.format);
             parseFieldCost(block, ".cost", inst.cycle, inst.latency);
+            parseFieldIntAuto(block, ".coissue", inst.coIssueMask);
             parseFieldCostOverrides(block, inst.costOverrides);
             parseFieldFlags(block, ".flags", inst.flags);
             parseFieldOperandFields(block, ".operand_fields", inst.operandFields);
@@ -851,6 +865,13 @@ class DefTParser {
         std::string val;
         parseField(block, fieldName, val);
         if (!val.empty()) out = std::stoi(val);
+    }
+
+    // Helper: Parse integer field with auto base detection (handles 0x hex prefix)
+    void parseFieldIntAuto(const std::string& block, const std::string& fieldName, int& out) {
+        std::string val;
+        parseField(block, fieldName, val);
+        if (!val.empty()) out = std::stoi(val, nullptr, 0);
     }
 
     // Helper: Parse cost field (.cost = {cycle, latency})
@@ -1483,8 +1504,10 @@ static bool emitArchIsaFile(const std::string& arch,
         if (it != unifiedOpcodeMap.end()) uop = it->second;
         std::string flagStr = flagsToMakeFlagSetContent(inst.finalFlags);
         out << "  { " << std::setw(3) << i << ", " << std::setw(5) << uop << ", " << std::setw(3)
-            << inst.cycle << ", " << std::setw(4) << inst.latency << ", " << "\"" << inst.mnemonic
-            << "\", " << "makeFlagSet({" << (flagStr.empty() ? "" : flagStr) << "}), "
+            << inst.cycle << ", " << std::setw(4) << inst.latency << ", " << "0x" << std::hex
+            << std::setfill('0') << std::setw(4) << (inst.coIssueMask >= 0 ? inst.coIssueMask : 0)
+            << std::dec << std::setfill(' ') << ", " << "\"" << inst.mnemonic << "\", "
+            << "makeFlagSet({" << (flagStr.empty() ? "" : flagStr) << "}), "
             << microcodeToCpp(inst.finalMicrocode) << ", " << inst.finalEncoding << ", "
             << unitToCpp(inst.finalUnit) << ", " << "{} },\n";
     }
