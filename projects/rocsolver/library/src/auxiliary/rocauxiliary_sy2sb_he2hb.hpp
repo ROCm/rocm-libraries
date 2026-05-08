@@ -181,9 +181,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
     T const one = 1;
     T const zero = 0;
-    T const neghalf = -0.5;
-    T const negone = -1;
-    S const rone = 1;
+    T const neg_half = -0.5;
+    T const neg_one = -1;
+    S const r_one = 1;
 
     if (debug_)
         print_matrix( "A_in", n, n, A, lda );
@@ -266,18 +266,18 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
                     n-i, kd, i-j, // opts
-                    &negone, V, idx2D( i, 0,   ldv ), ldv, strideV,  // Vj
-                             Z, idx2D( i, 0,   ldz ), ldz, strideZ,  // Zj^H, kd cols
-                    &one,    V, idx2D( i, i-j, ldv ), ldv, strideV,  // Vi
+                    &neg_one, V, idx2D( i, 0,   ldv ), ldv, strideV,  // Vj
+                              Z, idx2D( i, 0,   ldz ), ldz, strideZ,  // Zj^H, kd cols
+                    &one,     V, idx2D( i, i-j, ldv ), ldv, strideV,  // Vi
                     batch_count, workArr );
 
                 // Ai -= Zj Vj^H
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
                     n-i, kd, i-j, // opts
-                    &negone, Z, idx2D( i, 0,   ldz ), ldz, strideZ,  // Zj
-                             V, idx2D( i, 0,   ldv ), ldv, strideV,  // Vj^H, kd cols
-                    &one,    V, idx2D( i, i-j, ldv ), ldv, strideV,  // Vi
+                    &neg_one, Z, idx2D( i, 0,   ldz ), ldz, strideZ,  // Zj
+                              V, idx2D( i, 0,   ldv ), ldv, strideV,  // Vj^H, kd cols
+                    &one,     V, idx2D( i, i-j, ldv ), ldv, strideV,  // Vi
                     batch_count, workArr );
             }
 
@@ -372,9 +372,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_none,
                     jm, qn, i-j, // opts
-                    &negone, W, idx2D( j+kd, 0,   ldw ), ldw, strideW,  // Wj
-                             V, idx2D( j,    i-j, ldv ), ldv, strideV,  // Cji
-                    &one,    W, idx2D( j+kd, i-j, ldw ), ldw, strideW,  // Wi, jm rows
+                    &neg_one, W, idx2D( j+kd, 0,   ldw ), ldw, strideW,  // Wj
+                              V, idx2D( j,    i-j, ldv ), ldv, strideV,  // Cji
+                    &one,     W, idx2D( j+kd, i-j, ldw ), ldw, strideW,  // Wi, jm rows
                     batch_count, workArr );
             }
 
@@ -429,9 +429,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             rocsolver_gemm(
                 handle, rocblas_operation_none, rocblas_operation_none,
                 qm, i-j+qn, i-j+qn, // opts
-                &neghalf, V, idx2D( i+kd, 0, ldv ), ldv, strideV,  // Vj
-                          D, idx2D( 0,    0, ldd ), ldd, strideD,  // D
-                &one,     Z, idx2D( i+kd, 0, ldz ), ldz, strideZ,  // Zj
+                &neg_half, V, idx2D( i+kd, 0, ldv ), ldv, strideV,  // Vj
+                           D, idx2D( 0,    0, ldd ), ldd, strideD,  // D
+                &one,      Z, idx2D( i+kd, 0, ldz ), ldz, strideZ,  // Zj
                 batch_count, workArr);
 
             i += kd;
@@ -458,9 +458,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             rocblasCall_syr2k_her2k<BATCHED, T>(
                 handle, rocblas_fill_lower, rocblas_operation_none,
                 n-i, jb, // opts
-                &negone, Z, idx2D( i, 0, ldz ), ldz, strideZ,  // Zj, n-i rows
-                         V, idx2D( i, 0, ldv ), ldv, strideV,  // Vj, n-i rows
-                &rone,   A, idx2D( i, i, lda ), lda, strideA,  // Ai
+                &neg_one, Z, idx2D( i, 0, ldz ), ldz, strideZ,  // Zj, n-i rows
+                          V, idx2D( i, 0, ldv ), ldv, strideV,  // Vj, n-i rows
+                &r_one,   A, idx2D( i, i, lda ), lda, strideA,  // Ai
                 batch_count);
         }
         else
@@ -469,18 +469,18 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             rocsolver_gemm(
                 handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
                 n-i, n-i, jb, // opts
-                &negone, V, idx2D( i, 0, ldv ), ldv, strideV,  // Vj,   n-i rows
-                         Z, idx2D( i, 0, ldz ), ldz, strideZ,  // Zj^H, n-i cols
-                &one,    A, idx2D( i, i, lda ) + shiftA, lda, strideA,  // Ai
+                &neg_one, V, idx2D( i, 0, ldv ), ldv, strideV,  // Vj,   n-i rows
+                          Z, idx2D( i, 0, ldz ), ldz, strideZ,  // Zj^H, n-i cols
+                &one,     A, idx2D( i, i, lda ) + shiftA, lda, strideA,  // Ai
                 batch_count, workArr);
 
             // A -= ZV^H
             rocsolver_gemm(
                 handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
                 n-i, n-i, jb, // opts
-                &negone, Z, idx2D( i, 0, ldz ), ldz, strideZ,  // Zj,   n-i rows
-                         V, idx2D( i, 0, ldv ), ldv, strideV,  // Vj^H, n-i cols
-                &one,    A, idx2D( i, i, lda ) + shiftA, lda, strideA,  // Ai
+                &neg_one, Z, idx2D( i, 0, ldz ), ldz, strideZ,  // Zj,   n-i rows
+                          V, idx2D( i, 0, ldv ), ldv, strideV,  // Vj^H, n-i cols
+                &one,     A, idx2D( i, i, lda ) + shiftA, lda, strideA,  // Ai
                 batch_count, workArr);
         }
 
