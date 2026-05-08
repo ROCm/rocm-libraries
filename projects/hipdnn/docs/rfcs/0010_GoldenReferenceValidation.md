@@ -321,7 +321,9 @@ Adding a **new** operation:
 
 ## Data Management
 
-Golden data lives in `hipdnn_reference_data/` at the project root (see [Folder Convention](#folder-convention)). At install time, it is placed at `<exe_dir>/../lib/hipdnn_reference_data/`, which is where `getGoldenReferenceParams()` looks by default.
+Golden data lives in `hipdnn_reference_data/` at the project root (see [Folder Convention](#folder-convention)). CMake copies it to the build tree at configure time and installs it to `<prefix>/lib/hipdnn_reference_data/`. At runtime, `getGoldenReferenceParams()` resolves the path as `<exe_dir>/../lib/hipdnn_reference_data/` — the standard ROCm layout where executables are in `bin/` and data is in `lib/`. The `--golden-data-dir` CLI flag and `HIPDNN_TEST_GOLDEN_DATA_DIR` env var override this default.
+
+**Note**: because CMake uses `file(COPY)` at configure time, adding new golden data requires re-running CMake (not just rebuilding) to update the build tree.
 
 Golden data can grow large (a single test case with `8x512x64x64` fp32 tensors is ~64 MB). For large datasets, external storage is needed:
 
@@ -361,4 +363,5 @@ Comparison testing can confirm that two implementations agree, not that either i
 3. **C++ graph export**: Utility to export a graph from an existing test-as-code `buildGraph()` to the bundle format, enabling conversion of computed tests to golden tests.
 4. **Bundle inspection and validation tool**: CLI that reads bundles, reports tensor metadata and statistics, and validates integrity across a directory tree.
 5. **External data validation**: Because bundles are self-contained and tool-agnostic, external parties (customers, partner teams) could submit their own input+output tensor data for a given graph and validate it against golden references — or vice versa — without any C++ code. A Python-only comparison tool could load two bundles with the same graph and diff their output tensors.
-6. **Mathematical invariant checks and hand-verified micro cases**: Per-operation invariants (e.g., softmax rows sum to 1) and hand-computed expected outputs that catch bugs comparison testing cannot. Separate RFC.
+6. **Multi-source consensus gate**: Before freezing golden data, run the same graph through multiple independent reference sources (PyTorch, CPU ref, GPU ref) and only save the bundle when all sources agree within tolerance. This catches single-source bugs that the current single-reference generation cannot detect.
+7. **Mathematical invariant checks and hand-verified micro cases**: Per-operation invariants (e.g., softmax rows sum to 1) and hand-computed expected outputs that catch bugs comparison testing cannot. Separate RFC.
