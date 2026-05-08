@@ -284,19 +284,16 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     // Loop through all WGM values and find the best one
     int bestWGM = 1;
     int bestL2  = std::numeric_limits<int>::max();
-    bool preferLargerSplitKTie = false;
-    if (out_wgmxccsplitk != 0) {
-      constexpr size_t cacheLineBytes = 128;
-      double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
-                                  data_type_to_bytes(problem.b_dtype));
-      size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
+    constexpr size_t cacheLineBytes = 128;
+    double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
+                                data_type_to_bytes(problem.b_dtype));
+    size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
 
-      // SplitK L2 ties are order-sensitive. Wider WGM can improve reuse order,
-      // but when each K-step already spans more than a cache line, a wrong reuse
-      // direction is expensive; prefer the smaller tied WGM in that regime. This
-      // is a deliberately cheap runtime policy, computed once before the WGM loop.
-      preferLargerSplitKTie = bytesPerKIter <= cacheLineBytes;
-    }
+    // L2 ties are order-sensitive. Wider WGM can improve reuse order, but when
+    // each K-step already spans more than a cache line, a wrong reuse direction
+    // is expensive; prefer the smaller tied WGM in that regime. This policy is
+    // deliberately cheap and applies to both splitK and non-splitK ties.
+    bool preferLargerWGMTie = bytesPerKIter <= cacheLineBytes;
 
     for (auto wgm : wgmList) {
       auto wgmL2Estimate = 0;
@@ -376,9 +373,9 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       if (wgmL2Estimate < bestL2) {
         bestL2  = wgmL2Estimate;
         bestWGM = wgm;
-      } else if (out_wgmxccsplitk != 0 && wgmL2Estimate == bestL2) {
-        if ((preferLargerSplitKTie && wgm > bestWGM) ||
-            (!preferLargerSplitKTie && wgm < bestWGM))
+      } else if (wgmL2Estimate == bestL2) {
+        if ((preferLargerWGMTie && wgm > bestWGM) ||
+            (!preferLargerWGMTie && wgm < bestWGM))
           bestWGM = wgm;
       }
     }
