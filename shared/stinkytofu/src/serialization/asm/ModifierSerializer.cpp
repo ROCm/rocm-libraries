@@ -332,14 +332,42 @@ bool serializeVisit(const SWaitAluData& mod, std::ostream& os) {
 // MFMAModifiers
 bool serializeVisit(const MFMAModifiers& mod, std::ostream& os) {
     os << ", mod.mfma = {";
-    os << " inputPermute = \"" << mod.inputPermute << "\", scaleStr = \"" << mod.scaleStr
-       << "\", negStr = \"" << mod.negStr << "\", reuseA = " << (mod.reuseA ? "true" : "false")
+    os << " reuseA = " << (mod.reuseA ? "true" : "false")
        << ", reuseB = " << (mod.reuseB ? "true" : "false");
-    os << ", neg_lo = " << (mod.neg_lo ? "true" : "false")
-       << ", neg_hi = " << (mod.neg_hi ? "true" : "false");
-    if (mod.isMXMFMA) {
-        os << ", isMXMFMA = true, mxInstType = " << mod.mxInstType
-           << ", mxScaleAType = " << mod.mxScaleAType << ", mxScaleBType = " << mod.mxScaleBType;
+    if (!mod.negBits.empty()) {
+        os << ", negLo = [" << (int)mod.negBits.negLo[0];
+        for (int i = 1; i < mod.negBits.numSrcs; ++i) os << "," << (int)mod.negBits.negLo[i];
+        os << "], negHi = [" << (int)mod.negBits.negHi[0];
+        for (int i = 1; i < mod.negBits.numSrcs; ++i) os << "," << (int)mod.negBits.negHi[i];
+        os << "], numNegSrcs = " << (int)mod.negBits.numSrcs;
+    }
+    os << " }";
+    return true;
+}
+
+// MatrixFmtModifiers
+bool serializeVisit(const MatrixFmtModifiers& mod, std::ostream& os) {
+    os << ", mod.matrix_fmt = {";
+    bool first = true;
+    auto sep = [&]() {
+        os << (first ? " " : ", ");
+        first = false;
+    };
+    if (mod.fmtA != MatrixFmt::NONE) {
+        sep();
+        os << "fmtA = \"" << matrixFmtToStr(mod.fmtA) << "\"";
+    }
+    if (mod.fmtB != MatrixFmt::NONE) {
+        sep();
+        os << "fmtB = \"" << matrixFmtToStr(mod.fmtB) << "\"";
+    }
+    if (mod.scaleFmtA != MatrixScaleFmt::NONE) {
+        sep();
+        os << "scaleFmtA = \"" << matrixScaleFmtToStr(mod.scaleFmtA) << "\"";
+    }
+    if (mod.scaleFmtB != MatrixScaleFmt::NONE) {
+        sep();
+        os << "scaleFmtB = \"" << matrixScaleFmtToStr(mod.scaleFmtB) << "\"";
     }
     os << " }";
     return true;
@@ -365,7 +393,7 @@ bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
                           SMEMModifiers, SDWAModifiers, DPPModifiers, VOP3Modifiers, VOP3PModifiers,
                           True16Modifiers, EXEC, VCC, SWaitCntData, SWaitTensorCntData,
                           SWaitStoreCntData, SDelayAluData, SWaitAluData, MFMAModifiers,
-                          MemTokenData>(mod, os);
+                          MatrixFmtModifiers, MemTokenData>(mod, os);
 }
 
 /*
@@ -419,20 +447,32 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
     } else if (attrKey == "mod.swaitstorecnt") {
         inst->addModifier(SWaitStoreCntData(static_cast<int8_t>(getInt(fields, "storecnt", -1))));
     } else if (attrKey == "mod.mfma") {
-        bool isMX = getBool(fields, "isMXMFMA", false);
-        if (isMX) {
-            inst->addModifier(MFMAModifiers(
-                getStr(fields, "inputPermute"), getStr(fields, "scaleStr"),
-                getStr(fields, "negStr"), getBool(fields, "reuseA", false),
-                getBool(fields, "reuseB", false), getInt(fields, "mxInstType", 0),
-                getInt(fields, "mxScaleAType", 0), getInt(fields, "mxScaleBType", 0)));
-        } else {
-            inst->addModifier(
-                MFMAModifiers(getStr(fields, "inputPermute"), getStr(fields, "scaleStr"),
-                              getStr(fields, "negStr"), getBool(fields, "reuseA", false),
-                              getBool(fields, "reuseB", false), getBool(fields, "neg_lo", false),
-                              getBool(fields, "neg_hi", false)));
+        MFMAModifiers mod;
+        mod.reuseA = getBool(fields, "reuseA", false);
+        mod.reuseB = getBool(fields, "reuseB", false);
+
+        // Neg bits
+        if (fields.count("negLo")) {
+            auto loVec = getIntVector(fields, "negLo");
+            auto hiVec = getIntVector(fields, "negHi");
+            mod.negBits.numSrcs =
+                static_cast<uint8_t>(getInt(fields, "numNegSrcs", static_cast<int>(loVec.size())));
+            for (size_t i = 0; i < loVec.size() && i < 3; ++i)
+                mod.negBits.negLo[i] = static_cast<uint8_t>(loVec[i]);
+            for (size_t i = 0; i < hiVec.size() && i < 3; ++i)
+                mod.negBits.negHi[i] = static_cast<uint8_t>(hiVec[i]);
         }
+
+        inst->addModifier(mod);
+    } else if (attrKey == "mod.matrix_fmt") {
+        MatrixFmtModifiers mod;
+        if (fields.count("fmtA")) mod.fmtA = parseMatrixFmt(getStr(fields, "fmtA"));
+        if (fields.count("fmtB")) mod.fmtB = parseMatrixFmt(getStr(fields, "fmtB"));
+        if (fields.count("scaleFmtA"))
+            mod.scaleFmtA = parseMatrixScaleFmt(getStr(fields, "scaleFmtA"));
+        if (fields.count("scaleFmtB"))
+            mod.scaleFmtB = parseMatrixScaleFmt(getStr(fields, "scaleFmtB"));
+        inst->addModifier(mod);
     } else if (attrKey == "mod.delayalu") {
         auto toInstType = [](const std::string& s) {
             if (s == "VALU") return SDelayAluData::InstType::VALU;

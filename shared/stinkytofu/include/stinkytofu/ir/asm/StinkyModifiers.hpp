@@ -37,7 +37,35 @@ namespace stinkytofu {
 // Enum for selecting high or low 16 bits in True16 instructions
 enum class HighBitSel : int { NONE = -1, LOW = 0, HIGH = 1 };
 
-enum class MatrixFmt : uint8_t { FP4 = 0, FP6 = 1, FP8 = 2 };
+// Matrix data format for MFMA/WMMA F8F6F4 instructions.
+enum class MatrixFmt : uint8_t {
+    FP8 = 0,
+    BF8 = 1,
+    FP6 = 2,
+    BF6 = 3,
+    FP4 = 4,
+    NONE = 0xFF,
+};
+
+// Scale format for MXMFMA / scaled-WMMA instructions.
+enum class MatrixScaleFmt : uint8_t {
+    E8 = 0,
+    E5M3 = 1,
+    E4M3 = 2,
+    NONE = 0xFF,
+};
+
+// Convert MatrixFmt enum to assembly string (e.g. FP8 -> "MATRIX_FMT_FP8").
+STINKYTOFU_EXPORT std::string matrixFmtToStr(MatrixFmt fmt);
+
+// Parse assembly string to MatrixFmt enum (e.g. "MATRIX_FMT_FP8" -> FP8).
+STINKYTOFU_EXPORT MatrixFmt parseMatrixFmt(std::string_view s);
+
+// Convert MatrixScaleFmt enum to assembly string.
+STINKYTOFU_EXPORT std::string matrixScaleFmtToStr(MatrixScaleFmt fmt);
+
+// Parse assembly string to MatrixScaleFmt enum.
+STINKYTOFU_EXPORT MatrixScaleFmt parseMatrixScaleFmt(std::string_view s);
 
 enum class MUBUFScope : uint8_t {
     SCOPE_NONE = 0,
@@ -794,56 +822,65 @@ struct SWaitAluData : public TypedModifier<SWaitAluData> {
     uint8_t validFields;  // Bitmask indicating which fields are valid (not -1)
 };
 
-// MFMA modifiers
+// Per-source neg_lo/neg_hi bits for MFMA/WMMA instructions.
+// neg_lo and neg_hi are 3-bit fields (one bit per source: src0, src1, src2).
+// For IU8/IU4 data types, negation bits indicate signed vs unsigned.
+struct MFMANegBits {
+    std::array<uint8_t, 3> negLo = {0, 0, 0};
+    std::array<uint8_t, 3> negHi = {0, 0, 0};
+    uint8_t numSrcs = 0;  // 0 = unset, 2 or 3
+
+    bool hasNegLo() const {
+        return numSrcs > 0 && (negLo[0] || negLo[1] || negLo[2]);
+    }
+    bool hasNegHi() const {
+        return numSrcs > 0 && (negHi[0] || negHi[1] || negHi[2]);
+    }
+    bool empty() const {
+        return numSrcs == 0;
+    }
+};
+
+// MFMA modifiers - per-source neg_lo/neg_hi bits and matrix reuse hints.
+// Matrix data/scale formats live in MatrixFmtModifiers (its own TypedModifier)
+// so the cost-override table can match on it as a first-class Modifier type.
 struct MFMAModifiers : public TypedModifier<MFMAModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::MFMA_DATA;
 
-    MFMAModifiers(const std::string& inputPermute = "", const std::string& scaleStr = "",
-                  const std::string& negStr = "", bool reuseA = false, bool reuseB = false,
-                  bool neg_lo = false, bool neg_hi = false)
-        : TypedModifier<MFMAModifiers>(),
-          inputPermute(inputPermute),
-          scaleStr(scaleStr),
-          negStr(negStr),
-          reuseA(reuseA),
-          reuseB(reuseB),
-          neg_lo(neg_lo),
-          neg_hi(neg_hi),
-          isMXMFMA(false),
-          mxInstType(0),
-          mxScaleAType(0),
-          mxScaleBType(0) {}
+    MFMAModifiers() : TypedModifier<MFMAModifiers>() {}
 
-    // Constructor for MXMFMA instructions
-    MFMAModifiers(const std::string& inputPermute, const std::string& scaleStr,
-                  const std::string& negStr, bool reuseA, bool reuseB, int mxInstType,
-                  int mxScaleAType, int mxScaleBType, bool neg_lo = false, bool neg_hi = false)
-        : TypedModifier<MFMAModifiers>(),
-          inputPermute(inputPermute),
-          scaleStr(scaleStr),
-          negStr(negStr),
-          reuseA(reuseA),
-          reuseB(reuseB),
-          neg_lo(neg_lo),
-          neg_hi(neg_hi),
-          isMXMFMA(true),
-          mxInstType(mxInstType),
-          mxScaleAType(mxScaleAType),
-          mxScaleBType(mxScaleBType) {}
+    MFMANegBits negBits;  // Per-source neg_lo/neg_hi bits
+    bool reuseA = false;
+    bool reuseB = false;
+};
 
-    std::string inputPermute;
-    std::string scaleStr;
-    std::string negStr;
-    bool reuseA;
-    bool reuseB;
-    bool neg_lo;  // Indicates if neg_lo modifier is present
-    bool neg_hi;  // Indicates if neg_hi modifier is present
+// Matrix format modifier for F8F6F4-family WMMA/MFMA instructions.
+// Carries the per-matrix data format (fmtA/fmtB) and, for scaled (MXMFMA)
+// instructions, the per-matrix scale numeric format (scaleFmtA/scaleFmtB).
+// Used both for assembly emission (matrix_a_fmt:..., matrix_a_scale_fmt:...)
+// and as the match key for cost-override entries in *_Instructions.def.
+struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
+    static constexpr Modifier::Type Type = Modifier::Type::MATRIX_FMT;
 
-    // MXMFMA-specific fields
-    bool isMXMFMA;     // Flag to indicate if this is a MXMFMA modifier
-    int mxInstType;    // MXMFMA instruction type (rocisa::InstType)
-    int mxScaleAType;  // Scale type for matrix A (rocisa::InstType)
-    int mxScaleBType;  // Scale type for matrix B (rocisa::InstType)
+    MatrixFmt fmtA = MatrixFmt::NONE;
+    MatrixFmt fmtB = MatrixFmt::NONE;
+    MatrixScaleFmt scaleFmtA = MatrixScaleFmt::NONE;
+    MatrixScaleFmt scaleFmtB = MatrixScaleFmt::NONE;
+
+    MatrixFmtModifiers() : TypedModifier<MatrixFmtModifiers>() {}
+    MatrixFmtModifiers(MatrixFmt a, MatrixFmt b)
+        : TypedModifier<MatrixFmtModifiers>(), fmtA(a), fmtB(b) {}
+    MatrixFmtModifiers(MatrixFmt a, MatrixFmt b, MatrixScaleFmt sa, MatrixScaleFmt sb)
+        : TypedModifier<MatrixFmtModifiers>(), fmtA(a), fmtB(b), scaleFmtA(sa), scaleFmtB(sb) {}
+
+    // True for scaled F8F6F4 / MXMFMA (scale_fmt fields set).
+    bool isMXMFMA() const {
+        return scaleFmtA != MatrixScaleFmt::NONE;
+    }
+    // True when no format info is set (instance carries nothing useful).
+    bool empty() const {
+        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE;
+    }
 };
 
 struct CommentData : public TypedModifier<CommentData> {
@@ -852,16 +889,6 @@ struct CommentData : public TypedModifier<CommentData> {
     CommentData(const std::string& comment) : TypedModifier<CommentData>(), comment(comment) {}
 
     std::string comment;
-};
-
-struct MatrixFmtData : public TypedModifier<MatrixFmtData> {
-    static constexpr Modifier::Type Type = Modifier::Type::MATRIX_FMT;
-
-    MatrixFmtData(MatrixFmt fmtA, MatrixFmt fmtB)
-        : TypedModifier<MatrixFmtData>(), a(fmtA), b(fmtB) {}
-
-    MatrixFmt a;
-    MatrixFmt b;
 };
 
 struct MemTokenData : public TypedModifier<MemTokenData> {

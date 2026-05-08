@@ -145,4 +145,56 @@ DppCtrl parseDppCtrlFromAsm(std::string_view s) {
     return DppCtrl::NONE;
 }
 
+// --- MFMA matrix format conversion utilities ---
+
+std::string matrixFmtToStr(MatrixFmt fmt) {
+    switch (fmt) {
+        case MatrixFmt::FP8:
+            return "MATRIX_FMT_FP8";
+        case MatrixFmt::BF8:
+            return "MATRIX_FMT_BF8";
+        case MatrixFmt::FP6:
+            return "MATRIX_FMT_FP6";
+        case MatrixFmt::BF6:
+            return "MATRIX_FMT_BF6";
+        case MatrixFmt::FP4:
+            return "MATRIX_FMT_FP4";
+        default:
+            return {};
+    }
+}
+
+MatrixFmt parseMatrixFmt(std::string_view s) {
+    if (s == "MATRIX_FMT_FP8") return MatrixFmt::FP8;
+    if (s == "MATRIX_FMT_BF8") return MatrixFmt::BF8;
+    if (s == "MATRIX_FMT_FP6") return MatrixFmt::FP6;
+    if (s == "MATRIX_FMT_BF6") return MatrixFmt::BF6;
+    if (s == "MATRIX_FMT_FP4") return MatrixFmt::FP4;
+    return MatrixFmt::NONE;
+}
+
+std::string matrixScaleFmtToStr(MatrixScaleFmt fmt) {
+    switch (fmt) {
+        case MatrixScaleFmt::E8:
+            return "MATRIX_SCALE_FMT_E8";
+        case MatrixScaleFmt::E5M3:
+            return "MATRIX_SCALE_FMT_E5M3";
+        case MatrixScaleFmt::E4M3:
+            return "MATRIX_SCALE_FMT_E4M3";
+        default:
+            return {};
+    }
+}
+
+MatrixScaleFmt parseMatrixScaleFmt(std::string_view s) {
+    if (s == "MATRIX_SCALE_FMT_E8") return MatrixScaleFmt::E8;
+    if (s == "MATRIX_SCALE_FMT_E5M3") return MatrixScaleFmt::E5M3;
+    if (s == "MATRIX_SCALE_FMT_E4M3") return MatrixScaleFmt::E4M3;
+    // Also accept raw integer values (used by rocisa scale_fmt:N syntax)
+    if (s == "0") return MatrixScaleFmt::E8;
+    if (s == "1") return MatrixScaleFmt::E5M3;
+    if (s == "2") return MatrixScaleFmt::E4M3;
+    return MatrixScaleFmt::NONE;
+}
+
 }  // namespace stinkytofu

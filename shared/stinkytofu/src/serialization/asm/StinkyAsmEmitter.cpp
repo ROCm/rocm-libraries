@@ -290,21 +290,36 @@ inline std::ostream& operator<<(std::ostream& os, const DPPModifiers& dppMod) {
     return os;
 }
 
+inline std::ostream& operator<<(std::ostream& os, const MatrixFmtModifiers& m) {
+    // Input formats: matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8
+    if (m.fmtA != MatrixFmt::NONE) os << " matrix_a_fmt:" << matrixFmtToStr(m.fmtA);
+    if (m.fmtB != MatrixFmt::NONE) os << " matrix_b_fmt:" << matrixFmtToStr(m.fmtB);
+    // Scale formats: rocisa emits the raw integer (matrix_a_scale_fmt:2), so
+    // match that for byte-for-byte parity in the asm output. The IR (.stir)
+    // serializer keeps the symbolic name via matrixScaleFmtToStr().
+    if (m.scaleFmtA != MatrixScaleFmt::NONE)
+        os << " matrix_a_scale_fmt:" << static_cast<int>(m.scaleFmtA);
+    if (m.scaleFmtB != MatrixScaleFmt::NONE)
+        os << " matrix_b_scale_fmt:" << static_cast<int>(m.scaleFmtB);
+    return os;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const MFMAModifiers& mfmaMod) {
-    if (!mfmaMod.scaleStr.empty()) {
-        os << mfmaMod.scaleStr;
+    // Reuse hints
+    if (mfmaMod.reuseA) os << " matrix_a_reuse";
+    if (mfmaMod.reuseB) os << " matrix_b_reuse";
+    // Neg bits: neg_lo:[1,1] neg_hi:[0,1]
+    if (mfmaMod.negBits.hasNegLo()) {
+        os << " neg_lo:[" << (int)mfmaMod.negBits.negLo[0];
+        for (int i = 1; i < mfmaMod.negBits.numSrcs; ++i)
+            os << "," << (int)mfmaMod.negBits.negLo[i];
+        os << "]";
     }
-    if (!mfmaMod.inputPermute.empty()) {
-        os << " " << mfmaMod.inputPermute;
-    }
-    if (mfmaMod.reuseA) {
-        os << " matrix_a_reuse";
-    }
-    if (mfmaMod.reuseB) {
-        os << " matrix_b_reuse";
-    }
-    if (!mfmaMod.negStr.empty()) {
-        os << " " << mfmaMod.negStr;
+    if (mfmaMod.negBits.hasNegHi()) {
+        os << " neg_hi:[" << (int)mfmaMod.negBits.negHi[0];
+        for (int i = 1; i < mfmaMod.negBits.numSrcs; ++i)
+            os << "," << (int)mfmaMod.negBits.negHi[i];
+        os << "]";
     }
     return os;
 }
@@ -704,6 +719,7 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
             EMIT_TRAILING_MODIFIER(SDWA, SDWA);
             EMIT_TRAILING_MODIFIER(DPP, DPP);
             EMIT_TRAILING_MODIFIER(MFMA_DATA, MFMA);
+            EMIT_TRAILING_MODIFIER(MATRIX_FMT, MatrixFmt);
             default:
                 break;
         }
