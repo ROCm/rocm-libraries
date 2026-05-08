@@ -691,6 +691,44 @@ place. But the user owns the call.
 Everything else in §5 is cleanly resolvable in the bridge or sibling
 beads without further spike work.
 
+### 6.1 User decision (recorded post-spike)
+
+The spike's three-field rename proposal is **partially rejected**. The
+final shape is:
+
+```python
+SchedulePosition(loop_index: int, stream_index: int)
+```
+
+Two changes from the spike:
+
+1. **Drop `sub_index` / `tie_break_index` entirely.** The CMS bridge
+   (`rocm-libraries-xe5`) computes a single monotonic `stream_index`
+   per body by walking events in their existing
+   `(vmfma_index, sub_index)` lex order. Tie-breaking is folded into
+   the computation, not exposed as a separate field. Asm bridge
+   (`rocm-libraries-x6s`) assigns `stream_index` directly from asm
+   ordering — no tie-breaking needed because asm has no MFMA-anchor
+   concept.
+
+2. **Keep `loop_index` name (do NOT rename to `body_index`).** The
+   field today encodes one of 4 bodies of a single loop, but the
+   project will eventually model pre-loop, post-loop, and nested loops
+   — under that broader model the field truly indexes loop scopes.
+   `loop_index` generalizes; `body_index` would not.
+
+Failure-rendering implications: the existing `@ idx={vmfma_index}`
+shape (which depended on the CMS-specific `vmfma_index` value) must
+move to source-aware dispatch via `tagged_inst.render()` — already in
+scope for `rocm-libraries-3dy` (5gd.B.1, scope-tightened
+post-spike). For CMS-source rendering the user-facing N is recovered
+from the original `SlotKey.mfma_index` carried on `tagged_inst`, NOT
+from `position.stream_index` directly. `stream_index` is for sorting;
+display info lives on `tagged_inst`.
+
+Implementation tracked in `rocm-libraries-5v4u`. Blocks
+`rocm-libraries-iig`.
+
 ---
 
 ## 7. What's left for the implementation beads
