@@ -915,19 +915,77 @@ A one-file-and-a-half change:
 1. **Builder side** (`ScheduleCapture.py`): the edge identity tuple
    used for set construction switches from
    `(src_render_string, sink_render_string, edge_kind)` to
-   `(src_role, src_position, sink_role, sink_position, edge_kind,
-   byte_offset)`. `_canonical_render` stays for human-facing
-   `Failure` rendering but drops out of the matching path.
 
-   **CRITICAL — what `byte_offset` MUST mean here**: the
-   *intra-operand* offset within the connected operand (e.g., for a
-   4-vgpr LR feeding an MFMA's `a` input, the four edges have
-   `byte_offset` 0, 1, 2, 3 — those are positions WITHIN the LR's
-   destination, not absolute physical-register byte-keys). The
-   identity MUST be allocation-invariant: two graphs with the same
-   topology but different physical register allocations
-   (`vgpr(8, 4)` in one, `vgpr(12, 4)` in another for the same
-   logical operand) MUST produce identical edge keys.
+       (src_role, src_position, src_operand_slot,
+        sink_role, sink_position, sink_operand_slot,
+        edge_kind, byte_offset)
+
+   `_canonical_render` stays for human-facing `Failure` rendering
+   but drops out of the matching path.
+
+   **CRITICAL — the precise contract this identity must satisfy.**
+
+   Allocation invariance is *across-graph*, not *within-graph*:
+
+   - **Across graphs (must be EQUAL):** two graphs with the same
+     structural topology but different physical register
+     allocations. Example:
+
+         Graph A:  VSwap(v0, v1); VSwap(v1, v2)
+         Graph B:  VSwap(v1, v2); VSwap(v2, v3)
+
+     Both graphs have the same shared-register pattern (the second
+     instruction's first operand equals the first instruction's
+     second operand). They MUST produce identical edge identities
+     and `compare_graphs(A, B) == []`. The only difference between
+     them is which physical registers happen to hold the data —
+     that's exactly what allocation invariance means.
+
+   - **Within a graph (must be DIFFERENT):** any reordering of
+     instructions that changes the structural producer-consumer
+     pattern MUST be detected. Example:
+
+         Original:   VSwap(v0, v1); VSwap(v1, v2)
+         Reordered:  VSwap(v1, v2); VSwap(v0, v1)
+
+     These differ structurally: in the original the shared register
+     is *operand-1 of producer, operand-0 of consumer*; in the
+     reordered version the shared register is *operand-0 of
+     producer, operand-1 of consumer*. The flip of operand-slot
+     identity is allocation-invariant (slot indices 0/1 are
+     positional, not register-bound) but order-sensitive (it flips
+     when you swap the two instructions). `compare_graphs` MUST
+     surface this as an `OrderInvertedFailure` (or new
+     dedicated failure type if `OrderInverted` doesn't fit, but
+     prefer reusing `OrderInvertedFailure` if at all possible to
+     keep `Failure`-hierarchy unchanged).
+
+   **What each field MUST mean to satisfy this contract:**
+
+   - `src_role` / `sink_role`: scheduler-role tag (`identity[0]` —
+     LR/LW/GR/MFMA/PACK/...). Allocation-invariant.
+
+   - `src_position` / `sink_position`: SchedulePosition. Position-
+     sensitive so cross-body register reuse remains distinct.
+
+   - `src_operand_slot` / `sink_operand_slot`: positional operand
+     index on each endpoint (0, 1, 2, ...) describing WHICH
+     positional operand of the producer was written and WHICH
+     positional operand of the consumer was read for this edge.
+     For VSwap(dst, src), dst is slot 0 and src is slot 1. For
+     MFMA(acc, a, b, ...), acc is slot 0, a is slot 1, b is slot
+     2 (or whatever ordinal scheme is consistent with how the
+     rocisa instruction exposes its operands). Allocation-invariant
+     by construction (small integer, not a register reference).
+     This field is what makes the within-graph reorder detectable
+     while keeping the across-graph rename equal — see the two
+     examples above.
+
+   - `byte_offset`: intra-operand byte position(s) within the
+     connected operand (0..N-1 for an N-byte operand). For a
+     4-vgpr LR feeding an MFMA's `a` input, the four edges have
+     `byte_offset` 0, 1, 2, 3 — those are positions WITHIN the
+     LR's destination, not absolute physical-register byte-keys.
 
    This rules out using `_byte_keys_for_resource` outputs directly
    in the identity — those produce absolute byte-keys
@@ -936,8 +994,20 @@ A one-file-and-a-half change:
    comparison. The byte-keys are useful internally for finding
    the producer-consumer pair (`_resolve_producers` work), but
    the *identity* of the resulting edge must be expressed in
-   allocation-invariant terms: role + position + intra-operand
-   offset.
+   allocation-invariant terms: role + position + operand-slot +
+   intra-operand byte offset.
+
+   **Operand-slot derivation note.** The slot index must be
+   determined from the rocisa instruction's operand list at
+   capture time, not inferred from register names. `_writes(inst)`
+   and `_reads(inst)` already enumerate per-operand contributions;
+   that enumeration is the natural place to record the slot index
+   alongside the bytes published. If the existing `_writes`/`_reads`
+   helpers return flattened byte-key sets without operand-slot
+   provenance, they must be extended to yield
+   `(operand_slot, byte_keys)` tuples (or equivalent), and
+   `_resolve_producers` must thread the slot through the edge
+   construction so the final `DataflowEdge` carries it.
 
 2. **Compare side** (`CMSValidator.py`): the existing set-diff
    inside `compare_graphs` is unchanged; it just operates on the
