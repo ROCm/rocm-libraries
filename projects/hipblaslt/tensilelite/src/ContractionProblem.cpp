@@ -705,7 +705,7 @@ namespace TensileLite
             }
             else
             {
-                saSizes[boundIdx] = saSizes[boundIdx] / mxBlockA;
+                saSizes[boundIdx] = CeilDivide(saSizes[boundIdx], (size_t)mxBlockA);
             }
             TensorDescriptor mxsa("mx-a", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
@@ -730,7 +730,7 @@ namespace TensileLite
             }
             else
             {
-                sbSizes[boundIdx] = sbSizes[boundIdx] / mxBlockB;
+                sbSizes[boundIdx] = CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB);
             }
             TensorDescriptor mxsb("mx-b", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
