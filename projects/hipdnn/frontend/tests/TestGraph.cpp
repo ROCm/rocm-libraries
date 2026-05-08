@@ -236,6 +236,57 @@ TEST_F(TestGraph, GetBehaviorNotesForEngineReturnsNotes)
     EXPECT_EQ(notes[2], BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 }
 
+TEST_F(TestGraph, GetBehaviorNotesForEnginePropagatesCountQueryFailure)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
+    auto result = graph.get_behavior_notes_for_engine(7, notes);
+
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_TRUE(notes.empty());
+}
+
+TEST_F(TestGraph, GetBehaviorNotesForEnginePropagatesNoteQueryFailure)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, _, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
+    auto result = graph.get_behavior_notes_for_engine(7, notes);
+
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_TRUE(notes.empty());
+}
+
 TEST_F(TestGraph, GetBehaviorNotesForEngineSkipsUnknownNotes)
 {
     Graph graph;

@@ -298,6 +298,25 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesReturnsNotes)
     EXPECT_EQ(notes[2], HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 }
 
+TEST_F(TestEngineDescriptor, GetBehaviorNotesReturnsNotesWithoutElementCount)
+{
+    serializeEngineDetailsWithBehaviorNotes(
+        0,
+        {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+         static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    std::vector<hipdnnBackendBehaviorNote_t> notes(2);
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
+                                         HIPDNN_TYPE_BEHAVIOR_NOTE,
+                                         static_cast<int64_t>(notes.size()),
+                                         nullptr,
+                                         notes.data()));
+    EXPECT_EQ(notes[0], HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
+    EXPECT_EQ(notes[1], HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE);
+}
+
 TEST_F(TestEngineDescriptor, GetBehaviorNotesNullOutputReturnsCount)
 {
     serializeEngineDetailsWithBehaviorNotes(
@@ -374,6 +393,26 @@ TEST_F(TestEngineDescriptor, FinalizeFailsWithInvalidBehaviorNote)
 {
     serializeEngineDetailsWithBehaviorNotes(
         0, {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT)});
+
+    setGraph();
+    setGlobalIndex(0);
+    EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .WillOnce(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
+        .WillOnce(Return(std::vector<int64_t>{0}));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
+        .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
+            *d = this->_serializedEngineDetails;
+        }));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _));
+
+    ASSERT_THROW_HIPDNN_STATUS(getEngineDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineDescriptor, FinalizeFailsWithNegativeBehaviorNote)
+{
+    serializeEngineDetailsWithBehaviorNotes(0, {-1});
 
     setGraph();
     setGlobalIndex(0);

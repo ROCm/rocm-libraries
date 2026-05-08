@@ -43,6 +43,7 @@ TEST(TestTypes, BehaviorNoteToString)
                  "EXTERNAL_LIBRARY_DEPENDENCY");
     EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
                  "SUPPORTS_EXECUTION_PLAN_SERIALIZATION");
+    EXPECT_STREQ(to_string(static_cast<BehaviorNote>(-1)), "unknown");
 
     std::ostringstream oss;
     oss << BehaviorNote::SUPPORTS_GRAPH_CAPTURE;
