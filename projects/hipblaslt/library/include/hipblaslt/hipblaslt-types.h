@@ -46,8 +46,14 @@
 #include "hipblaslt_e8.h"
 #include "hipblaslt_e5m3.h"
 #include <float.h>
+#include <complex>
 
 // Generic API
+
+#ifdef __cplusplus
+typedef std::complex<float>  hipblaslt_complex_float;
+typedef std::complex<double> hipblaslt_complex_double;
+#endif
 
 #ifdef __cplusplus
 extern "C" {

@@ -474,7 +474,7 @@ inline void setTo1(const rocblaslt_compute_type& compute_type, const void* onePt
     }
 }
 
-inline std::complex<double> get_alpha_beta_scalar(hipDataType type, const void* ptr)
+inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const void* ptr)
 {
     if (!ptr) {
         return {0.0, 0.0};
@@ -495,12 +495,12 @@ inline std::complex<double> get_alpha_beta_scalar(hipDataType type, const void* 
 
         case HIP_C_32F:
         {
-            auto val = *(reinterpret_cast<const std::complex<float>*>(ptr));
+            auto val = *(reinterpret_cast<const hipblaslt_complex_float*>(ptr));
             return {static_cast<double>(val.real()), static_cast<double>(val.imag())};
         }
         case HIP_C_64F:
         {
-            return *(reinterpret_cast<const std::complex<double>*>(ptr));
+            return *(reinterpret_cast<const hipblaslt_complex_double*>(ptr));
         }
             
         default:

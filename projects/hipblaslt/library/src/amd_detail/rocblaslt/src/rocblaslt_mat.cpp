@@ -768,10 +768,10 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
         // avoid CPU dereference which causes an access violation on Windows.
         auto alpha_scalar = (!matmul_descr->pointermode && alpha)
                             ? get_alpha_beta_scalar(alpha_type, alpha)
-                            : std::complex<double>{0.0, 0.0};
+                            : hipblaslt_complex_double{0.0, 0.0};
         auto beta_scalar  = (!matmul_descr->pointermode && beta)
                             ? get_alpha_beta_scalar(beta_type, beta)
-                            : std::complex<double>{0.0, 0.0};
+                            : hipblaslt_complex_double{0.0, 0.0};
 
         log_trace(
             __func__,

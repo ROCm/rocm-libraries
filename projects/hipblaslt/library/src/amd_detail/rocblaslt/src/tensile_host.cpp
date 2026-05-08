@@ -262,20 +262,20 @@ namespace
         {
             if(typeA == rocisa::DataType::ComplexDouble)
             {
-                const std::complex<double> alpha_val
-                    = read_scalar_from_ptr<std::complex<double>>(alphaPtr);
-                const std::complex<double> beta_val
-                    = read_scalar_from_ptr<std::complex<double>>(betaPtr);
+                const hipblaslt_complex_double alpha_val
+                    = read_scalar_from_ptr<hipblaslt_complex_double>(alphaPtr);
+                const hipblaslt_complex_double beta_val
+                    = read_scalar_from_ptr<hipblaslt_complex_double>(betaPtr);
                 // Calculate magnitude and assign to double pointers
                 *alpha = std::abs(alpha_val);
                 *beta  = std::abs(beta_val);
             }
             else // typeA == rocisa::DataType::ComplexFloat
             {
-                const std::complex<float> alpha_val
-                    = read_scalar_from_ptr<std::complex<float>>(alphaPtr);
-                const std::complex<float> beta_val
-                    = read_scalar_from_ptr<std::complex<float>>(betaPtr);
+                const hipblaslt_complex_float alpha_val
+                    = read_scalar_from_ptr<hipblaslt_complex_float>(alphaPtr);
+                const hipblaslt_complex_float beta_val
+                    = read_scalar_from_ptr<hipblaslt_complex_float>(betaPtr);
                 // Calculate magnitude and assign to double pointers
                 *alpha = std::abs(alpha_val);
                 *beta  = std::abs(beta_val);
@@ -823,36 +823,36 @@ namespace
     inline std::string getAlphaRealAsString(const TensileLite::ContractionInputs& inputs, bool isComplex)
     {
         return isComplex 
-            ?  (std::holds_alternative<std::complex<float>>(inputs.alpha)
-                ?  std::to_string(std::get<std::complex<float>>(inputs.alpha).real())
-                : std::to_string(std::get<std::complex<double>>(inputs.alpha).real()))
+            ?  (std::holds_alternative<hipblaslt_complex_float>(inputs.alpha)
+                ?  std::to_string(std::get<hipblaslt_complex_float>(inputs.alpha).real())
+                : std::to_string(std::get<hipblaslt_complex_double>(inputs.alpha).real()))
             : ToString(inputs.alpha);
     }
 
     inline std::string getAlphaImagAsString(const TensileLite::ContractionInputs& inputs, bool isComplex)
     {
         return isComplex
-            ?  (std::holds_alternative<std::complex<float>>(inputs.alpha)
-                ?  std::to_string(std::get<std::complex<float>>(inputs.alpha).imag())
-                : std::to_string(std::get<std::complex<double>>(inputs.alpha).imag()))
+            ?  (std::holds_alternative<hipblaslt_complex_float>(inputs.alpha)
+                ?  std::to_string(std::get<hipblaslt_complex_float>(inputs.alpha).imag())
+                : std::to_string(std::get<hipblaslt_complex_double>(inputs.alpha).imag()))
             : std::to_string(0.0);
     }
 
     inline std::string getBetaRealAsString(const TensileLite::ContractionInputs& inputs, bool isComplex)
     {
         return isComplex
-            ?  (std::holds_alternative<std::complex<float>>(inputs.beta)
-                ?  std::to_string(std::get<std::complex<float>>(inputs.beta).real())
-                : std::to_string(std::get<std::complex<double>>(inputs.beta).real()))
+            ?  (std::holds_alternative<hipblaslt_complex_float>(inputs.beta)
+                ?  std::to_string(std::get<hipblaslt_complex_float>(inputs.beta).real())
+                : std::to_string(std::get<hipblaslt_complex_double>(inputs.beta).real()))
             : ToString(inputs.beta);
     }
 
     inline std::string getBetaImagAsString(const TensileLite::ContractionInputs& inputs, bool isComplex)
     {
         return isComplex
-            ?  (std::holds_alternative<std::complex<float>>(inputs.beta)
-                ?  std::to_string(std::get<std::complex<float>>(inputs.beta).imag())
-                : std::to_string(std::get<std::complex<double>>(inputs.beta).imag()))
+            ?  (std::holds_alternative<hipblaslt_complex_float>(inputs.beta)
+                ?  std::to_string(std::get<hipblaslt_complex_float>(inputs.beta).imag())
+                : std::to_string(std::get<hipblaslt_complex_double>(inputs.beta).imag()))
             : std::to_string(0.0f);
     }
 
@@ -2083,12 +2083,12 @@ namespace
 
             if(type == HIP_C_64F)
             {
-                auto val = *(reinterpret_cast<const std::complex<double>*>(ptr));
+                auto val = *(reinterpret_cast<const hipblaslt_complex_double*>(ptr));
                 return TensileLite::toScalarValueEnum(val);
             }
             else if(type == HIP_C_32F)
             {
-                auto val = *(reinterpret_cast<const std::complex<float>*>(ptr));
+                auto val = *(reinterpret_cast<const hipblaslt_complex_float*>(ptr));
                 return TensileLite::toScalarValueEnum(val);
             }
             else if(type == HIP_R_64F)
@@ -2397,11 +2397,11 @@ namespace
             {
                 if(complex_check_type == rocisa::DataType::ComplexDouble)
                 {
-                    visitable_alpha_beta_arg = std::complex<double>(0.0, 0.0);
+                    visitable_alpha_beta_arg = hipblaslt_complex_double(0.0, 0.0);
                 }
                 else
                 {
-                    visitable_alpha_beta_arg = std::complex<float>(0.0f, 0.0f);
+                    visitable_alpha_beta_arg = hipblaslt_complex_float(0.0f, 0.0f);
                 }
             }
             else

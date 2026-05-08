@@ -88,13 +88,13 @@ inline void assignAlphaBeta1(const rocblaslt_compute_type& compute_type,
         if (compute_type == rocblaslt_compute_f64)
         {
             // 64-bit complex compute
-            _set_value(alpha, std::complex<double>(1.0, 0.0));
-            _set_value(beta,  std::complex<double>(1.0, 0.0));
+            _set_value(alpha, hipblaslt_complex_double(1.0, 0.0));
+            _set_value(beta,  hipblaslt_complex_double(1.0, 0.0));
         }
         else
         {
-            _set_value(alpha, std::complex<float>(1.0f, 0.0f));
-            _set_value(beta,  std::complex<float>(1.0f, 0.0f));
+            _set_value(alpha, hipblaslt_complex_float(1.0f, 0.0f));
+            _set_value(beta,  hipblaslt_complex_float(1.0f, 0.0f));
         }
     }
     else 
