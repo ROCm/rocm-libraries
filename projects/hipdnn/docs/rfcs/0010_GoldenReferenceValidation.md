@@ -16,7 +16,6 @@
    - [Verification Modes](#verification-modes)
    - [Tolerance Framework](#tolerance-framework)
    - [Data Integrity](#data-integrity)
-   - [Harness Integration](#harness-integration)
 4. [Folder Convention](#folder-convention)
 5. [CLI and Configuration](#cli-and-configuration)
 6. [Integration](#integration)
@@ -155,7 +154,7 @@ PyTorch is the recommended starting point because it is independent of the C++ c
 
 ### Verification Modes
 
-Three modes control which test suites run. `computed` and `golden` are separate gtest suites with different test fixtures, parameterization, and data sources.
+Three modes control which test suites run. In every mode, the **engine** is the thing being tested — the reference source (runtime executor or golden bundle) provides the expected output. `computed` and `golden` are separate gtest suites with different test fixtures, parameterization, and data sources.
 
 | Mode | What runs | Reference source |
 |------|-----------|-----------------|
@@ -186,7 +185,7 @@ For golden tests, the same dynamic tolerance functions apply — the loaded bund
 
 ### Data Integrity
 
-Key-value consistency is mostly guaranteed by construction: `Graph.save()` writes the JSON and `.bin` files from the same in-memory graph in a single call, and `loadGraphAndTensors()` reads UIDs from the JSON and loads the corresponding `.bin` files. The UIDs match because they come from the same source. Corruption can only happen after generation (partial downloads, disk errors, manual edits).
+Internal consistency is guaranteed by construction: `Graph.save()` writes the JSON and `.bin` files from the same in-memory graph in a single call, so UIDs and tensor data always correspond. `loadGraphAndTensors()` reads UIDs from the JSON and loads the matching `.bin` files. Corruption can only enter after generation — partial downloads, disk errors, or manual edits.
 
 Three checks catch the real failure modes:
 
@@ -202,26 +201,9 @@ Three checks catch the real failure modes:
 
 ---
 
-### Harness Integration
-
-Two test patterns coexist in the codebase:
-
-| Pattern | Harness | Graph source | Reference source |
-|---------|---------|-------------|-----------------|
-| Test-as-code | `IntegrationGraphVerificationHarness` | Built by `buildGraph()` in C++ | CPU/GPU executor at runtime |
-| Test-as-data | `TestGoldenReferenceCpu` / `TestGoldenReferenceGpu` | Loaded from JSON on disk | Pre-computed data from bundle |
-
-Every existing test (conv, matmul, SDPA, etc.) uses test-as-code. This RFC does not modify it. New golden tests use test-as-data. Both patterns coexist in the same test binary. Over time, as golden data coverage grows, test-as-data becomes the primary validation path.
-
-**Acceptance criteria**:
-- [ ] Test-as-code tests are unchanged — zero modifications to existing test fixtures
-- [ ] Test-as-data tests work for any operation type (after removing `EXPECT_EQ(tensorMap.size(), 6)`)
-
----
-
 ## Folder Convention
 
-Golden data is organized under `hipdnn_reference_data/` with a three-level hierarchy. The folder path is a human convention for organization and gtest discovery -- the loader does not validate that the folder path matches the graph content. The generator is responsible for placing bundles in the correct folder.
+The folder path tells you what a test covers. The file inside tells the engine what to compute. Together they drive test discovery: `getGoldenReferenceParams()` takes a folder path and returns every `.json` file in it as a gtest parameter.
 
 ```
 hipdnn_reference_data/
@@ -230,6 +212,8 @@ hipdnn_reference_data/
       {DataType}/         # e.g., fp32, fp16, bfp16
         {TestName}.json + {TestName}.tensor{uid}.bin
 ```
+
+The folder path is a human convention — the loader does not validate that it matches the graph content. The generator is responsible for placing files in the correct folder.
 
 ### Naming Conventions
 
@@ -263,34 +247,30 @@ hipdnn_reference_data/
 
 ### How Test Discovery Works
 
-`getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32")` scans the directory for `.json` files and returns each file path as a gtest parameter. Each `.json` file becomes a separate test case.
-
-To add a new test case to an existing operation/layout/datatype, drop a new `.json` + `.bin` bundle into the directory. The next test run picks it up automatically.
-
-Because test names include the file path, standard `--gtest_filter` works for selecting by operation, layout, or data type.
+`getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32")` scans that directory for `.json` files and returns each as a gtest parameter. To add a test case to an existing folder, drop in a new `.json` + `.bin` set — the next run picks it up automatically. To select tests, use `--gtest_filter` with the file path (operation, layout, data type, or test name).
 
 ---
 
 ## CLI and Configuration
 
-### CLI Flags
+The test binary accepts two flags. `--verification-mode` controls **what** runs. `--golden-data-dir` controls **where** golden data is read from (ignored when mode is `computed`).
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
-| `--vm, --verification-mode` | `computed`, `golden`, `both` | `computed` | Controls which test suites run |
-| `--gd, --golden-data-dir` | path | `<exe_dir>/../lib/hipdnn_reference_data` | Root directory for golden data |
+| `--vm, --verification-mode` | `computed`, `golden`, `both` | `computed` | Which test suites run |
+| `--gd, --golden-data-dir` | path | `<exe_dir>/../lib/hipdnn_reference_data` | Where to find golden data (only used when mode includes golden tests) |
 
-### Environment Variable Fallbacks
+Each flag has an environment variable fallback. The CLI flag takes precedence when both are set.
 
-- `HIPDNN_TEST_VERIFICATION_MODE` -- overridden by `--verification-mode` CLI flag
-- `HIPDNN_TEST_GOLDEN_DATA_DIR` -- overridden by `--golden-data-dir` CLI flag
-
-Generation is performed by Python scripts (see [Generation Pipeline](#generation-pipeline)), not by the C++ test binary. The test binary is purely a consumer of golden data. Each test fixture checks the verification mode in `SetUp()` and skips itself if the mode excludes it.
+| Flag | Environment variable |
+|------|---------------------|
+| `--verification-mode` | `HIPDNN_TEST_VERIFICATION_MODE` |
+| `--golden-data-dir` | `HIPDNN_TEST_GOLDEN_DATA_DIR` |
 
 **Acceptance criteria**:
-- [ ] Both CLI flags parsed and stored in `TestConfig` singleton
+- [ ] Both flags parsed and stored in `TestConfig` singleton
 - [ ] Environment variable fallbacks work when CLI flag is absent
-- [ ] `--verification-mode golden` with missing golden data directory: hard FAIL with path
+- [ ] `--verification-mode golden` with missing golden data directory: hard FAIL with actionable path in the error message
 - [ ] `--verification-mode computed` ignores golden data entirely (no fetch, no directory check)
 
 ---
@@ -299,25 +279,17 @@ Generation is performed by Python scripts (see [Generation Pipeline](#generation
 
 ### CI Integration
 
-#### Recommended CI Strategy
-
-| CI Stage | Verification Mode | Golden Data Required | Rationale |
-|----------|-------------------|---------------------|-----------|
-| Pre-submit (smoke) | `computed` | No | Fast feedback, no external storage dependency |
-| Post-submit (full) | `both` | Yes | Cross-validates golden against computed |
-| Nightly | `golden` | Yes | Regression gate against locked baselines |
-
-Pre-submit jobs omit the golden data fetch step entirely, keeping them fast and independent of remote storage availability. Post-submit and nightly jobs fetch golden data before running tests.
+| CI Stage | Verification Mode | Golden Data Required |
+|----------|-------------------|---------------------|
+| Pre-submit (smoke) | `computed` | No |
+| Post-submit (full) | `both` | Yes |
+| Nightly | `golden` | Yes |
 
 ### Adding New Golden Reference Tests
 
-Adding a test case to an **existing** operation/layout/datatype requires zero C++ changes: generate the data bundle, drop it into the folder, and the runner discovers it on the next run.
-
-Adding a **new** operation:
-
 1. **Generate** — write a generation script following the [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
 2. **Commit** — add the bundle to `hipdnn_reference_data/{Operation}/{Layout}/{DataType}/`. For large tensors, use git-lfs or DVC (see [Data Management](#data-management))
-3. **Instantiate** — add a one-time `INSTANTIATE_TEST_SUITE_P` in a test `.cpp` file, using `TestGoldenReferenceCpu` or `TestGoldenReferenceGpu` as the fixture and `getGoldenReferenceParams("{Operation}/{Layout}/{DataType}")` as the parameter source
+3. **Instantiate** (new operations only) — add a one-time `INSTANTIATE_TEST_SUITE_P` in a test `.cpp` file, pointing `getGoldenReferenceParams()` at the new folder. Existing operations already have this — skip this step when adding test cases to an existing folder
 
 ---
 
