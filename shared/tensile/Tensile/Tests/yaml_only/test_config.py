@@ -159,6 +159,20 @@ def configMarks(filepath, rootDir, availableArchs):
 
 def findAvailableArchs():
     availableArchs = []
+
+    # Option 1: Use AMDGPU_FAMILIES from environment (TheRock CI)
+    if "AMDGPU_FAMILIES" in os.environ:
+        families = os.environ.get("AMDGPU_FAMILIES")
+        # Parse "gfx94X-dcgpu" or "gfx1151" format
+        for family in families.split():
+            # Extract base architecture (strip -dcgpu, -xnack, etc.)
+            arch = family.split('-')[0]  # gfx94X or gfx1151
+            availableArchs.append("gfx000")  # Always add gfx000 for fallback
+            if arch not in availableArchs:
+                availableArchs.append(arch)
+        return availableArchs
+
+    # Option 2: Fallback to rocm_agent_enumerator (local testing with GPU)
     rocmpath = "/opt/rocm"
     if "ROCM_PATH" in os.environ:
         rocmpath = os.environ.get("ROCM_PATH")
@@ -166,6 +180,8 @@ def findAvailableArchs():
         rocmpath = os.environ.get("TENSILE_ROCM_PATH")
     if os.name == "nt":
       rocmAgentEnum = os.path.join(rocmpath, "bin", "hipinfo.exe")
+      if not os.path.exists(rocmAgentEnum):
+          pytest.skip(f"GPU detection not available: no AMDGPU_FAMILIES and {rocmAgentEnum} not found")
       # change to use  check_output to force windows cmd block util command finish
       output = subprocess.check_output([rocmAgentEnum])
 
@@ -179,6 +195,8 @@ def findAvailableArchs():
       availableArchs.append(arch)
     else:
       rocmAgentEnum = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
+      if not os.path.exists(rocmAgentEnum):
+          pytest.skip(f"GPU detection not available: no AMDGPU_FAMILIES and {rocmAgentEnum} not found")
       # change to use  check_output to force windows cmd block util command finish
       output = subprocess.check_output([rocmAgentEnum, "-t", "GPU"])
       lines = output.decode().splitlines()

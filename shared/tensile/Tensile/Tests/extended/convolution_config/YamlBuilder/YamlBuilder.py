@@ -223,12 +223,28 @@ class YamlBuilder:
     @classmethod
     def findAvailableArchs(self):
         availableArchs = []
+
+        # Option 1: Use AMDGPU_FAMILIES from environment (TheRock CI)
+        if "AMDGPU_FAMILIES" in os.environ:
+            families = os.environ.get("AMDGPU_FAMILIES")
+            # Parse "gfx94X-dcgpu" or "gfx1151" format
+            for family in families.split():
+                # Extract base architecture (strip -dcgpu, -xnack, etc.)
+                arch = family.split('-')[0]  # gfx94X or gfx1151
+                if arch not in availableArchs:
+                    availableArchs.append(arch)
+            return availableArchs
+
+        # Option 2: Fallback to rocm_agent_enumerator (local testing with GPU)
         rocmpath = "/opt/rocm"
         if "ROCM_PATH" in os.environ:
             rocmpath = os.environ.get("ROCM_PATH")
         if "TENSILE_ROCM_PATH" in os.environ:
             rocmpath = os.environ.get("TENSILE_ROCM_PATH")
         rocmAgentEnum = os.path.join(rocmpath, "bin/rocm_agent_enumerator")
+        if not os.path.exists(rocmAgentEnum):
+            import pytest
+            pytest.skip(f"GPU detection not available: no AMDGPU_FAMILIES and {rocmAgentEnum} not found")
         output = subprocess.check_output([rocmAgentEnum, "-t", "GPU"])
         lines = output.decode().splitlines()
         for line in lines:
