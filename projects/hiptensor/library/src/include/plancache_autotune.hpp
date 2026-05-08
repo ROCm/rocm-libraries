@@ -38,6 +38,7 @@ namespace hiptensor
     enum class AutotuneOps
     {
         Autotune_Contraction,
+        Autotune_ContractionTrinary,
         Autotune_Permutation,
         Autotune_BinaryOp,
         Autotune_TrinaryOp,

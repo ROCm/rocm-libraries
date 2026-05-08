@@ -56,4 +56,14 @@ inline RegKey toRegKey(const StinkyRegister& reg, unsigned offset = 0) {
     return {reg.reg.type, reg.reg.idx + offset};
 }
 
+/// Invoke fn(RegKey) for each DWORD in a register operand.
+/// Skips non-register operands (literals, immediates).
+template <typename Fn>
+void forEachRegUnit(const StinkyRegister& reg, Fn&& fn) {
+    if (reg.dataType != StinkyRegister::Type::Register) return;
+    for (unsigned i = 0; i < reg.reg.num; ++i) {
+        fn(toRegKey(reg, i));
+    }
+}
+
 }  // namespace stinkytofu

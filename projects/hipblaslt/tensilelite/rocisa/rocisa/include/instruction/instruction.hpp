@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -255,7 +255,7 @@ namespace rocisa
             if(newVal != oriVal && !outputInlineAsm){
                 // Base layer WA: need to store previous msb value in [15:8] bits.
                 //int setVal = oriVal < 0? newVal : newVal + (oriVal << 8);
-		// only set newVal until complier support it
+		// only set newVal until compiler support it
                 int setVal = newVal;
                 std::string msbStr = "s_set_vgpr_msb " + std::to_string(setVal);
                 std::string msbComment = std::string("src0: " + std::to_string(msbSrc[0]) + ", src1: " + std::to_string(msbSrc[1]) + \

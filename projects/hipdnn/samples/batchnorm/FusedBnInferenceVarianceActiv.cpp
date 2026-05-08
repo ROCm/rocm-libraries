@@ -67,7 +67,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     activatedY->set_name("activated_y");
     activatedY->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     // Allocate tensors

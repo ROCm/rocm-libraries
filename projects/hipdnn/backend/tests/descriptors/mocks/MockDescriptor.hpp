@@ -173,6 +173,8 @@ public:
                 getEngineConfig,
                 (),
                 (const, override));
+    MOCK_METHOD(int64_t, getEngineId, (), (const, override));
+    MOCK_METHOD(const std::vector<int64_t>&, getTensorUids, (), (const, override));
     MOCK_METHOD(hipdnnEnginePluginExecutionContext_t, getExecutionContext, (), (const, override));
 
     static hipdnnBackendDescriptorType_t getStaticType()

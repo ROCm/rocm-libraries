@@ -117,6 +117,10 @@ void StinkyAsmModule::runOptimizationPipeline() {
     backend.runOptimization();
 }
 
+std::optional<uint64_t> StinkyAsmModule::getMetaDataU64(const std::string& key) const {
+    return getFunction().getMetaData(key);
+}
+
 void StinkyAsmModule::addGroup(const std::string& name) {
     if (pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end()) {
         return;
@@ -152,7 +156,7 @@ void StinkyAsmModule::updateInstructionGroups(const std::vector<const std::strin
             auto& groupRange = pImpl->instructionGroups.at(*groupName);
             if (groupRange.first == IntrusiveListIterator<IRBase>()) {
                 auto it = bb.rbegin();
-                for (auto i = 1; i < newInstructionCount; ++i) {
+                for (size_t i = 1; i < newInstructionCount; ++i) {
                     it++;
                 }
                 groupRange.first = IntrusiveListIterator<IRBase>(it.getNodePtr());
