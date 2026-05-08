@@ -15,10 +15,10 @@ namespace miopen_plugin
 namespace pointwise_applicability
 {
 
-using hipdnn_data_sdk::data_objects::DataType;
-using hipdnn_data_sdk::data_objects::NodeAttributes;
-using hipdnn_data_sdk::data_objects::PointwiseAttributes;
-using hipdnn_data_sdk::data_objects::PointwiseMode;
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+using hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes;
+using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
 void checkPointwiseModeSupported(const PointwiseAttributes& attrs)
 {
@@ -33,7 +33,8 @@ void checkPointwiseModeSupported(const PointwiseAttributes& attrs)
 
 void checkPointwiseTensorsSupported(
     const PointwiseAttributes& attrs,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     const auto& inputTensor
@@ -50,7 +51,7 @@ void checkPointwiseTensorsSupported(
     }
 }
 
-bool isSupported(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     if(opGraph.nodeCount() != 1)
     {

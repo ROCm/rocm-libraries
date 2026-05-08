@@ -13,14 +13,14 @@ namespace miopen_plugin
 
 bool MiopenPointwisePlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return pointwise_applicability::isSupported(opGraph);
 }
 
 size_t MiopenPointwisePlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const HipdnnMiopenSettings& executionSettings) const
 {
     // Pointwise operations do not require workspace memory.
@@ -29,8 +29,9 @@ size_t MiopenPointwisePlanBuilder::getMaxWorkspaceSize(
 
 void MiopenPointwisePlanBuilder::initializeExecutionSettings(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+        engineConfig,
     [[maybe_unused]] HipdnnMiopenSettings& executionSettings) const
 {
     // No execution settings are needed for pointwise operations.
@@ -38,8 +39,9 @@ void MiopenPointwisePlanBuilder::initializeExecutionSettings(
 
 void MiopenPointwisePlanBuilder::buildPlan(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+        engineConfig,
     HipdnnMiopenContext& executionContext) const
 {
     // Preconditions are validated in isApplicable; no need to re-check here.
@@ -49,15 +51,15 @@ void MiopenPointwisePlanBuilder::buildPlan(
     HIPDNN_PLUGIN_LOG_INFO("Building pointwise plan for node: " << nodeName);
 
     const auto& attrs
-        = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+        = nodeWrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
 
     auto plan = std::make_unique<MiopenPointwisePlan>(attrs, opGraph.getTensorMap());
     executionContext.setPlan(std::move(plan));
 }
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenPointwisePlanBuilder::getCustomKnobs(
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> MiopenPointwisePlanBuilder::getCustomKnobs(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     // Pointwise operations do not expose any custom knobs.
     return {};
