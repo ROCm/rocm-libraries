@@ -12,6 +12,3 @@ CMakeUserPresets.json
 
 # claude tmp files
 .nfs*
-
-# Stray binary occasionally produced by test rocisa codegen
-a.out
