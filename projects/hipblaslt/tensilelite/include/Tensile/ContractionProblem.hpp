@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,7 @@
 #include <Tensile/TensorOps.hpp>
 #include <Tensile/Utils.hpp>
 
+TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     /**
@@ -180,7 +181,7 @@ namespace TensileLite
         rocisa::DataType dataType;
     };
 
-    class ContractionProblem : public Problem
+    class TENSILE_API ContractionProblem : public Problem
     {
     public:
         ContractionProblem(size_t size, size_t workspaceSize = 0);
@@ -297,7 +298,7 @@ namespace TensileLite
      * summations, etc. This is decoupled from any particular pointers, which
      * are provided in ContractionInputs objects.
      */
-    class ContractionProblemGemm : public ContractionProblem
+    class TENSILE_API ContractionProblemGemm : public ContractionProblem
     {
     public:
         enum TENSOR : int
@@ -1064,24 +1065,14 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {});
-
-        size_t mxBlockA() const
-        {
-            return m_mxBlockA;
-        }
+        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensor = true);
 
         rocisa::DataType mxTypeA() const
         {
             return m_mxTypeA;
         }
 
-        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {});
-
-        size_t mxBlockB() const
-        {
-            return m_mxBlockB;
-        }
+        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensor = true);
 
         rocisa::DataType mxTypeB() const
         {
@@ -1106,6 +1097,16 @@ namespace TensileLite
         void setSwizzleTensorB(bool swizzle)
         {
             m_swizzleTensorB = swizzle;
+        }
+
+        size_t mxBlockA() const
+        {
+            return m_mxBlockA;
+        }
+
+        size_t mxBlockB() const
+        {
+            return m_mxBlockB;
         }
 
         /// Allocated elements excluding batch dimensions
@@ -1560,3 +1561,4 @@ namespace TensileLite
      * @}
      */
 } // namespace TensileLite
+TENSILE_HIDDEN_END
