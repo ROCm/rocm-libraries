@@ -146,6 +146,10 @@ inline void hipblaslt_init(void*       A,
             static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count);
         break;
 #endif
+    case HIP_R_8F_UE8M0:
+        hipblaslt_init<hipblaslt_e8>(
+            static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count);
+        break;
     case HIP_R_32I:
         hipblaslt_init<int32_t>(static_cast<int32_t*>(A), M, N, lda, stride, batch_count);
         break;
