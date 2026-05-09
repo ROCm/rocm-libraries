@@ -2410,12 +2410,24 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
       printExit("Config file requires version=%s is not compatible with current Tensile version=%s" \
           % (config["MinimumRequiredVersion"], __version__) )
 
-  if "HipConfig" in config:
+  version_str = os.environ.get("ROCM_VERSION")
+  if not version_str:
+    for root in [os.environ.get("ROCM_PATH"), os.environ.get("HIP_PATH"), "/opt/rocm"]:
+      if root:
+        try:
+          version_str = open(os.path.join(root, ".info", "version")).read().strip()
+          break
+        except OSError:
+          continue
+  if version_str:
+    globalParameters["HipClangVersion"] = version_str
+    tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
+  elif "HipConfig" in config:
     output = getVersion(config["HipConfig"], regex=r'(.+)')
     globalParameters["HipClangVersion"] = output.strip()
     tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
   else:
-    raise ValueError("HipConfig not specified in config, could not set HipClangVersion")
+    raise ValueError("HipConfig not specified in config and ROCM_VERSION not set, could not set HipClangVersion")
 
   # User-specified global parameters
   tPrint(3, "GlobalParameters:")
