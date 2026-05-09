@@ -1230,7 +1230,7 @@ pipeline {
         string(
             name: 'COMPILER_VERSION',
             defaultValue: '',
-            description: 'Specify which version of compiler to use: release, develop, amd-mainline, or leave blank (default).')
+            description: 'Specify which version of compiler to use: release, develop, amd-staging, amd-mainline, or leave blank (default).')
         string(
             name: 'COMPILER_COMMIT',
             defaultValue: '',
@@ -2091,7 +2091,10 @@ pipeline {
                          description: 'Some checks have failed'
             node(rocmnode("nogpu")) {
                 script {
-                    sendFailureNotifications()
+                    checkoutComposableKernel()
+                }
+                withCredentials([string(credentialsId: 'ck_ci_errors_webhook_url', variable: 'WEBHOOK_URL')]) {
+                    sh 'bash projects/composablekernel/script/infra_helper/send_failure_notifications.sh'
                 }
             }
         }
