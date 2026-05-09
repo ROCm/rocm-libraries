@@ -32,20 +32,11 @@ under `TYPE_CHECKING` (string-typed). No runtime cycle exists.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from collections import defaultdict
 from enum import Enum
-from typing import TYPE_CHECKING, ClassVar, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
-from rocisa.instruction import (
-    SWaitCnt, SBarrier,
-    MFMAInstruction, SMovB32, SAddU32,
-    VPermB32, VOrB32, VLShiftLeftOrB32, VSwapB32,
-    VCvtPkF32toBF16, PVCvtBF16toFP32, VCvtBF16toFP32, VSubF32, VDot2CF32BF16,
-    BufferLoadB128, BufferLoadB64, BufferLoadB32,
-)
+from rocisa.instruction import SWaitCnt
 from Tensile.Common.Utilities import printWarning
 # Eager imports from ScheduleCapture are safe: ScheduleCapture only imports
 # from this module under TYPE_CHECKING (no eager reverse-import), so loading
@@ -78,38 +69,6 @@ if TYPE_CHECKING:
         LoopBodyCapture, TaggedInstruction,
     )
 
-
-# Sentinel values for "infinitely far" positions. Values chosen to be well beyond
-# any realistic schedule size (per-body event counts are typically ~100-400,
-# and the structural-side encoding (`Timeline._insert`) multiplies by
-# `_STRUCTURAL_SUB_BASE` — the sentinel still has to dominate that product).
-_STRUCTURAL_SUB_BASE = 10_000  # See Timeline._insert; encodes (vmfma_index, sub_index)
-POSITION_INF = SchedulePosition(loop_index=9_999, stream_index=9_999_999_999)
-POSITION_NEG_INF = SchedulePosition(loop_index=-9_999, stream_index=-9_999_999_999)
-
-
-def _struct_vmfma_index(pos: 'SchedulePosition') -> int:
-    """Decode the structural-side stream_index back into the kernel-writer's
-    `vmfma_index`. Mirrors the encoding in `Timeline._insert`:
-        stream_index = (vmfma_index + 1) * _STRUCTURAL_SUB_BASE + sub_index
-    so `vmfma_index = stream_index // _STRUCTURAL_SUB_BASE - 1`. Used by
-    ValidatorInstruction error-rendering paths so `@ idx=N` strings keep
-    printing the kernel-writer's slot id rather than the encoded
-    structural stream index. Sentinel positions (POSITION_INF /
-    POSITION_NEG_INF) decode to large +/- numbers here; rendering paths
-    that compare against `>= -1` continue to work.
-    """
-    return pos.stream_index // _STRUCTURAL_SUB_BASE - 1
-
-# --- Loop Names ---
-MAIN_LOOP_PREV = "ML-1"
-MAIN_LOOP = "ML"
-NO_GLOBAL_LOAD_LOOP = "NGL"
-NO_LOCAL_LOAD_LOOP = "NLL"
-
-# --- Pack Group Sizes ---
-PACK_GROUP_SIZE_TF32 = 24        # 4 CVT0 + 16 middle + 4 CVT1
-PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
 
 # --- Quad-Cycle Timing (CDNA 4 ISA section 7.6) ---
 # Per-arch profiles (`ArchProfile`) defined below resolve from `kernel["ISA"]`.
@@ -312,14 +271,6 @@ _MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = (
 # runtime — actually the reverse direction; eager imports either way would
 # deadlock module init).
 
-# Type alias: every Failure-formatter parameter accepts either a graph-side
-# GraphNode (carries `position`, `category`, `tagged_inst`) or a structural-side
-# ValidatorInstruction (carries `issued_at` and exposes `category` via property).
-# Both shapes are exercised across the test suite; `_node_position` /
-# `cms_node_label` discriminate via getattr probes.
-NodeLike = Union["GraphNode", "ValidatorInstruction"]
-
-
 @dataclass
 class GraphNode:
     """A node in the unified 4-body dataflow graph.
@@ -331,10 +282,9 @@ class GraphNode:
     position lives in graph-builder space (loop_index spans bodies); the
     underlying TaggedInstruction.slot is preserved on tagged_inst.
 
-    issue_cycles is the per-instruction quad-cycle issue cost: mirrors
-    `ValidatorInstruction.min_issue_quad_cycles()` (CMSValidator.py:327 +
-    645). Default 1; SNop-shaped instructions return `1 + wait_state`.
-    Populated by `_make_node` from a class-dispatch table so the graph-side
+    issue_cycles is the per-instruction quad-cycle issue cost: default 1.
+    SNop-shaped instructions get `1 + wait_state` (computed by
+    `_min_issue_quad_cycles_for`). Populated by `_make_node` so the graph-side
     `cumulative_issue_cycles` helper can simulate per-instruction issue costs
     cycle-exactly without re-importing CMSValidator (which would create an
     import cycle — CMSValidator imports from this module). The structural-side
@@ -496,7 +446,7 @@ SWAIT_CATEGORY = "SYNC"
 SBARRIER_CATEGORY = "BARRIER"
 
 
-def counter_for(node_or_category: Union[str, GraphNode, "ValidatorInstruction"]) -> str:
+def counter_for(node_or_category: Union[str, GraphNode]) -> str:
     """Return the SWaitCnt counter that gates the given producer.
 
     'dscnt' for LR/LW (LDS ops); 'vlcnt' for GR (vector-memory loads).
@@ -821,10 +771,9 @@ def _identity_for(inst, body_label: str, category=None) -> tuple:
 def _min_issue_quad_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = None) -> int:
     """Return the per-instruction quad-cycle issue cost.
 
-    Mirrors `ValidatorInstruction.min_issue_quad_cycles()` from CMSValidator.py:
-        - Default `min_issue_quad_cycles_base = 1` (CMSValidator.py:298, 327-328).
-        - `SNop.min_issue_quad_cycles` adds `wait_state` (CMSValidator.py:645-647).
-    Every other validator dataclass keeps the base cost of 1.
+    Default issue cost is 1; SNop adds `wait_state` (read off the rocisa
+    instruction's first parameter). Every other instruction shape keeps
+    the base cost of 1.
 
     `profile` defaults to the CDNA 4 arch profile (base = 1). Per-arch
     overrides for the default issue cost come from
@@ -2021,12 +1970,9 @@ class _PositionStr(str):
             return -1
 
 
-def _node_position(node: NodeLike) -> SchedulePosition:
-    """Resolve the SchedulePosition for a NodeLike (GraphNode or
-    ValidatorInstruction). GraphNode has `position`; ValidatorInstruction
-    has `issued_at`. Mirrors the getattr probe used by the old free
-    helpers."""
-    return getattr(node, "position", None) or node.issued_at
+def _node_position(node: GraphNode) -> SchedulePosition:
+    """Resolve the SchedulePosition for a GraphNode."""
+    return node.position
 
 
 def _node_display_idx(node: NodeLike) -> int:
@@ -2359,10 +2305,10 @@ class OverriddenInputFailure(Failure):
 
 
 def cms_node_label(
-    node: NodeLike,
+    node: GraphNode,
     body_capture: Optional["LoopBodyCapture"],
 ) -> FailureNodeLabel:
-    """Construct a FailureNodeLabel for a CMS-side node.
+    """Construct a FailureNodeLabel for a CMS-side GraphNode.
 
     Wording is identical to the old `_node_with_pos`:
       - primary: 'category[N]' (per-category-stream 0-based index in the
@@ -2371,25 +2317,22 @@ def cms_node_label(
 
     `body_capture` is the LoopBodyCapture for the body that emitted this
     node (resolved by the caller from `node.body_label`). When
-    `body_capture` is None or the node has no `tagged_inst` recorded in
-    that body, the helper falls back to a bare `category` primary —
-    important for SWaitCnt / SBarrier / SNop nodes (no tagged_inst by
-    construction) and for cross-body callsites that don't index every
+    `body_capture` is None, the helper falls back to a bare `category`
+    primary — relevant for cross-body callsites that don't index every
     body's tagged_inst stream.
     """
     cat = node.category
     if cat == "MFMA":
         primary = cat
     else:
-        tagged = getattr(node, "tagged_inst", None)
         primary = cat
-        if body_capture is not None and tagged is not None:
+        if body_capture is not None:
             same_cat = [
                 t for t in body_capture.instructions
                 if getattr(t, "category", None) == cat
             ]
             try:
-                idx = same_cat.index(tagged)
+                idx = same_cat.index(node.tagged_inst)
                 primary = f"{cat}[{idx}]"
             except ValueError:
                 # Lookup miss (cross-body callsite, or a body capture that
@@ -2409,11 +2352,11 @@ def cms_node_label(
         primary=primary,
         position=_PositionStr(f"@ idx={_node_display_idx(node)}"),
         category=cat,
-        body_label=getattr(node, "body_label", None),
+        body_label=node.body_label,
     )
 
 
-def _cms_iter_delta(producer: NodeLike, consumer: NodeLike) -> int:
+def _cms_iter_delta(producer: GraphNode, consumer: GraphNode) -> int:
     """Compute the canonical loop-offset between consumer and producer.
 
     Mirrors the old `_iter_note`'s loop_index arithmetic. Returns the raw
@@ -2425,17 +2368,15 @@ def _cms_iter_delta(producer: NodeLike, consumer: NodeLike) -> int:
     return c_pos.loop_index - p_pos.loop_index
 
 
-def _body_for_node(graph: "DataflowGraph", node: NodeLike) -> Optional["LoopBodyCapture"]:
+def _body_for_node(graph: "DataflowGraph", node: GraphNode) -> Optional["LoopBodyCapture"]:
     """Look up the LoopBodyCapture that emitted `node`.
 
-    Uses `node.body_label` against `graph.captures`. Returns None for
-    NodeLike values without a body_label (e.g. some test stubs) or when
-    the body isn't present in the graph (kernel didn't emit it).
+    Uses `node.body_label` against `graph.captures`. Returns None when
+    the graph is None or the body isn't present (kernel didn't emit it).
     """
-    label = getattr(node, "body_label", None)
-    if label is None or graph is None:
+    if graph is None:
         return None
-    return graph.captures.get(label)
+    return graph.captures.get(node.body_label)
 
 
 # =============================================================================
@@ -3174,9 +3115,8 @@ def validate_middle_pack_pair_interleaving(graph: "DataflowGraph") -> List["Over
             continue
         if not _is_middle_pack(inst):
             continue
-        # Defensive: only honor nodes whose category looks like a Pack* tag
-        # (production resolves PackA0/PackB0/... via PACK_TYPE_MAP). A
-        # MiddlePack rocisa class with a non-Pack category would mean the
+        # Defensive: only honor nodes whose category looks like a Pack* tag.
+        # A MiddlePack rocisa class with a non-Pack category would mean the
         # category resolver mis-tagged the instruction; ignore rather than
         # blow up — the resolver is exercised by test_ScheduleCapture.py.
         if not getattr(node, "category", "").startswith("Pack"):
@@ -3230,798 +3170,6 @@ def validate_middle_pack_pair_interleaving(graph: "DataflowGraph") -> List["Over
             ),
         ))
     return failures
-
-
-@dataclass
-class ValidatorInstruction(ABC):
-    """Abstract base for all validator instructions."""
-    name: str
-    issued_at: SchedulePosition
-    # The minimum number of quad-cycles that this instruction takes to issue.
-    min_issue_quad_cycles_base: ClassVar[int] = 1
-    # Reference to the rocisa instruction object this was created from.
-    # None when constructed from mock/test data without real instructions.
-    # init=False: set via _insert after construction to avoid dataclass
-    # ordering issues (non-default following default in subclasses).
-    rocisa_inst: object = field(default=None, init=False, repr=False, compare=False)
-
-    @property
-    def category(self) -> str:
-        """Alias for `name`. Lets the typed-Failure canonical formatters in
-        ScheduleCapture.py — which were written against GraphNode (which has
-        both `category` and `name`) — accept ValidatorInstruction objects
-        without crashing. ValidatorInstruction's `name` already carries the
-        per-tensor / per-iter tag (e.g. 'LRA0', 'PackB1'), matching what
-        GraphNode.category holds."""
-        return self.name
-
-    @abstractmethod
-    def validate(self) -> Optional[str]:
-        ...
-
-    def done_idx(self) -> SchedulePosition:
-        """Position after which this instruction is done for scheduling purposes.
-
-        Default: instruction is done at its issue position.
-        Override in subclasses where completion depends on an SWaitCnt (LocalRead, GlobalRead).
-        """
-        return self.issued_at
-
-    def min_issue_quad_cycles(self) -> int:
-        return self.min_issue_quad_cycles_base
-
-@dataclass
-class LocalRead(ValidatorInstruction):
-    # The index in the list of Local Read instructions provided by a CMS schedule.
-    # Needed to properly calculate must_start_after for Packs.
-    issue_index: int
-    # `guaranteed_by` is set by ``apply_swaits`` to the SWaitCnt position
-    # that drains this LR; consumed by Pack-side dependency derivation
-    # (``derive_pack_must_start_after``) via ``done_idx()``.
-    guaranteed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
-
-    def done_idx(self) -> SchedulePosition:
-        return self.guaranteed_by
-
-    def validate(self) -> Optional[str]:
-        """No-op. LR-data-ready (LR -> MFMA dscnt drain) lives graph-side
-        via ``validate_edge_wait_coverage`` over LR -> MFMA RAW edges.
-        The ``ValidatorInstruction.validate`` abstract method still
-        requires an override on every subclass; this no-op preserves the
-        contract without re-introducing the deleted structural rule.
-        """
-        return None
-
-@dataclass
-class MFMA(ValidatorInstruction):
-    def validate(self) -> Optional[str]:
-        return None
-
-@dataclass
-class Pack(ValidatorInstruction):
-    """BF16 pack instructions (v_perm). Base class for all pack types.
-
-    The structural-side ordering rule (`Pack.validate`,
-    `Pack.must_start_after`, `Pack.needed_by`, plus all `_hook_up_packs_*`
-    plumbing) was removed. Pack-related ordering invariants (LR -> Pack
-    RAW dscnt drain, Pack -> MFMA RAW order, Pack -> Pack WAR ordering)
-    are now enforced graph-side by `validate_edge_wait_coverage` and
-    `compare_graphs` over real register dataflow edges produced by
-    `_GenericALURule` (ScheduleCapture.py). See migrated coverage in
-    `Tensile/Tests/unit/test_validate_pack_graph.py`.
-    """
-    # The index in the list of Pack instructions provided by a CMS schedule.
-    # Set at construction time (the `_insert` call paths in `Timeline`).
-    # Retained as a construction-time tag; the producing call site assigns
-    # it unconditionally.
-    issue_index: int
-    # Which tile/group this pack belongs to, computed at construction time.
-    # Only meaningful for TF32 subclasses (CVTPack, MiddlePack, MFMAPack); None for BF16 packs.
-    group_index: Optional[int] = None
-
-    def validate(self) -> Optional[str]:
-        """No-op. Pack-ordering invariants live graph-side; the
-        ValidatorInstruction abstract method still requires an override on
-        every subclass, so this preserves the contract.
-        """
-        return None
-
-@dataclass
-class CVTPack(Pack):
-    """TF32 CVT0/CVT1 packs (v_cvt_pk_bf16_f32). Type marker for isinstance dispatch."""
-    pass
-
-@dataclass
-class MiddlePack(Pack):
-    """Middle-16 packs in TF32 groups of 24.
-
-    The structural-side `MiddlePack.validate`, `pair_consumer`, and
-    `next_scheduled_middle_16` helpers were removed. The pair-interleaving
-    invariant (`OverriddenInputFailure` on a non-pair-consumer between
-    pair-leader and pair-consumer) is now enforced graph-side via
-    `validate_middle_pack_pair_interleaving`; see
-    `test_validate_pack_graph.py::TestMiddlePackPairInterleavingGraph`.
-    """
-    pass
-
-@dataclass
-class SwapPack(Pack):
-    """VSwapB32 instructions that transpose registers after wider local reads (VW > 1).
-
-    Generated by transposeLRVregs() in LocalRead.py. Count per pack group: 4 * (vw - 1).
-    Always appear at the beginning of a pack sequence before CVT0/MFMA/CVT1 groups.
-    """
-    pass
-
-@dataclass
-class MFMAPack(Pack, MFMA):
-    """A v_mfma_f32_4x4x4_16b_bf16 instruction used in TF32 4x4 emulation pack groups.
-
-    Identified from idMap via resolve_pack_type() (isinstance MFMAInstruction).
-    They are real MFMA instructions but participate in the pack dependency
-    chain (CVT0 -> MFMAPack -> CVT1).
-
-    Inherits from both Pack and MFMA:
-    - isinstance(x, Pack) is True — works with pack gathering, filtering, type hints
-    - isinstance(x, MFMA) is True — captures "this IS an MFMA" semantics
-    """
-
-
-@dataclass
-class GlobalRead(ValidatorInstruction):
-    swap_global_read_order: bool
-    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(name="MFMA", issued_at=POSITION_INF))
-    guaranteed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
-    barriered_at: list[SchedulePosition] = field(default_factory=list)
-
-    def done_idx(self) -> SchedulePosition:
-        return self.guaranteed_by
-
-    def validate(self):
-        """Stack 1.3: returns typed Failure or None (legacy str also accepted
-        for the residual defensive-fallback branches)."""
-        # Check needed_by constraint (GR must finish before LR1/3)
-        needed_by_error = self._validate_needed_by()
-        if needed_by_error:
-            return needed_by_error
-
-        return None
-
-    def _validate_needed_by(self):
-        """Validate: GR -> SWait -> SBarrier -> LR1. Returns Failure or None."""
-        # If needed_by is at inf, the constraint is not active (e.g. no LR1s).
-        if self.needed_by.issued_at == POSITION_INF:
-            return None
-
-        if self.issued_at < self.guaranteed_by < self.needed_by.issued_at:
-            if any(self.guaranteed_by < barriered_at < self.needed_by.issued_at for barriered_at in self.barriered_at):
-                    return None
-
-        issued_at = _struct_vmfma_index(self.issued_at)
-        needed_by = _struct_vmfma_index(self.needed_by.issued_at)
-
-        name = self._name()
-
-        # Eager source-aware labels. ValidatorInstruction has no body capture
-        # context (no tagged_inst, no body_label), so cms_node_label falls
-        # through to bare-category primary — matches the pre-g4w wording for
-        # this path (which previously raised under strict mode anyway).
-        producer_label = cms_node_label(self, None)
-        consumer_label = cms_node_label(self.needed_by, None)
-        iter_delta = _cms_iter_delta(self, self.needed_by)
-
-        # 1. No SWait
-        if self.guaranteed_by == POSITION_INF:
-            return MissingWaitFailure(
-                producer=producer_label, consumer=consumer_label,
-                iter_delta=iter_delta, counter_kind="vlcnt",
-            )
-
-        # NOTE: Must do it after the check above to guard against infinity.
-        guaranteed_by = _struct_vmfma_index(self.guaranteed_by)
-
-        # 2. No Barrier
-        if len(self.barriered_at) == 0:
-            return MissingBarrierFailure(
-                producer=producer_label, consumer=consumer_label,
-                iter_delta=iter_delta, role="needed_by",
-            )
-
-        # 3. Guaranteed after needed — semantically equivalent to no wait from the
-        # consumer's perspective, so surface as MissingWaitFailure.
-        if self.guaranteed_by > self.needed_by.issued_at:
-            return MissingWaitFailure(
-                producer=producer_label, consumer=consumer_label,
-                iter_delta=iter_delta, counter_kind="vlcnt",
-            )
-
-        # 4. No Barrier between SWait and LR1
-        if not any(self.guaranteed_by < barriered_at < self.needed_by.issued_at for barriered_at in self.barriered_at):
-            return MissingBarrierFailure(
-                producer=producer_label, consumer=consumer_label,
-                iter_delta=iter_delta, role="needed_by",
-            )
-
-        # Defensive fallback — string return; should not fire on valid logic.
-        return (f"{name} @ idx={issued_at} is not valid. issued @ idx={issued_at}, "
-                f"guaranteed @ idx={guaranteed_by}, "
-                f"barriered @ idx={[_struct_vmfma_index(b) for b in self.barriered_at]}, "
-                f"needed @ idx={needed_by} is not valid.")
-
-    def _name(self) -> str:
-        name = self.name
-        if not self.swap_global_read_order:
-            return name
-
-        if name.startswith("GRA"):
-            return name + " (Swapped, loading B)"
-        elif name.startswith("GRB"):
-            return name + " (Swapped, loading A)"
-        else:
-            raise ValueError(f"Unexpected global read name: {name}")
-
-@dataclass
-class SWait(ValidatorInstruction):
-    dscnt: int
-    vlcnt: int
-    vscnt: int
-    comment: str
-
-    def _is_valid(self) -> bool:
-        return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and _struct_vmfma_index(self.issued_at) >= -1
-
-    def validate(self):
-        """Stack 1 of jaunty-reddy plan: returns typed Failure or None."""
-        if self._is_valid():
-            return None
-        return InvalidCounterValueFailure(
-            swait_idx=_struct_vmfma_index(self.issued_at),
-            dscnt=self.dscnt,
-            vlcnt=self.vlcnt,
-            vscnt=self.vscnt,
-        )
-
-@dataclass
-class Barrier(ValidatorInstruction):
-    comment: str
-
-    def validate(self) -> Optional[str]:
-        # Sentinel range check stays as a defensive guard. No user-facing
-        # Failure type — this fires only on malformed test fixtures.
-        # Returning a string keeps the legacy boundary working.
-        if _struct_vmfma_index(self.issued_at) < -1:
-            return f"Barrier at index {_struct_vmfma_index(self.issued_at)} is not valid. Must be >= -1."
-        return None
-
-@dataclass
-class SNop(ValidatorInstruction):
-    wait_state: int
-
-    def min_issue_quad_cycles(self) -> int:
-        # Base instruction quad-cycles plus wait_state additional cycles
-        return self.min_issue_quad_cycles_base + self.wait_state
-
-    def validate(self) -> Optional[str]:
-        return None
-
-@dataclass
-class GRInc(ValidatorInstruction):
-    """Scalar pointer-increment instructions (GRIncA/GRIncB) that advance the
-    global memory address before the next buffer_load."""
-
-    def validate(self) -> Optional[str]:
-        return None
-
-ALL_INSTRUCTION_NAMES = [
-    "LRA0", "LRB0", "LRA1", "LRB1", "LRA3", "LRB3",
-    "GRA", "GRB",
-    "GRIncA", "GRIncB",
-    "PackA0", "PackB0", "PackA1", "PackB1", "PackA3", "PackB3",
-    "SYNC", "SNOP",
-]
-
-
-# --- Type Resolution for idMap-driven instruction classification ---
-# Maps rocisa instruction types to (ValidatorInstruction subclass, assembly label).
-# Lookup: exact type match first, then isinstance fallback for subclass chains.
-PACK_TYPE_MAP: dict[type, tuple[type, str]] = {
-    VPermB32:          (Pack,       "v_perm_b32"),
-    VOrB32:            (Pack,       "v_or_b32"),
-    VLShiftLeftOrB32:  (Pack,       "v_lshlrev_or_b32"),
-    VCvtPkF32toBF16:   (CVTPack,    "v_cvt_pk_bf16_f32"),
-    PVCvtBF16toFP32:   (MiddlePack, "p_v_cvt_f32_bf16"),
-    VCvtBF16toFP32:    (MiddlePack, "v_cvt_f32_bf16"),
-    VSubF32:           (MiddlePack, "v_sub_f32"),
-    VDot2CF32BF16:     (MiddlePack, "v_dot2c_f32_bf16"),
-    VSwapB32:          (SwapPack,   "v_swap_b32"),
-    MFMAInstruction:   (MFMAPack,   "v_mfma_*"),
-}
-
-# Maps rocisa instruction types to (is_gr_load: bool).
-# Used to distinguish actual GR loads from m0 pointer writes in DTL sequences.
-GR_TYPE_MAP: dict[type, bool] = {
-    SMovB32:        False,  # m0 pointer setup
-    SAddU32:        False,  # m0 pointer increment
-    BufferLoadB128: True,   # actual GR load
-    BufferLoadB64:  True,
-    BufferLoadB32:  True,
-}
-
-
-def resolve_pack_type(rocisa_inst: object) -> tuple[type, str]:
-    """Resolve a rocisa instruction to its ValidatorInstruction class and assembly label.
-
-    Args:
-        rocisa_inst: A rocisa instruction object from the idMap.
-
-    Returns:
-        Tuple of (ValidatorInstruction subclass, assembly label string).
-
-    Raises:
-        ValueError: If the instruction type is not recognized.
-    """
-    inst_type = type(rocisa_inst)
-    # Exact match first
-    if inst_type in PACK_TYPE_MAP:
-        return PACK_TYPE_MAP[inst_type]
-    # isinstance fallback for subclass chains (e.g. MFMAInstruction subclasses)
-    for base_type, result in PACK_TYPE_MAP.items():
-        if isinstance(rocisa_inst, base_type):
-            return result
-    raise ValueError(f"Unknown pack instruction type: {inst_type.__name__} ({rocisa_inst})")
-
-
-def is_gr_load(rocisa_inst: object) -> bool:
-    """Return True if the rocisa instruction is an actual GR load, False if it's a pointer operation.
-
-    Raises:
-        ValueError: If the instruction type is not recognized.
-    """
-    inst_type = type(rocisa_inst)
-    if inst_type in GR_TYPE_MAP:
-        return GR_TYPE_MAP[inst_type]
-    for base_type, result in GR_TYPE_MAP.items():
-        if isinstance(rocisa_inst, base_type):
-            return result
-    raise ValueError(f"Unknown GR instruction type: {inst_type.__name__} ({rocisa_inst})")
-
-
-def detect_pack_groups(idmap_items: list) -> list[dict]:
-    """Walk the idMap entries for a pack name and identify group boundaries from the type pattern.
-
-    Returns a list of group dicts, each containing:
-      - 'group_index': int (or None for ungrouped SwapPacks)
-      - 'entries': list of (index, validator_cls, asm_label) tuples
-
-    Group detection rules:
-      - SwapPack instructions at the start are ungrouped (group_index=None).
-      - If no CVTPack/MiddlePack/MFMAPack types appear, all entries are plain Pack (BF16, no grouping needed).
-      - Otherwise, determine the group size from the type pattern (presence of MiddlePack → 24, MFMAPack → 10)
-        and split the non-swap entries into fixed-size groups.
-    """
-    if not idmap_items:
-        return []
-
-    entries = []
-    for idx, inst in enumerate(idmap_items):
-        cls, label = resolve_pack_type(inst)
-        entries.append((idx, cls, label))
-
-    # Check if there are any TF32-related types
-    has_middle = any(cls is MiddlePack for _, cls, _ in entries)
-    has_mfma_pack = any(cls is MFMAPack for _, cls, _ in entries)
-    has_cvt = any(cls is CVTPack for _, cls, _ in entries)
-
-    if not (has_middle or has_mfma_pack or has_cvt):
-        # BF16: all plain Pack, single group
-        return [{"group_index": 0, "entries": entries}]
-
-    groups = []
-    # Separate leading SwapPacks
-    n_swaps = 0
-    for idx, cls, label in entries:
-        if cls is SwapPack:
-            n_swaps += 1
-        else:
-            break
-
-    if n_swaps > 0:
-        groups.append({"group_index": None, "entries": entries[:n_swaps]})
-
-    remaining = entries[n_swaps:]
-    if not remaining:
-        return groups
-
-    # Determine group size from the type pattern
-    if has_middle:
-        group_size = PACK_GROUP_SIZE_TF32       # 24: CVT0×4 + Middle×16 + CVT1×4
-    elif has_mfma_pack:
-        group_size = PACK_GROUP_SIZE_TF32_4X4   # 10: CVT0×4 + MFMAPack×2 + CVT1×4
-    else:
-        # CVTPack only (no middle or mfma) — shouldn't happen in practice, but handle gracefully
-        group_size = len(remaining)
-
-    # Split remaining entries into fixed-size groups
-    for i in range(0, len(remaining), group_size):
-        group_entries = remaining[i:i + group_size]
-        group_idx = i // group_size
-        groups.append({"group_index": group_idx, "entries": group_entries})
-
-    return groups
-
-
-def create_unified_timeline(
-    schedule_info: 'ScheduleInfo',
-    kernel: 'Solution',
-    code_path: int,
-    id_map: dict,
-    mfma_code: list,
-) -> 'Timeline':
-    """Create a single Timeline with all instruction types.
-
-    Args:
-        schedule_info:  The schedule to validate.
-        kernel:         Kernel configuration dict.
-        code_path:      Which code path to build the timeline for.
-        id_map:         Maps schedule keys to lists of rocisa instruction objects.
-        mfma_code:      Flat list of MFMA rocisa instruction objects in execution order
-                        (already reordered by mfmaReorder).
-    """
-    available_names = set(schedule_info.optSchedule.keys())
-    names_to_add = [n for n in ALL_INSTRUCTION_NAMES if n in available_names]
-    return Timeline(names_to_add, code_path, schedule_info, kernel, id_map=id_map, mfma_code=mfma_code)
-
-
-class Timeline:
-    def __init__(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution',
-                 id_map: dict, mfma_code: list):
-        """Build a Timeline restricted to the categories in
-        ``instruction_names_to_add``. Only one ``code_path`` is materialized
-        per Timeline — multi-codepath validation builds N Timelines so
-        per-codepath schedule disagreements are isolated.
-
-        Asserts the per-iteration suffix scheme (LRA0/LRA1/... or 0..3 for
-        ForceUnrollSubIter) matches what DepthU + matrixInstK derive. A
-        mismatched schedule key here means upstream drift between the CMS
-        author's iteration count and the kernel's, which would otherwise
-        surface as a confusing IndexError deep in the validators."""
-        
-        available_keys = schedule_info.optSchedule.keys()
-        has_lr1s = "LRA1" in available_keys or "LRB1" in available_keys
-        has_lr3s = "LRA3" in available_keys or "LRB3" in available_keys
-        assert not (has_lr1s and has_lr3s), "Can't mix LR1s and LR3s."
-
-        # Validate that sub-iteration suffixes are consistent with the kernel configuration.
-        # The valid suffixes depend on how numLoopIter is determined:
-        # - ForceUnrollSubIter=True: numLoopIter = numSubTiles² = 4 (KernelWriter.py:4592)
-        # - DepthU == matrixInstK (n_sub_iters == 1): split to numLoopIter = 2 (CustomSchedule.py:317)
-        # - DepthU > matrixInstK: numLoopIter = DepthU / matrixInstK
-        if "DepthU" in kernel and "MatrixInstruction" in kernel:
-            force_unroll = kernel.get("ForceUnrollSubIter", False)
-            if force_unroll:
-                valid_suffixes = {0, 1, 2, 3}
-            else:
-                n_sub_iters = kernel["DepthU"] // kernel["MatrixInstruction"][2]
-                if n_sub_iters == 1:
-                    valid_suffixes = {0, 1}
-                else:
-                    valid_suffixes = set(range(n_sub_iters))
-            for key in available_keys:
-                for prefix in ("LRA", "LRB", "PackA", "PackB"):
-                    if key.startswith(prefix):
-                        suffix_str = key[len(prefix):]
-                        if suffix_str.isdigit():
-                            suffix = int(suffix_str)
-                            assert suffix in valid_suffixes, (
-                                f"Schedule key '{key}' has sub-iteration index {suffix}, "
-                                f"but with DepthU={kernel['DepthU']} and matrixInstK={kernel['MatrixInstruction'][2]}, "
-                                f"valid sub-iteration indices are {sorted(valid_suffixes)}."
-                            )
-                        break
-
-        self.num_vmfma = schedule_info.numMfma
-        self.id_map = id_map
-        self.mfma_code = mfma_code
-        self.vlcnt_shift = defaultdict(int)
-        self.vlcnt_shift[NO_GLOBAL_LOAD_LOOP] = schedule_info.nglshift
-        self.vlcnt_shift[NO_LOCAL_LOAD_LOOP] = schedule_info.nllshift
-        self.nll_zero_dscnt = schedule_info.nllZeroDscnt
-
-        self.loops = [MAIN_LOOP_PREV, MAIN_LOOP, NO_GLOBAL_LOAD_LOOP, NO_LOCAL_LOAD_LOOP]
-        # NOTE: num_vmfma + 1 to account for special idx=-1.
-        #       idx=-1 is special case that occurs BEFORE the first VMFMA but AFTER the last VMFMA.
-        #       Instructions at idx=-1 happen after all instructions at idx=num_vmfma-1 and BEFORE all instructions (including the VMFMA) at idx=0.
-        self._instructions_at_index: dict[str, list[list[ValidatorInstruction]]] = {loop: [[] for _ in range(self.num_vmfma+1)] for loop in self.loops}
-        
-        # Linear timelines for each loop.
-        self._timelines: dict[str, list[ValidatorInstruction]] = {loop: [] for loop in self.loops}
-        # One linear timeline that spans all loops.
-        self.combined_timeline: list[ValidatorInstruction] = []
-
-        # Lookup for all instructions in a given loop for a given name.
-        # First key is the loop name, second key is the instruction name (e.g. "GRA").
-        # Value is a list of tuples of (index, instruction) for the given name in the given loop.
-        # Index is the index of the instruction in the loop, index in [0, len(self._timelines[loop])-1]
-        self._instructions_for_name: dict[str, dict[str, list[tuple[int, ValidatorInstruction]]]] = {loop: defaultdict(list) for loop in self.loops}
-        # Same as above, except for all instructions across all loops.
-        # Only index by instruction name.
-        # Index is the index of the instruction in the combined timeline. index in [0, len(self.combined_timeline)-1]
-        self._instructions_for_name_combined: dict[str, list[tuple[int, ValidatorInstruction]]] = defaultdict(list)
-
-        # Track which validation passes have already been applied to this timeline to avoid applying them multiple times.
-        self._applied_passes: set[Callable[['Timeline', 'ValidationContext'], None]] = set()
-
-        # Populate the timeline with instructions
-        self._populate_instructions(instruction_names_to_add, code_path, schedule_info, kernel)
-        self._linearize_timeline()
-    
-    def _populate_instructions(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution') -> None:
-        assert kernel["DirectToLds"], "Only DirectToLds cases are supported by validator."
-        assert kernel.get("LocalSplitU", 1) == 1, "Only LocalSplitU=1 cases are supported by validator."
-
-        swap_global_read_order = kernel["SwapGlobalReadOrder"]
-        is_tf32_emulation = kernel.get("UseF32XEmulation", False)
-        is_4x4mfma_tf32 = kernel.get("UseMFMAF32XEmulation", False)
-
-        # Explicitly add MFMAs to timeline.
-        # Do at the top here so they are the first ones scheduled at each vmfma index.
-        for i_vmfma in range(self.num_vmfma):
-            # mfmaReorder[new_pos] = original_pos. i_vmfma is the new (execution) position.
-            vmfma_slot = i_vmfma
-            if schedule_info.mfmaReorder:
-                vmfma_slot = schedule_info.mfmaReorder[i_vmfma]
-
-            mfma_kwargs = {"name": "MFMA"}
-            # mfma_code is indexed by new position (already reordered in CustomSchedule.py)
-            if self.mfma_code and i_vmfma < len(self.mfma_code):
-                mfma_kwargs["rocisa_inst"] = self.mfma_code[i_vmfma]
-            self._insert(vmfma_slot, MFMA, mfma_kwargs, kernel)
-
-        def _get_rocisa(name: str, idx: int) -> object:
-            """Look up the rocisa instruction from id_map, or None if unavailable."""
-            if self.id_map and name in self.id_map:
-                items = self.id_map[name]
-                if idx < len(items):
-                    return items[idx]
-            return None
-
-        # NOTE: Relative ordering of instructions must be preserved.
-        #       Order dictates the order in which instructions are scheduled if they are scheduled at the same vmfmaindex.
-        for name in schedule_info.optSchedule.keys():
-            if name not in instruction_names_to_add:
-                continue
-
-            if name == "SYNC":
-                for idx_sync, (idx_vmfma, sync) in enumerate(zip(schedule_get(name, code_path, schedule_info), schedule_info.syncCode)):
-                    assert idx_vmfma >= -1, f"Code path {code_path}: SWaitCnt at index {idx_sync} is not valid. Must be >= -1."
-                    ri = _get_rocisa("SYNC", idx_sync)
-                    if isinstance(sync, SWaitCnt):
-                        self._insert(idx_vmfma, SWait, {"name": "SWaitCnt", "dscnt": sync.dscnt, "vlcnt": sync.vlcnt, "vscnt": sync.vscnt, "comment": sync.comment, "rocisa_inst": ri}, kernel)
-                    elif isinstance(sync, SBarrier):
-                        self._insert(idx_vmfma, Barrier, {"name": "SBarrier", "comment": sync.comment, "rocisa_inst": ri}, kernel)
-                    else:
-                        raise ValueError(f"Unexpected sync instruction type: {type(sync)}")
-            elif name == "SNOP":
-                for idx_snop, (idx_vmfma, snop) in enumerate(zip(schedule_get(name, code_path, schedule_info), schedule_info.snopCode)):
-                    assert idx_vmfma >= -1, f"Code path {code_path}: SNop at index {idx_snop} is not valid. Must be >= -1."
-                    # The waitState is stored as the first parameter in the rocisa SNop instruction
-                    wait_state = snop.getParams()[0]
-                    self._insert(idx_vmfma, SNop, {"name": "SNop", "wait_state": wait_state, "rocisa_inst": _get_rocisa("SNOP", idx_snop)}, kernel)
-            elif name.startswith("LRA") or name.startswith("LRB"):
-                for idx_LR, idx_vmfma in enumerate(schedule_get(name, code_path, schedule_info)):
-                    assert idx_vmfma >= -1, f"Code path {code_path}: LocalRead {name} at index {idx_LR} is not valid. Must be >= -1."
-
-                    # TODO: For ForceUnrollSubIter, need to account for register reuse and the fact that the LR0/LR1/LR3s must start after a certain point in the iteration.
-                    self._insert(idx_vmfma, LocalRead, {"name": name, "issue_index": idx_LR, "rocisa_inst": _get_rocisa(name, idx_LR)}, kernel)
-            elif name.startswith("GRInc"):
-                grincs = schedule_get(name, code_path, schedule_info)
-                for idx_grinc, idx_vmfma in enumerate(grincs):
-                    assert idx_vmfma >= -1, f"Code path {code_path}: GRInc {name} at index {idx_grinc} is not valid. Must be >= -1."
-                    self._insert(idx_vmfma, GRInc, {"name": name, "rocisa_inst": _get_rocisa(name, idx_grinc)}, kernel)
-            elif name.startswith("GRA") or name.startswith("GRB"):
-                global_reads = schedule_get(name, code_path, schedule_info)
-                idmap_items = self.id_map[name]
-                if kernel["DirectToLds"]:
-                    assert len(global_reads) % 2 == 0, f"Code path {code_path}: {name} has an odd number of indices. Must be even if DirectToLds is True."
-                for idx_GR, idx_vmfma in enumerate(global_reads):
-                    assert idx_vmfma >= -1, f"Code path {code_path}: GlobalRead {name} at index {idx_GR} is not valid. Must be >= -1."
-                    ri = idmap_items[idx_GR] if idx_GR < len(idmap_items) else None
-                    if ri is not None and not is_gr_load(ri):
-                        continue  # pointer setup (SMovB32/SAddU32), not an actual load
-                    self._insert(idx_vmfma, GlobalRead, {"name": name, "swap_global_read_order": swap_global_read_order, "rocisa_inst": ri}, kernel)
-            elif name.startswith("Pack"):
-                packs = schedule_get(name, code_path, schedule_info)
-                idmap_items = self.id_map[name]
-                groups = detect_pack_groups(idmap_items)
-                idx_to_cls: dict[int, tuple[type, Optional[int]]] = {}
-                for group in groups:
-                    gidx = group["group_index"]
-                    for entry_idx, cls, label in group["entries"]:
-                        idx_to_cls[entry_idx] = (cls, gidx)
-
-                for idx_pack, idx_vmfma in enumerate(packs):
-                    assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
-                    ri = idmap_items[idx_pack] if idx_pack < len(idmap_items) else None
-                    pack_cls, group_idx = idx_to_cls.get(idx_pack, (Pack, None))
-                    pack_kwargs = {"name": name, "issue_index": idx_pack, "rocisa_inst": ri}
-                    if group_idx is not None:
-                        pack_kwargs["group_index"] = group_idx
-                    self._insert(idx_vmfma, pack_cls, pack_kwargs, kernel)
-            else:
-                raise NotImplementedError(f"Instruction {name} not implemented")
-
-    def _insert(self, vmfma_index: int, cls: type[ValidatorInstruction], kwargs: dict, kernel: 'Solution') -> None:
-        """
-        Construct and add an instruction to the timeline at a given VMFMA index.
-        A fresh instance is created for each applicable loop directly from
-        *cls* and *kwargs*, so no copying is needed.
-
-        Args:
-            vmfma_index:  The VMFMA slot to place the instruction at.
-            cls:          The instruction class to instantiate (e.g. LocalRead, MFMA).
-            kwargs:       Constructor keyword arguments **excluding** ``issued_at``
-                          (which is set per-loop by this method).
-                          ``rocisa_inst`` is extracted and set post-construction
-                          (it uses init=False on the dataclass).
-            kernel:       The kernel configuration dict.
-
-        After the rocm-libraries-5v4u SchedulePosition collapse, the
-        structural-side timeline encodes the historical
-        `(vmfma_index, sub_index)` lex order into a single
-        `stream_index = (vmfma_index + 1) * _STRUCTURAL_SUB_BASE + sub_index`.
-        The +1 keeps the wrap-around `vmfma_index = -1` slot below the
-        `vmfma_index = 0` slot. The structural-side `_insert` path is on
-        track to be deleted by rocm-libraries-wa57; this collapsed-encoding
-        scheme just keeps the dataclass type-correct and preserves
-        `__lt__` ordering until then. The rendering helpers below
-        (`_struct_vmfma_index`) recover the original `vmfma_index` by
-        decoding the same scheme so `@ idx=N` text stays stable.
-        """
-        # Extract rocisa_inst before passing kwargs to constructor (init=False field).
-        rocisa_inst = kwargs.pop("rocisa_inst", None)
-
-        for loop in self.loops:
-            if self._should_add(cls, kwargs.get("name", ""), loop, kernel):
-                loop_index = self.loops.index(loop)
-                sub_index = len(self._instructions_at_index[loop][vmfma_index + 1])
-                stream_index = (vmfma_index + 1) * _STRUCTURAL_SUB_BASE + sub_index
-                kwargs["issued_at"] = SchedulePosition(loop_index=loop_index, stream_index=stream_index)
-
-                _instruction = cls(**kwargs)
-                _instruction.rocisa_inst = rocisa_inst
-
-                # Adjust for NLL/NGL shifts.
-                if isinstance(_instruction, SWait):
-                    if _instruction.vlcnt != -1:
-                        vlcnt = max(0, _instruction.vlcnt - self.vlcnt_shift[loop])
-                        _instruction.vlcnt = vlcnt
-                    if _instruction.dscnt != -1 and self.nll_zero_dscnt \
-                       and loop in [NO_LOCAL_LOAD_LOOP]:
-                        _instruction.dscnt = 0
-
-                self._instructions_at_index[loop][vmfma_index+1].append(_instruction)
-
-    @staticmethod
-    def _should_add(cls: type[ValidatorInstruction], name: str, loop: str, kernel: 'Solution') -> bool:
-        """Per-loop instruction filter: GR/GRInc only fire in main loops;
-        only LR0 / Pack0 reach NLL (the rest of LR/Pack live in the
-        main-loop bodies). Encodes the CMS pipeline-stage contract."""
-        if issubclass(cls, GlobalRead):
-            # No GRs issued in NGL or NLL
-            return loop == MAIN_LOOP or loop == MAIN_LOOP_PREV
-        elif issubclass(cls, GRInc):
-            return loop == MAIN_LOOP or loop == MAIN_LOOP_PREV
-        elif issubclass(cls, LocalRead):
-            # Only LR0s are issued in the NLL
-            if loop == NO_LOCAL_LOAD_LOOP:
-                return name == "LRA0" or name == "LRB0"
-            return True
-        elif issubclass(cls, Pack):
-            if kernel.get("UsePLRPack", False):
-                # Packs1/3s correspond to the LR1/3s of this iteration.
-                if loop == NO_LOCAL_LOAD_LOOP:
-                    return name == "PackA0" or name == "PackB0"
-            return True
-        else:
-            return True
-   
-    def __len__(self):
-        return len(self._timelines)
-
-    def __getitem__(self, index: int) -> ValidatorInstruction:
-        return self._timelines[index]
-
-    def get_instruction_names(self) -> list[str]:
-        return list(self._instructions_for_name_combined.keys())
-
-    def get_instructions(self, name: str, loop: str) -> list[tuple[int, ValidatorInstruction]]:
-        return self._instructions_for_name[loop][name]
-
-    def get_instructions_combined(self, name: str) -> list[tuple[int, ValidatorInstruction]]:
-        return self._instructions_for_name_combined[name]
-
-    def get_instructions_at(self, index: int, loop: str) -> list[ValidatorInstruction]:
-        return self._instructions_at_index[loop][index+1]
-
-    def _linearize_timeline(self) -> None:
-        """Materialize the per-loop and combined linear timelines plus the
-        per-name lookup tables that ``get_instructions*`` indexes into."""
-        self.combined_timeline.clear()
-        self._instructions_for_name_combined.clear()
-        i_combined = 0
-        for loop_name, loop_instructions in self._instructions_at_index.items():
-            i_loop = 0
-            self._timelines[loop_name].clear()
-            self._instructions_for_name[loop_name].clear()
-
-            for instructions in loop_instructions:
-                for instruction in instructions:
-                    self._timelines[loop_name].append(instruction)
-                    self._instructions_for_name[loop_name][instruction.name].append((i_loop, instruction))
-                    self._instructions_for_name_combined[instruction.name].append((i_combined, instruction))
-                    i_loop += 1
-                    i_combined += 1
-            
-            self.combined_timeline.extend(self._timelines[loop_name])
-
-
-def _failure_to_string(result: object) -> Optional[str]:
-    """Boundary helper: a rule's validate() may return either a legacy
-    string OR a typed Failure. Normalize to string for the existing
-    isValid contract.
-
-    Stack 1 of plans/then-let-s-work-on-jaunty-reddy.md migrates rules
-    one at a time. Until every rule emits Failures, this helper supports
-    both shapes so the boundary stays stable.
-
-    Failure.format requires a capture; structural rules don't have one
-    in scope, so pass an empty LoopBodyCapture. Formatters that read
-    capture for [N] index lookup will fall through to bare category for
-    these legacy rule paths — an honest acknowledgement that the
-    structural-rule emitter has no per-body context.
-    """
-    if result is None:
-        return None
-    if isinstance(result, str):
-        return result
-    # Typed Failure (from Tensile.Components.ScheduleCapture).
-    from Tensile.Components.ScheduleCapture import LoopBodyCapture
-    return result.format(LoopBodyCapture(instructions=[]))
-
-
-def validate_timeline(timeline: Timeline) -> Optional[str]:
-    """Iterate every instruction in stream order; the first one whose
-    ``validate()`` returns non-None ends the walk.
-
-    Side effect: stashes the typed Failure (when one is returned) on
-    ``timeline._last_failure`` so test infrastructure can assert on type +
-    fields without parsing message text. Production callers consume only
-    the returned string. Rules still on the legacy str path leave
-    ``_last_failure`` None."""
-    timeline._last_failure = None
-    for loop in timeline.loops:
-        for instruction in timeline._timelines[loop]:
-            result = instruction.validate()
-            message = _failure_to_string(result)
-            if message is not None:
-                # Surface the typed Failure to test introspection. Rules
-                # that still return raw strings during migration leave
-                # _last_failure as None.
-                timeline._last_failure = result if not isinstance(result, str) else None
-                if loop in [NO_GLOBAL_LOAD_LOOP, NO_LOCAL_LOAD_LOOP]:
-                    message = f"Loop {loop}: {message}"
-                return message
-    return None
-
-
-def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> list[list[int]]:
-    """When the schedule has only one code path, return it (broadcast for
-    all callers regardless of ``code_path``); otherwise return the slice
-    for ``code_path``. Lets multi-codepath rules iterate ``code_path`` in
-    a loop without special-casing single-codepath schedules."""
-    assert code_path >= 0, f"Code path {code_path} is not valid. Must be >= 0."
-    schedules = schedule_info.optSchedule[name]
-    return schedules[0] if len(schedules) == 1 else schedules[code_path]
 
 
 @dataclass

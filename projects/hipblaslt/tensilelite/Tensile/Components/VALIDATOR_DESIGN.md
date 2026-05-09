@@ -406,22 +406,24 @@ Each Failure carries pre-rendered `FailureNodeLabel`s
 (`CMSValidator.py:654`) and an `iter_delta` for cross-iteration suffix
 rendering. Wording lives in each subclass's `_format_canonical()`.
 
-### 7.4 The `_node_label` / `cms_node_label` contract
+### 7.4 The `cms_node_label` contract
 
-`cms_node_label` (`CMSValidator.py:934`) accepts both `GraphNode`
-(graph-side) and `ValidatorInstruction` (structural-side) via the
-`NodeLike = Union[GraphNode, ValidatorInstruction]` type alias
-(`CMSValidator.py:364`).
+`cms_node_label` accepts a single `GraphNode` shape and constructs the
+per-node `FailureNodeLabel` carried by every typed `Failure`. It walks
+the body's `TaggedInstruction`s to compute the per-category `[N]` index
+(plain `MFMA` omits the `[N]`); when `body_capture` is None or the node
+has no entry in that body's tagged_inst stream, the helper falls back to
+a bare `category` primary.
 
-It accepts both because the structural-side `validate()` overrides on
-`GlobalRead` and `SWait` need to construct failure labels with the same
-formatter machinery the graph-side uses, but they don't have a
-`GraphNode` — they have the `ValidatorInstruction` they're validating.
-The discriminator is a getattr probe; both shapes carry `category` (one
-as a property, one as a field) and the helper walks the body's
-TaggedInstructions to compute the per-category `[N]` index. Whether
-the Union is the right abstraction long-term is open — tracked:
-`rocm-libraries-x4ef`.
+The historic `NodeLike = Union[GraphNode, ValidatorInstruction]` alias
+and the structural-side caller path it served (`GlobalRead.validate` ->
+`_validate_needed_by` over a `Timeline`) were deleted in
+`rocm-libraries-wa57`. The dead-code rationale and the original
+investigation are recorded in
+`Tensile/Components/NODELIKE_UNION_DISCUSSION.md`. If a future use case
+genuinely needs structural-side label construction, re-add via a
+`to_node_label()` method on the new instruction shape with proper
+body-context plumbing — git history preserves what was here.
 
 
 ### 7.5 The four pair-specific quad-cycle helpers
