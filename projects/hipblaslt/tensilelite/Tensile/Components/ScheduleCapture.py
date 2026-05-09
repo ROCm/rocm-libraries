@@ -263,6 +263,19 @@ class TaggedInstruction:
     category: str
     slot: SlotKey
 
+    def render(self) -> str:
+        """Render this instruction for a failure label.
+
+        Minimal CMS-side implementation of the `TaggedInstructionLike`
+        Protocol declared in `Tensile.Components.Timeline`. Returns the
+        `category[N]`-style label shape that `cms_node_label` produces
+        today; the per-stream `[N]` index requires body context that this
+        method does not have, so a bare `category` is returned. Sub-bead
+        `rocm-libraries-3dy` (5gd.B.1) refines this to the source-aware
+        per-category-stream `[N]` rendering.
+        """
+        return self.category
+
 
 @dataclass
 class LoopBodyCapture:
