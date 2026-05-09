@@ -25,10 +25,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-try:
-    from hip import hip, hiprtc  # type: ignore
-except (ImportError, RuntimeError):
-    hip = None  # ROCm runtime not available; GPU tests will be skipped
+from hip import hip, hiprtc  # type: ignore
 
 from unittest.mock import MagicMock
 from types import SimpleNamespace
@@ -48,7 +45,8 @@ def _detect_gfx_target():
     Detection order:
     1. TENSILE_GPU_TARGET env var (explicit override)
     2. rocm_agent_enumerator (GPU hardware detection)
-    3. Default to "gfx950"
+
+    Returns None if no GPU can be detected.
     """
     override = os.environ.get("TENSILE_GPU_TARGET")
     if override:
@@ -71,12 +69,11 @@ def _detect_gfx_target():
         except subprocess.CalledProcessError:
             pass
 
-    return "gfx950"
+    return None
 
 
 # ---- Constants ----
 GFX_TARGET = _detect_gfx_target()
-# Use gfx950-specific kernel assembly (added for subtile MFMA tests)
 HAS_GFX950 = GFX_TARGET == "gfx950"
 WAVESIZE   = 64
 NUM_WAVES  = 4

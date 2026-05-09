@@ -22,10 +22,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-try:
-    from hip import hip  # type: ignore
-except (ImportError, RuntimeError):
-    hip = None  # ROCm runtime not available; GPU tests will be skipped
+from hip import hip  # type: ignore
 
 from unittest.mock import MagicMock
 
