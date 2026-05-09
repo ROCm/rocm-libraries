@@ -151,9 +151,11 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         # Install rules for scikit-build-core: place _rocisa.so, libstinkytofu.so,
         # and __init__.py into the rocisa/ package directory in the wheel.
         install(TARGETS _rocisa DESTINATION rocisa)
-        # Co-install libstinkytofu.so and its SONAME symlink next to _rocisa.so.
+        # Co-install the stinkytofu shared library next to _rocisa.
         install(FILES $<TARGET_FILE:stinkytofu> DESTINATION rocisa)
-        install(FILES $<TARGET_SONAME_FILE:stinkytofu> DESTINATION rocisa)
+        if(NOT WIN32)
+            install(FILES $<TARGET_SONAME_FILE:stinkytofu> DESTINATION rocisa)
+        endif()
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
     endif()
 endif()

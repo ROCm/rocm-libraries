@@ -52,3 +52,20 @@ using DropoutDescGuard = DescGuard<miopenDropoutDescriptor_t,
 
 using RNNDescGuard =
     DescGuard<miopenRNNDescriptor_t, miopenCreateRNNDescriptor, miopenDestroyRNNDescriptor>;
+
+// Frees the internal DropoutDescriptor allocated by miopen::RNNDescriptor's
+// default and 8-arg constructors. The library has no destructor for this
+// field, so any test that creates an RNN descriptor and then calls
+// miopenSetRNNDescriptor[_V2] on it must invoke this helper:
+//   1. Before each Set* call (frees the default-allocated internal one).
+//   2. After the run, only when no user-supplied DropoutDescriptor was passed
+//      via the _V2 path (in that path the internal pointer aliases the
+//      user-owned descriptor — freeing it would double-free).
+inline void DestroyInternalRnnDropoutDesc(miopenRNNDescriptor_t rnnDesc)
+{
+    miopenDropoutDescriptor_t dropDesc = nullptr;
+    miopenGetRNNDescriptor_V2(
+        rnnDesc, nullptr, nullptr, &dropDesc, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+    if(dropDesc != nullptr)
+        miopenDestroyDropoutDescriptor(dropDesc);
+}

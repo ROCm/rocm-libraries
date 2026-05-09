@@ -58,6 +58,8 @@ NB_MODULE(_stinkytofu, m) {
         .def("getName", &StinkyAsmModule::getName, "Get the name of this module")
         .def("emitAssembly", &StinkyAsmModule::emitAssembly,
              "Emit the assembly code for all instructions in this module")
+        .def("getMetaDataU64", &StinkyAsmModule::getMetaDataU64, nb::arg("key"),
+             "Get uint64 metadata from function by key")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
              "Run the optimization pipeline on this module");
 

@@ -234,7 +234,7 @@ DEF_BATCH(.format = MXWMMA_SCALE, .flags = {WMMA_XDL},
 // v_wmma_scale16_* — VOP3PX3 (192-bit), inherit fields from MXWMMA_SCALE16
 DEF_BATCH(.format = MXWMMA_SCALE16, .flags = {WMMA_XDL},
     VWmmaScale16F3216x16x128F8f6f4Inst, "v_wmma_scale16_f32_16x16x128_f8f6f4",
-        .cost = {6, 8}, .costOverride = { { MatrixFmtData(FP4, FP4), 4, 4 } },
+        .cost = {1, 8}, .coissue = 0x00C0, .costOverride = { { MatrixFmtData(FP4, FP4), 1, 4 } },
     VWmmaScale16F3232x16x128F4Inst, "v_wmma_scale16_f32_32x16x128_f4",
         .operand_fields = { {D0, .size=512}, {S1, .size=256}, {S2, .size=512} },
 )
@@ -309,7 +309,7 @@ DEF_BATCH(.format = WMMA_FLOAT8MIX_16x16x64, .flags = {WMMA_XDL},
 )
 DEF_T(VWmmaI3216x16x64Iu8Inst, "v_wmma_i32_16x16x64_iu8", .format = WMMA_INT8, .flags = {WMMA_XDL})
 // 16x16x128
-DEF_T(VWmmaF3216x16x128F8f6f4Inst, "v_wmma_f32_16x16x128_f8f6f4", .format = WMMA, .flags = {WMMA_XDL}, .cost = {5, 8}, .costOverride = { { MatrixFmtData(FP4, FP4), 3, 4 } },
+DEF_T(VWmmaF3216x16x128F8f6f4Inst, "v_wmma_f32_16x16x128_f8f6f4", .format = WMMA, .flags = {WMMA_XDL}, .cost = {1, 8}, .coissue = 0x00E0, .costOverride = { { MatrixFmtData(FP4, FP4), 1, 4 } },
     .operand_fields = { {S0, .size=512}, {S1, .size=512} })
 
 // === gfx12-only WMMA/SWMMA (not available on gfx1250) ===

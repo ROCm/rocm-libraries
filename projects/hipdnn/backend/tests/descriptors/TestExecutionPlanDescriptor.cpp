@@ -109,27 +109,18 @@ public:
     flatbuffers::DetachedBuffer makeSerializedPlan(uint32_t version = 1,
                                                    int64_t workspaceSize = 1024,
                                                    bool includeTensorUids = true,
-                                                   bool includeEngineConfig = true,
                                                    bool includePluginPayload = true,
                                                    bool emptyTensorUids = false,
-                                                   bool emptyEngineConfig = false,
                                                    bool emptyPluginPayload = false) const
     {
         flatbuffers::FlatBufferBuilder builder;
         flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensorUids;
-        flatbuffers::Offset<flatbuffers::Vector<uint8_t>> engineConfig;
         flatbuffers::Offset<flatbuffers::Vector<uint8_t>> pluginPayload;
 
         if(includeTensorUids)
         {
             tensorUids = emptyTensorUids ? builder.CreateVector(std::vector<int64_t>{})
                                          : builder.CreateVector(_tensorUids);
-        }
-        if(includeEngineConfig)
-        {
-            auto engineConfigBytes
-                = emptyEngineConfig ? std::vector<uint8_t>{} : std::vector<uint8_t>{1, 2, 3};
-            engineConfig = builder.CreateVector(engineConfigBytes);
         }
         if(includePluginPayload)
         {
@@ -139,7 +130,7 @@ public:
         }
 
         auto plan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
-            builder, version, ENGINE_ID, workspaceSize, tensorUids, engineConfig, pluginPayload);
+            builder, version, ENGINE_ID, workspaceSize, tensorUids, pluginPayload);
         builder.Finish(plan);
         return builder.Release();
     }
@@ -398,29 +389,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingTensorUids)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyTensorUids)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, true, true);
-
-    ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
-                                                            serializedPlan.data(),
-                                                            serializedPlan.size()),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingEngineConfig)
-{
-    auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, false);
-
-    ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
-                                                            serializedPlan.data(),
-                                                            serializedPlan.size()),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyEngineConfig)
-{
-    auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, true, false, true);
+    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, true);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -431,7 +400,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyEngineConfig)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingPluginPayload)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, false);
+    auto serializedPlan = makeSerializedPlan(1, 1024, true, false);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -442,7 +411,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingPluginPayload)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyPluginPayload)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, true, false, false, true);
+    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, false, true);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -467,11 +436,8 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRestoresSerializedExecutionPlan)
     auto serializedPlan = makeSerializedPlan();
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _, _))
-        .WillOnce([](int64_t,
-                     const hipdnnPluginConstData_t* engineConfig,
-                     const hipdnnPluginConstData_t* serializedContext) {
-            EXPECT_EQ(engineConfig->size, 3);
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce([](int64_t, const hipdnnPluginConstData_t* serializedContext) {
             EXPECT_EQ(serializedContext->size, 3);
             return getExecutionContext();
         });
@@ -515,7 +481,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _, _))
+                createExecutionContextFromSerialized(ENGINE_ID, _))
         .WillOnce(Return(getExecutionContext()));
     EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
     ASSERT_NO_THROW(plan->deserializeBackendPlan(
@@ -563,7 +529,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _, _))
+                createExecutionContextFromSerialized(ENGINE_ID, _))
         .WillOnce(Return(getExecutionContext()));
     EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
     ASSERT_NO_THROW(plan->deserializeBackendPlan(
