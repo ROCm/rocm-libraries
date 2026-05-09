@@ -46,6 +46,13 @@
 
 #define USE_SIMPLER_HIP_F8x8 0
 
+// Pull FP8 config from config.h when available (host compilation).
+// During kernel compilation config.h is not in the include path;
+// the macros are passed via -D flags from the solver instead.
+#if __has_include(<miopen/config.h>)
+#include <miopen/config.h>
+#endif
+
 #ifndef MIOPEN_FP8_CLIPPING
 #define MIOPEN_FP8_CLIPPING 1
 #endif

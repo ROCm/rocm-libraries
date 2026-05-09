@@ -65,7 +65,17 @@ set(__clang_cxx_compile_options
     -Wno-suggest-override
     -Wno-nonportable-system-include-path
     -Wno-documentation
-    -Wmissing-noreturn)
+    -Wmissing-noreturn
+    # Suppress warnings triggered by external headers (HIP, rocRAND, hipBLAS-common)
+    -Wno-zero-as-null-pointer-constant
+    -Wno-comma
+    -Wno-newline-eof
+    -Wno-unused-template
+    -Wno-float-equal
+    -Wno-shadow-field-in-constructor
+    -Wno-nvcc-compat
+    -Wno-gnu-anonymous-struct
+    -Wno-nested-anon-types)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
     list(APPEND __clang_cxx_compile_options
