@@ -2306,7 +2306,7 @@ class OverriddenInputFailure(Failure):
 
 def cms_node_label(
     node: GraphNode,
-    body_capture: Optional["LoopBodyCapture"],
+    body_capture: "LoopBodyCapture",
 ) -> FailureNodeLabel:
     """Construct a FailureNodeLabel for a CMS-side GraphNode.
 
@@ -2316,38 +2316,33 @@ def cms_node_label(
       - position: '@ idx={vmfma_index}'.
 
     `body_capture` is the LoopBodyCapture for the body that emitted this
-    node (resolved by the caller from `node.body_label`). When
-    `body_capture` is None, the helper falls back to a bare `category`
-    primary — relevant for cross-body callsites that don't index every
-    body's tagged_inst stream.
+    node (resolved by the caller from `node.body_label`, typically via
+    `_body_for_node`). It is required and non-None: every GraphNode is
+    constructed from a body that lives in `graph.captures`, so the lookup
+    cannot miss. The same invariant guarantees `node.tagged_inst` appears
+    in `body_capture.instructions`, so the per-category index lookup also
+    cannot miss; the `same_cat.index` call uses an explicit assertion to
+    surface any future violation rather than silently degrading.
     """
     cat = node.category
     if cat == "MFMA":
         primary = cat
     else:
-        primary = cat
-        if body_capture is not None:
-            same_cat = [
-                t for t in body_capture.instructions
-                if getattr(t, "category", None) == cat
-            ]
-            try:
-                idx = same_cat.index(node.tagged_inst)
-                primary = f"{cat}[{idx}]"
-            except ValueError:
-                # Lookup miss (cross-body callsite, or a body capture that
-                # genuinely doesn't contain this node) — degrade to bare
-                # category. The new label API tolerates this gracefully
-                # because labels are computed eagerly; the previous
-                # `_node_label` raised here, which is exactly the source
-                # of the body-mismatch ValueError this bead resolves.
-                pass
-    # `@ idx=N` rendering uses the source-aware display id (CMS
-    # `slot.mfma_index` when available, falling back to the bridge-collapsed
-    # `stream_index` for sidecar nodes without a tagged instruction). After
-    # the 5v4u SchedulePosition collapse, `vmfma_index` no longer exists on
-    # SchedulePosition itself; the user-facing N is recovered from
-    # `tagged_inst` where the kernel-writer's MFMA-slot id still lives.
+        same_cat = [
+            t for t in body_capture.instructions
+            if getattr(t, "category", None) == cat
+        ]
+        # node.tagged_inst is guaranteed to be in body_capture.instructions
+        # (the node was constructed from this body in build_dataflow_graph),
+        # so it must appear in same_cat. Any miss indicates a capture-
+        # pipeline bug — surface it loudly rather than degrade the label.
+        assert node.tagged_inst in same_cat, (
+            f"cms_node_label: node.tagged_inst not found in body_capture "
+            f"instructions for category {cat!r} (body_label={node.body_label!r}). "
+            f"Every GraphNode must be constructed from the body it indexes."
+        )
+        idx = same_cat.index(node.tagged_inst)
+        primary = f"{cat}[{idx}]"
     return FailureNodeLabel(
         primary=primary,
         position=_PositionStr(f"@ idx={_node_display_idx(node)}"),
@@ -2368,15 +2363,20 @@ def _cms_iter_delta(producer: GraphNode, consumer: GraphNode) -> int:
     return c_pos.loop_index - p_pos.loop_index
 
 
-def _body_for_node(graph: "DataflowGraph", node: GraphNode) -> Optional["LoopBodyCapture"]:
+def _body_for_node(graph: "DataflowGraph", node: GraphNode) -> "LoopBodyCapture":
     """Look up the LoopBodyCapture that emitted `node`.
 
-    Uses `node.body_label` against `graph.captures`. Returns None when
-    the graph is None or the body isn't present (kernel didn't emit it).
+    Uses `node.body_label` against `graph.captures`. Both arguments are
+    required: every caller in CMSValidator passes a constructed
+    DataflowGraph (the wa57 cleanup removed the last None-graph caller),
+    and every GraphNode was built from a body that lives in
+    `graph.captures` (see `build_dataflow_graph` Phase 1, where each
+    `_make_node` is invoked under `for label in _BODY_BUILD_ORDER` with
+    `label in captures`). Subscripts directly so a future capture-
+    pipeline regression that produces a node with an unknown body_label
+    raises KeyError instead of silently degrading downstream labels.
     """
-    if graph is None:
-        return None
-    return graph.captures.get(node.body_label)
+    return graph.captures[node.body_label]
 
 
 # =============================================================================
