@@ -45,9 +45,7 @@ public:
                 (const, override));
     MOCK_METHOD(hipdnnEnginePluginExecutionContext_t,
                 createExecutionContextFromSerialized,
-                (int64_t engineId,
-                 const hipdnnPluginConstData_t* engineConfig,
-                 const hipdnnPluginConstData_t* serializedContext),
+                (int64_t engineId, const hipdnnPluginConstData_t* serializedContext),
                 (const, override));
     MOCK_METHOD(void,
                 serializeExecutionContext,
