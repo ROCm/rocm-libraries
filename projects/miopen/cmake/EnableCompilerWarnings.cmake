@@ -24,78 +24,29 @@
 #
 ################################################################################
 
-set(__default_cxx_compile_options
+set(__cxx_compile_options
+    -Werror
     -Wall
     -Wextra
-    -Wcomment
-    -Wendif-labels
-    -Wformat
-    -Winit-self
-    -Wreturn-type
-    -Wsequence-point
-    -Wswitch
-    -Wtrigraphs
+    # Additional warnings not included in -Wall/-Wextra
     -Wundef
-    -Wuninitialized
     -Wunreachable-code
+    -Wmissing-noreturn
+    # Suppress specific -Wall/-Wextra warnings
     -Wno-ignored-qualifiers
     -Wno-sign-compare
+    -Wno-deprecated-declarations
+    -Wno-deprecated
 )
 
 set(__clang_cxx_compile_options
-    -Weverything
-    -Wno-c++98-compat
-    -Wno-c++98-compat-pedantic
-    -Wno-conversion
-    -Wno-double-promotion
-    -Wno-exit-time-destructors
-    -Wno-extra-semi
-    -Wno-extra-semi-stmt
-    -Wno-missing-prototypes
-    -Wno-padded
     -Wno-unused-command-line-argument
-    -Wno-weak-vtables
-    -Wno-covered-switch-default
-    -Wno-unsafe-buffer-usage
-    -Wno-global-constructors
-    -Wno-reserved-identifier
-    -Wno-old-style-cast
-    -Wno-c++11-narrowing
-    -Wno-switch-enum
-    -Wno-suggest-override
-    -Wno-nonportable-system-include-path
-    -Wno-documentation
-    -Wmissing-noreturn
-    # Suppress warnings triggered by external headers (HIP, rocRAND, hipBLAS-common)
-    -Wno-zero-as-null-pointer-constant
-    -Wno-comma
-    -Wno-newline-eof
-    -Wno-unused-template
-    -Wno-float-equal
-    -Wno-shadow-field-in-constructor
-    -Wno-nvcc-compat
-    -Wno-gnu-anonymous-struct
-    -Wno-nested-anon-types)
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
-    list(APPEND __clang_cxx_compile_options
-        -Wno-unique-object-duplication
-        -Wno-switch-default)
-endif()
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23")
-    list(APPEND __clang_cxx_compile_options
-        -Wno-lifetime-safety
-        -Wno-lifetime-safety-suggestions
-        -Wno-lifetime-safety-intra-tu-suggestions
-        -Wno-lifetime-safety-cross-tu-suggestions)
-endif()
+)
 
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
         -fms-extensions
-        -fms-compatibility
-        )
+        -fms-compatibility)
     # AMD clang reports `__declspec(dllexport)` as "not supported" on the
     # x86_64-pc-windows-msvc target, even though the attribute is honored
     # (verified via llvm-readobj --coff-exports on MIOpen.dll). This produces
@@ -106,8 +57,9 @@ if(WIN32)
 endif()
 
 add_compile_options(
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${__default_cxx_compile_options};${__clang_cxx_compile_options}>"
+    "$<$<COMPILE_LANGUAGE:CXX>:${__cxx_compile_options}>"
+    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${__clang_cxx_compile_options}>"
 )
 
-unset(__default_cxx_compile_options)
+unset(__cxx_compile_options)
 unset(__clang_cxx_compile_options)
