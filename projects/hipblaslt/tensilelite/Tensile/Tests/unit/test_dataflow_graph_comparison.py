@@ -754,7 +754,7 @@ class TestDiagnoseMissingEdgeDefenses:
 # Historical context: a structural rule `verify_ascending_order` previously
 # caught CMS schedules that emitted category instructions out of order — e.g.
 # GRIncA at vmfma_indices [3,2,1,0] instead of [0,1,2,3]. The scheduler walks
-# the optSchedule list left-to-right with no sort (CustomSchedule.py:400-423),
+# the optSchedule list left-to-right with no sort (CustomSchedule/dispatch.py:207-230),
 # so reversal silently emits the chain in reverse order.
 #
 # A reversed GRIncA chain has real dataflow violations:

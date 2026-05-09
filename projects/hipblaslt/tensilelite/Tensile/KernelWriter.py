@@ -3214,7 +3214,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     The main-loop dispatcher (simdSpecDispatch in KernelWriterAssembly.py)
     branches each SIMD to one of numCodePath MAINLOOP invocations with
-    \\ID = 0 .. numCodePath-1. Per CustomSchedule.py:489-497, code-paths
+    \\ID = 0 .. numCodePath-1. Per CustomSchedule/dispatch.py:286-294, code-paths
     differ ONLY in slot/schedule order for the multi-stream case — they
     emit the SAME instruction set, with the same source/dest registers,
     against the same LDS regions. By the time control reaches the NGL/NLL

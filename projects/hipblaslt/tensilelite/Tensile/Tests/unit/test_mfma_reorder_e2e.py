@@ -38,7 +38,7 @@ What was missing (and what this file adds): no test passed a real
 
   1. ``ScheduleInfo(..., mfmaReorder=[...])`` construction.
   2. ``CustomSchedule.expand_macro``-equivalent permutation application
-     (``CustomSchedule.py:336-337``: ``mfmaCode = [mfmaCode[x] for x in
+     (``CustomSchedule/dispatch.py:133-134``: ``mfmaCode = [mfmaCode[x] for x in
      opt1.mfmaReorder]``).
   3. MFMA stream emission into a ``LoopBodyCapture``.
   4. ``build_dataflow_graph`` from that capture.
@@ -58,8 +58,8 @@ cover everything *except* the line that consumes a non-empty
 ``mfmaReorder``.
 
 Smaller-scoped configs that *do* trigger ``mfmaReorder=[...]`` (e.g.
-``_get_schedule_256x256x128_8bit`` at CustomSchedule.py:1361 and the
-TF32 192x256x32 NN shape at CustomSchedule.py:3683) reject inside
+``_get_schedule_256x256x128_8bit`` at CustomSchedule/gfx950/_256x256x128_8bit.py and the
+TF32 192x256x32 NN shape at CustomSchedule/gfx950/_192x256x32_TF32.py) reject inside
 ``Solution`` construction under the ISA / vector-width combinations the
 shared ``isa_infrastructure`` fixture provides. Standing up an alternate
 ISA / vector-width matrix purely to exercise the reorder line would
@@ -68,7 +68,7 @@ duplicate the kernel-build infrastructure.
 
 Therefore this file targets the *production code path* that consumes
 ``mfmaReorder`` directly — the permutation step at
-``CustomSchedule.py:336-337``. It:
+``CustomSchedule/dispatch.py:133-134``. It:
 
   * Constructs a ``ScheduleInfo`` with a real production ``mfmaReorder``
     shape.
@@ -80,7 +80,7 @@ Therefore this file targets the *production code path* that consumes
   * Runs the full graph build + wait-coverage pipeline on the result.
 
 The reorder shape used here is the simplest non-trivial production shape:
-the 16-element block prefix of CustomSchedule.py:1366
+the 16-element block prefix of CustomSchedule/gfx950/_256x256x128_8bit.py
 (``_get_schedule_256x256x128_8bit``), which is itself a clean
 "interleave four MFMA-quads" permutation — exactly the pattern that
 exposes the position-vs-dataflow distinction tested below.
@@ -116,7 +116,7 @@ from graph_native_validation_base import GraphNativeValidationTest
 # =============================================================================
 # Production reorder shape — provenance documented inline.
 # =============================================================================
-# 32-element prefix lifted verbatim from CustomSchedule.py:1366
+# 32-element prefix lifted verbatim from CustomSchedule/gfx950/_256x256x128_8bit.py
 # (``_get_schedule_256x256x128_8bit``, ``isTN(kernel) and TLDS == 1``,
 # ``not kernel["ForceUnrollSubIter"]`` branch). The full production
 # shape there is 64-element; we use the first half to keep the test's
@@ -182,7 +182,7 @@ def _build_mfma_code_for_n(n: int):
 def _apply_reorder_and_reslot(mfma_code, mfma_reorder, *, slot_offset: int = 0):
     """Apply the production permutation to ``mfma_code`` and assign final slots.
 
-    Mirrors CustomSchedule.py:336-337 verbatim::
+    Mirrors CustomSchedule/dispatch.py:133-134 verbatim::
 
         if len(opt1.mfmaReorder) > 0:
             mfmaCode = [mfmaCode[x] for x in opt1.mfmaReorder]
@@ -229,7 +229,7 @@ class TestMfmaReorderE2E(GraphNativeValidationTest):
     capture -> graph -> validate.
 
     Pins the production line ``mfmaCode = [mfmaCode[x] for x in
-    opt1.mfmaReorder]`` (CustomSchedule.py:336-337) is consumed by the
+    opt1.mfmaReorder]`` (CustomSchedule/dispatch.py:133-134) is consumed by the
     graph-native validator without false positives, and that an
     induced wait-coverage gap on a *reordered* MFMA still fires the
     expected ``MissingWaitFailure(dscnt)``.
@@ -242,7 +242,7 @@ class TestMfmaReorderE2E(GraphNativeValidationTest):
 
         Pinning this guards against a future refactor that drops the
         attribute or coerces the list (e.g. into a tuple) in a way that
-        would break the comprehension at CustomSchedule.py:337.
+        would break the comprehension at CustomSchedule/dispatch.py:134.
         """
         opt1 = ScheduleInfo(
             numCodePaths=1, numMfma=32, optSchedule={}, syncCode=[],
@@ -282,7 +282,7 @@ class TestMfmaReorderE2E(GraphNativeValidationTest):
         # 1. Build the original mfmaCode (one entry per ORIGINAL index 0..n-1).
         mfma_code = _build_mfma_code_for_n(n)
 
-        # 2. Mirror CustomSchedule.py:336-337 — apply the reorder. Land
+        # 2. Mirror CustomSchedule/dispatch.py:133-134 — apply the reorder. Land
         # the MFMAs at slot=1..n (slot_offset=1) to leave vmfma_index=0
         # for the pre-MFMA LRs / SWait so they form an unambiguous
         # stream-order chain.

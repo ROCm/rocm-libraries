@@ -477,7 +477,7 @@ class TestLRBeforeMFMA_MfmaReorder(GraphNativeValidationTest):
 
     E2E coverage of the production ``mfmaReorder`` pipeline (
     ``ScheduleInfo(mfmaReorder=[...])`` -> permutation step at
-    ``CustomSchedule.py:336-337`` -> capture -> ``build_dataflow_graph``
+    ``CustomSchedule/dispatch.py:133-134`` -> capture -> ``build_dataflow_graph``
     -> ``validate_edge_wait_coverage``) lives in:
 
       * ``test_mfma_reorder_e2e.py::TestMfmaReorderE2E``
