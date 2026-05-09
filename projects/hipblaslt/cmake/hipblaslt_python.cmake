@@ -38,6 +38,7 @@ function(hipblaslt_configure_bundled_python_command python_binary_dir asan_optio
         "${CMAKE_COMMAND}" -E env
         "PYTHONPATH=${_python_path}"
         "PATH=${_path}"
+        "ROCM_VERSION=${hip_VERSION}"
         "${asan_options}"
         --
         "${Python3_EXECUTABLE}"
