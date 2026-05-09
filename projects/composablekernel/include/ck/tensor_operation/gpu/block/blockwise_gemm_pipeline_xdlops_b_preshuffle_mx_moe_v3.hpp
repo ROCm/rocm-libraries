@@ -658,7 +658,7 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v3<BlockGemmPipelineSched
                                         make_tuple(I0, I0, im_minor, k0, ik))>{}];
                             });
 
-                            static_for<0, KPack, 1>{}([&](auto ik) {
+                            static_for<0, BKPack, 1>{}([&](auto ik) {
                                 b_thread_vec.template AsType<ComputeTypeB>()(ik) =
                                     b_thread_bufs[scale_comp_buf]
                                                  [Number<b_thread_desc_.CalculateOffset(make_tuple(
