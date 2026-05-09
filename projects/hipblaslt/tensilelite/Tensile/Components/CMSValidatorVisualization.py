@@ -32,11 +32,13 @@ this module. Use only for debugging / inspection (test fixtures, ad-hoc
 scripts under `visualizations/`, etc.).
 """
 
-from typing import Optional
+from typing import Optional, Set, Tuple
 
 
 def visualize_dataflow_graph(graph, output_path: str,
-                             title: Optional[str] = None) -> str:
+                             title: Optional[str] = None,
+                             highlight_edges: Optional[Set[Tuple]] = None,
+                             highlight_label: str = "ARTIFACT") -> str:
     """Render a `DataflowGraph` to PNG using networkx + matplotlib.
 
     Imports are local so neither package becomes a runtime dependency of
@@ -55,6 +57,13 @@ def visualize_dataflow_graph(graph, output_path: str,
     arrow tip inside the node and hides it). With the larger margin the
     arrow tip lands clearly outside the node boundary and the direction
     of every edge is unambiguous.
+
+    `highlight_edges`: optional set of `(producer.identity, consumer.identity)`
+    tuples; matching edges are rendered in red with a dashed style and a
+    leading `[<highlight_label>]` annotation. Used by the cross-subiter
+    Pack-artifact companion to bwfr (CROSS_SUBITER_ALU_FP_MINIMAL_REPRO.md)
+    so the artifactual edge in the default-side graph is visually distinct
+    from the semantically valid edges. No effect if None or empty.
     """
     import networkx as nx
     import matplotlib
@@ -90,9 +99,15 @@ def visualize_dataflow_graph(graph, output_path: str,
         _put(e.consumer)
 
     edge_labels = {}
+    highlighted_uv = set()
+    hl_set = highlight_edges or set()
     for e in graph.edges:
         u, v = id(e.producer), id(e.consumer)
+        is_hl = (e.producer.identity, e.consumer.identity) in hl_set
         lab = _edge_label(e)
+        if is_hl:
+            lab = f"[{highlight_label}]\n" + lab
+            highlighted_uv.add((u, v))
         if (u, v) in edge_labels:
             edge_labels[(u, v)] += "\n" + lab
         else:
@@ -118,10 +133,19 @@ def visualize_dataflow_graph(graph, output_path: str,
                             ax=ax, font_size=7)
     # arrowsize=40 + min_target_margin=20 lands the arrowhead clearly
     # outside the node circle (node_size=3500 otherwise swallows it).
-    nx.draw_networkx_edges(g, pos, ax=ax, arrows=True, arrowsize=40,
+    normal_edges = [uv for uv in g.edges() if uv not in highlighted_uv]
+    nx.draw_networkx_edges(g, pos, ax=ax, edgelist=normal_edges,
+                           arrows=True, arrowsize=40,
                            edge_color="gray", width=1.5,
                            connectionstyle="arc3,rad=0.1",
                            min_target_margin=20)
+    if highlighted_uv:
+        nx.draw_networkx_edges(g, pos, ax=ax, edgelist=list(highlighted_uv),
+                               arrows=True, arrowsize=40,
+                               edge_color="red", width=2.5,
+                               style="dashed",
+                               connectionstyle="arc3,rad=0.1",
+                               min_target_margin=20)
     nx.draw_networkx_edge_labels(g, pos, edge_labels=edge_labels,
                                  ax=ax, font_size=7,
                                  bbox=dict(facecolor="white", edgecolor="none", alpha=0.7))
