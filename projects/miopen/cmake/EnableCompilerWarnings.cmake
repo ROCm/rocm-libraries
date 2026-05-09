@@ -32,7 +32,8 @@ set(__cxx_compile_options
     -Wundef
     -Wunreachable-code
     -Wmissing-noreturn
-    # Suppress specific -Wall/-Wextra warnings
+    # Suppress specific warnings
+    -Wno-c++11-narrowing
     -Wno-ignored-qualifiers
     -Wno-sign-compare
     -Wno-deprecated-declarations
