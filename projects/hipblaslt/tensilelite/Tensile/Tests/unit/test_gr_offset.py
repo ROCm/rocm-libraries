@@ -207,7 +207,6 @@ def generate_gr_offset_kernel(cfg):
 
     gra_module = graTileAssignment(writer, kernel, useSwizzling=True)
 
-    # Emit non-DTL buffer loads to VGPRs using the computed offsets
     gr_load_module, dest_vgprs = generate_gr_to_vgpr_loads_v2(writer, ti)
 
     export_asm = generate_export_all_waves_v2(ti, dest_vgprs)
