@@ -17,7 +17,7 @@ runs:
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         repository: ROCm/TheRock
-        ref: dc88ae1f34e0ac09d46f0147df82c1184abd6ae4 # 2026-04-22
+        ref: 1372b2541cd0991c3b53d2134abb1a6fcd7ec792 # 2026-05-08
         path: TheRock
         sparse-checkout: build_tools
 
