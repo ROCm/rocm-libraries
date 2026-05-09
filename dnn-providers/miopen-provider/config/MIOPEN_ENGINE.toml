@@ -45,5 +45,5 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
 # expand the arch list if/when failures are seen elsewhere.
 [[test_skips]]
 archs   = ["gfx11"]
-filters = ["*BatchnormBackwardCalcStats3d*.Correctness/0"]
-reason  = "DSCALE ~1% low vs CPU reference on [1,16,8,112,112] — see epic 1913 follow-up ticket"
+filters = ["Full/*BatchnormBackwardCalcStats3d*.Correctness/0"]
+reason  = "DSCALE ~1% low vs CPU reference on [1,16,8,112,112] (Full tier only) — see epic 1913 follow-up ticket"
