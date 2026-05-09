@@ -1037,7 +1037,35 @@ def build_dataflow_graph(four_part_capture):
         latest_writer = {}  # byte_key -> (writer_node, write_resource, write_slot)
         sorted_nodes = sorted(nodes_by_identity.values(), key=lambda n: n.position)
 
+        # Track the body_label of the previously processed node so we can
+        # detect body-boundary transitions (ML-1 -> ML, ML -> NGL, NGL ->
+        # NLL) within the unified position-sorted stream. SCC is a single-
+        # bit hardware status register that is NOT preserved across loop
+        # iterations by any compiler convention, so an SCC writer in body
+        # N must NOT be visible to an SCC reader in body N+1. Clearing
+        # the SCC entries from latest_writer at the boundary stops the
+        # per-byte resolver from emitting cross-body SCC edges in the
+        # first place — fixing the artifact at its source rather than
+        # absorbing it later in the failure-classification layer
+        # (rocm-libraries-theq, see SCC_CROSS_BODY_INVESTIGATION.md §5).
+        # NOTE: only SCC keys are cleared. Non-SCC dataflow (LR/LW/GR/
+        # MFMA on vgpr/sgpr/memory) IS legitimately preserved across body
+        # boundaries — that cross-body dataflow is the whole reason the
+        # graph walks bodies as a single stream.
+        prev_body_label = None
+
         for node in sorted_nodes:
+            if prev_body_label is not None and node.body_label != prev_body_label:
+                # Body-boundary transition. Drop SCC byte_keys
+                # (first tuple element == "scc") so SCC writers in
+                # the previous body cannot source SCC reads in the
+                # next body.
+                latest_writer = {
+                    bk: v for bk, v in latest_writer.items()
+                    if not (bk and bk[0] == "scc")
+                }
+            prev_body_label = node.body_label
+
             wrapped = node.tagged_inst.wrapped
             # Per-body symbolic-name -> numeric-base lookup, populated
             # from the writer's RegSet directives during capture (see
@@ -2599,14 +2627,14 @@ def diagnose_missing_edge(
     # ALU-immediate producers.
     ref_resource = ref_edge.resource
     if getattr(ref_resource, "regType", None) == "scc":
-        # Same-body only. SCC is a single-bit hw status register that is
-        # NOT preserved across loop iterations by any compiler convention,
-        # so a cross-body SCC edge in the default graph is an aliasing
-        # artifact of the per-byte latest-writer resolver running over the
-        # SCC sentinel — not a real dataflow dependency. Suppress to
-        # avoid false-positive failures on cross-body SCC handoffs.
-        if p_node.body_label != c_node.body_label:
-            return []
+        # Cross-body SCC edges no longer reach this branch: the per-byte
+        # latest-writer resolver in build_dataflow_graph clears SCC
+        # entries at body boundaries (rocm-libraries-theq), so any SCC
+        # ref_edge here connects a producer and consumer in the SAME
+        # body. The downstream cross-body suppression that used to live
+        # here was absorbing artifacts the resolver should never have
+        # emitted — see SCC_CROSS_BODY_INVESTIGATION.md §5 for the
+        # rationale.
         intervening_writer = None
         for e in subj_graph.edges:
             if (e.consumer.identity == c_id
