@@ -5,6 +5,50 @@ Companion to bead `rocm-libraries-bwfr` and its deeper analysis at
 
 ---
 
+## Real-kernel source (added 2026-05-08)
+
+The synthetic 3-instruction fixture documented below is reduced from a real
+production kernel: a 128x128x32 TF32 4x4 emulation kernel (TN layout,
+DepthU=32, MI=16x16x32 with WaveTile 4x4 / WaveGroup 2x2, PGR=2 PLR=1,
+DTL=1, F32XdlMathOp='X'). The exact kernel-config dict is the same one used
+by all 10 production tests bwfr enumerates in section 3.2 of
+`CROSS_SUBITER_ALU_FP_INVESTIGATION.md`. Source test:
+`Tensile/Tests/unit/test_ScheduleCapture.py::TestRealKernelCapture::test_tf32_4x4_tn_capture_shape`
+(the first test in the bwfr list and the most-cited reproducer).
+
+End-to-end repro script at
+`Tensile/Components/repro_cross_subiter_artifact.py` runs the kernel through
+both default and CMS emit paths and saves the resulting assembly to
+`repro_cross_subiter_default.s` (609,698 bytes; built with
+`UseCustomMainLoopSchedule=0`) and `repro_cross_subiter_cms.s` (536,900
+bytes; built with `UseCustomMainLoopSchedule=1`) for direct comparison.
+
+The script reports **768** cross-subiter PackA[N]/PackB[N] artifact edges
+(`OrderInvertedFailure`s when the section-7.3 carve-out at
+`CMSValidator.py:2584-2598` is monkey-patched off via `_node_subiter`),
+matching bwfr's section 3.2 expectation exactly. The 768 edges are spread
+across PackA0/PackA3/PackB0/PackB1/PackB3 producers consuming `MFMA`s in
+the same body, with the artifact resource being the symbolic Pack scratch
+range `vgprValuA_X0_I0+0..63` / `vgprValuB_X0_I0+0..63` (resolved
+numerically at byte-key time to physical vgpr indices like v0, v7, v9,
+v23, v25, v32, v40, v47, v49, v50, v57 — each carrying 16 artifact edges
+— with v3, v4, v5, v6, v11..62 each carrying 8). These are the
+production-kernel equivalent of the v133 scratch-reuse pattern documented
+in `ScheduleCapture.py:1550-1610` and used in the synthetic 3-instruction
+fixture below.
+
+Run:
+
+```
+PYTHONPATH=projects/hipblaslt/tensilelite \
+    python projects/hipblaslt/tensilelite/Tensile/Components/repro_cross_subiter_artifact.py
+```
+
+(Initial run probes gfx950 ISA caps via the system compiler, ~3.8s; total
+runtime ~30s for two real KernelWriterAssembly builds.)
+
+---
+
 ## 1. Why this memo exists
 
 bwfr's investigation memo answers *why* the section-7.3 carve-out
