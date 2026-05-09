@@ -898,6 +898,19 @@ _LW_CLASS_NAMES = {
     # written. So the existing _DSStoreRule
     # (reads = (lds_addr, src_data); writes = ()) is correct as-is.
     "DSStoreD16HIB16", "DSStoreB8HID16",
+    # DSStore2B32 — `ds_store2_b32` writes TWO independent 32-bit values
+    # to LDS in a single instruction. Python ctor signature is
+    # `(dstAddr, src0, src1, ds, comment)` (rocisa/src/instruction/mem.cpp
+    # bindings; rocisa/include/instruction/mem.hpp::DSStore2B32). Unlike
+    # the single-src DSStore* family, both src0 AND src1 are real register
+    # operands. No special-case extract logic is needed because
+    # `DSStoreInstruction::getSrcParams` (mem.hpp:883) already returns
+    # `{dstAddr, src0, src1}` for ALL DSStoreInstruction subclasses; the
+    # generic `_DSStoreRule.extract` routes that through
+    # `_operands_with_slots` and `Register.is_register`, which correctly
+    # captures both src registers for DSStore2B32 (and filters out the
+    # None src1 hole for single-src variants like DSStoreB32).
+    "DSStore2B32",
     "DSStoreInstruction",
 }
 _GR_CLASS_NAMES = {
