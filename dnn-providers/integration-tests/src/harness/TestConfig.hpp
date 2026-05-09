@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 
+#include "harness/DeviceArch.hpp"
 #include "harness/TestSettings.hpp"
 
 namespace hipdnn_integration_tests
@@ -102,6 +103,12 @@ public:
             instance._testSettings.emplace(*configPath);
         }
 
+        // Detect device 0's gfx arch once at startup. Used by [[test_skips]]
+        // entries in the TOML config. SKIP_IF_NO_DEVICES() in the harness
+        // SetUp() handles the no-GPU case, so an empty result here just
+        // means arch-scoped skip rules won't match (global rules still do).
+        instance._currentArch = currentDeviceArchRaw();
+
         instance._initialized = true;
     }
 
@@ -188,6 +195,27 @@ public:
         return _testSettings->findToleranceOverride(testName);
     }
 
+    // Raw gcnArchName for device 0 detected at init time (e.g.
+    // "gfx942:sramecc+:xnack-"). Empty if detection failed.
+    const std::string& getCurrentArch() const
+    {
+        throwIfNotInitialized();
+        return _currentArch;
+    }
+
+    // Find a [[test_skips]] entry matching the given test name on the current
+    // device arch. Returns the entry's reason, or std::nullopt if no config
+    // is loaded, no entry matches, or the device arch could not be detected.
+    std::optional<std::string> findSkipForTest(std::string_view testName) const
+    {
+        throwIfNotInitialized();
+        if(!_testSettings.has_value())
+        {
+            return std::nullopt;
+        }
+        return _testSettings->findSkip(testName, _currentArch);
+    }
+
     // Get the reference executor type. Value is resolved once at init time:
     // CLI flag > HIPDNN_TEST_REFERENCE_EXECUTOR env var > CPU default.
     ReferenceExecutorType getReferenceExecutorType() const
@@ -211,6 +239,7 @@ private:
     std::optional<std::string> _engineName;
     std::optional<TestSettings> _testSettings;
     std::optional<ReferenceExecutorType> _referenceExecutorType;
+    std::string _currentArch;
     bool _failOnUnsupported = false;
     bool _skipGraphValidation = false;
     bool _initialized = false;
