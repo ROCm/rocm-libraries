@@ -11,6 +11,7 @@ import sys
 def _cmake_bool(value):
     return "ON" if value else "OFF"
 
+
 def detect_gpu_arch():
     try:
         result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)

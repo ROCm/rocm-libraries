@@ -29,7 +29,6 @@ struct SerializedExecutionPlanT : public ::flatbuffers::NativeTable {
   int64_t engine_id = 0;
   int64_t workspace_size = 0;
   std::vector<int64_t> tensor_uids{};
-  std::vector<uint8_t> engine_config{};
   std::vector<uint8_t> plugin_payload{};
 };
 
@@ -41,8 +40,7 @@ struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::
     VT_ENGINE_ID = 6,
     VT_WORKSPACE_SIZE = 8,
     VT_TENSOR_UIDS = 10,
-    VT_ENGINE_CONFIG = 12,
-    VT_PLUGIN_PAYLOAD = 14
+    VT_PLUGIN_PAYLOAD = 12
   };
   uint32_t version() const {
     return GetField<uint32_t>(VT_VERSION, 0);
@@ -68,12 +66,6 @@ struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::
   ::flatbuffers::Vector<int64_t> *mutable_tensor_uids() {
     return GetPointer<::flatbuffers::Vector<int64_t> *>(VT_TENSOR_UIDS);
   }
-  const ::flatbuffers::Vector<uint8_t> *engine_config() const {
-    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_ENGINE_CONFIG);
-  }
-  ::flatbuffers::Vector<uint8_t> *mutable_engine_config() {
-    return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_ENGINE_CONFIG);
-  }
   const ::flatbuffers::Vector<uint8_t> *plugin_payload() const {
     return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_PLUGIN_PAYLOAD);
   }
@@ -87,8 +79,6 @@ struct SerializedExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::
            VerifyField<int64_t>(verifier, VT_WORKSPACE_SIZE, 8) &&
            VerifyOffset(verifier, VT_TENSOR_UIDS) &&
            verifier.VerifyVector(tensor_uids()) &&
-           VerifyOffset(verifier, VT_ENGINE_CONFIG) &&
-           verifier.VerifyVector(engine_config()) &&
            VerifyOffset(verifier, VT_PLUGIN_PAYLOAD) &&
            verifier.VerifyVector(plugin_payload()) &&
            verifier.EndTable();
@@ -114,9 +104,6 @@ struct SerializedExecutionPlanBuilder {
   void add_tensor_uids(::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> tensor_uids) {
     fbb_.AddOffset(SerializedExecutionPlan::VT_TENSOR_UIDS, tensor_uids);
   }
-  void add_engine_config(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> engine_config) {
-    fbb_.AddOffset(SerializedExecutionPlan::VT_ENGINE_CONFIG, engine_config);
-  }
   void add_plugin_payload(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> plugin_payload) {
     fbb_.AddOffset(SerializedExecutionPlan::VT_PLUGIN_PAYLOAD, plugin_payload);
   }
@@ -137,13 +124,11 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
     int64_t engine_id = 0,
     int64_t workspace_size = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> tensor_uids = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> engine_config = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> plugin_payload = 0) {
   SerializedExecutionPlanBuilder builder_(_fbb);
   builder_.add_workspace_size(workspace_size);
   builder_.add_engine_id(engine_id);
   builder_.add_plugin_payload(plugin_payload);
-  builder_.add_engine_config(engine_config);
   builder_.add_tensor_uids(tensor_uids);
   builder_.add_version(version);
   return builder_.Finish();
@@ -155,10 +140,8 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
     int64_t engine_id = 0,
     int64_t workspace_size = 0,
     const std::vector<int64_t> *tensor_uids = nullptr,
-    const std::vector<uint8_t> *engine_config = nullptr,
     const std::vector<uint8_t> *plugin_payload = nullptr) {
   auto tensor_uids__ = tensor_uids ? _fbb.CreateVector<int64_t>(*tensor_uids) : 0;
-  auto engine_config__ = engine_config ? _fbb.CreateVector<uint8_t>(*engine_config) : 0;
   auto plugin_payload__ = plugin_payload ? _fbb.CreateVector<uint8_t>(*plugin_payload) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
       _fbb,
@@ -166,7 +149,6 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
       engine_id,
       workspace_size,
       tensor_uids__,
-      engine_config__,
       plugin_payload__);
 }
 
@@ -179,7 +161,6 @@ inline bool operator==(const SerializedExecutionPlanT &lhs, const SerializedExec
       (lhs.engine_id == rhs.engine_id) &&
       (lhs.workspace_size == rhs.workspace_size) &&
       (lhs.tensor_uids == rhs.tensor_uids) &&
-      (lhs.engine_config == rhs.engine_config) &&
       (lhs.plugin_payload == rhs.plugin_payload);
 }
 
@@ -201,7 +182,6 @@ inline void SerializedExecutionPlan::UnPackTo(SerializedExecutionPlanT *_o, cons
   { auto _e = engine_id(); _o->engine_id = _e; }
   { auto _e = workspace_size(); _o->workspace_size = _e; }
   { auto _e = tensor_uids(); if (_e) { _o->tensor_uids.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->tensor_uids[_i] = _e->Get(_i); } } else { _o->tensor_uids.resize(0); } }
-  { auto _e = engine_config(); if (_e) { _o->engine_config.resize(_e->size()); std::copy(_e->begin(), _e->end(), _o->engine_config.begin()); } }
   { auto _e = plugin_payload(); if (_e) { _o->plugin_payload.resize(_e->size()); std::copy(_e->begin(), _e->end(), _o->plugin_payload.begin()); } }
 }
 
@@ -217,7 +197,6 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
   auto _engine_id = _o->engine_id;
   auto _workspace_size = _o->workspace_size;
   auto _tensor_uids = _o->tensor_uids.size() ? _fbb.CreateVector(_o->tensor_uids) : 0;
-  auto _engine_config = _o->engine_config.size() ? _fbb.CreateVector(_o->engine_config) : 0;
   auto _plugin_payload = _o->plugin_payload.size() ? _fbb.CreateVector(_o->plugin_payload) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
       _fbb,
@@ -225,7 +204,6 @@ inline ::flatbuffers::Offset<SerializedExecutionPlan> CreateSerializedExecutionP
       _engine_id,
       _workspace_size,
       _tensor_uids,
-      _engine_config,
       _plugin_payload);
 }
 
