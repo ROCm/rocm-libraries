@@ -124,13 +124,24 @@ using DeviceGemm = ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3<
     CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
     CShuffleBlockTransferScalarPerVector_NPerBlock,
     ck::BlockGemmPipelineScheduler::Intrawave,
-#if GEMM_CONFIG_ENABLEXDL == 1
+#if GEMM_CONFIG_ENABLEXDL == 1 && defined(GEMM_CONFIG_USEPACKTENSOR)
     ck::BlockGemmPipelineVersion::v1,
-#else
-    ck::BlockGemmPipelineVersion::v3,
-#endif
+    ADataType,
+    BDataType,
+    false,
+    false,
+    0,
+    false,
+    true>;
+#elif GEMM_CONFIG_ENABLEXDL == 1
+    ck::BlockGemmPipelineVersion::v1,
     ADataType,
     BDataType>;
+#else
+    ck::BlockGemmPipelineVersion::v3,
+    ADataType,
+    BDataType>;
+#endif
 #elif defined(GEMM_CONFIG_ENABLEDTL)
 template <typename ALayout,
           typename BLayout,

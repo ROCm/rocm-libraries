@@ -2581,6 +2581,107 @@ struct GridwiseGemm_xdl_cshuffle_base
             }
         });
     }
+
+    template <InMemoryDataOperationEnum CGlobalMemoryDataOperation,
+              typename CThreadTransferSrcDstAccessOrder,
+              index_t CThreadTransferSrcDstVectorDim,
+              typename BlockwiseGemmPipe,
+              typename CGridDesc_M0_N0_M1_N1_M2_N2_N3,
+              typename CThreadBuffer,
+              typename CDEElementwiseOperation>
+    __device__ static void RunEpilogueWithPackTensor(
+        BlockwiseGemmPipe& blockwise_gemm,
+        const CGridDesc_M0_N0_M1_N1_M2_N2_N3& c_grid_desc_m0_n0_m1_n1_m2_n2_n3,
+        CThreadBuffer& c_thread_buf,
+        index_t block_m_id,
+        index_t block_n_id,
+        EDataType* p_c_grid,
+        const CDEElementwiseOperation& cde_element_op)
+    {
+        static_assert(IsMxGemm == false);
+
+        auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+            p_c_grid, c_grid_desc_m0_n0_m1_n1_m2_n2_n3.GetElementSpaceSize());
+
+        const index_t m_block_data_idx_on_grid =
+            __builtin_amdgcn_readfirstlane(block_m_id * MPerBlock);
+
+        const index_t n_block_data_idx_on_grid =
+            __builtin_amdgcn_readfirstlane(block_n_id * NPerBlock);
+
+        constexpr auto c_thread_desc_m0_n0_m1_n1_m2_n2_n3 =
+            BlockwiseGemmPipe::GetCThreadDescriptor_M0_N0_M1_N1_M2_N2_N3();
+
+        constexpr auto c_block_desc_m0_n0_m1_n1_m2_n2_n3 =
+            BlockwiseGemmPipe::GetCBlockDescriptor_M0_N0_M1_N1_M2_N2_N3();
+
+        constexpr auto M0 = c_block_desc_m0_n0_m1_n1_m2_n2_n3.GetLength(I0);
+        constexpr auto N0 = c_block_desc_m0_n0_m1_n1_m2_n2_n3.GetLength(I1);
+        constexpr auto M1 = c_block_desc_m0_n0_m1_n1_m2_n2_n3.GetLength(I2);
+        constexpr auto N1 = c_block_desc_m0_n0_m1_n1_m2_n2_n3.GetLength(I3);
+        constexpr auto M2 = c_block_desc_m0_n0_m1_n1_m2_n2_n3.GetLength(I4);
+        constexpr auto N2 = c_block_desc_m0_n0_m1_n1_m2_n2_n3.GetLength(I5);
+        constexpr auto N3 = c_block_desc_m0_n0_m1_n1_m2_n2_n3.GetLength(I6);
+
+        // calculate origin of thread output tensor on global memory
+        //     blockwise GEMM c matrix starting index
+        // const auto c_thread_mtx_on_block =
+        //    blockwise_gemm.CalculateCThreadOriginDataIndex(I0, I0, I0, I0);
+        const auto c_thread_mtx_on_block =
+            blockwise_gemm.CalculateCThreadOriginDataIndexAfterPermute(I0, I0, I0, I0);
+
+        const index_t m_thread_data_on_grid = m_block_data_idx_on_grid + c_thread_mtx_on_block[I0];
+
+        const index_t n_thread_data_on_grid = n_block_data_idx_on_grid + c_thread_mtx_on_block[I1];
+
+        const auto m_thread_data_on_grid_to_m0_m1_m2_m3_adaptor = make_single_stage_tensor_adaptor(
+            make_tuple(make_merge_transform(make_tuple(M0, M1, M2))),
+            make_tuple(Sequence<0, 1, 2>{}),
+            make_tuple(Sequence<0>{}));
+
+        const auto m_thread_data_on_grid_idx =
+            m_thread_data_on_grid_to_m0_m1_m2_m3_adaptor.CalculateBottomIndex(
+                make_multi_index(m_thread_data_on_grid));
+
+        const auto n_thread_data_on_grid_to_n0_n1_n2_adaptor = make_single_stage_tensor_adaptor(
+            make_tuple(make_merge_transform(make_tuple(N0, N1, N2, N3))),
+            make_tuple(Sequence<0, 1, 2, 3>{}),
+            make_tuple(Sequence<0>{}));
+
+        const auto n_thread_data_on_grid_idx =
+            n_thread_data_on_grid_to_n0_n1_n2_adaptor.CalculateBottomIndex(
+                make_multi_index(n_thread_data_on_grid));
+
+        auto c_thread_copy = ThreadwiseTensorSliceTransfer_v1r3_PackTensor<
+            ADataType,
+            BDataType,
+            AccDataType,
+            EDataType,
+            decltype(c_thread_desc_m0_n0_m1_n1_m2_n2_n3),
+            decltype(c_grid_desc_m0_n0_m1_n1_m2_n2_n3),
+            CDEElementwiseOperation,
+            Sequence<M0, N0, I1, I1, I1, I1, N3>,
+            CThreadTransferSrcDstAccessOrder,
+            CThreadTransferSrcDstVectorDim,
+            CShuffleBlockTransferScalarPerVector_NPerBlock,
+            CGlobalMemoryDataOperation,
+            1,
+            true>{c_grid_desc_m0_n0_m1_n1_m2_n2_n3,
+                  make_multi_index(m_thread_data_on_grid_idx[I0],
+                                   n_thread_data_on_grid_idx[I0],
+                                   m_thread_data_on_grid_idx[I1],
+                                   n_thread_data_on_grid_idx[I1],
+                                   m_thread_data_on_grid_idx[I2],
+                                   n_thread_data_on_grid_idx[I2],
+                                   I0),
+                  cde_element_op};
+
+        c_thread_copy.Run(c_thread_desc_m0_n0_m1_n1_m2_n2_n3,
+                          make_tuple(I0, I0, I0, I0, I0, I0, I0),
+                          c_thread_buf,
+                          c_grid_desc_m0_n0_m1_n1_m2_n2_n3,
+                          c_grid_buf);
+    }
 };
 
 } // namespace ck

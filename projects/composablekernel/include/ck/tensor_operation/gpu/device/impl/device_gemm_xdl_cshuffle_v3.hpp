@@ -168,7 +168,8 @@ template <typename ALayout,
           bool PermuteA                               = false,
           bool PermuteB                               = false,
           index_t MinimumOccupancy                    = 0,
-          bool UseDataCachePrefetch                   = false>
+          bool UseDataCachePrefetch                   = false,
+          bool UsePackTensor                          = false>
 struct DeviceGemm_Xdl_CShuffleV3 : public DeviceGemmV2<ALayout,
                                                        BLayout,
                                                        CLayout,
@@ -252,7 +253,8 @@ struct DeviceGemm_Xdl_CShuffleV3 : public DeviceGemmV2<ALayout,
         PermuteB,
         false,
         MinimumOccupancy,
-        UseDataCachePrefetch>;
+        UseDataCachePrefetch,
+        UsePackTensor>;
     using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
     using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
@@ -978,6 +980,11 @@ struct DeviceGemm_Xdl_CShuffleV3 : public DeviceGemmV2<ALayout,
             if constexpr (UseDataCachePrefetch)
             {
                 str << ", UseDataCachePrefetch";
+            }
+
+            if constexpr (UsePackTensor)
+            {
+                str << ", UsePackTensor";
             }
 
         // clang-format on

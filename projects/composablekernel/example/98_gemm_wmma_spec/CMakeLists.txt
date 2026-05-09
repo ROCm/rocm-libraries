@@ -262,6 +262,129 @@ foreach(gpu IN LISTS GPU_TARGETS)
         target_compile_definitions(example_gemm_xdl_v1_fp8_128_256_256_128_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_11=1 GEMM_SPEC_DEFAULT=1)
         target_compile_options(example_gemm_xdl_v1_fp8_128_256_256_128_default PRIVATE ${GEMM_SPEC_OPTIONS})
         add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_128_256_256_128_default)
+
+        # v1 + PackTensorStore
+        # Configuration 1: BlockSize=512, M=256, N=256, K=128 (FP8)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_1=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_1=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_default)
+
+        # Configuration 2: BlockSize=256, M=256, N=256, K=128 (FP8)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_2=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_2=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_default)
+
+        # Configuration 3: BlockSize=128, M=16, N=192, K=256 (FP8)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_3=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_3=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_default)
+
+        # Configuration 4: BlockSize=256, M=128, N=192, K=128 (FP8)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_4=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_4=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_default)
+
+        # Configuration 5: BlockSize=256, M=256, N=128, K=64 (FP16)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_5=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_5=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_default)
+
+        # Configuration 6: BlockSize=256, M=256, N=256, K=64 (FP16)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_6=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_6=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_default)
+
+        # Configuration 7: BlockSize=128, M=128, N=256, K=64 (FP16)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_7=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_7=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_default)
+
+        # Configuration 8: BlockSize=256, M=128, N=128, K=64 (FP16)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_8=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_8=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_default)
+
+        # Configuration 9: BlockSize=128, M=64, N=128, K=64 (FP16)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_9=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_9=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_default)
+
+        # Configuration 10: BlockSize=128, M=256, N=256, K=64 (FP16)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_10=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_10=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_default)
+
+        # Configuration 11: BlockSize=128, M=256, N=256, K=128 (FP8)
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128 gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_11=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128 PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_default gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_11=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_default PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_default)
+
         # v3
         # Configuration 1: BlockSize=512, M=256, N=256, K=128 (FP8)
         add_example_executable(example_gemm_xdl_v3_fp8_512_256_256_128 gemm_wmma_spec_fp16fp8.cpp)
@@ -732,6 +855,118 @@ foreach(gpu IN LISTS GPU_TARGETS)
         target_compile_definitions(example_gemm_xdl_v1_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_11=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
         target_compile_options(example_gemm_xdl_v1_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
         add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_128_256_256_128_default_acc_half)
+
+        # XDL v1 (GEMM_CONFIG_ENABLEXDL=1) + GEMM_ACC_HALF + USEPACKTENSOR
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_1=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_1=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_512_256_256_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_2=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_2=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_256_256_256_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_3=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_3=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_128_16_192_256_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_4=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_4=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_256_128_192_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_5=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_5=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_256_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_6=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_6=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_256_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_7=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_7=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_128_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_8=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_8=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_256_128_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_9=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_9=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_64_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_10=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_10=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp16_128_256_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_11=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_USEPACKTENSOR=1 GEMM_CONFIG_11=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_usepacktensor_fp8_128_256_256_128_default_acc_half)
 
         # XDL v3 (GEMM_CONFIG_ENABLEXDL=3) + GEMM_ACC_HALF
 

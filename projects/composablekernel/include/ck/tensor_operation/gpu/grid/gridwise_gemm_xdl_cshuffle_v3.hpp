@@ -255,7 +255,8 @@ template <typename ALayout,
           bool PermuteB                               = false,
           bool DoElementwiseBeforeCShuffle            = false,
           index_t MinimumOccupancy                    = 0,
-          bool UseDataCachePrefetch                   = false>
+          bool UseDataCachePrefetch                   = false,
+          bool UsePackTensor                          = false>
 struct GridwiseGemm_xdl_cshuffle_v3
     : public GridwiseGemm_xdl_cshuffle_base<
           ALayout,
@@ -363,11 +364,13 @@ struct GridwiseGemm_xdl_cshuffle_v3
 #ifdef GEMM_WMMA_SPEC_KERNEL
     static constexpr index_t MaxBlockSize = BlockSize;
 #endif
+
 #if defined(__gfx12__)
     static constexpr index_t TransposeC = true;
 #else
-    static constexpr index_t TransposeC = false;
+    static constexpr index_t TransposeC = UsePackTensor ? true : false;
 #endif
+
     static constexpr index_t APackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<ADataType>, pk_i4_t>)
             return 2;
@@ -778,19 +781,19 @@ struct GridwiseGemm_xdl_cshuffle_v3
         __host__ void Print() const
         {
             // clang-format off
-            std::cout << "problem {" 
-                      << "M:" << M << ", " 
-                      << "N:" << N << ", " 
+            std::cout << "problem {"
+                      << "M:" << M << ", "
+                      << "N:" << N << ", "
                       << "K:" << K << ", "
-                      << "SA:" << StrideA << ", " 
-                      << "SB:" << StrideB << ", " 
-                      << "SC:" << StrideC << ", " 
-                      << "MP:" << MPadded << ", " 
+                      << "SA:" << StrideA << ", "
+                      << "SB:" << StrideB << ", "
+                      << "SC:" << StrideC << ", "
+                      << "MP:" << MPadded << ", "
                       << "NP:" << NPadded << ", "
-                      << "KRead:" << KRead << ", " 
-                      << "KP:" << KPadded << ", " 
-                      << "AK0:" << AK0 << ", " 
-                      << "BK0:" << BK0 << ", " 
+                      << "KRead:" << KRead << ", "
+                      << "KP:" << KPadded << ", "
+                      << "AK0:" << AK0 << ", "
+                      << "BK0:" << BK0 << ", "
                       << "MBlock: " << MBlock << ", "
                       << "NBlock: " << NBlock << "}" << std::endl;
             // clang-format on
@@ -1519,16 +1522,36 @@ struct GridwiseGemm_xdl_cshuffle_v3
                                                                          c_thread_buf,
                                                                          num_k_block_main_loop);
         // shuffle C and write out
-        Base::template RunEpilogue<CGlobalMemoryDataOperation,
-                                   DoElementwiseBeforeCShuffle,
-                                   TransposeC>(blockwise_gemm_pipeline,
-                                               c_grid_desc_mblock_mperblock_nblock_nperblock,
-                                               c_thread_buf,
-                                               block_m_id,
-                                               block_n_id,
-                                               p_shared,
-                                               p_c_grid,
-                                               problem.c_element_op_);
+        if constexpr(UsePackTensor)
+        {
+            const auto c_grid_desc_m_n = MakeCGridDescriptor_M_N(
+                problem.M, problem.MPadded, problem.N, problem.NPadded, problem.StrideC);
+            const auto c_grid_desc_m0_n0_m1_n1_m2_n2_n3 =
+                blockwise_gemm_pipeline.MakeCGridDescriptor_M0_N0_M1_N1_M2_N2_N3(c_grid_desc_m_n);
+
+            Base::template RunEpilogueWithPackTensor<CGlobalMemoryDataOperation,
+                                                     Sequence<0, 1, 2, 3, 4, 5, 6>,
+                                                     6>(blockwise_gemm_pipeline,
+                                                        c_grid_desc_m0_n0_m1_n1_m2_n2_n3,
+                                                        c_thread_buf,
+                                                        block_m_id,
+                                                        block_n_id,
+                                                        p_c_grid,
+                                                        problem.c_element_op_);
+        }
+        else
+        {
+            Base::template RunEpilogue<CGlobalMemoryDataOperation,
+                                       DoElementwiseBeforeCShuffle,
+                                       TransposeC>(blockwise_gemm_pipeline,
+                                                   c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                                   c_thread_buf,
+                                                   block_m_id,
+                                                   block_n_id,
+                                                   p_shared,
+                                                   p_c_grid,
+                                                   problem.c_element_op_);
+        }
     }
 
     template <bool HasMainKBlockLoop,

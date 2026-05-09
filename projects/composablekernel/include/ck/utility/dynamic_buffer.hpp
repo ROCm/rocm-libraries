@@ -419,6 +419,30 @@ struct DynamicBuffer
 #endif
     }
 
+    template <typename X, typename AType, typename BType, index_t NumElemsPerThread>
+    __host__ __device__ void
+    packTensorStore(const X& x, index_t dst_offset, bool is_dst_valid) const
+    {
+        if(is_dst_valid)
+        {
+#if defined(__gfx13__)
+            constexpr bool input_is_8bit =
+                (is_same<AType, f8_t>::value || is_same<AType, bf8_t>::value) &&
+                (is_same<BType, f8_t>::value || is_same<BType, bf8_t>::value);
+
+            __attribute__((address_space(1))) const T* global_ptr =
+                reinterpret_cast<__attribute__((address_space(1))) T*>(
+                    reinterpret_cast<uintptr_t>(p_data_ + dst_offset));
+            amd_pack_tensor_store_to_buffer<remove_cvref_t<T>, input_is_8bit, NumElemsPerThread>(
+                x, global_ptr);
+#else
+            ignore = x;
+            ignore = dst_offset;
+
+#endif
+        }
+    }
+
     template <typename X,
               typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
                                          typename scalar_type<remove_cvref_t<T>>::type>::value,

@@ -1631,6 +1631,110 @@ amd_tile_store_to_buffer(const typename vector_type_maker<T, N>::type::type src_
 #endif
 }
 
+template <typename T, bool input_is_8bit, index_t N>
+__device__ void
+amd_pack_tensor_store_to_buffer(const typename vector_type_maker<T, N>::type::type src_thread_data,
+                                __attribute__((address_space(1))) const T* in_ptr)
+{
+#if defined(__gfx13__)
+    if constexpr((is_same<T, half_t>::value || is_same<T, bhalf_t>::value) && (N == 8))
+    {
+        const auto in_i32x4      = bit_cast<int32x4_t>(src_thread_data);
+        const uint32_t pInput[4] = {static_cast<uint32_t>(in_i32x4[0]),
+                                    static_cast<uint32_t>(in_i32x4[1]),
+                                    static_cast<uint32_t>(in_i32x4[2]),
+                                    static_cast<uint32_t>(in_i32x4[3])};
+        uint32_t out_vec1[4];
+
+        if constexpr(input_is_8bit)
+        {
+            static_for<0, 2, 1>{}([&](auto i) {
+                uint32_t tmp;
+                out_vec1[i] = __builtin_amdgcn_permute_pack_tensor_2src_b64(
+                    &tmp, pInput[i], pInput[i + 2], 0);
+                out_vec1[i + 2] = tmp;
+            });
+        }
+        else
+        {
+            static_for<0, 2, 1>{}([&](auto i) {
+                uint32_t tmp;
+                out_vec1[i << 1] = __builtin_amdgcn_permute_pack_tensor_2src_b64(
+                    &tmp, pInput[i], pInput[i + 2], 0);
+                out_vec1[(i << 1) + 1] = tmp;
+            });
+        }
+
+        using out_i32x4_t = typename vector_type<int32_t, 4>::type;
+        using out_f32x4_t = typename vector_type<float, 4>::type;
+
+        const out_i32x4_t out_i32x4 = {static_cast<int32_t>(out_vec1[0]),
+                                       static_cast<int32_t>(out_vec1[1]),
+                                       static_cast<int32_t>(out_vec1[2]),
+                                       static_cast<int32_t>(out_vec1[3])};
+        const auto out_f32x4        = bit_cast<out_f32x4_t>(out_i32x4);
+
+        auto* global_ptr = const_cast<__attribute__((address_space(1))) T*>(in_ptr);
+        amd_buffer_store<float, 4>(out_f32x4, c_style_pointer_cast<float*>(global_ptr), 0, true, 8);
+    }
+    else if constexpr((is_same<T, float>::value && (N == 8)))
+    {
+        const auto in_i32x8      = bit_cast<int32x8_t>(src_thread_data);
+        const uint32_t pInput[8] = {static_cast<uint32_t>(in_i32x8[0]),
+                                    static_cast<uint32_t>(in_i32x8[1]),
+                                    static_cast<uint32_t>(in_i32x8[2]),
+                                    static_cast<uint32_t>(in_i32x8[3]),
+                                    static_cast<uint32_t>(in_i32x8[4]),
+                                    static_cast<uint32_t>(in_i32x8[5]),
+                                    static_cast<uint32_t>(in_i32x8[6]),
+                                    static_cast<uint32_t>(in_i32x8[7])};
+        uint32_t out_vec1[8];
+
+        if constexpr(input_is_8bit)
+        {
+            static_for<0, 4, 1>{}([&](auto i) {
+                uint32_t tmp;
+                out_vec1[i] = __builtin_amdgcn_permute_pack_tensor_2src_b64(
+                    &tmp, pInput[i], pInput[i + 4], 0);
+                out_vec1[i + 4] = tmp;
+            });
+        }
+        else
+        {
+            uint32_t io_map[8] = {0, 1, 4, 5, 2, 3, 6, 7};
+            static_for<0, 4, 1>{}([&](auto i) {
+                uint32_t tmp;
+                uint32_t index1  = io_map[i];
+                uint32_t index2  = io_map[i + 4];
+                out_vec1[index1] = __builtin_amdgcn_permute_pack_tensor_2src_b64(
+                    &tmp, pInput[i], pInput[i + 4], 0);
+                out_vec1[index2] = tmp;
+            });
+        }
+
+        const int32x8_t out_i32x8 = {static_cast<int32_t>(out_vec1[0]),
+                                     static_cast<int32_t>(out_vec1[1]),
+                                     static_cast<int32_t>(out_vec1[2]),
+                                     static_cast<int32_t>(out_vec1[3]),
+                                     static_cast<int32_t>(out_vec1[4]),
+                                     static_cast<int32_t>(out_vec1[5]),
+                                     static_cast<int32_t>(out_vec1[6]),
+                                     static_cast<int32_t>(out_vec1[7])};
+        const auto out_f32x8      = bit_cast<float8_t>(out_i32x8);
+
+        auto* global_ptr = const_cast<__attribute__((address_space(1))) float*>(in_ptr);
+        amd_buffer_store<float, 8>(out_f32x8, c_style_pointer_cast<float*>(global_ptr), 0, true, 8);
+    }
+    else
+    {
+        static_assert(0, "wrong! The layout is incorrect!");
+    }
+#else
+    ignore = src_thread_data;
+    ignore = in_ptr;
+#endif
+}
+
 template <typename T, index_t N, AddressSpaceEnum BufferAddressSpace>
 __device__ auto
 amd_wgp_multicast_load_to_vgpr(__attribute__((address_space(1))) const T* in_ptr,

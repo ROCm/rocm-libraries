@@ -3075,6 +3075,42 @@ struct XdlopsGemm
     }
 
     // transposed XDL output supporting C' = B' * A'
+    // M2_N2 -> M2_N2_N3_N4
+    template <typename CDesc_M0_N0_M1_N1_M2_N2>
+    __host__ __device__ static constexpr auto
+    MakeCDescriptor_M0_N0_M1_N1_M2_N2_N3(const CDesc_M0_N0_M1_N1_M2_N2& c_desc_m0_n0_m1_n1_m2_n2)
+    {
+        const auto M0           = c_desc_m0_n0_m1_n1_m2_n2.GetLength(I0);
+        const auto N0           = c_desc_m0_n0_m1_n1_m2_n2.GetLength(I1);
+        const auto M1           = c_desc_m0_n0_m1_n1_m2_n2.GetLength(I2);
+        const auto N1           = c_desc_m0_n0_m1_n1_m2_n2.GetLength(I3);
+        constexpr auto num_blks = mfma_instr.m_per_blk / mfma_instr.num_regs_per_blk;
+
+        return transform_tensor_descriptor(
+            c_desc_m0_n0_m1_n1_m2_n2,
+            make_tuple(make_pass_through_transform(M0),
+                       make_pass_through_transform(N0),
+                       make_pass_through_transform(M1),
+                       make_pass_through_transform(N1),
+                       make_pass_through_transform(Number<mfma_instr.num_threads_per_blk>{}),
+                       make_unmerge_transform(make_tuple(
+                           Number<num_blks>{},
+                           Number<mfma_instr.group_size * mfma_instr.num_groups_per_blk>{}))),
+            make_tuple(Sequence<0>{},
+                       Sequence<1>{},
+                       Sequence<2>{},
+                       Sequence<3>{},
+                       Sequence<4>{},
+                       Sequence<5>{}),
+            make_tuple(Sequence<0>{},
+                       Sequence<1>{},
+                       Sequence<2>{},
+                       Sequence<3>{},
+                       Sequence<4>{},
+                       Sequence<5, 6>{}));
+    }
+
+    // transposed XDL output supporting C' = B' * A'
     // M3_N3 -> M3_N3_N4_N5
     template <typename CDesc_M0_N0_M1_N1_M2_N2>
     __host__ __device__ static constexpr auto MakeCDescriptor_M0_N0_M1_N1_M2_N2_M3_N3_N4_N5(
@@ -3350,6 +3386,20 @@ struct XdlopsGemm
 
         index_t n_offset = blk_i * mfma_instr.n_per_blk + blk_td;
         index_t m_offset = xdlops_i * mfma_instr.m_per_blk + blk_id * mfma_instr.group_size;
+
+        return TransposeC ? CIndex{n_offset, m_offset} : CIndex{m_offset, n_offset};
+    }
+
+    __device__ static CIndex GetBeginOfThreadBlkAfterPermute(index_t xdlops_i, index_t blk_i)
+    {
+        const auto blk_idx = GetBlkIdx();
+
+        const auto blk_id = blk_idx[I0];
+        const auto blk_td = blk_idx[I1];
+
+        index_t n_offset = blk_i * mfma_instr.n_per_blk + blk_td;
+        index_t m_offset = xdlops_i * mfma_instr.m_per_blk +
+                           blk_id * mfma_instr.group_size * mfma_instr.num_groups_per_blk;
 
         return TransposeC ? CIndex{n_offset, m_offset} : CIndex{m_offset, n_offset};
     }
