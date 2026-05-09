@@ -45,17 +45,17 @@ st.func @test() {
   "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
   v[8:11] = "st.ds_load_b128"(v24) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [2] } }
   "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
-  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[4:11], v[4:11], a[32:39]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
-  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[12:19], v[12:19], a[32:39]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[4:11], v[4:11], a[32:39]) { mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[12:19], v[12:19], a[32:39]) { mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
   "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
   "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
   "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
   "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
   "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
   "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
-  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], a[32:39]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
-  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[0:7], a[32:39]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
-  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[0:7], a[32:39]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], a[32:39]) { mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[0:7], a[32:39]) { mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[0:7], a[32:39]) { mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
   v[12:15] = "st.ds_load_b128"(v28) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [2] } }
   "st.tensor_load_to_lds"(s[36:39], s[40:47]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
   "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }

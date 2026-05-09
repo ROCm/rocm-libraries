@@ -306,9 +306,7 @@ void EnginePlugin::destroySerializedExecutionContext(
 }
 
 hipdnnEnginePluginExecutionContext_t EnginePlugin::createExecutionContextFromSerialized(
-    hipdnnEnginePluginHandle_t handle,
-    const hipdnnPluginConstData_t* engineConfig,
-    const hipdnnPluginConstData_t* serializedContext) const
+    hipdnnEnginePluginHandle_t handle, const hipdnnPluginConstData_t* serializedContext) const
 {
     assert(_initialized);
     if(!supportsExecutionContextSerialization())
@@ -321,7 +319,6 @@ hipdnnEnginePluginExecutionContext_t EnginePlugin::createExecutionContextFromSer
     invokePluginFunction("create execution context from serialized data",
                          _funcCreateExecutionContextFromSerialized,
                          handle,
-                         engineConfig,
                          serializedContext,
                          &execContext);
     return execContext;
