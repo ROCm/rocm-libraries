@@ -80,14 +80,30 @@ def _getVersion(executable: str, versionFlag: str, regex: str) -> str:
 
 
 def get_rocm_version() -> str:
-    """Compute the ROCm version string using hipconfig.
+    """Compute the ROCm version string.
+
+    Reads ROCM_VERSION env var (set by CMake from hip_VERSION) if available,
+    otherwise falls back to reading .info/version from ROCM_PATH, HIP_PATH,
+    or /opt/rocm. Avoids calling hipconfig (deprecated; use amdclang++ directly).
 
     Raises:
-        RuntimeError: If hipconfig fails to execute.
+        RuntimeError: If the version cannot be determined.
     Return:
-        ROCm version string
+        ROCm SemanticVersion
     """
-    return _getVersion(ToolchainDefaults.HIP_CONFIG, "--version", r'(.+)')
+    version_str = environ.get("ROCM_VERSION")
+    if not version_str:
+        for root in [environ.get("ROCM_PATH"), environ.get("HIP_PATH"), "/opt/rocm"]:
+            if root:
+                try:
+                    version_str = (Path(root) / ".info" / "version").read_text().strip()
+                    break
+                except OSError:
+                    continue
+    if not version_str:
+        raise RuntimeError("Failed to get ROCm version: ROCM_VERSION not set and "
+                           ".info/version not found in ROCM_PATH, HIP_PATH, or /opt/rocm")
+    return SemanticVersion(*[int(c.split("-")[0]) for c in version_str.split(".")[:3]])
 
 
 class Component:
