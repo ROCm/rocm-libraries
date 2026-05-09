@@ -990,7 +990,12 @@ validParameters = { # we need to make sure this matches develop
     # 1: Use TDM for A
     # 2: Use TDM for B
     # 3: Use TDM for both A and B
-    "TDMInst": [0, 1, 2, 3]
+    "TDMInst": [0, 1, 2, 3],
+    # Split each TDM data tensor (A or B) load across two tensor_load_to_lds instructions,
+    # each covering half the macro-tile in the M/N dimension. MX scale tensors (MXSA/MXSB)
+    # are not split regardless of this flag. When True, two extra SGPRs are allocated to
+    # hold the per-iteration LDS and global address increments for the split loads.
+    "TDMSplit": [False, True],
 }
 
 newMIValidParameters = {

@@ -40,6 +40,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
+    unit/asm/EstimateAsmCyclesTest.cpp
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
