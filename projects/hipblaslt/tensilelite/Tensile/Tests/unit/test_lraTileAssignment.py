@@ -187,8 +187,9 @@ TILE_CONFIGS = [
 
 # ---- Pytest tests ----
 
+@pytest.mark.skipif(not HAS_GFX950, reason=f"Subtile tests require gfx950, found {GFX_TARGET}")
 class TestLraTileAssignmentUnit:
-    """Non-GPU unit tests for lraTileAssignment."""
+    """Non-GPU unit tests for lraTileAssignment (requires rocIsa for code generation)."""
 
     @pytest.fixture(params=TILE_CONFIGS, ids=lambda c: c.label)
     def lra_env(self, request):
