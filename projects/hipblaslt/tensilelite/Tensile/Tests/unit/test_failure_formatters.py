@@ -109,8 +109,8 @@ def test_order_inverted_failure_format():
     failure = OrderInvertedFailure(
         producer=_cms_label("GRB", 3, name_idx=1),
         consumer=_cms_label("LRA1", 2, name_idx=0),
-        default_producer_position=SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0),
-        default_consumer_position=SchedulePosition(loop_index=1, vmfma_index=5, sub_index=0),
+        default_producer_position=SchedulePosition(loop_index=1, stream_index=0),
+        default_consumer_position=SchedulePosition(loop_index=1, stream_index=5),
     )
     msg = failure.format()
     assert "GRB[1] @ idx=3" in msg              # second GRB in its category-stream
@@ -131,8 +131,8 @@ def test_order_inverted_failure_format_mfma_consumer_omits_bracket():
     failure = OrderInvertedFailure(
         producer=_cms_label("LRA0", 5, name_idx=0),
         consumer=_cms_label("MFMA", 3),
-        default_producer_position=SchedulePosition(loop_index=1, vmfma_index=2, sub_index=0),
-        default_consumer_position=SchedulePosition(loop_index=1, vmfma_index=3, sub_index=0),
+        default_producer_position=SchedulePosition(loop_index=1, stream_index=2),
+        default_consumer_position=SchedulePosition(loop_index=1, stream_index=3),
     )
     msg = failure.format()
     assert "LRA0[0] @ idx=5" in msg
@@ -493,8 +493,8 @@ def test_cross_body_failure_producer_in_ml_consumer_in_ngl():
             primary="MFMA", position="@ idx=4",
             category="MFMA", body_label="NGL",
         ),
-        default_producer_position=SchedulePosition(loop_index=1, vmfma_index=2, sub_index=0),
-        default_consumer_position=SchedulePosition(loop_index=2, vmfma_index=4, sub_index=0),
+        default_producer_position=SchedulePosition(loop_index=1, stream_index=2),
+        default_consumer_position=SchedulePosition(loop_index=2, stream_index=4),
     )
     msg = failure.format()
     assert msg == "Producer LRA0[2] @ idx=8 is issued after consumer MFMA @ idx=4."

@@ -117,9 +117,9 @@ class SlotKey:
     `subiter` is the inner-unroll subiteration (0..LoopIters-1) the
     instruction belongs to. Multiple instructions can share the same
     (slot_kind, mfma_index); `sequence` disambiguates them in stream-
-    emission order, continuing across subiters within the same bucket
-    so that SchedulePosition's (loop_index, vmfma_index, sub_index) tuple
-    encodes stream order without needing the subiter field.
+    emission order, continuing across subiters within the same bucket so
+    that the bridge's `(slot.mfma_index, slot.sequence)` lex sort yields
+    a collision-free per-body monotonic `stream_index` for SchedulePosition.
     """
     subiter: int
     slot_kind: str
@@ -351,7 +351,10 @@ class FourPartCapture:
     num_codepaths: int
     source: str  # 'cms' or 'default-sia3'
     # Inner-unroll subiterations per MFMA group — used by build_dataflow_graph
-    # to derive each MFMA's subiter index (vmfma_index // num_mfma_per_subiter).
+    # to derive each MFMA's subiter index from `slot.mfma_index //
+    # num_mfma_per_subiter` (read from `node.tagged_inst.slot.mfma_index`,
+    # NOT from SchedulePosition.stream_index — stream_index is a
+    # bridge-collapsed sort key, not the kernel-writer's MFMA slot id).
     # Both default-side and CMS-side construction sites should pass
     # writer.states.numMfmaPerIter (upstream Tensile naming retains "Iter"
     # but it refers to the inner unroll subiteration here).
@@ -393,38 +396,67 @@ BODY_LABEL_TO_LOOP_INDEX = {
 @functools.total_ordering
 @dataclass(frozen=True)
 class SchedulePosition:
-    """Position in the instruction schedule. Fields ordered for tuple-style comparison."""
+    """Position in the instruction schedule. Fields ordered for tuple-style comparison.
+
+    Collapsed shape (rocm-libraries-5v4u): the historical
+    `(loop_index, vmfma_index, sub_index)` triple is replaced by
+    `(loop_index, stream_index)`. The CMS bridge (`make_position` /
+    `assign_stream_indices_for_body`) computes a single monotonic
+    `stream_index` per body by walking events in the existing
+    `(slot.mfma_index, slot.sequence)` lex order, folding tie-breaking into
+    the index. Source-aware display values (CMS `mfma_index`, asm
+    `stream_pos`) live on `tagged_inst`, NOT on SchedulePosition.
+
+    `loop_index` keeps its name (rather than `body_index`) because the
+    project will eventually model pre-loop / post-loop / nested loops, where
+    the field truly indexes loop scopes.
+    """
     # Which loop iteration this instruction belongs (larger index means later iteration)
     loop_index: int
-    # Which VMFMA slot within the loop
-    #   * 0 to num_vmfma-1 for normal positions
-    #   * -1 for wrap-around between iterations
-    #     (occurs before the first VMFMA in this loop but after the last VMFMA of the previous loop)
-    vmfma_index: int
-    # Ordering among instructions issued at the same (loop_index, vmfma_index).
-    # Multiple instructions can share a VMFMA slot; this field breaks ties.
-    sub_index: int
+    # Monotonic per-body stream-emission index. Computed at the bridge by
+    # lex-sorting body events on `(slot.mfma_index, slot.sequence)` and
+    # assigning 0, 1, 2, ... in that order. Lex sort over
+    # `(loop_index, stream_index)` therefore continues to give global
+    # stream order across bodies.
+    stream_index: int
 
     def __lt__(self, other: 'SchedulePosition') -> bool:
         if self.loop_index == other.loop_index:
-            if self.vmfma_index == other.vmfma_index:
-                return self.sub_index < other.sub_index
-            else:
-                return self.vmfma_index < other.vmfma_index
-        else:
-            return self.loop_index < other.loop_index
+            return self.stream_index < other.stream_index
+        return self.loop_index < other.loop_index
 
 
-def make_position(body_label: str, slot: SlotKey) -> SchedulePosition:
-    """Construct a SchedulePosition from a TaggedInstruction.slot SlotKey.
+def assign_stream_indices_for_body(instructions: list) -> Dict[int, int]:
+    """Walk a body's TaggedInstruction list and return `{id(ti): stream_index}`.
 
-    The body_label maps to loop_index via BODY_LABEL_TO_LOOP_INDEX so cross-body
-    ordering is well-defined.
+    Stream order is the lex sort of `(slot.mfma_index, slot.sequence)` over
+    all events in the body. By construction `LoopBodyCaptureBuilder.append`
+    issues `slot.sequence` per `(slot_kind, mfma_index)` bucket starting at
+    0, with the sequence counter shared across subiters — so the natural
+    list-append order matches the lex order in production. This helper
+    re-derives stream_index from the slot tuple anyway so callers that
+    construct synthetic captures with out-of-order `instructions` lists
+    still get a canonical assignment.
+    """
+    sorted_tis = sorted(
+        instructions,
+        key=lambda ti: (ti.slot.mfma_index, ti.slot.sequence),
+    )
+    return {id(ti): i for i, ti in enumerate(sorted_tis)}
+
+
+def make_position(body_label: str, stream_index: int) -> SchedulePosition:
+    """Construct a SchedulePosition from a body label and a precomputed
+    per-body `stream_index`.
+
+    The body_label maps to loop_index via BODY_LABEL_TO_LOOP_INDEX so
+    cross-body ordering is well-defined. `stream_index` is computed by the
+    caller (typically via `assign_stream_indices_for_body`) by walking
+    body events in their natural slot lex order.
     """
     return SchedulePosition(
         loop_index=BODY_LABEL_TO_LOOP_INDEX[body_label],
-        vmfma_index=slot.mfma_index,
-        sub_index=slot.sequence,
+        stream_index=stream_index,
     )
 
 
@@ -466,9 +498,11 @@ class LoopBodyCaptureBuilder:
 
     Owns a `sequence` counter that increments per-append within the same
     (slot_kind, mfma_index) bucket. The counter is SHARED across subiters
-    because SchedulePosition's tuple — (loop_index, vmfma_index, sub_index) —
-    drops `subiter`; sub_index must therefore continue across subiters
-    so positions encode stream-emission order without collisions.
+    because the bridge (`assign_stream_indices_for_body`) lex-sorts events
+    on `(slot.mfma_index, slot.sequence)` to assign monotonic
+    `stream_index` values; if `sequence` reset per-subiter, two events in
+    different subiters could share a `(mfma_index, sequence)` pair and
+    collide.
 
     finalize() runs capture-pipeline guards before returning the capture:
       - rocisa wiring: every TaggedInstruction.wrapped.rocisa_inst is non-None

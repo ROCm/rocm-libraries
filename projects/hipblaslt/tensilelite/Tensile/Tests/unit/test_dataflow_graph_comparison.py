@@ -727,13 +727,13 @@ class TestDiagnoseMissingEdgeDefenses:
         # Use the canonical short-form regType "v" (matches real rocisa).
         ref_producer = GraphNode(
             identity=("LR", 1, ("v", 8, 4), 64),
-            position=SchedulePosition(1, 0, 0),
+            position=SchedulePosition(1, 0),
             category="LRA0", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="LRA0[0]",
         )
         ref_consumer = GraphNode(
             identity=("MFMA", 1, ("v", 0, 4), ("v", 8, 2), ("v", 32, 2)),
-            position=SchedulePosition(1, 2, 0),
+            position=SchedulePosition(1, 2),
             category="MFMA", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="MFMA",
         )

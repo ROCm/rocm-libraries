@@ -128,40 +128,43 @@ class TestCustomScheduleValidation:
         assert schedule_info is None
 
 class TestSchedulePositionOrdering:
-    """Test that SchedulePosition comparison handles vmfma_index=-1 correctly.
+    """Test that SchedulePosition comparison correctly orders by
+    `(loop_index, stream_index)`.
 
-    vmfma_index=-1 is a wrap-around position: it represents instructions
-    scheduled between iterations (after the last VMFMA of the previous
-    iteration, before the first VMFMA of the current iteration). With
-    explicit loop_index tracking, -1 naturally sorts before 0 within the
-    same loop via integer comparison.
+    After the rocm-libraries-5v4u collapse, the historical
+    `(loop_index, vmfma_index, sub_index)` triple is folded into a single
+    monotonic `stream_index` per body — the bridge picks values that
+    preserve the original lex ordering. So the wrap-around "vmfma=-1" slot
+    is simply assigned a smaller `stream_index` than the first-of-body slot,
+    and these tests check the resulting `(loop_index, stream_index)`
+    ordering directly.
     """
 
-    def test_neg1_after_last_vmfma_same_loop(self):
-        """vmfma=-1 in loop 0 must be < vmfma=0 in loop 0."""
-        a = SchedulePosition(loop_index=0, vmfma_index=-1, sub_index=0)
-        b = SchedulePosition(loop_index=0, vmfma_index=0, sub_index=0)
+    def test_negative_stream_after_last_same_loop(self):
+        """stream=-1 in loop 0 must be < stream=0 in loop 0."""
+        a = SchedulePosition(loop_index=0, stream_index=-1)
+        b = SchedulePosition(loop_index=0, stream_index=0)
         assert a < b
         assert b > a
 
-    def test_neg1_loop1_after_last_vmfma_loop0(self):
-        """vmfma=-1 in loop 1 must be > vmfma=num_vmfma-1 in loop 0."""
-        a = SchedulePosition(loop_index=1, vmfma_index=-1, sub_index=0)
-        b = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=0)
+    def test_loop1_negative_stream_after_loop0_positive(self):
+        """stream=-1 in loop 1 must be > stream=2 in loop 0."""
+        a = SchedulePosition(loop_index=1, stream_index=-1)
+        b = SchedulePosition(loop_index=0, stream_index=2)
         assert a > b
         assert b < a
 
-    def test_neg1_before_next_loop_vmfma0(self):
-        """vmfma=-1 in loop 0 must be < vmfma=0 in loop 1."""
-        a = SchedulePosition(loop_index=0, vmfma_index=-1, sub_index=0)
-        b = SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0)
+    def test_negative_stream_before_next_loop_stream0(self):
+        """stream=-1 in loop 0 must be < stream=0 in loop 1."""
+        a = SchedulePosition(loop_index=0, stream_index=-1)
+        b = SchedulePosition(loop_index=1, stream_index=0)
         assert a < b
         assert b > a
 
     def test_equal_positions(self):
         """Identical positions must be equal."""
-        a = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=1)
-        b = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=1)
+        a = SchedulePosition(loop_index=0, stream_index=4)
+        b = SchedulePosition(loop_index=0, stream_index=4)
         assert a == b
         assert not (a != b)
         assert not (a < b)
@@ -169,17 +172,17 @@ class TestSchedulePositionOrdering:
         assert a <= b
         assert a >= b
 
-    def test_not_equal_different_sub_index(self):
-        """Same (loop, vmfma) but different sub_index must not be equal."""
-        a = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=0)
-        b = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=1)
+    def test_not_equal_different_stream_index(self):
+        """Same loop but different stream_index must not be equal."""
+        a = SchedulePosition(loop_index=0, stream_index=3)
+        b = SchedulePosition(loop_index=0, stream_index=4)
         assert a != b
         assert a < b
 
-    def test_sub_index_ordering(self):
-        """Within same (loop, vmfma), sub_index determines order."""
-        a = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=0)
-        b = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=5)
-        c = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=10)
+    def test_stream_index_ordering(self):
+        """Within same loop, stream_index determines order."""
+        a = SchedulePosition(loop_index=0, stream_index=2)
+        b = SchedulePosition(loop_index=0, stream_index=5)
+        c = SchedulePosition(loop_index=0, stream_index=10)
         assert a < b < c
         assert c > b > a

@@ -63,6 +63,7 @@ from Tensile.Components.ScheduleCapture import (
     UnexplainedMissingEdgeError,
     MemoryRegion,
     make_position,
+    assign_stream_indices_for_body,
     _canonical_render,
     _is_lr, _is_lw, _is_gr, _is_mfma, _is_swait, _is_sbarrier, _is_snop,
     _is_ssetprio, _is_cvt_pack, _is_middle_pack,
@@ -79,9 +80,26 @@ if TYPE_CHECKING:
 
 
 # Sentinel values for "infinitely far" positions. Values chosen to be well beyond
-# any realistic schedule size (num_vmfma is typically ~48-200).
-POSITION_INF = SchedulePosition(loop_index=9_999, vmfma_index=9_999, sub_index=9_999)
-POSITION_NEG_INF = SchedulePosition(loop_index=-9_999, vmfma_index=-9_999, sub_index=-9_999)
+# any realistic schedule size (per-body event counts are typically ~100-400,
+# and the structural-side encoding (`Timeline._insert`) multiplies by
+# `_STRUCTURAL_SUB_BASE` — the sentinel still has to dominate that product).
+_STRUCTURAL_SUB_BASE = 10_000  # See Timeline._insert; encodes (vmfma_index, sub_index)
+POSITION_INF = SchedulePosition(loop_index=9_999, stream_index=9_999_999_999)
+POSITION_NEG_INF = SchedulePosition(loop_index=-9_999, stream_index=-9_999_999_999)
+
+
+def _struct_vmfma_index(pos: 'SchedulePosition') -> int:
+    """Decode the structural-side stream_index back into the kernel-writer's
+    `vmfma_index`. Mirrors the encoding in `Timeline._insert`:
+        stream_index = (vmfma_index + 1) * _STRUCTURAL_SUB_BASE + sub_index
+    so `vmfma_index = stream_index // _STRUCTURAL_SUB_BASE - 1`. Used by
+    ValidatorInstruction error-rendering paths so `@ idx=N` strings keep
+    printing the kernel-writer's slot id rather than the encoded
+    structural stream index. Sentinel positions (POSITION_INF /
+    POSITION_NEG_INF) decode to large +/- numbers here; rendering paths
+    that compare against `>= -1` continue to work.
+    """
+    return pos.stream_index // _STRUCTURAL_SUB_BASE - 1
 
 # --- Loop Names ---
 MAIN_LOOP_PREV = "ML-1"
@@ -699,8 +717,11 @@ def _class_tag_from_category(category, inst) -> str:
 # --- Stream-position ordering ---
 # =============================================================================
 # The resolver walks producers in stream-position order. SchedulePosition
-# (loop_index, vmfma_index, sub_index) lex-sorts to actual stream order by
-# construction (see SlotKey docstring + commit f06ffc4770), so node.position
+# (loop_index, stream_index) — collapsed at rocm-libraries-5v4u from the
+# historical (loop_index, vmfma_index, sub_index) triple — lex-sorts to
+# actual stream order by construction (the bridge `make_position` /
+# `assign_stream_indices_for_body` walks events in `(slot.mfma_index,
+# slot.sequence)` order and assigns 0,1,2,... per body). `node.position`
 # is the canonical ordering key — no synthetic kind_rank table needed.
 #
 # Two "iter" axes exist in this codebase; do not conflate them:
@@ -710,13 +731,15 @@ def _class_tag_from_category(category, inst) -> str:
 #      stream-position lex sort (loop_index is the first component).
 #   2. Inner-unroll subiteration ("subiter") — which inner unroll iteration
 #      within a single body. Encoded in category trailing digits (LRA0,
-#      PackB3) for non-MFMA, or in vmfma_index // num_mfma_per_subiter
-#      for MFMA. Computed by _node_subiter.
+#      PackB3) for non-MFMA, or in
+#      `tagged_inst.slot.mfma_index // num_mfma_per_subiter` for MFMA
+#      (sourced from the kernel-writer's slot, NOT from the bridge-collapsed
+#      `stream_index`). Computed by _node_subiter.
 #
 # _node_subiter is used by the within-graph same-subiter gate in
 # _classify_edge_coverage (which has no default reference). Both subiter
-# derivations are schedule-invariant per identity (categories and
-# vmfma_indices are kernel-writer-set, identical across captures).
+# derivations are schedule-invariant per identity (categories and slot
+# mfma_indices are kernel-writer-set, identical across captures).
 
 import re as _re
 _TRAILING_DIGITS_RE = _re.compile(r"^(.*?)(\d*)$")
@@ -743,13 +766,22 @@ def _node_subiter(node: GraphNode, num_mfma_per_subiter: int) -> int:
 
     For non-MFMA categories, parsed from the category trailing digits
     (`PackA0` ⇒ 0). For MFMA, derived from
-    `vmfma_index // num_mfma_per_subiter`. When `num_mfma_per_subiter` is 0
-    (test fixtures that don't set it), MFMA subiter collapses to 0 — the
+    `tagged_inst.slot.mfma_index // num_mfma_per_subiter` — sourced from
+    the kernel-writer's MFMA slot id on the TaggedInstruction's SlotKey
+    (NOT from the bridge-collapsed `SchedulePosition.stream_index`, which
+    is a per-body monotonic sort key with no MFMA-slot semantics). When
+    `num_mfma_per_subiter` is 0 (test fixtures that don't set it), or
+    when `tagged_inst` is absent, MFMA subiter collapses to 0 — the
     OrderInverted gate then degenerates to "fire on any same-body
     stream-position inversion".
     """
     if node.category == "MFMA":
-        return node.position.vmfma_index // num_mfma_per_subiter if num_mfma_per_subiter else 0
+        if not num_mfma_per_subiter:
+            return 0
+        ti = getattr(node, "tagged_inst", None)
+        if ti is None or getattr(ti, "slot", None) is None:
+            return 0
+        return ti.slot.mfma_index // num_mfma_per_subiter
     return _split_category_iter(node.category)[1]
 
 
@@ -830,12 +862,18 @@ def _min_issue_quad_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = Non
 def _make_node(
     tagged_inst: "TaggedInstruction",
     body_label: str,
+    stream_index: int,
     profile: Optional[ArchProfile] = None,
 ) -> GraphNode:
     inst = tagged_inst.wrapped.rocisa_inst
     identity = _identity_for(inst, body_label, category=tagged_inst.category)
-    position = make_position(body_label, tagged_inst.slot)
-    name = f"{tagged_inst.category}@{position.vmfma_index}.{position.sub_index}"
+    position = make_position(body_label, stream_index)
+    # Node name continues to reference the kernel-writer's slot fields
+    # (`mfma_index.sequence`) — sourced from `tagged_inst.slot` because
+    # SchedulePosition no longer carries vmfma_index / sub_index after the
+    # 5v4u collapse. Names remain stable for any test that grep'd them.
+    slot = tagged_inst.slot
+    name = f"{tagged_inst.category}@{slot.mfma_index}.{slot.sequence}"
     # `issue_cycles` is only meaningful when an arch profile is available
     # (the field is never consumed downstream — `cumulative_issue_cycles`
     # calls `_min_issue_quad_cycles_for` directly). Skip the helper call
@@ -888,7 +926,7 @@ def build_dataflow_graph(four_part_capture):
 
     Phase 2 — edge formation by RESOURCE RESOLUTION. For each consumer's
     read resource R, walk producers in stream-position order
-    (SchedulePosition: loop_index, vmfma_index, sub_index) and yield
+    (SchedulePosition: loop_index, stream_index) and yield
     every prior writer whose written resource overlaps R. The current
     resolver yields ALL prior overlapping writers (the per-byte
     latest-writer rewrite is tracked as wx9.4.2 / Sub-B).
@@ -966,10 +1004,21 @@ def build_dataflow_graph(four_part_capture):
             continue
         body = captures[label]
 
+        # Per-body stream_index assignment (the CMS bridge: collapses
+        # `(slot.mfma_index, slot.sequence)` lex order into a single
+        # monotonic int per body). See SchedulePosition / make_position
+        # docstrings.
+        stream_idx_by_id = assign_stream_indices_for_body(body.instructions)
+
         for tagged_inst in body.instructions:
             inst = tagged_inst.wrapped.rocisa_inst
             try:
-                node = _make_node(tagged_inst, label, arch_profile)
+                node = _make_node(
+                    tagged_inst,
+                    label,
+                    stream_idx_by_id[id(tagged_inst)],
+                    arch_profile,
+                )
             except CaptureUnknownInstructionError as e:
                 raise CaptureUnknownInstructionError(
                     f"build_dataflow_graph: cannot classify instruction "
@@ -1515,7 +1564,7 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
     profile = _resolve_arch_profile(graph)
 
     # Producer must always be strictly before consumer in stream order. The
-    # SchedulePosition `__lt__` compares (loop_index, vmfma_index, sub_index)
+    # SchedulePosition `__lt__` compares (loop_index, stream_index)
     # so this single check covers same-body and cross-body cases uniformly.
     if not (producer.position < consumer.position):
         return 0
@@ -1542,8 +1591,18 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
 
     p_ti = getattr(producer, "tagged_inst", None)
     c_ti = getattr(consumer, "tagged_inst", None)
-    p_key = (producer.position.vmfma_index, producer.position.sub_index)
-    c_key = (consumer.position.vmfma_index, consumer.position.sub_index)
+    # Fallback slot keys for the by-slot lookup below: SchedulePosition no
+    # longer carries (vmfma_index, sub_index) after the 5v4u collapse, so
+    # source the kernel-writer slot tuple directly from the node's own
+    # `tagged_inst.slot`. The `(mfma_index, sequence)` pair is the same
+    # tuple we used pre-collapse — only its provenance changes.
+    def _slot_key(node):
+        ti = getattr(node, "tagged_inst", None)
+        if ti is None or getattr(ti, "slot", None) is None:
+            return None
+        return (ti.slot.mfma_index, ti.slot.sequence)
+    p_key = _slot_key(producer)
+    c_key = _slot_key(consumer)
 
     # Walk bodies in execution order. Simulator state persists across
     # boundaries (single source of truth for cycle gaps regardless of
@@ -1970,6 +2029,25 @@ def _node_position(node: NodeLike) -> SchedulePosition:
     return getattr(node, "position", None) or node.issued_at
 
 
+def _node_display_idx(node: NodeLike) -> int:
+    """Source-aware "user-facing N" for failure rendering.
+
+    For CMS-side nodes: recover the kernel-writer's `slot.mfma_index` from
+    `tagged_inst.slot` so existing pinning tests that match `@ idx=N` keep
+    seeing the kernel-writer's MFMA-slot id. For nodes without a tagged
+    instruction (SWaitCnt / SBarrier / SNop in the sidecar; ValidatorInstruction
+    on the structural side), fall back to `position.stream_index` — these
+    nodes never carried a meaningful CMS `vmfma_index` either, so the
+    bridge-collapsed sort key is the best we can do without the
+    source-aware label dispatch tracked under rocm-libraries-3dy.
+    """
+    ti = getattr(node, "tagged_inst", None)
+    if ti is not None and getattr(ti, "slot", None) is not None:
+        return ti.slot.mfma_index
+    pos = _node_position(node)
+    return pos.stream_index
+
+
 @dataclass(frozen=True)
 class FailureNodeLabel:
     """Pre-rendered identification of a node in a Failure message.
@@ -2321,10 +2399,15 @@ def cms_node_label(
                 # `_node_label` raised here, which is exactly the source
                 # of the body-mismatch ValueError this bead resolves.
                 pass
-    pos = _node_position(node)
+    # `@ idx=N` rendering uses the source-aware display id (CMS
+    # `slot.mfma_index` when available, falling back to the bridge-collapsed
+    # `stream_index` for sidecar nodes without a tagged instruction). After
+    # the 5v4u SchedulePosition collapse, `vmfma_index` no longer exists on
+    # SchedulePosition itself; the user-facing N is recovered from
+    # `tagged_inst` where the kernel-writer's MFMA-slot id still lives.
     return FailureNodeLabel(
         primary=primary,
-        position=_PositionStr(f"@ idx={pos.vmfma_index}"),
+        position=_PositionStr(f"@ idx={_node_display_idx(node)}"),
         category=cat,
         body_label=getattr(node, "body_label", None),
     )
@@ -2705,7 +2788,7 @@ def diagnose_missing_edge(
         # `nearby_wait_indices` so the user can extend one of them rather
         # than insert a new SWaitCnt; the underlying fix is the same either
         # way.
-        nearby_indices = tuple(_node_position(w).vmfma_index for w in waits_other)
+        nearby_indices = tuple(_node_display_idx(w) for w in waits_other)
         failures.append(MissingWaitFailure(
             producer=p_label,
             consumer=c_label,
@@ -2727,7 +2810,7 @@ def diagnose_missing_edge(
                     producer=p_label,
                     consumer=c_label,
                     iter_delta=iter_delta,
-                    wait_idx=_node_position(insufficient).vmfma_index,
+                    wait_idx=_node_display_idx(insufficient),
                     counter_kind=expected_counter,
                     counter_value=cv if cv is not None else 0,
                     queue_depth_at_wait=depth,
@@ -2766,7 +2849,7 @@ def diagnose_missing_edge(
                     consumer=c_label,
                     iter_delta=iter_delta,
                     role=role,
-                    wait_idx=_node_position(last_drain).vmfma_index,
+                    wait_idx=_node_display_idx(last_drain),
                 ))
 
     if not failures:
@@ -2971,7 +3054,7 @@ def _classify_edge_coverage(
 
     if not waits:
         # See note in _classify_edge_coverage's MissingWaitFailure emit.
-        nearby_indices = tuple(_node_position(w).vmfma_index for w in waits_other)
+        nearby_indices = tuple(_node_display_idx(w) for w in waits_other)
         failures.append(MissingWaitFailure(
             producer=p_label, consumer=c_label,
             iter_delta=iter_delta,
@@ -2989,7 +3072,7 @@ def _classify_edge_coverage(
                 failures.append(WaitInsufficientFailure(
                     producer=p_label, consumer=c_label,
                     iter_delta=iter_delta,
-                    wait_idx=_node_position(insufficient).vmfma_index,
+                    wait_idx=_node_display_idx(insufficient),
                     counter_kind=expected_counter,
                     counter_value=cv if cv is not None else 0,
                     queue_depth_at_wait=depth,
@@ -3019,7 +3102,7 @@ def _classify_edge_coverage(
                     producer=p_label, consumer=c_label,
                     iter_delta=iter_delta,
                     role=role,
-                    wait_idx=_node_position(last_drain).vmfma_index,
+                    wait_idx=_node_display_idx(last_drain),
                 ))
 
     # No fall-through case here: every reachable end-state of this
@@ -3314,8 +3397,8 @@ class GlobalRead(ValidatorInstruction):
             if any(self.guaranteed_by < barriered_at < self.needed_by.issued_at for barriered_at in self.barriered_at):
                     return None
 
-        issued_at = self.issued_at.vmfma_index
-        needed_by = self.needed_by.issued_at.vmfma_index
+        issued_at = _struct_vmfma_index(self.issued_at)
+        needed_by = _struct_vmfma_index(self.needed_by.issued_at)
 
         name = self._name()
 
@@ -3335,7 +3418,7 @@ class GlobalRead(ValidatorInstruction):
             )
 
         # NOTE: Must do it after the check above to guard against infinity.
-        guaranteed_by = self.guaranteed_by.vmfma_index
+        guaranteed_by = _struct_vmfma_index(self.guaranteed_by)
 
         # 2. No Barrier
         if len(self.barriered_at) == 0:
@@ -3362,7 +3445,7 @@ class GlobalRead(ValidatorInstruction):
         # Defensive fallback — string return; should not fire on valid logic.
         return (f"{name} @ idx={issued_at} is not valid. issued @ idx={issued_at}, "
                 f"guaranteed @ idx={guaranteed_by}, "
-                f"barriered @ idx={[b.vmfma_index for b in self.barriered_at]}, "
+                f"barriered @ idx={[_struct_vmfma_index(b) for b in self.barriered_at]}, "
                 f"needed @ idx={needed_by} is not valid.")
 
     def _name(self) -> str:
@@ -3385,14 +3468,14 @@ class SWait(ValidatorInstruction):
     comment: str
 
     def _is_valid(self) -> bool:
-        return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and self.issued_at.vmfma_index >= -1
+        return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and _struct_vmfma_index(self.issued_at) >= -1
 
     def validate(self):
         """Stack 1 of jaunty-reddy plan: returns typed Failure or None."""
         if self._is_valid():
             return None
         return InvalidCounterValueFailure(
-            swait_idx=self.issued_at.vmfma_index,
+            swait_idx=_struct_vmfma_index(self.issued_at),
             dscnt=self.dscnt,
             vlcnt=self.vlcnt,
             vscnt=self.vscnt,
@@ -3406,8 +3489,8 @@ class Barrier(ValidatorInstruction):
         # Sentinel range check stays as a defensive guard. No user-facing
         # Failure type — this fires only on malformed test fixtures.
         # Returning a string keeps the legacy boundary working.
-        if self.issued_at.vmfma_index < -1:
-            return f"Barrier at index {self.issued_at.vmfma_index} is not valid. Must be >= -1."
+        if _struct_vmfma_index(self.issued_at) < -1:
+            return f"Barrier at index {_struct_vmfma_index(self.issued_at)} is not valid. Must be >= -1."
         return None
 
 @dataclass
@@ -3781,6 +3864,18 @@ class Timeline:
                           ``rocisa_inst`` is extracted and set post-construction
                           (it uses init=False on the dataclass).
             kernel:       The kernel configuration dict.
+
+        After the rocm-libraries-5v4u SchedulePosition collapse, the
+        structural-side timeline encodes the historical
+        `(vmfma_index, sub_index)` lex order into a single
+        `stream_index = (vmfma_index + 1) * _STRUCTURAL_SUB_BASE + sub_index`.
+        The +1 keeps the wrap-around `vmfma_index = -1` slot below the
+        `vmfma_index = 0` slot. The structural-side `_insert` path is on
+        track to be deleted by rocm-libraries-wa57; this collapsed-encoding
+        scheme just keeps the dataclass type-correct and preserves
+        `__lt__` ordering until then. The rendering helpers below
+        (`_struct_vmfma_index`) recover the original `vmfma_index` by
+        decoding the same scheme so `@ idx=N` text stays stable.
         """
         # Extract rocisa_inst before passing kwargs to constructor (init=False field).
         rocisa_inst = kwargs.pop("rocisa_inst", None)
@@ -3789,7 +3884,8 @@ class Timeline:
             if self._should_add(cls, kwargs.get("name", ""), loop, kernel):
                 loop_index = self.loops.index(loop)
                 sub_index = len(self._instructions_at_index[loop][vmfma_index + 1])
-                kwargs["issued_at"] = SchedulePosition(loop_index=loop_index, vmfma_index=vmfma_index, sub_index=sub_index)
+                stream_index = (vmfma_index + 1) * _STRUCTURAL_SUB_BASE + sub_index
+                kwargs["issued_at"] = SchedulePosition(loop_index=loop_index, stream_index=stream_index)
 
                 _instruction = cls(**kwargs)
                 _instruction.rocisa_inst = rocisa_inst

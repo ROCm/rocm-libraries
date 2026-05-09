@@ -63,7 +63,7 @@ def visualize_dataflow_graph(graph, output_path: str,
 
     def _node_label(node):
         pos = node.position
-        pos_str = f"L{pos.loop_index}/V{pos.vmfma_index}/S{pos.sub_index}"
+        pos_str = f"L{pos.loop_index}/S{pos.stream_index}"
         name = node.name or node.category
         return f"{name}\n[{node.body_label}]\n{pos_str}"
 

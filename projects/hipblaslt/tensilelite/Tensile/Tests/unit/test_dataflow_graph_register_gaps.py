@@ -2329,8 +2329,8 @@ class TestMFMAQuadCycleGap:
         from Tensile.Components.ScheduleCapture import SchedulePosition
         from Tensile.Components.CMSValidator import GraphNode
 
-        producer_pos = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=0)
-        consumer_pos = SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0)
+        producer_pos = SchedulePosition(loop_index=0, stream_index=2)
+        consumer_pos = SchedulePosition(loop_index=1, stream_index=0)
         producer = GraphNode(
             identity=("VCvtPkF32toBF16", 0, ()),
             position=producer_pos,
@@ -2426,10 +2426,10 @@ class TestMFMAQuadCycleGap:
 
         # OLD: slot-delta + intervening-count under-estimate.
         body = g.captures[edge.producer.body_label]
-        p_key = (edge.producer.position.vmfma_index,
-                 edge.producer.position.sub_index)
-        c_key = (edge.consumer.position.vmfma_index,
-                 edge.consumer.position.sub_index)
+        p_key = (edge.producer.tagged_inst.slot.mfma_index,
+                 edge.producer.tagged_inst.slot.sequence)
+        c_key = (edge.consumer.tagged_inst.slot.mfma_index,
+                 edge.consumer.tagged_inst.slot.sequence)
         lo, hi = (p_key, c_key) if p_key < c_key else (c_key, p_key)
         intervening = 0
         for ti in body.instructions:
@@ -2804,8 +2804,8 @@ class TestCumulativeIssueCycles:
         for e in g.edges:
             if (getattr(e.producer, "category", None) == "MFMA"
                     and getattr(e.consumer, "category", None) == "MFMA"
-                    and e.producer.position.vmfma_index == 2
-                    and e.consumer.position.vmfma_index == 4):
+                    and e.producer.tagged_inst.slot.mfma_index == 2
+                    and e.consumer.tagged_inst.slot.mfma_index == 4):
                 target = e
                 break
         assert target is not None

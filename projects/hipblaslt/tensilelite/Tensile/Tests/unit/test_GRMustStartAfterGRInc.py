@@ -163,7 +163,11 @@ def _assert_inverted(failure, *, producer_category, subj_producer_idx,
     category — 'GRIncA' / 'GRA') plus the SUBJECT-side
     `producer.position.vmfma_index` / `consumer.position.vmfma_index`,
     which is where the order inversion was actually observed (the legacy
-    structural-rule assertion semantics).
+    structural-rule assertion semantics). After the rocm-libraries-5v4u
+    SchedulePosition collapse, `position` is a `_PositionStr` that parses
+    the kernel-writer slot id back out of the rendered `@ idx=N` string —
+    the value is sourced from `tagged_inst.slot.mfma_index` at label
+    construction time, so identity is preserved.
     """
     assert failure.producer.category == producer_category, (
         f"producer.category: expected {producer_category!r}, got "

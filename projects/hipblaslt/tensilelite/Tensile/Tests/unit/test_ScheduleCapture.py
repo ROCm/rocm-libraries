@@ -345,12 +345,12 @@ class TestDataflowDataclasses:
         )
         from Tensile.Components.CMSValidator import GraphNode
         producer = GraphNode(
-            identity=("LRA0", 1, ()), position=SchedulePosition(1, 0, 0),
+            identity=("LRA0", 1, ()), position=SchedulePosition(1, 0),
             category="LRA0", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="LRA0[0]",
         )
         consumer = GraphNode(
-            identity=("MFMA", 1, ()), position=SchedulePosition(1, 1, 0),
+            identity=("MFMA", 1, ()), position=SchedulePosition(1, 1),
             category="MFMA", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="MFMA[1]",
         )

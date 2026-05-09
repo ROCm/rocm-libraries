@@ -234,10 +234,10 @@ class TestBasicDataflow:
         edges = [e for e in g.edges if e.edge_kind == "raw_intrawave"
                  and e.resource.regIdx == 8]
         # Both MFMAs (at vmfma_index 1 and 3) get an edge from LR_a.
-        consumer_slots = sorted(e.consumer.position.vmfma_index for e in edges)
+        consumer_slots = sorted(e.consumer.tagged_inst.slot.mfma_index for e in edges)
         assert consumer_slots == [1, 3]
         # All edges attribute to the same producer (LR_a).
-        assert all(e.producer.position.vmfma_index == 0 for e in edges)
+        assert all(e.producer.tagged_inst.slot.mfma_index == 0 for e in edges)
 
     def test_no_producer_no_edge(self):
         """SWait alone with no producer in the graph: MFMA reads have no
@@ -674,13 +674,13 @@ class TestMultiWriteProducer:
         # Build minimal nodes by hand. The resolver only reads node.position.
         producer = GraphNode(
             identity=("LR", 1, ("v", 8, 4), 64),
-            position=SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0),
+            position=SchedulePosition(loop_index=1, stream_index=0),
             category="LRA0", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="multi-write-LR",
         )
         consumer = GraphNode(
             identity=("MFMA", 1, ("v", 8, 8)),
-            position=SchedulePosition(loop_index=1, vmfma_index=2, sub_index=0),
+            position=SchedulePosition(loop_index=1, stream_index=2),
             category="MFMA", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="wide-read-MFMA",
         )
@@ -742,13 +742,13 @@ class TestMultiWriteProducer:
 
         producer = GraphNode(
             identity=("LR", 1, ("v", 8, 4), 64),
-            position=SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0),
+            position=SchedulePosition(loop_index=1, stream_index=0),
             category="LRA0", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="multi-write-LR",
         )
         consumer = GraphNode(
             identity=("MFMA", 1, ("v", 8, 2)),
-            position=SchedulePosition(loop_index=1, vmfma_index=2, sub_index=0),
+            position=SchedulePosition(loop_index=1, stream_index=2),
             category="MFMA", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="narrow-read-MFMA",
         )
