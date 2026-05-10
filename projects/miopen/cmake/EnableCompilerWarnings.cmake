@@ -34,9 +34,9 @@ set(__cxx_compile_options
     -Wmissing-noreturn
     -Wshadow
     -Wsuggest-override
+    -Wold-style-cast
     # TODO: Working to enable these warnings. Each requires code cleanup first.
     # -Wconversion            # ~1000+ implicit narrowing/sign conversions to fix
-    # -Wold-style-cast        # C-style casts to replace with static_cast/reinterpret_cast
     # -Wdouble-promotion      # implicit float-to-double promotions
     # Suppress specific warnings -- working to remove these by fixing the code
     -Wno-c++11-narrowing        # ~40 instances: narrowing in brace init (batchnorm, ck_impl, addkernels)
