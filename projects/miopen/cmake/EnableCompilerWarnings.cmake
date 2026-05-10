@@ -32,12 +32,16 @@ set(__cxx_compile_options
     -Wundef
     -Wunreachable-code
     -Wmissing-noreturn
-    # Suppress specific warnings
-    -Wno-c++11-narrowing
-    -Wno-ignored-qualifiers
-    -Wno-sign-compare
-    -Wno-deprecated-declarations
-    -Wno-deprecated
+    -Wshadow
+    # TODO: Working to enable these warnings. Each requires code cleanup first.
+    # -Wconversion            # ~1000+ implicit narrowing/sign conversions to fix
+    # -Wold-style-cast        # C-style casts to replace with static_cast/reinterpret_cast
+    # -Wsuggest-override      # missing override on virtual function overrides
+    # -Wdouble-promotion      # implicit float-to-double promotions
+    # Suppress specific warnings -- working to remove these by fixing the code
+    -Wno-c++11-narrowing        # ~40 instances: narrowing in brace init (batchnorm, ck_impl, addkernels)
+    -Wno-sign-compare           # ~1000+ instances: signed/unsigned comparisons throughout codebase
+    -Wno-deprecated-declarations # 2 deprecated MIOpen APIs still have callers
 )
 
 set(__clang_cxx_compile_options
