@@ -927,6 +927,55 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
 
   return module
 
+# ---------------------------------------------------------------------------
+# Pick the MXMFMAInstruction instType for the V_MFMA_SCALE_F32_<MxNxK>_F8F6F4
+# family from kernel data types.
+#
+# The CBSZ/BLGP fields:
+#       000 E4M3 (FP8)        010 E2M3 (FP6)        100 E2M1 (FP4)
+#       001 E5M2 (BF8)        011 E3M2 (BF6)
+#
+# Returns None when DataType{A,B} aren't populated
+# ---------------------------------------------------------------------------
+def _selectF8F6F4InstType(kernel):
+  pt = kernel.get("ProblemType")
+  if pt is None:
+    return None
+  aType = pt.get("DataTypeA")
+  bType = pt.get("DataTypeB")
+  if aType is None or bType is None:
+    return None
+
+  # Defensive: support MagicMock / minimal stubs that don't define predicates.
+  def _pred(t, name):
+    fn = getattr(t, name, None)
+    return bool(fn()) if callable(fn) else False
+
+  # Pure types
+  aIsF8  = _pred(aType, "isAnyFloat8")
+  bIsF8  = _pred(bType, "isAnyFloat8")
+  if aIsF8 and bIsF8:
+    return InstType.INST_F8
+
+  aIsBF8 = _pred(aType, "isAnyBFloat8")
+  bIsBF8 = _pred(bType, "isAnyBFloat8")
+  if aIsBF8 and bIsBF8:
+    return InstType.INST_BF8
+
+  aIsF4  = _pred(aType, "isFloat4")
+  bIsF4  = _pred(bType, "isFloat4")
+  if aIsF4 and bIsF4:
+    return InstType.INST_F4
+
+  # Mixed FP8/BF8 (8-bit only) - SourceSwap flips the suffix.
+  sourceSwap = bool(kernel.get("SourceSwap", False))
+  if aIsF8 and bIsBF8:
+    return InstType.INST_BF8_F8 if sourceSwap else InstType.INST_F8_BF8
+
+  if aIsBF8 and bIsF8:
+    return InstType.INST_F8_BF8 if sourceSwap else InstType.INST_BF8_F8
+
+  return None
 
 ##################################################
 # Subroutine to generate MMA Instruction
@@ -960,9 +1009,10 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
 
   if miK == 128:
     # MX FP4: 16x16x128
+    mxInstType = _selectF8F6F4InstType(kernel) or InstType.INST_F4
     if scaleAVgpr >= 0 and scaleBVgpr >= 0:
       # Use actual loaded scale VGPRs
-      module.add(MXMFMAInstruction(instType=InstType.INST_F4, accType=InstType.INST_F32, variant=[16,16,miK,1], \
+      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
                                    acc=dAccAlias(vgprDStart,opDSize), \
                                    a=aOperand, \
                                    b=bOperand, \
@@ -974,7 +1024,7 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
       # Fallback: hardcoded scale 0x7f (scale=1.0 for all elements)
       tmpVgprScale = writer.vgprPool.checkOut(1)
       module.add(VMovB32(dst=vgpr(tmpVgprScale), src=hex(0x7f7f7f7f), comment="hardcoded scale 0x7f (E8M0)"))
-      module.add(MXMFMAInstruction(instType=InstType.INST_F4, accType=InstType.INST_F32, variant=[16,16,miK,1], \
+      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
                                    acc=dAccAlias(vgprDStart,opDSize), \
                                    a=aOperand, \
                                    b=bOperand, \
