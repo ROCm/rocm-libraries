@@ -54,7 +54,7 @@ The graph JSON is a complete computation description — operation type, tensor 
 2. Run a reference source (PyTorch, CPU ref, etc.) to produce outputs
 3. Write the bundle
 
-**[Validation](#generic-test-runner) (C++, every CI run):**
+**[Validation](#generic-test-runner) (every CI run, any tool that can load bundles):**
 1. Load bundle from disk, extract golden outputs
 2. Execute engine under test
 3. Compare engine output to golden output — PASS or FAIL
@@ -172,14 +172,20 @@ The `--verification-mode` flag overrides this default. In golden mode, tests wit
 
 ### Tolerance Framework
 
-Tolerances are **always defined in code**, never stored in the data bundle. Golden tests will initially use the existing fixed per-operation, per-type tolerances in [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) (e.g., batchnorm inference fp32 = `2e-4`). The codebase also has per-operation dynamic tolerance functions in [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) that compute tolerances based on tensor dimensions — the goal is to wire these into the golden test runner so a single generic test class handles all operations.
+Tolerances are **always defined in code and configuration**, never stored in the data bundle. The tolerance selection priority is:
 
-Per-engine tolerance overrides (e.g., a configuration file specifying looser tolerances for engines that produce less precise results) must also apply to golden tests. This allows a global acceptable tolerance with per-engine exceptions, avoiding hard-coded workarounds in test code.
+1. **TOML per-engine overrides** (highest priority) — each engine's TOML config (e.g., [`MIOPEN_ENGINE.toml`](../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. The integration harness already queries these via `TestConfig::findToleranceOverride(testName)`. Golden tests must use the same mechanism so that per-engine tolerance exceptions apply uniformly.
+
+2. **Fixed per-operation tolerances** (default) — [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) defines compile-time tolerances per operation and data type (e.g., batchnorm inference fp32 = `2e-4`, conv fwd fp32 = `1e-5`). The integration harness selects these based on the root operation in the graph. Golden tests will initially use these same fixed tolerances.
+
+3. **Dynamic tolerances** (target) — [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) computes tolerances from tensor dimensions using Higham error bounds. These exist for conv, matmul, batchnorm, layernorm, RMS norm, and pointwise but are not yet wired into the golden test runner. The goal is to replace fixed tolerances with dynamic ones so a single generic test class handles all operations.
+
+**Current gap**: The golden ref framework (`TestGoldenReferenceCpu`) takes tolerances as hard-coded function parameters — it does not go through the TOML override system or the operation-based tolerance selection in the integration harness. Golden tests must be connected to the same tolerance flow: check TOML override first, fall back to fixed (and eventually dynamic) tolerances.
 
 **Acceptance criteria**:
 - [ ] Golden data bundles contain no tolerance fields
-- [ ] Golden tests initially use fixed tolerances from `TestTolerances.hpp`, with dynamic tolerances as the target
-- [ ] Per-engine tolerance overrides apply to golden tests the same as all other tests
+- [ ] Golden tests use the same tolerance selection as all other tests: TOML override → fixed per-operation → (eventually) dynamic
+- [ ] Per-engine TOML tolerance overrides apply to golden tests — no separate override mechanism
 
 ---
 
@@ -206,46 +212,55 @@ A standalone CLI verifier will run these checks across a directory tree before b
 
 ## Folder Convention
 
-The recommended folder layout below organizes bundles for human navigation. The loader works with any folder structure — it only requires a valid `.json` file. The convention is a guideline, not enforced by the system.
+The only **enforced** folder level is the test tier at the top — `smoke/`, `standard/`, `comprehensive/`, `full/` — matching the existing integration test tiers. The runner reads the tier from the folder path and registers each discovered test under the corresponding **ctest label** (no prefix for smoke/smoke, `Standard`, `Comprehensive`, `Full`). This plugs golden tests into the existing CI tier selection — `ctest` runs smoke, `ctest -L Standard` runs standard, etc. No new flags or configuration needed. Everything below the tier level is a guideline for human navigation. The loader works with any folder structure — it recursively scans for `.json` files and does not validate that the folder path matches the graph content.
 
 ```
 hipdnn_reference_data/
-  {Operation}/            # e.g., BatchnormFwdInference, ConvFwd, MatmulFwd
-    {Layout}/             # e.g., nchw, nhwc, ncdhw
-      {DataType}/         # e.g., fp32, fp16, bfp16
-        {TestName}.json + {TestName}.tensor{uid}.bin
+  {Tier}/                   # ENFORCED: smoke, standard, comprehensive, full
+    ...any structure...     # guideline: {Operation}/{Layout}/{DataType}/
+      {BundleName}/         # one folder per bundle for easy copy/share
+        {Name}.json + {Name}.tensor{uid}.bin
 ```
 
-The folder path is a human convention — the loader does not validate that it matches the graph content. The generator is responsible for placing files in the correct folder.
+Each bundle lives in its own folder so it can be copied, shared, or zipped as a self-contained unit.
 
-### Naming Conventions
+### Naming Guidelines
 
 | Level | Convention | Examples |
 |-------|-----------|----------|
-| Operation | PascalCase, direction suffix | `BatchnormFwdInference`, `ConvFwd`, `ConvBwd`, `MatmulFwd`, `SdpaFwd`, `PointwiseRelu` |
+| Tier | Lowercase, matches CI stage | `smoke`, `standard`, `comprehensive`, `full` |
+| Operation | PascalCase, direction suffix | `BatchnormFwdInference`, `ConvFwd`, `ConvBwd`, `MatmulFwd` |
 | Layout | Lowercase | `nchw`, `nhwc`, `ncdhw`, `ndhwc` |
 | DataType | Lowercase abbreviation | `fp32`, `fp16`, `bfp16` |
-| TestName | PascalCase, free-form label | `Small`, `Medium`, `Large` |
+| BundleName | PascalCase, free-form label | `Small`, `Medium`, `Large` |
 
-TestName is a **human convenience label** — it is not stored in the graph JSON and cannot be derived from graph content. The graph itself (operation, tensor shapes, data types, parameters) is the true identity of the test case. TestName exists only for human navigation and to group the `.json` + `.bin` file set on disk. When TestName describes tensor size, align with integration test tiers: `Small` for smoke, `Medium` for standard, `Large` for comprehensive/full.
+BundleName is a **human convenience label** — it is not stored in the graph JSON and cannot be derived from graph content. The graph itself (operation, tensor shapes, data types, parameters) is the true identity of the test case. BundleName exists only for human navigation and to group the `.json` + `.bin` file set on disk.
 
-### Example: Current Data
+### Example
 
 ```
 hipdnn_reference_data/
-  BatchnormFwdInference/
-    ncdhw/
-      fp32/
-        Small.json + Small.tensor{0..5}.bin
-    nchw/
-      bfp16/
-        Small.json + Small.tensor{0..5}.bin
-      fp16/
-        Small.json + Small.tensor{0..5}.bin
-      fp32/
-        Small.json + Small.tensor{0..5}.bin
-        Large.json + Large.tensor{0..5}.bin
-        MIOpen.json + MIOpen.tensor{0..5}.bin
+  smoke/
+    BatchnormFwdInference/
+      nchw/
+        fp32/
+          Small/
+            Small.json + Small.tensor{0..5}.bin
+        fp16/
+          Small/
+            Small.json + Small.tensor{0..5}.bin
+  standard/
+    BatchnormFwdInference/
+      nchw/
+        fp32/
+          Large/
+            Large.json + Large.tensor{0..5}.bin
+      ncdhw/
+        fp32/
+          Small/
+            Small.json + Small.tensor{0..5}.bin
+  comprehensive/
+    ...
 ```
 
 ### How Test Discovery Works
@@ -291,22 +306,22 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 ### CI Integration
 
-| CI Stage | Verification Mode | Golden Data Required |
-|----------|-------------------|---------------------|
-| Pre-submit (smoke) | `auto` | Yes (tests without golden data fall back to computed) |
-| Post-submit (full) | `both` | Yes |
-| Nightly | `golden` | Yes (tests without golden data are skipped) |
+| CI Stage | ctest Selection | Verification Mode | Notes |
+|----------|----------------|-------------------|-------|
+| Pre-submit (smoke) | `ctest` (no label filter) | `auto` | Runs `smoke/` golden tests; tests without golden data fall back to computed |
+| Post-submit (full) | `ctest -L Standard` | `both` | Runs `smoke/` + `standard/` golden tests; both suites must pass |
+| Nightly | `ctest -L Comprehensive` | `golden` | All tiers; tests without golden data are skipped |
 
 ### Workflows
 
 **Add a new golden test** (developer):
 1. Write a generation script following the [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
 2. Run the bundle inspection tool to verify the bundle is well-formed
-3. Commit the bundle to the golden data directory (DVC for large tensors). No C++ changes needed — auto-discovery picks it up on the next run
+3. Place the bundle folder under the appropriate tier (`smoke/`, `standard/`, etc.) and commit (DVC for large tensors). No C++ changes needed — auto-discovery picks it up on the next run
 
 **Debug a customer issue** (support):
 1. Receive the customer's bundle (`.json` + `.bin` files) — no source code or NDA required
-2. Drop the bundle into the golden data directory
+2. Drop the bundle folder anywhere under the golden data directory
 3. Run tests — the runner auto-discovers it, executes the engine, compares against golden output
 4. Inspect the diff: which tensors diverge, by how much, at which indices
 
