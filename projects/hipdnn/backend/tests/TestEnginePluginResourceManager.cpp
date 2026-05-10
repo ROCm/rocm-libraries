@@ -877,9 +877,7 @@ TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedFailsF
     const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
-    const std::array<uint8_t, 3> engineConfigBytes{1, 2, 3};
     const std::array<uint8_t, 3> serializedContextBytes{4, 5, 6};
-    const hipdnnPluginConstData_t engineConfig{engineConfigBytes.data(), engineConfigBytes.size()};
     const hipdnnPluginConstData_t serializedContext{serializedContextBytes.data(),
                                                     serializedContextBytes.size()};
 
@@ -889,8 +887,8 @@ TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedFailsF
     EXPECT_CALL(*mockPlugin, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{100}));
     EXPECT_CALL(*mockPlugin,
-                createExecutionContextFromSerialized(
-                    hipdnnEnginePluginHandle_t(0xdeadbeef), &engineConfig, &serializedContext))
+                createExecutionContextFromSerialized(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                                     &serializedContext))
         .WillOnce(::testing::Throw(
             HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                             "Engine plugin does not support execution context serialization")));
@@ -903,7 +901,6 @@ TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedFailsF
             EnginePluginResourceManager::createExecutionContextFromSerialized(
                 std::make_shared<EnginePluginResourceManager>(std::move(resourceManager)),
                 100,
-                &engineConfig,
                 &serializedContext),
             HIPDNN_STATUS_NOT_SUPPORTED);
     }
@@ -916,9 +913,7 @@ TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedPropag
     const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
-    const std::array<uint8_t, 3> engineConfigBytes{1, 2, 3};
     const std::array<uint8_t, 3> serializedContextBytes{4, 5, 6};
-    const hipdnnPluginConstData_t engineConfig{engineConfigBytes.data(), engineConfigBytes.size()};
     const hipdnnPluginConstData_t serializedContext{serializedContextBytes.data(),
                                                     serializedContextBytes.size()};
 
@@ -928,8 +923,8 @@ TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedPropag
     EXPECT_CALL(*mockPlugin, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{100}));
     EXPECT_CALL(*mockPlugin,
-                createExecutionContextFromSerialized(
-                    hipdnnEnginePluginHandle_t(0xdeadbeef), &engineConfig, &serializedContext))
+                createExecutionContextFromSerialized(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                                     &serializedContext))
         .WillOnce(::testing::Throw(HipdnnException(
             HIPDNN_STATUS_PLUGIN_ERROR, "Plugin rejected serialized execution context")));
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
@@ -941,7 +936,6 @@ TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedPropag
             EnginePluginResourceManager::createExecutionContextFromSerialized(
                 std::make_shared<EnginePluginResourceManager>(std::move(resourceManager)),
                 100,
-                &engineConfig,
                 &serializedContext),
             HIPDNN_STATUS_PLUGIN_ERROR);
     }

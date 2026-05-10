@@ -502,11 +502,8 @@ hipdnnEnginePluginExecutionContext_t
 
 hipdnnEnginePluginExecutionContext_t
     EnginePluginResourceManager::createExecutionContextFromSerialized(
-        int64_t engineId,
-        const hipdnnPluginConstData_t* engineConfig,
-        const hipdnnPluginConstData_t* serializedContext) const
+        int64_t engineId, const hipdnnPluginConstData_t* serializedContext) const
 {
-    THROW_IF_NULL(engineConfig, HIPDNN_STATUS_BAD_PARAM, "Engine config cannot be null");
     THROW_IF_NULL(
         serializedContext, HIPDNN_STATUS_BAD_PARAM, "Serialized execution context cannot be null");
 
@@ -520,7 +517,7 @@ hipdnnEnginePluginExecutionContext_t
     auto handle = it->second;
     auto plugin = _handleToPlugin.at(handle);
 
-    return plugin->createExecutionContextFromSerialized(handle, engineConfig, serializedContext);
+    return plugin->createExecutionContextFromSerialized(handle, serializedContext);
 }
 
 void EnginePluginResourceManager::destroyExecutionContext(
@@ -546,11 +543,9 @@ std::shared_ptr<const EngineExecutionContextWrapper>
     EnginePluginResourceManager::createExecutionContextFromSerialized(
         const std::shared_ptr<EnginePluginResourceManager>& rm,
         int64_t engineId,
-        const hipdnnPluginConstData_t* engineConfig,
         const hipdnnPluginConstData_t* serializedContext)
 {
-    return std::make_shared<EngineExecutionContextWrapper>(
-        rm, engineId, engineConfig, serializedContext);
+    return std::make_shared<EngineExecutionContextWrapper>(rm, engineId, serializedContext);
 }
 
 size_t EnginePluginResourceManager::getWorkspaceSize(
@@ -848,13 +843,11 @@ EngineExecutionContextWrapper::EngineExecutionContextWrapper(
 EngineExecutionContextWrapper::EngineExecutionContextWrapper(
     const std::shared_ptr<EnginePluginResourceManager>& rm,
     int64_t engineId,
-    const hipdnnPluginConstData_t* engineConfig,
     const hipdnnPluginConstData_t* serializedContext)
     : _rm(rm)
     , _engineId(engineId)
 {
-    _executionContext
-        = _rm->createExecutionContextFromSerialized(engineId, engineConfig, serializedContext);
+    _executionContext = _rm->createExecutionContextFromSerialized(engineId, serializedContext);
 }
 
 EngineExecutionContextWrapper::~EngineExecutionContextWrapper()

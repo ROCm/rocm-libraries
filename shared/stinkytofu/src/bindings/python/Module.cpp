@@ -117,6 +117,10 @@ void StinkyAsmModule::runOptimizationPipeline() {
     backend.runOptimization();
 }
 
+std::optional<uint64_t> StinkyAsmModule::getMetaDataU64(const std::string& key) const {
+    return getFunction().getMetaData(key);
+}
+
 void StinkyAsmModule::addGroup(const std::string& name) {
     if (pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end()) {
         return;
