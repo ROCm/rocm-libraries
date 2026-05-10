@@ -65,14 +65,14 @@ The graph JSON is a complete computation description — operation type, tensor 
 
 ### Existing Infrastructure
 
-The golden reference infrastructure is already built and working for batchnorm. The table below summarizes each existing component. This RFC **keeps** the bundle format, core loader, Python framework, test runner pattern, folder structure, and `INSTANTIATE_TEST_SUITE_P` discovery mechanism. It **adds** graph-derived test identity, a golden-first fallback chain, a bundle verifier, data integrity checks, per-engine tolerance overrides, and CI integration. It **changes** the data location (moves to the integration suite) and the default verification mode (golden-first instead of computed-first).
+The golden reference infrastructure is already built and working for batchnorm. The table below summarizes each existing component. This RFC **keeps** the bundle format, core loader, and Python framework. It **adds** a fully generic test runner (recursive scan, no per-operation C++ code), graph-derived test identity, a golden-first fallback chain, a bundle verifier, data integrity checks, per-engine tolerance overrides, and CI integration. It **replaces** the per-operation `INSTANTIATE_TEST_SUITE_P` discovery with recursive auto-discovery, and **moves** the data location to the integration suite.
 
 | Component | File(s) | Role |
 |-----------|---------|------|
 | Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | Reads bundles from disk, separates inputs from expected outputs, validates results |
 | CPU runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | Base fixture + `getGoldenReferenceParams(subDir)` — scans a directory for `.json` files, each becomes a gtest parameter |
 | GPU runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern, executes via MIOpen GPU plugin (defined, no tests yet) |
-| Test instantiation | [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp) | One class + `INSTANTIATE_TEST_SUITE_P` per operation/layout/datatype — e.g., `getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32")` |
+| Test instantiation (current) | [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp) | One class + `INSTANTIATE_TEST_SUITE_P` per operation/layout/datatype — replaced by the generic runner in this RFC |
 | Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | Generates bundles: defines graphs, runs PyTorch, writes output files |
 | Golden data | [`hipdnn_reference_data/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm bundles across 4 layout/datatype combinations |
 
@@ -140,24 +140,55 @@ The file size in bytes equals `element_space × sizeof(element_type)`, where `el
 
 ![Validation Pipeline](images/validation_pipeline.png)
 
-The CPU and GPU runners (`TestGoldenReferenceCpu`, `TestGoldenReferenceGpu`) follow the same three-step pattern:
+The runner is a **single generic test class** — not one class per operation. It does not know what operation a bundle contains until it loads the graph JSON at runtime. Adding a test means dropping files in a folder. No C++ changes, no recompile.
 
-1. **Load** — read the bundle from disk, separate golden outputs from inputs
-2. **Execute** — run the engine under test (CPU reference or MIOpen GPU plugin)
-3. **Compare** — check engine output against golden output — PASS or FAIL
+#### How it works
 
-Test discovery follows the same `INSTANTIATE_TEST_SUITE_P` + parameterized fixture pattern used by all other integration tests. Each operation/layout/datatype combination has a test class that inherits from `TestGoldenReferenceCpu` (or `TestGoldenReferenceGpu`) and an `INSTANTIATE_TEST_SUITE_P` call that points `getGoldenReferenceParams()` at the corresponding subdirectory. Within that directory, every `.json` file becomes a test case automatically — adding a new bundle to an existing directory requires no C++ changes.
+1. **Discover** — recursively scan the golden data directory for `.json` files. Each file becomes a test case.
+2. **Load** — read the bundle from disk, separate golden outputs from inputs
+3. **Execute** — run the engine under test (CPU reference or MIOpen GPU plugin)
+4. **Compare** — check engine output against golden output — PASS or FAIL
+
+Tolerance is looked up at runtime from the graph content: the runner reads the operation type and data type from the JSON, then follows the [tolerance priority chain](#two-questions-two-levels) (TOML override → per-operation default). No per-operation test class needed.
+
+#### Test discovery
+
+The runner uses one `INSTANTIATE_TEST_SUITE_P` per tier, not per operation. These are fixed — they never change as new operations or bundles are added:
 
 ```cpp
-// Existing pattern — one class + instantiation per operation/layout/datatype
-INSTANTIATE_TEST_SUITE_P(,
-    TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32,
-    getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32"));
+// Four fixed instantiations — one per tier. Never changes.
+INSTANTIATE_TEST_SUITE_P(, TestGoldenReference,
+    discoverGoldenBundles("quick"));          // smoke tier
+
+INSTANTIATE_TEST_SUITE_P(Standard, TestGoldenReference,
+    discoverGoldenBundles("standard"));
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive, TestGoldenReference,
+    discoverGoldenBundles("comprehensive"));
+
+INSTANTIATE_TEST_SUITE_P(Full, TestGoldenReference,
+    discoverGoldenBundles("full"));
 ```
 
-Tiers are assigned via the GTest prefix on `INSTANTIATE_TEST_SUITE_P`, exactly like all other integration tests — `Smoke` (or no prefix) for smoke, `Standard` for standard, etc. Golden tests are not special — they must respect the same test-filtering mechanism used by all other tests.
+`discoverGoldenBundles(tierDir)` recursively scans the tier directory for `.json` files and returns each as a gtest parameter. The test name is derived from the graph content (operation, layout, data type) and the bundle name — not from the folder path.
+
+#### What changes from today
+
+| Aspect | Current (batchnorm only) | This RFC |
+|--------|--------------------------|----------|
+| Test class | One per operation/layout/datatype | One generic class for all |
+| Discovery | `getGoldenReferenceParams(subDir)` — shallow scan, one call per directory | `discoverGoldenBundles(tierDir)` — recursive scan, one call per tier |
+| Adding a test | Drop files (existing op) or write C++ class (new op) | Drop files. Always. |
+| Tier assignment | GTest prefix per `INSTANTIATE_TEST_SUITE_P` | Tier folder at top level |
+| Tolerance | Hard-coded per test class | Looked up from graph content at runtime |
 
 A **bundle inspection tool** will validate that bundles are well-formed and runnable. It reads bundles, reports tensor metadata and statistics, and can verify that the graph + tensors will load correctly before they reach CI.
+
+**Acceptance criteria**:
+- [ ] Single generic test class handles all operation types
+- [ ] Recursive scan discovers all bundles — no per-operation C++ code
+- [ ] Adding a new test requires only dropping files in a tier folder
+- [ ] Test name derived from graph content, not folder path
 
 ---
 
@@ -287,21 +318,31 @@ A standalone CLI verifier will run these checks across a directory tree before b
 
 ## Folder Convention
 
-The existing folder structure organizes bundles by `{Operation}/{Layout}/{DataType}/`:
+The top-level directory is organized by **tier**. Below that, the structure is flexible — the runner recursively scans for `.json` files regardless of subfolder depth. The recommended (not enforced) convention below the tier is `{Operation}/{Layout}/{DataType}/`, but any structure works as long as each leaf directory has valid bundles.
 
 ```
 hipdnn_reference_data/
-  {Operation}/
-    {Layout}/
-      {DataType}/
-        {Name}.json + {Name}.tensor{uid}.bin
+  {Tier}/                           # required: quick, standard, comprehensive, full
+    ... any folder structure ...
+      {Name}.json + {Name}.tensor{uid}.bin
 ```
 
 The root directory is `<exe_dir>/../lib/hipdnn_reference_data` (set by CMake `file(COPY ...)` at configure time and `install(DIRECTORY ...)` at install time). At runtime, `--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR` can override it.
 
-Each `INSTANTIATE_TEST_SUITE_P` call points `getGoldenReferenceParams()` at a specific subdirectory. The function does a **shallow scan** of that directory for `.json` files — each file becomes a gtest parameter. Multiple bundles coexist in the same directory, distinguished by base name (`Small`, `Large`, `MIOpen`).
+### Tier folders
 
-### Naming Guidelines
+The top-level folder determines the tier. The runner scans each tier directory separately (see [Generic Test Runner](#test-discovery)), mapping to the standard [tier cascade](../../../dnn-providers/integration-tests/README.md#test-tiers):
+
+| Folder | GTest prefix | `ctest -L` |
+|--------|-------------|------------|
+| `quick/` | (none) | `quick` |
+| `standard/` | `Standard` | `standard` |
+| `comprehensive/` | `Comprehensive` | `comprehensive` |
+| `full/` | `Full` | `full` |
+
+### Recommended sub-structure
+
+Below each tier, the recommended convention is `{Operation}/{Layout}/{DataType}/`:
 
 | Level | Convention | Examples |
 |-------|-----------|----------|
@@ -310,57 +351,43 @@ Each `INSTANTIATE_TEST_SUITE_P` call points `getGoldenReferenceParams()` at a sp
 | DataType | Lowercase abbreviation | `fp32`, `fp16`, `bfp16` |
 | BundleName | PascalCase, free-form label | `Small`, `Medium`, `Large`, `MIOpen` |
 
-BundleName is a **human convenience label** — it is not stored in the graph JSON and cannot be derived from graph content. The graph itself (operation, tensor shapes, data types, parameters) is the true identity of the test case. BundleName exists only for human navigation and to group the `.json` + `.bin` file set on disk.
+This convention is **guidance for humans**, not enforced by the runner. The runner discovers bundles by recursive scan and derives test identity from graph content, not folder paths. Folders can be reorganized without breaking tests.
 
-### Example (current layout)
+### Example
 
 ```
 hipdnn_reference_data/
-  BatchnormFwdInference/
-    nchw/
-      fp32/
-        Small.json + Small.tensor{0..5}.bin
-        Large.json + Large.tensor{0..5}.bin
-        MIOpen.json + MIOpen.tensor{0..5}.bin
-      fp16/
-        Small.json + Small.tensor{0..5}.bin
-      bfp16/
-        Small.json + Small.tensor{0..5}.bin
-    ncdhw/
-      fp32/
-        Small.json + Small.tensor{0..5}.bin
+  quick/
+    BatchnormFwdInference/
+      nchw/
+        fp32/
+          Small.json + Small.tensor{0..5}.bin
+          MIOpen.json + MIOpen.tensor{0..5}.bin
+        fp16/
+          Small.json + Small.tensor{0..5}.bin
+        bfp16/
+          Small.json + Small.tensor{0..5}.bin
+      ncdhw/
+        fp32/
+          Small.json + Small.tensor{0..5}.bin
+  standard/
+    BatchnormFwdInference/
+      nchw/
+        fp32/
+          Large.json + Large.tensor{0..5}.bin
+    ConvFwd/
+      nhwc/
+        fp16/
+          ResNet50.json + ResNet50.tensor{0..8}.bin
 ```
 
 ### How Test Discovery Works
 
-`getGoldenReferenceParams(subDir)` scans the given subdirectory for `.json` files and returns them as gtest parameters. Each `.json` file becomes a separate test case. Adding a new bundle to an existing directory (e.g., dropping `CustomerIssue42.json` + `.bin` files into `BatchnormFwdInference/nchw/fp32/`) requires no C++ changes — the next run picks it up automatically.
+`discoverGoldenBundles(tierDir)` recursively scans the tier directory for `.json` files and returns each as a gtest parameter. Test names are derived from graph content (operation type, layout, data type) plus the bundle base name — not from folder paths.
 
-Adding a **new operation** requires a new C++ test class and `INSTANTIATE_TEST_SUITE_P` call, following the existing pattern in [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp).
+**Adding a test** at any level — new bundle, new data type, new layout, new operation — means dropping `.json` + `.bin` files into the appropriate tier folder. No C++ changes, no recompile. The next run picks them up automatically.
 
-**Tier assignment** follows the same mechanism as all other integration tests: the GTest prefix on `INSTANTIATE_TEST_SUITE_P`. See the [Test Tiers](../../../dnn-providers/integration-tests/README.md#test-tiers) section in the integration tests README.
-
-Since `getGoldenReferenceParams()` scans an entire directory, **all bundles in a directory share the same tier**. To assign different tiers to different bundles, separate them into subdirectories:
-
-```
-BatchnormFwdInference/nchw/fp32/          # small bundles → smoke
-BatchnormFwdInference/nchw/fp32/large/    # large bundles → standard
-```
-
-```cpp
-// Smoke tier — no prefix, scans the base directory
-INSTANTIATE_TEST_SUITE_P(,
-    TestCpuBnFwdInfNchwFp32,
-    getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32"));
-
-// Standard tier — Standard prefix, scans a subdirectory with larger bundles
-INSTANTIATE_TEST_SUITE_P(Standard,
-    TestCpuBnFwdInfNchwFp32Large,
-    getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32/large"));
-```
-
-Today all existing bundles (`Small`, `Large`, `MIOpen`) sit in the same directory with no prefix, so they all run in smoke.
-
-To select tests, use `--gtest_filter`:
+To select tests, use `--gtest_filter` on graph-derived names:
 
 ```
 --gtest_filter=*BatchnormFwdInference*              # all batchnorm inference golden tests
@@ -398,7 +425,7 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 ### CI Integration
 
-Golden tests follow the same [tier cascade](../../../dnn-providers/integration-tests/README.md#how-tiers-cascade) as all other integration tests. Tiers are assigned via GTest prefix on `INSTANTIATE_TEST_SUITE_P`, not by folder structure.
+Golden tests follow the same [tier cascade](../../../dnn-providers/integration-tests/README.md#how-tiers-cascade) as all other integration tests. Tiers are determined by the top-level folder (see [Folder Convention](#folder-convention)), mapped to GTest prefixes by the four fixed `INSTANTIATE_TEST_SUITE_P` calls.
 
 | CI Stage | ctest Command | Verification Mode | Notes |
 |----------|--------------|-------------------|-------|
@@ -409,19 +436,14 @@ Golden tests follow the same [tier cascade](../../../dnn-providers/integration-t
 
 ### Workflows
 
-**Add a new bundle to an existing operation** (developer):
+**Add a test — any operation, any data type** (developer):
 1. Write a generation script following the [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
 2. Run the bundle inspection tool to verify the bundle is well-formed
-3. Place the `.json` + `.bin` files in the matching `{Operation}/{Layout}/{DataType}/` directory and commit (DVC for large tensors). No C++ changes needed — the existing `INSTANTIATE_TEST_SUITE_P` picks up new bundles automatically
-
-**Add a new operation** (developer):
-1. Generate bundles as above
-2. Add a C++ test class inheriting from `TestGoldenReferenceCpu` (or `TestGoldenReferenceGpu`)
-3. Add `INSTANTIATE_TEST_SUITE_P` calls pointing at the new directories, with appropriate tier prefixes
+3. Drop the `.json` + `.bin` files into the appropriate tier folder (e.g., `quick/ConvFwd/nhwc/fp16/`) and commit (DVC for large tensors). No C++ changes, no recompile — the generic runner discovers them automatically
 
 **Debug a customer issue** (support):
 1. Receive the customer's bundle (`.json` + `.bin` files) — no source code or NDA required
-2. Drop the files into the matching operation directory (or any directory already scanned by an `INSTANTIATE_TEST_SUITE_P`)
+2. Drop the files into any tier folder (e.g., `quick/customer_issues/`)
 3. Run tests — the runner picks it up, executes the engine, compares against golden output
 4. Inspect the diff: which tensors diverge, by how much, at which indices
 
@@ -466,4 +488,4 @@ Comparison testing can confirm that two implementations agree, not that either i
 2. **Engine-as-bundle-producer**: Any engine (MIOpen, CPU reference, future providers) can take a graph-only bundle as input, execute the graph, and write the results back as a full bundle. The codebase can already export graphs to JSON via `Graph.save()`; the remaining work is a produce-bundle mode in the test harness or a standalone CLI. Once every engine can produce bundles, validation becomes: feed the same graph-only bundle to two engines, compare the two output bundles. No reference source concept needed at comparison time — each engine is just a producer.
 3. **Bundle-to-bundle comparison**: A standalone tool that loads two bundles and diffs their output tensors directly — no engine execution at comparison time. Matching is by **graph content** (operation, tensor shapes, data types, parameters), not by filename — bundle A called `Small.json` and bundle B called `Run42.json` are comparable if their graphs describe the same computation. The tool supports two modes: **directional** (`--expected A.json --actual B.json`) where one bundle is truth and tolerances apply to the deviation from it, and **symmetric** (`--bundle1 A.json --bundle2 B.json`) where neither is truth and the tool just reports the delta. Combined with #2, this completes the loop: generate a bundle from engine A, generate a bundle from engine B (or PyTorch, or a customer's framework), compare. Use cases include cross-engine validation, PyTorch version upgrades, and external parties submitting bundles without access to any engine or C++ toolchain.
 4. **Reproducible generation**: Fixed seeds for random input generation so that regenerating a bundle (after a schema change, PyTorch upgrade, or generator fix) produces the same inputs, isolating output differences to the reference source change.
-5. **Auto-tier classification**: The generator could suggest the appropriate GTest prefix (`Smoke`, `Standard`, `Comprehensive`, `Full`) based on tensor element counts — matching the existing `getSmall`/`getMedium`/`getLargeEdge`/`getLargeStress` convention. Needs formalized size thresholds and an override for cases where tensor size alone doesn't predict test duration.
+5. **Auto-tier classification**: The generator could suggest the appropriate tier folder (`quick`, `standard`, `comprehensive`, `full`) based on tensor element counts — matching the existing `getSmall`/`getMedium`/`getLargeEdge`/`getLargeStress` convention. Needs formalized size thresholds and an override for cases where tensor size alone doesn't predict test duration.
