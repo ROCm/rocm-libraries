@@ -222,17 +222,19 @@ The `--verification-mode` flag overrides this default. In golden mode, tests wit
 
 Tolerances are **always defined in code and configuration**, never stored in the data bundle. The tolerance selection priority is:
 
-1. **TOML per-engine overrides** (highest priority) — each engine's TOML config (e.g., [`MIOPEN_ENGINE.toml`](../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. The integration harness already queries these via `TestConfig::findToleranceOverride(testName)`. Golden tests must use the same mechanism so that per-engine tolerance exceptions apply uniformly.
+1. **TOML per-engine overrides** (highest priority) — each engine's TOML config (e.g., [`MIOPEN_ENGINE.toml`](../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. The integration harness already queries these via `TestConfig::findToleranceOverride(testName)`. Golden tests must use the same mechanism so that per-engine tolerance exceptions apply uniformly. TOML overrides remain the highest priority at every stage — even after dynamic tolerances are adopted — because a specific engine may legitimately exceed the mathematical bound for certain operations (e.g., a fused kernel trading precision for throughput).
 
-2. **Fixed per-operation tolerances** (default) — [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) defines compile-time tolerances per operation and data type (e.g., batchnorm inference fp32 = `2e-4`, conv fwd fp32 = `1e-5`). The integration harness selects these based on the root operation in the graph. Golden tests will initially use these same fixed tolerances.
+2. **Default tolerance** (fallback when no TOML override matches):
+   - **Initially: fixed per-operation tolerances** — [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) defines compile-time tolerances per operation and data type (e.g., batchnorm inference fp32 = `2e-4`, conv fwd fp32 = `1e-5`). The integration harness selects these based on the root operation in the graph. Golden tests will initially use these same fixed values.
+   - **Target: dynamic tolerances** — [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) computes tolerances from tensor dimensions using Higham error bounds. Functions exist for conv, matmul, batchnorm, layernorm, RMS norm, and pointwise but are not yet wired into the golden test runner. Dynamic tolerances will replace fixed values as the default, giving tighter bounds for small tensors and appropriately looser bounds for large ones.
 
-3. **Dynamic tolerances** (target) — [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) computes tolerances from tensor dimensions using Higham error bounds. These exist for conv, matmul, batchnorm, layernorm, RMS norm, and pointwise but are not yet wired into the golden test runner. The goal is to replace fixed tolerances with dynamic ones so a single generic test class handles all operations.
+The end-state priority chain: **TOML override → dynamic tolerance → fixed tolerance (legacy fallback)**. TOML overrides serve a fundamentally different purpose from dynamic tolerances: dynamic tolerances set the *mathematically expected* error bound for an operation; TOML overrides grant *engine-specific exceptions* when a particular engine exceeds that bound.
 
-**Current gap**: The golden ref framework (`TestGoldenReferenceCpu`) takes tolerances as hard-coded function parameters — it does not go through the TOML override system or the operation-based tolerance selection in the integration harness. Golden tests must be connected to the same tolerance flow: check TOML override first, fall back to fixed (and eventually dynamic) tolerances.
+**Current gap**: The golden ref framework (`TestGoldenReferenceCpu`) takes tolerances as hard-coded function parameters — it does not go through the TOML override system or the operation-based tolerance selection in the integration harness. Golden tests must be connected to the same tolerance flow.
 
 **Acceptance criteria**:
 - [ ] Golden data bundles contain no tolerance fields
-- [ ] Golden tests use the same tolerance selection as all other tests: TOML override → fixed per-operation → (eventually) dynamic
+- [ ] Golden tests use the same tolerance selection as all other tests: TOML override → default tolerance (fixed initially, dynamic later)
 - [ ] Per-engine TOML tolerance overrides apply to golden tests — no separate override mechanism
 
 ---
