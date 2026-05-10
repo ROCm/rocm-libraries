@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -92,11 +92,11 @@ const char* hipDataType_to_string(hipDataType type)
         return "R_8F_E5M2";
     case HIP_R_8I:
         return "R_8I";
-    case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
+    case static_cast<hipDataType>(HIP_R_6F_E2M3):
         return "R_6F_E2M3";
-    case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):
+    case static_cast<hipDataType>(HIP_R_6F_E3M2):
         return "R_6F_E3M2";
-    case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
+    case static_cast<hipDataType>(HIP_R_4F_E2M1):
         return "R_4F_E2M1";
     default:
         return "Invalid";
@@ -135,11 +135,11 @@ const char* hipDataType_to_bench_string(hipDataType type)
         return "f8_r";
     case HIP_R_8F_E5M2:
         return "bf8_r";
-    case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
+    case static_cast<hipDataType>(HIP_R_6F_E2M3):
         return "f6_r";
-    case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):
+    case static_cast<hipDataType>(HIP_R_6F_E3M2):
         return "bf6_r";
-    case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
+    case static_cast<hipDataType>(HIP_R_4F_E2M1):
         return "f4_r";
     default:
         return "invalid";
@@ -211,6 +211,8 @@ const char* rocblaslt_matrix_layout_attributes_to_string(rocblaslt_matrix_layout
         return "ROCBLASLT_MATRIX_LAYOUT_COLS";
     case ROCBLASLT_MATRIX_LAYOUT_LD:
         return "ROCBLASLT_MATRIX_LAYOUT_LD";
+    case ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE:
+        return "ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE";        
     case ROCBLASLT_MATRIX_LAYOUT_MAX:
         return "ROCBLASLT_MATRIX_LAYOUT_MAX";
     default:
@@ -283,6 +285,35 @@ const char* hipblasOperation_to_string(hipblasOperation_t op)
         return "OP_T";
     case HIPBLAS_OP_C:
         return "OP_C";
+    default:
+        return "Invalid";
+    }
+}
+
+const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::ScalingFormat type)
+{
+    switch(type)
+    {
+    case RocblasltContractionProblem::ScalingFormat::None:
+        return "None";
+    case RocblasltContractionProblem::ScalingFormat::Scalar:
+        return "Scalar";
+    case RocblasltContractionProblem::ScalingFormat::Vector:
+        return "Vector";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+        return "Block_32_UE8M0";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return "Block_32_UE8M0_32_8_EXT";
+    case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
+        return "Block_16_UE8M0";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
+        return "Block_32_UE4M3";
+    case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
+        return "Block_16_UE4M3";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
+        return "Block_32_UE5M3";
+    case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
+        return "Block_16_UE5M3";
     default:
         return "Invalid";
     }
@@ -374,7 +405,7 @@ std::string rocblaslt_matrix_layout_to_string(rocblaslt_matrix_layout mat)
 {
     std::string             format = mat->batch_count <= 1
                                          ? "[type=%s rows=%d cols=%d ld=%d]\0"
-                                         : "[type=%s rows=%d cols=%d ld=%d batch_count=%d batch_stride=%d]\0";
+                                         : "[type=%s rows=%d cols=%d ld=%d batch_count=%d batch_stride=%d batch_mode=%d]\0";
     std::unique_ptr<char[]> buf(new char[255]);
     if(mat->batch_count <= 1)
         std::sprintf(
@@ -387,7 +418,8 @@ std::string rocblaslt_matrix_layout_to_string(rocblaslt_matrix_layout mat)
                      mat->n,
                      mat->ld,
                      mat->batch_count,
-                     mat->batch_stride);
+                     mat->batch_stride,
+                     mat->batch_mode);
     return std::string(buf.get());
 }
 std::string rocblaslt_matmul_desc_to_string(rocblaslt_matmul_desc matmul_desc)

@@ -130,6 +130,8 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/lapack/testing_gels.cpp
     common/lapack/testing_gebd2_gebrd.cpp
     common/lapack/testing_sytf2_sytrf.cpp
+    common/lapack/testing_sytrs.cpp
+    common/lapack/testing_sytrs2.cpp
     common/lapack/testing_sytxx_hetxx.cpp
     common/lapack/testing_sygsx_hegsx.cpp
     common/lapack/testing_syev_heev.cpp

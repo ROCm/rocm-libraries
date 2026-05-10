@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -202,6 +202,27 @@ inline void validate_or_throw(fft_input_generator input_gen, const std::string& 
     default:
         throw std::invalid_argument("invalid input generator for " + func_name);
     }
+}
+
+inline bool is_host_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_random_generator_host
+           || gen == fft_input_generator::fft_input_generator_host;
+}
+inline bool is_device_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_random_generator_device
+           || gen == fft_input_generator::fft_input_generator_device;
+}
+inline bool is_random_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_random_generator_host
+           || gen == fft_input_generator::fft_input_random_generator_device;
+}
+inline bool is_deterministic_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_generator_host
+           || gen == fft_input_generator::fft_input_generator_device;
 }
 
 template <>

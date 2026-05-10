@@ -26,7 +26,10 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
+
+#include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
 class Function;
@@ -38,6 +41,27 @@ class Function;
 // The ADDRESS of Key is the unique ID.
 // -----------------------------------------------------------------------
 struct alignas(8) AnalysisKey {};
+
+/// Declare the AnalysisKey boilerplate for an analysis pass.
+/// Must be used instead of manually declaring `static inline AnalysisKey Key`
+/// to ensure the key has correct visibility across shared library boundaries.
+///
+/// Usage:
+/// @code
+///   struct MyAnalysis {
+///       STINKYTOFU_ANALYSIS_KEY("MyAnalysis")
+///       using Result = ...;
+///       static Result run(Function& F, AnalysisManager& AM);
+///   };
+/// @endcode
+#define STINKYTOFU_ANALYSIS_KEY(NAME)                \
+    STINKYTOFU_UNIQUE static inline AnalysisKey Key; \
+    static AnalysisKey* ID() {                       \
+        return &Key;                                 \
+    }                                                \
+    static const char* name() {                      \
+        return NAME;                                 \
+    }
 
 // -----------------------------------------------------------------------
 // PreservedAnalyses — returned by transform passes to declare what
@@ -144,7 +168,7 @@ struct AnalysisResultModel : AnalysisResultConcept {
 //       static Result run(Function& F, AnalysisManager& AM);
 //   };
 // -----------------------------------------------------------------------
-class AnalysisManager {
+class STINKYTOFU_EXPORT AnalysisManager {
    public:
     AnalysisManager() = default;
     ~AnalysisManager() = default;

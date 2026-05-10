@@ -92,6 +92,8 @@ inline const char* hipdnnGetDataTypeString(hipdnnDataType_t type)
         return "HIPDNN_DATA_FP6_E3M2_EXT";
     case HIPDNN_DATA_INT64:
         return "HIPDNN_DATA_INT64";
+    case HIPDNN_DATA_BOOLEAN:
+        return "HIPDNN_DATA_BOOLEAN";
     default:
         return "HIPDNN_DATA_UNKNOWN";
     }
@@ -282,6 +284,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_EXECUTION_PLAN_KERNEL_CACHE";
     case HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP:
         return "HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP";
+    case HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT:
+        return "HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT";
 
     case HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID:
         return "HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID";

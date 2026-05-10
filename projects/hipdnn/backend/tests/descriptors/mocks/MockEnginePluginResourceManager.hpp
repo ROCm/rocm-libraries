@@ -43,6 +43,16 @@ public:
                  const hipdnnPluginConstData_t* engineConfig,
                  const hipdnn_backend::GraphDescriptor* graphDesc),
                 (const, override));
+    MOCK_METHOD(hipdnnEnginePluginExecutionContext_t,
+                createExecutionContextFromSerialized,
+                (int64_t engineId, const hipdnnPluginConstData_t* serializedContext),
+                (const, override));
+    MOCK_METHOD(void,
+                serializeExecutionContext,
+                (int64_t engineId,
+                 hipdnnEnginePluginExecutionContext_t executionContext,
+                 std::vector<uint8_t>& serializedContext),
+                (const, override));
     MOCK_METHOD(void,
                 destroyExecutionContext,
                 (int64_t engineId, hipdnnEnginePluginExecutionContext_t executionContext),

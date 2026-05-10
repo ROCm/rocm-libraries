@@ -72,6 +72,10 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
+    int64_t getOuterSize(unsigned normalizeDim) const;
+    int64_t getInnerSize(unsigned normalizeDim) const;
+    unsigned getNormalizeDim() const;
+
     RMSnormFwdParams _params;
 
     // Populated by compile()

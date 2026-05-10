@@ -49,6 +49,22 @@ public:
                  const hipdnnPluginConstData_t* engineConfig,
                  const hipdnnPluginConstData_t* opGraph),
                 (const));
+    MOCK_METHOD(bool, supportsExecutionContextSerialization, (), (const));
+    MOCK_METHOD(void,
+                serializeExecutionContext,
+                (hipdnnEnginePluginHandle_t handle,
+                 hipdnnEnginePluginExecutionContext_t executionContext,
+                 hipdnnPluginConstData_t* serializedContext),
+                (const));
+    MOCK_METHOD(void,
+                destroySerializedExecutionContext,
+                (hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* serializedContext),
+                (const));
+    MOCK_METHOD(hipdnnEnginePluginExecutionContext_t,
+                createExecutionContextFromSerialized,
+                (hipdnnEnginePluginHandle_t handle,
+                 const hipdnnPluginConstData_t* serializedContext),
+                (const));
     MOCK_METHOD(void,
                 destroyExecutionContext,
                 (hipdnnEnginePluginHandle_t handle,

@@ -3,8 +3,14 @@
 
 find_package(Threads REQUIRED)
 
-find_package(hipdnn_test_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+# hipdnn SDK dependencies - use targets directly if available (superbuild),
+# otherwise find installed packages (true standalone)
+if(NOT TARGET hipdnn_test_sdk)
+    find_package(hipdnn_test_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 add_executable(
     hip_kernel_provider_integration_tests
@@ -14,6 +20,9 @@ add_executable(
     Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
     Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
     Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
+    Batchnorm/IntegrationGpuBatchnormFwdTrainingActiv.cpp
+    Batchnorm/IntegrationGpuBatchnormBackward.cpp
+    Batchnorm/IntegrationGpuBatchnormBackwardActivation.cpp
     RMSnorm/IntegrationGpuRMSnormForward.cpp
     Layernorm/IntegrationGpuLayernormForward.cpp
 )
@@ -47,6 +56,7 @@ if(ENABLE_ASM_SDPA_ENGINE)
     else()
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
+            asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
         )
         target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE
             AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../engines/asm_sdpa_engine/asm/asm_kernels"

@@ -104,27 +104,24 @@ const static std::vector<std::vector<size_t>> ooffset_range = {{0, 0}, {1, 1}};
 auto forward_transform_types
     = {fft_transform_type_complex_forward, fft_transform_type_real_forward};
 
-INSTANTIATE_TEST_SUITE_P(
-#ifdef _WIN32
-    DISABLED_callback_no_offset,
-#else
-    callback,
-#endif
-    accuracy_test,
-    ::testing::ValuesIn(param_generator_base(test_prob,
-                                             forward_transform_types,
-                                             callback_sizes,
-                                             precision_range_sp_dp,
-                                             batch_range,
-                                             generate_types,
-                                             stride_range,
-                                             stride_range,
-                                             ioffset_range_zero,
-                                             ooffset_range_zero,
-                                             place_range,
-                                             false,
-                                             true)),
-    accuracy_test::TestName);
+// legacy callbacks need -fgpu-rdc, but that causes build
+// nondeterminism in kpack
+INSTANTIATE_TEST_SUITE_P(DISABLED_callback_no_offset,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_base(test_prob,
+                                                                  forward_transform_types,
+                                                                  callback_sizes,
+                                                                  precision_range_sp_dp,
+                                                                  batch_range,
+                                                                  generate_types,
+                                                                  stride_range,
+                                                                  stride_range,
+                                                                  ioffset_range_zero,
+                                                                  ooffset_range_zero,
+                                                                  place_range,
+                                                                  false,
+                                                                  true)),
+                         accuracy_test::TestName);
 
 INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
                          accuracy_test,

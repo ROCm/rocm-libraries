@@ -108,6 +108,9 @@ public:
                                     const GraphDescriptor* graphDesc) const;
     virtual size_t getWorkspaceSize(int64_t engineId,
                                     hipdnnEnginePluginExecutionContext_t executionContext) const;
+    virtual void serializeExecutionContext(int64_t engineId,
+                                           hipdnnEnginePluginExecutionContext_t executionContext,
+                                           std::vector<uint8_t>& serializedContext) const;
 
     virtual void executeOpGraph(hipdnnBackendDescriptor_t executionPlan,
                                 hipdnnBackendDescriptor_t variantPack) const;
@@ -121,6 +124,10 @@ public:
                                int64_t engineId,
                                const hipdnnPluginConstData_t* engineConfig,
                                const GraphDescriptor* graphDesc);
+    static std::shared_ptr<const EngineExecutionContextWrapper>
+        createExecutionContextFromSerialized(const std::shared_ptr<EnginePluginResourceManager>& rm,
+                                             int64_t engineId,
+                                             const hipdnnPluginConstData_t* serializedContext);
 
     virtual size_t getEngineCount() const;
     virtual std::vector<EngineInfo> getEngineInfos() const;
@@ -146,6 +153,8 @@ private:
         createExecutionContext(int64_t engineId,
                                const hipdnnPluginConstData_t* engineConfig,
                                const GraphDescriptor* graphDesc) const;
+    [[nodiscard]] virtual hipdnnEnginePluginExecutionContext_t createExecutionContextFromSerialized(
+        int64_t engineId, const hipdnnPluginConstData_t* serializedContext) const;
     virtual void
         destroyExecutionContext(int64_t engineId,
                                 hipdnnEnginePluginExecutionContext_t executionContext) const;
@@ -196,6 +205,9 @@ public:
                                   int64_t engineId,
                                   const hipdnnPluginConstData_t* engineConfig,
                                   const GraphDescriptor* graphDesc);
+    EngineExecutionContextWrapper(const std::shared_ptr<EnginePluginResourceManager>& rm,
+                                  int64_t engineId,
+                                  const hipdnnPluginConstData_t* serializedContext);
     ~EngineExecutionContextWrapper();
 
     // Prevent copying

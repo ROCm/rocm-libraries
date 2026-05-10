@@ -482,6 +482,39 @@ def getDockerImage(Map conf=[:])
 
     // Append Dockerfile path after image name is generated to avoid affecting the hash.
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
+
+    // Carry the promoted TheRock hash forward into the CI image metadata.
+    try {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
+            def promotedHash = sh(
+                script: """
+                    docker inspect --format '{{ index .Config.Labels "therock.git.hash" }}' \
+                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
+                """.stripIndent(),
+                returnStdout: true
+            ).trim()
+            if (promotedHash) {
+                echo "Embedding TheRock hash into CI image metadata: ${promotedHash}"
+                dockerArgs = dockerArgs + "--label therock.git.hash=${promotedHash} "
+                env.THEROCK_PROMOTED_HASH = promotedHash
+            }
+        }
+    } catch (Exception e) {
+        echo "Could not read TheRock label from :therock image, skipping metadata embedding: ${e.message}"
+    }
+
+    // Embed the CK commit hash built into this image.
+    def ckHash = sh(
+        script: "git -C ${env.WORKSPACE}/${env.CK_DIR} rev-parse HEAD",
+        returnStdout: true
+    ).trim()
+    if (ckHash) {
+        echo "Embedding CK hash into CI image metadata: ${ckHash}"
+        dockerArgs = dockerArgs + "--label ck.git.hash=${ckHash} "
+        env.CK_GIT_HASH = ckHash
+    }
+
     echo "Docker Args: ${dockerArgs}"
 
     def dockerImage
@@ -491,6 +524,15 @@ def getDockerImage(Map conf=[:])
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
             dockerImage.pull()
         }
+        def embeddedTheRockHash = sh(
+            script: "docker inspect --format '{{ index .Config.Labels \"therock.git.hash\" }}' ${image} 2>/dev/null || true",
+            returnStdout: true
+        ).trim()
+        def embeddedCkHash = sh(
+            script: "docker inspect --format '{{ index .Config.Labels \"ck.git.hash\" }}' ${image} 2>/dev/null || true",
+            returnStdout: true
+        ).trim()
+        echo "CI image TheRock hash: ${embeddedTheRockHash ?: 'not set'} | CK hash: ${embeddedCkHash ?: 'not set'}"
     }
     catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
         echo "The job was cancelled or aborted"
@@ -564,23 +606,47 @@ def getDockerImage(Map conf=[:])
     return [dockerImage, image]
 }
 
-// New wrapper function to add gitStatusWrapper around getDockerImage
-def getDockerImageWithStatus(Map conf=[:]) {
-    def stageName = env.STAGE_NAME ?: "Docker Image"  
-    def credentialsID = env.monorepo_status_wrapper_creds
-    
-    gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${stageName}", account: 'ROCm', repo: 'rocm-libraries') {
+def setGithubStatus(String context, String state, String description) {
+    def sha = env.GIT_COMMIT
+    def targetUrl = env.RUN_DISPLAY_URL ?: env.BUILD_URL
+    def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
+    withCredentials([usernamePassword(credentialsId: 'github-app-miopen', usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
+        def code = '0'
         try {
-            return getDockerImage(conf) 
+            retry(3) {
+                code = sh(returnStdout: true, script: """
+                    curl -s -w "%{http_code}" -o /dev/null -X POST '${statusUrl}' \\
+                        -H "Authorization: token \$GITHUB_TOKEN" \\
+                        -H 'Content-Type: application/json' \\
+                        -d '{"state":"${state}","context":"${context}","description":"${description}","target_url":"${targetUrl}"}'
+                """).trim()
+                if (!code.startsWith('2')) {
+                    error("GitHub status POST returned ${code}")
+                }
+            }
+        } catch (Exception e) {
+            echo "WARNING: GitHub status POST failed after retries (context=${context}, state=${state}, code=${code})"
         }
-        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
-                echo "The job was cancelled or aborted"
-                throw e
-        }
-        catch (Exception ex) {
-            echo "Error in getDockerImageWithStatus: ${ex.message}"
-            throw ex
-        }
+    }
+}
+
+def getDockerImageWithStatus(Map conf=[:]) {
+    def stageName = env.STAGE_NAME ?: "Docker Image"
+    setGithubStatus(stageName, 'pending', 'In progress')
+    try {
+        def result = getDockerImage(conf)
+        setGithubStatus(stageName, 'success', 'Completed successfully')
+        return result
+    }
+    catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        echo "The job was cancelled or aborted"
+        setGithubStatus(stageName, 'error', 'Job cancelled or aborted')
+        throw e
+    }
+    catch (Exception ex) {
+        echo "Error in getDockerImageWithStatus: ${ex.message}"
+        setGithubStatus(stageName, 'failure', 'Stage failed')
+        throw ex
     }
 }
 
@@ -616,9 +682,8 @@ def buildHipClangJob(Map conf=[:]){
         def build_timeout = conf.get("build_timeout", 420)
 
         def retimage
-        def credentialsID = env.monorepo_status_wrapper_creds
-
-        gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${variant}", account: 'ROCm', repo: 'rocm-libraries') {
+        setGithubStatus(variant, 'pending', 'In progress')
+        try {
             try {
                 (retimage, image) = getDockerImage(conf)
                 if (needs_gpu) {
@@ -637,6 +702,7 @@ def buildHipClangJob(Map conf=[:]){
             }
             catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
                 echo "The job was cancelled or aborted"
+                setGithubStatus(variant, 'error', 'Job cancelled or aborted')
                 throw e
             }
             catch(Exception ex) {
@@ -677,6 +743,14 @@ def buildHipClangJob(Map conf=[:]){
                     cmake_build(conf)
                 }
             }
+            setGithubStatus(variant, 'success', 'Completed successfully')
+        }
+        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+            throw e  // already set status above
+        }
+        catch (Exception ex) {
+            setGithubStatus(variant, 'failure', 'Stage failed')
+            throw ex
         }
         return retimage
 }
@@ -733,6 +807,48 @@ def RunPerfTest(Map conf=[:]){
     catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
         echo "The job was cancelled or aborted"
         throw e
+    }
+}
+
+def sendTeamsFailureNotification(Map conf=[:]) {
+    def teamsMessage = null
+    def teamsColor = null
+    def teamsFacts = null
+
+    if (conf.get("buildTheRock", false)) {
+        teamsMessage = 'TheRock Docker Promotion Failed'
+        teamsColor = '#FF6600'
+        teamsFacts = [
+            [name: 'Build',           template: "#${env.BUILD_NUMBER}"],
+            [name: 'TheRock hash',    template: "${env.THEROCK_FULL_HASH ?: 'unknown'}"],
+            [name: 'CK hash',         template: "${env.CK_GIT_HASH ?: 'unknown'}"],
+            [name: 'Duration',        template: "${currentBuild.durationString}"],
+            [name: 'Previous result', template: "${currentBuild.previousBuild?.result ?: 'N/A'}"],
+            [name: 'Build URL',       template: "${env.BUILD_URL}"]
+        ]
+    } else if (env.BRANCH_NAME == 'develop') {
+        teamsMessage = 'MIOpen develop branch CI failed'
+        teamsColor = '#FF0000'
+        teamsFacts = [
+            [name: 'Build',           template: "#${env.BUILD_NUMBER}"],
+            [name: 'Commit',          template: "${env.GIT_COMMIT?.take(7) ?: 'unknown'}"],
+            [name: 'TheRock hash',    template: "${env.THEROCK_PROMOTED_HASH ?: 'unknown'}"],
+            [name: 'Duration',        template: "${currentBuild.durationString}"],
+            [name: 'Previous result', template: "${currentBuild.previousBuild?.result ?: 'N/A'}"],
+            [name: 'Build URL',       template: "${env.BUILD_URL}"]
+        ]
+    }
+
+    if (teamsMessage) {
+        withCredentials([string(credentialsId: 'TEAMS_WEBHOOK_URL', variable: 'TEAMS_WEBHOOK_URL')]) {
+            office365ConnectorSend(
+                webhookUrl: TEAMS_WEBHOOK_URL,
+                message: teamsMessage,
+                status: 'Failure',
+                color: teamsColor,
+                factDefinitions: teamsFacts
+            )
+        }
     }
 }
 

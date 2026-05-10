@@ -39,29 +39,53 @@ StinkyIRConverter::StinkyIRConverter(const std::array<int, 3>& targetArch) : arc
 static void convertInstruction(AsmIRBuilder& irBuilder,
                                const std::unique_ptr<ParsedInstruction>& inst, GfxArchID arch) {
     if (inst->isLabel) {
-        irBuilder.createLabel(inst->opcodeStr);
+        StinkyInstruction* labelInst = irBuilder.createLabel(inst->opcodeStr);
+        if (labelInst && !inst->comment.empty())
+            labelInst->addModifier<CommentData>(CommentData{inst->comment});
         return;
     }
 
-    // AsmDirective (TEXTBLOCK / .set / etc.) — produced by RawAsmParser for unknown mnemonics,
-    // directives, and symbolic-register lines it cannot fully parse.
+    // "FENCE" is the mnemonic printed by AsmPrinter; "scheduling_fence" is the
+    // rocisa instruction string. Both round-trip to a scheduling fence.
+    // Fences carry no modifiers — they are hard region boundaries with no tokens.
+    if (inst->opcodeStr == "FENCE" || inst->opcodeStr == "scheduling_fence") {
+        irBuilder.createFence();
+    }
+
     if (inst->opcodeStr == "asm_directive") {
-        AsmDirective* directive = irBuilder.createIR<AsmDirective>();
-        // srcRegs encoding: [0]=kind-string  [1]=value  [2]=symbol (for .set)
-        if (!inst->srcRegs.empty() &&
-            inst->srcRegs[0].dataType == StinkyRegister::Type::LiteralString) {
-            const std::string& kindStr = inst->srcRegs[0].literalValue;
-            if (kindStr == ".set") {
-                directive->kind = AsmDirectiveKind::SET;
-                directive->name = ".set";
-                if (inst->srcRegs.size() > 1) directive->symbol = inst->srcRegs[1].literalValue;
-                if (inst->srcRegs.size() > 2) directive->value = inst->srcRegs[2].literalValue;
-            } else {
-                // TEXTBLOCK — raw line stored in srcRegs[1]
-                directive->kind = AsmDirectiveKind::TEXTBLOCK;
-                if (inst->srcRegs.size() > 1) directive->value = inst->srcRegs[1].literalValue;
-            }
+        AsmDirective* d = irBuilder.createIR<AsmDirective>();
+        const bool hasName = !inst->srcRegs.empty() &&
+                             inst->srcRegs[0].dataType == StinkyRegister::Type::LiteralString;
+        const bool hasPayload = inst->srcRegs.size() > 1 &&
+                                inst->srcRegs[1].dataType == StinkyRegister::Type::LiteralString;
+
+        // RawAsmParser::makeTextBlock encodes pass-through text as
+        //   srcRegs[0] = "TEXTBLOCK", srcRegs[1] = raw text (with trailing '\n').
+        // The "TEXTBLOCK" sentinel is not part of the directive name; route the
+        // raw text into AsmDirective::value so the emitter prints it verbatim.
+        if (hasName && inst->srcRegs[0].literalValue == "TEXTBLOCK") {
+            d->kind = AsmDirectiveKind::TEXTBLOCK;
+            if (hasPayload) d->value = inst->srcRegs[1].literalValue;
+            return;
         }
+
+        if (hasName) {
+            d->name = inst->srcRegs[0].literalValue;
+            if (d->name == ".set") d->kind = AsmDirectiveKind::SET;
+        }
+        if (hasPayload) {
+            d->symbol = inst->srcRegs[1].literalValue;
+        }
+        // RawAsmParser packs ".set" as srcRegs = {".set", symbol, value}.
+        // The SET emitter branch concatenates "name symbol, value", so the
+        // value MUST be carried through; otherwise lines like
+        // ".set vgprValuMXSA_X0_I0_BASE, vgprMXSBase+0" round-trip as
+        // ".set vgprValuMXSA_X0_I0_BASE" with the assignment dropped.
+        if (inst->srcRegs.size() > 2 &&
+            inst->srcRegs[2].dataType == StinkyRegister::Type::LiteralString) {
+            d->value = inst->srcRegs[2].literalValue;
+        }
+        if (!inst->comment.empty()) d->comment = inst->comment;
         return;
     }
 
@@ -89,6 +113,8 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
     if (!inst->modifiers.empty()) {
         ModifierSerializer::deserialize(stinkyInst, inst->modifiers);
     }
+
+    if (!inst->comment.empty()) stinkyInst->addModifier<CommentData>(CommentData{inst->comment});
 }
 
 StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string& irText,
