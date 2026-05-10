@@ -75,18 +75,6 @@ add_dependencies(MIOpenDriver generate_kernels)
 target_include_directories(MIOpenDriver PRIVATE ../src/kernels)
 # MIOpen_with_plugins ensures CK plugin .so's are built alongside MIOpenDriver
 target_link_libraries(MIOpenDriver PRIVATE MIOpen_with_plugins Threads::Threads roc::rocrand nlohmann_json::nlohmann_json )
-# rocrand_wrapper.cpp includes <rocrand/rocrand.hpp> directly. Mark rocrand's imported
-# target includes as SYSTEM so rocrand headers don't trigger -Wundef (rocrand_common.h
-# uses bare #if __HIP_DEVICE_COMPILE__ which is undefined during host compilation).
-foreach(_rocrand_target rocrand rocrand::rocrand roc::rocrand)
-    if(TARGET ${_rocrand_target})
-        get_target_property(_rocrand_iface_incs ${_rocrand_target} INTERFACE_INCLUDE_DIRECTORIES)
-        if(_rocrand_iface_incs)
-            target_include_directories(MIOpenDriver SYSTEM PRIVATE ${_rocrand_iface_incs})
-        endif()
-        break()
-    endif()
-endforeach()
 if(NOT MIOPEN_EMBED_DB STREQUAL "")
     target_link_libraries(MIOpenDriver PRIVATE $<BUILD_INTERFACE:miopen_data> )
 endif()

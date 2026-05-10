@@ -1007,19 +1007,6 @@ if(hipblaslt_FOUND)
 endif()
 
 target_include_directories( MIOpen SYSTEM PRIVATE ${ROCRAND_INCLUDE_DIR} )
-# Also mark rocrand's imported target includes as SYSTEM so rocrand headers don't
-# trigger -Wundef (rocrand_common.h uses #if __HIP_DEVICE_COMPILE__ without #ifdef).
-# In TheRock builds rocrand exposes both stage/include and dist/include; only dist/
-# is covered by ROCRAND_INCLUDE_DIR above.
-foreach(_rocrand_target rocrand rocrand::rocrand roc::rocrand)
-    if(TARGET ${_rocrand_target})
-        get_target_property(_rocrand_iface_incs ${_rocrand_target} INTERFACE_INCLUDE_DIRECTORIES)
-        if(_rocrand_iface_incs)
-            target_include_directories(MIOpen SYSTEM PRIVATE ${_rocrand_iface_incs})
-        endif()
-        break()
-    endif()
-endforeach()
 
 # For backward compatibility with ROCm 5.3
 # Build with library libMLIRMIOpen
