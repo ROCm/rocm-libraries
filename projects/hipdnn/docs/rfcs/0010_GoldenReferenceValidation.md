@@ -83,17 +83,18 @@ A bundle can be **full** or **graph-only**. A full bundle (`{Name}.json` + `.bin
 
 ### Golden Data Format
 
-Golden data uses the existing format already established by `LoadGraphAndTensors.hpp` and `Graph.save()`. The graph JSON inside the bundle defines the test — operation type, tensor shapes, data types, and all parameters. The folder path is a storage convention for human navigation; the loader does not depend on it. Each test case is a set of files with a shared base name:
+Golden data uses the existing format already established by `LoadGraphAndTensors.hpp` and `Graph.save()`. The graph JSON inside the bundle defines the test — operation type, tensor shapes, data types, and all parameters. The folder path is a storage convention for human navigation; the loader does not depend on it (see [Folder Convention](#folder-convention) for where bundles live on disk). Each bundle is a folder containing a `.json` file and its `.bin` files:
 
 ```
-{Operation}/{Layout}/{DataType}/{TestName}.json              # Graph definition (operation, tensor metadata, parameters)
-{Operation}/{Layout}/{DataType}/{TestName}.tensor{uid}.bin   # Raw tensor data, one file per UID
+{BundleName}/
+  {Name}.json              # Graph definition (operation, tensor metadata, parameters)
+  {Name}.tensor{uid}.bin   # Raw tensor data, one file per UID
 ```
 
-For example, the file `Small.json` in `BatchnormFwdInference/nchw/fp32/` is a batchnorm inference test with small tensors in NCHW layout at fp32 precision:
+For example, a batchnorm inference bundle with 6 tensors at fp32 precision:
 
 ```
-BatchnormFwdInference/nchw/fp32/
+Small/
   Small.json               # Graph: batchnorm inference, 6 tensors, fp32
   Small.tensor0.bin         # x (input)
   Small.tensor1.bin         # mean (input)
@@ -212,17 +213,26 @@ A standalone CLI verifier will run these checks across a directory tree before b
 
 ## Folder Convention
 
-The only **enforced** folder level is the test tier at the top — `smoke/`, `standard/`, `comprehensive/`, `full/` — matching the existing integration test tiers. The runner reads the tier from the folder path and registers each discovered test under the corresponding **ctest label** (no prefix for smoke/smoke, `Standard`, `Comprehensive`, `Full`). This plugs golden tests into the existing CI tier selection — `ctest` runs smoke, `ctest -L Standard` runs standard, etc. No new flags or configuration needed. Everything below the tier level is a guideline for human navigation. The loader works with any folder structure — it recursively scans for `.json` files and does not validate that the folder path matches the graph content.
+The only **enforced** folder level is the test tier at the top — `smoke/`, `standard/`, `comprehensive/`, `full/` — matching the existing [integration test tiers](../../../dnn-providers/integration-tests/README.md#test-tiers). The runner reads the tier from the folder path and registers each discovered test with the corresponding **GTest prefix** (`Smoke` or no prefix, `Standard`, `Comprehensive`, `Full`). This is the same prefix that existing `INSTANTIATE_TEST_SUITE_P` calls use — the ctest exclusion filter (`-Standard*:Comprehensive*:Full*`) sorts golden tests into tiers automatically, no new flags or configuration needed. Everything below the tier level is a guideline for human navigation. The loader works with any folder structure — it recursively scans for `.json` files and does not validate that the folder path matches the graph content.
+
+The full path to a bundle has four parts:
 
 ```
-hipdnn_reference_data/
-  {Tier}/                   # ENFORCED: smoke, standard, comprehensive, full
-    ...any structure...     # guideline: {Operation}/{Layout}/{DataType}/
-      {BundleName}/         # one folder per bundle for easy copy/share
-        {Name}.json + {Name}.tensor{uid}.bin
+{root}  /  {tier}  /  {path}  /  {bundle}
+  │           │          │          └─ Bundle folder: {BundleName}/{Name}.json + .bin files
+  │           │          └─ Suggested: {Operation}/{Layout}/{DataType}/ (guideline, not enforced)
+  │           └─ ENFORCED: smoke/, standard/, comprehensive/, full/
+  └─ --golden-data-dir (default: <exe_dir>/../lib/hipdnn_reference_data)
 ```
 
-Each bundle lives in its own folder so it can be copied, shared, or zipped as a self-contained unit.
+| Part | Who decides | Enforced? | Example |
+|------|-----------|-----------|---------|
+| Root | CLI flag or env var | No (configurable) | `hipdnn_reference_data/` |
+| Tier | Developer (based on tensor size / test speed) | **Yes** | `smoke/` |
+| Path | Developer (for human navigation) | No (loader ignores it) | `BatchnormFwdInference/nchw/fp32/` |
+| Bundle | Developer (free-form label) | No (loader finds `.json`) | `Small/Small.json + .bin` |
+
+Choose the tier the same way existing integration tests do — see the [Test Tiers](../../../dnn-providers/integration-tests/README.md#test-tiers) section in the integration tests README. Each bundle lives in its own folder so it can be copied, shared, or zipped as a self-contained unit.
 
 ### Naming Guidelines
 
@@ -267,7 +277,7 @@ hipdnn_reference_data/
 
 The runner recursively scans the golden data directory for `.json` files. Each `.json` file becomes a separate gtest parameter — one file, one test case. The gtest name is derived from the graph content (operation, layout, data type), not from the folder path.
 
-To add a test case, drop a new `.json` + `.bin` set anywhere under the golden data directory — the next run picks it up automatically. To select tests, use `--gtest_filter` with graph-derived names:
+To add a test case, place a bundle folder under the appropriate tier directory — the next run picks it up automatically. To select tests, use `--gtest_filter` with graph-derived names:
 
 ```
 --gtest_filter=*BatchnormFwdInference*              # all batchnorm inference tests
@@ -306,11 +316,14 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 ### CI Integration
 
-| CI Stage | ctest Selection | Verification Mode | Notes |
-|----------|----------------|-------------------|-------|
-| Pre-submit (smoke) | `ctest` (no label filter) | `auto` | Runs `smoke/` golden tests; tests without golden data fall back to computed |
-| Post-submit (full) | `ctest -L Standard` | `both` | Runs `smoke/` + `standard/` golden tests; both suites must pass |
-| Nightly | `ctest -L Comprehensive` | `golden` | All tiers; tests without golden data are skipped |
+Golden tests follow the same [tier cascade](../../../dnn-providers/integration-tests/README.md#how-tiers-cascade) as all other integration tests:
+
+| CI Stage | ctest Command | Verification Mode | Notes |
+|----------|--------------|-------------------|-------|
+| Pre-submit (smoke) | `ctest -L quick` | `auto` | `smoke/` golden tests; tests without golden data fall back to computed |
+| Post-submit | `ctest -L standard` | `both` | `smoke/` + `standard/`; both suites must pass |
+| Nightly | `ctest -L comprehensive` | `golden` | All tiers up to comprehensive; tests without golden data are skipped |
+| Weekly | `ctest -L full` | `golden` | All tiers |
 
 ### Workflows
 
@@ -321,7 +334,7 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 **Debug a customer issue** (support):
 1. Receive the customer's bundle (`.json` + `.bin` files) — no source code or NDA required
-2. Drop the bundle folder anywhere under the golden data directory
+2. Drop the bundle folder under any tier (e.g., `smoke/` for a quick check)
 3. Run tests — the runner auto-discovers it, executes the engine, compares against golden output
 4. Inspect the diff: which tensors diverge, by how much, at which indices
 
