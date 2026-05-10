@@ -20,7 +20,7 @@
 5. [CLI and Configuration](#cli-and-configuration)
 6. [Integration](#integration)
    - [CI Integration](#ci-integration)
-   - [Adding New Golden Reference Tests](#adding-new-golden-reference-tests)
+   - [Workflows](#workflows)
 7. [Data Management](#data-management)
 8. [Risk Register](#risk-register)
 9. [Known Limitations](#known-limitations)
@@ -47,6 +47,8 @@ Golden reference validation uses two pipelines -- [**generation**](#generation-p
 
 The graph JSON is a complete computation description — operation type, tensor shapes, data types, and all operation parameters. Generation produces bundles. Validation loads a bundle — graph from `{Name}.json`, tensor data from `{Name}.tensor{uid}.bin` — executes the graph through the engine under test, and compares the result to the expected output. The test fixture determines which engine runs the graph (CPU reference, MIOpen GPU plugin, etc.); the bundle itself is engine-agnostic.
 
+**Design principle — test identity comes from the graph, not the filesystem.** The graph JSON contains everything that defines a test: operation type, tensor shapes, data types, parameters. The runner derives the test name from the graph content, not from the folder path where the bundle is stored. This decouples test identity from storage layout, which means: folders can be reorganized without breaking filters, TOML skip rules match stable graph-derived names, and customer-submitted bundles get meaningful test names regardless of where they're dropped.
+
 **[Generation](#generation-pipeline) (run once, any tool):**
 1. Define graph and create input tensors
 2. Run a reference source (PyTorch, CPU ref, etc.) to produce outputs
@@ -63,7 +65,7 @@ The graph JSON is a complete computation description — operation type, tensor 
 
 ### Existing Infrastructure
 
-The golden reference infrastructure is already built and working for batchnorm. What this RFC adds: golden data for operations beyond batchnorm; a formalized folder convention; data integrity checks; a CI strategy with explicit verification modes and golden data fetching; and GPU runner test instantiations. The table below summarizes each existing component:
+The golden reference infrastructure is already built and working for batchnorm. The table below summarizes each existing component. This RFC **keeps** the bundle format, core loader, Python framework, and test runner pattern. It **adds** auto-discovery (no manual `INSTANTIATE_TEST_SUITE_P`), graph-derived test identity, a golden-first fallback chain, a bundle verifier, data integrity checks, per-engine tolerance overrides, and CI integration. It **changes** the data location (moves to the integration suite) and the default verification mode (golden-first instead of computed-first).
 
 | Component | File(s) | Role |
 |-----------|---------|------|
@@ -81,7 +83,7 @@ A bundle can be **full** or **graph-only**. A full bundle (`{Name}.json` + `.bin
 
 ### Golden Data Format
 
-Golden data uses the existing format already established by `LoadGraphAndTensors.hpp` and `Graph.save()`. The folder path identifies the operation, layout, and data type. The filename identifies the test variant (e.g., tensor size). Each test case is a set of files with a shared base name:
+Golden data uses the existing format already established by `LoadGraphAndTensors.hpp` and `Graph.save()`. The graph JSON inside the bundle defines the test — operation type, tensor shapes, data types, and all parameters. The folder path is a storage convention for human navigation; the loader does not depend on it. Each test case is a set of files with a shared base name:
 
 ```
 {Operation}/{Layout}/{DataType}/{TestName}.json              # Graph definition (operation, tensor metadata, parameters)
@@ -113,7 +115,9 @@ The CPU and GPU runners (`TestGoldenReferenceCpu`, `TestGoldenReferenceGpu`) fol
 2. **Execute** — run the engine under test (CPU reference or MIOpen GPU plugin)
 3. **Compare** — check engine output against golden output — PASS or FAIL
 
-Test cases are auto-discovered: `getGoldenReferenceParams()` scans a subdirectory for `.json` files and returns each as a gtest parameter. Adding a bundle to an existing folder is picked up on the next run. Golden tests are not special — the runner must respect the same test-filtering mechanism used by all other tests (e.g., a configuration matrix that determines which operations, shapes, or data types to run or skip). No hard-coded workarounds for skipping golden tests.
+Test cases are **fully auto-discovered**: the runner recursively scans the golden data directory for `.json` files and registers each as a gtest parameter. No manual `INSTANTIATE_TEST_SUITE_P` is required — dropping a bundle in the directory is sufficient. Golden tests are not special — the runner must respect the same test-filtering mechanism used by all other tests (e.g., a configuration matrix that determines which operations, shapes, or data types to run or skip). No hard-coded workarounds for skipping golden tests.
+
+A **bundle inspection tool** will validate that bundles are well-formed and runnable. It reads bundles, reports tensor metadata and statistics, and can verify that the graph + tensors will load correctly before they reach CI.
 
 ---
 
@@ -127,7 +131,7 @@ Golden data is generated by Python scripts in [`reference_data_scripts/`](../../
 2. **Compute** — run a reference source (PyTorch, CPU ref, etc.)
 3. **Write** — save the bundle (`.json` + `.tensor{uid}.bin`)
 
-To add a new operation, create a node class and generator script following the existing [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern. See [Adding New Golden Reference Tests](#adding-new-golden-reference-tests) for the full workflow.
+To add a new operation, create a node class and generator script following the existing [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern. See [Workflows](#workflows) for the full workflow.
 
 Only batchnorm has generators and data today. Generators for the remaining operations will be added incrementally.
 
@@ -147,27 +151,35 @@ The golden data format is **reference-source-agnostic**. Any tool that produces 
 
 ### Verification Modes
 
-Three modes control which test suites run. In every mode, the **engine** is the thing being tested — the reference source (runtime executor or golden bundle) provides the expected output. `computed` and `golden` are separate gtest suites with different test fixtures, parameterization, and data sources.
+The default verification strategy is **golden-first with automatic fallback**. For each test, the runner selects the best available reference source in order:
+
+1. **Golden data** — if a bundle exists for this test, use it
+2. **GPU reference** — if no golden data but a GPU reference executor is available, use it
+3. **CPU reference** — last resort, always available
+
+The `--verification-mode` flag overrides this default. In golden mode, tests without golden data are **skipped** (not failed). In every mode, the **engine** is the thing being tested — the reference source provides the expected output.
 
 | Mode | What runs | Reference source |
 |------|-----------|-----------------|
+| `auto` (default) | Per-test fallback: golden → GPU ref → CPU ref | Best available |
 | `computed` | Test-as-code tests (`IntegrationGraphVerificationHarness`) — graph built by `buildGraph()` in C++ | CPU/GPU reference executor at runtime |
-| `golden` | Test-as-data tests (`TestGoldenReferenceCpu` / `TestGoldenReferenceGpu`) — graph loaded from disk | Pre-computed data from bundle |
+| `golden` | Test-as-data tests (`TestGoldenReferenceCpu` / `TestGoldenReferenceGpu`) — graph loaded from disk; tests without golden data are skipped | Pre-computed data from bundle |
 | `both` | Both suites, independently — both must pass | Runtime executor + pre-computed data |
 
 **Floating-point edge case**: `-0.0` vs `+0.0` uses value comparison, not bitwise. NaN handling is covered in [Data Integrity](#data-integrity).
-
-**Architecture note**: all current golden data comes from Python or the CPU reference executor (architecture-independent). If GPU-generated data is added, an architecture guard will be needed. See [Future Work](#future-work).
 
 ---
 
 ### Tolerance Framework
 
-Tolerances are **always defined in code**, never stored in the data bundle. The codebase already has per-operation dynamic tolerance functions in [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) (matmul, convolution, batchnorm, layernorm, RMS norm, pointwise). These are used in the computed tests today. The remaining work is to wire them into the golden test runner so a single generic test class handles all operations.
+Tolerances are **always defined in code**, never stored in the data bundle. Golden tests will initially use the existing fixed per-operation, per-type tolerances in [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) (e.g., batchnorm inference fp32 = `2e-4`). The codebase also has per-operation dynamic tolerance functions in [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) that compute tolerances based on tensor dimensions — the goal is to wire these into the golden test runner so a single generic test class handles all operations.
+
+Per-engine tolerance overrides (e.g., a configuration file specifying looser tolerances for engines that produce less precise results) must also apply to golden tests. This allows a global acceptable tolerance with per-engine exceptions, avoiding hard-coded workarounds in test code.
 
 **Acceptance criteria**:
 - [ ] Golden data bundles contain no tolerance fields
-- [ ] Golden tests use the existing dynamic tolerance functions, not hardcoded `(atol, rtol)` pairs
+- [ ] Golden tests initially use fixed tolerances from `TestTolerances.hpp`, with dynamic tolerances as the target
+- [ ] Per-engine tolerance overrides apply to golden tests the same as all other tests
 
 ---
 
@@ -177,11 +189,11 @@ Internal consistency is guaranteed by construction: `Graph.save()` writes the JS
 
 Three checks catch the real failure modes:
 
-1. **File size validation (C++, load time)** — *proposed*. Before reading tensor data, verify that each `.bin` file's size matches `product(dims) * sizeOfDataType(data_type)` from the graph JSON. Catches truncated downloads, wrong-file swaps, and stale files. Cheap — one `stat()` call per tensor. `loadGraphAndTensors()` does not perform this check today; a truncated file silently produces garbage.
+1. **Tensor size validation (C++, load time)** — *proposed*. After loading tensor data, verify that each tensor's size matches the dimensions declared in the graph JSON. Catches truncated downloads, wrong-file swaps, and stale files. `loadGraphAndTensors()` does not perform this check today; a truncated file silently produces garbage.
 
-2. **Output validation (Python, generation time)** — *proposed*. `Graph.save()` should reject NaN, Inf, and zero-variance output tensors before writing any files. Built into `Graph.save()` itself so no generator can bypass it. A degenerate output (all NaN, all-same-value) makes the test meaningless — everything passes within tolerance.
+2. **NaN/Inf rejection (Python, generation time)** — *proposed*. `Graph.save()` should reject output tensors containing NaN or Inf before writing any files. Built into `Graph.save()` itself so no generator can bypass it. All-same-value tensors are valid (e.g., a bias-only layer can produce uniform output).
 
-3. **NaN/Inf rejection (C++, load time)** — *proposed*. Safety net for bundles generated by external tools or before check #2 is added. `loadGraphAndTensors()` should scan output tensors after loading and fail if any contain NaN or Inf.
+3. **NaN/Inf rejection (bundle verifier, offline)** — *proposed*. Safety net for bundles generated by external tools or before check #2 is added. Run by the CLI verifier before commit, not at test load time — scanning every tensor at runtime adds overhead the test runner should not pay. The existing test validators already catch NaN/Inf from the engine's computation.
 
 A standalone CLI verifier will run these checks across a directory tree before bundles are committed, catching errors before they reach CI.
 
@@ -194,7 +206,7 @@ A standalone CLI verifier will run these checks across a directory tree before b
 
 ## Folder Convention
 
-Golden data lives in [`projects/hipdnn/hipdnn_reference_data/`](../../hipdnn_reference_data/). The folder path tells you what a test covers. The file inside tells the engine what to compute. Together they drive test discovery: `getGoldenReferenceParams()` takes a folder path and returns every `.json` file in it as a gtest parameter.
+The recommended folder layout below organizes bundles for human navigation. The loader works with any folder structure — it only requires a valid `.json` file. The convention is a guideline, not enforced by the system.
 
 ```
 hipdnn_reference_data/
@@ -238,9 +250,16 @@ hipdnn_reference_data/
 
 ### How Test Discovery Works
 
-`getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32")` resolves the full path as `<exe_dir>/../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/` and scans it for `.json` files. Each `.json` file becomes a separate gtest parameter — one file, one test case.
+The runner recursively scans the golden data directory for `.json` files. Each `.json` file becomes a separate gtest parameter — one file, one test case. The gtest name is derived from the graph content (operation, layout, data type), not from the folder path.
 
-To add a test case to an existing folder, drop in a new `.json` + `.bin` set — the next run picks it up automatically. To select tests, use `--gtest_filter` with the file path (operation, layout, data type, or test name).
+To add a test case, drop a new `.json` + `.bin` set anywhere under the golden data directory — the next run picks it up automatically. To select tests, use `--gtest_filter` with graph-derived names:
+
+```
+--gtest_filter=*BatchnormFwdInference*              # all batchnorm inference tests
+--gtest_filter=*BatchnormFwdInference*fp32*          # batchnorm inference fp32 only
+--gtest_filter=*ConvFwd*nhwc*fp16*                   # conv forward, nhwc, fp16
+--gtest_filter=*Small*                               # all tests named "Small"
+```
 
 ---
 
@@ -250,7 +269,7 @@ The test binary will accept two flags (neither exists today). `--verification-mo
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
-| `--vm, --verification-mode` | `computed`, `golden`, `both` | `computed` | Which test suites run |
+| `--vm, --verification-mode` | `auto`, `computed`, `golden`, `both` | `auto` | Which verification strategy to use (see [Verification Modes](#verification-modes)) |
 | `--gd, --golden-data-dir` | path | `<exe_dir>/../lib/hipdnn_reference_data` | Where to find golden data (only used when mode includes golden tests) |
 
 Each flag has an environment variable fallback. The CLI flag takes precedence when both are set.
@@ -263,7 +282,7 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 **Acceptance criteria**:
 - [ ] Both flags parsed and stored in `TestConfig` singleton
 - [ ] Environment variable fallbacks work when CLI flag is absent
-- [ ] `--verification-mode golden` with missing golden data directory: hard FAIL with actionable path in the error message
+- [ ] `--verification-mode golden` skips tests that have no golden data
 - [ ] `--verification-mode computed` ignores golden data entirely (no fetch, no directory check)
 
 ---
@@ -274,28 +293,37 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 | CI Stage | Verification Mode | Golden Data Required |
 |----------|-------------------|---------------------|
-| Pre-submit (smoke) | `computed` | No |
+| Pre-submit (smoke) | `auto` | Yes (tests without golden data fall back to computed) |
 | Post-submit (full) | `both` | Yes |
-| Nightly | `golden` | Yes |
+| Nightly | `golden` | Yes (tests without golden data are skipped) |
 
-### Adding New Golden Reference Tests
+### Workflows
 
-1. **Generate** — write a generation script following the [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
-2. **Commit** — add the bundle to `hipdnn_reference_data/{Operation}/{Layout}/{DataType}/`. For large tensors, use git-lfs or DVC (see [Data Management](#data-management))
-3. **Instantiate** — if the `{Operation}/{Layout}/{DataType}` folder is new, add a one-time `INSTANTIATE_TEST_SUITE_P` in a test `.cpp` file pointing `getGoldenReferenceParams()` at it. Existing folders already have this — no C++ change needed
-   ```cpp
-   INSTANTIATE_TEST_SUITE_P(, TestBnormFwdFp32, getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32"));
-   ```
+**Add a new golden test** (developer):
+1. Write a generation script following the [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
+2. Run the bundle inspection tool to verify the bundle is well-formed
+3. Commit the bundle to the golden data directory (DVC for large tensors). No C++ changes needed — auto-discovery picks it up on the next run
+
+**Debug a customer issue** (support):
+1. Receive the customer's bundle (`.json` + `.bin` files) — no source code or NDA required
+2. Drop the bundle into the golden data directory
+3. Run tests — the runner auto-discovers it, executes the engine, compares against golden output
+4. Inspect the diff: which tensors diverge, by how much, at which indices
+
+**Reproduce a CI failure locally** (developer):
+1. Pull the golden data via DVC
+2. Run the failing test with `--gtest_filter=*OperationName*DataType*`
+3. The bundle is self-contained — no environment-specific setup beyond the engine under test
 
 ---
 
 ## Data Management
 
-Golden data lives in `projects/hipdnn/hipdnn_reference_data/` (see [Folder Convention](#folder-convention)). CMake copies it to the build tree at configure time and installs it to `<prefix>/lib/hipdnn_reference_data/`. At runtime, `getGoldenReferenceParams()` resolves the path as `<exe_dir>/../lib/hipdnn_reference_data/` — the standard ROCm layout where executables are in `bin/` and data is in `lib/`. The `--golden-data-dir` CLI flag and `HIPDNN_TEST_GOLDEN_DATA_DIR` env var override this default.
+Golden data will live with the integration test suite (exact path TBD — see open question below). At runtime, the `--golden-data-dir` CLI flag or `HIPDNN_TEST_GOLDEN_DATA_DIR` env var points the runner to the data location.
 
-**Note**: because CMake uses `file(COPY)` at configure time, adding new golden data requires re-running CMake (not just rebuilding) to update the build tree.
+The existing batchnorm data (small tensors) is committed directly to git. Larger golden data will be stored in **DVC**, which the repo already uses for large binary assets. Golden data can grow large (a single test case with `8x512x64x64` fp32 tensors is ~64 MB), so DVC is the natural fit.
 
-The existing batchnorm data (small tensors) is committed directly to git. Golden data can grow large (a single test case with `8x512x64x64` fp32 tensors is ~64 MB), so large datasets will need external storage (git-lfs, DVC, or similar). The storage tool decision is out of scope for this RFC.
+**Open question**: How to ship golden data to ROCm CI. The data must be available at test time without bloating the build tree. Options include DVC pull at CI time, a pre-staged CI cache, or a separate data artifact. Input from the broader team is needed here.
 
 ---
 
@@ -303,7 +331,7 @@ The existing batchnorm data (small tensors) is committed directly to git. Golden
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| FlatBuffers schema change | Old JSON bundles unreadable by `loadGraphAndTensors()` | Medium | Update Python scripts to match new schema, then regenerate all bundles |
+| FlatBuffers schema change | Old JSON bundles unreadable by `loadGraphAndTensors()` | Low | Schema changes must be backwards compatible — old graphs continue to work when new fields are added. FlatBuffers supports this natively via optional fields |
 | Reference script bug freezes wrong data | Silent incorrect baseline | Medium | Cross-validate against C++ CPU ref; review generated data before committing; [proposed generation-time validation](#data-integrity) will reject degenerate outputs |
 | PyTorch version drift | Different versions produce slightly different outputs | Low | Pin PyTorch version in `requirements.txt`; regenerate when upgrading |
 | Large golden data sets slow CI | CI feedback loop degrades | Low | Storage caching, selective fetch by test filter, compression (future) |
@@ -313,18 +341,13 @@ The existing batchnorm data (small tensors) is committed directly to git. Golden
 
 ## Known Limitations
 
-Comparison testing can confirm that two implementations agree, not that either is correct. If the reference executor and the engine under test share the same bug, the test passes. Future work on mathematical invariant checks and hand-verified micro cases addresses this gap without changing the golden data format.
+Comparison testing can confirm that two implementations agree, not that either is correct. If the reference executor and the engine under test share the same bug, the test passes.
 
 ---
 
 ## Future Work
 
 1. **Dynamic tolerance integration**: Wire the existing `DynamicTolerances` functions (matmul, conv, batchnorm, layernorm, RMS norm, pointwise) into the golden test runner so a single generic test class handles all operations.
-2. **Automatic test discovery**: Recursive scanning of `hipdnn_reference_data/` to auto-generate test instantiations, eliminating manual `INSTANTIATE_TEST_SUITE_P`.
-3. **C++ graph export**: Utility to export a graph from an existing test-as-code `buildGraph()` to the bundle format, enabling conversion of computed tests to golden tests.
-4. **Bundle inspection tool**: CLI that reads bundles and reports tensor metadata and statistics (integrity validation is covered in [Data Integrity](#data-integrity)).
-5. **External data validation**: Because bundles are self-contained and tool-agnostic, external parties (customers, partner teams) could submit their own input+output tensor data for a given graph and validate it against golden references — or vice versa — without any C++ code. A Python-only comparison tool could load two bundles with the same graph and diff their output tensors.
-6. **Multi-source consensus gate**: Before freezing golden data, run the same graph through multiple independent reference sources (PyTorch, CPU ref, GPU ref) and only save the bundle when all sources agree within tolerance. This catches single-source bugs that the current single-reference generation cannot detect.
-7. **Bundle metadata**: Record provenance information (generator tool and version, reference source, ROCm version, generation timestamp) in the bundle for debugging and auditing. The runner does not need this to execute — it is for human use when investigating failures.
-8. **Reproducible generation**: Fixed seeds for random input generation so that regenerating a bundle (after a schema change, PyTorch upgrade, or generator fix) produces the same inputs, isolating output differences to the reference source change.
-9. **Mathematical invariant checks and hand-verified micro cases**: Per-operation invariants (e.g., softmax rows sum to 1) and hand-computed expected outputs that catch bugs comparison testing cannot. Separate RFC.
+2. **C++ graph export**: The codebase can already export graphs to JSON via `Graph.save()`. The remaining work is a convenience utility that takes an existing test-as-code `buildGraph()`, runs it, and writes the complete bundle — enabling bulk conversion of computed tests to golden tests.
+3. **External data validation**: Because bundles are self-contained and tool-agnostic, external parties (customers, partner teams) could submit their own bundles for validation. A Python-only comparison tool could load two bundles with the same graph and diff their output tensors — no C++ required.
+4. **Reproducible generation**: Fixed seeds for random input generation so that regenerating a bundle (after a schema change, PyTorch upgrade, or generator fix) produces the same inputs, isolating output differences to the reference source change.
