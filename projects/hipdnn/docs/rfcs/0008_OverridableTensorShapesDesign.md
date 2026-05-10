@@ -184,7 +184,7 @@ invariant for an idiomatic C++ surface:
 ```cpp
 struct OverrideEntry {
     std::vector<int64_t> shape;
-    std::vector<int64_t> strides;
+    std::vector<int64_t> stride;
 };
 
 error_t execute(hipdnnHandle_t handle,
@@ -201,7 +201,7 @@ and dispatch. There is no separate code path for the map form.
 #### 4.2.1 Override input validation
 
 The frontend is the single point of input policing. Each violation
-returns `HIPDNN_STATUS_BAD_PARAM`; the first failure returns
+returns `ErrorCode::INVALID_VALUE`; the first failure returns
 immediately:
 
 1. **Length consistency.** For the parallel-array overload,
@@ -396,10 +396,14 @@ extract { uids, ptrs } -> deviceBuffers[]
 extract optional { override_uids, override_shapes, override_strides, override_lengths }
 
 if (override attributes present) {
-    // hasOverrideExecute() is the dispatch-time safety net. The per-graph
-    // version filter at applicability time (§4.5) is the primary gate; this
-    // guard catches the edge case where a plugin reports the right version
-    // but is missing the symbol.
+    // The plugin API-version and hasOverrideExecute() checks are the
+    // dispatch-time safety net. The per-graph version filter at applicability
+    // time (§4.5) is the primary gate; these guards catch direct/serialized
+    // execution paths and plugins that report the right version but are
+    // missing the symbol.
+    if (plugin.apiVersion() < Version{"1.1.0"}) {
+        return HIPDNN_STATUS_NOT_SUPPORTED;
+    }
     if (!plugin.hasOverrideExecute()) {
         return HIPDNN_STATUS_NOT_SUPPORTED;
     }
@@ -416,7 +420,7 @@ to take the override path with no overrides supplied; dispatch
 correctly falls through to the existing entry. It **is** an error to
 call the override execute API with overrides on a graph that did not
 set the flag at build time; the frontend overload rejects this with
-`HIPDNN_STATUS_BAD_PARAM` before any backend call.
+`ErrorCode::INVALID_VALUE` before any backend call.
 
 **Lifetime.** Temporary arrays passed to the plugin point into the
 variant pack's storage and live for the duration of the execute
@@ -761,14 +765,18 @@ two-layer (version filter + per-symbol check) model.
 Because the change is non-breaking, migration is straightforward:
 
 - **Existing plugins (in-tree and out-of-tree).** Continue to function
-  unchanged for Phase-1-shaped graphs. They are filtered out of the
-  applicable set only for graphs that actually use Phase-2 features.
-- **In-tree plugins adopting Phase 2.** Bump their reported version to
-  1.2.0 once they are updated to recognize `is_dynamic` and handle
-  the override execute API.
-- **Out-of-tree plugins adopting Phase 2.** Same path: rebuild
-  against 1.2.0 headers, implement the override execute symbol,
-  bump the reported version.
+  unchanged for graphs that do not opt into override features. They
+  are filtered out of the applicable set for graphs that require an
+  override API version newer than the one they report.
+- **In-tree plugins adopting Phase 1 override execute.** Bump their
+  reported version to 1.1.0 once they implement the override execute
+  API.
+- **Out-of-tree plugins adopting Phase 1 override execute.** Same
+  path: rebuild against 1.1.0 headers, implement the override execute
+  symbol, bump the reported version.
+- **Plugins adopting Phase 2 dynamic tensor features.** Bump their
+  reported version to 1.2.0 once they recognize `is_dynamic`,
+  wildcard dims, or stride-as-order.
 
 No coordinated version bump across plugin / data / backend / frontend
 SDKs is needed for this work. Each plugin migrates on its own
@@ -939,8 +947,9 @@ The plan exercises three categories:
   case for graphs and tensors that never opt in); the host dispatch
   switch; applicability filtering; override-payload translation from
   frontend to variant pack to plugin; and rejection paths
-  (`HIPDNN_STATUS_BAD_PARAM` for malformed overrides, "no applicable
-  engines" for graphs no plugin can serve).
+  (`ErrorCode::INVALID_VALUE` for malformed frontend overrides,
+  `HIPDNN_STATUS_BAD_PARAM` for malformed backend override attributes,
+  and "no applicable engines" for graphs no plugin can serve).
 - **API tests** verifying the frontend overload contract: empty
   overrides equivalent to non-override execute; missing graph flag +
   override payload returns an error before any backend call;
@@ -1096,14 +1105,15 @@ would be additive on top of the current parallel-vector transport.
 - **Applicability skip**: the mechanism that bypasses non-conforming
   plugins for graphs that cannot use them. Two layers compose: the
   per-graph plugin-version filter at applicability time (the primary
-  gate) and the per-symbol `hasOverrideExecute()` check at dispatch
-  (a safety net). See [§4.5](#45-applicability-filtering) and
+  gate) and the dispatch-time API-version plus per-symbol
+  `hasOverrideExecute()` checks (a safety net). See
+  [§4.5](#45-applicability-filtering) and
   [§4.6](#46-host-dispatch-logic).
 - **Host dispatch switch**: the inspection of variant-pack
   override-attribute presence to decide which plugin entry to call
   (`hipdnnEnginePluginExecuteOpGraphWithOverrides` if present, the
-  existing entry otherwise). The companion safety-net
-  `hasOverrideExecute()` check is described under "Applicability
+  existing entry otherwise). The companion safety-net API-version and
+  `hasOverrideExecute()` checks are described under "Applicability
   skip" above.
 - **SDPA gate**: the SDPA feature flag introduced in PR
   [#6493](https://github.com/ROCm/rocm-libraries/pull/6493), which

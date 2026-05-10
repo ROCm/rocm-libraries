@@ -80,6 +80,99 @@ TEST(TestEngineDetailsWrapper, DestroysPluginDetailsWhenFlatbufferVerificationFa
                                HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST(TestEngineDetailsWrapper, MoveAssignmentDestroysDestinationDetailsAndTransfersSourceDetails)
+{
+    auto resourceManager = std::make_shared<MockEnginePluginResourceManager>();
+    auto detailsA = createValidEngineDetails(100);
+    auto detailsB = createValidEngineDetails(200);
+    hipdnnPluginConstData_t returnedDetailsA{detailsA.GetBufferPointer(), detailsA.GetSize()};
+    hipdnnPluginConstData_t returnedDetailsB{detailsB.GetBufferPointer(), detailsB.GetSize()};
+
+    EXPECT_CALL(*resourceManager, getEngineDetails(100, nullptr, _))
+        .WillOnce([&returnedDetailsA](
+                      int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* engineDetails) {
+            *engineDetails = returnedDetailsA;
+        });
+    EXPECT_CALL(*resourceManager, getEngineDetails(200, nullptr, _))
+        .WillOnce([&returnedDetailsB](
+                      int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* engineDetails) {
+            *engineDetails = returnedDetailsB;
+        });
+
+    bool destroyedA = false;
+    bool destroyedB = false;
+
+    {
+        EngineDetailsWrapper destination(resourceManager, 100, nullptr);
+        EngineDetailsWrapper source(resourceManager, 200, nullptr);
+
+        EXPECT_CALL(*resourceManager, destroyEngineDetails(100, _))
+            .WillOnce(
+                [&destroyedA, &returnedDetailsA](int64_t, hipdnnPluginConstData_t* engineDetails) {
+                    destroyedA = true;
+                    EXPECT_EQ(engineDetails->ptr, returnedDetailsA.ptr);
+                    EXPECT_EQ(engineDetails->size, returnedDetailsA.size);
+                });
+        EXPECT_CALL(*resourceManager, destroyEngineDetails(200, _)).Times(0);
+
+        destination = std::move(source);
+
+        EXPECT_TRUE(destroyedA);
+        Mock::VerifyAndClearExpectations(resourceManager.get());
+
+        EXPECT_CALL(*resourceManager, destroyEngineDetails(200, _))
+            .WillOnce(
+                [&destroyedB, &returnedDetailsB](int64_t, hipdnnPluginConstData_t* engineDetails) {
+                    destroyedB = true;
+                    EXPECT_EQ(engineDetails->ptr, returnedDetailsB.ptr);
+                    EXPECT_EQ(engineDetails->size, returnedDetailsB.size);
+                });
+    }
+
+    EXPECT_TRUE(destroyedB);
+}
+
+TEST(TestEngineExecutionContextWrapper,
+     MoveAssignmentDestroysDestinationContextAndTransfersSourceContext)
+{
+    auto resourceManager = std::make_shared<MockEnginePluginResourceManager>();
+    auto contextA = hipdnnEnginePluginExecutionContext_t(0xaaaaaaaa);
+    auto contextB = hipdnnEnginePluginExecutionContext_t(0xbbbbbbbb);
+    const hipdnnPluginConstData_t fakeEngineConfig{reinterpret_cast<const void*>("fake_config"),
+                                                   11};
+
+    EXPECT_CALL(*resourceManager, createExecutionContext(100, &fakeEngineConfig, nullptr))
+        .WillOnce(::testing::Return(contextA));
+    EXPECT_CALL(*resourceManager, createExecutionContext(200, &fakeEngineConfig, nullptr))
+        .WillOnce(::testing::Return(contextB));
+
+    bool destroyedA = false;
+    bool destroyedB = false;
+
+    {
+        EngineExecutionContextWrapper destination(resourceManager, 100, &fakeEngineConfig, nullptr);
+        EngineExecutionContextWrapper source(resourceManager, 200, &fakeEngineConfig, nullptr);
+
+        EXPECT_CALL(*resourceManager, destroyExecutionContext(100, contextA))
+            .WillOnce([&destroyedA](int64_t, hipdnnEnginePluginExecutionContext_t) {
+                destroyedA = true;
+            });
+        EXPECT_CALL(*resourceManager, destroyExecutionContext(200, contextB)).Times(0);
+
+        destination = std::move(source);
+
+        EXPECT_TRUE(destroyedA);
+        Mock::VerifyAndClearExpectations(resourceManager.get());
+
+        EXPECT_CALL(*resourceManager, destroyExecutionContext(200, contextB))
+            .WillOnce([&destroyedB](int64_t, hipdnnEnginePluginExecutionContext_t) {
+                destroyedB = true;
+            });
+    }
+
+    EXPECT_TRUE(destroyedB);
+}
+
 TEST(TestEnginePluginResourceManager, SetStream)
 {
     const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
@@ -2045,6 +2138,7 @@ struct DispatchCase
     std::vector<int64_t> overrideLengths;
     DispatchExpectedPath expectedPath;
     hipdnnStatus_t expectedThrow = HIPDNN_STATUS_SUCCESS;
+    std::string_view apiVersion = hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION;
 };
 
 } // namespace
@@ -2098,6 +2192,15 @@ TEST_P(TestEnginePluginResourceManagerDispatchMatrix, RoutesOrRejectsOverrideDis
     else
     {
         EXPECT_CALL(*h.plugin, hasOverrideExecute()).Times(0);
+    }
+
+    if(hasOverrides && testCase.planOverrideShapeEnabled && testCase.hasOverrideExecute == 1)
+    {
+        EXPECT_CALL(*h.plugin, apiVersion()).WillOnce(::testing::Return(testCase.apiVersion));
+    }
+    else
+    {
+        EXPECT_CALL(*h.plugin, apiVersion()).Times(0);
     }
 
     EXPECT_CALL(*h.plugin, executeOpGraphWithOverrides(_, _, _, _, _, _, _, _, _, _)).Times(0);
@@ -2201,7 +2304,17 @@ INSTANTIATE_TEST_SUITE_P(
                                    {12, 4, 1},
                                    {3},
                                    DispatchExpectedPath::THROW_BEFORE_EXECUTE,
-                                   HIPDNN_STATUS_NOT_SUPPORTED}),
+                                   HIPDNN_STATUS_NOT_SUPPORTED},
+                      DispatchCase{"OldApiVersionWithOverrideSymbolRejected",
+                                   /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/true,
+                                   {1},
+                                   {2, 3, 4},
+                                   {12, 4, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_NOT_SUPPORTED,
+                                   hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE}),
     [](const auto& info) { return std::string(info.param.name); });
 
 // When the variant pack carries override tensors and the plugin exports the
@@ -2271,6 +2384,8 @@ TEST(TestEnginePluginResourceManager, DispatchRoutesToOverrideEntryWithReconstru
         .WillOnce(::testing::ReturnRef(overrideLengths));
 
     EXPECT_CALL(*h.plugin, hasOverrideExecute()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(*h.plugin, apiVersion())
+        .WillOnce(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
     EXPECT_CALL(*h.mockExecutionPlan, isOverrideShapeEnabled()).WillOnce(::testing::Return(true));
 
     // Capture the call to verify length narrowing and pointer reconstruction.

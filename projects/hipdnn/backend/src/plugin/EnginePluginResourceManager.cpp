@@ -694,8 +694,19 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides although the variant pack "
                        "carries override-tensor selectors.");
 
+        const auto pluginApiVersion = plugin->parsedApiVersion();
+        THROW_IF_FALSE(pluginApiVersion.has_value()
+                           && *pluginApiVersion >= computeMinimumPluginApiVersion(true),
+                       HIPDNN_STATUS_NOT_SUPPORTED,
+                       "Selected plugin API version does not support "
+                       "hipdnnEnginePluginExecuteOpGraphWithOverrides.");
+
         // Validate before narrowing variant-pack int64 lengths to the SDK uint32 surface.
         const auto numOverridesSize = overrideUniqueIds.size();
+        THROW_IF_TRUE(numOverridesSize > std::numeric_limits<uint32_t>::max(),
+                      HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND,
+                      "Override variant pack: number of overrides exceeds uint32 max");
+
         std::vector<uint32_t> overrideLengthsU32;
         overrideLengthsU32.reserve(numOverridesSize);
         for(size_t i = 0; i < overrideLengths64.size(); ++i)
@@ -831,12 +842,25 @@ EngineDetailsWrapper::EngineDetailsWrapper(EngineDetailsWrapper&& other) noexcep
     other._rm = nullptr;
     other._engineId = 0;
     other._engineDetailsData.ptr = nullptr;
+    other._engineDetailsData.size = 0;
 }
 
 EngineDetailsWrapper& EngineDetailsWrapper::operator=(EngineDetailsWrapper&& other) noexcept
 {
     if(this != &other)
     {
+        if(_engineDetailsData.ptr != nullptr && _rm != nullptr)
+        {
+            try
+            {
+                _rm->destroyEngineDetails(_engineId, &_engineDetailsData);
+            }
+            catch(const HipdnnException& e)
+            {
+                HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
+            }
+        }
+
         _rm = std::move(other._rm);
         _engineId = other._engineId;
         _engineDetailsData = other._engineDetailsData;
@@ -844,6 +868,7 @@ EngineDetailsWrapper& EngineDetailsWrapper::operator=(EngineDetailsWrapper&& oth
         other._rm = nullptr;
         other._engineId = 0;
         other._engineDetailsData.ptr = nullptr;
+        other._engineDetailsData.size = 0;
     }
     return *this;
 }
@@ -906,6 +931,7 @@ EngineExecutionContextWrapper::EngineExecutionContextWrapper(
     , _executionContext(other._executionContext)
 {
     other._rm = nullptr;
+    other._engineId = 0;
     other._executionContext = nullptr;
 }
 
@@ -914,11 +940,24 @@ EngineExecutionContextWrapper&
 {
     if(this != &other)
     {
+        if(_executionContext != nullptr && _rm != nullptr)
+        {
+            try
+            {
+                _rm->destroyExecutionContext(_engineId, _executionContext);
+            }
+            catch(const HipdnnException& e)
+            {
+                HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
+            }
+        }
+
         _rm = std::move(other._rm);
         _engineId = other._engineId;
         _executionContext = other._executionContext;
 
         other._rm = nullptr;
+        other._engineId = 0;
         other._executionContext = nullptr;
     }
     return *this;
