@@ -119,6 +119,21 @@ BatchnormFwdInference/nchw/fp32/
 
 Multiple bundles coexist in the same directory, distinguished by their base name (`Small`, `Large`, `MIOpen`). See [Folder Convention](#folder-convention) for the full directory structure.
 
+#### Binary tensor format
+
+Each `.tensor{uid}.bin` file is a **raw dump of the tensor's underlying storage** — no header, no metadata, no framing. The graph JSON carries all the metadata needed to interpret the bytes:
+
+| Property | Source | Details |
+|----------|--------|---------|
+| Element type | `data_type` field in JSON | `FLOAT` = 4 bytes, `HALF` = 2 bytes, `BFLOAT16` = 2 bytes, etc. |
+| Dimensions | `dims` field in JSON | Element counts per dimension (e.g., `[1, 3, 224, 224]`) |
+| Strides | `strides` field in JSON | **Element strides**, not byte strides (e.g., `[150528, 50176, 224, 1]`). Multiply by `sizeof(element_type)` for byte offsets. |
+| Byte order | Native platform | Little-endian on x86-64. No endianness marker in the file. |
+
+The file size in bytes equals `element_space × sizeof(element_type)`, where `element_space` is computed from `dims` and `strides` (the total storage footprint including any gaps for non-contiguous layouts). For a contiguous (packed) tensor, `element_space` equals the product of `dims`.
+
+**To read a `.bin` file**: allocate `element_space × sizeof(T)` bytes, read the file into that buffer, then index using the strides from JSON. For contiguous tensors this is a straightforward row-major (C-order) array. The Python writer uses PyTorch's `untyped_storage()` and the C++ reader uses `memcpy` into a pre-allocated buffer — both operate on raw bytes with no interpretation.
+
 ---
 
 ### Generic Test Runner
