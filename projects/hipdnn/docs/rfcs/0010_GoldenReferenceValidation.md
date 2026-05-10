@@ -188,11 +188,12 @@ Only batchnorm has generators and data today. Generators for the remaining opera
 
 The golden data format is **reference-source-agnostic**. Any tool that produces a valid bundle (graph JSON matching the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema + corresponding `.bin` files) is a valid reference source. The validation pipeline does not know or care what produced the data.
 
-| Category | Examples |
-|----------|----------|
-| Python frameworks | PyTorch, TensorFlow, JAX |
-| In-house references | `CpuReferenceGraphExecutor`, `GpuReferenceGraphExecutor` |
-| AMD internal tools | AITER, AOTriton |
+| Category | Examples | Portability |
+|----------|----------|-------------|
+| Python frameworks | PyTorch, TensorFlow, JAX | Architecture-independent — bundles valid on any GPU |
+| In-house CPU reference | `CpuReferenceGraphExecutor` | Architecture-independent |
+| In-house GPU reference | `GpuReferenceGraphExecutor` | **Architecture-dependent** — bundles tied to the GPU that generated them |
+| AMD internal tools | AITER, AOTriton | Architecture-dependent |
 
 ---
 
