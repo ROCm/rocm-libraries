@@ -494,6 +494,11 @@ hipdnnHandle_t GraphDescriptor::getHandle() const
     return _handle;
 }
 
+bool GraphDescriptor::isOverrideShapeEnabled() const
+{
+    return _isOverrideShapeEnabled;
+}
+
 std::string GraphDescriptor::toString() const
 {
     std::string str = "GraphDescriptor: {handle=";

@@ -23,6 +23,7 @@
 #include "descriptors/TestMacros.hpp"
 #include "descriptors/VariantDescriptor.hpp"
 #include "descriptors/mocks/MockDescriptor.hpp"
+#include "descriptors/mocks/MockEnginePluginResourceManager.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
 #include "plugins/mocks/MockEnginePlugin.hpp"
 #include "plugins/mocks/MockEnginePluginManager.hpp"
@@ -55,6 +56,28 @@ TEST(TestEnginePluginResourceManager, PluginLoading)
     {
         const EnginePluginResourceManager resourceManager(pluginManager);
     }
+}
+
+TEST(TestEngineDetailsWrapper, DestroysPluginDetailsWhenFlatbufferVerificationFails)
+{
+    auto resourceManager = std::make_shared<MockEnginePluginResourceManager>();
+    std::array<uint8_t, 4> malformedBytes{1, 2, 3, 4};
+    hipdnnPluginConstData_t returnedDetails{malformedBytes.data(), malformedBytes.size()};
+
+    EXPECT_CALL(*resourceManager, getEngineDetails(100, nullptr, _))
+        .WillOnce([&returnedDetails](
+                      int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* engineDetails) {
+            *engineDetails = returnedDetails;
+        });
+    EXPECT_CALL(*resourceManager, destroyEngineDetails(100, _))
+        .WillOnce([](int64_t, hipdnnPluginConstData_t* engineDetails) {
+            EXPECT_NE(engineDetails, nullptr);
+            EXPECT_NE(engineDetails->ptr, nullptr);
+            EXPECT_EQ(engineDetails->size, 4u);
+        });
+
+    ASSERT_THROW_HIPDNN_STATUS(EngineDetailsWrapper(resourceManager, 100, nullptr),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST(TestEnginePluginResourceManager, SetStream)
@@ -2015,6 +2038,7 @@ struct DispatchCase
 {
     const char* name;
     int hasOverrideExecute; // -1: not queried, 0: queried false, 1: queried true.
+    bool planOverrideShapeEnabled = true;
     std::vector<int64_t> overrideUniqueIds;
     std::vector<int64_t> overrideShapes;
     std::vector<int64_t> overrideStrides;
@@ -2058,7 +2082,15 @@ TEST_P(TestEnginePluginResourceManagerDispatchMatrix, RoutesOrRejectsOverrideDis
     EXPECT_CALL(*h.mockVariantPack, getOverrideLengths())
         .WillOnce(::testing::ReturnRef(overrideLengths));
 
-    if(testCase.hasOverrideExecute >= 0)
+    const bool hasOverrides = !overrideUniqueIds.empty() || !overrideShapes.empty()
+                              || !overrideStrides.empty() || !overrideLengths.empty();
+    if(hasOverrides)
+    {
+        EXPECT_CALL(*h.mockExecutionPlan, isOverrideShapeEnabled())
+            .WillOnce(::testing::Return(testCase.planOverrideShapeEnabled));
+    }
+
+    if(hasOverrides && testCase.planOverrideShapeEnabled && testCase.hasOverrideExecute >= 0)
     {
         EXPECT_CALL(*h.plugin, hasOverrideExecute())
             .WillOnce(::testing::Return(testCase.hasOverrideExecute == 1));
@@ -2101,6 +2133,7 @@ INSTANTIATE_TEST_SUITE_P(
     TestEnginePluginResourceManagerDispatchMatrix,
     ::testing::Values(DispatchCase{"VersionLiarPluginRejected",
                                    /*hasOverrideExecute=*/0,
+                                   /*planOverrideShapeEnabled=*/true,
                                    {1},
                                    {2, 3, 4},
                                    {12, 4, 1},
@@ -2109,6 +2142,7 @@ INSTANTIATE_TEST_SUITE_P(
                                    HIPDNN_STATUS_NOT_SUPPORTED},
                       DispatchCase{"NoOverridesRoutesToLegacyEntry",
                                    /*hasOverrideExecute=*/-1,
+                                   /*planOverrideShapeEnabled=*/false,
                                    {},
                                    {},
                                    {},
@@ -2116,6 +2150,7 @@ INSTANTIATE_TEST_SUITE_P(
                                    DispatchExpectedPath::LEGACY_EXECUTE},
                       DispatchCase{"MismatchedOverrideLengthsRejected",
                                    /*hasOverrideExecute=*/-1,
+                                   /*planOverrideShapeEnabled=*/true,
                                    {1, 2},
                                    {2, 3, 4, 5},
                                    {12, 4, 1, 1},
@@ -2124,6 +2159,7 @@ INSTANTIATE_TEST_SUITE_P(
                                    HIPDNN_STATUS_BAD_PARAM},
                       DispatchCase{"OverrideShapesFlatCountMismatchRejected",
                                    /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/true,
                                    {1},
                                    {2, 3},
                                    {12, 4, 1},
@@ -2132,6 +2168,7 @@ INSTANTIATE_TEST_SUITE_P(
                                    HIPDNN_STATUS_BAD_PARAM},
                       DispatchCase{"OverrideStridesFlatCountMismatchRejected",
                                    /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/true,
                                    {1},
                                    {2, 3, 4},
                                    {12, 4, 1, 1},
@@ -2140,6 +2177,7 @@ INSTANTIATE_TEST_SUITE_P(
                                    HIPDNN_STATUS_BAD_PARAM},
                       DispatchCase{"ZeroOverrideLengthRejected",
                                    /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/true,
                                    {1},
                                    {},
                                    {},
@@ -2148,12 +2186,22 @@ INSTANTIATE_TEST_SUITE_P(
                                    HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND},
                       DispatchCase{"OverrideLengthExceedsUint32Rejected",
                                    /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/true,
                                    {1},
                                    {},
                                    {},
                                    {static_cast<int64_t>(std::numeric_limits<uint32_t>::max()) + 1},
                                    DispatchExpectedPath::THROW_BEFORE_EXECUTE,
-                                   HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND}),
+                                   HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND},
+                      DispatchCase{"OverrideMetadataRejectedWhenPlanNotOverrideEnabled",
+                                   /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/false,
+                                   {1},
+                                   {2, 3, 4},
+                                   {12, 4, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_NOT_SUPPORTED}),
     [](const auto& info) { return std::string(info.param.name); });
 
 // When the variant pack carries override tensors and the plugin exports the
@@ -2223,6 +2271,7 @@ TEST(TestEnginePluginResourceManager, DispatchRoutesToOverrideEntryWithReconstru
         .WillOnce(::testing::ReturnRef(overrideLengths));
 
     EXPECT_CALL(*h.plugin, hasOverrideExecute()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(*h.mockExecutionPlan, isOverrideShapeEnabled()).WillOnce(::testing::Return(true));
 
     // Capture the call to verify length narrowing and pointer reconstruction.
     EXPECT_CALL(*h.plugin,

@@ -669,6 +669,11 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
 
     if(hasOverrides)
     {
+        THROW_IF_FALSE(executionPlanDesc->isOverrideShapeEnabled(),
+                       HIPDNN_STATUS_NOT_SUPPORTED,
+                       "Execution plan was not built with override shape support enabled, but the "
+                       "variant pack carries override-tensor selectors.");
+
         THROW_IF_NE(overrideUniqueIds.size(),
                     overrideLengths64.size(),
                     HIPDNN_STATUS_BAD_PARAM,
@@ -767,15 +772,38 @@ EngineDetailsWrapper::EngineDetailsWrapper(const std::shared_ptr<EnginePluginRes
                                            int64_t engineId,
                                            const GraphDescriptor* graphDesc)
     : _rm(rm)
+    , _engineId(engineId)
 {
-    _rm->getEngineDetails(engineId, graphDesc, &_engineDetailsData);
-    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(_engineDetailsData.ptr),
-                                   _engineDetailsData.size);
-    if(!verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineDetails>())
+    hipdnnPluginConstData_t engineDetailsData{nullptr, 0};
+    _rm->getEngineDetails(engineId, graphDesc, &engineDetailsData);
+
+    try
     {
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              "EngineDetailsWrapper: unable to verify the flatbuffer schema.");
+        flatbuffers::Verifier verifier(static_cast<const uint8_t*>(engineDetailsData.ptr),
+                                       engineDetailsData.size);
+        if(!verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineDetails>())
+        {
+            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                                  "EngineDetailsWrapper: unable to verify the flatbuffer schema.");
+        }
     }
+    catch(...)
+    {
+        if(engineDetailsData.ptr != nullptr)
+        {
+            try
+            {
+                _rm->destroyEngineDetails(engineId, &engineDetailsData);
+            }
+            catch(const HipdnnException& e)
+            {
+                HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
+            }
+        }
+        throw;
+    }
+
+    _engineDetailsData = engineDetailsData;
 }
 
 EngineDetailsWrapper::~EngineDetailsWrapper()
@@ -787,7 +815,7 @@ EngineDetailsWrapper::~EngineDetailsWrapper()
 
     try
     {
-        _rm->destroyEngineDetails(get()->engine_id(), &_engineDetailsData);
+        _rm->destroyEngineDetails(_engineId, &_engineDetailsData);
     }
     catch(const HipdnnException& e)
     {
@@ -797,9 +825,11 @@ EngineDetailsWrapper::~EngineDetailsWrapper()
 
 EngineDetailsWrapper::EngineDetailsWrapper(EngineDetailsWrapper&& other) noexcept
     : _rm(std::move(other._rm))
+    , _engineId(other._engineId)
     , _engineDetailsData(other._engineDetailsData)
 {
     other._rm = nullptr;
+    other._engineId = 0;
     other._engineDetailsData.ptr = nullptr;
 }
 
@@ -808,9 +838,11 @@ EngineDetailsWrapper& EngineDetailsWrapper::operator=(EngineDetailsWrapper&& oth
     if(this != &other)
     {
         _rm = std::move(other._rm);
+        _engineId = other._engineId;
         _engineDetailsData = other._engineDetailsData;
 
         other._rm = nullptr;
+        other._engineId = 0;
         other._engineDetailsData.ptr = nullptr;
     }
     return *this;

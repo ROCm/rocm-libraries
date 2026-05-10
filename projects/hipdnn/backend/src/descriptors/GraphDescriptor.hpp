@@ -137,6 +137,7 @@ public:
         createFromJsonGraph(GraphDescriptor& desc, const char* jsonGraph, size_t jsonByteSize);
 
     virtual hipdnnHandle_t getHandle() const;
+    virtual bool isOverrideShapeEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

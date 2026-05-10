@@ -1892,6 +1892,16 @@ public:
                 getTensorsByUid(), overrideUids, overrideShapes, overrideStrides));
         }
 
+        for(const auto uid : overrideUids)
+        {
+            if(variantPack.find(uid) == variantPack.end())
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "Override UID " + std::to_string(uid)
+                            + " is not present in the variant pack."};
+            }
+        }
+
         HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name() << " with "
                                               << overrideUids.size() << " override entries.");
 
@@ -3155,6 +3165,14 @@ public:
     /// Enable or disable runtime tensor-shape overrides for this graph.
     Graph& set_override_shape_enabled(bool enabled) // NOLINT(readability-identifier-naming)
     {
+        if((_graphDesc && _graphDesc->valid())
+           || (_executionPlanDesc && _executionPlanDesc->valid()))
+        {
+            HIPDNN_FE_LOG_WARN(
+                "set_override_shape_enabled() called after graph descriptors or execution plans "
+                "were created. Rebuild the graph for this flag to affect backend plugin "
+                "selection and execution-plan override eligibility.");
+        }
         _isOverrideShapeEnabled = enabled;
         return *this;
     }

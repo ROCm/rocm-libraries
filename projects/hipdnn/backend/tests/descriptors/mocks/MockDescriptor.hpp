@@ -141,6 +141,7 @@ public:
 
     MOCK_METHOD(hipdnnHandle_t, getHandle, (), (const, override));
     MOCK_METHOD(hipdnnPluginConstData_t, getSerializedGraph, (), (const, override));
+    MOCK_METHOD(bool, isOverrideShapeEnabled, (), (const, override));
 
     static hipdnnBackendDescriptorType_t getStaticType()
     {
@@ -175,6 +176,7 @@ public:
                 (const, override));
     MOCK_METHOD(int64_t, getEngineId, (), (const, override));
     MOCK_METHOD(const std::vector<int64_t>&, getTensorUids, (), (const, override));
+    MOCK_METHOD(bool, isOverrideShapeEnabled, (), (const, override));
     MOCK_METHOD(hipdnnEnginePluginExecutionContext_t, getExecutionContext, (), (const, override));
 
     static hipdnnBackendDescriptorType_t getStaticType()

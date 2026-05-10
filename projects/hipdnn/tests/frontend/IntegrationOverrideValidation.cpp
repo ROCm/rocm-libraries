@@ -230,8 +230,9 @@ TEST_F(IntegrationOverrideValidation, OverrideUidMissingFromVariantPackRejectedB
 
     resetLastCallRecord(*_implementingPlugin, "OverrideImplementing");
     auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
-    EXPECT_NE(result.code, ErrorCode::OK)
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
         << "Override UID 2 is a graph tensor, but it is absent from the variant pack.";
+    EXPECT_NE(result.err_msg.find("variant pack"), std::string::npos);
 
     const auto* record = getLastCallRecord(*_implementingPlugin, "OverrideImplementing");
     ASSERT_NE(record, nullptr);
@@ -305,6 +306,36 @@ TEST_F(IntegrationOverrideValidationFlagAbsent, ArrayFormRejectedWhenFlagAbsent)
         << "Override-execute on a graph that did not opt in must reject "
            "(RFC §7.1): "
         << result.err_msg;
+    const auto* record = getLastCallRecord(*_implementingPlugin, "OverrideImplementing");
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE);
+}
+
+TEST_F(IntegrationOverrideValidationFlagAbsent, PostBuildToggleDoesNotEnableExistingPlan)
+{
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+
+    auto graph = hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
+        "FlagAbsent_PostBuildToggle", dims, /*strides=*/{}, /*overrideShapeEnabled=*/false);
+    compileGraph(graph, _handle);
+    graph->set_override_shape_enabled(true);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = nullptr;
+    variantPack[2] = nullptr;
+
+    const std::vector<int64_t> uids = {1};
+    const std::vector<std::vector<int64_t>> shapes = {dims};
+    const std::vector<std::vector<int64_t>> strides
+        = {hipdnn_data_sdk::utilities::generateStrides(dims)};
+
+    resetLastCallRecord(*_implementingPlugin, "OverrideImplementing");
+    auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
+    EXPECT_NE(result.code, ErrorCode::OK)
+        << "Toggling override shape support after build must not make the existing plan "
+           "override-capable.";
+    EXPECT_NE(result.err_msg.find("override"), std::string::npos);
+
     const auto* record = getLastCallRecord(*_implementingPlugin, "OverrideImplementing");
     ASSERT_NE(record, nullptr);
     EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE);
