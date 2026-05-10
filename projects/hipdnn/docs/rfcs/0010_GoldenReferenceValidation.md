@@ -220,29 +220,40 @@ The `--verification-mode` flag overrides this default. In golden mode, tests wit
 
 ### Tolerance Framework
 
-Tolerances are **always defined in code and configuration**, never stored in the data bundle.
+Tolerances are **always defined in code and configuration**, never stored in the data bundle. A bundle says *what* to compute and *what* to expect — the tolerance says *how close is close enough*. Keeping tolerances out of the bundle means the same bundle can be validated with different tolerance policies (strict for a CPU reference engine, looser for a GPU engine that trades precision for throughput) without regenerating data.
 
-#### Priority chain
+#### Two questions, two levels
 
-Two levels, checked in order:
+Tolerance selection answers two independent questions:
 
-| Priority | Source | Purpose |
-|----------|--------|---------|
-| 1 | TOML per-engine override | Grant exceptions for engines that legitimately exceed the default — e.g., a fused kernel trading precision for throughput. Each engine's TOML config (e.g., [`MIOPEN_ENGINE.toml`](../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) declares `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. The integration harness queries these via `TestConfig::findToleranceOverride(testName)`. |
-| 2 | Per-operation default | The expected error bound for the operation and data type. Applied when no TOML override matches. |
+1. **"How much error should this operation produce?"** — the per-operation default. This is a property of the *computation* (operation type, data type, tensor dimensions). It is the same regardless of which engine runs the graph.
 
-This chain never changes. TOML overrides always win.
+2. **"Does this engine need more room?"** — the per-engine override. This is a property of the *engine*. A specific engine may legitimately exceed the mathematical bound for certain operations — e.g., a fused kernel trading precision for throughput, or a backend whose accumulation order differs from the reference.
 
-#### How the default evolves
+These compose into a two-level priority chain:
 
-The per-operation default (level 2) evolves in two phases:
+| Priority | Source | Depends on | Example |
+|----------|--------|------------|---------|
+| 1 | TOML per-engine override | Engine | `MIOPEN_ENGINE.toml`: conv fp16 → atol `1e-3` |
+| 2 | Per-operation default | Operation + data type | batchnorm inference fp32 → atol `2e-4` |
+
+If a TOML override matches, it wins. Otherwise the per-operation default applies. This chain is permanent — it does not change as the system evolves.
+
+The TOML mechanism already exists. Each engine's config (e.g., [`MIOPEN_ENGINE.toml`](../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. The integration harness queries these via `TestConfig::findToleranceOverride(testName)`.
+
+#### How the per-operation default evolves
+
+The per-operation default (level 2) starts simple and gets smarter:
 
 - **This RFC — fixed tolerances**: [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) defines compile-time constants per operation and data type (e.g., batchnorm inference fp32 = `2e-4`, conv fwd fp32 = `1e-5`). Golden tests will use these same fixed values.
-- **Future — dynamic tolerances**: [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) computes tolerances from tensor dimensions using Higham error bounds. Functions already exist for conv, matmul, batchnorm, layernorm, RMS norm, and pointwise. Dynamic tolerances will replace fixed values as the default, giving tighter bounds for small tensors and appropriately looser bounds for large ones. Fixed values remain as a fallback for operations without a dynamic function.
+
+- **Future — dynamic tolerances**: [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) computes tolerances from tensor dimensions using Higham error bounds. Functions already exist for conv, matmul, batchnorm, layernorm, RMS norm, and pointwise. Dynamic tolerances will replace fixed values as the per-operation default, giving tighter bounds for small tensors and appropriately looser bounds for large ones. Fixed values remain as fallback for operations without a dynamic function.
+
+This evolution changes *how* the default is computed — it does not change the two-level chain. TOML overrides still win at every stage.
 
 #### Current gap
 
-The golden ref framework (`TestGoldenReferenceCpu`) takes tolerances as hard-coded function parameters — it bypasses both the TOML override lookup and the operation-based tolerance selection. Golden tests must be connected to the same two-level flow.
+The golden ref framework (`TestGoldenReferenceCpu`) takes tolerances as hard-coded function parameters — it bypasses both the TOML override lookup and the operation-based tolerance selection. Golden tests must be connected to the same two-level flow: check TOML override first, fall back to per-operation default.
 
 **Acceptance criteria**:
 - [ ] Golden data bundles contain no tolerance fields
