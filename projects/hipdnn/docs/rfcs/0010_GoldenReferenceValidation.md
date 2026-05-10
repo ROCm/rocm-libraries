@@ -80,11 +80,18 @@ The golden reference infrastructure is already built and working for batchnorm. 
 
 All of these components operate on a single shared artifact -- the golden data bundle. A bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
 
+The bundle format is **deliberately independent of any test infrastructure**. The JSON follows the FlatBuffers `graph.fbs` schema; the `.bin` files are raw contiguous tensors. Any tool that can parse JSON and read binary can consume bundles — they are not tied to GTest, `TestGoldenReferenceCpu`, or the `getGoldenReferenceParams()` discovery mechanism. Examples of other consumers:
+
+- **External test harnesses** — a partner's internal test framework loads the same bundles to validate their engine
+- **Python validation scripts** — a PyTorch script loads a bundle, re-runs the computation, compares
+- **Standalone CLI tools** — the proposed [bundle inspection tool](#generic-test-runner) and future [bundle-to-bundle comparison tool](#future-work) consume bundles directly
+- **CI systems** — a non-GTest CI pipeline loads bundles, invokes an engine, checks results
+
 A bundle can be **full** or **graph-only**. A full bundle (`{Name}.json` + `.bin` files) carries pre-computed tensor data — the runner loads it and compares. A graph-only bundle (`{Name}.json` alone, no `.bin` files) carries only the computation definition, no tensor data. The runtime behavior is determined by the test fixture: it generates inputs, runs the engine under test and a reference source (e.g., CPU reference for GPU tests), compares their outputs, and optionally writes the resulting `.bin` files back to produce a full bundle. For reproducible inputs across runs, use fixed seeds.
 
 ### Golden Data Format
 
-Golden data uses the existing format already established by `LoadGraphAndTensors.hpp` and `Graph.save()`. The graph JSON inside the bundle defines the test — operation type, tensor shapes, data types, and all parameters. A bundle is a set of files with a shared base name: one `.json` file and one `.tensor{uid}.bin` file per tensor. All files sit in the same directory — no wrapper folder.
+The bundle format is a convention, not a library API. It uses the existing format already established by `LoadGraphAndTensors.hpp` (C++ reader) and `Graph.save()` (Python writer), but any tool that follows the same convention can produce or consume bundles. A bundle is a set of files with a shared base name: one `.json` file (graph definition conforming to the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema) and one `.tensor{uid}.bin` file per tensor (raw contiguous data matching the tensor's declared `data_type`, `dims`, and `strides`). All files sit in the same directory — no wrapper folder.
 
 ```
 {Name}.json              # Graph definition (operation, tensor metadata, parameters)
