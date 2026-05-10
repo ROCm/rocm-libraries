@@ -868,18 +868,15 @@ public:
 
     static hipdnnPluginStatus_t enginePluginCreateExecutionContextFromSerialized(
         hipdnnEnginePluginHandle_t handle,
-        const hipdnnPluginConstData_t* engineConfig,
         const hipdnnPluginConstData_t* serializedContext,
         hipdnnEnginePluginExecutionContext_t* executionContext)
     {
-        LOG_API_ENTRY("handle=" << static_cast<void*>(handle) << ", engineConfig="
-                                << static_cast<const void*>(engineConfig) << ", serializedContext="
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle) << ", serializedContext="
                                 << static_cast<const void*>(serializedContext)
                                 << ", executionContext=" << static_cast<void*>(executionContext));
 
         return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
             hipdnn_plugin_sdk::throwIfNull(handle);
-            hipdnn_plugin_sdk::throwIfNull(engineConfig);
             hipdnn_plugin_sdk::throwIfNull(serializedContext);
             hipdnn_plugin_sdk::throwIfNull(serializedContext->ptr);
             hipdnn_plugin_sdk::throwIfNull(executionContext);
@@ -1165,12 +1162,11 @@ private:
     HIPDNN_PLUGIN_NODISCARD HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t                       \
         hipdnnEnginePluginCreateExecutionContextFromSerialized(                                  \
             hipdnnEnginePluginHandle_t handle,                                                   \
-            const hipdnnPluginConstData_t* engineConfig,                                         \
             const hipdnnPluginConstData_t* serializedContext,                                    \
             hipdnnEnginePluginExecutionContext_t* executionContext)                              \
     {                                                                                            \
         return TestPluginBase::enginePluginCreateExecutionContextFromSerialized(                 \
-            handle, engineConfig, serializedContext, executionContext);                          \
+            handle, serializedContext, executionContext);                                        \
     }                                                                                            \
                                                                                                  \
     HIPDNN_PLUGIN_NODISCARD HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t                       \

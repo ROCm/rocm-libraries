@@ -17,7 +17,6 @@
 #include "OverrideTestUtils.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_flatbuffers_sdk/data_objects/execution_plan_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginCommon.hpp>
@@ -252,32 +251,7 @@ int currentProcessId()
 
 std::string describeCompiledPlanForFailure(const std::vector<uint8_t>& compiledPlan)
 {
-    using hipdnn_flatbuffers_sdk::data_objects::GetSerializedExecutionPlan;
-    using hipdnn_flatbuffers_sdk::data_objects::VerifySerializedExecutionPlanBuffer;
-
-    if(compiledPlan.empty())
-    {
-        return "compiled_plan_size=0";
-    }
-
-    flatbuffers::Verifier verifier(compiledPlan.data(), compiledPlan.size());
-    if(!VerifySerializedExecutionPlanBuffer(verifier))
-    {
-        return "compiled_plan_size=" + std::to_string(compiledPlan.size())
-               + ", flatbuffer_valid=false";
-    }
-
-    const auto* plan = GetSerializedExecutionPlan(compiledPlan.data());
-    const auto* engineConfig = plan->engine_config();
-    const auto* pluginPayload = plan->plugin_payload();
-    const auto payloadSize = pluginPayload != nullptr ? pluginPayload->size() : 0U;
-    const auto payloadFirstByte = payloadSize > 0 ? static_cast<int>(pluginPayload->Get(0)) : -1;
-    return "compiled_plan_size=" + std::to_string(compiledPlan.size())
-           + ", engine_id=" + std::to_string(plan->engine_id())
-           + ", workspace_size=" + std::to_string(plan->workspace_size()) + ", engine_config_size="
-           + std::to_string(engineConfig != nullptr ? engineConfig->size() : 0U)
-           + ", plugin_payload_size=" + std::to_string(payloadSize)
-           + ", plugin_payload_first_byte=" + std::to_string(payloadFirstByte);
+    return "compiled_plan_size=" + std::to_string(compiledPlan.size());
 }
 
 void createPlanOnlyGraph(hipdnnHandle_t handle,
