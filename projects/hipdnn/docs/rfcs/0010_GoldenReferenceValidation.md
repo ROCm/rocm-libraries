@@ -42,7 +42,7 @@ The integration test suite validates engine outputs by computing references at r
 
 A prior effort established a golden reference pattern -- golden data bundles (graph JSON + tensor `.bin` files) loaded from disk and validated against engine outputs. The initial infrastructure is in place for batchnorm. This RFC extends golden data coverage to all operation types, formalizes the folder convention, adds data integrity checks, and integrates with CI.
 
-**Long-term direction**: Every integration test becomes a data bundle. Adding a test means dropping files in a folder — no C++ code, no `buildGraph()` functions, no per-operation test classes. The graph is always loaded from the bundle JSON. The regression suite's end state is entirely data-driven.
+**Long-term direction**: Every integration test becomes a data bundle. Adding a test means dropping files in a folder — no C++ code, no per-operation test classes. The graph is always loaded from the bundle JSON. The regression suite's end state is entirely data-driven.
 
 ---
 
@@ -107,7 +107,7 @@ The golden reference infrastructure is already built and working for batchnorm. 
 
 ### Self-Contained Bundles
 
-All of these components operate on a single shared artifact — the golden data bundle. A bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
+Every component above — loader, runners, generators, verifier — operates on a single shared artifact: the **golden data bundle**. A bundle does not reference any C++ code or any test fixture. If the computation changes, generate a new bundle.
 
 The bundle format is independent of any test infrastructure. The JSON follows the FlatBuffers `graph.fbs` schema; the `.bin` files are raw contiguous tensors. Any tool that can parse JSON and read binary can produce or consume bundles.
 
