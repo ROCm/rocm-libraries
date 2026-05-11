@@ -99,8 +99,8 @@ The golden reference infrastructure is already built and working for batchnorm. 
 | TOML override infrastructure | **Kept as-is** | Golden tests connected to existing `[[tolerance_overrides]]` glob matching |
 | Python generation framework | **Kept, enhanced** | Generator scripts auto-derive output paths from graph content |
 | Existing golden data | **Kept, relocated** | 6 batchnorm bundles move to `golden_reference_data/quick/BatchnormFwdInference/...` |
-| `GoldenReferenceCpu.hpp` | **→ `ValidateGoldenBundleWithRef.hpp`** | New file in `test_sdk/tests/`. Inherits `ValidateGoldenBundleBase`. Recursive discovery, tolerance looked up by operation type |
-| `GoldenReferenceGpu.hpp` | **→ `ValidateGoldenBundleWithPlugin.hpp`** | New file in `miopen-provider/tests/`. Inherits `ValidateGoldenBundleBase`. Plugin setup/teardown, device buffers, "unsupported" as SKIP |
+| `GoldenReferenceCpu.hpp` | **→ `ValidateGoldenBundleWithRef.hpp`** | New file in `test_sdk/tests/`. Inherits `ValidateGoldenBundleBase`. Overrides execution to run via reference executor (CPU or GPU) |
+| `GoldenReferenceGpu.hpp` | **→ `ValidateGoldenBundleWithPlugin.hpp`** | New file in `miopen-provider/tests/`. Inherits `ValidateGoldenBundleBase`. Overrides execution to run via GPU plugin — handles device buffers, plugin setup/teardown, "unsupported" as SKIP |
 | `TestCpuFpReferenceBatchnorm.cpp` | **Replaced** | Per-operation C++ class eliminated — bundles discovered automatically |
 | `DynamicTolerances.hpp` | **Future** | Not connected in this RFC — future fallback when no fixed tolerance exists |
 
@@ -197,7 +197,7 @@ The file size in bytes equals `element_space × sizeof(element_type)`, where `el
 
 ![Validation Pipeline](images/validation_pipeline.png)
 
-The runner is a **base class** (`ValidateGoldenBundleBase`) with two concrete subclasses: `ValidateGoldenBundleWithRef` (reference executor) and `ValidateGoldenBundleWithPlugin` (GPU plugin). The base class owns discovery, loading, tolerance lookup, and comparison. The subclasses override the execution step — ref runs on host buffers with a simple setup; plugin creates handles, engine configs, and device buffers, and reports "unsupported" as SKIP. Neither subclass knows what operation a bundle contains until it loads the graph JSON at runtime.
+The runner is a **base class** (`ValidateGoldenBundleBase`) with two concrete subclasses: `ValidateGoldenBundleWithRef` (reference executor) and `ValidateGoldenBundleWithPlugin` (GPU plugin). The base class owns discovery, loading, tolerance lookup, and comparison. Each subclass overrides the execution step. Neither subclass knows what operation a bundle contains until it loads the graph JSON at runtime.
 
 #### How it works
 
