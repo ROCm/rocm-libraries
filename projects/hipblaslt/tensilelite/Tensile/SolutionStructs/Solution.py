@@ -461,6 +461,25 @@ class Solution(collections.abc.Mapping):
     if "Valid" not in state:
       state["Valid"] = True
 
+    # SIA=4 means "use StinkyTofu with full optimization". Remap to SIA=0 so all
+    # existing scheduling logic is unaffected, and record the opt level separately.
+    if state["ScheduleIterAlg"] == 4:
+      import rocisa
+      if not rocisa.hasStinkyTofuBackend():
+        reject(state, printRejectionReason,
+               "ScheduleIterAlg=4 requires the StinkyTofu backend, but rocisa was built without it")
+        return
+      if not rocisa.isSupportedByStinkyTofu(state["ISA"]):
+        supported = rocisa.getRegisteredArchKeys()
+        reject(state, printRejectionReason,
+               f"ScheduleIterAlg=4 is not supported for {state['ISA']}: no StinkyTofu backend for this architecture. "
+               f"Supported: {supported}")
+        return
+      state["ScheduleIterAlg"] = 0
+      state["_StinkyTofuOptLevel"] = 3
+    else:
+      state["_StinkyTofuOptLevel"] = None
+
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")
 
