@@ -4,42 +4,52 @@
 
 .. _install-linux:
 
-**************************************************************************
-Installing and building hipSPARSELt
-**************************************************************************
+*****************************************
+Build and install hipSPARSELt from source
+*****************************************
 
-This topic explains how to install and build the hipSPARSELt library.
+To build hipSPARSELt as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build hipSPARSELt standalone using the following
+instructions.
 
 Prerequisites
-====================================
+=============
 
 hipSPARSELt requires a :doc:`ROCm-enabled platform <rocm:index>` and the
 :doc:`hipSPARSE library <hipsparse:index>` for the header file.
 
-Installing prebuilt packages
-==================================
+Quick start using install.sh
+============================
 
-
-hipSPARSELt can be installed from the AMD ROCm repository.
-For detailed instructions on installing ROCm, see :doc:`ROCm installation <rocm-install-on-linux:index>`.
-
-To install hipSPARSELt on Ubuntu, run these commands:
+The root directory of the `hipSPARSELt project <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparselt>`_
+within the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_ contains the
+helper bash script ``install.sh`` for building and installing hipSPARSELt on Ubuntu with a single command. The
+script only accepts a few options and hardcodes configuration that can be specified by invoking
+CMake directly. However, it's a great way to get started quickly and can serve as an example of how to build
+and install hipSPARSELt. Some commands require ``sudo`` access, so the script might prompt you for a password.
 
 .. code-block:: bash
 
-   sudo apt-get update
-   sudo apt-get install hipsparselt
+   # Run install.sh script
+   # Command line options:
+   #   -h|--help            - prints help message
+   #   -i|--install         - install after build
+   #   -d|--dependencies    - install build dependencies
+   #   -c|--clients         - build library clients too (combines with -i & -d)
+   #   -g|--debug           - build with debug flag
+   #   -k|--relwithdebinfo  - build with RelWithDebInfo
 
+   ./install.sh -dc
 
-After hipSPARSELt is installed, it can be used just like any other library with a C API.
-To call hipSPARSELt, the header file must be included in the user code.
-This means the hipSPARSELt shared library becomes a link-time and run-time dependency for the user application.
+For more detailed installation instructions, see :ref:`install-linux`.
 
 Building hipSPARSELt from source
-======================================================
+================================
 
-It isn't necessary to build hipSPARSELt from source because it's ready to use after installing
-the prebuilt packages, as described above.
 To build hipSPARSELt from source, follow the instructions in this section.
 
 To compile and run hipSPARSELt, the `ROCm platform <https://github.com/ROCm/ROCm>`_ is required.
