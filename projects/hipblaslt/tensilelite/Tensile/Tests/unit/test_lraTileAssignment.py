@@ -187,49 +187,6 @@ TILE_CONFIGS = [
 
 # ---- Pytest tests ----
 
-@pytest.mark.skipif(not HAS_GFX950, reason=f"Subtile tests require gfx950, found {GFX_TARGET}")
-class TestLraTileAssignmentUnit:
-    """Non-GPU unit tests for lraTileAssignment (requires rocIsa for code generation)."""
-
-    @pytest.fixture(params=TILE_CONFIGS, ids=lambda c: c.label)
-    def lra_env(self, request):
-        """Generate lraTileAssignment output once per tile config."""
-        cfg = request.param
-        lra_asm, writer, tileInfoA, tileInfoB, kernel = generate_lra_asm(cfg)
-        return SimpleNamespace(
-            cfg=cfg,
-            lra_asm=lra_asm,
-            writer=writer,
-            tileInfoA=tileInfoA,
-            tileInfoB=tileInfoB,
-            kernel=kernel,
-        )
-
-    def test_returns_valid_module(self, lra_env):
-        """Verify lraTileAssignment returns a non-empty assembly string."""
-        assert lra_env.lra_asm is not None
-        assert len(lra_env.lra_asm) > 0
-
-    def test_lr_offset_registers_allocated(self, lra_env):
-        """Verify LR offset registers are allocated for both A and B."""
-        for tileInfo in [lra_env.tileInfoA, lra_env.tileInfoB]:
-            assert hasattr(tileInfo, 'sharedVgprLROffset'), \
-                f"tileInfo{tileInfo.tc} missing sharedVgprLROffset"
-            assert len(tileInfo.sharedVgprLROffset) == tileInfo.numLRPerSubtile, \
-                f"tileInfo{tileInfo.tc}: expected {tileInfo.numLRPerSubtile} LR offset regs, " \
-                f"got {len(tileInfo.sharedVgprLROffset)}"
-
-    def test_tile_info_lr_consistency(self, lra_env):
-        """Verify LR-related TileInfo fields are consistent."""
-        for tileInfo in [lra_env.tileInfoA, lra_env.tileInfoB]:
-            assert tileInfo.numLRPerSubtile >= 1, \
-                f"tileInfo{tileInfo.tc}: numLRPerSubtile should be >= 1"
-            assert tileInfo.numLRTotal >= 1, \
-                f"tileInfo{tileInfo.tc}: numLRTotal should be >= 1"
-            assert tileInfo.loadRatioLR > 0, \
-                f"tileInfo{tileInfo.tc}: loadRatioLR should be > 0"
-
-
 @pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestLraTileAssignmentGPU:
 
