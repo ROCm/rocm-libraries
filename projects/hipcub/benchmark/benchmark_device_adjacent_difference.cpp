@@ -46,8 +46,6 @@ namespace
 constexpr std::size_t DEFAULT_N = 128 * primbench::MiB;
 #endif
 
-constexpr unsigned int batch_size = 10;
-
 template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   std::true_type /*copy*/,
@@ -155,8 +153,8 @@ class device_adjacent_difference_benchmark : public primbench::benchmark_interfa
         void*       d_temp_storage = nullptr;
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
 
-        state.set_items(batch_size * size);
-        state.add_writes<T>(batch_size * size);
+        state.set_items(size);
+        state.add_writes<T>(size);
 
         state.run(
             [&]
