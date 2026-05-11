@@ -69,6 +69,10 @@ from Tensile.Components.InstructionCategory import (
     RdnaSDelayAluClass,
     category as _category,
 )
+from Tensile.Components.InstructionShape import (
+    InstructionShape,
+    shape_of,
+)
 
 if TYPE_CHECKING:
     # Annotations only — kept as strings at runtime by `from __future__ import
@@ -83,6 +87,96 @@ if TYPE_CHECKING:
 # Per-arch profiles (`ArchProfile`) defined below resolve from `kernel["ISA"]`.
 # The `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` / `_mfma_pack_to_cvt_gap_ok`
 # helpers that consume them are defined later in this same file.
+
+# =============================================================================
+# GapRule — single per-pair quad-cycle gap rule (rocm-libraries-vmua)
+# =============================================================================
+# Each `(InstructionShape, InstructionShape) -> List[GapRule]` row in
+# `ArchProfile.gap_rules` is one ISA-cited entry. The list shape allows
+# multiple condition-discriminated rules under the same key (e.g. an MFMA
+# producer with TWO consumer-overlap kinds, each with a different
+# required-cycles count).
+#
+# `condition` is the discriminator name; `_evaluate_condition` (defined
+# alongside the dispatch site below) maps the name to its predicate.
+# Conditions documented in the canonical `_DEFAULT_CDNA4_ARCH_PROFILE`:
+#   None                 — rule fires unconditionally for the (p_shape,
+#                          c_shape) pair.
+#   "passthrough"        — sentinel: producer's results immediately
+#                          visible; no cycle gap required, no observed/
+#                          required computation. Distinct from a missing
+#                          `(p_shape, c_shape)` key (which falls through
+#                          to Phase-2 wait coverage).
+#   "cross_subiter_alu_artifact"
+#                        — bwfr resolver carve-out: an ALU producer
+#                          whose subiter differs from the consumer's is
+#                          a known false-positive source (PackA3 in
+#                          subiter 3 writes a symbolic vgpr that an
+#                          earlier-subiter MFMA reads under the same
+#                          name; the cross-subiter pipelining is
+#                          legitimate). The condition fires only when
+#                          producer subiter != consumer subiter.
+#   "same_subiter"       — rule fires only when producer and consumer
+#                          live in the same subiteration (the
+#                          companion to `cross_subiter_alu_artifact`).
+#                          Used by the C-9 ALU→MFMA forwarding gap so
+#                          the new rule does not regress existing
+#                          cross-subiter ALU exemptions.
+#
+# `required_quad_cycles` is either an `int` constant or a callable taking
+# the producer's rocisa instance and returning an `int`. The callable
+# form is used by the standard MFMA finish-cycle rule so per-instance
+# `getIssueLatency`-derived cycle counts (rocm-libraries-qbcc) drive the
+# gap requirement (covering audit-memo §2.2 C-11 / C-12-finer for free).
+#
+# `rationale` cites the ISA section + line range. Surfaced in failure
+# messages and in pytest assertion output so a regression in the table
+# carries its own provenance.
+
+@dataclass(frozen=True)
+class GapRule:
+    """One quad-cycle gap rule for a `(producer_shape, consumer_shape)` pair.
+
+    Fields:
+      required_quad_cycles: Either an `int` constant (most common) or a
+          callable `(rocisa_inst) -> int` for cases where the cycle count
+          depends on producer-instance properties (e.g. MFMA finish-cycles
+          via `getIssueLatency`).
+      condition: Optional named predicate that gates whether this rule
+          fires for a given (producer, consumer) pair. None means the
+          rule fires for every edge with the matching shape pair.
+          Special sentinel `"passthrough"` short-circuits gap evaluation
+          (no cycle requirement; immediate visibility).
+      rationale: Free-form ISA citation + design-intent string. Used in
+          tests and surfaced for debugging; not consumed by the dispatch
+          loop. Each rule MUST cite its source — the audit memo §2 (the
+          inventory of CDNA4 gap classes), the bwfr / o0ei / s5g1 /
+          uqoz / qbcc memo it migrates from, OR a concrete §7.6 Table 38
+          / §7.3 / §4.5 line range.
+    """
+    required_quad_cycles: Union[int, "Callable"]
+    condition: Optional[str] = None
+    rationale: str = ""
+
+    def evaluate_required(self, rocisa_inst) -> int:
+        """Resolve `required_quad_cycles` to an integer cycle count.
+
+        Handles both the constant-int and the callable-instance forms
+        uniformly so callers don't branch on `callable(...)`.
+        """
+        rq = self.required_quad_cycles
+        if callable(rq):
+            return rq(rocisa_inst)
+        return int(rq)
+
+
+# Sentinel marker for the `condition` field denoting "no gap requirement;
+# producer's result is immediately visible (ALU exemption)". Distinct from
+# `condition is None` (which means "rule fires unconditionally at the
+# numeric `required_quad_cycles`"). The dispatch site checks this before
+# computing observed/required.
+_GAP_RULE_PASSTHROUGH = "passthrough"
+
 
 # =============================================================================
 # ArchProfile — per-architecture quad-cycle and issue-cycle constants
@@ -160,6 +254,16 @@ class ArchProfile:
     mfma_type_switch_threshold_from_4x4: int
     default_issue_quad_cycles: int = 1
     arch_not_supported: bool = False
+    # rocm-libraries-vmua: per-pair gap-rule table. Keyed on
+    # `(producer_shape, consumer_shape)`. Value is a list of `GapRule`s;
+    # the first whose `condition` matches (or whose condition is None /
+    # `_GAP_RULE_PASSTHROUGH`) is the active rule. A missing key in the
+    # table means "no gap rule applies" — the dispatch site falls
+    # through to Phase-2 wait coverage. See `_DEFAULT_CDNA4_ARCH_PROFILE`
+    # for a populated table; see `_evaluate_gap_rule_dispatch` for the
+    # consumer.
+    gap_rules: Dict[Tuple[InstructionShape, InstructionShape], List[GapRule]] = \
+        field(default_factory=dict)
 
     @classmethod
     def for_isa(
@@ -320,10 +424,358 @@ class ArchProfile:
         return TimingCheck.failing(observed, required)
 
 
+# =============================================================================
+# CDNA4 gap-rule table (rocm-libraries-vmua)
+# =============================================================================
+# Single source of truth for the `(producer_shape, consumer_shape) ->
+# List[GapRule]` matrix consumed by `_evaluate_gap_rule_dispatch`. Replaces
+# the legacy `_DISPATCH` (`(_ProducerRole, _ConsumerRole) -> helper`) table
+# whose helpers stored their cycle constants implicitly inside python
+# function bodies. The table here makes the constants + their ISA
+# provenance + their carve-out rationale all literal data.
+#
+# Population:
+#   1. Five MIGRATED carve-outs reproducing the legacy `_DISPATCH` behavior
+#      bit-identical (validated by the snapshot test
+#      `test_arch_profile_gap_rule_table_snapshot.py`):
+#        - MFMA-finish for standard MFMA (per-instance via callable).
+#        - MFMA-finish for 4x4 PackMFMA (1 quad-cycle).
+#        - CVT_PACK -> MFMA settle (2 quad-cycles).
+#        - MFMA_4x4 -> CVT_PACK settle (5 quad-cycles).
+#        - ALU / CVT-feeding-non-MFMA passthrough sentinel rows.
+#   2. Six NEWLY-COVERED gap classes from the s5g1 audit memo §2.2 inventory
+#      ("not modeled but in-scope"):
+#        - C-4 / C-5 MFMA RAW-on-accumulator gates: 4 rules covering
+#          (MFMA_STANDARD|MFMA_4x4) -> (ALU|LR|GR), each with an explicit
+#          5-quad-cycle minimum (the §7.6 Table 38 XDL-row floor).
+#        - C-9 ALU -> MFMA forwarding gap: 2 rules covering
+#          ALU -> (MFMA_STANDARD|MFMA_4x4) at 2 quad-cycles, gated to
+#          same-subiter to avoid regressing the cross-subiter ALU
+#          exemption (bwfr).
+#
+# The MIDDLE_PACK shape gets passthrough-only rules (it's a TF32-emul
+# helper class with no hardware timing constraint of its own; pair-
+# interleaving is enforced separately via
+# `validate_middle_pack_pair_interleaving`).
+
+def _cdna4_standard_mfma_finish_cycles(rocisa_inst) -> int:
+    """Per-instance finish-cycles for a CDNA4 standard MFMA producer.
+
+    Delegates to the running profile's `mfma_finish_cycles_for` method
+    (post-rocm-libraries-qbcc, this consults rocisa's
+    `MFMAInstruction.getIssueLatency()` for per-(arch, dtype, B) values).
+    Captures audit-memo §2.2 C-11 (F8 cycle-count doubling) and the
+    16x16 vs 32x32 distinction for free — the rocisa accessor returns
+    per-family cycle counts, and the gap rule trusts that as the
+    required-cycles floor.
+
+    Wraps the bound-method indirection so the rule's
+    `required_quad_cycles` can be a plain callable taking only the
+    producer instance (no profile-self argument).
+    """
+    return _DEFAULT_CDNA4_ARCH_PROFILE.mfma_finish_cycles_for(rocisa_inst)
+
+
+def _cdna4_4x4_mfma_finish_cycles(_rocisa_inst) -> int:
+    """Per-instance finish-cycles for a CDNA4 4x4 PackMFMA producer.
+
+    Constant 1 quad-cycle for every 4x4 family member; takes a rocisa
+    instance argument purely to share the callable signature with
+    `_cdna4_standard_mfma_finish_cycles`. The argument is unused.
+    """
+    return _DEFAULT_CDNA4_ARCH_PROFILE.mfma_4x4_finish_cycles
+
+
+def _build_cdna4_gap_rules() -> Dict[Tuple[InstructionShape, InstructionShape], List[GapRule]]:
+    """Construct the populated gap-rule table for CDNA4 (gfx950).
+
+    Returns a fresh dict so the frozen `ArchProfile` dataclass holds its
+    own table instance. Called exactly once at module-import time as the
+    `gap_rules=...` argument to `_DEFAULT_CDNA4_ARCH_PROFILE`.
+    """
+    rules: Dict[Tuple[InstructionShape, InstructionShape], List[GapRule]] = {}
+
+    # ----------------------------------------------------------------
+    # MIGRATED carve-outs (preserve legacy `_DISPATCH` behavior).
+    # ----------------------------------------------------------------
+
+    # Standard MFMA producer (`_quad_cycle_gap_ok` rows in legacy dispatch).
+    # required = per-instance finish-cycles via rocisa's `getIssueLatency`.
+    # Consumer side: any of MFMA_STANDARD / MFMA_4x4 / CVT_PACK / MIDDLE_PACK
+    # / ALU / LR / LW / GR / OTHER. We split by shape rather than by a
+    # wildcard so the new C-4 / C-5 rules (below) are addable without
+    # widening the wildcard.
+    _std_mfma_rule = GapRule(
+        required_quad_cycles=_cdna4_standard_mfma_finish_cycles,
+        condition=None,
+        rationale=(
+            "CDNA4 §7.6 Table 38 (Standard MFMA finish window). "
+            "Per-instance cycle count via rocisa MFMAInstruction.getIssueLatency() "
+            "(rocm-libraries-qbcc); covers audit-memo §2.2 C-11 (F8 cycle "
+            "doubling) and C-12-finer (16x16 vs 32x32) automatically."
+        ),
+    )
+    for c_shape in (InstructionShape.MFMA_STANDARD, InstructionShape.MFMA_4x4,
+                    InstructionShape.CVT_PACK, InstructionShape.MIDDLE_PACK,
+                    InstructionShape.OTHER):
+        rules[(InstructionShape.MFMA_STANDARD, c_shape)] = [_std_mfma_rule]
+
+    # 4x4 PackMFMA producer (`_quad_cycle_gap_ok` rows in legacy dispatch).
+    # required = 1 quad-cycle (constant; the 4x4 PackMFMA family has the
+    # shortest finish window in CDNA4's MFMA set).
+    _4x4_mfma_rule = GapRule(
+        required_quad_cycles=_cdna4_4x4_mfma_finish_cycles,
+        condition=None,
+        rationale=(
+            "CDNA4 §7.6 Table 38 (4x4 PackMFMA finish window = 1 quad-cycle). "
+            "Constant per 4x4-family member (rocisa getIssueLatency yields "
+            "1 or 2 for every 4x4 family on every CDNA arch)."
+        ),
+    )
+    for c_shape in (InstructionShape.MFMA_STANDARD, InstructionShape.MFMA_4x4,
+                    InstructionShape.MIDDLE_PACK, InstructionShape.OTHER):
+        rules[(InstructionShape.MFMA_4x4, c_shape)] = [_4x4_mfma_rule]
+
+    # 4x4 PackMFMA -> CVT_PACK settle window (`_mfma_pack_to_cvt_gap_ok` in
+    # legacy dispatch). 5 quad-cycles for the accumulator to settle before
+    # CVT1 reads it. Distinct from the 4x4 finish rule above because the
+    # cycle count is LARGER than the bare 1-cycle finish.
+    rules[(InstructionShape.MFMA_4x4, InstructionShape.CVT_PACK)] = [
+        GapRule(
+            required_quad_cycles=5,
+            condition=None,
+            rationale=(
+                "CDNA4 §7.6 (4x4 PackMFMA -> CVT1 settle = 5 quad-cycles, "
+                "the largest of the four section-7.6 quad-cycle constants). "
+                "Accumulator-settle window before TF32-emul CVT1 reads it."
+            ),
+        ),
+    ]
+
+    # CVT_PACK -> MFMA settle (`_cvt_to_mfma_gap_ok` in legacy dispatch).
+    # 2 quad-cycles for v_cvt_pk_bf16_f32 result to be visible to the MFMA.
+    _cvt_to_mfma_rule = GapRule(
+        required_quad_cycles=2,
+        condition=None,
+        rationale=(
+            "CDNA4 §7.6 (CVT-pack -> MFMA settle = 2 quad-cycles). TF32-emul "
+            "v_cvt_pk_bf16_f32 producing operand for MFMA needs 2 quad-cycles "
+            "for the converted bf16 to be visible."
+        ),
+    )
+    for c_shape in (InstructionShape.MFMA_STANDARD, InstructionShape.MFMA_4x4):
+        rules[(InstructionShape.CVT_PACK, c_shape)] = [_cvt_to_mfma_rule]
+
+    # CVT_PACK feeding non-MFMA consumers (legacy `_PASSTHROUGH` rows).
+    # Producer is immediate-visibility; the (CVT_PACK, MFMA_*) rule above
+    # is the only carve-out off this passthrough behavior.
+    _passthrough_rule = GapRule(
+        required_quad_cycles=0,
+        condition=_GAP_RULE_PASSTHROUGH,
+        rationale=(
+            "Legacy `_PASSTHROUGH` carve-out (rocm-libraries-s5g1 _DISPATCH). "
+            "Producer is ALU-immediate-visibility; no gap requirement."
+        ),
+    )
+    for c_shape in (InstructionShape.CVT_PACK, InstructionShape.MIDDLE_PACK,
+                    InstructionShape.OTHER):
+        rules[(InstructionShape.CVT_PACK, c_shape)] = [_passthrough_rule]
+
+    # MIDDLE_PACK producer (TF32-emul middle-16 ALU ops: PVCvtBF16toFP32,
+    # VSubF32, VCvtBF16toFP32, VDot2CF32BF16). In the legacy `_DISPATCH`
+    # these fell into `_ProducerRole.ALU` (Pack* category, non-MFMA
+    # non-CVT-pack rocisa) and passed through unconditionally. The new
+    # shape system gives them their own InstructionShape, so we add
+    # explicit passthrough rows. Pair-leader/consumer interleaving is
+    # enforced separately by `validate_middle_pack_pair_interleaving`;
+    # the MIDDLE_PACK shape carries no quad-cycle gap requirement.
+    _middle_pack_passthrough_rule = GapRule(
+        required_quad_cycles=0,
+        condition=_GAP_RULE_PASSTHROUGH,
+        rationale=(
+            "MIDDLE_PACK producers (TF32-emul bf16 error-term ALU ops) "
+            "carry no quad-cycle gap requirement; they are immediate-"
+            "visibility ALU ops. Pair-interleaving invariant is enforced "
+            "separately by validate_middle_pack_pair_interleaving."
+        ),
+    )
+    for c_shape in (InstructionShape.MFMA_STANDARD, InstructionShape.MFMA_4x4,
+                    InstructionShape.CVT_PACK, InstructionShape.MIDDLE_PACK,
+                    InstructionShape.ALU, InstructionShape.LR,
+                    InstructionShape.LW, InstructionShape.GR,
+                    InstructionShape.OTHER):
+        rules[(InstructionShape.MIDDLE_PACK, c_shape)] = [_middle_pack_passthrough_rule]
+
+    # ALU producer (`_PASSTHROUGH` rows in legacy dispatch). Generic ALU
+    # ops are immediate-visibility for every consumer except where the
+    # NEW C-9 rules (below) carve out the same-subiter ALU -> MFMA gap.
+    _alu_passthrough_rule = GapRule(
+        required_quad_cycles=0,
+        condition=_GAP_RULE_PASSTHROUGH,
+        rationale=(
+            "Legacy `_PASSTHROUGH` (ALU exemption). Generic ALU producer "
+            "results are immediate-visibility under existing fixtures. The "
+            "audit-memo §2.2 C-9 (ALU -> MFMA forwarding gap) carves out "
+            "the same-subiter ALU -> MFMA case below; cross-subiter ALU "
+            "edges remain on the bwfr resolver-artifact passthrough."
+        ),
+    )
+    for c_shape in (InstructionShape.ALU, InstructionShape.CVT_PACK,
+                    InstructionShape.MIDDLE_PACK, InstructionShape.LR,
+                    InstructionShape.LW, InstructionShape.GR,
+                    InstructionShape.OTHER):
+        rules[(InstructionShape.ALU, c_shape)] = [_alu_passthrough_rule]
+
+    # ----------------------------------------------------------------
+    # NEWLY-COVERED gap classes from audit-memo §2.2 inventory.
+    # ----------------------------------------------------------------
+
+    # C-4 / C-5: MFMA RAW-on-accumulator gates.
+    # Audit memo §2.2 (CDNA4 §7.6 Table 38, p. 67-69): "VALU read/write
+    # VGPR (RAW + WAW)" row gives required wait states 5/8/12/20 for XDL
+    # producers and 4/6/10/18 for SGEMM. We use the FLOOR (5 for XDL,
+    # 4 for SGEMM) at the table-row level; per-instance refinement
+    # (per-pass cycle counts) deferred until a sibling bead exposes
+    # rocisa's per-MFMA pass count.
+    _mfma_raw_on_accumulator_rationale_std = (
+        "CDNA4 §7.6 Table 38 (XDL/SMFMA RAW-on-accumulator floor = 5 "
+        "wait states; audit-memo §2.2 C-4 / C-5). Floor per the smallest "
+        "MFMA family's required wait; refined per-pass cycle counts "
+        "tracked under a future bead."
+    )
+    _mfma_raw_on_accumulator_rationale_4x4 = (
+        "CDNA4 §7.6 Table 38 (4x4 PackMFMA -> downstream consumer; "
+        "audit-memo §2.2 C-4 / C-5). 5-quad-cycle floor matches the 4x4 "
+        "PackMFMA -> CVT1 settle window — the accumulator is not stable "
+        "for downstream VALU/MEM read until the same window elapses."
+    )
+
+    # NOTE: these new rules do NOT regress the existing
+    # (MFMA_STANDARD|MFMA_4x4) -> ALU/LR/GR passthrough fixtures because
+    # the legacy `_DISPATCH` ALSO ran `_quad_cycle_gap_ok` for these
+    # consumer roles (see legacy `(MFMA, OTHER)` / `(PACK_MFMA, OTHER)`
+    # rows). The standard-MFMA rule above already covers this for the
+    # OTHER consumer-shape; here we explicitly add the ALU / LR / GR
+    # consumer-shape rows so the (MFMA, OTHER) catch-all isn't load-
+    # bearing for downstream ALU/MEM consumers.
+    rules[(InstructionShape.MFMA_STANDARD, InstructionShape.ALU)] = [
+        GapRule(
+            required_quad_cycles=_cdna4_standard_mfma_finish_cycles,
+            condition=None,
+            rationale=_mfma_raw_on_accumulator_rationale_std,
+        ),
+    ]
+    rules[(InstructionShape.MFMA_STANDARD, InstructionShape.LR)] = [
+        GapRule(
+            required_quad_cycles=_cdna4_standard_mfma_finish_cycles,
+            condition=None,
+            rationale=_mfma_raw_on_accumulator_rationale_std,
+        ),
+    ]
+    rules[(InstructionShape.MFMA_STANDARD, InstructionShape.GR)] = [
+        GapRule(
+            required_quad_cycles=_cdna4_standard_mfma_finish_cycles,
+            condition=None,
+            rationale=_mfma_raw_on_accumulator_rationale_std,
+        ),
+    ]
+    rules[(InstructionShape.MFMA_4x4, InstructionShape.ALU)] = [
+        GapRule(
+            required_quad_cycles=_cdna4_4x4_mfma_finish_cycles,
+            condition=None,
+            rationale=_mfma_raw_on_accumulator_rationale_4x4,
+        ),
+    ]
+    rules[(InstructionShape.MFMA_4x4, InstructionShape.LR)] = [
+        GapRule(
+            required_quad_cycles=_cdna4_4x4_mfma_finish_cycles,
+            condition=None,
+            rationale=_mfma_raw_on_accumulator_rationale_4x4,
+        ),
+    ]
+    rules[(InstructionShape.MFMA_4x4, InstructionShape.GR)] = [
+        GapRule(
+            required_quad_cycles=_cdna4_4x4_mfma_finish_cycles,
+            condition=None,
+            rationale=_mfma_raw_on_accumulator_rationale_4x4,
+        ),
+    ]
+
+    # C-9: ALU -> MFMA forwarding gap.
+    # Audit memo §2.2 (CDNA4 §7.6 Table 38, p. 66 top row): "Non-DLops
+    # VALU writes VGPR -> V_MFMA*/V_SMFMA* read" requires 2 wait states.
+    # Currently `_DISPATCH` returns _PASSTHROUGH for (ALU, MFMA) — the
+    # legacy ALU-immediate exemption. This new rule fires only when
+    # producer and consumer live in the same subiter (the bwfr cross-
+    # subiter resolver-artifact carve-out is preserved by the
+    # `cross_subiter_alu_artifact` row, which evaluates first via the
+    # condition order in the rule list).
+    _alu_to_mfma_rule = GapRule(
+        required_quad_cycles=2,
+        condition="same_subiter",
+        rationale=(
+            "CDNA4 §7.6 Table 38 p.66 (Non-DLops VALU -> MFMA = 2 wait states; "
+            "audit-memo §2.2 C-9). Gated to same-subiter: cross-subiter ALU "
+            "-> MFMA edges are a known false-positive class (bwfr resolver "
+            "artifact) and remain on the passthrough rule that precedes this "
+            "one in the rule list."
+        ),
+    )
+    _alu_cross_subiter_passthrough = GapRule(
+        required_quad_cycles=0,
+        condition="cross_subiter_alu_artifact",
+        rationale=(
+            "bwfr cross-subiter ALU resolver-artifact passthrough. PackA3 "
+            "(subiter 3) writes a symbolic vgpr that an earlier-subiter "
+            "MFMA reads under the same name; CMS's pipelining of subiter-N+1 "
+            "Pack after subiter-N MFMA is legitimate scheduling, not a real "
+            "dependency reorder. Mirrors the diagnose_missing_edge §7.3 "
+            "carve-out (CMSValidator.py:_classify_edge_coverage line ~2843). "
+            "MUST evaluate before the C-9 same-subiter rule below."
+        ),
+    )
+    # The three-rule list ORDER MATTERS:
+    #   [0] cross_subiter passthrough — fires when subiter info is
+    #       available AND producer.subiter != consumer.subiter.
+    #   [1] same_subiter 2-cycle gap — the C-9 rule; fires when subiter
+    #       info is available AND producer.subiter == consumer.subiter.
+    #   [2] unconditional passthrough fallback — fires when the graph
+    #       carries no usable subiter info (`num_mfma_per_subiter==0`,
+    #       i.e. the test-fixture default). Required to preserve
+    #       byte-equivalence with the legacy `(ALU, MFMA) -> _PASSTHROUGH`
+    #       behavior on every existing fixture; without it, the dispatch
+    #       would fall through to Phase-2 wait coverage and emit
+    #       MissingWaitFailure on edges the legacy path silently exempted.
+    _alu_to_mfma_unconditional_passthrough = GapRule(
+        required_quad_cycles=0,
+        condition=_GAP_RULE_PASSTHROUGH,
+        rationale=(
+            "Unconditional passthrough fallback for ALU -> MFMA when the "
+            "graph carries no `num_mfma_per_subiter` (test-fixture default). "
+            "Preserves byte-equivalence with legacy `(ALU, MFMA) -> "
+            "_PASSTHROUGH` (rocm-libraries-s5g1 _DISPATCH). Production "
+            "graphs always have a non-zero nmps; this row is only reached "
+            "in test fixtures."
+        ),
+    )
+    for c_shape in (InstructionShape.MFMA_STANDARD, InstructionShape.MFMA_4x4):
+        rules[(InstructionShape.ALU, c_shape)] = [
+            _alu_cross_subiter_passthrough,
+            _alu_to_mfma_rule,
+            _alu_to_mfma_unconditional_passthrough,
+        ]
+
+    return rules
+
+
 # CDNA 4 (gfx950) — sourced from ISA section 7.6. These are the values that
 # lived as module-scope literals in this file before the ArchProfile
 # refactor; they remain the default everywhere a profile isn't explicitly
 # attached to keep the existing unit-test suite bit-identical.
+#
+# rocm-libraries-vmua: now also carries the gap-rule table; see
+# `_build_cdna4_gap_rules` for the populated `(producer_shape,
+# consumer_shape) -> List[GapRule]` matrix.
 _DEFAULT_CDNA4_ARCH_PROFILE = ArchProfile(
     name="CDNA4",
     isa=(9, 5, 0),
@@ -334,7 +786,14 @@ _DEFAULT_CDNA4_ARCH_PROFILE = ArchProfile(
     mfma_type_switch_threshold_from_standard=5,
     mfma_type_switch_threshold_from_4x4=3,
     default_issue_quad_cycles=1,
+    gap_rules={},  # Populated below; see two-step note immediately below.
 )
+# Populated post-construction because `_build_cdna4_gap_rules` references
+# the singleton's `mfma_finish_cycles_for` method (closure over
+# `_DEFAULT_CDNA4_ARCH_PROFILE`). Mutating the dict in place keeps the
+# frozen-dataclass invariant — the field reference doesn't change, only
+# the dict's contents do.
+_DEFAULT_CDNA4_ARCH_PROFILE.gap_rules.update(_build_cdna4_gap_rules())
 
 
 # RDNA 3.5 (gfx1151) — STUB profile (rocm-libraries-e8ni). gfx1151 is a
@@ -366,6 +825,7 @@ _DEFAULT_RDNA35_ARCH_PROFILE = ArchProfile(
     mfma_type_switch_threshold_from_4x4=0,
     default_issue_quad_cycles=1,
     arch_not_supported=True,               # Skip all quad-cycle gap helpers.
+    gap_rules={},                          # Empty by design (see arch_not_supported).
 )
 
 
@@ -2047,180 +2507,175 @@ def _is_alu_producer(producer: GraphNode) -> bool:
 
 
 # =============================================================================
-# Quad-cycle dispatch table (rocm-libraries-s5g1)
+# Gap-rule dispatch (rocm-libraries-vmua)
 # =============================================================================
-# Replaces the order-dependent if/elif chain that used to live inline in
-# `_classify_edge_coverage` and `diagnose_missing_edge`. The chain ran four
-# branches in a load-bearing order (PackMFMA->CVT before generic MFMA before
-# CVT->MFMA before ALU exemption) because the underlying predicates
-# overlapped (`_is_mfma_producer` claims PackMFMAs; `_is_alu_producer` claims
-# CVTPacks). Reordering ANY pair silently downgraded a strict gap to a
-# weaker one or to no check at all — see QUAD_CYCLE_DISPATCH_AUDIT.md for
-# the full failure-mode catalog.
-#
-# The fix (audit Option 4): classify producer and consumer ONCE into role
-# enums whose values are pairwise disjoint by construction, then dispatch
-# by exact (producer_role, consumer_role) lookup. The carve-outs disappear
-# because the categories themselves disambiguate: PACK_MFMA is a different
-# enum value from MFMA; CVT_PACK is a different enum value from ALU. Branch
-# ordering CANNOT regress the dispatch because there are no branches —
-# just a dict lookup.
+# Replaces the legacy `_DISPATCH` (`(_ProducerRole, _ConsumerRole) -> helper`)
+# table from rocm-libraries-s5g1 with a lookup into
+# `arch_profile.gap_rules[(p_shape, c_shape)]`. The shape pair is computed
+# via `shape_of(node)` (Tensile/Components/InstructionShape.py) which
+# refines the s5g1 producer/consumer roles into per-rule shape values.
+# The carve-outs that the s5g1 enum-distinctness encoded (PACK_MFMA != MFMA;
+# CVT_PACK != ALU) carry over: `InstructionShape` distinguishes
+# MFMA_4x4 / MFMA_STANDARD and CVT_PACK / ALU as separate values, so
+# branch ordering can never regress dispatch coverage.
 
-
-class _ProducerRole(Enum):
-    """Producer-side role for the quad-cycle dispatch table.
-
-    Pairwise-disjoint by construction: each producer maps to exactly one
-    role via `_producer_role()`. The classifier internally checks
-    `is_mfma_pack_producer` BEFORE `is_mfma_producer`/`is_cvt_pack_producer`/
-    `_is_alu_producer` so PackMFMAs land in PACK_MFMA (not MFMA / not ALU)
-    and CVTPacks land in CVT_PACK (not ALU). Once the role is assigned,
-    the dispatch table consults exact-match keys — no branch ordering.
-    """
-    PACK_MFMA = "PACK_MFMA"   # 4x4 PackMFMA (Pack* category, MFMA-shaped rocisa)
-    MFMA = "MFMA"             # category == "MFMA"
-    CVT_PACK = "CVT_PACK"     # Pack* category, VCvtPkF32toBF16 rocisa
-    ALU = "ALU"               # ALU-immediate (no quad-cycle constraint)
-    OTHER = "OTHER"           # everything else (LR/LW/GR/etc — Phase 2 wait coverage)
-
-
-class _ConsumerRole(Enum):
-    """Consumer-side role for the quad-cycle dispatch table.
-
-    Only three buckets matter on the consumer side: MFMA-as-consumer (the
-    sink for CVT->MFMA), CVT_PACK-as-consumer (the sink for PackMFMA->CVT),
-    or anything else (no consumer-specific constraint).
-    """
-    MFMA = "MFMA"
-    CVT_PACK = "CVT_PACK"
-    OTHER = "OTHER"
-
-
-def _producer_role(node: "GraphNode") -> _ProducerRole:
-    """Classify a producer node into exactly one `_ProducerRole`.
-
-    Order of internal checks reproduces the pre-refactor predicate
-    semantics (PackMFMA carved out of MFMA's umbrella before ALU's
-    umbrella claims it) but the result is an enum value, so downstream
-    dispatch is order-INDEPENDENT.
-    """
-    if GraphNode.is_mfma_pack_producer(node):
-        return _ProducerRole.PACK_MFMA
-    if GraphNode.is_mfma_producer(node):
-        # is_mfma_producer is True for category=="MFMA" OR PackMFMA; the
-        # PackMFMA case was already claimed above, so this branch matches
-        # only the standard category=="MFMA" path.
-        return _ProducerRole.MFMA
-    if GraphNode.is_cvt_pack_producer(node):
-        return _ProducerRole.CVT_PACK
-    if _is_alu_producer(node):
-        return _ProducerRole.ALU
-    return _ProducerRole.OTHER
-
-
-def _consumer_role(node: "GraphNode") -> _ConsumerRole:
-    """Classify a consumer node into exactly one `_ConsumerRole`.
-
-    Mirrors the consumer-side predicates the original chain used (only
-    `is_mfma_producer(c_node)` and `is_cvt_pack_producer(c_node)`).
-    """
-    if GraphNode.is_cvt_pack_producer(node):
-        return _ConsumerRole.CVT_PACK
-    if GraphNode.is_mfma_producer(node):
-        return _ConsumerRole.MFMA
-    return _ConsumerRole.OTHER
-
-
-def _quad_cycle_gap_ok(
-    producer: "GraphNode", consumer: "GraphNode", subj_graph: "DataflowGraph",
-) -> "TimingCheck":
-    """Uniform-signature wrapper around `arch_profile.quad_cycle_gap_ok`.
-
-    Exists so the dispatch table can store a single `(p, c, g) -> TimingCheck`
-    callable shape for all three quad-cycle helpers (this one,
-    `_cvt_to_mfma_gap_ok`, `_mfma_pack_to_cvt_gap_ok`). Keeps the
-    unknown-ISA short-circuit in one place rather than open-coding it at
-    every dispatch site.
-    """
-    if subj_graph.arch_profile is None:
-        return TimingCheck.arch_not_supported()
-    return subj_graph.arch_profile.quad_cycle_gap_ok(producer, consumer, subj_graph)
-
-
-# Sentinel: dispatch table value meaning "no gap check; the producer's
+# Sentinel: dispatch result meaning "no gap check; the producer's
 # results are immediately visible (ALU exemption) — return [] without
-# running any helper". Distinct from a missing-key lookup, which means
-# "fall through to Phase 2 wait coverage".
+# evaluating observed/required cycle counts. Distinct from a `None`
+# return (which means "no rule applies; fall through to Phase 2 wait
+# coverage").
 _PASSTHROUGH = "PASSTHROUGH"
 
 
-# Dispatch table — single source of truth for "which helper handles which
-# (producer_role, consumer_role) pair". Keys MUST be exhaustive over the
-# pairs that previously matched the if/elif chain; missing keys map to
-# the Phase-2 wait-coverage fall-through.
-#
-# Carve-outs the old branch order encoded are now expressed as
-# enum-distinctness:
-#   - PackMFMA->CVT used to need to beat the generic MFMA branch. Now
-#     PACK_MFMA is a different enum value from MFMA; the table has
-#     separate entries for (PACK_MFMA, CVT_PACK) and (MFMA, *).
-#   - CVT_PACK used to need to beat the ALU exemption. Now CVT_PACK is
-#     a different enum value from ALU; the table has a (CVT_PACK, MFMA)
-#     entry and the ALU rows map to _PASSTHROUGH separately.
-_DISPATCH: dict = {
-    # PackMFMA producers.
-    (_ProducerRole.PACK_MFMA, _ConsumerRole.CVT_PACK): _mfma_pack_to_cvt_gap_ok,
-    (_ProducerRole.PACK_MFMA, _ConsumerRole.MFMA):     _quad_cycle_gap_ok,
-    (_ProducerRole.PACK_MFMA, _ConsumerRole.OTHER):    _quad_cycle_gap_ok,
+def _evaluate_gap_rule_condition(
+    rule: GapRule,
+    p_node: "GraphNode",
+    c_node: "GraphNode",
+    subj_graph: "DataflowGraph",
+) -> bool:
+    """Return True iff `rule.condition` matches for this (p_node, c_node).
 
-    # Standard MFMA producers — every consumer side gets the
-    # arch-profile finish-cycle check (the original generic-MFMA branch
-    # ran unconditionally regardless of consumer kind).
-    (_ProducerRole.MFMA, _ConsumerRole.CVT_PACK): _quad_cycle_gap_ok,
-    (_ProducerRole.MFMA, _ConsumerRole.MFMA):     _quad_cycle_gap_ok,
-    (_ProducerRole.MFMA, _ConsumerRole.OTHER):    _quad_cycle_gap_ok,
+    Conditions:
+      None                          — fires unconditionally.
+      "passthrough"                 — sentinel; treated as fires unconditionally
+                                      (caller short-circuits to _PASSTHROUGH).
+      "same_subiter"                — fires only when (a) the graph
+                                      carries a non-zero
+                                      `num_mfma_per_subiter` (so MFMA
+                                      subiter is meaningfully derivable;
+                                      a zero value collapses every MFMA
+                                      to subiter 0 which would falsely
+                                      claim every ALU -> MFMA edge as
+                                      same-subiter), AND (b)
+                                      producer.subiter == consumer.subiter.
+                                      The first guard is what preserves
+                                      byte-equivalence for the existing
+                                      test fixtures (which all use
+                                      num_mfma_per_subiter=0); production
+                                      `build_dataflow_graph` always
+                                      propagates a real per-kernel value.
+      "cross_subiter_alu_artifact"  — bwfr resolver-artifact passthrough.
+                                      Fires only when (a) the graph
+                                      carries a non-zero
+                                      `num_mfma_per_subiter` (so the
+                                      cross-subiter discrimination is
+                                      meaningful) AND (b) producer.subiter
+                                      != consumer.subiter (the legitimate
+                                      cross-subiter pipelining case). When
+                                      num_mfma_per_subiter==0, neither
+                                      this nor `same_subiter` fires; the
+                                      ALU -> MFMA edge falls through to
+                                      Phase-2 wait coverage (the legacy
+                                      `_PASSTHROUGH` behavior is matched
+                                      because `_dispatch_quad_cycle_check`
+                                      then returns None instead of a
+                                      TimingCheck — see below).
 
-    # CVTPack producers — only the CVT->MFMA pair carries a quad-cycle
-    # constraint (2-cycle settle window). CVT->CVT and CVT->OTHER fall
-    # through to ALU passthrough (the original chain's behavior: CVTPack
-    # producers feeding non-MFMA consumers landed in `_is_alu_producer`).
-    (_ProducerRole.CVT_PACK, _ConsumerRole.MFMA):     _cvt_to_mfma_gap_ok,
-    (_ProducerRole.CVT_PACK, _ConsumerRole.CVT_PACK): _PASSTHROUGH,
-    (_ProducerRole.CVT_PACK, _ConsumerRole.OTHER):    _PASSTHROUGH,
-
-    # ALU producers — immediately visible, no gap check. All consumers.
-    (_ProducerRole.ALU, _ConsumerRole.MFMA):     _PASSTHROUGH,
-    (_ProducerRole.ALU, _ConsumerRole.CVT_PACK): _PASSTHROUGH,
-    (_ProducerRole.ALU, _ConsumerRole.OTHER):    _PASSTHROUGH,
-
-    # OTHER producers (LR/LW/GR/etc) intentionally have NO entries here —
-    # missing keys fall through to Phase-2 wait coverage at the call site.
-}
+    Unknown condition names raise ValueError — silent skip would
+    mis-classify and silently downgrade gap coverage; the caller's
+    rule list is data we control end-to-end so a typo is a bug.
+    """
+    cond = rule.condition
+    if cond is None or cond == _GAP_RULE_PASSTHROUGH:
+        return True
+    nmps = getattr(subj_graph, "num_mfma_per_subiter", 0) or 0
+    if cond == "same_subiter":
+        # Subiter info only meaningful when nmps > 0; otherwise every MFMA
+        # collapses to subiter 0 (test-fixture default) which would
+        # spuriously claim every ALU -> MFMA edge. Returning False here
+        # for nmps==0 is what preserves byte-equivalence for the
+        # existing fixtures.
+        if nmps == 0:
+            return False
+        return p_node.subiter(nmps) == c_node.subiter(nmps)
+    if cond == "cross_subiter_alu_artifact":
+        # Same gating as `same_subiter`; cross-subiter discrimination is
+        # only meaningful when nmps > 0.
+        if nmps == 0:
+            return False
+        return p_node.subiter(nmps) != c_node.subiter(nmps)
+    raise ValueError(
+        f"_evaluate_gap_rule_condition: unknown condition {cond!r} on rule "
+        f"with rationale {rule.rationale!r}. Known conditions: None, "
+        f"'passthrough', 'same_subiter', 'cross_subiter_alu_artifact'."
+    )
 
 
 def _dispatch_quad_cycle_check(
     p_node: "GraphNode", c_node: "GraphNode", subj_graph: "DataflowGraph",
 ):
-    """Apply the quad-cycle dispatch table to one edge.
+    """Apply the gap-rule table to one edge (rocm-libraries-vmua).
+
+    Replaces the legacy `_DISPATCH` (`(_ProducerRole, _ConsumerRole) ->
+    helper`) with a lookup into `arch_profile.gap_rules[(p_shape,
+    c_shape)]`. The table is the single source of truth — there is NO
+    fallback to a hardcoded helper / branch chain.
 
     Returns one of three values:
       - A `TimingCheck` instance — caller wraps a `TimingTooCloseFailure`
         if `check.result == TimingResult.FAIL`, else returns `[]`.
       - `_PASSTHROUGH` — caller returns `[]` (ALU exemption / CVT-feeding-
         non-MFMA pass-through). No further check applies.
-      - `None` — no entry in the table; caller falls through to Phase-2
-        wait coverage.
+      - `None` — no entry in the table for this `(p_shape, c_shape)` key
+        OR every rule's condition failed; caller falls through to
+        Phase-2 wait coverage.
 
-    No fallback to the legacy if/elif chain. The table is the dispatch.
+    Algorithm:
+      1. Resolve the arch profile from the graph; None / arch_not_supported
+         short-circuit to ARCH_NOT_SUPPORTED (mirrors the legacy
+         per-helper short-circuit).
+      2. Compute `(p_shape, c_shape)` via `shape_of(node)`.
+      3. Fetch the rule list at that key; if missing, return None.
+      4. Walk rules in declaration order. The FIRST rule whose condition
+         matches is the active rule:
+           - If the condition is `_GAP_RULE_PASSTHROUGH`, return
+             `_PASSTHROUGH` directly.
+           - Otherwise compute observed = cumulative_issue_cycles(...),
+             required = rule.evaluate_required(producer.rocisa_inst),
+             and return PASS / FAIL `TimingCheck`.
+      5. If no rule's condition matched, return None (fall through).
     """
-    role_p = _producer_role(p_node)
-    role_c = _consumer_role(c_node)
-    handler = _DISPATCH.get((role_p, role_c))
-    if handler is None:
+    profile = ArchProfile.from_carrier(subj_graph)
+    p_shape = shape_of(p_node)
+    c_shape = shape_of(c_node)
+    # Arch-not-supported short-circuit (rocm-libraries-zkzw / e8ni):
+    # when the kernel's ISA has no registered profile, OR has a stub
+    # profile flagged `arch_not_supported`, we suppress timing-related
+    # validation but PRESERVE non-timing wait coverage. The legacy
+    # behavior keyed this off the (producer_role, consumer_role)
+    # dispatch table: edges that would have hit a quad-cycle helper
+    # got `TimingCheck.arch_not_supported()`; edges that would have
+    # fallen through to Phase 2 (LR/LW/GR producers) still ran wait
+    # coverage. We mirror that by probing the CDNA4 default table for
+    # the same `(p_shape, c_shape)` key — if the default would have
+    # claimed this edge, this unregistered-ISA path returns
+    # arch-not-supported; otherwise it returns None and the call site
+    # falls through to Phase 2.
+    if profile is None or profile.arch_not_supported:
+        # Use the CDNA4 default table as the probe surface for "would
+        # this shape pair have been claimed by a gap rule?" — this is
+        # the same shape-pair surface the production CDNA4 path uses,
+        # so the legacy zkzw/e8ni invariant ("non-timing validation
+        # still runs") holds for every edge that the legacy `_DISPATCH`
+        # would have routed through Phase 2.
+        if (p_shape, c_shape) not in _DEFAULT_CDNA4_ARCH_PROFILE.gap_rules:
+            return None
+        return TimingCheck.arch_not_supported()
+    rules = profile.gap_rules.get((p_shape, c_shape))
+    if rules is None:
         return None
-    if handler is _PASSTHROUGH:
-        return _PASSTHROUGH
-    return handler(p_node, c_node, subj_graph)
+    for rule in rules:
+        if not _evaluate_gap_rule_condition(rule, p_node, c_node, subj_graph):
+            continue
+        if rule.condition == _GAP_RULE_PASSTHROUGH:
+            return _PASSTHROUGH
+        required = rule.evaluate_required(getattr(p_node, "rocisa_inst", None))
+        observed = cumulative_issue_cycles(subj_graph, p_node, c_node)
+        if observed >= required:
+            return TimingCheck.passing(observed, required)
+        return TimingCheck.failing(observed, required)
+    # Every rule's condition failed — fall through to Phase-2 wait coverage.
+    return None
 
 
 def _first_insufficient(
