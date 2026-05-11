@@ -42,7 +42,7 @@ The integration test suite validates engine outputs by computing references at r
 
 A prior effort established a golden reference pattern -- golden data bundles (graph JSON + tensor `.bin` files) loaded from disk and validated against engine outputs. The initial infrastructure is in place for batchnorm. This RFC extends golden data coverage to all operation types, formalizes the folder convention, adds data integrity checks, and integrates with CI.
 
-**Long-term direction**: Every integration test becomes a data bundle. Adding a test means dropping files in a folder — no C++ code, no per-operation test classes. The graph is always loaded from the bundle JSON. The regression suite's end state is entirely data-driven.
+**Long-term direction**: Every integration test becomes a data bundle. Adding a test means dropping files in a folder — no C++ code, no per-operation test classes. The regression suite's end state is entirely data-driven.
 
 ---
 
@@ -70,7 +70,7 @@ Generation produces bundles. Validation loads a bundle, runs the computation, an
 
 ### Existing Infrastructure
 
-The golden reference infrastructure is already built and working for batchnorm. The table below summarizes each existing component.
+The golden reference infrastructure is already built and working for batchnorm.
 
 - **Keeps**: bundle format, core loader, TOML tolerance overrides, Python generation framework
 - **Adds**: generic test runner (one test class for all operations), graph-derived test identity, golden-first fallback chain, bundle verifier, data integrity checks, CI integration
@@ -100,7 +100,7 @@ The golden reference infrastructure is already built and working for batchnorm. 
 | Python generation framework | **Kept, enhanced** | Generator scripts auto-derive output paths from graph content |
 | Existing golden data | **Kept, relocated** | 6 batchnorm bundles move to `golden_reference_data/quick/BatchnormFwdInference/...` |
 | (new) `ValidateGoldenBundleBase` | **New** | New file in `test_sdk/`. Base class — owns discovery, loading, tolerance lookup, and comparison |
-| `GoldenReferenceCpu.hpp` | **→ `ValidateGoldenBundleWithRef.hpp`** | New file in `test_sdk/tests/`. Inherits `ValidateGoldenBundleBase`. Overrides execution to run via reference executor (CPU or GPU) |
+| `GoldenReferenceCpu.hpp` | **→ `ValidateGoldenBundleWithRef.hpp`** | New file in `test_sdk/tests/`. Inherits `ValidateGoldenBundleBase`. Overrides execution to run via the reference executor |
 | `GoldenReferenceGpu.hpp` | **→ `ValidateGoldenBundleWithPlugin.hpp`** | New file in `miopen-provider/tests/`. Inherits `ValidateGoldenBundleBase`. Overrides execution to run via GPU plugin — plugin setup/teardown, "unsupported" as SKIP |
 | `TestCpuFpReferenceBatchnorm.cpp` | **Replaced** | Per-operation C++ class eliminated — bundles discovered automatically |
 | `DynamicTolerances.hpp` | **Future** | Not connected in this RFC — future fallback when no fixed tolerance exists |
@@ -111,7 +111,7 @@ Every component above — loader, runners, generators, verifier — operates on 
 
 The bundle format is independent of any test infrastructure. The JSON follows the FlatBuffers `graph.fbs` schema; the `.bin` files are raw contiguous tensors. Any tool that can parse JSON and read binary can produce or consume bundles.
 
-A bundle can be **full** or **graph-only**. A **full bundle** (`{Name}.json` + `.bin` files) is the primary format — it carries pre-computed tensor data for comparison. A **graph-only bundle** (`{Name}.json` alone, no `.bin` files) is a **transitional tool** for migrating existing computed tests — the runner generates inputs and computes references at runtime instead of loading them from disk. Once `.bin` files are generated and committed, the graph-only bundle becomes a full bundle.
+A bundle can be **full** or **graph-only**. A **full bundle** (`{Name}.json` + `.bin` files) is the primary format — it carries pre-computed tensor data for comparison. A **graph-only bundle** (`{Name}.json` alone, no `.bin` files) carries only the computation definition — references are computed at runtime until `.bin` files are generated and committed.
 
 #### Bundle metadata (open for discussion)
 
@@ -143,7 +143,7 @@ This section is intentionally left open for team input.
 
 ### Golden Data Format
 
-A bundle is a **directory** containing files with a shared base name: one `.json` file (graph definition conforming to the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema) and one `.tensor{uid}.bin` file per tensor (raw contiguous data matching the tensor's declared `data_type`, `dims`, and `strides`). The existing `LoadGraphAndTensors.hpp` (C++ reader) and `Graph.save()` (Python writer) already implement this format.
+A bundle is a **directory** containing files with a shared base name: one `.json` file (graph definition conforming to the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema) and one `.tensor{uid}.bin` file per tensor (raw contiguous data matching the tensor's declared `data_type`, `dims`, and `strides`). The existing `LoadGraphAndTensors.hpp` (C++ reader) and [`Graph.save()`](../../reference_data_scripts/utilities/graph.py) (Python writer) already implement this format.
 
 ```
 {Name}/                    # One directory per bundle
@@ -151,9 +151,7 @@ A bundle is a **directory** containing files with a shared base name: one `.json
   {Name}.tensor{uid}.bin   # Raw tensor data, one file per UID
 ```
 
-Each bundle is a self-contained folder. Share a bundle = zip the folder. Delete a bundle = delete the folder. No risk of mixing files across bundles.
-
-For example, batchnorm inference bundles at `BatchnormFwdInference/nchw/fp32/`:
+For example, batchnorm inference bundles:
 
 ```
 BatchnormFwdInference/nchw/fp32/
@@ -175,7 +173,7 @@ BatchnormFwdInference/nchw/fp32/
     ...
 ```
 
-Each bundle lives in its own directory. The name describes *why the test exists* — `typical` covers a common shape, `large_batch` stresses the batch dimension, `resnet50_layer3` tests a real-world shape. Tensor dimensions are in the graph JSON, not the name. See [Folder Convention](#folder-convention) for the full directory structure.
+The name describes *why the test exists* — `typical` covers a common shape, `large_batch` stresses the batch dimension, `resnet50_layer3` tests a real-world shape. Tensor dimensions are in the graph JSON, not the name. See [Folder Convention](#folder-convention) for the full directory structure.
 
 #### Binary tensor format
 
@@ -228,14 +226,12 @@ FAIL: ValidateGoldenBundleWithPlugin/ConvFwd_nhwc_fp16_resnet50_layer3
   Mismatched elements: 42 / 200704 (0.02%)
 ```
 
-The key fields: which tensor failed, the worst-case error with its location, and how many elements exceeded tolerance. The existing `validateTensors()` in `LoadGraphAndTensors.hpp` already produces per-tensor comparison results — the generic runner surfaces them in this format.
-
 #### Test discovery
 
 Each runner uses one `INSTANTIATE_TEST_SUITE_P` per tier, not per operation. Both runners discover the same bundles — the test binary determines which runner class is used. These instantiations are fixed — they never change as new operations or bundles are added:
 
 ```cpp
-// Ref runner (in hipdnn_test_sdk_tests):
+// Ref runner (in hipdnn_test_sdk_tests) — plugin runner mirrors this with ValidateGoldenBundleWithPlugin:
 INSTANTIATE_TEST_SUITE_P(, ValidateGoldenBundleWithRef,
     discoverGoldenBundles("quick"));
 INSTANTIATE_TEST_SUITE_P(Standard, ValidateGoldenBundleWithRef,
@@ -243,16 +239,6 @@ INSTANTIATE_TEST_SUITE_P(Standard, ValidateGoldenBundleWithRef,
 INSTANTIATE_TEST_SUITE_P(Comprehensive, ValidateGoldenBundleWithRef,
     discoverGoldenBundles("comprehensive"));
 INSTANTIATE_TEST_SUITE_P(Full, ValidateGoldenBundleWithRef,
-    discoverGoldenBundles("full"));
-
-// Plugin runner (in miopen_integration_tests):
-INSTANTIATE_TEST_SUITE_P(, ValidateGoldenBundleWithPlugin,
-    discoverGoldenBundles("quick"));
-INSTANTIATE_TEST_SUITE_P(Standard, ValidateGoldenBundleWithPlugin,
-    discoverGoldenBundles("standard"));
-INSTANTIATE_TEST_SUITE_P(Comprehensive, ValidateGoldenBundleWithPlugin,
-    discoverGoldenBundles("comprehensive"));
-INSTANTIATE_TEST_SUITE_P(Full, ValidateGoldenBundleWithPlugin,
     discoverGoldenBundles("full"));
 ```
 
@@ -267,8 +253,6 @@ If the tier directory is empty or missing, `discoverGoldenBundles` returns an em
 | Adding a test | Drop files (existing op) or write C++ class (new op) | Drop files. Always. |
 | Tier assignment | GTest prefix per `INSTANTIATE_TEST_SUITE_P` | Tier folder at top level |
 | Tolerance | Hard-coded per test class | Looked up from graph content at runtime |
-
-The **pre-commit bundle verifier** (see [Data Integrity](#data-integrity)) validates that bundles are well-formed and runnable before they reach CI. It reads bundles, runs integrity checks (SHA-256, file size, NaN/Inf), and reports tensor metadata and statistics.
 
 **Acceptance criteria**:
 - [ ] Single generic test class handles all operation types
@@ -290,9 +274,7 @@ Golden data is generated by Python scripts in [`reference_data_scripts/`](../../
 2. **Compute** — run a reference source (PyTorch, CPU ref, etc.)
 3. **Write** — save the bundle (`.json` + `.tensor{uid}.bin`)
 
-To add a new operation, create a node class and generator script following the existing [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern. See [Workflows](#workflows) for the full workflow.
-
-The generator should **auto-derive the output path** from the graph content. The graph JSON already contains the operation type, tensor layouts, and data types — exactly the `{Operation}/{Layout}/{DataType}/` structure used by the [folder convention](#folder-convention). The developer supplies only the **bundle name**; the generator computes the directory:
+The generator should **auto-derive the output path** from the graph content. The developer supplies only the **bundle name**; the generator computes the directory from the graph's operation type, layout, and data type:
 
 ```bash
 python generate_batchnorm_reference.py --name typical
@@ -322,7 +304,7 @@ The default verification strategy is **golden-first with automatic fallback**. F
 
 1. **Golden data** — if a bundle exists for this test, use it
 2. **GPU reference** — if no golden data but a GPU reference executor is available, use it
-3. **CPU reference** — last resort, always available
+3. **CPU reference** — last resort, if the operation is implemented
 
 The `--verification-mode` flag overrides this default. In golden mode, tests without golden data are **skipped** (not failed). In every mode, the **engine** is the thing being tested — the reference source provides the expected output.
 
@@ -356,9 +338,9 @@ These compose into a two-level priority chain:
 | 1 | TOML per-engine override | Engine | `MIOPEN_ENGINE.toml`: conv fp16 → atol `1e-3` |
 | 2 | Per-operation default | Operation + data type | batchnorm inference fp32 → atol `2e-4` |
 
-If a TOML override matches, it wins. Otherwise the per-operation default applies. This chain is permanent — it does not change as the system evolves.
+If a TOML override matches, it wins. Otherwise the per-operation default applies.
 
-The TOML mechanism already exists. Each engine's config (e.g., [`MIOPEN_ENGINE.toml`](../../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. The integration harness queries these via `TestConfig::findToleranceOverride(testName)`.
+The TOML mechanism already exists. Each engine's config (e.g., [`MIOPEN_ENGINE.toml`](../../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values.
 
 #### How the per-operation default evolves
 
@@ -366,9 +348,9 @@ The per-operation default (level 2) starts simple and gets smarter:
 
 - **This RFC — fixed tolerances**: [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) defines compile-time constants per operation and data type (e.g., batchnorm inference fp32 = `2e-4`, conv fwd fp32 = `1e-5`). Golden tests will use these same fixed values.
 
-- **Future — dynamic tolerances**: [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) computes tolerances from tensor dimensions using Higham error bounds. Functions already exist for conv, matmul, batchnorm, layernorm, RMS norm, and pointwise. Dynamic tolerances will replace fixed values as the per-operation default, giving tighter bounds for small tensors and appropriately looser bounds for large ones. Fixed values remain as fallback for operations without a dynamic function.
+- **Future — dynamic tolerances**: [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) will replace fixed values as the per-operation default (see [Future Work](#future-work)).
 
-This evolution changes *how* the default is computed — it does not change the two-level chain. TOML overrides still win at every stage.
+This evolution changes *how* the default is computed — it does not change the two-level chain.
 
 #### Current gap
 
@@ -387,15 +369,15 @@ Internal consistency is guaranteed by construction: `Graph.save()` writes the JS
 
 Four checks catch the real failure modes:
 
-1. **Per-tensor SHA-256 checksum (Python, generation time; C++, load time)** — *proposed*. `Graph.save()` computes a SHA-256 hash of each `.bin` file and stores it in the tensor's JSON entry. At load time, `loadGraphAndTensors()` recomputes the hash and rejects mismatches. This catches truncated downloads, wrong-file swaps, file corruption, and accidental mixing of `.bin` files from different bundles.
+1. **Per-tensor SHA-256 checksum (generation + load time)** — *proposed*. The generator computes a SHA-256 hash of each `.bin` file and stores it in the tensor's JSON entry. At load time, the hash is recomputed and mismatches are rejected. Catches truncated downloads, wrong-file swaps, and file corruption.
 
-2. **Tensor size validation (C++, load time)** — *proposed*. After loading tensor data, verify that `tensor.size == graph.tensor.size()` — i.e., the loaded byte count matches `element_space × sizeof(element_type)` declared in the graph JSON (see [binary tensor format](#binary-tensor-format)). Catches truncated downloads, wrong-file swaps, and stale files. `loadGraphAndTensors()` does not perform this check today; a truncated file silently produces garbage.
+2. **Tensor size validation (load time)** — *proposed*. Verify that the loaded byte count matches `element_space × sizeof(element_type)` declared in the graph JSON (see [binary tensor format](#binary-tensor-format)). Not performed today — a truncated file silently produces garbage.
 
-3. **NaN/Inf rejection (Python, generation time)** — *proposed*. `Graph.save()` should reject output tensors containing NaN or Inf before writing any files. Built into `Graph.save()` itself so no generator can bypass it. All-same-value tensors are valid (e.g., a bias-only layer can produce uniform output).
+3. **NaN/Inf rejection (generation time)** — *proposed*. Reject output tensors containing NaN or Inf before writing any files. All-same-value tensors are valid (e.g., a bias-only layer can produce uniform output).
 
-4. **NaN/Inf rejection (pre-commit bundle verifier)** — *proposed*. Safety net for bundles generated by external tools or before check #3 is added. The **pre-commit bundle verifier** scans output tensors and rejects any containing NaN or Inf. This runs before commit, **never at test load time** — scanning every tensor at runtime adds overhead the test runner should not pay. The existing test validators already catch NaN/Inf from the engine's computation at runtime.
+4. **NaN/Inf rejection (pre-commit)** — *proposed*. Safety net for bundles generated by external tools or before check #3 is added. The **pre-commit bundle verifier** scans output tensors and rejects any containing NaN or Inf.
 
-The **pre-commit bundle verifier** is a standalone CLI tool that runs checks #1–#4 across a directory tree before bundles are committed, catching errors before they reach CI. It also validates structural conventions:
+The **pre-commit bundle verifier** runs checks #1–#4 across a directory tree before bundles are committed. It also validates structural conventions:
 
 5. **Tier folder validation** — warn about top-level directories that are not one of the four tier names
 6. **Graph JSON validation** — verify each `.json` file is a parseable graph (not a stray `README.json` or editor config)
@@ -411,7 +393,7 @@ The **pre-commit bundle verifier** is a standalone CLI tool that runs checks #1�
 
 ## Folder Convention
 
-The top-level directory is organized by **tier**. Below that, the structure is flexible — the runner recursively scans for `.json` files regardless of subfolder depth. The recommended (not enforced) convention below the tier is `{Operation}/{Layout}/{DataType}/`, but any structure works as long as each leaf directory has valid bundles.
+The top-level directory is organized by **tier**. Below that, the runner recursively scans for `.json` files regardless of subfolder depth. The recommended convention is `{Operation}/{Layout}/{DataType}/`, but any structure works.
 
 ```
 golden_reference_data/
@@ -585,6 +567,10 @@ Tiers are determined by the top-level folder (see [Folder Convention](#folder-co
 1. Pull the golden data via DVC
 2. Run the failing test with `--gtest_filter=*OperationName*DataType*`
 3. The bundle is self-contained — no environment-specific setup beyond the engine under test
+
+**Add golden test support for a new plugin** (provider developer):
+1. Subclass `ValidateGoldenBundleBase` in your provider's tests directory — override the execution step with your plugin's setup/teardown
+2. The same bundles are automatically validated against your plugin — no new test data needed
 
 ---
 
