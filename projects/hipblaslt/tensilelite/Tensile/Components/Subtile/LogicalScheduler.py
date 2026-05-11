@@ -213,15 +213,22 @@ class SchedulerConfig:
         """Return partition candidates as [(partitionSizeM, partitionSizeN), ...].
 
         For the smaller dimension, uses a single partition (full size).
-        For the larger dimension, tries every size from max down to 1.
+        For the larger dimension, starts at full size then jumps to divUp(dim,2)
+        and decrements from there, skipping unbalanced 2-partition sizes.
         """
         M = tileInfoA.localMMATileGrid[0]
         N = tileInfoB.localMMATileGrid[0]
 
+        def divUp(n, d):
+            return (n + d - 1) // d
+
+        def partitionSizes(dim):
+            return [dim] + list(range(divUp(dim, 2), 0, -1))
+
         if N >= M:
-            candidates = [(M, s) for s in range(N, 0, -1)]
+            candidates = [(M, s) for s in partitionSizes(N)]
         else:
-            candidates = [(s, N) for s in range(M, 0, -1)]
+            candidates = [(s, N) for s in partitionSizes(M)]
 
         return candidates
 
@@ -722,9 +729,12 @@ class LogicalScheduler:
                 self.next_id = 0
                 self.active_count = 0
                 self.peak = 0
-            def alloc(self):
-                if self.free:
-                    vid = self.free.popleft()  # FIFO for convergence
+            def alloc(self, preferred=None):
+                if preferred is not None and preferred in self.free:
+                    self.free.remove(preferred)
+                    vid = preferred
+                elif self.free:
+                    vid = self.free.popleft()
                 else:
                     vid = self.next_id
                     self.next_id += 1
@@ -794,7 +804,7 @@ class LogicalScheduler:
                                 seen_keys.add(key)
                                 if key in target:
                                     pools[tensor].release(target[key])
-                                vid = pools[tensor].alloc()
+                                vid = pools[tensor].alloc(preferred=group)
                                 target[key] = vid
                                 tile_map[group] = vid
                         lr.vgpr_tile_map.append(tile_map)
