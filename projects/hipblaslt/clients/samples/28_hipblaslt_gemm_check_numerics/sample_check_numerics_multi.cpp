@@ -10,7 +10,8 @@
 //   inject_at=7, SCAN_EVERY=5 -> calls 5,10,15,20 sampled; #7 is NOT in
 //                                that set, so no NaN reported (expected
 //                                miss for sampling).
-//   inject_at=10, SCAN_EVERY=5 -> #10 IS sampled, expect "first NaN at #10".
+//   inject_at=10, SCAN_EVERY=5 -> #10 IS sampled, expect
+//                                  "first NaN observed at sampled matmul call #10".
 //   inject_at=12, SCAN_FROM=10 SCAN_UNTIL=15 -> in window, expect #12.
 //   inject_at=2, SCAN_FROM=10 SCAN_UNTIL=15 -> outside window, no NaN.
 

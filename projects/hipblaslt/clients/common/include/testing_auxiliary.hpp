@@ -3595,7 +3595,11 @@ void testing_aux_check_numerics_func(const Arguments& arg)
     // ---- drain_check_numerics_window with null flag ----
     ASSERT_EQ(hipblaslt_drain_check_numerics_window(nullptr,
                                                     hipblaslt_check_numerics_mode_warn,
-                                                    1u, 100u, "unit-test"),
+                                                    1u, 100u,
+                                                    /*scan_every*/ 1u,
+                                                    /*scan_from*/ 1u,
+                                                    /*scan_until*/ ~uint32_t(0),
+                                                    "unit-test"),
               0u);
 
     // ---- Happy path: enable scanning, fill a small float buffer with NaN,

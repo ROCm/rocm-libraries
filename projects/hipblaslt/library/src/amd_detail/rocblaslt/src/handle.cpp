@@ -155,11 +155,19 @@ _rocblaslt_handle::_rocblaslt_handle()
     // report that looks indistinguishable from "no NaN seen".
     if(check_numerics_scan_from > check_numerics_scan_until)
     {
-        std::cerr << "[hipBLASLt CHECK_NUMERICS] " << kEnvScanFrom << "="
-                  << check_numerics_scan_from << " > " << kEnvScanUntil << "="
-                  << check_numerics_scan_until
-                  << " is inverted; resetting to defaults (full range scanned)."
-                  << std::endl;
+        // Route through the same sink as every other CHECK_NUMERICS line so
+        // users who redirected the logger to a file still capture this. Going
+        // straight to std::cerr here would lose the warning for those users.
+        std::lock_guard<std::mutex> lk(log_mutex);
+        std::ostream*               sink = get_logger_os();
+        if(!sink)
+            sink = &std::cerr;
+        *sink << hipblaslt_check_numerics_ts()
+              << "[hipBLASLt CHECK_NUMERICS] " << kEnvScanFrom << "="
+              << check_numerics_scan_from << " > " << kEnvScanUntil << "="
+              << check_numerics_scan_until
+              << " is inverted; resetting to defaults (full range scanned)."
+              << std::endl;
         check_numerics_scan_from  = 1u;
         check_numerics_scan_until = ~uint32_t(0);
     }
@@ -213,6 +221,9 @@ _rocblaslt_handle::~_rocblaslt_handle()
                                                             check_numerics,
                                                             window_lo,
                                                             window_hi,
+                                                            every,
+                                                            check_numerics_scan_from,
+                                                            check_numerics_scan_until,
                                                             "handle teardown"));
 
     // Unscanned-tail warning. Compute the exact [tail_lo..tail_hi] range of
@@ -250,7 +261,8 @@ _rocblaslt_handle::~_rocblaslt_handle()
             std::ostream* sink = get_logger_os();
             if(!sink)
                 sink = &std::cerr;
-            *sink << "[hipBLASLt CHECK_NUMERICS] handle teardown: matmul calls ["
+            *sink << hipblaslt_check_numerics_ts()
+                  << "[hipBLASLt CHECK_NUMERICS] handle teardown: matmul calls ["
                   << tail_lo << ".." << tail_hi
                   << "] were NOT scanned (scan_every=" << every
                   << ", scan_from=" << check_numerics_scan_from
@@ -274,7 +286,8 @@ _rocblaslt_handle::~_rocblaslt_handle()
         std::ostream* sink = get_logger_os();
         if(!sink)
             sink = &std::cerr;
-        *sink << "[hipBLASLt CHECK_NUMERICS] handle teardown: one or more scanner"
+        *sink << hipblaslt_check_numerics_ts()
+              << "[hipBLASLt CHECK_NUMERICS] handle teardown: one or more scanner"
               << " kernel launches FAILED on this handle; NaN/Inf reports above"
               << " may be incomplete or absent. Check earlier log lines for the"
               << " first failure's rocblaslt_status code." << std::endl;

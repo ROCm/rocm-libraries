@@ -39,6 +39,9 @@
 #include "utility.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <ctime>
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <mutex>
@@ -50,6 +53,28 @@
 #else
 #include <hipblas/hipblas.h>
 #endif
+
+// Wall-clock timestamp prefix used by every CHECK_NUMERICS log line. We pick
+// wall clock (not monotonic) on purpose so users can correlate these messages
+// with their training-loop logs, which are typically wall-clock stamped.
+// localtime_r is POSIX; hipBLASLt is Linux/ROCm-only so this is safe.
+inline std::string hipblaslt_check_numerics_ts()
+{
+    using namespace std::chrono;
+    const auto now    = system_clock::now();
+    const auto t      = system_clock::to_time_t(now);
+    const auto ms_part
+        = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+    std::tm tm{};
+    localtime_r(&t, &tm);
+    char buf[40];
+    std::snprintf(buf, sizeof(buf),
+                  "[%04d-%02d-%02d %02d:%02d:%02d.%03lld]",
+                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                  tm.tm_hour, tm.tm_min, tm.tm_sec,
+                  static_cast<long long>(ms_part.count()));
+    return std::string(buf);
+}
 
 // One thread per element of D. On first NaN found in the current scan window,
 // claims the device flag with this call's id via atomicCAS(flag, 0, call_id).
@@ -254,6 +279,9 @@ inline uint32_t hipblaslt_drain_check_numerics_window(uint32_t* d_flag,
                                                      hipblaslt_check_numerics_mode mode,
                                                      uint32_t    window_lo,
                                                      uint32_t    window_hi,
+                                                     uint32_t    scan_every,
+                                                     uint32_t    scan_from,
+                                                     uint32_t    scan_until,
                                                      const char* label /* "window" or "teardown" */)
 {
     if(!d_flag)
@@ -276,21 +304,70 @@ inline uint32_t hipblaslt_drain_check_numerics_window(uint32_t* d_flag,
     if(!log_anything)
         return h_flag;
 
+    // Match the scanner's coercion (0 -> 1) so the value reported here equals
+    // the value actually applied per-call by the sampler.
+    const uint32_t every_eff = scan_every ? scan_every : 1u;
+
+    // Effective window: the slice of [window_lo..window_hi] the scanner could
+    // actually have inspected, given SCAN_FROM/SCAN_UNTIL. Reporting the
+    // *requested* window when SCAN_FROM=100000 was set would let users assume
+    // calls 1..99999 were inspected and clean -- they were never scanned at
+    // all. We clamp to the requested window so the printed bounds never lie
+    // outside what the caller asked about.
+    const uint32_t eff_lo = std::max(window_lo, scan_from);
+    const uint32_t eff_hi = std::min(window_hi, scan_until);
+    const bool     sampling = (every_eff > 1u);
+
     std::lock_guard<std::mutex> lk(log_mutex);
     std::ostream*               sink = get_logger_os();
     if(!sink)
         sink = &std::cerr;
     if(h_flag != 0)
-        *sink << "[hipBLASLt CHECK_NUMERICS] " << label
-              << ": first NaN at matmul call #" << h_flag
-              << " (window [" << window_lo << ".." << window_hi << "]"
-              << ", mode=" << static_cast<int>(mode) << ")"
-              << std::endl;
+    {
+        // Sampling bound: with scan_every=N, the *true* first NaN sits in
+        // the interval (prev_sampled, h_flag], because the previous scan
+        // fired at the largest multiple of N strictly less than h_flag.
+        // Clamp the lower bound to scan_from so we don't suggest bisecting
+        // calls the user explicitly excluded.
+        uint32_t bisect_lo = 0, bisect_hi = 0;
+        bool     have_bisect = false;
+        if(sampling)
+        {
+            const uint32_t prev_sampled = ((h_flag - 1u) / every_eff) * every_eff;
+            bisect_lo   = std::max<uint32_t>(prev_sampled + 1u, scan_from);
+            bisect_hi   = h_flag;
+            have_bisect = (bisect_lo < bisect_hi);
+        }
+
+        *sink << hipblaslt_check_numerics_ts()
+              << "[hipBLASLt CHECK_NUMERICS] " << label
+              << ": first NaN observed at sampled matmul call #" << h_flag;
+        if(have_bisect)
+            *sink << " (true first NaN somewhere in (" << (bisect_lo - 1u)
+                  << ".." << bisect_hi << "] due to scan_every=" << every_eff << ")";
+        *sink << ", effective window [" << eff_lo << ".." << eff_hi << "]"
+              << ", mode=" << static_cast<int>(mode)
+              << ", scan_every=" << every_eff << ".";
+        if(have_bisect)
+            *sink << " To bisect, re-run with HIPBLASLT_CHECK_NUMERICS_SCAN_FROM="
+                  << bisect_lo << " HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL="
+                  << bisect_hi << " HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY=1.";
+        *sink << std::endl;
+    }
     else if(mode & hipblaslt_check_numerics_mode_info)
-        *sink << "[hipBLASLt CHECK_NUMERICS] " << label
-              << ": no NaN observed in window [" << window_lo << ".." << window_hi << "]"
-              << " (mode=" << static_cast<int>(mode) << ")"
-              << std::endl;
+    {
+        *sink << hipblaslt_check_numerics_ts()
+              << "[hipBLASLt CHECK_NUMERICS] " << label
+              << ": no NaN observed in effective window ["
+              << eff_lo << ".." << eff_hi << "]"
+              << " (mode=" << static_cast<int>(mode)
+              << ", scan_every=" << every_eff;
+        if(sampling && eff_lo <= eff_hi)
+            *sink << " -- sampled 1 in " << every_eff
+                  << " calls; NaNs in unsampled calls would be missed."
+                  << " Re-run with HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY=1 to confirm";
+        *sink << ")." << std::endl;
+    }
     return h_flag;
 }
 
@@ -363,7 +440,8 @@ inline rocblaslt_status hipblaslt_check_numerics_scan_D(rocblaslt_handle handle,
             std::ostream* sink = get_logger_os();
             if(!sink)
                 sink = &std::cerr;
-            *sink << "[hipBLASLt CHECK_NUMERICS] scanner kernel launch failed at call_id="
+            *sink << hipblaslt_check_numerics_ts()
+                  << "[hipBLASLt CHECK_NUMERICS] scanner kernel launch failed at call_id="
                   << call_id << " (rocblaslt_status=" << static_cast<int>(st)
                   << "); scanner is non-functional for this handle, results may be"
                   << " incomplete. Further per-call launch errors will be suppressed."
@@ -387,7 +465,11 @@ inline uint32_t hipblaslt_check_numerics_drain_handle(rocblaslt_handle handle)
         = handle->check_numerics_call_id.load(std::memory_order_relaxed);
     return hipblaslt_drain_check_numerics_window(
         handle->check_numerics_flag, handle->check_numerics,
-        1u, window_hi, "on-demand drain");
+        1u, window_hi,
+        handle->check_numerics_scan_every,
+        handle->check_numerics_scan_from,
+        handle->check_numerics_scan_until,
+        "on-demand drain");
 }
 
 #endif // HIPBLASLT_CHECK_NUMERICS_MATRIX_HPP
