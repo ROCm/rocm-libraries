@@ -59,7 +59,7 @@ void rocsolver_sy2sb_he2hb_getMemorySize(const I n,
     *size_workArr = 0;
 
     // if quick return no workspace needed
-    if(n == 0 || batch_count == 0 || kd == 0 || nb == 0)
+    if(n == 0 || batch_count == 0 || kd > n)
         return;
 
     size_t w, wa, s1, s2;
@@ -161,6 +161,19 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
+    // If band covers matrix, just copy to Aband.
+    if (kd <= n)
+    {
+        // Copies some "don't care entries". That probably messes up the fill in bulges, right?
+        // Using ldab-1 converts dense to band format.
+        cpy_mblks = ceildiv(n, 32);
+        cpy_nblks = ceildiv(n, 32);
+        ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32),
+                                0, stream, n, n, // opts
+                                A, shiftA, lda, strideA, // A
+                                Aband, 0, ldab-1, strideAb); // Aband
+    }
+
     // everything must be executed with scalars on the host
     rocblas_pointer_mode old_mode;
     rocblas_get_pointer_mode(handle, &old_mode);
@@ -208,7 +221,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32),
                                 0, stream, n - j, jb_rnd, // opts
                                 A, idx2D(j, j, lda) + shiftA, lda, strideA, // Aj
-                                V, idx2D(j, 0, ldv), ldv, strideA); // Vj
+                                V, idx2D(j, 0, ldv), ldv, strideV); // Vj
 
         // Loop over inner blocking sub-panels to reach bandwidth.
         assert(i == j);
