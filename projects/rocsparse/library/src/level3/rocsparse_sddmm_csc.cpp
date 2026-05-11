@@ -133,7 +133,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
                                     const J*             C_ind_data,
                                     C*                   C_val_data,
                                     int64_t              offsets_batch_stride_C,
-                                    int64_t              columns_values_batch_stride_C,
+                                    int64_t              rows_values_batch_stride_C,
                                     int64_t              batch_count,
                                     rocsparse_index_base C_base,
                                     rocsparse_mat_descr  C_descr,
@@ -145,7 +145,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
         // Batched computation is currently only supported for the COO format.
         if(batch_count > 1)
         {
-            return rocsparse_status_not_implemented;
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
 
         switch(alg)

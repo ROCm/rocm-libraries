@@ -39,7 +39,82 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_KERNEL_W(BLOCKSIZE, 1)
+    ROCSPARSE_DEVICE_ILF void sddmm_coox_device(rocsparse_operation transA,
+                                                rocsparse_operation transB,
+                                                rocsparse_order     orderA,
+                                                rocsparse_order     orderB,
+                                                J                   M,
+                                                J                   N,
+                                                J                   K,
+                                                I                   nnz,
+                                                T                   alpha,
+                                                const A* __restrict__ dense_A,
+                                                int64_t lda,
+                                                const B* __restrict__ dense_B,
+                                                int64_t ldb,
+                                                T       beta,
+                                                C* __restrict__ coo_val,
+                                                const I* __restrict__ coo_row_ind,
+                                                const I* __restrict__ coo_col_ind,
+                                                rocsparse_index_base coo_base)
+    {
+        //
+        // Each group treats one row / column
+        //
+        static constexpr rocsparse_int NUM_COEFF         = (BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
+        const I                        local_coeff_index = hipThreadIdx_x / NTHREADS_PER_DOTPRODUCT;
+        const I local_thread_index                       = hipThreadIdx_x % NTHREADS_PER_DOTPRODUCT;
+        const J incx                                     = (orderA == rocsparse_order_column)
+                                                               ? ((transA == rocsparse_operation_none) ? lda : 1)
+                                                               : ((transA == rocsparse_operation_none) ? 1 : lda);
+
+        const J incy = (orderB == rocsparse_order_column)
+                           ? ((transB == rocsparse_operation_none) ? 1 : ldb)
+                           : ((transB == rocsparse_operation_none) ? ldb : 1);
+
+        const I innz = hipBlockIdx_x * NUM_COEFF + local_coeff_index;
+        if(innz >= nnz)
+        {
+            return;
+        }
+
+        const I i = coo_row_ind[innz * ((AOS) ? 2 : 1)] - coo_base;
+        const I j = coo_col_ind[innz * ((AOS) ? 2 : 1)] - coo_base;
+
+        const A* x
+            = (orderA == rocsparse_order_column)
+                  ? ((transA == rocsparse_operation_none) ? (dense_A + i) : (dense_A + lda * i))
+                  : ((transA == rocsparse_operation_none) ? (dense_A + lda * i) : (dense_A + i));
+
+        const B* y
+            = (orderB == rocsparse_order_column)
+                  ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * j) : (dense_B + j))
+                  : ((transB == rocsparse_operation_none) ? (dense_B + j) : (dense_B + ldb * j));
+
+        T sum = static_cast<T>(0);
+        for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
+        {
+            sum = rocsparse::fma<T>(x[k * incx], y[k * incy], sum);
+        }
+
+        sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
+
+        if(local_thread_index == NTHREADS_PER_DOTPRODUCT - 1)
+        {
+            coo_val[innz] = rocsparse::fma<T>(beta, coo_val[innz], alpha * sum);
+        }
+    }
+
+    template <rocsparse_int BLOCKSIZE,
+              rocsparse_int NTHREADS_PER_DOTPRODUCT,
+              bool          AOS,
+              typename T,
+              typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
     void sddmm_coox_kernel(rocsparse_operation transA,
                            rocsparse_operation transB,
                            rocsparse_order     orderA,
@@ -69,62 +144,26 @@ namespace rocsparse
         {
             return;
         }
-        //
-        // Each group treats one row / column
-        //
-        static constexpr rocsparse_int NUM_COEFF         = (BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
-        const I                        local_coeff_index = hipThreadIdx_x / NTHREADS_PER_DOTPRODUCT;
-        const I local_thread_index                       = hipThreadIdx_x % NTHREADS_PER_DOTPRODUCT;
-        const J incx                                     = (orderA == rocsparse_order_column)
-                                                               ? ((transA == rocsparse_operation_none) ? lda : 1)
-                                                               : ((transA == rocsparse_operation_none) ? 1 : lda);
 
-        const J incy = (orderB == rocsparse_order_column)
-                           ? ((transB == rocsparse_operation_none) ? 1 : ldb)
-                           : ((transB == rocsparse_operation_none) ? ldb : 1);
-
-        const I innz = hipBlockIdx_x * NUM_COEFF + local_coeff_index;
-        if(innz >= nnz)
-        {
-            return;
-        }
-
-        // Offset pointers for the current batch so the rest of the kernel
-        // can address the batched inputs as though they were single matrices.
-        // Note: batched computation is currently only supported for the COO
-        // (struct-of-arrays) format. The AOS case keeps a single batch.
-        const uint32_t batch = hipBlockIdx_y;
-        dense_A              = dense_A + batch_stride_A * batch;
-        dense_B              = dense_B + batch_stride_B * batch;
-        coo_row_ind          = coo_row_ind + batch_stride_C * batch;
-        coo_col_ind          = coo_col_ind + batch_stride_C * batch;
-        coo_val              = coo_val + batch_stride_C * batch;
-
-        const I i = coo_row_ind[innz * ((AOS) ? 2 : 1)] - coo_base;
-        const I j = coo_col_ind[innz * ((AOS) ? 2 : 1)] - coo_base;
-
-        const A* x
-            = (orderA == rocsparse_order_column)
-                  ? ((transA == rocsparse_operation_none) ? (dense_A + i) : (dense_A + lda * i))
-                  : ((transA == rocsparse_operation_none) ? (dense_A + lda * i) : (dense_A + i));
-
-        const B* y
-            = (orderB == rocsparse_order_column)
-                  ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * j) : (dense_B + j))
-                  : ((transB == rocsparse_operation_none) ? (dense_B + j) : (dense_B + ldb * j));
-
-        T sum = static_cast<T>(0);
-        for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
-        {
-            sum = rocsparse::fma<T>(x[k * incx], y[k * incy], sum);
-        }
-
-        sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
-
-        if(local_thread_index == NTHREADS_PER_DOTPRODUCT - 1)
-        {
-            coo_val[innz] = rocsparse::fma<T>(beta, coo_val[innz], alpha * sum);
-        }
+        rocsparse::sddmm_coox_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT, AOS>(
+            transA,
+            transB,
+            orderA,
+            orderB,
+            M,
+            N,
+            K,
+            nnz,
+            alpha,
+            load_pointer(dense_A, hipBlockIdx_y, batch_stride_A),
+            lda,
+            load_pointer(dense_B, hipBlockIdx_y, batch_stride_B),
+            ldb,
+            beta,
+            load_pointer(coo_val, hipBlockIdx_y, batch_stride_C),
+            load_pointer(coo_row_ind, hipBlockIdx_y, batch_stride_C),
+            load_pointer(coo_col_ind, hipBlockIdx_y, batch_stride_C),
+            coo_base);
     }
 
     template <rocsparse_int BLOCKSIZE, bool AOS, typename T, typename I, typename J, typename C>

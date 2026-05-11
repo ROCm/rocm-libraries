@@ -144,7 +144,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
         // Batched computation is currently only supported for the COO format.
         if(batch_count > 1)
         {
-            return rocsparse_status_not_implemented;
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
 
         switch(alg)

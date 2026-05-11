@@ -158,7 +158,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, T, I, J, A, B, C>
             // Batched computation is not supported for the dense algorithm.
             if(batch_count > 1)
             {
-                return rocsparse_status_not_implemented;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
 
             char* ptr   = reinterpret_cast<char*>(buffer);

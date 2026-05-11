@@ -300,10 +300,20 @@ void testing_sddmm_batched_coo(const Arguments& arg)
         CHECK_ROCSPARSE_ERROR(
             testing::rocsparse_sddmm(PARAMS(&halpha, mat_A, mat_B, &hbeta, mat_C1)));
 
+        if(ROCSPARSE_REPRODUCIBILITY)
+        {
+            rocsparse_reproducibility::save("P pointer mode host", dcoo_val_1);
+        }
+
         // Pointer mode device
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
         CHECK_ROCSPARSE_ERROR(
             testing::rocsparse_sddmm(PARAMS(dalpha, mat_A, mat_B, dbeta, mat_C2)));
+
+        if(ROCSPARSE_REPRODUCIBILITY)
+        {
+            rocsparse_reproducibility::save("P pointer mode device", dcoo_val_2);
+        }
 
         // Copy output to host
         CHECK_HIP_ERROR(hipMemcpy(
