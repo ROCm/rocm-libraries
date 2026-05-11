@@ -90,8 +90,8 @@ The table below maps each existing component to its treatment in this RFC.
 
 | Component | Status | What changes |
 |-----------|--------|-------------|
-| `LoadGraphAndTensors.hpp` | **Kept as-is** | Core loading functions (`loadGraphAndTensors()`, `extractAndClearOutputTensorData()`, `validateTensors()`) are the foundation of the generic test runner. Add tensor size validation after loading (check #2). |
-| `TestTolerances.hpp` | **Kept as-is** | Per-operation compile-time defaults remain the starting point. The generic runner looks up defaults by operation type from this file. |
+| `LoadGraphAndTensors.hpp` | **Kept, extended** | Core loading functions (`loadGraphAndTensors()`, `extractAndClearOutputTensorData()`, `validateTensors()`) are the foundation of the generic test runner. Add tensor size validation after loading (check #2). |
+| `TestTolerances.hpp` | **Kept, extended** | Per-operation compile-time defaults remain the starting point. The generic runner adds a lookup-by-operation-type mechanism to select the right defaults from this file at runtime. |
 | TOML override infrastructure | **Kept as-is** | `TestSettings.hpp`, `TestConfig.hpp`, and per-engine `.toml` files with `[[tolerance_overrides]]` glob matching are connected to golden tests — a TOML override that matches a golden test name applies automatically. |
 | Python generation framework | **Kept, enhanced** | `reference_data_scripts/utilities/` (`graph.py`, `tensor.py`, `common.py`) remain the generation backbone. Enhanced: generator scripts auto-derive output paths from graph content (operation type, layout, data type) to match the folder convention. |
 | Existing golden data | **Kept, relocated** | 6 batchnorm bundles move from `hipdnn_reference_data/` to `golden_reference_data/quick/BatchnormFwdInference/...` under the new folder convention. Bundle contents unchanged. |
