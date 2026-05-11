@@ -152,11 +152,71 @@ struct MmaPipelineBase
         }
     }
 
+    // Entry point for dense and sparse operations. TODO: Add c_vec = a_vec * b_vec variant.
     template <typename CTensor, typename ATensor, typename BTensor, bool post_nop_ = false>
     CK_TILE_DEVICE void
     operator()(CTensor& c, ATensor& a, BTensor& b, bool_constant<post_nop_> = {})
     {
         exec(a, b, c);
+    }
+
+    template <index_t opselA,
+              index_t opselB,
+              typename ATensor,
+              typename BTensor,
+              typename CTensor,
+              typename ScaleADataType,
+              typename ScaleBDataType>
+    CK_TILE_DEVICE static decltype(auto)
+    exec(ATensor& a, BTensor& b, CTensor& accum, ScaleADataType& scale_A, ScaleBDataType& scale_B)
+    {
+        static_assert(MmaOpTraits<typename Derived::MmaOp>::IsScale,
+                      "This exec variant is intended for scale policy structs");
+
+        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsSupported)
+        {
+            if constexpr(Flags & MmaPipelineOptionFlag::ABSwap)
+            {
+                decltype(auto) a_transformed = Derived::ATransform::exec(b);
+                decltype(auto) b_transformed = Derived::BTransform::exec(a);
+                decltype(auto) c_transformed = Derived::CTransform::exec(accum);
+                Derived::template execImpl<opselA, opselB>(
+                    a_transformed, b_transformed, c_transformed, scale_A, scale_B);
+                return Derived::DTransform::exec(c_transformed);
+            }
+            else
+            {
+                decltype(auto) a_transformed = Derived::ATransform::exec(a);
+                decltype(auto) b_transformed = Derived::BTransform::exec(b);
+                decltype(auto) c_transformed = Derived::CTransform::exec(accum);
+                Derived::template execImpl<opselA, opselB>(
+                    a_transformed, b_transformed, c_transformed, scale_A, scale_B);
+                return Derived::DTransform::exec(c_transformed);
+            }
+        }
+        else
+        {
+            return Derived::MmaOp::exec({}, {}, {});
+        }
+    }
+
+    // Entry point for scale operations. TODO: Add c_vec = a_vec * b_vec variant (+ scaleless
+    // variant?)
+    // TODO: Add support for other scale types.
+    template <index_t opselA,
+              index_t opselB,
+              typename CTensor,
+              typename ATensor,
+              typename BTensor,
+              bool post_nop_ = false>
+    CK_TILE_DEVICE void operator()(CTensor& c,
+                                   const ATensor& a,
+                                   const BTensor& b,
+                                   const int32_t& a_scale,
+                                   const int32_t& b_scale,
+                                   bool_constant<post_nop_> = {}) const
+    {
+        exec<opselA, opselB>(a, b, c, a_scale, b_scale);
     }
 };
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER

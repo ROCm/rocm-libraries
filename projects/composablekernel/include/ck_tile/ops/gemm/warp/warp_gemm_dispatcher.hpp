@@ -8,6 +8,8 @@
 #include "ck_tile/ops/gemm/warp/warp_wmma_gemm.hpp"
 #include "ck_tile/core/arch/arch.hpp"
 
+#define USE_NEW_UNIFIED_FRAMEWORK 1
+
 namespace ck_tile {
 
 namespace impl {
@@ -38,7 +40,58 @@ template <typename AType,
           WGAttrNumAccessEnum AttrNumAccessA = ESingle,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
           typename Enable                    = void>
-struct Dispatcher;
+struct Dispatcher
+{
+    // static_assert(0);
+
+#if USE_NEW_UNIFIED_FRAMEWORK
+
+    // TODO: The dispatcher currently determines whether microscaling intrinsics are requested based
+    // on the WaveTile sizes and types. This is potentially dangerous and we should add a dedicated
+    // parameter instead.
+    static constexpr bool IsMxSized = (MPerWave == 16 && NPerWave == 16 && KPerWave == 128) ||
+                                      (MPerWave == 32 && NPerWave == 32 && KPerWave == 64);
+    static constexpr bool IsMx =
+        (IsMxSized && std::is_same_v<AccType, float> && UseStructuredSparsity == false);
+
+    // General checks.
+    static_assert(SwizzleA == false);
+    static_assert(UseStructuredSparsity == false);
+
+    // Scale checks.
+    // TODO: Add the tiny types after those are merged.
+    static_assert(!IsMx || (std::is_same_v<AType, fp8_t> || std::is_same_v<AType, bf8_t>));
+    static_assert(!IsMx || (std::is_same_v<BType, fp8_t> || std::is_same_v<BType, bf8_t>));
+
+    // Non scale checks;
+    static_assert(IsMx || AttrNumAccessA == ESingle);
+    static_assert(IsMx || AttrNumAccessB == ESingle);
+
+    using Type = std::conditional_t<
+        IsMx,
+        ScaleMmaPipeline<AType,                     // ADataType
+                         BType,                     // BDataType
+                         AccType,                   // CDataType
+                         MPerWave,                  // M
+                         NPerWave,                  // N
+                         KPerWave,                  // K
+                         MmaAccumPolicy::ROW_MAJOR, // Irrelevant for now because we
+                                                    // don't allow MN composition
+                         TransposeC>,               // CTranspose
+        WaveWiseMmaPipeline<AType,                  // ADataType
+                            BType,                  // BDataType
+                            AccType,                // CDataType
+                            MPerWave,               // M
+                            NPerWave,               // N
+                            KPerWave,               // K
+                            MmaOpFamily::DENSE,
+                            MmaAccumPolicy::ROW_MAJOR, // Irrelevant for now because we
+                                                       // don't allow MN composition
+                            TransposeC>>;              // CTranspose
+#endif
+};
+
+#if !USE_NEW_UNIFIED_FRAMEWORK // Dispatcher specializations
 
 // clang-format off
 // fp32
@@ -276,6 +329,8 @@ struct Dispatcher<AType, BType, AccType, M, N, K, TransposeC, SA, SS,
                   std::enable_if_t<!std::is_base_of_v<WmmaTag,
                       Dispatcher<AType, BType, AccType, M, N, K, TransposeC, SA, SS, ESingle, ESingle, void>>>>
     : Dispatcher<AType, BType, AccType, M, N, K, TransposeC, SA, SS, ESingle, ESingle, void> {};
+
+#endif
 
 // clang-format on
 } // namespace warp_gemm_dispatcher
