@@ -559,7 +559,7 @@ set(FMHA_FALLBACK_SOURCE "${FMHA_FALLBACK_KERNEL_DIR}/fmha_python_fallback.cpp")
 add_custom_command(
     OUTPUT ${FMHA_DISPATCH_HEADER} ${FMHA_FALLBACK_LIB} ${FMHA_FALLBACK_SENTINEL}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${FMHA_FALLBACK_KERNEL_DIR}
-    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../codegen/generate_fmha_fallback.py
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../codegen/fmha/generate_fallback.py
             --output-dir ${FMHA_FALLBACK_KERNEL_DIR}
             --gpu-target ${GPU_TARGET}
             --compile

@@ -18,13 +18,18 @@ and the dispatcher's runtime-registry model:
 import argparse
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Iterable, Union
 
-from codegen_common import parallel_generate
-from fmha_profiles import profile_allows
-from fmha_rules import load_arch_specs, validate_config
-from fmha_symbol_map import (
+# Ensure parent (codegen/) is on path for codegen_common and sibling modules
+_CODEGEN_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_CODEGEN_DIR))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from codegen_common import parallel_generate  # noqa: E402
+from specs import load_arch_specs, profile_allows, validate_config  # noqa: E402
+from symbol_map import (  # noqa: E402
     ARCH_PREPROC_MAP,
     ARCH_TAG_MAP,
     BIAS_TO_CPP,
@@ -90,9 +95,10 @@ def _kv_lookup_cpp(value: str) -> str:
 def _bwd_block_tile(tile: list, sig: dict) -> str:
     """Format the bwd block tile sequence.
 
-    If tile has 9 elements, use them directly as (bm0,bn0,bk0,bk1,bk2,bk3,bk4,bhdq,bhdv).
-    If tile has 6 elements (forward-style), map as: M0,N0,K0,K1,K2,K3,K4,HDQ,HDV
-    using the forward-to-backward heuristic.
+    Source: fmha_bwd.hpp FmhaBwdDQDKDVTileSize — 9 elements:
+    (bm0, bn0, bk0, bn1, bk1, bk0max, tile6, tile7, tile8).
+    If tile has only 6 elements (forward-style), maps to BWD format using the
+    forward-to-backward heuristic from fmha_bwd.py.
     """
     if len(tile) >= 9:
         return ", ".join(str(t) for t in tile[:9])

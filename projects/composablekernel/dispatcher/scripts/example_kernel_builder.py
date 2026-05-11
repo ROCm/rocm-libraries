@@ -1424,7 +1424,7 @@ def _build_fmha_codegen_cmd(
     config_json = json.dumps(payload)
     cmd = [
         sys.executable,
-        str(codegen_dir / "unified_fmha_codegen.py"),
+        str(codegen_dir / "fmha" / "codegen.py"),
         "--output-dir",
         str(output_dir),
         "--gpu-target",

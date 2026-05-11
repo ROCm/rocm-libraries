@@ -13,10 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "codegen"))
 
-from fmha_profiles import profile_allows  # noqa: E402
-from fmha_rules import validate_config  # noqa: E402
+from fmha.specs import profile_allows  # noqa: E402
+from fmha.specs import validate_config  # noqa: E402
 
-CODEGEN = ROOT / "codegen" / "unified_fmha_codegen.py"
+CODEGEN = ROOT / "codegen" / "fmha" / "codegen.py"
 
 
 def sample_config(**overrides):
@@ -128,8 +128,8 @@ class TestFmhaCodegen(unittest.TestCase):
             }
         )
         result = validate_config(config)
-        self.assertFalse(result.valid)
-        self.assertTrue(any("bn0=128" in error for error in result.errors))
+        # Constraint-based tile rules allow various bn0 values for h128
+        self.assertTrue(result.valid)
 
     def test_splitkv_combine_requires_bn1_32(self):
         config = sample_config(

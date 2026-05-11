@@ -16,7 +16,6 @@ Usage:
     result = runner.run(Q, K, V, problem)
 """
 
-import copy
 import ctypes
 import json
 import os
@@ -248,10 +247,16 @@ class FmhaKernelConfig:
             self.pipeline,
             f"t{self.tile_m0}x{self.tile_n0}x{self.tile_k0}x{self.tile_n1}x{self.tile_k1}x{self.tile_k0max}"
             + (f".{self.tile_tag}" if self.tile_tag else ""),
-            f"pad{s}{k}{d}{v}",
-            f"mask={self.mask}",
-            f"bias={self.bias}",
         ]
+        # Always include warp class for uniform naming
+        parts.append(f"w{self.warp_m0}x{self.warp_n0}x{self.warp_k0}")
+        parts.extend(
+            [
+                f"pad{s}{k}{d}{v}",
+                f"mask={self.mask}",
+                f"bias={self.bias}",
+            ]
+        )
         if self.lse:
             parts.append("lse=1")
         if self.dropout:
@@ -280,8 +285,8 @@ class FmhaKernelConfig:
             parts.append("dbias=1")
         if self.dropout_variant and self.dropout_variant != "no":
             parts.append(f"drv={self.dropout_variant}")
-        if self.block_per_cu != -1:
-            parts.append(f"bpc={self.block_per_cu}")
+        # Always include block_per_cu for uniform naming
+        parts.append(f"bpc={self.block_per_cu}")
         return "_".join(parts)
 
     def to_codegen_json(self) -> str:
@@ -1147,13 +1152,40 @@ class FmhaSetupResult:
     build_time_s: float = 0.0
 
 
+def _build_static_lib(root: Path) -> Optional[Path]:
+    """Build libck_tile_dispatcher.a via cmake if not already present."""
+    build_dir = root / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    hipcc = _find_hipcc()
+    cmake_cmd = ["cmake", str(root), f"-DCMAKE_CXX_COMPILER={hipcc}"]
+    r = subprocess.run(cmake_cmd, cwd=str(build_dir), capture_output=True, text=True)
+    if r.returncode != 0:
+        print(
+            f"Warning: cmake failed for dispatcher lib: {r.stderr[:200]}",
+            file=sys.stderr,
+        )
+        return None
+    make_cmd = ["make", "ck_tile_dispatcher", f"-j{os.cpu_count() or 4}"]
+    r = subprocess.run(make_cmd, cwd=str(build_dir), capture_output=True, text=True)
+    if r.returncode != 0:
+        print(
+            f"Warning: make failed for dispatcher lib: {r.stderr[:200]}",
+            file=sys.stderr,
+        )
+        return None
+    lib_path = build_dir / "libck_tile_dispatcher.a"
+    return lib_path if lib_path.exists() else None
+
+
 def _find_static_lib() -> Optional[Path]:
     root = get_dispatcher_root()
     for rel in ["build/libck_tile_dispatcher.a", "build/lib/libck_tile_dispatcher.a"]:
         p = root / rel
         if p.exists():
             return p
-    return None
+    # Auto-build if not found
+    print("  Building libck_tile_dispatcher.a (first time)...", file=sys.stderr)
+    return _build_static_lib(root)
 
 
 def _find_hipcc() -> str:
@@ -1166,8 +1198,14 @@ def _find_hipcc() -> str:
 def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str]:
     """Base hipcc flags for compiling FMHA kernels. Shared by JIT and tile engine.
 
-    Mirrors the flags from example/ck_tile/01_fmha/CMakeLists.txt to ensure
-    parity with CK's own build system.
+    Source: example/ck_tile/01_fmha/CMakeLists.txt — mirrors CK's own build
+    flags to ensure parity.  Key defines:
+    - CK_TILE_FMHA_FWD_FAST_EXP2: enables fast exp2 on gfx9 (CDNA)
+    - CK_TILE_USE_OCP_FP8: uses OCP standard fp8 format
+    - CK_GFX950_SUPPORT / CK_USE_GFX950: enables gfx950-specific code paths
+    - CK_USE_XDL: enables MFMA (matrix fused multiply-add) instructions
+    - CK_TILE_USE_WMMA: 0 for CDNA (uses MFMA instead)
+    - CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3: BWD bf16 conversion mode
     """
     if not hipcc:
         hipcc = _find_hipcc()
@@ -1222,10 +1260,14 @@ def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str
 def _make_splitkv_combine_config(splitkv_cfg: FmhaKernelConfig) -> FmhaKernelConfig:
     """Create a matching fwd_splitkv_combine config for a fwd_splitkv config.
 
+    Source: fmha_fwd.py splitkv_combine tile — fixed (32, hdim_v, 32, 32) tile.
+    The combine_bn1=32 comes from specs.py load_arch_specs() splitkv_combine dict.
     The combine kernel merges partial results from the split stage into the
     final output.  Must be in the same .so as the split kernel for the
-    2-stage splitkv pipeline (same pattern as bwd dot_do_o + dq_dk_dv).
+    2-stage splitkv pipeline.
     """
+    import copy
+
     comb = copy.copy(splitkv_cfg)
     comb.family = "fwd_splitkv_combine"
     comb.pipeline = "splitkv_combine"
@@ -1256,11 +1298,13 @@ def _make_splitkv_combine_config(splitkv_cfg: FmhaKernelConfig) -> FmhaKernelCon
 def _make_bwd_dot_do_o_config(dq_cfg: FmhaKernelConfig) -> FmhaKernelConfig:
     """Create a matching bwd_dot_do_o config for a bwd_dq_dk_dv config.
 
+    Source: fmha_bwd.py FmhaBwdDotDoOTileSize — fixed tile (64, max(hv,128), 32).
+    Warp tile (32,32,16) with 4 waves in M = standard fp16/bf16 MFMA config.
     The dot_do_o kernel computes d = rowsum(O * dO) and must be in the same
     .so as the dq_dk_dv kernel for the 2-stage BWD pipeline.
-    Tile/wave/warp are fixed; signature fields (hdim, dtype, mode, features,
-    padding) are inherited from the dq_dk_dv config.
     """
+    import copy
+
     dot = copy.copy(dq_cfg)
     dot.family = "bwd_dot_do_o"
     dot.pipeline = "qr"
@@ -1368,7 +1412,7 @@ def setup_fmha_dispatcher(
         config_json_str = config.to_codegen_json()
     gen_cmd = [
         sys.executable,
-        str(codegen_dir / "generate_fmha_fallback.py"),
+        str(codegen_dir / "fmha" / "generate_fallback.py"),
         "--output-dir",
         str(output_dir),
         "--gpu-target",
@@ -1490,6 +1534,7 @@ def setup_multiple_fmha_dispatchers(
     verbose: bool = False,
     max_workers: Optional[int] = None,
     executor=None,
+    progress_callback=None,
 ) -> List[FmhaSetupResult]:
     """3-stage pipelined JIT: codegen(parallel) -> compile(parallel) -> link+load(parallel).
 
@@ -1556,7 +1601,7 @@ def setup_multiple_fmha_dispatchers(
             rc = subprocess.call(
                 [
                     sys.executable,
-                    str(codegen_dir / "generate_fmha_fallback.py"),
+                    str(codegen_dir / "fmha" / "generate_fallback.py"),
                     "--output-dir",
                     str(out),
                     "--gpu-target",
@@ -1576,7 +1621,11 @@ def setup_multiple_fmha_dispatchers(
             )
         return (cfg.name, cfg, out, ok)
 
-    codegen_results = [_codegen(cfg) for cfg in configs]
+    codegen_results = []
+    for i, cfg in enumerate(configs):
+        codegen_results.append(_codegen(cfg))
+        if progress_callback:
+            progress_callback("codegen", i + 1, len(configs))
 
     # --- Stage 2: Collect ALL compile jobs, run in one pool ---
     # Use bwd family flag to get the superset of all flags (includes BWD-specific defines)
@@ -1625,7 +1674,12 @@ def setup_multiple_fmha_dispatchers(
             _own_pool = ProcessPoolExecutor(max_workers=workers)
             _pool = _own_pool
         try:
+            done_count = 0
+            total_jobs = len(compile_jobs)
             for name, ok, err in _pool.map(_run_compile_job, compile_jobs):
+                done_count += 1
+                if progress_callback:
+                    progress_callback("compile", done_count, total_jobs)
                 if not ok:
                     failed_names.add(name)
                     if name not in results:
