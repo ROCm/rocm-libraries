@@ -74,12 +74,7 @@ PRIMBENCH_REGISTER_TYPE(float, "f32")
 PRIMBENCH_REGISTER_TYPE(double, "f64")
 PRIMBENCH_REGISTER_TYPE(long long, "i64")
 PRIMBENCH_REGISTER_TYPE(unsigned long long, "u64")
-
-// this limitation can be removed once
-// https://github.com/NVIDIA/cub/issues/484 is fixed
-#ifdef __HIP_PLATFORM_AMD__
 PRIMBENCH_REGISTER_TYPE(__half, "f16")
-#endif
 
 // these are very commonly used in the benchmarks
 using custom_float2  = benchmark_utils::custom_type<float, float>;
