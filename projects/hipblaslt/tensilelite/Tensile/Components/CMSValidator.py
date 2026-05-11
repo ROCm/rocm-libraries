@@ -1874,6 +1874,183 @@ def _is_alu_producer(producer: GraphNode) -> bool:
     return True
 
 
+# =============================================================================
+# Quad-cycle dispatch table (rocm-libraries-s5g1)
+# =============================================================================
+# Replaces the order-dependent if/elif chain that used to live inline in
+# `_classify_edge_coverage` and `diagnose_missing_edge`. The chain ran four
+# branches in a load-bearing order (PackMFMA->CVT before generic MFMA before
+# CVT->MFMA before ALU exemption) because the underlying predicates
+# overlapped (`_is_mfma_producer` claims PackMFMAs; `_is_alu_producer` claims
+# CVTPacks). Reordering ANY pair silently downgraded a strict gap to a
+# weaker one or to no check at all — see QUAD_CYCLE_DISPATCH_AUDIT.md for
+# the full failure-mode catalog.
+#
+# The fix (audit Option 4): classify producer and consumer ONCE into role
+# enums whose values are pairwise disjoint by construction, then dispatch
+# by exact (producer_role, consumer_role) lookup. The carve-outs disappear
+# because the categories themselves disambiguate: PACK_MFMA is a different
+# enum value from MFMA; CVT_PACK is a different enum value from ALU. Branch
+# ordering CANNOT regress the dispatch because there are no branches —
+# just a dict lookup.
+
+
+class _ProducerRole(Enum):
+    """Producer-side role for the quad-cycle dispatch table.
+
+    Pairwise-disjoint by construction: each producer maps to exactly one
+    role via `_producer_role()`. The classifier internally checks
+    `is_mfma_pack_producer` BEFORE `is_mfma_producer`/`is_cvt_pack_producer`/
+    `_is_alu_producer` so PackMFMAs land in PACK_MFMA (not MFMA / not ALU)
+    and CVTPacks land in CVT_PACK (not ALU). Once the role is assigned,
+    the dispatch table consults exact-match keys — no branch ordering.
+    """
+    PACK_MFMA = "PACK_MFMA"   # 4x4 PackMFMA (Pack* category, MFMA-shaped rocisa)
+    MFMA = "MFMA"             # category == "MFMA"
+    CVT_PACK = "CVT_PACK"     # Pack* category, VCvtPkF32toBF16 rocisa
+    ALU = "ALU"               # ALU-immediate (no quad-cycle constraint)
+    OTHER = "OTHER"           # everything else (LR/LW/GR/etc — Phase 2 wait coverage)
+
+
+class _ConsumerRole(Enum):
+    """Consumer-side role for the quad-cycle dispatch table.
+
+    Only three buckets matter on the consumer side: MFMA-as-consumer (the
+    sink for CVT->MFMA), CVT_PACK-as-consumer (the sink for PackMFMA->CVT),
+    or anything else (no consumer-specific constraint).
+    """
+    MFMA = "MFMA"
+    CVT_PACK = "CVT_PACK"
+    OTHER = "OTHER"
+
+
+def _producer_role(node: "GraphNode") -> _ProducerRole:
+    """Classify a producer node into exactly one `_ProducerRole`.
+
+    Order of internal checks reproduces the pre-refactor predicate
+    semantics (PackMFMA carved out of MFMA's umbrella before ALU's
+    umbrella claims it) but the result is an enum value, so downstream
+    dispatch is order-INDEPENDENT.
+    """
+    if GraphNode.is_mfma_pack_producer(node):
+        return _ProducerRole.PACK_MFMA
+    if GraphNode.is_mfma_producer(node):
+        # is_mfma_producer is True for category=="MFMA" OR PackMFMA; the
+        # PackMFMA case was already claimed above, so this branch matches
+        # only the standard category=="MFMA" path.
+        return _ProducerRole.MFMA
+    if GraphNode.is_cvt_pack_producer(node):
+        return _ProducerRole.CVT_PACK
+    if _is_alu_producer(node):
+        return _ProducerRole.ALU
+    return _ProducerRole.OTHER
+
+
+def _consumer_role(node: "GraphNode") -> _ConsumerRole:
+    """Classify a consumer node into exactly one `_ConsumerRole`.
+
+    Mirrors the consumer-side predicates the original chain used (only
+    `is_mfma_producer(c_node)` and `is_cvt_pack_producer(c_node)`).
+    """
+    if GraphNode.is_cvt_pack_producer(node):
+        return _ConsumerRole.CVT_PACK
+    if GraphNode.is_mfma_producer(node):
+        return _ConsumerRole.MFMA
+    return _ConsumerRole.OTHER
+
+
+def _quad_cycle_gap_ok(
+    producer: "GraphNode", consumer: "GraphNode", subj_graph: "DataflowGraph",
+) -> "TimingCheck":
+    """Uniform-signature wrapper around `arch_profile.quad_cycle_gap_ok`.
+
+    Exists so the dispatch table can store a single `(p, c, g) -> TimingCheck`
+    callable shape for all three quad-cycle helpers (this one,
+    `_cvt_to_mfma_gap_ok`, `_mfma_pack_to_cvt_gap_ok`). Keeps the
+    unknown-ISA short-circuit in one place rather than open-coding it at
+    every dispatch site.
+    """
+    if subj_graph.arch_profile is None:
+        return TimingCheck.arch_not_supported()
+    return subj_graph.arch_profile.quad_cycle_gap_ok(producer, consumer, subj_graph)
+
+
+# Sentinel: dispatch table value meaning "no gap check; the producer's
+# results are immediately visible (ALU exemption) — return [] without
+# running any helper". Distinct from a missing-key lookup, which means
+# "fall through to Phase 2 wait coverage".
+_PASSTHROUGH = "PASSTHROUGH"
+
+
+# Dispatch table — single source of truth for "which helper handles which
+# (producer_role, consumer_role) pair". Keys MUST be exhaustive over the
+# pairs that previously matched the if/elif chain; missing keys map to
+# the Phase-2 wait-coverage fall-through.
+#
+# Carve-outs the old branch order encoded are now expressed as
+# enum-distinctness:
+#   - PackMFMA->CVT used to need to beat the generic MFMA branch. Now
+#     PACK_MFMA is a different enum value from MFMA; the table has
+#     separate entries for (PACK_MFMA, CVT_PACK) and (MFMA, *).
+#   - CVT_PACK used to need to beat the ALU exemption. Now CVT_PACK is
+#     a different enum value from ALU; the table has a (CVT_PACK, MFMA)
+#     entry and the ALU rows map to _PASSTHROUGH separately.
+_DISPATCH: dict = {
+    # PackMFMA producers.
+    (_ProducerRole.PACK_MFMA, _ConsumerRole.CVT_PACK): _mfma_pack_to_cvt_gap_ok,
+    (_ProducerRole.PACK_MFMA, _ConsumerRole.MFMA):     _quad_cycle_gap_ok,
+    (_ProducerRole.PACK_MFMA, _ConsumerRole.OTHER):    _quad_cycle_gap_ok,
+
+    # Standard MFMA producers — every consumer side gets the
+    # arch-profile finish-cycle check (the original generic-MFMA branch
+    # ran unconditionally regardless of consumer kind).
+    (_ProducerRole.MFMA, _ConsumerRole.CVT_PACK): _quad_cycle_gap_ok,
+    (_ProducerRole.MFMA, _ConsumerRole.MFMA):     _quad_cycle_gap_ok,
+    (_ProducerRole.MFMA, _ConsumerRole.OTHER):    _quad_cycle_gap_ok,
+
+    # CVTPack producers — only the CVT->MFMA pair carries a quad-cycle
+    # constraint (2-cycle settle window). CVT->CVT and CVT->OTHER fall
+    # through to ALU passthrough (the original chain's behavior: CVTPack
+    # producers feeding non-MFMA consumers landed in `_is_alu_producer`).
+    (_ProducerRole.CVT_PACK, _ConsumerRole.MFMA):     _cvt_to_mfma_gap_ok,
+    (_ProducerRole.CVT_PACK, _ConsumerRole.CVT_PACK): _PASSTHROUGH,
+    (_ProducerRole.CVT_PACK, _ConsumerRole.OTHER):    _PASSTHROUGH,
+
+    # ALU producers — immediately visible, no gap check. All consumers.
+    (_ProducerRole.ALU, _ConsumerRole.MFMA):     _PASSTHROUGH,
+    (_ProducerRole.ALU, _ConsumerRole.CVT_PACK): _PASSTHROUGH,
+    (_ProducerRole.ALU, _ConsumerRole.OTHER):    _PASSTHROUGH,
+
+    # OTHER producers (LR/LW/GR/etc) intentionally have NO entries here —
+    # missing keys fall through to Phase-2 wait coverage at the call site.
+}
+
+
+def _dispatch_quad_cycle_check(
+    p_node: "GraphNode", c_node: "GraphNode", subj_graph: "DataflowGraph",
+):
+    """Apply the quad-cycle dispatch table to one edge.
+
+    Returns one of three values:
+      - A `TimingCheck` instance — caller wraps a `TimingTooCloseFailure`
+        if `check.result == TimingResult.FAIL`, else returns `[]`.
+      - `_PASSTHROUGH` — caller returns `[]` (ALU exemption / CVT-feeding-
+        non-MFMA pass-through). No further check applies.
+      - `None` — no entry in the table; caller falls through to Phase-2
+        wait coverage.
+
+    No fallback to the legacy if/elif chain. The table is the dispatch.
+    """
+    role_p = _producer_role(p_node)
+    role_c = _consumer_role(c_node)
+    handler = _DISPATCH.get((role_p, role_c))
+    if handler is None:
+        return None
+    if handler is _PASSTHROUGH:
+        return _PASSTHROUGH
+    return handler(p_node, c_node, subj_graph)
+
+
 def _first_insufficient(
     waits: List[GraphNode], producer: GraphNode, subj_graph: DataflowGraph
 ) -> Optional[GraphNode]:
@@ -2578,78 +2755,27 @@ def diagnose_missing_edge(
         # simply unsourced in subj. Fall through to the generic ALU early
         # return so we don't double-emit on a non-clobber miss.
 
-    # 4x4 PackMFMA-as-producer feeding CVTPack-as-consumer: 5-quad-cycle
-    # settle window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1`).
-    # Must run BEFORE the generic `_is_mfma_producer` branch below:
-    # `_is_mfma_producer` claims PackMFMA producers and would otherwise
-    # route this pair through `_quad_cycle_gap_ok`, which uses
-    # `_mfma_finish_cycles_for(producer) == 1` for 4x4 PackMFMAs — too
-    # weak by 4 quad-cycles versus the 5-cycle CVT1 visibility window.
-    # The structural-side mirror (`_handle_min_pack_quad_cycles` /
-    # `MFMAPack.min_quad_cycles_before_result_used`) was removed; this
-    # dispatch is now the only enforcement path.
-    if (GraphNode.is_mfma_pack_producer(p_node)
-            and GraphNode.is_cvt_pack_producer(c_node)):
-        check = _mfma_pack_to_cvt_gap_ok(
-            p_node, c_node, subj_graph)
-        if check.result == TimingResult.FAIL:
+    # Quad-cycle dispatch (rocm-libraries-s5g1): replaced the four-branch
+    # order-dependent if/elif chain with the shared `_dispatch_quad_cycle_check`
+    # table. Same dispatch as `_classify_edge_coverage` — single source of
+    # truth for "which helper handles which (producer_role, consumer_role)
+    # pair". Carve-outs that were previously enforced by branch order are
+    # now expressed as enum-distinctness in `_DISPATCH`.
+    dispatch_result = _dispatch_quad_cycle_check(p_node, c_node, subj_graph)
+    if dispatch_result is _PASSTHROUGH:
+        # ALU-immediate exemption (ALU producers + CVT-feeding-non-MFMA).
+        return []
+    if dispatch_result is not None:
+        if dispatch_result.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
                 producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
                 consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
                 iter_delta=p_node.iter_delta_to(c_node),
-                expected_quad_cycles=check.required,
-                actual_quad_cycles=check.observed,
+                expected_quad_cycles=dispatch_result.required,
+                actual_quad_cycles=dispatch_result.observed,
             )]
         return []
-
-    # MFMA-as-producer: governed by quad-cycle issue-timing constraints,
-    # not by the dscnt/vlcnt FIFO. An explicit gap check fires; an MFMA
-    # producer whose consumer fires too soon after it is a TimingTooClose
-    # violation. Dispatch is via `_is_mfma_producer` (rather than `category
-    # == "MFMA"`) so 4x4 PackMFMAs (categorized Pack* but syntactically
-    # MFMAInstruction) are routed here BEFORE the ALU exemption claims
-    # them.
-    if GraphNode.is_mfma_producer(p_node):
-        if subj_graph.arch_profile is None:
-            check = TimingCheck.arch_not_supported()
-        else:
-            check = subj_graph.arch_profile.quad_cycle_gap_ok(p_node, c_node, subj_graph)
-        if check.result == TimingResult.FAIL:
-            return [TimingTooCloseFailure(
-                producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
-                consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
-                iter_delta=p_node.iter_delta_to(c_node),
-                expected_quad_cycles=check.required,
-                actual_quad_cycles=check.observed,
-            )]
-        return []
-
-    # CVTPack-as-producer feeding MFMA-as-consumer: 2-quad-cycle settle
-    # window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_CVT_BEFORE_MFMA`). The
-    # structural-side mirror was removed; this dispatch is now the only
-    # enforcement path. Must precede the ALU-immediate exemption below
-    # (same dispatch-order constraint as the MFMA branch above) so
-    # CVTPacks don't get silently waved through. Non-MFMA consumers fall
-    # through to the ALU exemption — only the CVT->MFMA edge carries the
-    # quad-cycle constraint.
-    if GraphNode.is_cvt_pack_producer(p_node) and GraphNode.is_mfma_producer(c_node):
-        check = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
-        if check.result == TimingResult.FAIL:
-            return [TimingTooCloseFailure(
-                producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
-                consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
-                iter_delta=p_node.iter_delta_to(c_node),
-                expected_quad_cycles=check.required,
-                actual_quad_cycles=check.observed,
-            )]
-        return []
-
-    # ALU-as-producer (scalar/vector ALU, GRInc, m0 setters): result is
-    # immediately visible to the next issued instruction; no SWaitCnt drain
-    # applies. Phase 1 already classified any order inversion; nothing else
-    # to verify.
-    if _is_alu_producer(p_node):
-        return []
+    # dispatch_result is None — fall through to Phase 2 wait coverage.
 
     # Phase 2 — independent checks. Run all; collect failures.
     # All wait/barrier helpers walk subj_graph cross-body: producer in
@@ -2859,82 +2985,37 @@ def _classify_edge_coverage(
     # in diagnose_missing_edge owns OrderInverted detection (with default
     # positions for diagnostics).
 
-    # 4x4 PackMFMA-as-producer feeding CVTPack-as-consumer: 5-quad-cycle
-    # settle window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1`).
-    # The structural-side mirror was removed; this dispatch is now the
-    # only enforcement path. Must run BEFORE the generic
-    # `_is_mfma_producer` branch below: PackMFMA producers are claimed by
-    # `_is_mfma_producer` and would otherwise route through
-    # `_quad_cycle_gap_ok`, whose threshold for 4x4 PackMFMAs
-    # (`_mfma_finish_cycles_for == 1`) is too weak by 4 quad-cycles
-    # versus the 5-cycle CVT1 visibility window.
+    # Quad-cycle dispatch (rocm-libraries-s5g1): replaced the four-branch
+    # order-dependent if/elif chain (PackMFMA->CVT, generic MFMA, CVT->MFMA,
+    # ALU exemption) with a single category-keyed dispatch table. The
+    # carve-outs that were previously enforced by branch order
+    # (PackMFMA->CVT must beat generic MFMA; CVT->MFMA must beat ALU) are
+    # now expressed as enum-distinctness in `_DISPATCH`: PACK_MFMA and MFMA
+    # are different `_ProducerRole` values, CVT_PACK and ALU are different
+    # `_ProducerRole` values. See QUAD_CYCLE_DISPATCH_AUDIT.md for the
+    # design rationale and the failure-mode catalog the table is closed
+    # against.
     p_label = cms_node_label(p_node, subj_graph.body_for(p_node))
     c_label = cms_node_label(c_node, subj_graph.body_for(c_node))
     iter_delta = p_node.iter_delta_to(c_node)
 
-    if (GraphNode.is_mfma_pack_producer(p_node)
-            and GraphNode.is_cvt_pack_producer(c_node)):
-        check = _mfma_pack_to_cvt_gap_ok(
-            p_node, c_node, subj_graph)
-        if check.result == TimingResult.FAIL:
+    dispatch_result = _dispatch_quad_cycle_check(p_node, c_node, subj_graph)
+    if dispatch_result is _PASSTHROUGH:
+        # ALU-immediate exemption (ALU producers + CVT-feeding-non-MFMA).
+        return []
+    if dispatch_result is not None:
+        # A gap-check helper ran; it returned a TimingCheck.
+        if dispatch_result.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
                 producer=p_label,
                 consumer=c_label,
                 iter_delta=iter_delta,
-                expected_quad_cycles=check.required,
-                actual_quad_cycles=check.observed,
+                expected_quad_cycles=dispatch_result.required,
+                actual_quad_cycles=dispatch_result.observed,
             )]
         return []
-
-    # MFMA-as-producer: gated by quad-cycle issue timing rather than
-    # SWaitCnt (see diagnose_missing_edge). An explicit gap check fires.
-    # Dispatch is via `_is_mfma_producer` (rather than `category == "MFMA"`)
-    # so PackMFMAs (categorized Pack* but rocisa MFMAInstruction) reach
-    # this branch instead of getting silently exempted by
-    # `_is_alu_producer` below.
-    if GraphNode.is_mfma_producer(p_node):
-        if subj_graph.arch_profile is None:
-            check = TimingCheck.arch_not_supported()
-        else:
-            check = subj_graph.arch_profile.quad_cycle_gap_ok(p_node, c_node, subj_graph)
-        if check.result == TimingResult.FAIL:
-            return [TimingTooCloseFailure(
-                producer=p_label,
-                consumer=c_label,
-                iter_delta=iter_delta,
-                expected_quad_cycles=check.required,
-                actual_quad_cycles=check.observed,
-            )]
-        return []
-
-    # CVTPack-as-producer feeding MFMA-as-consumer: governed by the
-    # `_QUAD_CYCLES_CVT_BEFORE_MFMA` (= 2) settle window from CDNA 4 ISA
-    # section 7.6. The structural-side mirror was removed; this dispatch
-    # is now the only enforcement path. Must run BEFORE the ALU-immediate
-    # exemption below — CVTPacks are categorized `Pack*` and
-    # `_is_alu_producer` would otherwise silently absorb them and skip
-    # the gap check entirely (same dispatch-order constraint as the
-    # PackMFMA carve-out above). Restricted to MFMA consumers: a CVTPack
-    # feeding a non-MFMA consumer (e.g. another Pack or VXor that uses
-    # the converted result for something other than an MFMA operand load)
-    # carries no quad-cycle constraint — fall through to the ALU
-    # exemption in that case.
-    if GraphNode.is_cvt_pack_producer(p_node) and GraphNode.is_mfma_producer(c_node):
-        check = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
-        if check.result == TimingResult.FAIL:
-            return [TimingTooCloseFailure(
-                producer=p_label,
-                consumer=c_label,
-                iter_delta=iter_delta,
-                expected_quad_cycles=check.required,
-                actual_quad_cycles=check.observed,
-            )]
-        return []
-
-    # ALU-as-producer: results are immediately visible; no wait counter
-    # applies. Within-graph order inversions were already handled above.
-    if _is_alu_producer(p_node):
-        return []
+    # dispatch_result is None — no entry in the table for this pair.
+    # Fall through to Phase-2 wait coverage.
 
     # Phase 2 — wait coverage.
     expected_counter = counter_for(p_node)
