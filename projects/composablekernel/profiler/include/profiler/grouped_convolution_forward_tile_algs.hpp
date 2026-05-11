@@ -81,14 +81,13 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                               ck_tile::half_t,
                                               ck_tile::bfloat16_t>>;
 
-    std::unique_ptr<ckt::Outputs<SIGNATURE>> reference;
+    auto reference = ckt::alloc_outputs(args);
     if(do_verification)
     {
-        reference = ckt::alloc_outputs(args);
         using ReferenceInstance =
             typename ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
-        auto ref_conv = ReferenceInstance{};
-        ckt::run(ref_conv, args, inputs, reference.get());
+        auto ref_conv                    = ReferenceInstance{};
+        [[maybe_unused]] auto ref_result = ckt::run(ref_conv, args, inputs, reference.get());
     }
     auto run_alg = [&](auto&& run_alg_func) {
         std::tie(is_supported, avg_time, op_name) = run_alg_func(args, inputs, outputs, s_conf);
@@ -117,7 +116,7 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                                          name,
                                                          desc,
                                                          outputs.*ptr,
-                                                         reference->*ptr,
+                                                         reference.get().*ptr,
                                                          ck::profiler::get_rtol<DataType>(),
                                                          ck::profiler::get_atol<DataType>());
                                                  });
@@ -128,7 +127,7 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                     std::cout << "Number of incorrect values: " << error.wrong_elements
                               << " Is all zero:" << error.is_all_zero()
                               << " max err: " << error.max_error << std::endl;
-                    run_cpu_validation<SIGNATURE>(args, outputs, *reference);
+                    run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
                 }
             }
         }

@@ -81,22 +81,21 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                                               ck_tile::half_t,
                                               ck_tile::bfloat16_t>>;
 
-    std::unique_ptr<ckt::Outputs<SIGNATURE>> reference;
     const auto conv_param       = args.to_ck_tile_conv_param();
     float max_accumulated_value = 0.f;
+    auto reference              = ckt::alloc_outputs(args);
     if(do_verification)
     {
-        reference = ckt::alloc_outputs(args);
         using ReferenceInstance =
             typename ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
-        auto ref_conv = ReferenceInstance{};
-        ckt::run(ref_conv, args, inputs, reference.get());
+        auto ref_conv                    = ReferenceInstance{};
+        [[maybe_unused]] auto ref_result = ckt::run(ref_conv, args, inputs, reference.get());
 
         // Get max possible value in the output
         const std::size_t weight_bytes_num = conv_param.template GetWeightByte<DataType>();
         std::vector<DataType> ref(weight_bytes_num / sizeof(DataType));
-        HIP_CHECK_ERROR(
-            hipMemcpy(&ref.data()[0], reference->weight, weight_bytes_num, hipMemcpyDeviceToHost));
+        HIP_CHECK_ERROR(hipMemcpy(
+            &ref.data()[0], reference.get().weight, weight_bytes_num, hipMemcpyDeviceToHost));
         max_accumulated_value = *std::max_element(ref.begin(), ref.end());
     }
     const index_t num_accums = std::accumulate(std::begin(conv_param.output_spatial_lengths_),
@@ -133,7 +132,8 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                         [&](std::string_view name,
                             const auto& desc,
                             void* ckt::Outputs<SIGNATURE>::*ptr) {
-                            report.check(name, desc, outputs.*ptr, reference->*ptr, rtol, atol);
+                            report.check(
+                                name, desc, outputs.*ptr, reference.get().*ptr, rtol, atol);
                         });
 
                     valid = report.get_errors().empty();
@@ -145,7 +145,7 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                             std::cout << "\tNumber of incorrect values: " << error.wrong_elements
                                       << " Is all zero:" << error.is_all_zero()
                                       << " max err: " << error.max_error << std::endl;
-                            run_cpu_validation<SIGNATURE>(args_k_batch, outputs, *reference);
+                            run_cpu_validation<SIGNATURE>(args_k_batch, outputs, reference.get());
                         }
                         all_instances_valid = false;
                     }
