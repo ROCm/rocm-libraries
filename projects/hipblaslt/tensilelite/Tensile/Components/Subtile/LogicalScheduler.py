@@ -673,185 +673,114 @@ class LogicalScheduler:
     def assign_vgpr_tiles(self):
         """Assign physical vgprTileIds to all placements (A, B, SA, SB).
 
-        Free-list allocator with per-tensor FIFO queues, iterated until
-        convergence (or max 4 unroll iterations).
+        Deterministic double-buffer allocator.  Each tensor gets two sets
+        of vgprTiles, each of size maxPartitionGroups.  The active set
+        alternates based on the K-group index and macro-tile iteration:
 
-        Three phases:
-          1. Scan all MFMAs to find last read position for each
-             (tensor, tileId, k_data_group) key.
-          2. Walk execution order in a loop: each iteration feeds the
-             previous next_iter as the starting active state.  Appends
-             one tile-map dict per iteration to each placement's list.
-             Stops when next_iter matches the seeded state (convergence).
-          3. Record unroll_factor, needs_unrolling, and max tile_peaks.
+          set = (mt_iter * num_k_groups + k // gran.k) % 2
 
-        Keys use a unified formula parameterized by ReadGranularity:
-          key = (tensor, (tileId // lr_gran.mn) * lr_gran.mn, (k // lr_gran.k) * lr_gran.k)
+        Within a set the position is the sequential index of the tile
+        group inside its partition.  Unrolling (factor 2) is needed when
+        num_k_groups is odd for any tensor, because the set parity flips
+        across macro-tile boundaries.
 
-        Sets self.tile_peaks (per-tensor max across unrolls),
-        self.needs_unrolling, self.unroll_factor.
+        Sets self.tile_peaks, self.needs_unrolling, self.unroll_factor.
         """
         self._ensure_pass(Pass.LR)
 
         cfg = self.config
         numK = cfg.numSubIterK
-        MAX_UNROLL = 8
+        numP = cfg.numPartitions
 
         lr_grans = {'A': cfg.lrA, 'B': cfg.lrB}
         if cfg.hasScale:
             lr_grans['SA'] = cfg.lrSA
             lr_grans['SB'] = cfg.lrSB
 
-        # ── Phase 1: find last MFMA read for each key ──
-        last_read = {}  # key -> flat position
-        for pi, slots in enumerate(self._partitions):
-            for slot in slots:
-                if not slot.mfma:
-                    continue
-                pos = pi * numK + slot.subIterK
-                k = slot.subIterK
-                for tensor in self.tensors:
-                    side = TENSOR_SIDE[tensor]
-                    tileRange = slot.mfma.tileA if side == 'A' else slot.mfma.tileB
-                    gran = lr_grans[tensor]
-                    for t in tileRange.tileId_list:
-                        group = (t // gran.mn) * gran.mn
-                        k_chunk = (k // gran.k) * gran.k
-                        last_read[(tensor, group, k_chunk)] = pos
+        # ── Precompute per-partition group mappings ──
+        part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
 
-        # ── Phase 2: iterate until convergence ──
-        from collections import deque
+        # group_to_pos[tensor][pi] = {group: position}
+        group_to_pos = {t: [] for t in self.tensors}
+        max_groups = {t: 0 for t in self.tensors}
 
-        class _FreeList:
-            __slots__ = ('free', 'next_id', 'active_count', 'peak')
-            def __init__(self):
-                self.free = deque()
-                self.next_id = 0
-                self.active_count = 0
-                self.peak = 0
-            def alloc(self):
-                if self.free:
-                    vid = self.free.popleft()  # FIFO for convergence
-                else:
-                    vid = self.next_id
-                    self.next_id += 1
-                self.active_count += 1
-                self.peak = max(self.peak, self.active_count)
-                return vid
-            def release(self, vid):
-                self.free.append(vid)
-                self.active_count -= 1
+        for pi in range(numP):
+            for tensor in self.tensors:
+                side = TENSOR_SIDE[tensor]
+                start, end = part_ranges[pi][side]
+                gran = lr_grans[tensor]
+                groups = sorted(set(
+                    (t // gran.mn) * gran.mn for t in range(start, end)))
+                g2p = {g: i for i, g in enumerate(groups)}
+                group_to_pos[tensor].append(g2p)
+                max_groups[tensor] = max(max_groups[tensor], len(groups))
 
-        max_peaks = {t: 0 for t in self.tensors}
-        carry_active = {}
-        all_next_iters = []     # next_iter from each iteration, for cycle detection
+        # Reverse lookup: (side, tile_start) → partition index
+        tile_start_to_pi = {}
+        for pi in range(numP):
+            for side in ('A', 'B'):
+                tile_start_to_pi[(side, part_ranges[pi][side][0])] = pi
 
-        pools = {t: _FreeList() for t in self.tensors}
+        # ── Compute per-tensor K-groups and unroll factor ──
+        num_k_groups = {}
+        for tensor in self.tensors:
+            num_k_groups[tensor] = numK // lr_grans[tensor].k
 
-        for unroll_iter in range(MAX_UNROLL):
-            if unroll_iter == 0:
-                active = {}
-            else:
-                active = dict(carry_active)
-                # Reset active_count to match carry_active (tiles that survived
-                # as live from the previous iteration's wrapping LRs).
-                for t in self.tensors:
-                    pools[t].active_count = sum(
-                        1 for key in active if key[0] == t)
+        unroll_factor = 1
+        for tensor in self.tensors:
+            if num_k_groups[tensor] % 2 != 0:
+                unroll_factor = 2
+                break
 
-            next_iter = {}
-
+        # ── Deterministic tile assignment ──
+        for unroll_iter in range(unroll_factor):
             for pi, slots in enumerate(self._partitions):
                 for slot in slots:
-                    pos = pi * numK + slot.subIterK
                     k = slot.subIterK
 
-                    # ── MFMA reads: look up or seed ──
                     if slot.mfma:
                         for tensor in self.tensors:
-                            side = TENSOR_SIDE[tensor]
-                            tileRange = slot.mfma.tileA if side == 'A' else slot.mfma.tileB
                             gran = lr_grans[tensor]
+                            nkg = num_k_groups[tensor]
+                            set_idx = (unroll_iter * nkg + k // gran.k) % 2
+                            side = TENSOR_SIDE[tensor]
+                            tileRange = (slot.mfma.tileA if side == 'A'
+                                         else slot.mfma.tileB)
                             tile_map = {}
                             for t in tileRange.tileId_list:
                                 group = (t // gran.mn) * gran.mn
-                                k_chunk = (k // gran.k) * gran.k
-                                key = (tensor, group, k_chunk)
-                                if key not in active:
-                                    active[key] = pools[tensor].alloc()
-                                tile_map[group] = active[key]
-                            slot.mfma.vgpr_tile_maps.setdefault(tensor, []).append(tile_map)
+                                pos = group_to_pos[tensor][pi][group]
+                                tile_map[group] = (set_idx * max_groups[tensor]
+                                                   + pos)
+                            slot.mfma.vgpr_tile_maps.setdefault(
+                                tensor, []).append(tile_map)
 
-                    # ── LR writes: allocate new tiles ──
                     for lr in slot.lrs:
                         tensor = lr.tensor
-                        is_wrapping = lr.mtIteration != 0
-                        target = next_iter if is_wrapping else active
-
                         gran = lr_grans[tensor]
+                        nkg = num_k_groups[tensor]
+                        target_mt = unroll_iter + lr.mtIteration
+                        target_k = lr.tiles.subIterK_start
+                        set_idx = (target_mt * nkg + target_k // gran.k) % 2
+
+                        side = TENSOR_SIDE[tensor]
+                        lr_pi = tile_start_to_pi.get(
+                            (side, lr.tiles.tileId_start), pi)
+
                         tile_map = {}
-                        seen_keys = set()
                         for t in lr.tiles.tileId_list:
                             group = (t // gran.mn) * gran.mn
-                            for lk in lr.tiles.subIterK_list:
-                                k_chunk = (lk // gran.k) * gran.k
-                                key = (tensor, group, k_chunk)
-                                if key in seen_keys:
-                                    continue
-                                seen_keys.add(key)
-                                if key in target:
-                                    pools[tensor].release(target[key])
-                                vid = pools[tensor].alloc()
-                                target[key] = vid
-                                tile_map[group] = vid
+                            if group in tile_map:
+                                continue
+                            pos = group_to_pos[tensor][lr_pi][group]
+                            tile_map[group] = (set_idx * max_groups[tensor]
+                                               + pos)
                         lr.vgpr_tile_map.append(tile_map)
 
-                    # ── Release tiles whose last read was at this position ──
-                    to_release = [key for key, lr_pos in last_read.items()
-                                  if lr_pos == pos and key in active]
-                    for key in to_release:
-                        pools[key[0]].release(active[key])
-                        del active[key]
-
-            # Track max peaks across iterations
-            for t in self.tensors:
-                max_peaks[t] = max(max_peaks[t], pools[t].peak)
-
-            # Check convergence: if this iteration's next_iter matches
-            # any previous iteration's next_iter, we found a cycle.
-            # The cycle period is (current_iter - matching_iter).
-            # All iterations from matching_iter to current_iter-1 form
-            # the repeating pattern; iterations before that are prologue.
-            converged = False
-            for prev_idx, prev_ni in enumerate(all_next_iters):
-                if next_iter == prev_ni:
-                    # Strip tile maps from the redundant convergence iteration.
-                    for pi2, slots2 in enumerate(self._partitions):
-                        for slot2 in slots2:
-                            if slot2.mfma:
-                                for tensor in self.tensors:
-                                    if tensor in slot2.mfma.vgpr_tile_maps:
-                                        slot2.mfma.vgpr_tile_maps[tensor].pop()
-                            for lr2 in slot2.lrs:
-                                lr2.vgpr_tile_map.pop()
-                    converged = True
-                    break
-            if converged:
-                break
-
-            # Carry next_iter forward as active for next iteration
-            all_next_iters.append(next_iter)
-            carry_active = next_iter
-        else:
-            assert False, (f"assign_vgpr_tiles did not converge after "
-                           f"{MAX_UNROLL} unroll iterations\n"
-                           f"{self.print_vgpr()}")
-
-        # ── Phase 3: record results ──
-        # unroll_factor = number of unique iterations (convergence iteration excluded)
-        self.unroll_factor = unroll_iter
-        self.needs_unrolling = self.unroll_factor > 1
-        self.tile_peaks = max_peaks
+        # ── Record results ──
+        self.tile_peaks = {t: 2 * max_groups[t] for t in self.tensors}
+        self.unroll_factor = unroll_factor
+        self.needs_unrolling = unroll_factor > 1
 
         self._completed.add(Pass.VGPR_TILES)
 
