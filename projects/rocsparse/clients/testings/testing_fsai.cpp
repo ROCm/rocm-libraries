@@ -174,6 +174,12 @@ void testing_fsai_bad_arg(const Arguments& arg)
     }
 }
 
+void testing_fsai_extra(const Arguments& arg)
+{
+    // Extra tests for FSAI (e.g., edge cases, special configurations)
+    // Currently empty - expand as needed
+}
+
 template <typename I, typename J, typename T>
 void testing_fsai(const Arguments& arg)
 {

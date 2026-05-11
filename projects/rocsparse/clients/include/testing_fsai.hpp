@@ -29,5 +29,7 @@
 template <typename I, typename J, typename T>
 void testing_fsai_bad_arg(const Arguments& arg);
 
+void testing_fsai_extra(const Arguments& arg);
+
 template <typename I, typename J, typename T>
 void testing_fsai(const Arguments& arg);
