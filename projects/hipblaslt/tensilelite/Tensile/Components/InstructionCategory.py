@@ -263,3 +263,92 @@ def registered_class_names() -> tuple:
     snapshot.
     """
     return tuple(_CLASS_NAME_TO_CATEGORY.keys())
+
+
+# =============================================================================
+# RDNA3.5 S_DELAY_ALU named gap-class taxonomy
+# =============================================================================
+# Mirrors the `INSTID_*` enumeration from RDNA3.5 ISA §16.5 (pp. 251-252)
+# verbatim — the instruction itself IS the gap and the encoding NAMES the
+# class. This is the strong ISA-side signal called out in the s5g1 audit
+# memo (`ISA_GAP_GENERALIZATION_AUDIT.md`, R-10..R-13): the named taxonomy
+# is the right validator abstraction, NOT a synthesized "quad-cycle" count.
+#
+# Each member is exactly one `INSTID_*` value the ISA defines for the
+# `INSTID0` / `INSTID1` 4-bit fields of `S_DELAY_ALU`'s SIMM16 encoding.
+# Hex values are the 4-bit encoded values per §16.5. DO NOT add members
+# the ISA does not list — RDNA3.5 §16.5 is the closed source.
+#
+# Used by `validate_s_delay_alu_coverage` (CMSValidator) — dormant today
+# (the kernel emitter does not produce S_DELAY_ALU), structurally
+# installed so the moment any emitter starts producing one, the
+# encoding/gap consistency check is already in place.
+class RdnaSDelayAluClass(Enum):
+    """RDNA3.5 §16.5 S_DELAY_ALU `INSTID_*` named gap-class taxonomy.
+
+    Member name ↔ ISA `INSTID_*` symbol (1:1, verbatim). Member value is
+    the 4-bit encoded value per §16.5 ("Legal values for the InstID0 and
+    InstID1 fields are: ...").
+    """
+    NO_DEP            = 0x0   # INSTID_NO_DEP — no dependency on any prior instruction.
+    VALU_DEP_1        = 0x1   # INSTID_VALU_DEP_1 — VALU dep, 1 instruction back.
+    VALU_DEP_2        = 0x2   # INSTID_VALU_DEP_2 — VALU dep, 2 instructions back.
+    VALU_DEP_3        = 0x3   # INSTID_VALU_DEP_3 — VALU dep, 3 instructions back.
+    VALU_DEP_4        = 0x4   # INSTID_VALU_DEP_4 — VALU dep, 4 instructions back.
+    TRANS32_DEP_1     = 0x5   # INSTID_TRANS32_DEP_1 — TRANS32 dep, 1 back.
+    TRANS32_DEP_2     = 0x6   # INSTID_TRANS32_DEP_2 — TRANS32 dep, 2 back.
+    TRANS32_DEP_3     = 0x7   # INSTID_TRANS32_DEP_3 — TRANS32 dep, 3 back.
+    FMA_ACCUM_CYCLE_1 = 0x8   # INSTID_FMA_ACCUM_CYCLE_1 — single-cycle FMA accum penalty (reserved).
+    SALU_CYCLE_1      = 0x9   # INSTID_SALU_CYCLE_1 — 1 cycle penalty for prior SALU.
+    SALU_CYCLE_2      = 0xa   # INSTID_SALU_CYCLE_2 — 2 cycle penalty for prior SALU.
+    SALU_CYCLE_3      = 0xb   # INSTID_SALU_CYCLE_3 — 3 cycle penalty for prior SALU.
+
+    @property
+    def required_back_distance(self) -> int:
+        """The minimum producer-back distance (in instructions of the
+        named family) the encoding asserts. `VALU_DEP_3` claims "the
+        VALU producer is 3 instructions back"; the actual producer/consumer
+        gap must be >= this to be correctly covered.
+
+        `NO_DEP` returns 0 — degenerate carrier, nothing to verify.
+        `FMA_ACCUM_CYCLE_1` returns 1 — reserved single-cycle penalty.
+        """
+        return _SDELAY_ALU_REQUIRED_BACK_DISTANCE[self]
+
+    @property
+    def family(self) -> str:
+        """Producer-instruction family the class names: 'VALU', 'TRANS32',
+        'SALU', 'FMA_ACCUM', or 'NONE' (NO_DEP)."""
+        return _SDELAY_ALU_FAMILY[self]
+
+
+_SDELAY_ALU_REQUIRED_BACK_DISTANCE: dict = {
+    RdnaSDelayAluClass.NO_DEP:            0,
+    RdnaSDelayAluClass.VALU_DEP_1:        1,
+    RdnaSDelayAluClass.VALU_DEP_2:        2,
+    RdnaSDelayAluClass.VALU_DEP_3:        3,
+    RdnaSDelayAluClass.VALU_DEP_4:        4,
+    RdnaSDelayAluClass.TRANS32_DEP_1:     1,
+    RdnaSDelayAluClass.TRANS32_DEP_2:     2,
+    RdnaSDelayAluClass.TRANS32_DEP_3:     3,
+    RdnaSDelayAluClass.FMA_ACCUM_CYCLE_1: 1,
+    RdnaSDelayAluClass.SALU_CYCLE_1:      1,
+    RdnaSDelayAluClass.SALU_CYCLE_2:      2,
+    RdnaSDelayAluClass.SALU_CYCLE_3:      3,
+}
+
+
+_SDELAY_ALU_FAMILY: dict = {
+    RdnaSDelayAluClass.NO_DEP:            "NONE",
+    RdnaSDelayAluClass.VALU_DEP_1:        "VALU",
+    RdnaSDelayAluClass.VALU_DEP_2:        "VALU",
+    RdnaSDelayAluClass.VALU_DEP_3:        "VALU",
+    RdnaSDelayAluClass.VALU_DEP_4:        "VALU",
+    RdnaSDelayAluClass.TRANS32_DEP_1:     "TRANS32",
+    RdnaSDelayAluClass.TRANS32_DEP_2:     "TRANS32",
+    RdnaSDelayAluClass.TRANS32_DEP_3:     "TRANS32",
+    RdnaSDelayAluClass.FMA_ACCUM_CYCLE_1: "FMA_ACCUM",
+    RdnaSDelayAluClass.SALU_CYCLE_1:      "SALU",
+    RdnaSDelayAluClass.SALU_CYCLE_2:      "SALU",
+    RdnaSDelayAluClass.SALU_CYCLE_3:      "SALU",
+}

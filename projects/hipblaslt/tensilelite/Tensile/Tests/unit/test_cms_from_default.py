@@ -391,15 +391,15 @@ class _MockWriter:
 
 
 def _patch_validator(monkeypatch, *, graph_failures, wait_failures,
-                     timing_class, vopd_failures=()):
+                     timing_class):
     """Stub the CMSValidator entry points the wrapper calls.
 
     The wrapper imports `TimingTooCloseFailure`, `build_dataflow_graph`,
-    `compare_graphs`, `validate_edge_wait_coverage`, and
-    `validate_vopd_pair_formation` from `Tensile.Components.CMSValidator`.
-    We stub all five — the VOPD pass defaults to "no failures" because
-    today no kernel emits VOPD; tests that exercise hard-fail paths
-    pass an explicit `vopd_failures` list.
+    `compare_graphs`, and `validate_edge_wait_coverage` from
+    `Tensile.Components.CMSValidator`. VOPD pair-formation is NOT
+    re-run by this wrapper (canonical dispatch is `cmsv.isValid`,
+    invoked earlier in `CustomSchedule/dispatch.py`); per-rule VOPD
+    coverage lives in `test_vopd_pair_formation.py`.
     """
     import Tensile.Components.CMSValidator as cmsv
     monkeypatch.setattr(cmsv, "TimingTooCloseFailure", timing_class,
@@ -410,8 +410,6 @@ def _patch_validator(monkeypatch, *, graph_failures, wait_failures,
                         lambda r, s: list(graph_failures), raising=True)
     monkeypatch.setattr(cmsv, "validate_edge_wait_coverage",
                         lambda g: list(wait_failures), raising=True)
-    monkeypatch.setattr(cmsv, "validate_vopd_pair_formation",
-                        lambda g: list(vopd_failures), raising=True)
 
 
 class TestValidateAgainstDefaultSoftFail:

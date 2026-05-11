@@ -66,6 +66,7 @@ from Tensile.Components.ScheduleCapture import (
 # routing through per-bucket boolean predicates.
 from Tensile.Components.InstructionCategory import (
     InstructionCategory,
+    RdnaSDelayAluClass,
     category as _category,
 )
 
@@ -660,6 +661,43 @@ class VopdPair:
 
 
 @dataclass
+class SDelayAluInstance:
+    """A single emitted RDNA3.5 `S_DELAY_ALU` instruction.
+
+    Models one S_DELAY_ALU well enough for `validate_s_delay_alu_coverage`
+    to verify the encoded delay matches the actual producer/consumer gap
+    it claims to cover. The kernel emitter does NOT produce S_DELAY_ALU
+    today; this dataclass is the recognition surface the validator works
+    against the moment emission lands. Tests fabricate instances directly.
+
+    `gap_class` is the §16.5 `INSTID0` (or `INSTID1`) named class —
+    `VALU_DEP_3` says "the dependent VALU producer is 3 instructions
+    back" (counting in the producer's family, NOT total stream offset).
+    The encoded count comes from the enum member itself
+    (`gap_class.required_back_distance`).
+
+    `producer_label` / `consumer_label` are opaque strings (e.g. opcode
+    or scheduler tag) used solely in failure messages — the validator
+    does not interpret them.
+
+    `actual_back_distance` is the OBSERVED producer-back distance the
+    schedule placed (count of producer-family instructions strictly
+    between the consumer and the named producer, plus one for the
+    producer itself, in §16.5 counting). The validator's coverage
+    predicate is `gap_class.required_back_distance <=
+    actual_back_distance`: an encoded `VALU_DEP_3` claiming "VALU 3
+    back" but observing only 2 instructions back is hard-fail (the GPU
+    may issue the consumer too early). An encoded `VALU_DEP_3` covering
+    a 4-back actual gap is fine — the encoding underclaims the gap,
+    which is conservative.
+    """
+    gap_class: RdnaSDelayAluClass        # The named §16.5 INSTID class.
+    producer_label: str                  # Opaque label of the producer.
+    consumer_label: str                  # Opaque label of the consumer.
+    actual_back_distance: int            # Observed producer-back distance the schedule placed.
+
+
+@dataclass
 class DataflowGraph:
     """Unified graph spanning all 4 captured bodies.
 
@@ -694,6 +732,12 @@ class DataflowGraph:
     # `rocm-libraries-zkzw`.
     arch_profile: Optional[ArchProfile] = None
     vopd_pairs: List["VopdPair"] = field(default_factory=list)
+    # RDNA3.5 §16.5 S_DELAY_ALU records the kernel emitter produced for
+    # this kernel. Empty for every kernel today (no S_DELAY_ALU emission
+    # yet) — `validate_s_delay_alu_coverage` is dormant in that case
+    # (returns []). The moment the emitter starts producing S_DELAY_ALU
+    # this becomes the per-instance encoding/gap consistency check.
+    s_delay_alu_instances: List["SDelayAluInstance"] = field(default_factory=list)
 
     def edge_keys(self):
         """Edge-equality keys for cross-graph diff.
@@ -2585,6 +2629,36 @@ class VopdPairFormationFailure(Failure):
         )
 
 
+# ----------------------------------------------------------------------------
+# 9. SDelayAluCoverageFailure — RDNA3.5 §16.5 S_DELAY_ALU encoding mismatch.
+#    Emitted exclusively by `validate_s_delay_alu_coverage`. Each instance
+#    identifies one S_DELAY_ALU record whose ENCODED named-gap-class claims
+#    a producer-back distance that the schedule does NOT actually satisfy.
+#    There is NO soft-fail counterpart: an under-encoded delay tells the
+#    GPU to issue the consumer too early, which RDNA3.5 §16.5 explicitly
+#    states "may suffer when multiple waves are in flight; IB may issue
+#    dependent instructions that stall in the ALU" — at minimum a perf
+#    cliff, at worst a real hazard depending on the dependent op family.
+# ----------------------------------------------------------------------------
+@dataclass
+class SDelayAluCoverageFailure(Failure):
+    gap_class: Optional[RdnaSDelayAluClass] = None  # The named §16.5 INSTID class.
+    producer_label: str = ""                        # Opaque label of the producer.
+    consumer_label: str = ""                        # Opaque label of the consumer.
+    encoded_back_distance: int = 0                  # Distance the encoding asserts.
+    actual_back_distance: int = 0                   # Distance the schedule observed.
+    why: str = ""                                   # Plain-language predicate text.
+
+    def _format_canonical(self) -> str:
+        cls_name = self.gap_class.name if self.gap_class is not None else "?"
+        return (
+            f"S_DELAY_ALU coverage violation [RDNA3.5 §16.5, {cls_name}]: "
+            f"producer={self.producer_label} / consumer={self.consumer_label}: "
+            f"encoded back-distance {self.encoded_back_distance} but observed "
+            f"{self.actual_back_distance}; {self.why}"
+        )
+
+
 # =============================================================================
 # CMS-side FailureNodeLabel provider
 # =============================================================================
@@ -3518,6 +3592,75 @@ def validate_vopd_pair_formation(graph: "DataflowGraph") -> List["Failure"]:
     return failures
 
 
+# =============================================================================
+# RDNA3.5 §16.5 S_DELAY_ALU coverage validator
+# =============================================================================
+# RDNA3.5's S_DELAY_ALU is unique: the instruction itself IS the gap, and
+# the encoding NAMES the gap class (`INSTID_VALU_DEP_3` says "the dependent
+# VALU producer is 3 instructions back"). The audit memo §3 (R-10..R-13)
+# flagged the named-gap-class taxonomy as the right validator abstraction.
+# This pass walks every recorded S_DELAY_ALU and verifies the encoded
+# named-class' required producer-back distance is satisfied by the actual
+# observed schedule gap.
+#
+# Coverage predicate (§16.5):
+#   gap_class.required_back_distance <= actual_back_distance
+#
+# Under-encoded delays (encoded > actual) are HARD-FAIL: the GPU may issue
+# the consumer too early. Over-encoded delays (encoded < actual) are fine —
+# the encoding underclaims the gap, which is conservative (only costs perf,
+# never correctness). NO_DEP records have required distance 0 and trivially
+# pass.
+#
+# Today the kernel emitter does NOT emit S_DELAY_ALU; `graph.s_delay_alu_instances`
+# is always empty and this pass returns []. The pass is installed
+# unconditionally so that the moment S_DELAY_ALU emission lands, the
+# encoding/gap consistency check is already in place. There is no
+# `accept_violation` escape hatch and no fallback path: every mismatch
+# produces an `SDelayAluCoverageFailure`.
+
+
+def validate_s_delay_alu_coverage(graph: "DataflowGraph") -> List["Failure"]:
+    """RDNA3.5 §16.5 S_DELAY_ALU encoding/gap consistency validator.
+
+    Walks every `SDelayAluInstance` recorded on `graph.s_delay_alu_instances`
+    and emits one `SDelayAluCoverageFailure` per record whose encoded
+    named-gap-class' `required_back_distance` exceeds the actual observed
+    `actual_back_distance`.
+
+    Correctness-critical: an S_DELAY_ALU encoding `VALU_DEP_3` tells the
+    hardware the dependent VALU producer is 3 instructions back; if the
+    schedule actually placed it 2 instructions back, the hardware will
+    not insert sufficient delay and may issue the consumer before the
+    producer's result is forwardable. There is no soft-fail equivalent.
+
+    Returns an empty list when the graph carries no S_DELAY_ALU records
+    (the common case today — the kernel emitter does not produce
+    S_DELAY_ALU yet); the pass is dormant but installed.
+    """
+    failures: List[Failure] = []
+    for inst in graph.s_delay_alu_instances:
+        required = inst.gap_class.required_back_distance
+        actual = inst.actual_back_distance
+        if required > actual:
+            failures.append(SDelayAluCoverageFailure(
+                gap_class=inst.gap_class,
+                producer_label=inst.producer_label,
+                consumer_label=inst.consumer_label,
+                encoded_back_distance=required,
+                actual_back_distance=actual,
+                why=(
+                    f"encoding {inst.gap_class.name} asserts the "
+                    f"{inst.gap_class.family} producer is {required} "
+                    f"instruction(s) back, but the schedule placed it "
+                    f"{actual} instruction(s) back; hardware may issue "
+                    f"the consumer before the producer's result is "
+                    f"forwardable."
+                ),
+            ))
+    return failures
+
+
 @dataclass
 class ValidationContext:
     """Typed context for CMS validation — replaces the raw context dict and ValidatorPassContext."""
@@ -3653,6 +3796,32 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> None:
             raise ValidationError(message=(
                 f"Wait-coverage validation failed: "
                 f"{len(wait_failures)} failure(s):\n  {summary}"
+            ))
+        # RDNA3.5 §7.6 VOPD pair-formation hard rules. Dormant today
+        # (no VOPD emission); fires the moment any kernel emitter
+        # populates `subj_graph.vopd_pairs`.
+        vopd_failures = validate_vopd_pair_formation(subj_graph)
+        if vopd_failures:
+            summary = "\n  ".join(
+                f.format()
+                for f in vopd_failures
+            )
+            raise ValidationError(message=(
+                f"VOPD pair-formation validation failed: "
+                f"{len(vopd_failures)} failure(s):\n  {summary}"
+            ))
+        # RDNA3.5 §16.5 S_DELAY_ALU encoded-vs-actual gap consistency.
+        # Dormant today (no S_DELAY_ALU emission); fires the moment any
+        # kernel emitter populates `subj_graph.s_delay_alu_instances`.
+        s_delay_failures = validate_s_delay_alu_coverage(subj_graph)
+        if s_delay_failures:
+            summary = "\n  ".join(
+                f.format()
+                for f in s_delay_failures
+            )
+            raise ValidationError(message=(
+                f"S_DELAY_ALU coverage validation failed: "
+                f"{len(s_delay_failures)} failure(s):\n  {summary}"
             ))
 
     return None
