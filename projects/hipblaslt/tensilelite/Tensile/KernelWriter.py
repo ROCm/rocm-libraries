@@ -6011,7 +6011,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         collect_regset_stream,
       )
       from Tensile.Components.CMSValidator import (
-        _resolve_arch_profile_for_isa, build_dataflow_graph, compare_graphs,
+        ArchProfile, build_dataflow_graph, compare_graphs,
         validate_edge_wait_coverage,
       )
       assert loopCopies == 1, (
@@ -6046,7 +6046,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # DataflowGraph; the timing helpers short-circuit on it
           # (rocm-libraries-zkzw).
           isa_tuple = tuple(kernel["ISA"]) if "ISA" in kernel else None
-          arch_profile = _resolve_arch_profile_for_isa(isa_tuple)
+          arch_profile = ArchProfile.for_isa(isa_tuple)
           # Harvest the writer's RegSet directives once, here — by this
           # point both customMainLoopSchedule (which emitted macro-vgpr
           # RegSets) and _loopBody / _noLoadLoopBody (which emitted body-

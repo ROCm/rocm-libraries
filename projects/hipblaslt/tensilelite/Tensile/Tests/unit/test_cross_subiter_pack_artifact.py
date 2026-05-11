@@ -256,14 +256,15 @@ class TestCrossSubiterPackArtifact:
 
         # Probe: neutralize the carve-out's subiter predicate by forcing
         # both producer and consumer to look like subiter 0. The
-        # `_node_subiter(p) != _node_subiter(c)` check fails, the carve-out
+        # `p.subiter(n) != c.subiter(n)` check fails, the carve-out
         # branch is skipped, and the OrderInvertedFailure path fires.
-        original_node_subiter = CMSValidator._node_subiter
-        CMSValidator._node_subiter = lambda n, nmps: 0
+        from Tensile.Components.CMSValidator import GraphNode
+        original_subiter = GraphNode.subiter
+        GraphNode.subiter = lambda self, nmps: 0
         try:
             failures_neutralized = compare_graphs(g_default, g_cms)
         finally:
-            CMSValidator._node_subiter = original_node_subiter
+            GraphNode.subiter = original_subiter
 
         assert len(failures_neutralized) == 1, (
             f"With the carve-out neutralized, the artifact must surface as "

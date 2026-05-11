@@ -429,9 +429,8 @@ class TestRenderStringIdentity:
         """The identity tuple's third element should be the canonical
         rendered assembly. This is what makes identity robust to
         register-naming variations."""
-        from Tensile.Components.CMSValidator import _identity_for
-        lr = make_lr(8, 4, 64, slot=0, category="LRA0").wrapped.rocisa_inst
-        ident = _identity_for(lr, BODY_LABEL_ML)
+        lr_tagged = make_lr(8, 4, 64, slot=0, category="LRA0")
+        ident = lr_tagged.identity_for(BODY_LABEL_ML)
         assert ident[0] == "LR"             # class tag
         assert isinstance(ident[1], int)    # loop_index
         assert isinstance(ident[2], str)    # render-string
@@ -445,7 +444,7 @@ class TestRenderStringIdentity:
         """Two instructions with identical operations but different
         comments (e.g. 'init' vs 'reload') should have the same identity.
         Confirms that _canonical_render strips comments."""
-        from Tensile.Components.ScheduleCapture import _canonical_render
+        from Tensile.Components.ScheduleCapture import WrappedInstruction
 
         # Use real rocisa instances to test the comment-stripping path.
         from rocisa.instruction import DSLoadB128
@@ -454,17 +453,17 @@ class TestRenderStringIdentity:
         b = DSLoadB128(dst=vgpr(8, 4), src=vgpr(0), comment="reload")
         # render-strings might or might not include comment in str();
         # _canonical_render strips it either way.
-        assert _canonical_render(a) == _canonical_render(b)
+        assert WrappedInstruction.canonical_str(a) == WrappedInstruction.canonical_str(b)
 
     def test_whitespace_normalization(self):
         """Multiple spaces / tabs / newlines collapse to single spaces."""
-        from Tensile.Components.ScheduleCapture import _canonical_render
+        from Tensile.Components.ScheduleCapture import WrappedInstruction
 
         class _Spaced:
             def __str__(self):
                 return "v_mfma  v[0:3], \tv[8:9], \n v[32:33]"
 
-        result = _canonical_render(_Spaced())
+        result = WrappedInstruction.canonical_str(_Spaced())
         # No double spaces, no tabs, no newlines
         assert "  " not in result
         assert "\t" not in result
@@ -476,8 +475,9 @@ class TestRenderStringIdentity:
         F32X TF32 emulation pattern: symbolic ValuA_T + numeric scratch +
         symbolic ValuA_X) renders consistently. If both captures emit the
         same inst with the same register identifiers, identities match."""
-        from Tensile.Components.CMSValidator import _identity_for
-        from Tensile.Components.ScheduleCapture import _canonical_render
+        from Tensile.Components.ScheduleCapture import (
+            WrappedInstruction, TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+        )
         from rocisa.instruction import MFMAInstruction
         from rocisa.container import vgpr
         from rocisa.enum import InstType
@@ -492,15 +492,23 @@ class TestRenderStringIdentity:
                 b=vgpr("ValuA_X0_I0", 2),         # symbolic
             )
 
+        def _tag(inst):
+            return TaggedInstruction(
+                wrapped=WrappedInstruction(inst),
+                category="MFMA",
+                slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                             mfma_index=0, sequence=0),
+            )
+
         a = _build()
         b = _build()
         # Even though the MFMA mixes symbolic and numeric register kinds,
         # the rendered string is deterministic; both instances render
         # identically; identities match.
-        assert _canonical_render(a) == _canonical_render(b)
-        assert _identity_for(a, BODY_LABEL_ML) == _identity_for(b, BODY_LABEL_ML)
+        assert WrappedInstruction.canonical_str(a) == WrappedInstruction.canonical_str(b)
+        assert _tag(a).identity_for(BODY_LABEL_ML) == _tag(b).identity_for(BODY_LABEL_ML)
         # Sanity check: render contains all three reg kinds.
-        rendered = _canonical_render(a)
+        rendered = WrappedInstruction.canonical_str(a)
         assert "vgprValuA_T0_I0" in rendered    # symbolic acc
         assert "v[74:75]" in rendered           # numeric a
         assert "vgprValuA_X0_I0" in rendered    # symbolic b
@@ -518,7 +526,7 @@ class TestRenderStringIdentity:
         behavior that wic4 / prp2 / oram depend on.
         """
         from Tensile.Components.ScheduleCapture import (
-            _canonical_render, _byte_keys_for_resource,
+            WrappedInstruction, _byte_keys_for_resource,
         )
         from rocisa.instruction import DSLoadB128
         from rocisa.container import vgpr
@@ -528,7 +536,7 @@ class TestRenderStringIdentity:
         # Render-strings still differ (the identity tuple is render-based;
         # operand-level resolution lives at edge-formation time, not at
         # canonical-render time).
-        assert _canonical_render(sym) != _canonical_render(num)
+        assert WrappedInstruction.canonical_str(sym) != WrappedInstruction.canonical_str(num)
         # When a RegSet binding for ValuA_X0_I0 -> 8 is in scope, the
         # symbolic and numeric refs to the same physical reg produce the
         # SAME numeric byte-keys — the load-bearing equivalence for
@@ -545,11 +553,13 @@ class TestRenderStringIdentity:
         compare_graphs into reporting it as a missing main-loop MFMA when
         the two captures see different counts of pack-MFMAs.
 
-        With category provided, _identity_for must use the category as the
-        discriminator: PackA{u}/PackB{u} -> 'PACK', LRA{u} -> 'LR', etc.
+        With a Pack* category, `TaggedInstruction.identity_for` must use the
+        category as the discriminator: PackA{u}/PackB{u} -> 'PACK',
+        LRA{u} -> 'LR', etc. (See `class_tag_for_category` for the mapping
+        consulted by the identity tuple.)
         """
-        from Tensile.Components.CMSValidator import (
-            _identity_for, _class_tag_from_category,
+        from Tensile.Components.ScheduleCapture import (
+            WrappedInstruction, TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
         )
         from rocisa.instruction import MFMAInstruction
         from rocisa.container import vgpr
@@ -562,32 +572,41 @@ class TestRenderStringIdentity:
             a=vgpr(74, 2),
             b=vgpr("ValuA_X0_I0", 2),
         )
+
+        def _tag(category):
+            return TaggedInstruction(
+                wrapped=WrappedInstruction(pack_mfma),
+                category=category,
+                slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                             mfma_index=0, sequence=0),
+            )
+
         # Without category -> isinstance fallback says 'MFMA'.
-        assert _identity_for(pack_mfma, BODY_LABEL_ML)[0] == "MFMA"
+        assert _tag("MFMA").identity_for(BODY_LABEL_ML)[0] == "MFMA"
         # With pack category -> 'PACK'.
-        assert _identity_for(pack_mfma, BODY_LABEL_ML, category="PackA0")[0] == "PACK"
-        assert _identity_for(pack_mfma, BODY_LABEL_ML, category="PackB3")[0] == "PACK"
+        assert _tag("PackA0").identity_for(BODY_LABEL_ML)[0] == "PACK"
+        assert _tag("PackB3").identity_for(BODY_LABEL_ML)[0] == "PACK"
         # Sanity-check the underlying mapping for the other categories.
-        assert _class_tag_from_category("LRA0", pack_mfma) == "LR"
-        assert _class_tag_from_category("LRB3", pack_mfma) == "LR"
-        assert _class_tag_from_category("LWA",  pack_mfma) == "LW"
-        assert _class_tag_from_category("GRA",  pack_mfma) == "GR"
-        assert _class_tag_from_category("GRIncA", pack_mfma) == "GRINC"
-        assert _class_tag_from_category("LRSA", pack_mfma) == "LRS"
-        assert _class_tag_from_category("LWSA", pack_mfma) == "LWS"
-        assert _class_tag_from_category("LCC",  pack_mfma) == "LCC"
+        assert WrappedInstruction.class_tag_for_category("LRA0", pack_mfma) == "LR"
+        assert WrappedInstruction.class_tag_for_category("LRB3", pack_mfma) == "LR"
+        assert WrappedInstruction.class_tag_for_category("LWA",  pack_mfma) == "LW"
+        assert WrappedInstruction.class_tag_for_category("GRA",  pack_mfma) == "GR"
+        assert WrappedInstruction.class_tag_for_category("GRIncA", pack_mfma) == "GRINC"
+        assert WrappedInstruction.class_tag_for_category("LRSA", pack_mfma) == "LRS"
+        assert WrappedInstruction.class_tag_for_category("LWSA", pack_mfma) == "LWS"
+        assert WrappedInstruction.class_tag_for_category("LCC",  pack_mfma) == "LCC"
         # category="SYNC" lumps SWaitCnt and SBarrier together (capture-side
         # bucket); fall back to isinstance to disambiguate.
-        assert _class_tag_from_category("SYNC", pack_mfma) == "MFMA"  # isinstance fallback
+        assert WrappedInstruction.class_tag_for_category("SYNC", pack_mfma) == "MFMA"  # isinstance fallback
         from rocisa.instruction import SWaitCnt, SBarrier
         sw = SWaitCnt(comment="t")
         sb = SBarrier()
-        assert _class_tag_from_category("SYNC", sw) == "SWAIT"
-        assert _class_tag_from_category("SYNC", sb) == "SBARRIER"
-        assert _class_tag_from_category("BARRIER", pack_mfma) == "SBARRIER"
+        assert WrappedInstruction.class_tag_for_category("SYNC", sw) == "SWAIT"
+        assert WrappedInstruction.class_tag_for_category("SYNC", sb) == "SBARRIER"
+        assert WrappedInstruction.class_tag_for_category("BARRIER", pack_mfma) == "SBARRIER"
         # Unrecognized category falls back to isinstance.
-        assert _class_tag_from_category("UNKNOWN", pack_mfma) == "MFMA"
-        assert _class_tag_from_category(None, pack_mfma) == "MFMA"
+        assert WrappedInstruction.class_tag_for_category("UNKNOWN", pack_mfma) == "MFMA"
+        assert WrappedInstruction.class_tag_for_category(None, pack_mfma) == "MFMA"
 
 
 # =============================================================================

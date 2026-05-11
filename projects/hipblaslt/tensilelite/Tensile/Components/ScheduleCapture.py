@@ -42,6 +42,15 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
 from Tensile.Components.register import Register
+# Single source of truth for rocisa-instruction-class -> scheduler-role
+# bucket dispatch. WrappedInstruction's `is_*` properties and the static
+# `class_tag` / `class_tag_for_category` helpers all read this map.
+# (rocm-libraries-009 re-scoped + nn0 follow-up.)
+from Tensile.Components.InstructionCategory import (
+    InstructionCategory,
+    category as _category,
+    category_of_class_name as _category_of_class_name,
+)
 
 if TYPE_CHECKING:
     # Imported only for type hints — CMSValidator imports from this module at
@@ -215,6 +224,207 @@ class WrappedInstruction:
         new.write_slots = self.write_slots
         return new
 
+    # ------------------------------------------------------------------
+    # Class-tag predicates. Instance properties on `WrappedInstruction`
+    # — callers must wrap a bare rocisa instance first
+    # (`WrappedInstruction(inst).is_lr`). Explicit wrapping at call sites
+    # is the agreed shape (nn0 follow-up, 2026-05-08): it keeps the
+    # predicate API uniform with the rest of the wrapper interface and
+    # avoids a parallel "static-on-class" surface.
+    # ------------------------------------------------------------------
+    @property
+    def is_lr(self) -> bool:
+        return _category(self._rocisa_inst) is InstructionCategory.LR
+
+    @property
+    def is_lw(self) -> bool:
+        return _category(self._rocisa_inst) is InstructionCategory.LW
+
+    @property
+    def is_gr(self) -> bool:
+        return _category(self._rocisa_inst) is InstructionCategory.GR
+
+    @property
+    def is_mfma(self) -> bool:
+        return _category(self._rocisa_inst) is InstructionCategory.MFMA
+
+    @property
+    def is_middle_pack(self) -> bool:
+        """True for MiddlePack rocisa instances (TF32 middle-16 v_cvt_f32_bf16
+        + v_sub_f32 / PVCvtBF16toFP32 / VDot2CF32BF16 family).
+
+        These are the 16 instructions in each 24-pack group that compute the
+        bf16 error terms. Per CMSValidator.py PACK_TYPE_MAP, all of them bind
+        to the `MiddlePack` validator dataclass which carries the pair-consumer
+        interleaving invariant. The graph-side classifier in
+        `validate_middle_pack_pair_interleaving` uses this discriminator to
+        identify pair leaders / consumers from the GraphNode stream without
+        re-importing the validator dataclass (which would create an import
+        cycle). Body uses the central `InstructionCategory.MIDDLE_PACK`
+        bucket per rocm-libraries-009 re-scoped.
+        """
+        return _category(self._rocisa_inst) is InstructionCategory.MIDDLE_PACK
+
+    @property
+    def is_cvt_pack(self) -> bool:
+        """True for CVT-pack rocisa instances (`v_cvt_pk_bf16_f32` family).
+
+        These are the TF32 CVT0/CVT1 packs that bind to the validator-side
+        `CVTPack` dataclass via PACK_TYPE_MAP (CMSValidator.py:676). When such
+        an instruction writes a vgpr that a downstream MFMA reads, the CDNA 4
+        ISA (section 7.6) requires 2 quad-cycles between them
+        (`_QUAD_CYCLES_CVT_BEFORE_MFMA` in this file). The graph-side
+        enforcement of this rule routes CVTPack producers through
+        `_cvt_to_mfma_gap_ok` instead of the ALU-immediate exemption.
+        """
+        return _category(self._rocisa_inst) is InstructionCategory.CVT_PACK
+
+    @property
+    def is_swait(self) -> bool:
+        return _category(self._rocisa_inst) is InstructionCategory.SWAIT
+
+    @property
+    def is_sbarrier(self) -> bool:
+        return _category(self._rocisa_inst) is InstructionCategory.SBARRIER
+
+    @property
+    def is_snop(self) -> bool:
+        return _category(self._rocisa_inst) is InstructionCategory.SNOP
+
+    @property
+    def is_ssetprio(self) -> bool:
+        """SSetPrior — wave-priority scalar op, no register dataflow. See
+        InstructionCategory.SSETPRIO for the rationale."""
+        return _category(self._rocisa_inst) is InstructionCategory.SSETPRIO
+
+    # Lazy-compiled comment-strip regex, shared across all canonical_str calls.
+    _COMMENT_STRIP_RE = None
+
+    @staticmethod
+    def canonical_str(inst) -> str:
+        """Return a normalized render-string for an instruction.
+
+        Used as the identity-defining payload so the comparison is robust to
+        register-naming differences (symbolic / numeric / mixed). Two
+        instructions producing the same canonical render-string represent
+        the same GPU operation, regardless of how their constructor was
+        invoked.
+
+        Normalizations applied:
+          - strip trailing comment ('// ...')
+          - strip leading/trailing whitespace
+          - collapse runs of whitespace to a single space
+
+        Symbolic registers (vgpr("ValuA_X0_I0", 4)) render as
+        'v[vgprValuA_X0_I0:vgprValuA_X0_I0+3]'; numeric registers
+        (vgpr(8, 4)) render as 'v[8:11]'. The same instruction emitted by
+        two different code paths in the SAME kernel writer build will have
+        identical renders because both paths consume the same writer state.
+        Cross-kernel comparison would still differ on numeric allocation
+        but that's not a use case here (compare_graphs operates within one
+        build).
+        """
+        if WrappedInstruction._COMMENT_STRIP_RE is None:
+            import re as _re
+            WrappedInstruction._COMMENT_STRIP_RE = _re.compile(r"//.*$", _re.MULTILINE)
+        s = str(inst)
+        s = WrappedInstruction._COMMENT_STRIP_RE.sub("", s).strip()
+        # Collapse internal whitespace to single spaces for consistent matching
+        return " ".join(s.split())
+
+    @staticmethod
+    def class_tag(inst) -> str:
+        """Return the stable class tag
+        (LR/LW/GR/MFMA/SWAIT/SBARRIER/SNOP/SSETPRIO) for an instruction.
+        Used as the first element of the identity tuple so diagnostic
+        categorization works without parsing the render-string.
+
+        SNop and SSetPrior are recognized here so that the production capture
+        path — which may end up assigning category="UNKNOWN" (via
+        `_captureSubIterToBuilder`'s fallback) when an instruction is neither
+        in the id-map nor matched by the explicit isinstance branches — still
+        falls through `class_tag_for_category(category="UNKNOWN", inst)` to
+        a recognized tag rather than raising
+        `CaptureUnknownInstructionError`. These tags are excluded from the
+        cross-graph data-flow identity set (`build_dataflow_graph` Phase 1)
+        just like SWait/SBarrier.
+        """
+        w = inst if isinstance(inst, WrappedInstruction) else WrappedInstruction(inst)
+        if w.is_lr:
+            return "LR"
+        if w.is_lw:
+            return "LW"
+        if w.is_gr:
+            return "GR"
+        if w.is_mfma:
+            return "MFMA"
+        if w.is_swait:
+            return "SWAIT"
+        if w.is_sbarrier:
+            return "SBARRIER"
+        if w.is_snop:
+            return "SNOP"
+        if w.is_ssetprio:
+            return "SSETPRIO"
+        raise CaptureUnknownInstructionError(
+            f"WrappedInstruction.class_tag: cannot classify instruction class "
+            f"{type(inst).__name__!r}."
+        )
+
+    @staticmethod
+    def class_tag_for_category(category, inst) -> str:
+        """Like class_tag(inst) but consults TaggedInstruction.category first.
+
+        The pure isinstance path is wrong for instructions whose Python class
+        doesn't reflect their scheduler role: F32X TF32 emulation MFMAs in the
+        pack path are real MFMAInstruction objects but are categorized as
+        PackA{u}/PackB{u}. Treating them as cls='MFMA' in the identity tuple
+        causes them to appear as missing main-loop MFMAs in compare_graphs
+        when the two captures see different counts of pack-MFMAs.
+
+        Maps categories to scheduler-role tags so cross-capture comparison
+        discriminates pack-MFMAs from real MFMAs.
+
+        Falls back to class_tag(inst) when category is None or unrecognized
+        so test sites that pass bare insts (no TaggedInstruction wrapping)
+        keep working.
+        """
+        if category is None:
+            return WrappedInstruction.class_tag(inst)
+        # Per-tensor / per-iteration suffixes -> scheduler-role tag.
+        if category.startswith(("LRA", "LRB", "LRMXSA", "LRMXSB", "LRMetadata")):
+            return "LR"
+        if category.startswith("LRS"):
+            return "LRS"
+        if category.startswith("LWS"):
+            return "LWS"
+        if category.startswith("LW"):
+            return "LW"
+        if category.startswith("GRInc"):
+            return "GRINC"
+        if category.startswith("GR"):
+            return "GR"
+        if category.startswith("Pack"):
+            return "PACK"
+        if category == "LCC":
+            return "LCC"
+        if category == "SYNC":
+            # _captureSubIterToBuilder lumps SWaitCnt AND SBarrier into category
+            # "SYNC", so we must distinguish them here by class. Without this,
+            # an SBarrier would render as cls='SWAIT' and never match a real
+            # SBARRIER identity in the other graph.
+            return WrappedInstruction.class_tag(inst)
+        if category == "SNOP":
+            return "SNOP"
+        if category == "SSETPRIO":
+            return "SSETPRIO"
+        if category == "BARRIER":
+            return "SBARRIER"
+        if category == "MFMA":
+            return "MFMA"
+        # Unrecognized category (e.g. UNKNOWN) -> fall back to isinstance.
+        return WrappedInstruction.class_tag(inst)
+
 
 @dataclass(frozen=True)
 class MemoryRegion:
@@ -238,6 +448,24 @@ class MemoryRegion:
     buffer_id: str       # symbolic root of the address vgpr
     offset: int          # bytes from buffer base
     byte_count: int      # extent
+
+    def intersection(self, other: "MemoryRegion") -> Optional["MemoryRegion"]:
+        """Return the overlap MemoryRegion between `self` and `other`, or None.
+
+        Two MemoryRegions overlap when they're in the same `space` AND share
+        the same `buffer_id` (symbolic root) AND their `[offset, offset+byte_count)`
+        byte ranges intersect. Different buffers with the same space don't
+        overlap (e.g., LocalReadAddrA vs LocalReadAddrB are distinct LDS
+        halves under symbolic resolution).
+        """
+        if self.space != other.space or self.buffer_id != other.buffer_id:
+            return None
+        lo = max(self.offset, other.offset)
+        hi = min(self.offset + self.byte_count, other.offset + other.byte_count)
+        if lo >= hi:
+            return None
+        return MemoryRegion(space=self.space, buffer_id=self.buffer_id,
+                            offset=lo, byte_count=hi - lo)
 
 
 @dataclass
@@ -275,6 +503,37 @@ class TaggedInstruction:
         per-category-stream `[N]` rendering.
         """
         return self.category
+
+    def identity_for(self, body_label: str) -> tuple:
+        """Build a content-based identity tuple for this tagged instruction.
+
+        Uses `self.category` so pack-MFMAs (TF32 emulation MFMAInstruction
+        objects categorized as `PackA*`/`PackB*`) get the `PACK` class tag
+        rather than masquerading as main-loop MFMAs.
+
+        The body-label argument selects the loop_index component of the tuple.
+        Format: `(class_tag, loop_index, canonical_render)`.
+
+        Render-string identity (rather than a per-class structured signature
+        of register fields) makes the comparison robust to register-naming
+        variations: an MFMA emitted as
+            v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:...], v[74:75], ...
+        has a stable identity regardless of whether the schedulers happen to
+        spell its inputs symbolically, numerically, or mixed.
+
+        Tests that need to synthesize an identity tuple from a bare rocisa
+        instance must construct a `TaggedInstruction` first (via
+        `WrappedInstruction(inst)` plus the desired category) and then call
+        this method. There is no free-function form (the parallel
+        `_identity_for` was removed in the nn0 follow-up, 2026-05-08).
+        """
+        from Tensile.Components.CMSValidator import (
+            BODY_LABEL_TO_LOOP_INDEX,
+        )
+        inst = self.wrapped.rocisa_inst
+        loop_idx = BODY_LABEL_TO_LOOP_INDEX[body_label]
+        cls_tag = WrappedInstruction.class_tag_for_category(self.category, inst)
+        return (cls_tag, loop_idx, WrappedInstruction.canonical_str(inst))
 
 
 @dataclass
@@ -488,11 +747,7 @@ def make_position(body_label: str, stream_index: int) -> SchedulePosition:
 # matching (not isinstance) is preserved — the central map keys on
 # `type(inst).__name__` for the same reason: keeps this module free of hard
 # rocisa imports so synthetic test stand-ins continue to dispatch correctly.
-from Tensile.Components.InstructionCategory import (
-    InstructionCategory,
-    category as _category,
-    category_of_class_name as _category_of_class_name,
-)
+# (Module-level import lives at the top of the file alongside `Register`.)
 
 
 class LoopBodyCaptureBuilder:
@@ -877,10 +1132,11 @@ def assert_idmap_completeness(idmap, capture):
 # predicates have been collapsed into the single registry in
 # `Tensile/Components/InstructionCategory.py` (rocm-libraries-009 re-scoped,
 # 2026-05-08). Production code now writes
-# `category(inst) is InstructionCategory.MFMA`, etc., directly. The pre-
-# existing module-level sets and predicate functions were deleted to avoid
-# parallel-API drift; the central `category()` function and
-# `InstructionCategory` enum are imported above.
+# `category(inst) is InstructionCategory.MFMA`, etc., directly. The
+# WrappedInstruction.is_X properties (added by nn0) wrap the same lookup so
+# call sites that already hold a WrappedInstruction read `wi.is_lr` rather
+# than calling `_category(wi.rocisa_inst) is InstructionCategory.LR` by
+# hand.
 
 
 # Stable hashable signatures for RegisterContainers are obtained via
@@ -891,40 +1147,9 @@ def assert_idmap_completeness(idmap, capture):
 # (rocisa nanobind-bound) and filters through `Register.is_register`.
 
 
-_COMMENT_STRIP_RE = None  # lazy-compiled
-
-
-def _canonical_render(inst) -> str:
-    """Return a normalized render-string for an instruction.
-
-    Used as the identity-defining payload so the comparison is robust to
-    register-naming differences (symbolic / numeric / mixed). Two
-    instructions producing the same canonical render-string represent
-    the same GPU operation, regardless of how their constructor was
-    invoked.
-
-    Normalizations applied:
-      - strip trailing comment ('// ...')
-      - strip leading/trailing whitespace
-      - collapse runs of whitespace to a single space
-
-    Symbolic registers (vgpr("ValuA_X0_I0", 4)) render as
-    'v[vgprValuA_X0_I0:vgprValuA_X0_I0+3]'; numeric registers
-    (vgpr(8, 4)) render as 'v[8:11]'. The same instruction emitted by
-    two different code paths in the SAME kernel writer build will have
-    identical renders because both paths consume the same writer state.
-    Cross-kernel comparison would still differ on numeric allocation
-    but that's not a use case here (compare_graphs operates within one
-    build).
-    """
-    global _COMMENT_STRIP_RE
-    if _COMMENT_STRIP_RE is None:
-        import re as _re
-        _COMMENT_STRIP_RE = _re.compile(r"//.*$", _re.MULTILINE)
-    s = str(inst)
-    s = _COMMENT_STRIP_RE.sub("", s).strip()
-    # Collapse internal whitespace to single spaces for consistent matching
-    return " ".join(s.split())
+# `_canonical_render(inst)` is now `WrappedInstruction.canonical_str(inst)`
+# (static method on the wrapper). The lazy-compiled regex cache moved with it
+# (`WrappedInstruction._COMMENT_STRIP_RE`).
 
 
 # Stream-position ordering / identity helpers (_class_tag,
@@ -1615,25 +1840,6 @@ def _materialize_register(reg):
     return factory(reg.base, reg.count)
 
 
-def _memory_intersection(a, b):
-    """Return the overlap MemoryRegion between `a` and `b`, or None.
-
-    Two MemoryRegions overlap when they're in the same `space` AND share
-    the same `buffer_id` (symbolic root) AND their `[offset, offset+byte_count)`
-    byte ranges intersect. Different buffers with the same space don't
-    overlap (e.g., LocalReadAddrA vs LocalReadAddrB are distinct LDS
-    halves under symbolic resolution).
-    """
-    if a.space != b.space or a.buffer_id != b.buffer_id:
-        return None
-    lo = max(a.offset, b.offset)
-    hi = min(a.offset + a.byte_count, b.offset + b.byte_count)
-    if lo >= hi:
-        return None
-    return MemoryRegion(space=a.space, buffer_id=a.buffer_id,
-                        offset=lo, byte_count=hi - lo)
-
-
 def _intersection(a, b):
     """Type-dispatched resource intersection. Returns the overlap (subresource
     of the same type) or None if no overlap (including heterogeneous types
@@ -1646,7 +1852,7 @@ def _intersection(a, b):
     set-based edge dedup).
     """
     if isinstance(a, MemoryRegion) and isinstance(b, MemoryRegion):
-        return _memory_intersection(a, b)
+        return a.intersection(b)
     if isinstance(a, MemoryRegion) or isinstance(b, MemoryRegion):
         return None
     # Both are RegisterContainers (or duck-types). Wrap and intersect.

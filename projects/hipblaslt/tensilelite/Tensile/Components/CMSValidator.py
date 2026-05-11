@@ -53,9 +53,9 @@ from Tensile.Components.ScheduleCapture import (
     CaptureUnknownInstructionError,
     UnexplainedMissingEdgeError,
     MemoryRegion,
+    WrappedInstruction,
     make_position,
     assign_stream_indices_for_body,
-    _canonical_render,
     _byte_keys_for_resource, _resolve_producers,
 )
 # rocm-libraries-009 (re-scoped): the 13 `_*_CLASS_NAMES` sets and 10
@@ -146,6 +146,135 @@ class ArchProfile:
     mfma_type_switch_threshold_from_4x4: int
     default_issue_quad_cycles: int = 1
 
+    @classmethod
+    def for_isa(
+        cls, isa: Optional[Tuple[int, int, int]],
+    ) -> Optional["ArchProfile"]:
+        """Return the ArchProfile for an ISA tuple, or `None` when unknown.
+
+        Behavior:
+          - `isa is None`: returns the CDNA 4 default profile (legacy callers
+            that haven't plumbed ISA through still get the historical
+            CDNA 4 path — we can't tell "no ISA available" apart from the
+            historical "didn't bother" case here).
+          - `isa` registered in `_ARCH_PROFILES_BY_ISA`: returns that profile.
+          - `isa` NOT registered: emits a `printWarning(...)` naming the ISA
+            tuple verbatim (grep-able), then returns `None`. There is NO
+            silent fallback to CDNA 4 — callers that receive `None` must
+            skip timing-related validation for this kernel (cross-graph
+            diff, wait coverage, SCC, MiddlePack interleaving still run).
+
+        Every call with an unknown ISA emits the warning — there is no
+        process-wide de-dup. A build that schedules N kernels for the same
+        uncharacterized arch fires N warnings. Production callers gate the
+        warning surface by calling the resolver once per kernel resolution.
+
+        Tracked: `rocm-libraries-zkzw`. The previous behavior silently
+        substituted CDNA 4 timing constants for any uncharacterized arch,
+        producing wrong timing answers without any signal to the user.
+        """
+        if isa is None:
+            return _DEFAULT_CDNA4_ARCH_PROFILE
+        isa_key = tuple(isa)
+        profile = _ARCH_PROFILES_BY_ISA.get(isa_key)
+        if profile is not None:
+            return profile
+        printWarning(
+            f"CMSValidator: no ArchProfile registered for ISA {isa_key!r}; "
+            f"skipping timing-related validation."
+        )
+        return None
+
+    @classmethod
+    def from_carrier(cls, carrier: object) -> Optional["ArchProfile"]:
+        """Return the ArchProfile attached to a DataflowGraph or FourPartCapture.
+
+        `carrier` may be:
+          - DataflowGraph with `.arch_profile` set,
+          - FourPartCapture with `.arch_profile` set,
+          - None (degenerate test path).
+
+        Returns:
+          - The attached `ArchProfile` if one is set.
+          - `None` when `carrier.arch_profile is None` (unknown-ISA case;
+            the resolver returned None and the timing-related validation
+            is skipped downstream).
+        """
+        if carrier is None:
+            return None
+        profile = getattr(carrier, "arch_profile", None)
+        if isinstance(profile, cls):
+            return profile
+        return None
+
+    def min_issue_quad_cycles_for(self, rocisa_inst) -> int:
+        """Return the per-instruction quad-cycle issue cost.
+
+        Default issue cost is `default_issue_quad_cycles`; SNop adds
+        `wait_state` (read off the rocisa instruction's first parameter).
+        Every other instruction shape keeps the base cost.
+
+        With the structural-side simulators removed, this method is the
+        canonical per-instruction cost table.
+        """
+        base = self.default_issue_quad_cycles
+        if rocisa_inst is None:
+            return base
+        if WrappedInstruction(rocisa_inst).is_snop:
+            # SNop stores wait_state as the first param of getParams()
+            # (matches CMSValidator.py SNop branches: `snop.getParams()[0]`).
+            try:
+                params = rocisa_inst.getParams()
+                if params:
+                    return base + int(params[0])
+            except Exception:
+                pass
+            return base
+        return base
+
+    def mfma_finish_cycles_for(self, rocisa_inst) -> int:
+        """Classify an MFMA-shaped rocisa instruction as standard or 4x4 PackMFMA
+        and return the per-arch finish-cycle count.
+
+        The rocisa `MFMAInstruction` C++ class accepts a `variant` list at
+        construction (`[M, N, K, blk]`, e.g. `[4, 4, 4, 16]` for the 4x4 PackMFMA
+        family) but does NOT expose that field as a readable Python attribute via
+        the nanobind binding. The rendered assembly string IS canonical and
+        stable — every MFMA family renders as `..._<M>x<N>x<K>_<dtype>...`. We
+        discriminate the 4x4 family by parsing for the `_4x4x` substring.
+        """
+        if rocisa_inst is None:
+            return self.standard_mfma_finish_cycles
+        try:
+            rendered = str(rocisa_inst)
+        except Exception:
+            return self.standard_mfma_finish_cycles
+        if "_4x4x" in rendered:
+            return self.mfma_4x4_finish_cycles
+        return self.standard_mfma_finish_cycles
+
+    def quad_cycle_gap_ok(
+        self,
+        producer: "GraphNode",
+        consumer: "GraphNode",
+        graph: "DataflowGraph",
+    ) -> "TimingCheck":
+        """Verify that enough quad-cycles separate an MFMA producer from its
+        consumer for the producer's result to be visible.
+
+        Returns a `TimingCheck` (result, observed, required). Same-body and
+        cross-body share ONE code path that delegates to
+        `cumulative_issue_cycles`. The hardware MFMA pipeline does not reset
+        at body boundaries — `mfma_free_at` and the type-switch stall carry
+        through.
+        """
+        finish = self.mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None))
+        required = finish
+        observed = cumulative_issue_cycles(graph, producer, consumer)
+        if observed >= required:
+            return TimingCheck.passing(observed, required)
+        return TimingCheck.failing(observed, required)
+
 
 # CDNA 4 (gfx950) — sourced from ISA section 7.6. These are the values that
 # lived as module-scope literals in this file before the ArchProfile
@@ -170,65 +299,8 @@ _ARCH_PROFILES_BY_ISA: Dict[Tuple[int, int, int], ArchProfile] = {
 }
 
 
-def _resolve_arch_profile_for_isa(
-    isa: Optional[Tuple[int, int, int]],
-) -> Optional[ArchProfile]:
-    """Return the ArchProfile for an ISA tuple, or `None` when unknown.
-
-    Behavior:
-      - `isa is None`: returns `_DEFAULT_CDNA4_ARCH_PROFILE` (legacy
-        callers that haven't plumbed ISA through still get the historical
-        CDNA 4 path — we can't tell "no ISA available" apart from the
-        historical "didn't bother" case here).
-      - `isa` registered in `_ARCH_PROFILES_BY_ISA`: returns that profile.
-      - `isa` NOT registered: emits a `printWarning(...)` naming the ISA
-        tuple verbatim (grep-able), then returns `None`. There is NO
-        silent fallback to CDNA 4 — callers that receive `None` must
-        skip timing-related validation for this kernel (cross-graph
-        diff, wait coverage, SCC, MiddlePack interleaving still run).
-
-    Every call with an unknown ISA emits the warning — there is no
-    process-wide de-dup. A build that schedules N kernels for the same
-    uncharacterized arch fires N warnings. Production callers gate the
-    warning surface by calling the resolver once per kernel resolution.
-
-    Tracked: `rocm-libraries-zkzw`. The previous behavior silently
-    substituted CDNA 4 timing constants for any uncharacterized arch,
-    producing wrong timing answers without any signal to the user.
-    """
-    if isa is None:
-        return _DEFAULT_CDNA4_ARCH_PROFILE
-    isa_key = tuple(isa)
-    profile = _ARCH_PROFILES_BY_ISA.get(isa_key)
-    if profile is not None:
-        return profile
-    printWarning(
-        f"CMSValidator: no ArchProfile registered for ISA {isa_key!r}; "
-        f"skipping timing-related validation."
-    )
-    return None
-
-
-def _resolve_arch_profile(carrier: object) -> Optional[ArchProfile]:
-    """Return the ArchProfile attached to a DataflowGraph or FourPartCapture.
-
-    `carrier` may be:
-      - DataflowGraph with `.arch_profile` set,
-      - FourPartCapture with `.arch_profile` set,
-      - None (degenerate test path).
-
-    Returns:
-      - The attached `ArchProfile` if one is set.
-      - `None` when `carrier.arch_profile is None` (unknown-ISA case;
-        the resolver returned None and the timing-related validation
-        is skipped downstream).
-    """
-    if carrier is None:
-        return None
-    profile = getattr(carrier, "arch_profile", None)
-    if isinstance(profile, ArchProfile):
-        return profile
-    return None
+# `_resolve_arch_profile_for_isa(isa)` is now `ArchProfile.for_isa(isa)`.
+# `_resolve_arch_profile(carrier)` is now `ArchProfile.from_carrier(carrier)`.
 
 
 # --- Quad-cycle constants (default-CDNA 4 aliases) ---------------------------
@@ -308,6 +380,116 @@ class GraphNode:
     body_label: str                     # 'ML-1' | 'ML' | 'NGL' | 'NLL'
     name: str = ""                      # human-readable label (e.g. 'LRA0[2]')
     issue_cycles: int = 1               # per-instruction quad-cycle cost
+
+    @property
+    def canonical_position(self) -> SchedulePosition:
+        """SchedulePosition for this node — the canonical ordering key.
+
+        Returns `self.position`; named for explicitness at call sites that
+        once went through a free `_node_position(node)` helper. New code can
+        read `self.position` directly.
+        """
+        return self.position
+
+    def subiter(self, num_mfma_per_subiter: int) -> int:
+        """Inner-unroll subiteration index for this node.
+
+        "Subiter" = which inner unroll subiteration this node belongs to within
+        its body. NOT the outer loop iteration (those are encoded in
+        SchedulePosition.loop_index and the body label ml_prev / ml / ngl / nll).
+
+        For non-MFMA categories, parsed from the category trailing digits
+        (`PackA0` ⇒ 0). For MFMA, derived from
+        `tagged_inst.slot.mfma_index // num_mfma_per_subiter` — sourced from
+        the kernel-writer's MFMA slot id on the TaggedInstruction's SlotKey
+        (NOT from the bridge-collapsed `SchedulePosition.stream_index`, which
+        is a per-body monotonic sort key with no MFMA-slot semantics). When
+        `num_mfma_per_subiter` is 0 (test fixtures that don't set it), or
+        when `tagged_inst` is absent, MFMA subiter collapses to 0 — the
+        OrderInverted gate then degenerates to "fire on any same-body
+        stream-position inversion".
+        """
+        if self.category == "MFMA":
+            if not num_mfma_per_subiter:
+                return 0
+            ti = getattr(self, "tagged_inst", None)
+            if ti is None or getattr(ti, "slot", None) is None:
+                return 0
+            return ti.slot.mfma_index // num_mfma_per_subiter
+        return _split_category_iter(self.category)[1]
+
+    @staticmethod
+    def is_mfma_pack_producer(producer) -> bool:
+        """True for a 4x4 PackMFMA producer.
+
+        PackMFMAs (TF32 4x4 emulation) are syntactically `MFMAInstruction` rocisa
+        objects but are categorized as `PackA*` / `PackB*` because the macro
+        classifier groups them with the surrounding CVT pack chain. Discrimination:
+        `category.startswith("Pack")` AND `rocisa_inst` is an MFMA-shaped class.
+
+        Used by `is_mfma_producer` so PackMFMAs route to the quad-cycle gap
+        branch rather than the ALU-immediate-visibility branch — without this
+        discriminator the ALU-producer exemption would fire first and PackMFMA
+        producers would skip timing checks entirely.
+
+        Static so it accepts both `GraphNode` instances and duck-typed stubs
+        (test fixtures synthesize `_StubNode(category, rocisa_inst)` shapes).
+        """
+        if not getattr(producer, "category", "").startswith("Pack"):
+            return False
+        inst = getattr(producer, "rocisa_inst", None)
+        if inst is None:
+            return False
+        return WrappedInstruction(inst).is_mfma
+
+    @staticmethod
+    def is_mfma_producer(producer) -> bool:
+        """True for any producer subject to MFMA quad-cycle finish-time gating.
+
+        Two shapes:
+          - `category == "MFMA"` — the standard MFMA path (everything but the
+            TF32 4x4 emulation pack chain).
+          - PackMFMA — `category.startswith("Pack")` with an MFMA-shaped rocisa
+            instance. The dispatch in `_classify_edge_coverage` and
+            `diagnose_missing_edge` claims pack-MFMA producers BEFORE the
+            ALU-producer exemption fires.
+
+        Static so it accepts duck-typed stubs alongside `GraphNode` instances.
+        """
+        if getattr(producer, "category", None) == "MFMA":
+            return True
+        return GraphNode.is_mfma_pack_producer(producer)
+
+    @staticmethod
+    def is_cvt_pack_producer(producer) -> bool:
+        """True for a CVTPack producer (TF32 v_cvt_pk_bf16_f32 family).
+
+        CVTPacks are categorized `Pack*` (PackA0/PackA1/PackB0/PackB1/PackA3/
+        PackB3 depending on the surrounding LR group); discrimination here is
+        `category.startswith("Pack")` AND `rocisa_inst` is the
+        `VCvtPkF32toBF16` rocisa class. Used by `_classify_edge_coverage` and
+        `diagnose_missing_edge` so CVTPack-feeding-MFMA edges are routed to
+        `_cvt_to_mfma_gap_ok` BEFORE the ALU-immediate exemption claims them
+        — same shape as the PackMFMA carve-out, but with the CVT class set
+        in place of the MFMA class set.
+
+        Static so it accepts duck-typed stubs alongside `GraphNode` instances.
+        """
+        if not getattr(producer, "category", "").startswith("Pack"):
+            return False
+        inst = getattr(producer, "rocisa_inst", None)
+        if inst is None:
+            return False
+        return WrappedInstruction(inst).is_cvt_pack
+
+    def iter_delta_to(self, other: "GraphNode") -> int:
+        """Compute the canonical loop-offset between `other` (consumer) and
+        `self` (producer): `other.position.loop_index - self.position.loop_index`.
+
+        Mirrors the legacy `_cms_iter_delta`'s arithmetic. The Failure base's
+        `_iter_suffix` consumes the result to pick the appropriate suffix.
+        """
+        return other.position.loop_index - self.position.loop_index
 
 
 @dataclass
@@ -433,6 +615,113 @@ class DataflowGraph:
                  e.edge_kind, e.intra_operand_byte_offset)
                 for e in self.edges}
 
+    @property
+    def all_nodes_in_order(self):
+        """Yield every node in execution order across all bodies.
+
+        Used by the wait/barrier helpers below to walk cross-body windows
+        (e.g. producer in body=ML-1, consumer in body=ML). Per-body
+        `_graph_nodes` is already in stream order; bodies are enumerated in
+        `_BODY_BUILD_ORDER` which matches SchedulePosition.loop_index ordering,
+        so concatenating yields a globally-correct stream.
+        """
+        for label in _BODY_BUILD_ORDER:
+            cap = self.captures.get(label)
+            if cap is None or not hasattr(cap, '_graph_nodes'):
+                continue
+            for node in cap._graph_nodes:
+                yield node
+
+    def body_for(self, node: GraphNode) -> "LoopBodyCapture":
+        """Look up the LoopBodyCapture that emitted `node`.
+
+        Uses `node.body_label` against `self.captures`. Both arguments are
+        required: every caller in CMSValidator passes a constructed
+        DataflowGraph (the wa57 cleanup removed the last None-graph caller),
+        and every GraphNode was built from a body that lives in
+        `self.captures` (see `build_dataflow_graph` Phase 1, where each
+        `_make_node` is invoked under `for label in _BODY_BUILD_ORDER` with
+        `label in captures`). Subscripts directly so a future capture-
+        pipeline regression that produces a node with an unknown body_label
+        raises KeyError instead of silently degrading downstream labels.
+        """
+        return self.captures[node.body_label]
+
+    def queue_depth_at(self, wait_node: GraphNode, producer: GraphNode) -> int:
+        """Replay the per-counter FIFO from start of the graph to wait_node.position
+        and return the queue depth at the wait's moment for the producer's counter.
+
+        Walks across all bodies in execution order so cross-body queue state
+        is preserved (matches build_dataflow_graph's persistent-queue model).
+        """
+        counter = counter_for(producer)
+        depth = 0
+        for n in self.all_nodes_in_order:
+            if n.position >= wait_node.position:
+                break
+            if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
+                depth += 1
+            elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
+                depth += 1
+            elif n.category == SWAIT_CATEGORY:
+                cap_value = _swait_drains(n, counter)
+                if cap_value is not None and depth > cap_value:
+                    # Drain to cap; same as build_dataflow_graph semantics.
+                    depth = cap_value
+        return depth
+
+    def producer_queue_position(self, producer: GraphNode) -> int:
+        """Return the producer's position in the per-counter FIFO at the moment
+        it joined (zero-indexed from the queue head AT THAT MOMENT). Cross-body
+        aware via `all_nodes_in_order`."""
+        counter = counter_for(producer)
+        queue_size = 0
+        for n in self.all_nodes_in_order:
+            if n is producer:
+                return queue_size  # producer enters at this index
+            if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
+                queue_size += 1
+            elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
+                queue_size += 1
+            elif n.category == SWAIT_CATEGORY:
+                cap_value = _swait_drains(n, counter)
+                if cap_value is not None and queue_size > cap_value:
+                    queue_size = cap_value
+        return queue_size
+
+    def wait_drains_producer(self, wait_node: GraphNode, producer: GraphNode) -> bool:
+        """True if `wait_node` drains `producer` — i.e. the wait's counter cap
+        is low enough that the producer's slot in the FIFO falls inside the
+        drained range at the wait's moment.
+
+        Walks the WHOLE-graph stream (cross-body) so a producer in body=ML-1
+        and a wait in body=ML correctly see each other in the simulation —
+        same persistent-queue model as build_dataflow_graph.
+        """
+        counter = counter_for(producer)
+        cap_value = _swait_drains(wait_node, counter)
+        if cap_value is None:
+            return False
+        queue = []        # list of producer GraphNodes
+        drained_ids = set()
+        target_id = id(producer)
+        for n in self.all_nodes_in_order:
+            if n.position > wait_node.position:
+                break
+            if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
+                queue.append(n)
+            elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
+                queue.append(n)
+            elif n.category == SWAIT_CATEGORY:
+                cv = _swait_drains(n, counter)
+                if cv is not None:
+                    while len(queue) > cv:
+                        drained_ids.add(id(queue.pop(0)))
+        return target_id in drained_ids
+
+    def any_drains(self, waits: List[GraphNode], producer: GraphNode) -> bool:
+        return any(self.wait_drains_producer(w, producer) for w in waits)
+
 
 # =============================================================================
 # Graph walkers + FIFO simulator + identity helpers (br4.6)
@@ -480,6 +769,13 @@ def _swait_drains(swait_node: GraphNode, counter: str) -> Optional[int]:
 
     A SWaitCnt's field is set to -1 when the counter is unconstrained
     ('don't care'); a value >= 0 caps outstanding ops at that count.
+
+    Left as a free function (not migrated to `GraphNode`) per nn0:
+    semantically only meaningful for SWait nodes — the SYNC bucket lumps
+    SWaitCnt and SBarrier together, and `swait_drains` on an SBarrier
+    returns `None` immediately. A method on `GraphNode` would have to
+    advertise that asymmetry; keeping it free with this `isinstance`
+    early-out keeps the call sites obvious.
     """
     inst = swait_node.rocisa_inst
     if inst is None:
@@ -507,21 +803,9 @@ def _swait_drains(swait_node: GraphNode, counter: str) -> Optional[int]:
     return v
 
 
-def _all_nodes_in_order(subj_graph: Optional[DataflowGraph]):
-    """Yield every node in execution order across all bodies.
-
-    Used by the wait/barrier helpers below to walk cross-body windows
-    (e.g. producer in body=ML-1, consumer in body=ML). Per-body
-    `_graph_nodes` is already in stream order; bodies are enumerated in
-    `_BODY_BUILD_ORDER` which matches SchedulePosition.loop_index ordering,
-    so concatenating yields a globally-correct stream.
-    """
-    for label in _BODY_BUILD_ORDER:
-        cap = subj_graph.captures.get(label) if subj_graph is not None else None
-        if cap is None or not hasattr(cap, '_graph_nodes'):
-            continue
-        for node in cap._graph_nodes:
-            yield node
+# `_all_nodes_in_order(graph)` is now `graph.all_nodes_in_order` (property on
+# `DataflowGraph`). The new property requires a non-None graph, matching the
+# wa57 cleanup that removed the last None-graph call site.
 
 
 def waits_in_window(
@@ -545,7 +829,7 @@ def waits_in_window(
     if counter is not None and exclude_counter is not None:
         raise ValueError("counter and exclude_counter are mutually exclusive")
     out = []
-    for node in _all_nodes_in_order(subj_graph):
+    for node in subj_graph.all_nodes_in_order:
         if node.category != SWAIT_CATEGORY:
             continue
         if not (start <= node.position < end):
@@ -571,7 +855,7 @@ def barriers_in_window(
     Walks across bodies for the same reason as waits_in_window.
     """
     out = []
-    for node in _all_nodes_in_order(subj_graph):
+    for node in subj_graph.all_nodes_in_order:
         if node.category != SBARRIER_CATEGORY:
             continue
         if start < node.position < end:
@@ -604,109 +888,13 @@ _NO_DATAFLOW_IDENTITY_CATEGORIES = frozenset({
     InstructionCategory.SSETPRIO,
 })
 
-# Subset of InstructionCategory members whose enum-name doubles as the
-# stable class tag string used in identity tuples (and as a category
-# fallback in `_class_tag_from_category`). The remaining categories
-# (CVT_PACK / MIDDLE_PACK / SMEM / FLAT / VECTOR_STORE) are not used as
-# identity-tuple class tags — CVT/MIDDLE packs come through the "PACK"
-# category-derived tag, and SMEM/FLAT/VECTOR_STORE are finalize() guards
-# that reject the body before it ever reaches identity construction.
-_CLASS_TAG_CATEGORIES = frozenset({
-    InstructionCategory.LR,
-    InstructionCategory.LW,
-    InstructionCategory.GR,
-    InstructionCategory.MFMA,
-    InstructionCategory.SWAIT,
-    InstructionCategory.SBARRIER,
-    InstructionCategory.SNOP,
-    InstructionCategory.SSETPRIO,
-})
 
-
-def _class_tag(inst) -> str:
-    """Return the stable class tag
-    (LR/LW/GR/MFMA/SWAIT/SBARRIER/SNOP/SSETPRIO) for an instruction.
-    Used as the first element of the identity tuple so diagnostic
-    categorization works without parsing the render-string.
-
-    SNop and SSetPrior are recognized here so that the production capture
-    path — which may end up assigning category="UNKNOWN" (via
-    `_captureSubIterToBuilder`'s fallback) when an instruction is neither
-    in the id-map nor matched by the explicit isinstance branches — still
-    falls through `_class_tag_from_category(category="UNKNOWN", inst)` to
-    a recognized tag rather than raising
-    `CaptureUnknownInstructionError`. These tags are excluded from the
-    cross-graph data-flow identity set (`build_dataflow_graph` Phase 1)
-    just like SWait/SBarrier.
-
-    Collapsed onto the central `InstructionCategory` map per
-    rocm-libraries-009 (re-scoped). Each enum member's `name` IS the tag
-    string; the only thing this helper still does is restrict to the
-    subset of categories that participate in identity tuples and raise
-    `CaptureUnknownInstructionError` for unknown classes (preserving the
-    legacy throw-on-unknown contract).
-    """
-    cat = _category(inst)
-    if cat in _CLASS_TAG_CATEGORIES:
-        return cat.name
-    raise CaptureUnknownInstructionError(
-        f"_class_tag: cannot classify instruction class "
-        f"{type(inst).__name__!r}."
-    )
-
-
-def _class_tag_from_category(category, inst) -> str:
-    """Like _class_tag(inst) but consults TaggedInstruction.category first.
-
-    The pure isinstance path is wrong for instructions whose Python class
-    doesn't reflect their scheduler role: F32X TF32 emulation MFMAs in the
-    pack path are real MFMAInstruction objects but are categorized as
-    PackA{u}/PackB{u}. Treating them as cls='MFMA' in the identity tuple
-    causes them to appear as missing main-loop MFMAs in compare_graphs
-    when the two captures see different counts of pack-MFMAs.
-
-    Maps categories to scheduler-role tags so cross-capture comparison
-    discriminates pack-MFMAs from real MFMAs.
-
-    Falls back to _class_tag(inst) when category is None or unrecognized
-    so test sites that pass bare insts (no TaggedInstruction wrapping)
-    keep working.
-    """
-    if category is None:
-        return _class_tag(inst)
-    # Per-tensor / per-iteration suffixes -> scheduler-role tag.
-    if category.startswith(("LRA", "LRB", "LRMXSA", "LRMXSB", "LRMetadata")):
-        return "LR"
-    if category.startswith("LRS"):
-        return "LRS"
-    if category.startswith("LWS"):
-        return "LWS"
-    if category.startswith("LW"):
-        return "LW"
-    if category.startswith("GRInc"):
-        return "GRINC"
-    if category.startswith("GR"):
-        return "GR"
-    if category.startswith("Pack"):
-        return "PACK"
-    if category == "LCC":
-        return "LCC"
-    if category == "SYNC":
-        # _captureSubIterToBuilder lumps SWaitCnt AND SBarrier into category
-        # "SYNC", so we must distinguish them here by class. Without this,
-        # an SBarrier would render as cls='SWAIT' and never match a real
-        # SBARRIER identity in the other graph.
-        return _class_tag(inst)
-    if category == "SNOP":
-        return "SNOP"
-    if category == "SSETPRIO":
-        return "SSETPRIO"
-    if category == "BARRIER":
-        return "SBARRIER"
-    if category == "MFMA":
-        return "MFMA"
-    # Unrecognized category (e.g. UNKNOWN) -> fall back to isinstance.
-    return _class_tag(inst)
+# `_class_tag(inst)` and `_class_tag_from_category(category, inst)` are now
+# `WrappedInstruction.class_tag(inst)` and
+# `WrappedInstruction.class_tag_for_category(category, inst)` (static methods on
+# the wrapper) — see ScheduleCapture.py. The 009-introduced
+# `_CLASS_TAG_CATEGORIES` frozenset is gone with them: WrappedInstruction.class_tag
+# enumerates the per-bucket properties directly (is_lr / is_lw / ...).
 
 
 # =============================================================================
@@ -753,105 +941,22 @@ def _split_category_iter(category):
     return base, (int(suffix) if suffix else 0)
 
 
-def _node_subiter(node: GraphNode, num_mfma_per_subiter: int) -> int:
-    """Inner-unroll subiteration index for a graph node.
-
-    "Subiter" = which inner unroll subiteration this node belongs to within
-    its body. NOT the outer loop iteration (those are encoded in
-    SchedulePosition.loop_index and the body label ml_prev / ml / ngl / nll).
-
-    For non-MFMA categories, parsed from the category trailing digits
-    (`PackA0` ⇒ 0). For MFMA, derived from
-    `tagged_inst.slot.mfma_index // num_mfma_per_subiter` — sourced from
-    the kernel-writer's MFMA slot id on the TaggedInstruction's SlotKey
-    (NOT from the bridge-collapsed `SchedulePosition.stream_index`, which
-    is a per-body monotonic sort key with no MFMA-slot semantics). When
-    `num_mfma_per_subiter` is 0 (test fixtures that don't set it), or
-    when `tagged_inst` is absent, MFMA subiter collapses to 0 — the
-    OrderInverted gate then degenerates to "fire on any same-body
-    stream-position inversion".
-    """
-    if node.category == "MFMA":
-        if not num_mfma_per_subiter:
-            return 0
-        ti = getattr(node, "tagged_inst", None)
-        if ti is None or getattr(ti, "slot", None) is None:
-            return 0
-        return ti.slot.mfma_index // num_mfma_per_subiter
-    return _split_category_iter(node.category)[1]
+# `_node_subiter(node, n)` is now `node.subiter(n)` (method on `GraphNode`).
 
 
-def _identity_for(inst, body_label: str, category=None) -> tuple:
-    """Build a content-based identity tuple for an instruction.
-
-    Format: (class_tag, loop_index, canonical_render).
-
-    Render-string identity (rather than a per-class structured signature
-    of register fields) makes the comparison robust to register-naming
-    variations: an MFMA emitted as
-        v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:...], v[74:75], ...
-    has a stable identity regardless of whether the schedulers happen
-    to spell its inputs symbolically, numerically, or mixed — the
-    rendered assembly is what the GPU sees, and that's what we compare
-    on.
-
-    class_tag (LR/LW/GR/MFMA/SWAIT/SBARRIER/PACK/...) is preserved as the
-    first element so the identity-mismatch diagnostic in compare_graphs can
-    still categorize differences by kind.
-
-    `category` (TaggedInstruction.category) is consulted first when
-    provided; this prevents pack-MFMAs (TF32 emulation MFMAInstruction
-    objects categorized as PackA{u}/PackB{u}) from masquerading as
-    main-loop MFMAs in the identity tuple. When omitted, falls back to
-    pure isinstance-based classification — preserves existing test sites
-    that synthesize bare insts.
-
-    Raises CaptureUnknownInstructionError when an instruction class
-    isn't one of the recognized kinds AND category is None.
-    """
-    loop_idx = BODY_LABEL_TO_LOOP_INDEX[body_label]
-    cls_tag = _class_tag_from_category(category, inst)
-    return (cls_tag, loop_idx, _canonical_render(inst))
+# `_identity_for(inst, body_label, category=None)` is now
+# `TaggedInstruction.identity_for(body_label)` (instance method on
+# TaggedInstruction in ScheduleCapture.py). Callers that have a bare
+# rocisa instance and a category must construct a TaggedInstruction
+# (via `WrappedInstruction(inst)` plus a category) before calling.
+# Removed in the nn0 follow-up (2026-05-08): the free-function form was
+# a parallel API that the user has rejected.
 
 
-def _min_issue_quad_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = None) -> int:
-    """Return the per-instruction quad-cycle issue cost.
-
-    Default issue cost is 1; SNop adds `wait_state` (read off the rocisa
-    instruction's first parameter). Every other instruction shape keeps
-    the base cost of 1.
-
-    `profile` defaults to the CDNA 4 arch profile (base = 1). Per-arch
-    overrides for the default issue cost come from
-    `profile.default_issue_quad_cycles`. The SNop wait-state add is
-    arch-independent (the wait_state is encoded in the SNop instruction
-    itself, not the arch).
-
-    With the structural-side simulators removed, this helper is the
-    canonical per-instruction cost table.
-    """
-    if profile is None:
-        raise ValueError(
-            "_min_issue_quad_cycles_for requires an explicit ArchProfile; "
-            "callers must pass the resolved per-arch profile (production "
-            "callers always do; tests must pass an explicit fixture)."
-        )
-    p = profile
-    base = p.default_issue_quad_cycles
-    if rocisa_inst is None:
-        return base
-    if _category(rocisa_inst) is InstructionCategory.SNOP:
-        # SNop stores wait_state as the first param of getParams()
-        # (matches CMSValidator.py SNop branches: `snop.getParams()[0]`).
-        # Tests build real SNop instances too, so this is the only path.
-        try:
-            params = rocisa_inst.getParams()
-            if params:
-                return base + int(params[0])
-        except Exception:
-            pass
-        return base
-    return base
+# `_min_issue_quad_cycles_for(rocisa_inst, profile)` is now
+# `profile.min_issue_quad_cycles_for(rocisa_inst)` (method on `ArchProfile`).
+# Production callers always have a non-None profile; the method documents the
+# requirement instead of raising.
 
 
 def _make_node(
@@ -861,7 +966,7 @@ def _make_node(
     profile: Optional[ArchProfile] = None,
 ) -> GraphNode:
     inst = tagged_inst.wrapped.rocisa_inst
-    identity = _identity_for(inst, body_label, category=tagged_inst.category)
+    identity = tagged_inst.identity_for(body_label)
     position = make_position(body_label, stream_index)
     # Node name continues to reference the kernel-writer's slot fields
     # (`mfma_index.sequence`) — sourced from `tagged_inst.slot` because
@@ -874,7 +979,7 @@ def _make_node(
     # calls `_min_issue_quad_cycles_for` directly). Skip the helper call
     # entirely on the unknown-ISA path so the helper can require a
     # non-None profile.
-    issue_cycles = _min_issue_quad_cycles_for(inst, profile) if profile is not None else 0
+    issue_cycles = profile.min_issue_quad_cycles_for(inst) if profile is not None else 0
     return GraphNode(
         identity=identity,
         position=position,
@@ -1343,186 +1448,26 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
 # -----------------------------------------------------------------------------
 
 
-def _queue_depth_at(wait_node: GraphNode, producer: GraphNode, subj_graph: DataflowGraph) -> int:
-    """Replay the per-counter FIFO from start of the graph to wait_node.position
-    and return the queue depth at the wait's moment for the producer's counter.
-
-    Walks across all bodies in execution order so cross-body queue state
-    is preserved (matches build_dataflow_graph's persistent-queue model).
-    """
-    counter = counter_for(producer)
-    depth = 0
-    for n in _all_nodes_in_order(subj_graph):
-        if n.position >= wait_node.position:
-            break
-        if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
-            depth += 1
-        elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
-            depth += 1
-        elif n.category == SWAIT_CATEGORY:
-            cap_value = _swait_drains(n, counter)
-            if cap_value is not None and depth > cap_value:
-                # Drain to cap; same as build_dataflow_graph semantics.
-                depth = cap_value
-    return depth
+# `_queue_depth_at(wait, producer, graph)` is now
+# `graph.queue_depth_at(wait, producer)`.
+# `_producer_queue_position(producer, graph)` is now
+# `graph.producer_queue_position(producer)`.
+# `_wait_drains_producer(wait, producer, graph)` is now
+# `graph.wait_drains_producer(wait, producer)`.
+# `_any_drains(waits, producer, graph)` is now `graph.any_drains(waits, producer)`.
 
 
-def _producer_queue_position(producer: GraphNode, subj_graph: DataflowGraph) -> int:
-    """Return the producer's position in the per-counter FIFO at the moment
-    it joined (zero-indexed from the queue head AT THAT MOMENT). Cross-body
-    aware via _all_nodes_in_order."""
-    counter = counter_for(producer)
-    queue_size = 0
-    for n in _all_nodes_in_order(subj_graph):
-        if n is producer:
-            return queue_size  # producer enters at this index
-        if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
-            queue_size += 1
-        elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
-            queue_size += 1
-        elif n.category == SWAIT_CATEGORY:
-            cap_value = _swait_drains(n, counter)
-            if cap_value is not None and queue_size > cap_value:
-                queue_size = cap_value
-    return queue_size
+# `_mfma_finish_cycles_for(rocisa_inst, profile)` is now
+# `profile.mfma_finish_cycles_for(rocisa_inst)` (method on `ArchProfile`).
+# `_is_mfma_pack_producer(producer)`, `_is_mfma_producer(producer)`, and
+# `_is_cvt_pack_producer(producer)` are now staticmethods on `GraphNode`:
+# `GraphNode.is_mfma_pack_producer(producer)`,
+# `GraphNode.is_mfma_producer(producer)`,
+# `GraphNode.is_cvt_pack_producer(producer)`. They are static rather than
+# instance methods so duck-typed test stubs (which lack the full GraphNode
+# shape) can still dispatch through them.
 
 
-def _wait_drains_producer(wait_node: GraphNode, producer: GraphNode, subj_graph: DataflowGraph) -> bool:
-    """True if `wait_node` drains `producer` — i.e. the wait's counter cap
-    is low enough that the producer's slot in the FIFO falls inside the
-    drained range at the wait's moment.
-
-    Walks the WHOLE-graph stream (cross-body) so a producer in body=ML-1
-    and a wait in body=ML correctly see each other in the simulation —
-    same persistent-queue model as build_dataflow_graph.
-    """
-    counter = counter_for(producer)
-    cap_value = _swait_drains(wait_node, counter)
-    if cap_value is None:
-        return False
-    queue = []        # list of producer GraphNodes
-    drained_ids = set()
-    target_id = id(producer)
-    for n in _all_nodes_in_order(subj_graph):
-        if n.position > wait_node.position:
-            break
-        if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
-            queue.append(n)
-        elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
-            queue.append(n)
-        elif n.category == SWAIT_CATEGORY:
-            cv = _swait_drains(n, counter)
-            if cv is not None:
-                while len(queue) > cv:
-                    drained_ids.add(id(queue.pop(0)))
-    return target_id in drained_ids
-
-
-def _any_drains(waits: List[GraphNode], producer: GraphNode, subj_graph: DataflowGraph) -> bool:
-    return any(_wait_drains_producer(w, producer, subj_graph) for w in waits)
-
-
-def _mfma_finish_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = None) -> int:
-    """Classify an MFMA-shaped rocisa instruction as standard or 4x4 PackMFMA
-    and return the per-arch finish-cycle count.
-
-    The rocisa `MFMAInstruction` C++ class accepts a `variant` list at
-    construction (`[M, N, K, blk]`, e.g. `[4, 4, 4, 16]` for the 4x4 PackMFMA
-    family) but does NOT expose that field as a readable Python attribute via
-    the nanobind binding. The rendered assembly string IS canonical and
-    stable — every MFMA family renders as `..._<M>x<N>x<K>_<dtype>...`. We
-    discriminate the 4x4 family by parsing for the `_4x4x` substring. Test
-    fixtures (`make_mfma`) build real `MFMAInstruction` instances too, so
-    they take the same render path.
-
-    `profile` defaults to the CDNA 4 arch profile so the historical call
-    sites (which pass only the rocisa instance) keep returning identical
-    values. Per-arch overrides come from `profile.standard_mfma_finish_cycles`
-    and `profile.mfma_4x4_finish_cycles`.
-    """
-    if profile is None:
-        raise ValueError(
-            "_mfma_finish_cycles_for requires an explicit ArchProfile; "
-            "callers must pass the resolved per-arch profile (production "
-            "callers always do; tests must pass an explicit fixture)."
-        )
-    p = profile
-    if rocisa_inst is None:
-        return p.standard_mfma_finish_cycles
-    # Discriminate by parsing the rendered assembly form. Real
-    # MFMAInstruction does not expose `variant` as an attribute via
-    # nanobind, but every MFMA family renders as `..._<M>x<N>x<K>_<dtype>...`.
-    try:
-        rendered = str(rocisa_inst)
-    except Exception:
-        return p.standard_mfma_finish_cycles
-    if "_4x4x" in rendered:
-        return p.mfma_4x4_finish_cycles
-    return p.standard_mfma_finish_cycles
-
-
-def _is_mfma_pack_producer(producer: GraphNode) -> bool:
-    """Return True for a 4x4 PackMFMA producer.
-
-    PackMFMAs (TF32 4x4 emulation) are syntactically `MFMAInstruction` rocisa
-    objects but are categorized as `PackA*` / `PackB*` because the macro
-    classifier groups them with the surrounding CVT pack chain. Discrimination:
-    `category.startswith("Pack")` AND `rocisa_inst` is an MFMA-shaped class.
-
-    Used by `_is_mfma_producer` so PackMFMAs route to the quad-cycle gap
-    branch rather than the ALU-immediate-visibility branch — without this
-    discriminator the ALU-producer exemption would fire first and PackMFMA
-    producers would skip timing checks entirely.
-    """
-    if not getattr(producer, "category", "").startswith("Pack"):
-        return False
-    inst = getattr(producer, "rocisa_inst", None)
-    if inst is None:
-        return False
-    return _category(inst) is InstructionCategory.MFMA
-
-
-def _is_mfma_producer(producer: GraphNode) -> bool:
-    """True for any producer subject to MFMA quad-cycle finish-time gating.
-
-    Two shapes:
-      - `category == "MFMA"` — the standard MFMA path (everything but the
-        TF32 4x4 emulation pack chain).
-      - PackMFMA — `category.startswith("Pack")` with an MFMA-shaped rocisa
-        instance. The dispatch in `_classify_edge_coverage` and
-        `diagnose_missing_edge` claims pack-MFMA producers BEFORE the
-        ALU-producer exemption fires.
-    """
-    if getattr(producer, "category", None) == "MFMA":
-        return True
-    return _is_mfma_pack_producer(producer)
-
-
-def _is_cvt_pack_producer(producer: GraphNode) -> bool:
-    """True for a CVTPack producer (TF32 v_cvt_pk_bf16_f32 family).
-
-    CVTPacks are categorized `Pack*` (PackA0/PackA1/PackB0/PackB1/PackA3/
-    PackB3 depending on the surrounding LR group); discrimination here is
-    `category.startswith("Pack")` AND `rocisa_inst` is the
-    `VCvtPkF32toBF16` rocisa class. Used by `_classify_edge_coverage` and
-    `diagnose_missing_edge` so CVTPack-feeding-MFMA edges are routed to
-    `_cvt_to_mfma_gap_ok` BEFORE the ALU-immediate exemption claims them
-    — same shape as the PackMFMA carve-out, but with the CVT class set
-    in place of the MFMA class set.
-
-    The structural-side mirror (`_handle_min_pack_quad_cycles`,
-    `Pack.min_quad_cycles_before_result_used`,
-    `Pack.estimated_quad_cycles_before_result_used`, `estimate_quad_cycles`)
-    has been removed; the graph-side dispatch in
-    `_classify_edge_coverage` is now the only enforcement path for the
-    CVT -> MFMA settle window.
-    """
-    if not getattr(producer, "category", "").startswith("Pack"):
-        return False
-    inst = getattr(producer, "rocisa_inst", None)
-    if inst is None:
-        return False
-    return _category(inst) is InstructionCategory.CVT_PACK
 
 
 def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer: GraphNode) -> int:
@@ -1581,7 +1526,7 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
     # production code paths therefore never reach here with a None
     # profile. Test fixtures that want timing checks must pass an
     # explicit profile (e.g. `_DEFAULT_CDNA4_ARCH_PROFILE`).
-    profile = _resolve_arch_profile(graph)
+    profile = ArchProfile.from_carrier(graph)
 
     # Producer must always be strictly before consumer in stream order. The
     # SchedulePosition `__lt__` compares (loop_index, stream_index)
@@ -1688,7 +1633,7 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
             is_mfma = inst is not None and _category(inst) is InstructionCategory.MFMA
             if is_mfma:
                 current_issue = max(current_issue, mfma_free_at)
-                current_mfma_class = _mfma_finish_cycles_for(inst, profile)
+                current_mfma_class = profile.mfma_finish_cycles_for(inst)
                 if last_mfma_class is not None and current_mfma_class != last_mfma_class:
                     gap = current_issue - last_mfma_issue
                     # Threshold is producer-class-keyed; thresholds come from
@@ -1716,7 +1661,7 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
             # directly from `_min_issue_quad_cycles_for`. For graph-tracked
             # nodes the cost is identical (default base 1) so either path is
             # cycle-exact.
-            current_issue += _min_issue_quad_cycles_for(inst, profile)
+            current_issue += profile.min_issue_quad_cycles_for(inst)
 
         if c_issue_start is not None:
             break
@@ -1772,59 +1717,23 @@ class TimingCheck:
         return cls(result=TimingResult.FAIL, observed=observed, required=required)
 
 
-def _quad_cycle_gap_ok(
-    producer: GraphNode,
-    consumer: GraphNode,
-    num_mfma_per_subiter: int = 0,
-    graph: Optional[DataflowGraph] = None,
-) -> "TimingCheck":
-    """Verify that enough quad-cycles separate an MFMA producer from its
-    consumer for the producer's result to be visible.
-
-    Returns a `TimingCheck` (result, observed, required).
-
-    Same-body and cross-body share ONE code path that delegates to
-    `cumulative_issue_cycles`. The hardware MFMA pipeline does not reset
-    at body boundaries — `mfma_free_at` and the type-switch stall carry
-    through — so the cross-body cycle gap is just the same simulator
-    extended over the body boundary. (A previous `body_delta * 1000`
-    cross-body placeholder always returned ok=True regardless of how
-    tight the boundary actually was; do not reintroduce it.)
-    `cumulative_issue_cycles` walks the unified instruction stream
-    across all bodies in `_BODY_BUILD_ORDER`.
-
-    `num_mfma_per_subiter` is retained as a positional parameter for
-    backward compatibility with existing call sites and tests but is no
-    longer consulted (the helper has the body context). `graph` is the
-    DataflowGraph the producer/consumer belong to; when omitted (or when
-    the body can't be located) we degrade gracefully by reporting an
-    `observed` of 0 — strictly conservative, will fail the gap check.
-    """
-    # Defensive guard for unit-test scaffolding: production callers always
-    # pass a real graph. No graph -> no profile -> no derivable threshold;
-    # report a strict FAIL so degenerate test paths surface rather than
-    # silently passing.
-    if graph is None:
-        return TimingCheck.failing(observed=0, required=0)
-    # Unknown-ISA short-circuit (rocm-libraries-zkzw): no characterized
-    # timing constants for this arch. Report ARCH_NOT_SUPPORTED so the
-    # caller treats the gap as passing and emits no `TimingTooCloseFailure`.
-    # All other (non-timing) validation continues to run.
-    if graph.arch_profile is None:
-        return TimingCheck.arch_not_supported()
-
-    profile = graph.arch_profile
-    finish = _mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None), profile)
-    required = finish
-
-    observed = cumulative_issue_cycles(graph, producer, consumer)
-    if observed >= required:
-        return TimingCheck.passing(observed, required)
-    return TimingCheck.failing(observed, required)
+# `_quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter, graph)` is now
+# `graph.arch_profile.quad_cycle_gap_ok(producer, consumer, graph)` with the
+# unknown-ISA short-circuit handled at the call site (see
+# `_classify_edge_coverage` / `diagnose_missing_edge`):
+#
+#     if graph.arch_profile is None:
+#         check = TimingCheck.arch_not_supported()
+#     else:
+#         check = graph.arch_profile.quad_cycle_gap_ok(p, c, graph)
+#
+# (The defensive `graph is None` guard from the legacy free function is gone:
+# production callers always pass a real graph, and that path was an artifact
+# of unit-test scaffolding.)
 
 
 def _cvt_to_mfma_gap_ok(
-    producer: GraphNode, consumer: GraphNode, subj_graph: Optional[DataflowGraph]
+    producer: GraphNode, consumer: GraphNode, subj_graph: DataflowGraph
 ) -> "TimingCheck":
     """Verify that enough quad-cycles separate a CVTPack producer from its
     downstream MFMA consumer for the CVT result to be visible.
@@ -1832,8 +1741,8 @@ def _cvt_to_mfma_gap_ok(
     The threshold is fixed at `_QUAD_CYCLES_CVT_BEFORE_MFMA == 2`
     (CDNA 4 ISA 7.6).
 
-    Returns a `TimingCheck` — same shape as `_quad_cycle_gap_ok` so
-    callers can wrap a single `TimingTooCloseFailure(required, observed)`
+    Returns a `TimingCheck` — same shape as `ArchProfile.quad_cycle_gap_ok`
+    so callers can wrap a single `TimingTooCloseFailure(required, observed)`
     regardless of the gap kind.
 
     Same-body and cross-body share ONE code path that delegates to
@@ -1847,11 +1756,7 @@ def _cvt_to_mfma_gap_ok(
     `cumulative_issue_cycles` walks the unified instruction stream
     across all bodies in `_BODY_BUILD_ORDER`.
     """
-    # Defensive guard for unit-test scaffolding: see _quad_cycle_gap_ok.
-    # No graph -> no profile -> no derivable threshold; strict FAIL.
-    if subj_graph is None:
-        return TimingCheck.failing(observed=0, required=0)
-    # Unknown-ISA short-circuit (rocm-libraries-zkzw): see _quad_cycle_gap_ok.
+    # Unknown-ISA short-circuit (rocm-libraries-zkzw).
     if subj_graph.arch_profile is None:
         return TimingCheck.arch_not_supported()
 
@@ -1865,7 +1770,7 @@ def _cvt_to_mfma_gap_ok(
 
 
 def _mfma_pack_to_cvt_gap_ok(
-    producer: GraphNode, consumer: GraphNode, subj_graph: Optional[DataflowGraph]
+    producer: GraphNode, consumer: GraphNode, subj_graph: DataflowGraph
 ) -> "TimingCheck":
     """Verify that enough quad-cycles separate a 4x4 PackMFMA producer from
     its downstream CVTPack (CVT1) consumer for the accumulator to settle.
@@ -1877,14 +1782,14 @@ def _mfma_pack_to_cvt_gap_ok(
     helper enforces a larger min-gap on PackMFMA->CVTPack edges than
     the bare finish would suggest.
 
-    Returns a `TimingCheck` — same shape as `_quad_cycle_gap_ok` and
-    `_cvt_to_mfma_gap_ok` so callers can wrap a single
+    Returns a `TimingCheck` — same shape as `ArchProfile.quad_cycle_gap_ok`
+    and `_cvt_to_mfma_gap_ok` so callers can wrap a single
     `TimingTooCloseFailure(required, observed)` regardless of the gap
     kind.
 
     Approach: CYCLE-EXACT via `cumulative_issue_cycles`, the same
-    simulator `_quad_cycle_gap_ok` uses. The helper walks the captured
-    stream from the producer to the consumer, accumulating
+    simulator `ArchProfile.quad_cycle_gap_ok` uses. The helper walks
+    the captured stream from the producer to the consumer, accumulating
     per-instruction issue costs plus MFMA-specific finish-time and
     type-switch stalls. The structural-side `precompute_issue_times`
     simulator that this helper originally mirrored has been removed;
@@ -1901,11 +1806,7 @@ def _mfma_pack_to_cvt_gap_ok(
     PackMFMA -> CVT1 edges are enforced with the same 5-quad-cycle
     threshold as same-body edges.
     """
-    # Defensive guard for unit-test scaffolding: see _quad_cycle_gap_ok.
-    # No graph -> no profile -> no derivable threshold; strict FAIL.
-    if subj_graph is None:
-        return TimingCheck.failing(observed=0, required=0)
-    # Unknown-ISA short-circuit (rocm-libraries-zkzw): see _quad_cycle_gap_ok.
+    # Unknown-ISA short-circuit (rocm-libraries-zkzw).
     if subj_graph.arch_profile is None:
         return TimingCheck.arch_not_supported()
 
@@ -1957,7 +1858,7 @@ def _is_alu_producer(producer: GraphNode) -> bool:
         # PackMFMA carve-out: pack-categorized but real MFMA → quad-cycle
         # finish gating, not ALU-immediate. Other Pack* (CVT/Middle/Swap)
         # behave as ALU.
-        if _is_mfma_pack_producer(producer):
+        if GraphNode.is_mfma_pack_producer(producer):
             return False
         return True
     if cat == "MFMA":
@@ -1979,7 +1880,7 @@ def _first_insufficient(
     """Return the first wait (in stream order) that does NOT drain the producer
     despite drainable counter. None if every wait drains, or no wait applies."""
     for w in waits:
-        if not _wait_drains_producer(w, producer, subj_graph):
+        if not subj_graph.wait_drains_producer(w, producer):
             return w
     return None
 
@@ -1988,7 +1889,7 @@ def _last_drain(
     waits: List[GraphNode], producer: GraphNode, subj_graph: DataflowGraph
 ) -> Optional[GraphNode]:
     """Return the latest wait that drained the producer, else None."""
-    drainers = [w for w in waits if _wait_drains_producer(w, producer, subj_graph)]
+    drainers = [w for w in waits if subj_graph.wait_drains_producer(w, producer)]
     if not drainers:
         return None
     return max(drainers, key=lambda w: w.position)
@@ -2041,9 +1942,8 @@ class _PositionStr(str):
             return -1
 
 
-def _node_position(node: GraphNode) -> SchedulePosition:
-    """Resolve the SchedulePosition for a GraphNode."""
-    return node.position
+# `_node_position(node)` is now `node.canonical_position` (property on
+# `GraphNode`). New code reads `node.position` directly.
 
 
 def _node_display_idx(node: NodeLike) -> int:
@@ -2061,8 +1961,7 @@ def _node_display_idx(node: NodeLike) -> int:
     ti = getattr(node, "tagged_inst", None)
     if ti is not None and getattr(ti, "slot", None) is not None:
         return ti.slot.mfma_index
-    pos = _node_position(node)
-    return pos.stream_index
+    return node.position.stream_index
 
 
 @dataclass(frozen=True)
@@ -2422,32 +2321,12 @@ def cms_node_label(
     )
 
 
-def _cms_iter_delta(producer: GraphNode, consumer: GraphNode) -> int:
-    """Compute the canonical loop-offset between consumer and producer.
-
-    Mirrors the old `_iter_note`'s loop_index arithmetic. Returns the raw
-    integer delta (consumer.loop_index - producer.loop_index) so the
-    Failure base's `_iter_suffix` can pick the appropriate suffix.
-    """
-    p_pos = _node_position(producer)
-    c_pos = _node_position(consumer)
-    return c_pos.loop_index - p_pos.loop_index
+# `_cms_iter_delta(producer, consumer)` is now `producer.iter_delta_to(consumer)`
+# (method on `GraphNode`).
 
 
-def _body_for_node(graph: "DataflowGraph", node: GraphNode) -> "LoopBodyCapture":
-    """Look up the LoopBodyCapture that emitted `node`.
-
-    Uses `node.body_label` against `graph.captures`. Both arguments are
-    required: every caller in CMSValidator passes a constructed
-    DataflowGraph (the wa57 cleanup removed the last None-graph caller),
-    and every GraphNode was built from a body that lives in
-    `graph.captures` (see `build_dataflow_graph` Phase 1, where each
-    `_make_node` is invoked under `for label in _BODY_BUILD_ORDER` with
-    `label in captures`). Subscripts directly so a future capture-
-    pipeline regression that produces a node with an unknown body_label
-    raises KeyError instead of silently degrading downstream labels.
-    """
-    return graph.captures[node.body_label]
+# `_body_for_node(graph, node)` is now `graph.body_for(node)` (method on
+# `DataflowGraph`).
 
 
 # =============================================================================
@@ -2636,13 +2515,12 @@ def diagnose_missing_edge(
             # _classify_edge_coverage uses in within-graph mode.
             nmps = subj_graph.num_mfma_per_subiter
             if (_is_alu_producer(p_node)
-                    and _node_subiter(p_node, nmps)
-                        != _node_subiter(c_node, nmps)):
+                    and p_node.subiter(nmps) != c_node.subiter(nmps)):
                 return []  # cross-subiter pipelined dependency — legitimate
             return [OrderInvertedFailure(
-                producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
-                consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
-                iter_delta=_cms_iter_delta(p_node, c_node),
+                producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
+                consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
+                iter_delta=p_node.iter_delta_to(c_node),
                 default_producer_position=ref_p.position,
                 default_consumer_position=ref_c.position,
             )]
@@ -2687,13 +2565,13 @@ def diagnose_missing_edge(
                 break
         if intervening_writer is not None:
             return [OverriddenInputFailure(
-                producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
-                consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
-                iter_delta=_cms_iter_delta(p_node, c_node),
+                producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
+                consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
+                iter_delta=p_node.iter_delta_to(c_node),
                 resource="SCC",
                 intervening_writer=cms_node_label(
                     intervening_writer,
-                    _body_for_node(subj_graph, intervening_writer),
+                    subj_graph.body_for(intervening_writer),
                 ),
             )]
         # No intervening SCC writer found — the consumer's SCC slot is
@@ -2710,15 +2588,15 @@ def diagnose_missing_edge(
     # The structural-side mirror (`_handle_min_pack_quad_cycles` /
     # `MFMAPack.min_quad_cycles_before_result_used`) was removed; this
     # dispatch is now the only enforcement path.
-    if (_is_mfma_pack_producer(p_node)
-            and _is_cvt_pack_producer(c_node)):
+    if (GraphNode.is_mfma_pack_producer(p_node)
+            and GraphNode.is_cvt_pack_producer(c_node)):
         check = _mfma_pack_to_cvt_gap_ok(
             p_node, c_node, subj_graph)
         if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
-                producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
-                consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
-                iter_delta=_cms_iter_delta(p_node, c_node),
+                producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
+                consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
+                iter_delta=p_node.iter_delta_to(c_node),
                 expected_quad_cycles=check.required,
                 actual_quad_cycles=check.observed,
             )]
@@ -2731,14 +2609,16 @@ def diagnose_missing_edge(
     # == "MFMA"`) so 4x4 PackMFMAs (categorized Pack* but syntactically
     # MFMAInstruction) are routed here BEFORE the ALU exemption claims
     # them.
-    if _is_mfma_producer(p_node):
-        nmps = subj_graph.num_mfma_per_subiter
-        check = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
+    if GraphNode.is_mfma_producer(p_node):
+        if subj_graph.arch_profile is None:
+            check = TimingCheck.arch_not_supported()
+        else:
+            check = subj_graph.arch_profile.quad_cycle_gap_ok(p_node, c_node, subj_graph)
         if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
-                producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
-                consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
-                iter_delta=_cms_iter_delta(p_node, c_node),
+                producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
+                consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
+                iter_delta=p_node.iter_delta_to(c_node),
                 expected_quad_cycles=check.required,
                 actual_quad_cycles=check.observed,
             )]
@@ -2752,13 +2632,13 @@ def diagnose_missing_edge(
     # CVTPacks don't get silently waved through. Non-MFMA consumers fall
     # through to the ALU exemption — only the CVT->MFMA edge carries the
     # quad-cycle constraint.
-    if _is_cvt_pack_producer(p_node) and _is_mfma_producer(c_node):
+    if GraphNode.is_cvt_pack_producer(p_node) and GraphNode.is_mfma_producer(c_node):
         check = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
         if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
-                producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
-                consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
-                iter_delta=_cms_iter_delta(p_node, c_node),
+                producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
+                consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
+                iter_delta=p_node.iter_delta_to(c_node),
                 expected_quad_cycles=check.required,
                 actual_quad_cycles=check.observed,
             )]
@@ -2790,9 +2670,9 @@ def diagnose_missing_edge(
 
     wait_failure_emitted = False
 
-    p_label = cms_node_label(p_node, _body_for_node(subj_graph, p_node))
-    c_label = cms_node_label(c_node, _body_for_node(subj_graph, c_node))
-    iter_delta = _cms_iter_delta(p_node, c_node)
+    p_label = cms_node_label(p_node, subj_graph.body_for(p_node))
+    c_label = cms_node_label(c_node, subj_graph.body_for(c_node))
+    iter_delta = p_node.iter_delta_to(c_node)
 
     if not waits:
         # No SWait on the expected counter at all in the window. If other-
@@ -2811,13 +2691,13 @@ def diagnose_missing_edge(
         wait_failure_emitted = True
     else:
         # At least one wait on the right counter. Check if any drains the producer.
-        if not _any_drains(waits, p_node, subj_graph):
+        if not subj_graph.any_drains(waits, p_node):
             insufficient = _first_insufficient(waits, p_node, subj_graph)
             if insufficient is not None:
                 # Compute queue depth at the wait's position for diagnostic.
-                depth = _queue_depth_at(insufficient, p_node, subj_graph)
+                depth = subj_graph.queue_depth_at(insufficient, p_node)
                 cv = _swait_drains(insufficient, expected_counter)
-                pos = _producer_queue_position(p_node, subj_graph)
+                pos = subj_graph.producer_queue_position(p_node)
                 failures.append(WaitInsufficientFailure(
                     producer=p_label,
                     consumer=c_label,
@@ -2874,7 +2754,7 @@ def diagnose_missing_edge(
         # subj graph paired this consumer with a different (closer)
         # producer. No real classifier bug; suppress.
         if (p_node.body_label != c_node.body_label
-                and waits and _any_drains(waits, p_node, subj_graph)):
+                and waits and subj_graph.any_drains(waits, p_node)):
             return []
 
         # Couldn't classify — capture pipeline bug or classifier bug.
@@ -2988,12 +2868,12 @@ def _classify_edge_coverage(
     # `_quad_cycle_gap_ok`, whose threshold for 4x4 PackMFMAs
     # (`_mfma_finish_cycles_for == 1`) is too weak by 4 quad-cycles
     # versus the 5-cycle CVT1 visibility window.
-    p_label = cms_node_label(p_node, _body_for_node(subj_graph, p_node))
-    c_label = cms_node_label(c_node, _body_for_node(subj_graph, c_node))
-    iter_delta = _cms_iter_delta(p_node, c_node)
+    p_label = cms_node_label(p_node, subj_graph.body_for(p_node))
+    c_label = cms_node_label(c_node, subj_graph.body_for(c_node))
+    iter_delta = p_node.iter_delta_to(c_node)
 
-    if (_is_mfma_pack_producer(p_node)
-            and _is_cvt_pack_producer(c_node)):
+    if (GraphNode.is_mfma_pack_producer(p_node)
+            and GraphNode.is_cvt_pack_producer(c_node)):
         check = _mfma_pack_to_cvt_gap_ok(
             p_node, c_node, subj_graph)
         if check.result == TimingResult.FAIL:
@@ -3012,9 +2892,11 @@ def _classify_edge_coverage(
     # so PackMFMAs (categorized Pack* but rocisa MFMAInstruction) reach
     # this branch instead of getting silently exempted by
     # `_is_alu_producer` below.
-    if _is_mfma_producer(p_node):
-        nmps = subj_graph.num_mfma_per_subiter
-        check = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
+    if GraphNode.is_mfma_producer(p_node):
+        if subj_graph.arch_profile is None:
+            check = TimingCheck.arch_not_supported()
+        else:
+            check = subj_graph.arch_profile.quad_cycle_gap_ok(p_node, c_node, subj_graph)
         if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
                 producer=p_label,
@@ -3037,7 +2919,7 @@ def _classify_edge_coverage(
     # the converted result for something other than an MFMA operand load)
     # carries no quad-cycle constraint — fall through to the ALU
     # exemption in that case.
-    if _is_cvt_pack_producer(p_node) and _is_mfma_producer(c_node):
+    if GraphNode.is_cvt_pack_producer(p_node) and GraphNode.is_mfma_producer(c_node):
         check = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
         if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
@@ -3075,12 +2957,12 @@ def _classify_edge_coverage(
         ))
         wait_failure_emitted = True
     else:
-        if not _any_drains(waits, p_node, subj_graph):
+        if not subj_graph.any_drains(waits, p_node):
             insufficient = _first_insufficient(waits, p_node, subj_graph)
             if insufficient is not None:
-                depth = _queue_depth_at(insufficient, p_node, subj_graph)
+                depth = subj_graph.queue_depth_at(insufficient, p_node)
                 cv = _swait_drains(insufficient, expected_counter)
-                pos = _producer_queue_position(p_node, subj_graph)
+                pos = subj_graph.producer_queue_position(p_node)
                 failures.append(WaitInsufficientFailure(
                     producer=p_label, consumer=c_label,
                     iter_delta=iter_delta,
@@ -3148,9 +3030,9 @@ def _classify_edge_coverage(
 #
 # Pair-detection algorithm:
 #   1. Walk every node in stream order.
-#   2. Filter to MiddlePack-class nodes (rocisa class in
-#      `_MIDDLE_PACK_CLASS_NAMES`). Group by `category` (PackA0, PackB0,
-#      etc.) — categories partition the pack stream.
+#   2. Filter to MiddlePack-class nodes (rocisa class registered as
+#      `InstructionCategory.MIDDLE_PACK`). Group by `category` (PackA0,
+#      PackB0, etc.) — categories partition the pack stream.
 #   3. Within each category, pair MiddlePacks by adjacency in the
 #      category-local stream order: pair (0, 1), (2, 3), (4, 5), ...
 #      Each pair's first element is the LEADER; the second is the
@@ -3180,7 +3062,7 @@ def validate_middle_pack_pair_interleaving(graph: "DataflowGraph") -> List["Over
     """
     # 1. Collect MiddlePacks in global stream order.
     middle_packs_global = []
-    for node in _all_nodes_in_order(graph):
+    for node in graph.all_nodes_in_order:
         inst = getattr(node, "rocisa_inst", None)
         if inst is None:
             continue
@@ -3232,12 +3114,12 @@ def validate_middle_pack_pair_interleaving(graph: "DataflowGraph") -> List["Over
         if actual_next is consumer:
             continue
         failures.append(OverriddenInputFailure(
-            producer=cms_node_label(node, _body_for_node(graph, node)),
-            consumer=cms_node_label(consumer, _body_for_node(graph, consumer)),
-            iter_delta=_cms_iter_delta(node, consumer),
+            producer=cms_node_label(node, graph.body_for(node)),
+            consumer=cms_node_label(consumer, graph.body_for(consumer)),
+            iter_delta=node.iter_delta_to(consumer),
             resource="vgpr",
             intervening_writer=cms_node_label(
-                actual_next, _body_for_node(graph, actual_next),
+                actual_next, graph.body_for(actual_next),
             ),
         ))
     return failures
@@ -3352,7 +3234,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> None:
         # SCC, and MiddlePack interleaving still run for unknown ISAs;
         # only the four pair-specific timing checks are suppressed.
         isa_tuple = tuple(kernel["ISA"]) if "ISA" in kernel else None
-        arch_profile = _resolve_arch_profile_for_isa(isa_tuple)
+        arch_profile = ArchProfile.for_isa(isa_tuple)
         if context.default_capture.arch_profile is None:
             context.default_capture.arch_profile = arch_profile
         if context.cms_capture.arch_profile is None:

@@ -134,6 +134,11 @@ _CLASS_NAME_TO_CATEGORY: dict = {
     "DSStoreB256":          InstructionCategory.LW,
     "DSStoreD16HIB16":      InstructionCategory.LW,
     "DSStoreB8HID16":       InstructionCategory.LW,
+    # DSStore2B32 — `ds_store2_b32` writes TWO independent 32-bit values
+    # to LDS in a single instruction. Real rocisa subclass of
+    # DSStoreInstruction; same generic rule extracts both src registers
+    # (kx1: `_DSStoreRule.extract` delegates to `_operands_with_slots`).
+    "DSStore2B32":          InstructionCategory.LW,
     "DSStoreInstruction":   InstructionCategory.LW,
 
     # GR — rocisa BufferLoad / GlobalLoad classes plus their umbrellas.

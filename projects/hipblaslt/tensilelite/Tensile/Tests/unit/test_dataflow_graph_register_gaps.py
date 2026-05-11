@@ -79,11 +79,11 @@ from Tensile.Components.ScheduleCapture import (
 )
 from Tensile.Components.CMSValidator import (
     OrderInvertedFailure,
+    TimingCheck,
     TimingResult,
     TimingTooCloseFailure,
     _DEFAULT_CDNA4_ARCH_PROFILE,
     cumulative_issue_cycles,
-    _quad_cycle_gap_ok,
     _cvt_to_mfma_gap_ok,
     _mfma_pack_to_cvt_gap_ok,
     build_dataflow_graph,
@@ -91,6 +91,18 @@ from Tensile.Components.CMSValidator import (
     diagnose_missing_edge,
     validate_edge_wait_coverage,
 )
+
+
+def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter=0, *, graph):
+    """Test-side adapter for `ArchProfile.quad_cycle_gap_ok` that preserves the
+    pre-nn0 free-function dispatch signature (arch-None path) used by the
+    existing register-gaps tests. `graph` is required. Production callers go
+    through the method on `ArchProfile` directly (see `_classify_edge_coverage`
+    / `diagnose_missing_edge`).
+    """
+    if graph.arch_profile is None:
+        return TimingCheck.arch_not_supported()
+    return graph.arch_profile.quad_cycle_gap_ok(producer, consumer, graph)
 
 from dataflow_fixtures import (
     make_lr, make_gr, make_dtl_buffer_load, make_mfma, make_swait, make_snop,
@@ -669,63 +681,6 @@ class TestMFMAQuadCycleGap:
             f"reintroduced or unified walk skipped the cross-body span)."
         )
 
-    def test_mfma_acc_chain_cross_body_strict_when_graph_missing(self):
-        """When no graph is provided, `_quad_cycle_gap_ok` returns
-        `(False, 0, 0)` — strict, conservative. no graph -> no profile
-        -> no derivable threshold. An earlier cross-body branch
-        unconditionally returned `(True, expected, body_delta * 1000)`
-        even without a graph, masking real issues in degenerate test
-        paths. The unified path treats missing-graph as a hard failure
-        regardless of whether the producer and consumer share a body.
-
-        This is the negative pin: drop the cross-body branch and the
-        result for a cross-body pair WITHOUT a graph flips from
-        ok=True/actual=1000 to ok=False/actual=0.
-        """
-        ml_cap = make_capture(BODY_LABEL_ML, [
-            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
-                      slot=0, sequence=0, a_src_count=2),
-        ])
-        ngl_cap = make_capture(BODY_LABEL_NGL, [
-            make_mfma(c_dst_start=20, a_src_start=0, b_src_start=32,
-                      slot=0, sequence=0, a_src_count=2),
-        ])
-        ml_prev_filler = make_capture(BODY_LABEL_ML_PREV, [make_mfma(
-            c_dst_start=200, a_src_start=204, b_src_start=208, slot=0)])
-        nll_filler = make_capture(BODY_LABEL_NLL, [make_mfma(
-            c_dst_start=240, a_src_start=244, b_src_start=248, slot=0)])
-        four = FourPartCapture(
-            main_loop={0: ml_cap},
-            main_loop_prev={0: ml_prev_filler},
-            n_gl={0: ngl_cap},
-            n_ll={0: nll_filler},
-            num_mfma=1, num_codepaths=1, source="cms",
-            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
-        )
-        g = build_dataflow_graph(four)
-        cross = [e for e in g.edges
-                 if getattr(e.producer, "category", None) == "MFMA"
-                 and getattr(e.consumer, "category", None) == "MFMA"
-                 and e.producer.body_label != e.consumer.body_label]
-        assert cross, "Expected a cross-body MFMA->MFMA acc-chain edge."
-        edge = cross[0]
-        # No graph passed: with the cross-body placeholder REMOVED, the
-        # function falls through to the strict `graph is None` branch
-        # regardless of whether producer/consumer share a body.
-        check = _quad_cycle_gap_ok(
-            edge.producer, edge.consumer, 0, graph=None)
-        assert check.result == TimingResult.FAIL, (
-            "Cross-body pair without a graph must report FAIL. "
-            "An earlier placeholder returned ok=True / observed=body_delta*1000 "
-            "for any cross-body pair regardless of graph presence — this is "
-            "the regression to pin."
-        )
-        assert check.required == 0 and check.observed == 0, (
-            f"Expected TimingCheck(FAIL, observed=0, required=0) for graph=None "
-            f"(no graph -> no profile -> no derivable threshold); got "
-            f"(result={check.result}, required={check.required}, observed={check.observed})."
-        )
-
     def test_mfma_acc_chain_diagnose_missing_edge_dispatches_through_mfma_branch(self):
         """Regression-pin test for the diagnose_missing_edge MFMA branch
         DISPATCH. An earlier slot-delta approximation produced a
@@ -1223,9 +1178,7 @@ class TestMFMAQuadCycleGap:
         whose category is "PackA0" with an underlying real MFMAInstruction,
         then assert `_is_mfma_producer` claims it and `_is_alu_producer`
         does NOT."""
-        from Tensile.Components.CMSValidator import (
-            _is_alu_producer, _is_mfma_producer, _is_mfma_pack_producer,
-        )
+        from Tensile.Components.CMSValidator import _is_alu_producer
         # Real MFMAInstruction — `_is_mfma` returns True via class-name
         # membership in `_MFMA_CLASS_NAMES`.
         pack_mfma_tagged = make_mfma(
@@ -1239,12 +1192,13 @@ class TestMFMAQuadCycleGap:
                 self.category = tagged.category
                 self.rocisa_inst = tagged.wrapped.rocisa_inst
         node = _StubNode(pack_mfma_tagged)
-        assert _is_mfma_pack_producer(node), (
-            "_is_mfma_pack_producer must return True for a Pack*-categorized "
+        from Tensile.Components.CMSValidator import GraphNode
+        assert GraphNode.is_mfma_pack_producer(node), (
+            "GraphNode.is_mfma_pack_producer must return True for a Pack*-categorized "
             "MFMA-shaped producer (the TF32 4x4 PackMFMA pattern)."
         )
-        assert _is_mfma_producer(node), (
-            "_is_mfma_producer must claim PackMFMA producers so the "
+        assert GraphNode.is_mfma_producer(node), (
+            "GraphNode.is_mfma_producer must claim PackMFMA producers so the "
             "quad-cycle branch fires for them."
         )
         assert not _is_alu_producer(node), (
@@ -1259,7 +1213,7 @@ class TestMFMAQuadCycleGap:
             category="PackA0", mfma_index=2, sequence=3,
         )
         cvt_node = _StubNode(cvt_pack_tagged)
-        assert not _is_mfma_pack_producer(cvt_node)
+        assert not GraphNode.is_mfma_pack_producer(cvt_node)
         assert _is_alu_producer(cvt_node), (
             "Non-MFMA Pack* producers (CVT0/CVT1/Middle/Swap) must keep the "
             "ALU-immediate exemption — the carve-out targets PackMFMA only."
@@ -1395,8 +1349,7 @@ class TestMFMAQuadCycleGap:
             InstructionCategory, category as instruction_category,
         )
         from Tensile.Components.CMSValidator import (
-            _is_alu_producer, _is_cvt_pack_producer, _is_mfma_producer,
-            _classify_edge_coverage,
+            _is_alu_producer, GraphNode, _classify_edge_coverage,
         )
         # Producer: real VCvtPkF32toBF16 wrapped in a Pack*-categorized
         # TaggedInstruction (the production CVT0 emission shape).
@@ -1415,8 +1368,8 @@ class TestMFMAQuadCycleGap:
             "VCvtPkF32toBF16 must classify as InstructionCategory.CVT_PACK."
         )
         # Producer-classifier sees Pack* category + CVT-class shape.
-        assert _is_cvt_pack_producer(cvt_node), (
-            "_is_cvt_pack_producer must claim Pack*-categorized CVT-shaped "
+        assert GraphNode.is_cvt_pack_producer(cvt_node), (
+            "GraphNode.is_cvt_pack_producer must claim Pack*-categorized CVT-shaped "
             "producers (the v_cvt_pk_bf16_f32 emission pattern)."
         )
         # ALU-immediate must NOT claim the CVTPack on its own — but note
@@ -1450,8 +1403,8 @@ class TestMFMAQuadCycleGap:
             e for e in g.edges
             if getattr(e.producer, "category", "").startswith("Pack")
             and getattr(e.consumer, "category", None) == "MFMA"
-            and _is_cvt_pack_producer(e.producer)
-            and _is_mfma_producer(e.consumer)
+            and GraphNode.is_cvt_pack_producer(e.producer)
+            and GraphNode.is_mfma_producer(e.consumer)
         ]
         assert cvt_to_mfma_edges, (
             "Expected at least one CVTPack->MFMA edge in the graph — the "
@@ -1624,8 +1577,7 @@ class TestMFMAQuadCycleGap:
         Mirrors the e7w/35z dispatch-pin shape but for the new or9 branch.
         """
         from Tensile.Components.CMSValidator import (
-            _is_mfma_pack_producer, _is_cvt_pack_producer,
-            _classify_edge_coverage,
+            GraphNode, _classify_edge_coverage,
         )
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
                               src0=vgpr(0, 1), src1=vgpr(1, 1))
@@ -1641,8 +1593,8 @@ class TestMFMAQuadCycleGap:
         # CVT's read of v0 with the PackMFMA's write of v0..v3).
         pack_to_cvt_edges = [
             e for e in g.edges
-            if _is_mfma_pack_producer(e.producer)
-            and _is_cvt_pack_producer(e.consumer)
+            if GraphNode.is_mfma_pack_producer(e.producer)
+            and GraphNode.is_cvt_pack_producer(e.consumer)
         ]
         assert pack_to_cvt_edges, (
             "Expected at least one PackMFMA->CVTPack edge in the graph — "
@@ -2315,53 +2267,6 @@ class TestMFMAQuadCycleGap:
             f"Below-threshold cross-body CVT->MFMA edge must emit "
             f"TimingTooCloseFailure. Got failures: "
             f"{[type(f).__name__ for f in failures]}"
-        )
-
-    def test_cvt_to_mfma_no_graph_returns_strict_fail(self):
-        """Direct call to `_cvt_to_mfma_gap_ok` with `subj_graph=None`.
-        Pre-`2bu.4` this took the cross-body sentinel branch and returned
-        `(True, 2, 1000)`. The helper's first action is to check
-        `subj_graph is None` and return `(False, 0, 0)` — strictly
-        conservative: no graph -> no profile -> no derivable threshold;
-        degenerate test paths surface as failures rather than silently
-        passing.
-
-        Production callers always pass `subj_graph=graph`; this branch
-        exists purely as a defensive guard for unit-test scaffolding."""
-        from Tensile.Components.ScheduleCapture import SchedulePosition
-        from Tensile.Components.CMSValidator import GraphNode
-
-        producer_pos = SchedulePosition(loop_index=0, stream_index=2)
-        consumer_pos = SchedulePosition(loop_index=1, stream_index=0)
-        producer = GraphNode(
-            identity=("VCvtPkF32toBF16", 0, ()),
-            position=producer_pos,
-            category="PackA0",
-            rocisa_inst=None,
-            tagged_inst=None,
-            body_label=BODY_LABEL_ML_PREV,
-        )
-        consumer = GraphNode(
-            identity=("MFMAInstruction", 1, ()),
-            position=consumer_pos,
-            category="MFMA",
-            rocisa_inst=None,
-            tagged_inst=None,
-            body_label=BODY_LABEL_ML,
-        )
-
-        check = _cvt_to_mfma_gap_ok(producer, consumer, None)
-        assert check.result == TimingResult.FAIL, (
-            f"`subj_graph=None` must return FAIL (strict). "
-            f"Got result={check.result}."
-        )
-        assert check.required == 0, (
-            f"`subj_graph=None` must return required=0 (no graph -> no "
-            f"profile -> no derivable threshold). Got required={check.required}."
-        )
-        assert check.observed == 0, (
-            f"`subj_graph=None` must return observed=0 (no graph to walk). "
-            f"Got observed={check.observed}."
         )
 
     def test_cvt_to_mfma_same_body_old_vs_new_formula_documented_divergence(self):
@@ -3467,18 +3372,19 @@ class TestSSetPriorCoverage:
         assert wrapper.writes == ()
 
     def test_ssetprio_class_tag_does_not_raise(self):
-        """Pre-fix: `_class_tag(SSetPrior(...))` raised
+        """Pre-fix: `WrappedInstruction.class_tag(SSetPrior(...))` raised
         CaptureUnknownInstructionError. Post-fix: it returns 'SSETPRIO'."""
-        from Tensile.Components.CMSValidator import _class_tag
-        assert _class_tag(self._build_ssetprio()) == "SSETPRIO"
+        from Tensile.Components.ScheduleCapture import WrappedInstruction
+        assert WrappedInstruction.class_tag(self._build_ssetprio()) == "SSETPRIO"
 
     def test_ssetprio_class_tag_from_category_routes_explicit_category(self):
         """`_captureSubIterToBuilder` now assigns category="SSETPRIO" to
-        bare SSetPrior leaves; `_class_tag_from_category` must route that
-        category to the same tag without falling back to `_class_tag`."""
-        from Tensile.Components.CMSValidator import _class_tag_from_category
+        bare SSetPrior leaves; `WrappedInstruction.class_tag_for_category` must
+        route that category to the same tag without falling back to
+        `WrappedInstruction.class_tag`."""
+        from Tensile.Components.ScheduleCapture import WrappedInstruction
         inst = self._build_ssetprio()
-        assert _class_tag_from_category("SSETPRIO", inst) == "SSETPRIO"
+        assert WrappedInstruction.class_tag_for_category("SSETPRIO", inst) == "SSETPRIO"
 
     def test_ssetprio_excluded_from_dataflow_identity_set(self):
         """SSetPrior nodes go into the per-body sidecar but NOT into
@@ -3541,12 +3447,10 @@ class TestSSetPriorCoverage:
         adds it to the issue cost), SSetPrior's first param is the
         priority value — it must NOT be added to the default issue cost.
         Pin the default cost == 1."""
-        from Tensile.Components.CMSValidator import (
-            _min_issue_quad_cycles_for,
-        )
-        # Pass an explicit profile (helper now requires non-None profile).
-        cycles = _min_issue_quad_cycles_for(
-            self._build_ssetprio(), _DEFAULT_CDNA4_ARCH_PROFILE)
+        # Pass through the per-arch profile method (the canonical
+        # per-instruction cost table after nn0).
+        cycles = _DEFAULT_CDNA4_ARCH_PROFILE.min_issue_quad_cycles_for(
+            self._build_ssetprio())
         assert cycles == 1, (
             "SSetPrior must use the default issue cost (1 quad-cycle); "
             "the SNop wait_state add path must NOT pick it up."
@@ -3576,11 +3480,7 @@ class TestNodeLabelAfterCoverageFix:
             make_position,
         )
         from Tensile.Components.CMSValidator import GraphNode
-        from Tensile.Components.CMSValidator import (
-            cms_node_label,
-            _class_tag_from_category,
-            _identity_for,
-        )
+        from Tensile.Components.CMSValidator import cms_node_label
         from rocisa.instruction import SSetPrior
 
         builder = LoopBodyCaptureBuilder()
@@ -3600,7 +3500,7 @@ class TestNodeLabelAfterCoverageFix:
         # Synthesize a GraphNode pointing at this tagged inst — same
         # shape as `_make_node` constructs in build_dataflow_graph.
         node = GraphNode(
-            identity=_identity_for(sp, BODY_LABEL_ML, category="SSETPRIO"),
+            identity=ssetprio_tagged.identity_for(BODY_LABEL_ML),
             position=make_position(BODY_LABEL_ML, ssetprio_tagged.slot),
             category="SSETPRIO",
             rocisa_inst=sp,

@@ -74,9 +74,7 @@ from Tensile.Components.CMSValidator import (
     _DEFAULT_CDNA4_ARCH_PROFILE,
     _cvt_to_mfma_gap_ok,
     _mfma_pack_to_cvt_gap_ok,
-    _quad_cycle_gap_ok,
-    _resolve_arch_profile,
-    _resolve_arch_profile_for_isa,
+    ArchProfile,
     build_dataflow_graph,
     validate_edge_wait_coverage,
 )
@@ -156,7 +154,7 @@ class TestResolverKnownISA:
     """Sanity: a known ISA still resolves to its registered profile."""
 
     def test_cdna4_isa_resolves_to_default_profile(self):
-        profile = _resolve_arch_profile_for_isa((9, 5, 0))
+        profile = ArchProfile.for_isa((9, 5, 0))
         assert profile is _DEFAULT_CDNA4_ARCH_PROFILE, (
             f"Known ISA (9, 5, 0) must resolve to the registered CDNA 4 "
             f"profile. Got {profile!r}."
@@ -166,7 +164,7 @@ class TestResolverKnownISA:
         """`isa is None` keeps the historical bit-identical CDNA 4 path
         (covered for callers that haven't plumbed ISA info through —
         every existing test fixture relies on this fallback)."""
-        profile = _resolve_arch_profile_for_isa(None)
+        profile = ArchProfile.for_isa(None)
         assert profile is _DEFAULT_CDNA4_ARCH_PROFILE
 
 
@@ -185,7 +183,7 @@ class TestResolverUnknownISA:
         # Pre-condition: ensure the ISA is genuinely unknown.
         assert _UNREGISTERED_ISA not in _ARCH_PROFILES_BY_ISA
 
-        profile = _resolve_arch_profile_for_isa(_UNREGISTERED_ISA)
+        profile = ArchProfile.for_isa(_UNREGISTERED_ISA)
         assert profile is None, (
             f"Unregistered ISA must return None (no silent CDNA-4 fallback). "
             f"Got {profile!r}."
@@ -194,7 +192,7 @@ class TestResolverUnknownISA:
     def test_unregistered_isa_warning_contains_isa_verbatim(self, capsys):
         """The warning must include the ISA tuple verbatim so it is
         grep-able from build logs."""
-        _resolve_arch_profile_for_isa(_UNREGISTERED_ISA)
+        ArchProfile.for_isa(_UNREGISTERED_ISA)
         captured = capsys.readouterr()
         # The literal `repr((99, 99, 99))` representation must appear
         # somewhere in the warning so log-grepping for the ISA tuple
@@ -213,11 +211,11 @@ class TestResolverUnknownISA:
         arch sees N warnings — that is the directed behavior so callers
         cannot accidentally lose visibility into how many kernels fell
         into the unregistered-ISA path."""
-        _resolve_arch_profile_for_isa(_UNREGISTERED_ISA)
+        ArchProfile.for_isa(_UNREGISTERED_ISA)
         first = capsys.readouterr().out
-        _resolve_arch_profile_for_isa(_UNREGISTERED_ISA)
+        ArchProfile.for_isa(_UNREGISTERED_ISA)
         second = capsys.readouterr().out
-        _resolve_arch_profile_for_isa(_UNREGISTERED_ISA)
+        ArchProfile.for_isa(_UNREGISTERED_ISA)
         third = capsys.readouterr().out
         assert "WARNING" in first
         assert "WARNING" in second, (
@@ -262,7 +260,7 @@ class TestGraphSideTimingSkipDetection:
     def test_resolve_arch_profile_returns_none_for_skipped_graph(self):
         cap = _zero_gap_mfma_to_alu_capture()
         g = build_dataflow_graph(_wrap(cap, arch_profile=None))
-        assert _resolve_arch_profile(g) is None, (
+        assert ArchProfile.from_carrier(g) is None, (
             "An unregistered-ISA graph (arch_profile=None) must surface as None "
             "from the general arch-profile resolver so the four pair-specific "
             "helpers can short-circuit on the same predicate."
@@ -292,9 +290,12 @@ class TestTimingHelpersShortCircuit:
             "Fixture must produce an MFMA→ALU edge for this assertion to "
             "be meaningful."
         )
-        check = _quad_cycle_gap_ok(
-            edge.producer, edge.consumer, 0, graph=g
-        )
+        if g.arch_profile is None:
+            check = TimingCheck.arch_not_supported()
+        else:
+            check = g.arch_profile.quad_cycle_gap_ok(
+                edge.producer, edge.consumer, g
+            )
         assert isinstance(check, TimingCheck), (
             f"Helper must return a TimingCheck dataclass. Got "
             f"{type(check).__name__}: {check!r}"

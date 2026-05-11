@@ -67,6 +67,7 @@ _LEGACY_SNAPSHOT = {
     "DSStoreB256":        InstructionCategory.LW,
     "DSStoreD16HIB16":    InstructionCategory.LW,
     "DSStoreB8HID16":     InstructionCategory.LW,
+    "DSStore2B32":        InstructionCategory.LW,
     "DSStoreInstruction": InstructionCategory.LW,
     # _GR_CLASS_NAMES
     "BufferLoadB32":         InstructionCategory.GR,

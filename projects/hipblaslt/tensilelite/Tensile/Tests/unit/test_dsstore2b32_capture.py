@@ -80,8 +80,8 @@ class TestDSStore2B32Dispatch:
     """`DSStore2B32` must be claimed by `_DSStoreRule` via `_is_lw`."""
 
     def test_dsstore2b32_recognized_as_lw(self):
-        from Tensile.Components.ScheduleCapture import _is_lw
-        assert _is_lw(_build_dsstore2_b32()), (
+        from Tensile.Components.ScheduleCapture import WrappedInstruction
+        assert WrappedInstruction(_build_dsstore2_b32()).is_lw, (
             "DSStore2B32 must be in _LW_CLASS_NAMES so the class-name "
             "dispatch routes it to _DSStoreRule. Without this, the "
             "instruction falls through to UNKNOWN and produces no "
