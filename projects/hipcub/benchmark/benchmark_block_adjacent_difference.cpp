@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "common_benchmark_header.hpp"
-#include "primbench.hpp"
 
 // HIP API
 #include <hipcub/block/block_adjacent_difference.hpp>
@@ -272,8 +271,8 @@ class block_adjacent_difference_benchmark : public primbench::benchmark_interfac
                             input.size() * sizeof(input[0]),
                             hipMemcpyHostToDevice));
 
-        state.set_items(items);
-        state.add_writes<T>(items);
+        state.set_items(Trials * items);
+        state.add_writes<T>(Trials * items);
 
         state.run(
             [&]

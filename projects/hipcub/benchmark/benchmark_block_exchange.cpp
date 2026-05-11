@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "common_benchmark_header.hpp"
-#include "primbench.hpp"
 
 // HIP API
 #include <hipcub/block/block_exchange.hpp>

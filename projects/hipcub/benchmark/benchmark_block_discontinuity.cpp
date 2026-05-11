@@ -27,7 +27,6 @@
 #include <hipcub/thread/thread_operators.hpp> //to use hipcub::Equality
 
 #include "common_benchmark_header.hpp"
-#include "primbench.hpp"
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 128 * primbench::MiB;

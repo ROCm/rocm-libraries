@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "common_benchmark_header.hpp"
-#include "primbench.hpp"
 
 #include <hipcub/block/block_shuffle.hpp>
 
@@ -206,8 +205,8 @@ class block_shuffle_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.set_items(items);
-        state.add_writes<T>(items);
+        state.set_items(Trials * items);
+        state.add_writes<T>(Trials * items);
 
         state.run(
             [&]

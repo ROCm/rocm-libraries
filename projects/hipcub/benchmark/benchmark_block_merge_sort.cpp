@@ -23,7 +23,6 @@
 #include "common_benchmark_header.hpp"
 
 #include "../test/hipcub/test_utils_sort_comparator.hpp"
-#include "primbench.hpp"
 // HIP API
 #include <hipcub/block/block_load.hpp>
 #include <hipcub/block/block_merge_sort.hpp>

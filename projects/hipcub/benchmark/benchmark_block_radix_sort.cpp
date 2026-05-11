@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "common_benchmark_header.hpp"
-#include "primbench.hpp"
 
 // HIP API
 #include <hipcub/block/block_load.hpp>
@@ -230,15 +229,15 @@ class block_radix_sort_benchmark : public primbench::benchmark_interface
         const size_t   items = items_per_block * ((size + items_per_block - 1) / items_per_block);
 
         std::vector<T> input
-            = benchmark_utils::get_random_data<T>(size,
+            = benchmark_utils::get_random_data<T>(items,
                                                   benchmark_utils::generate_limits<T>::min(),
                                                   benchmark_utils::generate_limits<T>::max());
 
         T* d_input;
         T* d_output;
-        HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-        HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, items * sizeof(T)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
         state.set_items(Trials * items);
@@ -250,14 +249,14 @@ class block_radix_sort_benchmark : public primbench::benchmark_interface
                 if constexpr(BenchmarkKind == benchmark_kinds::sort_keys)
                 {
                     sort_keys_kernel<Helper, T, BlockSize, ItemsPerThread>
-                        <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
-                                                                                       d_output);
+                        <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
+                                                                                        d_output);
                 }
                 else if(BenchmarkKind == benchmark_kinds::sort_pairs)
                 {
                     sort_pairs_kernel<Helper, T, BlockSize, ItemsPerThread>
-                        <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
-                                                                                       d_output);
+                        <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
+                                                                                        d_output);
                 }
             });
 

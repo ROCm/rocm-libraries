@@ -24,7 +24,6 @@
 // disable the warning because all warnings are threated as errors:
 
 #include "common_benchmark_header.hpp"
-#include "primbench.hpp"
 
 // HIP API
 #include <hipcub/device/device_for.hpp>
