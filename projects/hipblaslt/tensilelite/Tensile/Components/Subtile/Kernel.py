@@ -1028,7 +1028,7 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
 
   if miK == 128:
     # MX FP4: 16x16x128
-    mxInstType = _selectF8F6F4InstType(kernel) or InstType.INST_F4
+    mxInstType = _selectF8F6F4InstType(kernel)
     if scaleAVgpr >= 0 and scaleBVgpr >= 0:
       # Use actual loaded scale VGPRs
       module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
