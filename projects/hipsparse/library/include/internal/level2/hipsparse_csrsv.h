@@ -106,8 +106,8 @@ hipsparseStatus_t
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrsv2_bufferSize(hipsparseHandle_t         handle,
@@ -198,8 +198,8 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrsv2_bufferSizeExt(hipsparseHandle_t         handle,
                                                  hipsparseOperation_t      transA,
@@ -293,8 +293,8 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrsv2_analysis(hipsparseHandle_t         handle,
@@ -452,8 +452,8 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrsv2_solve(hipsparseHandle_t         handle,

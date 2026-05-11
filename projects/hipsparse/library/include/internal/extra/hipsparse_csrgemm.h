@@ -250,8 +250,8 @@ hipsparseStatus_t hipsparseXcsrgemmNnz(hipsparseHandle_t         handle,
 *          \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
 *          \p transB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrgemm(hipsparseHandle_t         handle,
@@ -424,8 +424,8 @@ hipsparseStatus_t hipsparseZcsrgemm(hipsparseHandle_t         handle,
 *          is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrgemm2_bufferSizeExt(hipsparseHandle_t         handle,
@@ -757,8 +757,8 @@ hipsparseStatus_t hipsparseXcsrgemm2Nnz(hipsparseHandle_t         handle,
 *          allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrgemm2(hipsparseHandle_t         handle,

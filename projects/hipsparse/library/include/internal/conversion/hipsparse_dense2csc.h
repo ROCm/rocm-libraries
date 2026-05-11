@@ -104,8 +104,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p A, \p nnzPerColumn, \p cscVal,
 *          \p cscColPtr, or \p cscRowInd is nullptr, \p m or \p n is negative, or \p ld is invalid.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSdense2csc(hipsparseHandle_t         handle,

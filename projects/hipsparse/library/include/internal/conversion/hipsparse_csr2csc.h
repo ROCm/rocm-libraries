@@ -119,8 +119,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsr2csc(hipsparseHandle_t    handle,

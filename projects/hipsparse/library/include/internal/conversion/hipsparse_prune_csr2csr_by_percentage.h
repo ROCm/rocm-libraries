@@ -77,8 +77,8 @@ extern "C" {
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p pBufferSizeInBytes pointer is invalid.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneCsr2csrByPercentage_bufferSize(hipsparseHandle_t         handle,
@@ -165,8 +165,8 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSize(hipsparseHandle_
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p pBufferSizeInBytes pointer is invalid.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneCsr2csrByPercentage_bufferSizeExt(hipsparseHandle_t         handle,
@@ -254,8 +254,8 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSizeExt(hipsparseHand
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p percentage, \p descrA, \p descrC,
  *              \p info, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrRowPtrC, \p nnzTotalDevHostPtr, or \p buffer
  *              pointer is invalid.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneCsr2csrNnzByPercentage(hipsparseHandle_t         handle,
@@ -348,8 +348,8 @@ hipsparseStatus_t hipsparseDpruneCsr2csrNnzByPercentage(hipsparseHandle_t       
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p percentage, \p descrA, \p descrC, \p info,
  *              \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrValC, \p csrRowPtrC, \p csrColIndC, or \p buffer pointer is
  *              invalid.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneCsr2csrByPercentage(hipsparseHandle_t         handle,

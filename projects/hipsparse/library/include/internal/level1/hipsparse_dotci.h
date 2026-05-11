@@ -85,8 +85,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the dot product reduction
 *          could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCdotci(hipsparseHandle_t    handle,

@@ -73,8 +73,8 @@ extern "C" {
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p pBufferSizeInBytes pointer is invalid.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+ * @{
  */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneCsr2csr_bufferSize(hipsparseHandle_t         handle,
                                                     int                       m,
@@ -155,8 +155,8 @@ hipsparseStatus_t hipsparseDpruneCsr2csr_bufferSize(hipsparseHandle_t         ha
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p pBufferSizeInBytes pointer is invalid.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneCsr2csr_bufferSizeExt(hipsparseHandle_t         handle,
@@ -240,8 +240,8 @@ hipsparseStatus_t hipsparseDpruneCsr2csr_bufferSizeExt(hipsparseHandle_t        
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p threshold, \p descrA,
  *              \p descrC, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrRowPtrC, \p nnzTotalDevHostPtr,
  *              or \p buffer pointer is invalid.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneCsr2csrNnz(hipsparseHandle_t         handle,
@@ -328,8 +328,8 @@ hipsparseStatus_t hipsparseDpruneCsr2csrNnz(hipsparseHandle_t         handle,
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p threshold, \p descrA, \p descrC, \p csrValA,
  *              \p csrRowPtrA, \p csrcolindA, \p csrvalC, \p csrrowptrC, \p csrcolIndC, or \p buffer pointer is invalid.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneCsr2csr(hipsparseHandle_t         handle,

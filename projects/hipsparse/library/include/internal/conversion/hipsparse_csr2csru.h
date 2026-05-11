@@ -33,8 +33,8 @@ extern "C" {
 *  \brief
 *  This function converts the sorted CSR format to the unsorted CSR format. The required
 *  temporary storage has to be allocated by the user.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsr2csru(hipsparseHandle_t         handle,

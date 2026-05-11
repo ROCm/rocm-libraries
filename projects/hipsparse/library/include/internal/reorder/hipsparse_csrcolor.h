@@ -78,8 +78,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p fractionToColor,
 *          \p ncolors, \p coloring, or \p info is nullptr, \p m or \p nnz is negative, or
 *          \p csrValA, \p csrRowPtrA, or \p csrColIndA is nullptr when \p nnz is greater than zero.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrcolor(hipsparseHandle_t         handle,

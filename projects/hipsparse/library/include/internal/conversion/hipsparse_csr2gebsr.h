@@ -71,8 +71,8 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p rowBlockDim, \p colBlockDim, \p csrVal,
 *              \p csrRowPtr, \p csrColInd, or \p pBufferSizeInBytes pointer is invalid.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsr2gebsr_bufferSize(hipsparseHandle_t         handle,
                                                  hipsparseDirection_t      dir,
@@ -422,8 +422,8 @@ hipsparseStatus_t hipsparseXcsr2gebsrNnz(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p rowBlockDim, \p colBlockDim, \p bsrVal,
 *              \p bsrRowPtr, \p bsrColInd, \p csrVal, \p csrRowPtr, or \p csrColInd pointer is invalid.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsr2gebsr(hipsparseHandle_t         handle,
                                       hipsparseDirection_t      dir,

@@ -54,8 +54,8 @@ extern "C" {
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ * @{
  */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSgemvi_bufferSize(hipsparseHandle_t    handle,
                                              hipsparseOperation_t transA,
@@ -159,8 +159,8 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ * @{
  */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSgemvi(hipsparseHandle_t    handle,
                                   hipsparseOperation_t transA,

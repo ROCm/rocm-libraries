@@ -92,8 +92,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p A, \p nnzPerRow, \p csrVal,
 *          \p csrRowPtr, or \p csrColInd is nullptr, \p m or \p n is negative, or \p ld is invalid.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSdense2csr(hipsparseHandle_t         handle,
                                       int                       m,

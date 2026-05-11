@@ -115,8 +115,8 @@ hipsparseStatus_t
  *          or \p blockDim is invalid.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSbsric02_bufferSize(hipsparseHandle_t         handle,
@@ -219,8 +219,8 @@ hipsparseStatus_t hipsparseZbsric02_bufferSize(hipsparseHandle_t         handle,
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSbsric02_analysis(hipsparseHandle_t         handle,
@@ -350,8 +350,8 @@ hipsparseStatus_t hipsparseZbsric02_analysis(hipsparseHandle_t         handle,
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSbsric02(hipsparseHandle_t         handle,

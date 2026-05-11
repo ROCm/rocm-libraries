@@ -97,8 +97,8 @@ hipsparseStatus_t
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info, \p tol, or \p boost_val is nullptr.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrilu02_numericBoost(
@@ -166,8 +166,8 @@ hipsparseStatus_t hipsparseZcsrilu02_numericBoost(hipsparseHandle_t handle,
 *              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info, or \p pBufferSizeInBytes pointer
 *              is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrilu02_bufferSize(hipsparseHandle_t         handle,
@@ -250,8 +250,8 @@ hipsparseStatus_t hipsparseZcsrilu02_bufferSize(hipsparseHandle_t         handle
 *              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info, or \p pBufferSizeInBytes pointer
 *              is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrilu02_bufferSizeExt(hipsparseHandle_t         handle,
                                                    int                       m,
@@ -336,8 +336,8 @@ hipsparseStatus_t hipsparseZcsrilu02_bufferSizeExt(hipsparseHandle_t         han
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
 *              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrilu02_analysis(hipsparseHandle_t         handle,
@@ -516,8 +516,8 @@ hipsparseStatus_t hipsparseZcsrilu02_analysis(hipsparseHandle_t         handle,
 *              \p csrSortedRowPtrA, or \p csrSortedColIndA pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrilu02(hipsparseHandle_t         handle,

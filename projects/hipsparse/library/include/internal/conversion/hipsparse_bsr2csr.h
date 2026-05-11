@@ -112,8 +112,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrC, \p bsrValA,
 *          \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC is nullptr,
 *          \p mb or \p nb is negative, or \p blockDim is invalid.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSbsr2csr(hipsparseHandle_t         handle,
                                     hipsparseDirection_t      dirA,

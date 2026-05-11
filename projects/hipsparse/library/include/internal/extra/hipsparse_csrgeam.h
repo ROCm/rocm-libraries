@@ -197,8 +197,8 @@ hipsparseStatus_t hipsparseXcsrgeamNnz(hipsparseHandle_t         handle,
 *          \p csrRowPtrC, or \p csrColIndC is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrgeam(hipsparseHandle_t         handle,
@@ -354,8 +354,8 @@ hipsparseStatus_t hipsparseZcsrgeam(hipsparseHandle_t         handle,
 *          \p pBufferSizeInBytes is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrgeam2_bufferSizeExt(hipsparseHandle_t         handle,
                                                    int                       m,
@@ -612,8 +612,8 @@ hipsparseStatus_t hipsparseXcsrgeam2Nnz(hipsparseHandle_t         handle,
 *          \p csrSortedRowPtrC, \p csrSortedColIndC, or \p pBuffer is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrgeam2(hipsparseHandle_t         handle,
                                      int                       m,

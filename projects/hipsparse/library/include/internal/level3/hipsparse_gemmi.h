@@ -88,8 +88,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha or \p beta is nullptr,
 *          \p m, \p n, \p k, or \p nnz is negative, \p lda or \p ldc is invalid, or
 *          \p A, \p cscValB, \p cscColPtrB, \p cscRowIndB, or \p C is nullptr.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSgemmi(hipsparseHandle_t handle,

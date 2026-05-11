@@ -85,8 +85,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p pBufferSizeInBytes is nullptr,
 *          or \p m or \p n is negative.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneDense2csr_bufferSize(hipsparseHandle_t         handle,
@@ -228,8 +228,8 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSizeExt(hipsparseHandle_t      
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p A, \p threshold, \p descr, \p csrRowPtr,
 *              \p nnzTotalDevHostPtr, or \p buffer pointer is invalid.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneDense2csrNnz(hipsparseHandle_t         handle,
@@ -343,8 +343,8 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnz(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p A, \p descr, \p threshold, \p csrVal,
 *              \p csrRowPtr, \p csrColInd, or \p buffer pointer is invalid.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneDense2csr(hipsparseHandle_t         handle,

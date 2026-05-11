@@ -85,8 +85,8 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p tol, \p csrValA, \p csrRowPtrA,
 *              \p csrColIndA, \p csrValC, \p csrRowPtrC, \p csrColIndC, or \p nnzPerRow pointer is invalid.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsr2csr_compress(hipsparseHandle_t         handle,
                                              int                       m,

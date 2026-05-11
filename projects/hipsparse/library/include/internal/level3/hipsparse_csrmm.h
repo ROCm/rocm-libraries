@@ -121,8 +121,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
 *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrmm(hipsparseHandle_t         handle,
@@ -298,8 +298,8 @@ hipsparseStatus_t hipsparseZcsrmm(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsrmm2(hipsparseHandle_t         handle,

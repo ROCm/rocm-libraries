@@ -103,8 +103,8 @@ hipsparseStatus_t
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info, \p tol, or \p boost_val is nullptr.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSbsrilu02_numericBoost(
@@ -180,8 +180,8 @@ hipsparseStatus_t hipsparseZbsrilu02_numericBoost(hipsparseHandle_t handle,
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSbsrilu02_bufferSize(hipsparseHandle_t         handle,
@@ -285,8 +285,8 @@ hipsparseStatus_t hipsparseZbsrilu02_bufferSize(hipsparseHandle_t         handle
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSbsrilu02_analysis(hipsparseHandle_t         handle,
@@ -410,8 +410,8 @@ hipsparseStatus_t hipsparseZbsrilu02_analysis(hipsparseHandle_t         handle,
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ * @{
  */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSbsrilu02(hipsparseHandle_t         handle,

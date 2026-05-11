@@ -121,8 +121,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
 *          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSbsrxmv(hipsparseHandle_t         handle,

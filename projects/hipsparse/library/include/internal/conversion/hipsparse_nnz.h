@@ -96,8 +96,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p A, \p nnzPerRowColumn,
 *          or \p nnzTotalDevHostPtr is nullptr, \p m or \p n is negative, or \p lda is invalid.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSnnz(hipsparseHandle_t         handle,
                                 hipsparseDirection_t      dirA,

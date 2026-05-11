@@ -64,8 +64,8 @@ extern "C" {
 *          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseShyb2csr(hipsparseHandle_t         handle,

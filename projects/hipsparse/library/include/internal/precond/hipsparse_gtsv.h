@@ -67,8 +67,8 @@ extern "C" {
 *          \p pBufferSizeInBytes is nullptr, \p m is less than 2, \p n is negative,
 *          or \p ldb is invalid.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSgtsv2_bufferSizeExt(hipsparseHandle_t handle,
                                                 int               m,
@@ -163,8 +163,8 @@ hipsparseStatus_t hipsparseZgtsv2_bufferSizeExt(hipsparseHandle_t       handle,
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d,
 *              \p du, \p B, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSgtsv2(hipsparseHandle_t handle,
                                   int               m,

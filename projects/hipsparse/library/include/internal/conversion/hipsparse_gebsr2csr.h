@@ -126,8 +126,8 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p block_dim, \p bsrValA,
 *              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is invalid.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSgebsr2csr(hipsparseHandle_t         handle,
                                       hipsparseDirection_t      dirA,

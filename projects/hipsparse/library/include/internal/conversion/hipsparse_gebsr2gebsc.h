@@ -69,8 +69,8 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrRowPtr, \p bsrColInd,
 *              or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSgebsr2gebsc_bufferSize(hipsparseHandle_t handle,
                                                    int               mb,
@@ -231,8 +231,8 @@ hipsparseStatus_t hipsparseZgebsr2gebsc_bufferSize(hipsparseHandle_t       handl
 *              \p temp_buffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+* @{
 */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSgebsr2gebsc(hipsparseHandle_t    handle,
                                         int                  mb,

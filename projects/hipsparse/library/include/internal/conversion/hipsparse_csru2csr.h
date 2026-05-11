@@ -33,8 +33,8 @@ extern "C" {
 *  \brief
 *  This function calculates the amount of temporary storage in bytes required for
 *  \p hipsparseXcsru2csr() and \p hipsparseXcsr2csru().
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsru2csr_bufferSizeExt(hipsparseHandle_t handle,
@@ -90,8 +90,8 @@ hipsparseStatus_t hipsparseZcsru2csr_bufferSizeExt(hipsparseHandle_t handle,
 *  \brief
 *  This function converts the unsorted CSR format to the sorted CSR format. The required
 *  temporary storage has to be allocated by the user.
+* @{
 */
-/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScsru2csr(hipsparseHandle_t         handle,

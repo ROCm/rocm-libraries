@@ -121,8 +121,8 @@ extern "C" {
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
  *          \p transB is \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or
  *          \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ * @{
  */
-/**@{*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSbsrmm(hipsparseHandle_t         handle,
                                   hipsparseDirection_t      dirA,
