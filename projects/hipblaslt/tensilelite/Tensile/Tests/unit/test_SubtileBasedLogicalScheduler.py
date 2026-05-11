@@ -127,7 +127,8 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, numPartM=1, numPartN=1,
 def make_cfg_bf16(MT0=256, MT1=256, depthU=64, numPartM=1, numPartN=1,
                   miWaveGroup=None, sourceSwap=False):
     """Build BF16 config without scale tensors."""
-    kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU)
+    kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU,
+                           miWaveGroup=miWaveGroup, sourceSwap=sourceSwap)
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
     return SchedulerConfig(
