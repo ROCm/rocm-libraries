@@ -327,7 +327,7 @@ validParameters = { # we need to make sure this matches develop
     # Scheduling algorithm to use for each iteration:
     # 0 = minimal/no scheduling.  Global Read and increments, followed by local reads,
     # followed by local writes, followed by MACs
-    "ScheduleIterAlg": [0, 1, 2, 3],
+    "ScheduleIterAlg": [0, 1, 2, 3, 4],
     # For MatrixInstruction and SIA3, number of GlobalReadInstruction between mfma
     # the purpose of this parameter is to control density of global read instruction scheduling
     # Scheduling global read back to back can have better memory efficiency
@@ -990,7 +990,12 @@ validParameters = { # we need to make sure this matches develop
     # 1: Use TDM for A
     # 2: Use TDM for B
     # 3: Use TDM for both A and B
-    "TDMInst": [0, 1, 2, 3]
+    "TDMInst": [0, 1, 2, 3],
+    # Split each TDM data tensor (A or B) load across two tensor_load_to_lds instructions,
+    # each covering half the macro-tile in the M/N dimension. MX scale tensors (MXSA/MXSB)
+    # are not split regardless of this flag. When True, two extra SGPRs are allocated to
+    # hold the per-iteration LDS and global address increments for the split loads.
+    "TDMSplit": [False, True],
 }
 
 newMIValidParameters = {

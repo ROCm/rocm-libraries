@@ -292,7 +292,7 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     /// reordered across it.
     StinkyInstruction* createFence() {
         static const HwInstDesc fenceMCID{
-            GFX::FENCE, GFX::FENCE, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::FENCE, GFX::FENCE, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
         return create(&fenceMCID);
     }
 
