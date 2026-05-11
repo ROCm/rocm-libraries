@@ -602,6 +602,43 @@ class DataflowEdge:
 
 
 @dataclass
+class VopdPair:
+    """A single RDNA3.5 VOPD-encoded instruction pair (X-op + Y-op).
+
+    Models the dual-issue VALU encoding from RDNA3.5 §7.6 well enough for
+    the §7.6 R-4..R-7 hard-rule pair-formation validator
+    (`validate_vopd_pair_formation`). The kernel emitter does NOT produce
+    VOPD today; this dataclass is the recognition surface the validator
+    works against the moment emission lands. Tests fabricate VopdPair
+    instances directly.
+
+    VGPR fields are non-negative integer VGPR indices. SRC0 fields may
+    legitimately be -1 to denote "this operand is an SGPR / inline
+    constant / literal" — only VGPR-shaped src0 operands participate in
+    the bank-conflict (R-4) check. Set the field to -1 for non-VGPR src0;
+    src1 is always a VGPR per the encoding (`vsrc1X` / `vsrc1Y`).
+
+    SRC2 fields are -1 when the X / Y operation does not consume SRC2
+    (only FMAMK_F32, DOT2ACC_F32_F16, DOT2ACC_F32_BF16, FMAC_F32 do —
+    see §7.6). The R-6 check fires only when BOTH X and Y consume SRC2.
+
+    `instruction_a` / `instruction_b` are opaque labels (e.g. opcode
+    name strings) used solely in the failure message — the validator
+    does not interpret them.
+    """
+    instruction_a: str          # X-op label for diagnostics
+    instruction_b: str          # Y-op label for diagnostics
+    src0_a: int                 # X SRC0 VGPR (or -1 if non-VGPR)
+    src1_a: int                 # X SRC1 VGPR (always VGPR)
+    src0_b: int                 # Y SRC0 VGPR (or -1 if non-VGPR)
+    src1_b: int                 # Y SRC1 VGPR (always VGPR)
+    vdst_a: int                 # X destination VGPR
+    vdst_b: int                 # Y destination VGPR
+    src2_a: int = -1            # X SRC2 VGPR (-1 if op does not use SRC2)
+    src2_b: int = -1            # Y SRC2 VGPR (-1 if op does not use SRC2)
+
+
+@dataclass
 class DataflowGraph:
     """Unified graph spanning all 4 captured bodies.
 
@@ -618,6 +655,12 @@ class DataflowGraph:
     subiteration (`vmfma_index // n`) without re-plumbing it through every
     classifier call. Non-MFMA nodes get subiter from their category trailing
     digits (`PackA0` → 0).
+
+    `vopd_pairs` carries any RDNA3.5 VOPD dual-issue pairs the emitter
+    produced for this kernel. Empty for every kernel today (no VOPD
+    emission yet) — `validate_vopd_pair_formation` is dormant in that
+    case (returns []). The moment the emitter starts emitting VOPD it
+    becomes the gating correctness check for §7.6 R-4..R-7.
     """
     nodes: dict                            # identity -> GraphNode
     edges: list                            # list[DataflowEdge]
@@ -629,6 +672,7 @@ class DataflowGraph:
     # other timing-related validation are skipped." Tracked:
     # `rocm-libraries-zkzw`.
     arch_profile: Optional[ArchProfile] = None
+    vopd_pairs: List["VopdPair"] = field(default_factory=list)
 
     def edge_keys(self):
         """Edge-equality keys for cross-graph diff.
@@ -2498,6 +2542,28 @@ class OverriddenInputFailure(Failure):
         )
 
 
+# ----------------------------------------------------------------------------
+# 8. VopdPairFormationFailure — RDNA3.5 §7.6 R-4..R-7 hard-rule violation.
+#    Emitted exclusively by `validate_vopd_pair_formation`. Each instance
+#    identifies one rule and one VOPD pair. Per ISA §7.6: "These are hard
+#    rules — the instruction does not function if these rules are broken."
+#    There is NO soft-fail counterpart: a violation here means the kernel
+#    will produce wrong results on real hardware.
+# ----------------------------------------------------------------------------
+@dataclass
+class VopdPairFormationFailure(Failure):
+    rule: str = ""                # 'R-4' / 'R-5' / 'R-6' / 'R-7'
+    instruction_a: str = ""       # X-op label (from VopdPair.instruction_a)
+    instruction_b: str = ""       # Y-op label (from VopdPair.instruction_b)
+    why: str = ""                 # plain-language predicate text
+
+    def _format_canonical(self) -> str:
+        return (
+            f"VOPD pair-formation violation [{self.rule}, RDNA3.5 §7.6]: "
+            f"X={self.instruction_a} / Y={self.instruction_b}: {self.why}"
+        )
+
+
 # =============================================================================
 # CMS-side FailureNodeLabel provider
 # =============================================================================
@@ -3266,6 +3332,168 @@ def validate_middle_pack_pair_interleaving(graph: "DataflowGraph") -> List["Over
                 actual_next, graph.body_for(actual_next),
             ),
         ))
+    return failures
+
+
+# =============================================================================
+# RDNA3.5 §7.6 VOPD pair-formation hard-rule validator (R-4..R-7)
+# =============================================================================
+#
+# §7.6 Dual Issue VALU encodes two VALU operations (X + Y) in a single
+# VOPD instruction word. The ISA enumerates several restrictions and
+# states bluntly: "These are hard rules — the instruction does not
+# function if these rules are broken." There is no soft-fail path —
+# violations cause the GPU to silently produce wrong results.
+#
+# This pass walks `graph.vopd_pairs` and asserts the four
+# pair-formation predicates that are correctness-critical (gating)
+# rather than performance-shape (advisory):
+#
+#   R-4 (src VGPR bank):   SRCX0 and SRCY0 must use different VGPR banks
+#                          (banks indexed by `SRC[1:0]`); VSRCX1 and
+#                          VSRCY1 must also use different banks.
+#   R-5 (dst VGPR parity): One destination VGPR must be even, the other
+#                          odd (vdstY's LSB is forced to !vdstX[0]).
+#   R-6 (SRC2 even/odd):   If both ops consume SRC2, one SRC2 input
+#                          must be even and the other odd.
+#   R-7 (independence):    The two operations must be independent
+#                          (no RAW between X and Y — VOPD reads the OLD
+#                          value if both touch the same VGPR; no WAW).
+#
+# R-8 (wave32-only) is a kernel-wide property, not a pair-shape
+# property, so it is excluded from this pass — it is checked at
+# kernel-config time, not against individual pairs.
+#
+# Today the kernel emitter does NOT emit VOPD; `graph.vopd_pairs` is
+# always empty and this pass returns []. The pass is installed
+# unconditionally so that the moment VOPD emission lands, the gating
+# correctness check is already in place. There is no `accept_violation`
+# escape hatch and no fallback path: every violation produces a
+# `VopdPairFormationFailure`.
+
+
+def _vgpr_bank(vgpr: int) -> int:
+    """RDNA3.5 §7.6 VGPR bank index — `SRC[1:0]` (the low 2 bits)."""
+    return vgpr & 0x3
+
+
+def validate_vopd_pair_formation(graph: "DataflowGraph") -> List["Failure"]:
+    """RDNA3.5 §7.6 hard-rule pair-formation invariants for VOPD.
+
+    Walks every `VopdPair` recorded on `graph.vopd_pairs` and emits one
+    `VopdPairFormationFailure` per (rule, pair) violation for R-4..R-7.
+
+    Correctness-critical: §7.6 states each of these rules is a HARD
+    rule — "the instruction does not function if these rules are
+    broken". A violating pair makes the GPU silently produce wrong
+    results. There is no soft-fail equivalent: if this pass emits a
+    failure, the kernel must NOT ship.
+
+    Returns an empty list when the graph carries no VOPD pairs (the
+    common case today — the kernel emitter does not produce VOPD yet);
+    the pass is dormant but installed.
+    """
+    failures: List[Failure] = []
+    for pair in graph.vopd_pairs:
+        # ---- R-4: source VGPR bank conflict --------------------------
+        # SRCX0 and SRCY0 must live in different VGPR banks. SRC0 may be
+        # an SGPR / inline / literal — only check when both src0 fields
+        # name a VGPR (>= 0).
+        if pair.src0_a >= 0 and pair.src0_b >= 0:
+            if _vgpr_bank(pair.src0_a) == _vgpr_bank(pair.src0_b):
+                failures.append(VopdPairFormationFailure(
+                    rule="R-4",
+                    instruction_a=pair.instruction_a,
+                    instruction_b=pair.instruction_b,
+                    why=(
+                        f"SRCX0 (v{pair.src0_a}) and SRCY0 (v{pair.src0_b}) "
+                        f"share VGPR bank {_vgpr_bank(pair.src0_a)} "
+                        f"(banks indexed by SRC[1:0]); they must be in "
+                        f"different banks."
+                    ),
+                ))
+        # VSRC1 is always a VGPR per §7.6 encoding.
+        if _vgpr_bank(pair.src1_a) == _vgpr_bank(pair.src1_b):
+            failures.append(VopdPairFormationFailure(
+                rule="R-4",
+                instruction_a=pair.instruction_a,
+                instruction_b=pair.instruction_b,
+                why=(
+                    f"VSRCX1 (v{pair.src1_a}) and VSRCY1 (v{pair.src1_b}) "
+                    f"share VGPR bank {_vgpr_bank(pair.src1_a)}; they must "
+                    f"be in different banks."
+                ),
+            ))
+
+        # ---- R-5: destination VGPR parity ----------------------------
+        # One vdst must be even, the other odd. Equivalently: their LSBs
+        # must differ.
+        if (pair.vdst_a & 1) == (pair.vdst_b & 1):
+            failures.append(VopdPairFormationFailure(
+                rule="R-5",
+                instruction_a=pair.instruction_a,
+                instruction_b=pair.instruction_b,
+                why=(
+                    f"vdstX (v{pair.vdst_a}) and vdstY (v{pair.vdst_b}) "
+                    f"have the same parity; one must be even and the "
+                    f"other odd."
+                ),
+            ))
+
+        # ---- R-6: SRC2 even/odd --------------------------------------
+        # Only fires when BOTH ops consume SRC2 (FMAMK_F32, DOT2ACC_*,
+        # FMAC_F32 — the §7.6 SRC2-using set). Pairs convey "no SRC2"
+        # via -1.
+        if pair.src2_a >= 0 and pair.src2_b >= 0:
+            if (pair.src2_a & 1) == (pair.src2_b & 1):
+                failures.append(VopdPairFormationFailure(
+                    rule="R-6",
+                    instruction_a=pair.instruction_a,
+                    instruction_b=pair.instruction_b,
+                    why=(
+                        f"SRC2X (v{pair.src2_a}) and SRC2Y (v{pair.src2_b}) "
+                        f"have the same parity; when both ops use SRC2, "
+                        f"one must be even and the other odd."
+                    ),
+                ))
+
+        # ---- R-7: independence ---------------------------------------
+        # The two operations must be independent. VOPD reads the OLD
+        # value if X writes a VGPR Y reads in the same cycle — but the
+        # ISA forbids forming such a pair regardless. Two violation
+        # shapes:
+        #   * RAW: one op's vdst appears in the other op's source set.
+        #   * WAW: both ops write the same VGPR (R-5 also forbids this
+        #     via parity, but a same-parity WAW would be reported under
+        #     R-5; an aliased WAW where X.vdst == Y.vdst is also caught
+        #     here for completeness, even though R-5 fires too).
+        a_srcs = {pair.src0_a, pair.src1_a, pair.src2_a} - {-1}
+        b_srcs = {pair.src0_b, pair.src1_b, pair.src2_b} - {-1}
+        raw_x_to_y = pair.vdst_a in b_srcs
+        raw_y_to_x = pair.vdst_b in a_srcs
+        waw = pair.vdst_a == pair.vdst_b
+        if raw_x_to_y or raw_y_to_x or waw:
+            shape = []
+            if raw_x_to_y:
+                shape.append(
+                    f"X writes v{pair.vdst_a} which Y reads (RAW X→Y)"
+                )
+            if raw_y_to_x:
+                shape.append(
+                    f"Y writes v{pair.vdst_b} which X reads (RAW Y→X)"
+                )
+            if waw:
+                shape.append(
+                    f"X and Y both write v{pair.vdst_a} (WAW)"
+                )
+            failures.append(VopdPairFormationFailure(
+                rule="R-7",
+                instruction_a=pair.instruction_a,
+                instruction_b=pair.instruction_b,
+                why=(
+                    "X and Y are not independent: " + "; ".join(shape) + "."
+                ),
+            ))
     return failures
 
 

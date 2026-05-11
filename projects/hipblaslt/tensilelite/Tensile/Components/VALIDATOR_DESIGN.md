@@ -495,6 +495,45 @@ other MiddlePack sits between a leader and its pair-consumer in the
 GLOBAL stream order. A violation emits `OverriddenInputFailure` with
 `resource="vgpr"` and the intervening node as the clobber.
 
+### 7.11 VOPD pair-formation (RDNA3.5 §7.6 R-4..R-7) — correctness pass
+
+`validate_vopd_pair_formation` is a **correctness** pass, not a
+performance / soft-fail pass. RDNA3.5 §7.6 defines the dual-issue VOPD
+encoding and four pair-formation hard rules (the ISA wording: "These
+are hard rules — the instruction does not function if these rules are
+broken"):
+
+- **R-4** Source bank conflict: SRCX0/SRCY0 must use different VGPR
+  banks (banks indexed by `SRC[1:0]`); same constraint for VSRCX1/VSRCY1.
+- **R-5** Destination parity: one vdst must be even, the other odd
+  (vdstY's LSB is forced to `!vdstX[0]` in the encoding).
+- **R-6** SRC2 even/odd: when both X and Y use SRC2 (FMAMK_F32,
+  DOT2ACC_F32_F16, DOT2ACC_F32_BF16, FMAC_F32), one SRC2 must be even
+  and the other odd.
+- **R-7** Independence: X and Y must be independent — no RAW between
+  them (VOPD reads the OLD value if both touch the same VGPR), no WAW.
+
+Every violation emits a `VopdPairFormationFailure` carrying
+`(rule, instruction_a, instruction_b, why)`. Unlike
+`TimingTooCloseFailure`, there is no soft-fail bucket: a §7.6 hard-rule
+violation makes the GPU silently produce wrong results, so the
+`validate_schedule_against_default` wrapper raises on any
+`vopd_failures` list, alongside the hard graph-comparison failures.
+R-8 (wave32-only) is a kernel-wide property and is checked at
+kernel-config time rather than per-pair, so it is excluded from this
+pass.
+
+VOPD pair recognition is via `DataflowGraph.vopd_pairs`, a
+`list[VopdPair]` with sources `{src0, src1, src2}` and destination
+`vdst` populated for both X and Y operands. SRC0 and SRC2 fields use
+`-1` to denote "not a VGPR" (SGPR / inline / literal for SRC0;
+"operation does not consume SRC2" for SRC2). The kernel emitter does
+not produce VOPD today; `vopd_pairs` is empty for every kernel, the
+pass returns `[]`, and the wrapper observes no failures. The pass is
+installed unconditionally so that the moment VOPD emission lands, the
+gating correctness check is already wired into the validator entry
+point (`cms_from_default.validate_schedule_against_default`).
+
 ## 8. Future work
 
 > **TODO.** Verify each item below is genuinely future work rather than

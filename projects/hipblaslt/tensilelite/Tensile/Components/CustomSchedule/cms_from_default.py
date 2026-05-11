@@ -198,6 +198,7 @@ def validate_schedule_against_default(writer, default_capture) -> ValidationRepo
         build_dataflow_graph,
         compare_graphs,
         validate_edge_wait_coverage,
+        validate_vopd_pair_formation,
     )
 
     cms_capture = writer._last_cms_capture
@@ -213,6 +214,13 @@ def validate_schedule_against_default(writer, default_capture) -> ValidationRepo
     subj_graph = build_dataflow_graph(cms_capture)
     graph_failures = list(compare_graphs(ref_graph, subj_graph))
     wait_failures = list(validate_edge_wait_coverage(subj_graph))
+    # RDNA3.5 §7.6 R-4..R-7 hard-rule pair-formation check. Dormant
+    # while `subj_graph.vopd_pairs` is empty (no kernel emits VOPD
+    # today); the moment VOPD emission lands this is the gating
+    # correctness check — violations here mean the GPU silently
+    # produces wrong results, so they are folded in alongside other
+    # hard failures below rather than the timing soft-fail bucket.
+    vopd_failures = list(validate_vopd_pair_formation(subj_graph))
 
     timing_only = [f for f in graph_failures if isinstance(f, TimingTooCloseFailure)]
     hard_graph = [f for f in graph_failures if not isinstance(f, TimingTooCloseFailure)]
@@ -228,6 +236,14 @@ def validate_schedule_against_default(writer, default_capture) -> ValidationRepo
             "Converter hard-failed on wait-coverage validation "
             f"({len(wait_failures)} failure(s)):\n  "
             + "\n  ".join(f.format() for f in wait_failures)
+        )
+    if vopd_failures:
+        # RDNA3.5 §7.6 hard rules: violations make the GPU silently
+        # produce wrong results. No soft-fail bucket — raise.
+        raise RuntimeError(
+            "Converter hard-failed on VOPD pair-formation validation "
+            f"({len(vopd_failures)} failure(s); RDNA3.5 §7.6 R-4..R-7):\n  "
+            + "\n  ".join(f.format() for f in vopd_failures)
         )
 
     return ValidationReport(
