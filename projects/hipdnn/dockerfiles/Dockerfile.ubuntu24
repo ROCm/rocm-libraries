@@ -42,12 +42,12 @@ RUN apt-get update && apt-get install -y \
     gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Install DVC
-RUN mkdir -p /etc/apt/keyrings && \
-    wget -qO - https://dvc.org/deb/iterative.asc | gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | tee /etc/apt/sources.list.d/dvc.list && \
-    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
-    apt-get update && apt-get install -y dvc && \
+# Install DVC. The dvc.org/deb apt repo has been unreachable, so install the
+# official .deb package directly. It bundles all remote backends (incl. S3),
+# which is required for `dvc pull` from the rocm-libraries S3 remote.
+RUN curl -fL https://dvc.org/download/linux-deb/dvc-3.67.0 -o /tmp/dvc.deb && \
+    apt-get update && apt-get install -y /tmp/dvc.deb && \
+    rm /tmp/dvc.deb && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -282,12 +282,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 
-# Install DVC
-RUN mkdir -p /etc/apt/keyrings && \
-    wget -qO - https://dvc.org/deb/iterative.asc | gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | tee /etc/apt/sources.list.d/dvc.list && \
-    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
-    apt-get update && apt-get install -y dvc && \
+# Install DVC. The dvc.org/deb apt repo has been unreachable, so install the
+# official .deb package directly. It bundles all remote backends (incl. S3),
+# which is required for `dvc pull` from the rocm-libraries S3 remote.
+RUN curl -fL https://dvc.org/download/linux-deb/dvc-3.67.0 -o /tmp/dvc.deb && \
+    apt-get update && apt-get install -y /tmp/dvc.deb && \
+    rm /tmp/dvc.deb && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
