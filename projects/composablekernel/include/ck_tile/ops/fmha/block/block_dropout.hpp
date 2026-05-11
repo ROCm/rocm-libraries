@@ -402,7 +402,7 @@ struct BlockDropout
                                                        : PComputeDataType(0);
                         });
                     });
-                };
+                }
             });
             move_tile_window(randval_dram_window, {kMPerStep, -kNPerBlock});
         });
