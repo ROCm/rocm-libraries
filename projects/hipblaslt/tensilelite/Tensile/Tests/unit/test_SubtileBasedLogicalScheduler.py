@@ -861,7 +861,7 @@ class TestPlaceGRs:
 
     def test_1x19_bf16(self):
         """320x304, BF16, 1x19 partition, wg=[4,1]. High partition count with sourceSwap."""
-        cfg = make_cfg_bf16(320, 304, numPartM=1, numPartN=19,
+        cfg = make_cfg_bf16(320, 304, partSizeN=1,
                             miWaveGroup=[4, 1], sourceSwap=True)
         sched = LogicalScheduler(cfg)
         sched.place_GRs()
@@ -1439,12 +1439,12 @@ class TestFromTileInfo:
 class TestPartitionCandidates:
 
     def test_square(self):
-        """M==N: partitions N, sizes descending (divisors only)."""
+        """M==N: partitions N, full then divUp(N,2) down to 1."""
         kernel = create_kernel(256, 256)
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
-        assert candidates == [(8, 8), (8, 4), (8, 2), (8, 1)]
+        assert candidates == [(8, 8), (8, 4), (8, 3), (8, 2), (8, 1)]
 
     def test_n_larger(self):
         """N > M: partitions N."""
@@ -1452,7 +1452,7 @@ class TestPartitionCandidates:
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
-        assert candidates == [(2, 8), (2, 4), (2, 2), (2, 1)]
+        assert candidates == [(2, 8), (2, 4), (2, 3), (2, 2), (2, 1)]
 
     def test_m_larger(self):
         """M > N: partitions M."""
@@ -1460,16 +1460,16 @@ class TestPartitionCandidates:
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
-        assert candidates == [(8, 2), (4, 2), (2, 2), (1, 2)]
+        assert candidates == [(8, 2), (4, 2), (3, 2), (2, 2), (1, 2)]
 
     def test_prime_dim(self):
-        """Prime-sized dimension: only full and single-tile sizes."""
+        """Prime-sized dimension: full then divUp down to 1."""
         cfg_tiA = MagicMock()
         cfg_tiB = MagicMock()
         cfg_tiA.localMMATileGrid = [5, 2]
         cfg_tiB.localMMATileGrid = [3, 2]
         candidates = SchedulerConfig.get_partition_candidates(cfg_tiA, cfg_tiB)
-        assert candidates == [(5, 3), (1, 3)]
+        assert candidates == [(5, 3), (3, 3), (2, 3), (1, 3)]
 
     def test_composite(self):
         """Composite dimension with mixed prime factors."""
