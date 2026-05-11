@@ -118,21 +118,16 @@ def _reportChipIdFailure(filepath: Path, detail: str) -> None:
 
 
 def _validateChipIdPlacement(gfx: str, device_ids: Set[str], filepath: Path) -> Optional[str]:
+    arch_ids = _archChipIds(gfx)
     source_ids = _sourceChipIds(gfx)
     default_ids = _defaultChipIds(gfx)
-    declared_source_ids = device_ids.intersection(source_ids)
     chip_id_dir = _chipIdDirFromPath(gfx, filepath)
 
     if not chip_id_dir.hasChipIdDir:
-        if declared_source_ids:
+        if not device_ids.issubset(arch_ids):
             return (
-                f"{gfx} logic with chip IDs {sorted(declared_source_ids)} must be under "
-                f"a {gfx}_id<chip> directory"
-            )
-        if not device_ids.issubset(default_ids):
-            return (
-                f"base {gfx} logic may only declare default chip IDs "
-                f"{sorted(default_ids)}; found {sorted(device_ids)}"
+                f"base {gfx} logic may only declare chip IDs available for {gfx} "
+                f"{sorted(arch_ids)}; found {sorted(device_ids)}"
             )
         return None
 

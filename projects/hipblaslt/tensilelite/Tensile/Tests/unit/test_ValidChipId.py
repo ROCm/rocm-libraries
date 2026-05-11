@@ -192,12 +192,19 @@ def test_validateChipIdRejectsUnsupportedChipIdReportsPredicateError(tmp_path, c
     assert "device ID not supported" in out
 
 
-def test_validateChipIdRejectsNonDefaultChipIdInBaseDirectory(tmp_path, capsys):
+def test_validateChipIdAcceptsSourceChipIdInBaseDirectory(tmp_path):
     logic_file = _writeLogicFile(_baseGfx950Path(tmp_path), devices="Device 75a3")
 
-    assert not _validateChipId(logic_file)
-    out = capsys.readouterr().out
-    assert "must be under a gfx950_id<chip> directory" in out
+    assert _validateChipId(logic_file)
+
+
+def test_validateChipIdAcceptsMixedSourceAndDefaultChipIdsInPlainArchDirectory(tmp_path):
+    logic_file = _writeLogicFile(
+        tmp_path / "gfx950" / "GridBased" / "logic.yaml",
+        devices="Device 75a3, Device 75a0",
+    )
+
+    assert _validateChipId(logic_file)
 
 
 def test_validateChipIdRejectsVariantDirectoryWithoutMatchingChipId(tmp_path, capsys):
@@ -319,12 +326,12 @@ def _source_chip_ids(gfx):
 _BASE_DIR_MATRIX = [
     (gfx, cid)
     for gfx in _gated_archs()
-    for cid in _default_chip_ids(gfx)
+    for cid in GFX_CHIP_IDS[gfx]
 ]
 
 
 @pytest.mark.parametrize("gfx,chip_id", _BASE_DIR_MATRIX)
-def test_validateChipIdAcceptsAllDefaultChipIdsInBaseDir(tmp_path, gfx, chip_id):
+def test_validateChipIdAcceptsAllArchChipIdsInBaseDir(tmp_path, gfx, chip_id):
     logic_file = _writeLogicFile(
         tmp_path / gfx / gfx / "Equality" / "logic.yaml",
         gfx=gfx,
@@ -333,7 +340,7 @@ def test_validateChipIdAcceptsAllDefaultChipIdsInBaseDir(tmp_path, gfx, chip_id)
     )
 
     assert _validateChipId(logic_file), (
-        f"default chip ID {chip_id} should validate in base {gfx} directory"
+        f"chip ID {chip_id} should validate in base {gfx} directory"
     )
 
 
