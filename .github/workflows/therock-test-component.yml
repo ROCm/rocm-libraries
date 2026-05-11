@@ -34,9 +34,6 @@ jobs:
         --group-add 992
         --group-add 110
         --env-file /etc/podinfo/gha-gpu-isolation-settings
-        --user 0:0
-        --ulimit memlock=-1:-1
-        --security-opt seccomp=unconfined
     strategy:
       fail-fast: false
       matrix:
