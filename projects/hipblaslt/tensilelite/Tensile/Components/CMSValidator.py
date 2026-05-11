@@ -250,20 +250,41 @@ class ArchProfile:
         """Classify an MFMA-shaped rocisa instruction as standard or 4x4 PackMFMA
         and return the per-arch finish-cycle count.
 
-        The rocisa `MFMAInstruction` C++ class accepts a `variant` list at
-        construction (`[M, N, K, blk]`, e.g. `[4, 4, 4, 16]` for the 4x4 PackMFMA
-        family) but does NOT expose that field as a readable Python attribute via
-        the nanobind binding. The rendered assembly string IS canonical and
-        stable — every MFMA family renders as `..._<M>x<N>x<K>_<dtype>...`. We
-        discriminate the 4x4 family by parsing for the `_4x4x` substring.
+        Classification consumes rocisa's bound `MFMAInstruction.getIssueLatency()`
+        accessor (rocm-libraries-qbcc): rocisa's C++ helper
+        `getMFMAIssueLatency<isSparse>(dataType, matrixInstM, matrixInstB)` (in
+        `rocisa/include/instruction/mfma.hpp`) returns
+        `(matrixInstM / mi_divisor, miIssueLatency)` per `(arch, dtype, B)`,
+        and is exposed to Python as `MFMAInstruction.getIssueLatency()` / the
+        free `getMFMAIssueLatency` binding. The 4x4 PackMFMA family (M=4) yields
+        `issueLatency` in {1, 2} regardless of dtype/B/arch (mi_divisor in {2,4});
+        every 16x16 / 32x32 / DGEMM family yields `issueLatency >= 4` (worst
+        case is 16/4 = 4 on the FP16/BF16/INT8/FP8 fast path). Threshold 3
+        cleanly partitions the two classes for every MFMA shape rocisa knows
+        how to emit, including SMFMA (sparse always uses mi_divisor=4) and the
+        gfx950 F8 special-case (which still leaves M=4 → issueLatency<=2 and
+        M=16 → issueLatency=8).
+
+        Falls back to `standard_mfma_finish_cycles` for any non-MFMA-shaped
+        instance (no `getIssueLatency` accessor) — only `MFMAInstruction` and
+        `SMFMAInstruction` carry the binding; `MXMFMAInstruction` does not.
+
+        We deliberately do NOT wrap the `get_issue_latency()` call in a
+        bare `except`. The two pre-checks above (None input, missing
+        accessor) cover every legitimate non-MFMA case. A real MFMA whose
+        accessor raises is a bug in rocisa's binding (or in our assumption
+        that the accessor is callable on this object), and silent fallback
+        to the standard bucket would silently misclassify it — defeating
+        the qbcc audit memo's "no silent fallback to old logic" intent.
+        Letting the exception propagate surfaces the bug.
         """
         if rocisa_inst is None:
             return self.standard_mfma_finish_cycles
-        try:
-            rendered = str(rocisa_inst)
-        except Exception:
+        get_issue_latency = getattr(rocisa_inst, "getIssueLatency", None)
+        if get_issue_latency is None:
             return self.standard_mfma_finish_cycles
-        if "_4x4x" in rendered:
+        issue_latency = get_issue_latency()
+        if issue_latency <= 2:
             return self.mfma_4x4_finish_cycles
         return self.standard_mfma_finish_cycles
 
