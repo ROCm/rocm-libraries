@@ -54,23 +54,24 @@ void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>&
                                     "BFLOAT16 data types for x and y tensors.");
     }
 
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedAffineTypes{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF};
+
+    validateConsistentDataTypes(affineTensorIds,
+                                allowedAffineTypes,
+                                "RMSnorm affine tensors use unsupported data type.",
+                                "All affine tensors for RMSnorm must have the same data type.");
+
     // Only fp32 compute type is supported for now
     const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedComputeTypes{
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
 
     };
-    validateConsistentDataTypes(affineTensorIds,
-                                allowedComputeTypes,
-                                "RMSnorm affine tensors use unsupported data type.",
-                                "All affine tensors for RMSnorm must have the same data type.");
-
-    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedStatTypes{
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF};
 
     validateConsistentDataTypes(statTensorIds,
-                                allowedStatTypes,
+                                allowedComputeTypes,
                                 "RMSnorm stat tensors use unsupported data type.",
                                 "All stat tensors for RMSnorm must have the same data type.");
 }
