@@ -62,7 +62,7 @@ def downloadLogicFiles(logicDir):
 
   # basically to query the latest zip release weblink, download it and unzip
   # selected files to destination folder
-  cmd = """#!/bin/bash
+  cmd = r"""#!/bin/bash
   set -x
   wget -nc https://api.github.com/repos/ROCm/rocBLAS/releases/latest
   weblink=$(grep -oP '(?<="zipball_url": ")[a-zA-Z:/\.\-0-9]*' latest)
