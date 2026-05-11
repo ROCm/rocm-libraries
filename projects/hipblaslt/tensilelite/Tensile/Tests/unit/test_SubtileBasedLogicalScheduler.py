@@ -853,15 +853,16 @@ class TestAssignVgprTiles:
 
     # ── Group 3b: BF16 multi-partition on asymmetric macro tiles ──
 
-    @pytest.mark.parametrize("partSizeN,expected_peak_B", [
-        (6, 12),
-        (4, 8),
-        (3, 6),
-        (5, 10),
+    @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
+        (6, 12, [6, 6]),
+        (4, 8,  [4, 4, 4]),
+        (3, 6,  [3, 3, 3, 3]),
+        (5, 10, [5, 2, 5]),
     ])
-    def test_bf16_partition_256x384(self, partSizeN, expected_peak_B):
+    def test_bf16_partition_256x384(self, partSizeN, expected_peak_B, expected_partN):
         """BF16 256x384 (tilesN=12) with partitions along N."""
         cfg = make_cfg_bf16(MT1=384, depthU=64, partSizeN=partSizeN)
+        assert cfg.partitionSizesN == expected_partN
         sched = LogicalScheduler(cfg)
         sched.assign_vgpr_tiles()
 
@@ -870,14 +871,15 @@ class TestAssignVgprTiles:
         assert not sched.needs_unrolling
         self._assert_no_conflict_and_unrolling(sched)
 
-    @pytest.mark.parametrize("partSizeN,expected_peak_B", [
-        (4, 8),
-        (3, 6),
-        (6, 12),
+    @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
+        (4, 8,  [4, 3, 4]),
+        (3, 6,  [3, 2, 3, 3]),
+        (6, 12, [6, 5]),
     ])
-    def test_bf16_partition_256x352(self, partSizeN, expected_peak_B):
+    def test_bf16_partition_256x352(self, partSizeN, expected_peak_B, expected_partN):
         """BF16 256x352 (tilesN=11, odd) with partitions along N."""
         cfg = make_cfg_bf16(MT1=352, depthU=64, partSizeN=partSizeN)
+        assert cfg.partitionSizesN == expected_partN
         sched = LogicalScheduler(cfg)
         sched.assign_vgpr_tiles()
 
@@ -886,15 +888,16 @@ class TestAssignVgprTiles:
         assert not sched.needs_unrolling
         self._assert_no_conflict_and_unrolling(sched)
 
-    @pytest.mark.parametrize("partSizeN,expected_peak_B", [
-        (4, 8),
-        (6, 12),
-        (8, 16),
+    @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
+        (4, 8,  [4, 4, 3, 4, 4, 4]),
+        (6, 12, [6, 5, 6, 6]),
+        (8, 16, [8, 7, 8]),
     ])
-    def test_bf16_partition_256x368(self, partSizeN, expected_peak_B):
+    def test_bf16_partition_256x368(self, partSizeN, expected_peak_B, expected_partN):
         """BF16 256x368 miWaveGroup=[4,1] (tilesM=4, tilesN=23) with partitions along N."""
         cfg = make_cfg_bf16(MT1=368, depthU=64, miWaveGroup=[4, 1],
                             partSizeN=partSizeN)
+        assert cfg.partitionSizesN == expected_partN
         sched = LogicalScheduler(cfg)
         sched.assign_vgpr_tiles()
 
