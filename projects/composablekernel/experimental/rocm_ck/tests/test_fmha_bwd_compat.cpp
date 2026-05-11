@@ -40,6 +40,7 @@ using ::rocm_ck::FmhaBiasType;
 using ::rocm_ck::FmhaBwdConvertDQConfig;
 using ::rocm_ck::FmhaBwdDQDKDVConfig;
 using ::rocm_ck::FmhaBwdOGradDotOConfig;
+using ::rocm_ck::FmhaMaskType;
 using ::rocm_ck::FmhaMode;
 using ::rocm_ck::makeSpec;
 
@@ -205,7 +206,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
-    EXPECT_FALSE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_FALSE(k.has_dropout);
     EXPECT_FALSE(k.is_deterministic);
     EXPECT_EQ(k.pad_hdim_q, 8);
@@ -283,9 +284,10 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask)
     constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+        .algorithm = {
+            .mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
 
-    EXPECT_TRUE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::TOP_LEFT_CAUSAL);
     EXPECT_FALSE(k.has_dropout);
     EXPECT_FALSE(k.is_deterministic);
 }
@@ -298,7 +300,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_Det)
         .algorithm = {.is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_TRUE(k.is_deterministic);
-    EXPECT_FALSE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_FALSE(k.has_dropout);
 }
 
@@ -415,7 +417,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_EBias)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_FALSE(k.has_bias_grad);
-    EXPECT_FALSE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_FALSE(k.has_dropout);
     EXPECT_FALSE(k.is_deterministic);
     EXPECT_EQ(k.pad_hdim_q, 8);
@@ -438,7 +440,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_ALiBi)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ALIBI);
     EXPECT_FALSE(k.has_bias_grad);
-    EXPECT_FALSE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_FALSE(k.has_dropout);
     EXPECT_FALSE(k.is_deterministic);
     EXPECT_EQ(k.pad_hdim_q, 8);
@@ -466,7 +468,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_EBias_DBias)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_TRUE(k.has_bias_grad);
-    EXPECT_FALSE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_FALSE(k.has_dropout);
     EXPECT_FALSE(k.is_deterministic);
     EXPECT_EQ(k.pad_hdim_q, 8);
@@ -489,7 +491,7 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch_EBias)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_FALSE(k.has_bias_grad);
-    EXPECT_FALSE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_FALSE(k.has_dropout);
     EXPECT_FALSE(k.is_deterministic);
     EXPECT_EQ(k.pad_hdim_q, 8);
@@ -512,7 +514,7 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch_ALiBi)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ALIBI);
     EXPECT_FALSE(k.has_bias_grad);
-    EXPECT_FALSE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_FALSE(k.has_dropout);
     EXPECT_FALSE(k.is_deterministic);
     EXPECT_EQ(k.pad_hdim_q, 8);
@@ -540,7 +542,7 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch_EBias_DBias)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_TRUE(k.has_bias_grad);
-    EXPECT_FALSE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_FALSE(k.has_dropout);
     EXPECT_FALSE(k.is_deterministic);
     EXPECT_EQ(k.pad_hdim_q, 8);
@@ -563,7 +565,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_Dropout)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
-    EXPECT_FALSE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_TRUE(k.has_dropout);
     EXPECT_FALSE(k.is_deterministic);
     EXPECT_EQ(k.pad_hdim_q, 8);
@@ -575,11 +577,15 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_Dropout)
 
 TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask_Det)
 {
-    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
-        .signature =
-            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {
-            .has_mask = true, .is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 128,
+                                                   .hdim_v = 128,
+                                                   .mode   = FmhaMode::BATCH},
+                                     .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
+                                                   .is_deterministic = true,
+                                                   .pad_hdim_q       = 8,
+                                                   .pad_hdim_v       = 8}});
 
     EXPECT_EQ(k.dtype, DataType::FP16);
     EXPECT_EQ(k.hdim_q, 128);
@@ -587,7 +593,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask_Det)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
-    EXPECT_TRUE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::TOP_LEFT_CAUSAL);
     EXPECT_FALSE(k.has_dropout);
     EXPECT_TRUE(k.is_deterministic);
     EXPECT_EQ(k.pad_hdim_q, 8);
@@ -1077,9 +1083,52 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsMask)
     const auto* v = findVariant(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+        .algorithm = {
+            .mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch_cmask");
+}
+
+// AE-1 turned `bool has_mask` into `enum FmhaMaskType mask_type`, which means
+// findVariant() must distinguish the three mask families instead of aliasing
+// them onto whichever variant happens to come first in the registry table.
+// This is the same class of predicate bug fixed for `has_bias_grad` in 7abd4.
+TEST(FmhaBwdCompat, Registry_DqDkDv_DisambiguatesMaskType)
+{
+    const auto* v_tl = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {
+            .mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v_tl, nullptr);
+    EXPECT_STREQ(v_tl->name, "fmha_bwd_dqdkdv_fp16_d128_batch_cmask");
+
+    const auto* v_br = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {
+            .mask_type = FmhaMaskType::BOTTOM_RIGHT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v_br, nullptr);
+    EXPECT_STREQ(v_br->name, "fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br");
+
+    const auto* v_gen = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.mask_type = FmhaMaskType::GENERIC, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v_gen, nullptr);
+    EXPECT_STREQ(v_gen->name, "fmha_bwd_dqdkdv_fp16_d128_batch_swa");
+
+    // Negative case: combining a registered mask family with an unregistered
+    // bias family must still return nullptr -- the predicate must AND across
+    // every feature flag, not OR.
+    const auto* v_none = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.bias_type  = FmhaBiasType::ALIBI,
+                      .mask_type  = FmhaMaskType::GENERIC,
+                      .pad_hdim_q = 8,
+                      .pad_hdim_v = 8}});
+    EXPECT_EQ(v_none, nullptr);
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsDeterministic)
@@ -1171,11 +1220,15 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsGroupEBiasDBias)
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsCMaskDet)
 {
-    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
-        .signature =
-            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {
-            .has_mask = true, .is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    const auto* v =
+        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                      .hdim_q = 128,
+                                                      .hdim_v = 128,
+                                                      .mode   = FmhaMode::BATCH},
+                                        .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
+                                                      .is_deterministic = true,
+                                                      .pad_hdim_q       = 8,
+                                                      .pad_hdim_v       = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch_cmask_det");
 }
@@ -1271,14 +1324,15 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 28); }
 
-// _cmask_br and _swa share the compiled spec with _cmask. findVariant() matches
-// by spec features alone, so it returns _cmask first for any has_mask=true
-// query — the new variants are reachable only via name lookup.
+// _cmask, _cmask_br, and _swa share the compiled spec shape but advertise
+// distinct mask_type values, so findVariant() returns each unambiguously
+// (AE-1). The name-lookup path remains the canonical way to fetch a specific
+// variant from a kpack archive.
 TEST(FmhaBwdCompat, Registry_DqDkDv_NameLookup_CMaskBR)
 {
     constexpr auto k =
         ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br");
-    EXPECT_TRUE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::BOTTOM_RIGHT_CAUSAL);
     EXPECT_EQ(k.dtype, DataType::FP16);
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
@@ -1289,7 +1343,7 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_NameLookup_SWA)
 {
     constexpr auto k =
         ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_swa");
-    EXPECT_TRUE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::GENERIC);
     EXPECT_EQ(k.dtype, DataType::FP16);
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
@@ -1307,7 +1361,8 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMaskBR_SharesSpecWithCMask)
     EXPECT_EQ(k_br.hdim_q, k_cmask.hdim_q);
     EXPECT_EQ(k_br.hdim_v, k_cmask.hdim_v);
     EXPECT_EQ(k_br.mode, k_cmask.mode);
-    EXPECT_EQ(k_br.has_mask, k_cmask.has_mask);
+    // mask_type intentionally differs: TOP_LEFT_CAUSAL vs BOTTOM_RIGHT_CAUSAL.
+    EXPECT_NE(k_br.mask_type, k_cmask.mask_type);
     EXPECT_EQ(k_br.pad_hdim_q, k_cmask.pad_hdim_q);
     EXPECT_EQ(k_br.pad_hdim_v, k_cmask.pad_hdim_v);
 }
@@ -1323,7 +1378,8 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_SWA_SharesSpecWithCMask)
     EXPECT_EQ(k_swa.hdim_q, k_cmask.hdim_q);
     EXPECT_EQ(k_swa.hdim_v, k_cmask.hdim_v);
     EXPECT_EQ(k_swa.mode, k_cmask.mode);
-    EXPECT_EQ(k_swa.has_mask, k_cmask.has_mask);
+    // mask_type intentionally differs: TOP_LEFT_CAUSAL vs GENERIC.
+    EXPECT_NE(k_swa.mask_type, k_cmask.mask_type);
     EXPECT_EQ(k_swa.pad_hdim_q, k_cmask.pad_hdim_q);
     EXPECT_EQ(k_swa.pad_hdim_v, k_cmask.pad_hdim_v);
 }

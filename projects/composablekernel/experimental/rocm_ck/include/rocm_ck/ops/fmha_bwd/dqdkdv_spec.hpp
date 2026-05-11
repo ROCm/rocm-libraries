@@ -322,7 +322,7 @@ struct FmhaBwdDQDKDVAlgorithm
     // Feature flags -- which variation of the computation
     FmhaBiasType bias_type = FmhaBiasType::NONE;
     bool has_bias_grad     = false;
-    bool has_mask          = false;
+    FmhaMaskType mask_type = FmhaMaskType::NO_MASK;
     bool has_dropout       = false;
     bool is_deterministic  = false;
 
@@ -352,7 +352,7 @@ struct FmhaBwdDQDKDVSpec
     // From Algorithm -- feature flags
     FmhaBiasType bias_type;
     bool has_bias_grad;
-    bool has_mask;
+    FmhaMaskType mask_type;
     bool has_dropout;
     bool is_deterministic;
 
@@ -431,7 +431,7 @@ constexpr int P_UNDROP       = 4; // f32: 1/(1-dropout_rate), passed to CK Tile 
 constexpr int RP_UNDROP      = 5; // f32: 1-dropout_rate (keep_prob), used for p_undrop_in_uint8_t
 constexpr int DROP_SEED      = 6; // u64: dropout RNG seed
 constexpr int DROP_OFFSET    = 7; // u64: dropout RNG offset
-// Mask scalar slots -- present only when has_mask=true.
+// Mask scalar slots -- present only when mask_type != NO_MASK.
 // Indices are fixed regardless of dropout; unused slots are not populated.
 constexpr int WINDOW_SIZE_LEFT  = 8;  // i32: left context window (-1 = unlimited)
 constexpr int WINDOW_SIZE_RIGHT = 9;  // i32: right context window (0 = causal)
@@ -444,6 +444,12 @@ constexpr int MASK_TYPE         = 10; // i32: GenericAttentionMaskEnum cast to i
 constexpr int BATCH_SIZE = 11; // i32: batch count (deterministic batch mode only)
 
 } // namespace fmha_bwd_dqdkdv_slots
+
+/// True iff the spec enables any attention mask.
+/// Single source of truth for "is masking active" so the device bridge,
+/// host runner, registry matcher, and slot-count predicate cannot drift
+/// apart when a new mask family is added.
+constexpr bool hasMask(FmhaBwdDQDKDVSpec k) { return k.mask_type != FmhaMaskType::NO_MASK; }
 
 /// Single source of truth for "does this spec use the BATCH_SIZE scalar slot".
 /// Used by requiredScalars(), validateArgs(), and the device bridge so the
@@ -462,7 +468,7 @@ constexpr int requiredScalars(FmhaBwdDQDKDVSpec k)
 {
     if(usesBatchSizeSlot(k))
         return BATCH_SIZE + 1; // 12 (dominates mask/dropout slots)
-    if(k.has_mask)
+    if(hasMask(k))
         return MASK_TYPE + 1; // 11 (covers dropout slots [4..7] since 11 > 8)
     if(k.has_dropout)
         return DROP_OFFSET + 1; // 8
@@ -517,6 +523,17 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
     if(algo.has_bias_grad && algo.bias_type == FmhaBiasType::NONE)
         throw "has_bias_grad requires bias_type != NONE";
 
+    // mask_type must be one of the four declared enum values. The cast guards
+    // against callers passing an integer-via-enum out of range -- the device
+    // bridge static_casts straight to ck_tile::GenericAttentionMaskEnum and an
+    // unknown value would silently land on undefined kernel behaviour.
+    {
+        const auto m = static_cast<int>(algo.mask_type);
+        if(m < static_cast<int>(FmhaMaskType::NO_MASK) ||
+           m > static_cast<int>(FmhaMaskType::GENERIC))
+            throw "mask_type must be NO_MASK, TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL, or GENERIC";
+    }
+
     // --- padding validation ---
     if(algo.pad_hdim_q != 0 && algo.pad_hdim_q != 1 && algo.pad_hdim_q != 8)
         throw "pad_hdim_q must be 0, 1, or 8";
@@ -547,7 +564,7 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
         .mode             = sig.mode,
         .bias_type        = algo.bias_type,
         .has_bias_grad    = algo.has_bias_grad,
-        .has_mask         = algo.has_mask,
+        .mask_type        = algo.mask_type,
         .has_dropout      = algo.has_dropout,
         .is_deterministic = algo.is_deterministic,
         .pad_hdim_q       = algo.pad_hdim_q,
@@ -603,7 +620,7 @@ static_assert(fmha_bwd_dqdkdv_slots::requiredScalars(makeSpec(
         .signature = {.dtype = DataType::FP16,
                       .hdim_q = 128, .hdim_v = 128,
                       .mode = FmhaMode::BATCH},
-        .algorithm = {.has_mask = true,
+        .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
                       .is_deterministic = true,
                       .pad_hdim_q = 8, .pad_hdim_v = 8}})) == 12);
 

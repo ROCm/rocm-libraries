@@ -33,7 +33,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <numeric>
-#include <string_view>
 #include <vector>
 
 // Namespace aliases for named slot constants.
@@ -865,36 +864,26 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     assert(batch > 0);
     args.scalars[DKV::BATCH_SIZE].i32 = static_cast<int32_t>(batch);
 
-    // Mask geometry is variant-specific. The compiled spec is identical for
-    // _cmask, _cmask_br, and _swa — geometry is selected at runtime via the
-    // WINDOW_SIZE_LEFT/RIGHT and MASK_TYPE scalar slots.
-    // GenericAttentionMaskEnum: 0=NO_MASK, 1=MASK_FROM_TOP_LEFT,
-    //                           2=MASK_FROM_BOTTOM_RIGHT, 3=MASK_GENERIC.
-    // Use ends_with (not find) so a future variant whose name merely contains
-    // "_swa" or "_cmask_br" as a non-suffix substring won't be misclassified.
-    if(variant.spec.has_mask)
+    // Mask geometry is driven entirely by the spec's mask_type enum (AE-1).
+    // The compiled spec is shared across _cmask, _cmask_br, and _swa --
+    // family selection happens at runtime via MASK_TYPE, and the window
+    // pair distinguishes causal (unlimited left, no future tokens) from
+    // sliding-window attention.
+    if(rocm_ck::hasMask(variant.spec))
     {
-        const std::string_view name(variant.name);
-        if(name.ends_with("_swa"))
+        args.scalars[DKV::MASK_TYPE].i32 = static_cast<int32_t>(variant.spec.mask_type);
+        if(variant.spec.mask_type == rocm_ck::FmhaMaskType::GENERIC)
         {
-            // Sliding-window attention with both-side limits.
+            // Sliding-window attention. Window size is hardcoded today;
+            // surfacing it on the spec is tracked as a follow-up (AE-3).
             args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = 64;
             args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 64;
-            args.scalars[DKV::MASK_TYPE].i32         = 3; // MASK_GENERIC
-        }
-        else if(name.ends_with("_cmask_br"))
-        {
-            // Bottom-right causal: unlimited left, no future tokens.
-            args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = -1;
-            args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 0;
-            args.scalars[DKV::MASK_TYPE].i32         = 2; // MASK_FROM_BOTTOM_RIGHT
         }
         else
         {
-            // Default: top-left causal (preserves _cmask and _cmask_det).
+            // TOP_LEFT_CAUSAL and BOTTOM_RIGHT_CAUSAL share the causal window.
             args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = -1;
             args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 0;
-            args.scalars[DKV::MASK_TYPE].i32         = 1; // MASK_FROM_TOP_LEFT
         }
     }
 
@@ -1413,7 +1402,7 @@ int main(int argc, char** argv)
         // no deterministic flag get full verification.
         // Others are compilation proof only.
         bool is_plain_batch =
-            (!v.spec.has_mask && !v.spec.has_dropout && !v.spec.is_deterministic &&
+            (!rocm_ck::hasMask(v.spec) && !v.spec.has_dropout && !v.spec.is_deterministic &&
              v.spec.bias_type == rocm_ck::FmhaBiasType::NONE);
 
         bool passed = runDqDkDvBatchVariant(v,
