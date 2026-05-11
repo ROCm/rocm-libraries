@@ -584,8 +584,6 @@ namespace TensileLite
             = TensorDescriptor("scaleAlphaVec");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::METADATA]   = TensorDescriptor("metadata");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::AMAXD]      = TensorDescriptor("amaxD");
-        gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSA]     = TensorDescriptor("mxScaleA");
-        gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSB]     = TensorDescriptor("mxScaleB");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED] = TensorDescriptor("compressed");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSA]       = TensorDescriptor("mx-a");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSB]       = TensorDescriptor("mx-b");
@@ -689,7 +687,7 @@ namespace TensileLite
         calcArithmeticIntensity();
     }
 	
-    void ContractionProblemGemm::setMXScaleA(rocisa::DataType mxTypeA, int mxBlockA, std::vector<size_t> saStride)
+    void ContractionProblemGemm::setMXScaleA(rocisa::DataType mxTypeA, int mxBlockA, std::vector<size_t> saStride, bool padScaleTensor)
     {
         m_mxBlockA = mxBlockA;
         m_mxTypeA = mxTypeA;
@@ -697,13 +695,24 @@ namespace TensileLite
         if (mxBlockA)
         {
             std::vector<size_t> saSizes = m_tensors[ContractionProblemGemm::TENSOR::A].sizes();
-            saSizes[m_boundIndices[0].a] = saSizes[m_boundIndices[0].a] / mxBlockA;
+            auto boundIdx = m_boundIndices[0].a;
+            if (padScaleTensor)
+            {
+                saSizes[boundIdx] = RoundUpToMultiple(
+                    CeilDivide(saSizes[boundIdx], (size_t)mxBlockA), (size_t)8);
+                auto freeIdx = m_freeIndicesA[0].i;
+                saSizes[freeIdx] = RoundUpToMultiple(saSizes[freeIdx], (size_t)32);
+            }
+            else
+            {
+                saSizes[boundIdx] = CeilDivide(saSizes[boundIdx], (size_t)mxBlockA);
+            }
             TensorDescriptor mxsa("mx-a", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
         }
     }
 
-    void ContractionProblemGemm::setMXScaleB(rocisa::DataType mxTypeB, int mxBlockB, std::vector<size_t> sbStride)
+    void ContractionProblemGemm::setMXScaleB(rocisa::DataType mxTypeB, int mxBlockB, std::vector<size_t> sbStride, bool padScaleTensor)
     {
         m_mxBlockB = mxBlockB;
         m_mxTypeB = mxTypeB;
@@ -711,7 +720,18 @@ namespace TensileLite
         if (mxBlockB)
         {
             std::vector<size_t> sbSizes = m_tensors[ContractionProblemGemm::TENSOR::B].sizes();
-            sbSizes[m_boundIndices[0].b] = sbSizes[m_boundIndices[0].b] / mxBlockB;
+            auto boundIdx = m_boundIndices[0].b;
+            if (padScaleTensor)
+            {
+                sbSizes[boundIdx] = RoundUpToMultiple(
+                    CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB), (size_t)8);
+                auto freeIdx = m_freeIndicesB[0].i;
+                sbSizes[freeIdx] = RoundUpToMultiple(sbSizes[freeIdx], (size_t)32);
+            }
+            else
+            {
+                sbSizes[boundIdx] = CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB);
+            }
             TensorDescriptor mxsb("mx-b", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
         }
@@ -1328,8 +1348,7 @@ namespace TensileLite
 
     size_t ContractionProblemGemm::flopsPerMac() const
     {
-        auto& aTensor = m_tensors[ContractionProblemGemm::TENSOR::A];
-        return 2 * DataTypeInfo::Get(aTensor.dataType()).packing;
+        return 2;
     }
 
     size_t ContractionProblemGemm::flopCount() const

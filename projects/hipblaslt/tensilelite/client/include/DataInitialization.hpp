@@ -323,6 +323,7 @@ namespace TensileLite
                 hipMemcpyKind kind;
 
                 bool needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
+                bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
 
                 if(m_keepPristineCopyOnGPU && !m_problemDependentData)
                 {
@@ -336,7 +337,7 @@ namespace TensileLite
                 }
 
                 if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-                   && !m_problemDependentData && !needSwizzle)
+                   && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
                 {
                     if(m_elementsToValidate)
                     {
@@ -356,7 +357,7 @@ namespace TensileLite
                         initializeCPUInputs(problem);
                     if(m_problemDependentData)
                         copyValidToGPUBuffer(problem);
-                    if(needSwizzle)
+                    if(needSwizzle || needMXSwizzle)
                         copySwizzledToGPUBuffer(problem);
 
                     // gpu to gpu
@@ -860,20 +861,24 @@ namespace TensileLite
             {
                 m_currentGemmProblem
                     = dynamic_cast<ContractionProblemGemm const*>(problem);
+                m_currentSolution = nullptr;
             }
             virtual void postProblem() override {}
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
                 // Re-init MX FP4 inputs once the solution is known (MI-based preSwizzle when enabled).
-                // Do not gate on useScaleAB: MX kernels may use MXSA/MXSB with empty useScaleAB.
-                if(m_currentSolution != nullptr && m_currentGemmProblem != nullptr
+                // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
+                // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
+                if(m_currentSolution != nullptr
+                   && m_mxScaleFormat > 0
+                   && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty())
                 {
                     bool isMXFP4 = isMXFP4Problem(*m_currentGemmProblem);
                     if(isMXFP4)
                     {
-                        initializeMXData(*m_currentGemmProblem);
+                        initializeMXDataForFP4(*m_currentGemmProblem);
                         copyValidToGPUBuffer(*m_currentGemmProblem);
                         copyInputs(m_gpuPtrs,
                                    m_gpuBatchPtrs,
@@ -1000,7 +1005,7 @@ namespace TensileLite
 
             void initializeConstantInputs(ContractionProblemGemm const& problem);
 
-            void initializeMXData(ContractionProblemGemm const& problem);
+            void initializeMXDataForFP4(ContractionProblemGemm const& problem);
 
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
@@ -1100,6 +1105,12 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
+            // True when the current GPU uses preswizzled MX scale layout (gfx950 subtile).
+            // False for architectures that use K-swizzle layout (e.g. gfx1250).
+            bool m_isMXPreswizzleArch = false;
+            // Set by initializeMXDataForFP4 when preswizzled scale was uploaded to gpuInput.valid.
+            bool m_mxPreswizzledA = false;
+            bool m_mxPreswizzledB = false;
         };
 
         template <>

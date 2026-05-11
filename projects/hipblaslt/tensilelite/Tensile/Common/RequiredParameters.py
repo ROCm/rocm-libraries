@@ -100,6 +100,7 @@ def getRequiredParametersMin() -> set:
         'TransposeLDS',
         'TransposeLDSMetadata',
         'TDMInst',
+        "TDMSplit",
         'UnrollLoopSwapGlobalReadOrder',
         'Use64bShadowLimit',
         'Use64bShadowLimitMX',
@@ -114,5 +115,6 @@ def getRequiredParametersMin() -> set:
         'WorkGroup',
         'DtlPlusLdsBuf',
         'MinGRIncPerMfma',
-        'UsePLRPack'
+        'UsePLRPack',
+        'UseSubtileImpl'
     })

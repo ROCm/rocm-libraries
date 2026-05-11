@@ -16,6 +16,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   BoundsCheck: 2
+  MXScaleFormat: 1
 
 BenchmarkProblems:
   ########################################
@@ -51,7 +52,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1, 1, 8, 8, 2, 2]
           - [32, 32, 64, 1, 1, 4, 4, 2, 2]
           - [32, 32, 64, 1, 1, 8, 8, 2, 2]
-        - DepthU: [32, 64, 128]
+        #- DepthU: [32, 64, 128]
+        - DepthU: [256, 512]
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
         - PrefetchGlobalRead: [2]
@@ -74,6 +76,8 @@ BenchmarkProblems:
         - LdsPadA: [4]
         - LdsPadB: [4]
         - WorkGroupMapping: [64]
+        - StreamK: [0,3]
+        - UseSubtileImpl: [1] # TODO: enable subtile
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

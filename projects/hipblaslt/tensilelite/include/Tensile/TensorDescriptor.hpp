@@ -349,8 +349,10 @@ namespace TensileLite
             // Cannot use elementSize directly as elementSize is
             // packed size for MX data types.
             auto const info = DataTypeInfo::Get(m_dataType);
-            assert(totalAllocatedElements() * info.elementSize % info.packing == 0);
-            return totalAllocatedElements() * info.elementSize / info.packing;
+            auto const totalSize
+                = multiplyElementSize(totalAllocatedElements(), info.elementSize);
+            assert(totalSize % info.packing == 0);
+            return totalSize / info.packing;
         }
 
         float elementBytes() const
@@ -469,11 +471,13 @@ namespace TensileLite
         if(decorated)
             stream << "[";
 
+        constexpr size_t packing = TypeInfo<std::remove_cv_t<T>>::Packing;
+
         if(desc.sizes()[0] > 0)
             stream << data[0];
 
-        for(size_t i = 1; i < desc.sizes()[0]; i++)
-            stream << " " << data[i];
+        for(size_t i = packing; i < desc.sizes()[0]; i += packing)
+            stream << " " << data[i / packing];
 
         if(decorated)
             stream << "]" << std::endl;

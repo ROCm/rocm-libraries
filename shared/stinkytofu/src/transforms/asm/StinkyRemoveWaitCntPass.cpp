@@ -31,8 +31,6 @@ namespace {
 using namespace stinkytofu;
 
 bool tryRemoveTensorWaitCnt(StinkyInstruction* stinkyInst) {
-    const auto& label = stinkyInst->getParent()->getLabel();
-
     if (stinkyInst && stinkyInst->is(InstFlag::IF_WaitTensorCnt)) {
         return true;
     }
