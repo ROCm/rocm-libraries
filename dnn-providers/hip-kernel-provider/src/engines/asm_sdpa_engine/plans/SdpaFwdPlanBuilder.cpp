@@ -18,6 +18,8 @@
 namespace asm_sdpa_engine
 {
 
+using namespace hip_kernel_provider_common;
+
 MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;

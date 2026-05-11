@@ -3,6 +3,9 @@
 
 #pragma once
 
+namespace hip_kernel_provider_common
+{
+
 enum MaskType : int
 {
     NO_MASK = 0,
@@ -23,3 +26,5 @@ enum BatchMode : int
     BATCH = 0, // All sequences have same length
     GROUP // Variable sequence lengths
 };
+
+}

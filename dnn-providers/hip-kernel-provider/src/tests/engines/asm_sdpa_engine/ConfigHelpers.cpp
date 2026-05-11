@@ -2,8 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include "ConfigHelpers.hpp"
+#include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
+#include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
-#include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
@@ -11,24 +12,30 @@
 namespace asm_sdpa_engine
 {
 
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hip_kernel_provider_common;
+
+DataType toDataType(const std::string& configDataType)
+{
+    std::unordered_map<std::string, DataType> typeMap = {{config::BFLOAT16, DataType::BFLOAT16},
+                                                         {config::HALF, DataType::HALF},
+                                                         {config::FLOAT, DataType::FLOAT}};
+
+    auto it = typeMap.find(configDataType);
+    if(it == typeMap.end())
+    {
+        throw std::runtime_error("Unsupported datatype name in config: " + configDataType);
+    }
+    return it->second;
+}
+
 flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config)
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
 
     // Map dtype string to DataType enum
-    DataType dataType = DataType::BFLOAT16;
-    if(config.dtype == "fp16")
-    {
-        dataType = DataType::HALF;
-    }
-    else if(config.dtype == "fp32")
-    {
-        dataType = DataType::FLOAT;
-    }
-    // Default to BFLOAT16 for "bf16" or any other value
+    DataType dataType = toDataType(config.dtype);
 
     // Use arbitrary values for batch, num_heads, and sequence lengths
     const int64_t batch = 2;

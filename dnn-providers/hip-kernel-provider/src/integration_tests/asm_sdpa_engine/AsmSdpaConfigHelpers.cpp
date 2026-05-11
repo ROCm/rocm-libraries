@@ -2,13 +2,30 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
+#include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
+#include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
-#include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 
 namespace asm_sdpa_engine
 {
+using namespace hipdnn_frontend;
+using namespace hip_kernel_provider_common;
+
+DataType toDataType(const std::string& configDataType)
+{
+    std::unordered_map<std::string, DataType> typeMap = {{config::BFLOAT16, DataType::BFLOAT16},
+                                                         {config::HALF, DataType::HALF},
+                                                         {config::FLOAT, DataType::FLOAT}};
+
+    auto it = typeMap.find(configDataType);
+    if(it == typeMap.end())
+    {
+        throw std::runtime_error("Unsupported datatype name in config: " + configDataType);
+    }
+    return it->second;
+}
 
 std::string getConfigDescription(const fmha_v3_fwdConfig& config)
 {
@@ -52,15 +69,7 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
     const int64_t seqKv = 256;
 
     // Determine data type
-    DataType dataType = DataType::BFLOAT16;
-    if(config.dtype == "fp16")
-    {
-        dataType = DataType::HALF;
-    }
-    else if(config.dtype == "fp32")
-    {
-        dataType = DataType::FLOAT;
-    }
+    DataType dataType = toDataType(config.dtype);
 
     // Create tensor dimensions
     std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
