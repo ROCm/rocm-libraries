@@ -50,9 +50,9 @@ A prior effort established a golden reference pattern -- golden data bundles (gr
 
 Golden reference validation uses two pipelines -- [**generation**](#generation-pipeline) and [**validation**](#generic-test-runner) -- that share a common data format: the **golden data bundle** (`{Name}.json` + `{Name}.tensor{uid}.bin`). A bundle is a self-contained test case: the graph JSON defines the computation, the `.bin` files carry the tensor data (inputs and expected outputs).
 
-Generation produces bundles. Validation loads a bundle, executes the graph through the engine under test, and compares the result to the expected output. The bundle itself is engine-agnostic — the test fixture determines which engine runs the graph.
+Generation produces bundles. Validation loads a bundle, runs the computation, and compares the result to the expected output. The bundle itself is engine-agnostic — the test fixture determines which engine runs it.
 
-**Design principle — test identity comes from the graph, not the filesystem.** The graph JSON contains everything that defines a test: operation type, tensor shapes, data types, parameters. The runner derives the test name from the graph content, not from the folder path where the bundle is stored. This decouples test identity from storage layout, which means: folders can be reorganized without breaking filters, TOML skip rules match stable graph-derived names, and customer-submitted bundles get meaningful test names regardless of where they're dropped.
+**Design principle — test identity comes from the graph, not the filesystem.** The runner derives the test name from graph content (operation type, layout, data type), not from the folder path. Folders can be reorganized without breaking filters, TOML skip rules match stable names, and customer-submitted bundles get meaningful test names regardless of where they're dropped.
 
 **[Generation](#generation-pipeline) (run once, any tool):**
 1. Define graph and create input tensors
@@ -102,7 +102,7 @@ The table below maps each existing component to its treatment in this RFC.
 
 ### Self-Contained Bundles
 
-All of these components operate on a single shared artifact -- the golden data bundle. A bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
+All of these components operate on a single shared artifact — the golden data bundle. A bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
 
 The bundle format is independent of any test infrastructure. The JSON follows the FlatBuffers `graph.fbs` schema; the `.bin` files are raw contiguous tensors. Any tool that can parse JSON and read binary can produce or consume bundles.
 
@@ -138,7 +138,7 @@ This section is intentionally left open for team input.
 
 ### Golden Data Format
 
-The bundle format is a convention, not a library API. It uses the existing format already established by `LoadGraphAndTensors.hpp` (C++ reader) and `Graph.save()` (Python writer), but any tool that follows the same convention can produce or consume bundles. A bundle is a **directory** containing a set of files with a shared base name: one `.json` file (graph definition conforming to the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema) and one `.tensor{uid}.bin` file per tensor (raw contiguous data matching the tensor's declared `data_type`, `dims`, and `strides`).
+A bundle is a **directory** containing files with a shared base name: one `.json` file (graph definition conforming to the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema) and one `.tensor{uid}.bin` file per tensor (raw contiguous data matching the tensor's declared `data_type`, `dims`, and `strides`). The existing `LoadGraphAndTensors.hpp` (C++ reader) and `Graph.save()` (Python writer) already implement this format.
 
 ```
 {Name}/                    # One directory per bundle
@@ -193,7 +193,7 @@ The file size in bytes equals `element_space × sizeof(element_type)`, where `el
 
 ![Validation Pipeline](images/validation_pipeline.png)
 
-The runner is a **base class** (`ValidateGoldenBundleBase`) with two concrete subclasses: `ValidateGoldenBundleWithRef` (reference executor) and `ValidateGoldenBundleWithPlugin` (GPU plugin). The base class owns discovery, loading, tolerance lookup, and comparison. The subclasses override the execution step — ref runs on host buffers with a simple setup; plugin creates handles, engine configs, and device buffers, and reports "unsupported" as SKIP. Neither subclass knows what operation a bundle contains until it loads the graph JSON at runtime. The bundles are the same for both. Adding a test means dropping files in a folder. No C++ changes, no recompile.
+The runner is a **base class** (`ValidateGoldenBundleBase`) with two concrete subclasses: `ValidateGoldenBundleWithRef` (reference executor) and `ValidateGoldenBundleWithPlugin` (GPU plugin). The base class owns discovery, loading, tolerance lookup, and comparison. The subclasses override the execution step — ref runs on host buffers with a simple setup; plugin creates handles, engine configs, and device buffers, and reports "unsupported" as SKIP. Neither subclass knows what operation a bundle contains until it loads the graph JSON at runtime.
 
 #### How it works
 
@@ -302,7 +302,7 @@ Only batchnorm has generators and data today. Generators for the remaining opera
 
 ### Reference Sources
 
-The golden data format is **reference-source-agnostic**. Any tool that produces a valid bundle (graph JSON matching the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema + corresponding `.bin` files) is a valid reference source. The validation pipeline does not know or care what produced the data.
+The golden data format is **reference-source-agnostic**. Any tool that produces a valid bundle (graph JSON matching the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema + corresponding `.bin` files) is a valid reference source.
 
 | Category | Examples | Portability |
 |----------|----------|-------------|
@@ -444,7 +444,7 @@ Below each tier, the recommended convention is `{Operation}/{Layout}/{DataType}/
 | DataType | Lowercase abbreviation | `fp32`, `fp16`, `bfp16` |
 | BundleName | lowercase_snake_case — **one directory per bundle**. Name describes *why the test exists* (the scenario), not the tensor shapes. Shapes are in the graph JSON. | `typical/`, `odd_spatial/`, `single_element/`, `resnet50_layer3/` |
 
-This convention is **guidance for humans**, not enforced by the runner. The runner discovers bundles by recursive scan and derives test identity from graph content, not folder paths. Folders can be reorganized without breaking tests.
+This convention is **guidance for humans**, not enforced by the runner.
 
 **Bundle naming principle**: the name answers *"what breaks if this test fails?"* — not *"what are the dimensions?"* A bundle called `odd_spatial` tells you the test covers non-power-of-2 spatial dimensions. A bundle called `Small_32x32` tells you nothing about why it exists. Good names describe the scenario: `typical`, `large_batch`, `misaligned_channels`, `resnet50_layer3`, `single_element`.
 
@@ -485,9 +485,7 @@ golden_reference_data/
 
 ### How Test Discovery Works
 
-`discoverGoldenBundles(tierDir)` recursively scans the tier directory for `.json` files and returns each as a gtest parameter. Test names are derived from graph content (operation type, layout, data type) plus the bundle base name — not from folder paths.
-
-**Adding a test** at any level — new bundle, new data type, new layout, new operation — means dropping `.json` + `.bin` files into the appropriate tier folder. No C++ changes, no recompile. The next run picks them up automatically.
+**Adding a test** at any level — new bundle, new data type, new layout, new operation — means dropping `.json` + `.bin` files into the appropriate tier folder. The next run picks them up automatically.
 
 #### Filtering examples
 
