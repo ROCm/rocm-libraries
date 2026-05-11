@@ -434,7 +434,8 @@ reason  = "no kernel"
     const TestSettings settings(file.path());
 
     // Bare arch in TOML must match against the full ROCm-formatted device string.
-    auto result = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-");
+    auto result
+        = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-", "linux");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, "no kernel");
 }
@@ -455,11 +456,13 @@ reason  = "xnack-only issue"
 
     const TestSettings settings(file.path());
 
-    auto matched = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-");
+    auto matched
+        = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-", "linux");
     ASSERT_FALSE(matched.has_value())
         << "literal substring 'gfx942:xnack-' should not appear in 'gfx942:sramecc+:xnack-'";
 
-    auto matchedExact = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:xnack-");
+    auto matchedExact
+        = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:xnack-", "linux");
     ASSERT_TRUE(matchedExact.has_value());
 }
 
@@ -477,7 +480,8 @@ reason  = "rdna3 only"
 
     const TestSettings settings(file.path());
 
-    auto result = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-");
+    auto result
+        = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-", "linux");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -495,7 +499,8 @@ reason  = "batchnorm only"
 
     const TestSettings settings(file.path());
 
-    auto result = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-");
+    auto result
+        = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942:sramecc+:xnack-", "linux");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -514,7 +519,7 @@ reason  = "r"
 
     const TestSettings settings(file.path());
 
-    auto result = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "");
+    auto result = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "", "linux");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -532,14 +537,15 @@ reason  = "global"
     const TestSettings settings(file.path());
 
     // Global rule fires on any arch.
-    EXPECT_TRUE(settings.findSkip("KnownBroken.Test", "gfx942:sramecc+:xnack-").has_value());
-    EXPECT_TRUE(settings.findSkip("KnownBroken.Test", "gfx1100").has_value());
-    EXPECT_TRUE(settings.findSkip("KnownBroken.Test", "anything").has_value());
+    EXPECT_TRUE(
+        settings.findSkip("KnownBroken.Test", "gfx942:sramecc+:xnack-", "linux").has_value());
+    EXPECT_TRUE(settings.findSkip("KnownBroken.Test", "gfx1100", "linux").has_value());
+    EXPECT_TRUE(settings.findSkip("KnownBroken.Test", "anything", "linux").has_value());
     // ...even when the device arch could not be detected.
-    EXPECT_TRUE(settings.findSkip("KnownBroken.Test", "").has_value());
+    EXPECT_TRUE(settings.findSkip("KnownBroken.Test", "", "linux").has_value());
 
     // But filter still has to match.
-    EXPECT_FALSE(settings.findSkip("Other.Test", "gfx942").has_value());
+    EXPECT_FALSE(settings.findSkip("Other.Test", "gfx942", "linux").has_value());
 }
 
 TEST(TestSettingsParser, FindSkipReturnsNulloptWhenNoSkipsConfigured)
@@ -551,7 +557,7 @@ version = 1
 
     const TestSettings settings(file.path());
 
-    auto result = settings.findSkip("AnyTest.Name", "gfx942");
+    auto result = settings.findSkip("AnyTest.Name", "gfx942", "linux");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -574,7 +580,7 @@ reason  = "second more specific"
 
     const TestSettings settings(file.path());
 
-    auto result = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942");
+    auto result = settings.findSkip("IntegrationGpuConvFwd2dFp16.Test", "gfx942", "linux");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, "first");
 }
@@ -593,9 +599,134 @@ reason  = "broad arch list"
 
     const TestSettings settings(file.path());
 
-    EXPECT_TRUE(settings.findSkip("IntegrationGpuConvFwd.Test", "gfx942:xnack-").has_value());
-    EXPECT_TRUE(settings.findSkip("IntegrationGpuConvFwd.Test", "gfx1100").has_value());
-    EXPECT_FALSE(settings.findSkip("IntegrationGpuConvFwd.Test", "gfx906").has_value());
+    EXPECT_TRUE(
+        settings.findSkip("IntegrationGpuConvFwd.Test", "gfx942:xnack-", "linux").has_value());
+    EXPECT_TRUE(settings.findSkip("IntegrationGpuConvFwd.Test", "gfx1100", "linux").has_value());
+    EXPECT_FALSE(settings.findSkip("IntegrationGpuConvFwd.Test", "gfx906", "linux").has_value());
+}
+
+// ---------------------------------------------------------------------------
+// [[test_skips]] platforms
+// ---------------------------------------------------------------------------
+
+TEST(TestSettingsParser, ParsesSkipWithPlatforms)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[test_skips]]
+archs     = ["gfx1100"]
+platforms = ["windows"]
+filters   = ["*Foo*"]
+reason    = "windows + RDNA3 only"
+)");
+
+    const TestSettings settings(file.path());
+    EXPECT_EQ(settings.skipEntryCount(), 1U);
+}
+
+TEST(TestSettingsParser, FindSkipMatchesPlatform)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[test_skips]]
+platforms = ["windows"]
+filters   = ["*Foo*"]
+reason    = "windows-only"
+)");
+
+    const TestSettings settings(file.path());
+
+    auto winMatch = settings.findSkip("Foo.Test", "gfx942", "windows");
+    ASSERT_TRUE(winMatch.has_value());
+    EXPECT_EQ(*winMatch, "windows-only");
+
+    auto linuxMiss = settings.findSkip("Foo.Test", "gfx942", "linux");
+    EXPECT_FALSE(linuxMiss.has_value());
+}
+
+TEST(TestSettingsParser, FindSkipMatchesAnyPlatformInList)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[test_skips]]
+platforms = ["windows", "linux"]
+filters   = ["*Foo*"]
+reason    = "broken everywhere"
+)");
+
+    const TestSettings settings(file.path());
+
+    EXPECT_TRUE(settings.findSkip("Foo.Test", "gfx942", "windows").has_value());
+    EXPECT_TRUE(settings.findSkip("Foo.Test", "gfx942", "linux").has_value());
+}
+
+TEST(TestSettingsParser, FindSkipPlatformIsExactNotSubstring)
+{
+    // Unlike archs, platform matching is exact equality. "win" must not match
+    // "windows".
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[test_skips]]
+platforms = ["win"]
+filters   = ["*Foo*"]
+reason    = "should not fire"
+)");
+
+    const TestSettings settings(file.path());
+    auto result = settings.findSkip("Foo.Test", "gfx942", "windows");
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(TestSettingsParser, FindSkipOmittedPlatformsMatchesAny)
+{
+    // No 'platforms' field => entry matches any platform (the existing
+    // arch-only behavior is unchanged).
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[test_skips]]
+archs   = ["gfx942"]
+filters = ["*Foo*"]
+reason  = "arch-only rule"
+)");
+
+    const TestSettings settings(file.path());
+
+    EXPECT_TRUE(settings.findSkip("Foo.Test", "gfx942", "windows").has_value());
+    EXPECT_TRUE(settings.findSkip("Foo.Test", "gfx942", "linux").has_value());
+}
+
+TEST(TestSettingsParser, FindSkipArchAndPlatformBothRequired)
+{
+    // When both 'archs' and 'platforms' are set, BOTH must match.
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[test_skips]]
+archs     = ["gfx1100"]
+platforms = ["windows"]
+filters   = ["*Foo*"]
+reason    = "windows + gfx1100 only"
+)");
+
+    const TestSettings settings(file.path());
+
+    // Both match
+    EXPECT_TRUE(settings.findSkip("Foo.Test", "gfx1100", "windows").has_value());
+    // Wrong arch
+    EXPECT_FALSE(settings.findSkip("Foo.Test", "gfx942", "windows").has_value());
+    // Wrong platform
+    EXPECT_FALSE(settings.findSkip("Foo.Test", "gfx1100", "linux").has_value());
 }
 
 // NOLINTEND(readability-identifier-naming)

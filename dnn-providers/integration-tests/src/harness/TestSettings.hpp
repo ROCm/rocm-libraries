@@ -51,11 +51,12 @@ struct ToleranceOverride
 //   rtol = 1e-2
 //
 //   [[test_skips]]
-//   archs   = ["gfx1100", "gfx1101"]
-//   filters = ["*Activation*Fp16*"]
-//   reason  = "missing activation kernel on RDNA3"
+//   archs     = ["gfx1100", "gfx1101"]
+//   platforms = ["windows"]                       # optional
+//   filters   = ["*Activation*Fp16*"]
+//   reason    = "missing activation kernel on Windows + RDNA3"
 //
-//   # Global skip (omit 'archs' to skip on every arch)
+//   # Global skip (omit 'archs' and 'platforms' to skip everywhere)
 //   [[test_skips]]
 //   filters = ["*KnownBroken*"]
 //   reason  = "tracked in #1234"
@@ -63,9 +64,11 @@ struct ToleranceOverride
 // Filters use GTest-style globs (globMatch with * wildcards).
 // For tolerance_overrides, later entries take precedence over earlier
 // ones when multiple filters match.
-// For test_skips, an entry matches when:
-//   - 'archs' is omitted/empty (global rule), OR any 'archs' value is a
-//     substring of the device's raw gcnArchName, AND
+// For test_skips, an entry matches when ALL of:
+//   - 'archs' is omitted/empty (any arch), OR any 'archs' value is a
+//     substring of the device's raw gcnArchName.
+//   - 'platforms' is omitted/empty (any platform), OR any 'platforms'
+//     value exactly equals the current platform ("windows" or "linux").
 //   - any 'filters' glob matches the gtest-formatted test name.
 // The first matching entry wins.
 class TestSettings
@@ -122,19 +125,24 @@ public:
         return _overrides.size();
     }
 
-    // Find a skip rule matching the given test name on the given device.
+    // Find a skip rule matching the given test name, device, and platform.
     // deviceArchRaw is the unparsed gcnArchName string (e.g. "gfx942:sramecc+:xnack-").
+    // platform is the lowercase platform name ("windows" or "linux").
     // An entry matches when:
-    //   - the entry's 'archs' list is empty (global rule, matches every arch),
-    //     OR any 'archs' value is a substring of deviceArchRaw, AND
+    //   - the entry's 'archs' list is empty (any arch), OR any 'archs' value
+    //     is a substring of deviceArchRaw, AND
+    //   - the entry's 'platforms' list is empty (any platform), OR any
+    //     'platforms' value exactly equals platform, AND
     //   - any 'filters' glob matches testName.
     // First matching entry wins; returns its reason. Returns nullopt if no
     // entry matches.
     std::optional<std::string> findSkip(std::string_view testName,
-                                        std::string_view deviceArchRaw) const
+                                        std::string_view deviceArchRaw,
+                                        std::string_view platform) const
     {
         const std::string testNameStr(testName);
         const std::string deviceArchStr(deviceArchRaw);
+        const std::string platformStr(platform);
 
         for(const auto& entry : _skips)
         {
@@ -145,6 +153,16 @@ public:
                           return deviceArchStr.find(candidate) != std::string::npos;
                       });
             if(!archMatches)
+            {
+                continue;
+            }
+
+            const bool platformMatches
+                = entry.platforms.empty()
+                  || std::any_of(entry.platforms.begin(),
+                                 entry.platforms.end(),
+                                 [&](const std::string& p) { return p == platformStr; });
+            if(!platformMatches)
             {
                 continue;
             }
@@ -178,6 +196,7 @@ private:
     struct SkipEntry
     {
         std::vector<std::string> archs;
+        std::vector<std::string> platforms;
         std::vector<std::string> filters;
         std::string reason;
     };
@@ -269,8 +288,9 @@ private:
         }
 
         SkipEntry parsed;
-        // 'archs' is optional. Empty list = global rule that matches every arch.
+        // 'archs' and 'platforms' are both optional. Empty = matches any.
         parsed.archs = parseStringArray(*table, "archs", kSection);
+        parsed.platforms = parseStringArray(*table, "platforms", kSection);
         parsed.filters = parseStringArray(*table, "filters", kSection);
         if(parsed.filters.empty())
         {

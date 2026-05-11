@@ -15,3 +15,12 @@ version = 1
 archs   = ["gfx1151"]
 filters = ["*ConvFwd*Fp16*"]
 reason  = "manual smoke test of [[test_skips]] mechanism"
+
+# Optional 'platforms' field (exact match on lowercase "windows" / "linux").
+# Omit to apply on every platform.
+#
+# [[test_skips]]
+# archs     = ["gfx1100"]
+# platforms = ["windows"]
+# filters   = ["*Foo*"]
+# reason    = "broken on Windows + RDNA3 only"
