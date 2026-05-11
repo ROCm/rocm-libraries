@@ -42,7 +42,7 @@ The integration test suite validates engine outputs by computing references at r
 
 A prior effort established a golden reference pattern -- golden data bundles (graph JSON + tensor `.bin` files) loaded from disk and validated against engine outputs. The initial infrastructure is in place for batchnorm. This RFC extends golden data coverage to all operation types, formalizes the folder convention, adds data integrity checks, and integrates with CI.
 
-**Long-term direction**: Every integration test becomes a data bundle — no C++ test code, no `buildGraph()` functions, no per-operation test classes. Adding a test means dropping files in a folder. The `computed` mode and its `buildGraph()` infrastructure remain available during the transition, but the end state is a test suite that is entirely data-driven.
+**Long-term direction**: Every integration test becomes a data bundle — no C++ test code, no `buildGraph()` functions, no per-operation test classes. Adding a test means dropping files in a folder. Both validation modes — golden (compare against `.bin` data) and computed (compare against reference executor) — load the graph from the bundle JSON. The regression suite's end state is entirely data-driven.
 
 ---
 
@@ -75,8 +75,8 @@ The golden reference infrastructure is already built and working for batchnorm. 
 | Component | File(s) | Role |
 |-----------|---------|------|
 | Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | Reads bundles from disk, separates inputs from expected outputs, validates results |
-| Ref runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | Base fixture + `getGoldenReferenceParams(subDir)` — scans a directory for `.json` files, each becomes a gtest parameter. Renamed to `ValidateGoldenBundleWithRef` in this RFC |
-| Plugin runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern, executes via engine plugin (defined, no tests yet). Renamed to `ValidateGoldenBundleWithPlugin` in this RFC |
+| Ref runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | Base fixture + `getGoldenReferenceParams(subDir)`. Replaced by `ValidateGoldenBundleWithRef` — validates bundles against the reference executor |
+| Plugin runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern, executes via engine plugin. Replaced by `ValidateGoldenBundleWithPlugin` — validates bundles against the GPU plugin |
 | Test instantiation (current) | [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp) | One class + `INSTANTIATE_TEST_SUITE_P` per operation/layout/datatype — replaced by the generic runner in this RFC |
 | Tolerance defaults | [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/TestTolerances.hpp) | Per-operation compile-time atol/rtol constants (e.g., `getToleranceInference<T>()` for batchnorm) |
 | TOML overrides | [`TestSettings.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/TestSettings.hpp), engine `.toml` files | Per-engine `[[tolerance_overrides]]` with glob matching — lets specific tests relax tolerances without code changes |
@@ -95,8 +95,8 @@ The table below maps each existing component to its treatment in this RFC.
 | TOML override infrastructure | **Kept as-is** | `TestSettings.hpp`, `TestConfig.hpp`, and per-engine `.toml` files with `[[tolerance_overrides]]` glob matching are connected to golden tests — a TOML override that matches a golden test name applies automatically. |
 | Python generation framework | **Kept, enhanced** | `reference_data_scripts/utilities/` (`graph.py`, `tensor.py`, `common.py`) remain the generation backbone. Enhanced: generator scripts auto-derive output paths from graph content (operation type, layout, data type) to match the folder convention. |
 | Existing golden data | **Kept, relocated** | 6 batchnorm bundles move from `hipdnn_reference_data/` to `golden_reference_data/quick/BatchnormFwdInference/...` under the new folder convention. Bundle contents unchanged. |
-| `GoldenReferenceCpu.hpp` → `ValidateGoldenBundleWithRef` | **Pattern replaced** | The base fixture pattern (`goldenReferenceTestSuite()`, `getGoldenReferenceParams(subDir)`) is replaced by the generic test runner. Key difference: no per-operation test class, recursive discovery across tier folders, tolerance looked up by operation type instead of hard-coded per fixture. The existing functions inform the generic runner design. |
-| `GoldenReferenceGpu.hpp` → `ValidateGoldenBundleWithPlugin` | **Pattern replaced** | Same as ref runner — the per-operation fixture pattern is replaced by a single generic plugin runner class. Currently has no tests; the generic runner provides the first plugin golden tests. |
+| `GoldenReferenceCpu.hpp` → `ValidateGoldenBundleWithRef` | **Pattern replaced** | The base fixture pattern is replaced by `ValidateGoldenBundleWithRef` (inherits `ValidateGoldenBundle`). Validates bundles against the reference executor. Key difference from today: no per-operation test class, recursive discovery across tier folders, tolerance looked up by operation type instead of hard-coded per fixture. |
+| `GoldenReferenceGpu.hpp` → `ValidateGoldenBundleWithPlugin` | **Pattern replaced** | Same pattern replaced by `ValidateGoldenBundleWithPlugin` (inherits `ValidateGoldenBundle`). Validates bundles against the GPU plugin. Handles plugin setup/teardown, device buffers, and "unsupported" as SKIP. |
 | `TestCpuFpReferenceBatchnorm.cpp` | **Replaced** | The per-operation test class + `INSTANTIATE_TEST_SUITE_P` pattern is replaced by recursive auto-discovery. Adding a new operation no longer requires writing a C++ test class — drop bundle files in the right tier folder. |
 | `DynamicTolerances.hpp` | **Future integration** | Higham-style error bounds are not connected to golden tests in this RFC. Future work: use dynamic tolerances as a fallback when `TestTolerances.hpp` has no entry for an operation type. |
 
@@ -199,16 +199,16 @@ The file size in bytes equals `element_space × sizeof(element_type)`, where `el
 
 ![Validation Pipeline](images/validation_pipeline.png)
 
-The runner is a **single generic test class** — not one class per operation. It does not know what operation a bundle contains until it loads the graph JSON at runtime. Adding a test means dropping files in a folder. No C++ changes, no recompile.
+The runner is a **base class** (`ValidateGoldenBundle`) with two concrete subclasses: `ValidateGoldenBundleWithRef` (reference executor) and `ValidateGoldenBundleWithPlugin` (GPU plugin). The base class owns discovery, loading, tolerance lookup, and comparison. The subclasses override the execution step — ref runs on host buffers with a simple setup; plugin creates handles, engine configs, and device buffers, and reports "unsupported" as SKIP. Neither subclass knows what operation a bundle contains until it loads the graph JSON at runtime. The bundles are the same for both. Adding a test means dropping files in a folder. No C++ changes, no recompile.
 
 #### How it works
 
 For a **full bundle** (`.json` + `.bin` files):
 
-1. **Discover** — recursively scan the golden data directory for `.json` files. Each file becomes a test case.
-2. **Load** — read the bundle from disk, separate golden outputs from inputs
-3. **Execute** — run the engine under test (CPU reference or MIOpen GPU plugin)
-4. **Compare** — check engine output against golden output — PASS or FAIL
+1. **Discover** — at GTest startup, `discoverGoldenBundles(tierDir)` recursively scans the tier directory for `.json` files. Each `.json` path becomes a GTest parameter. GTest creates one test case per parameter — no C++ code per test.
+2. **Load** — when a test case runs, the runner calls `loadGraphAndTensors()` which deserializes the `.json` into a graph object and loads the corresponding `.bin` files into tensors. The graph object is a fully executable computation — the same object that `buildGraph()` used to construct in C++, now created from JSON.
+3. **Execute** — run the graph through the engine under test (CPU reference or GPU plugin)
+4. **Compare** — check engine output against golden output from the `.bin` files — PASS or FAIL
 
 For a **graph-only bundle** (`.json` only, no `.bin` files — transitional): the runner loads the graph, generates inputs (using a fixed seed for reproducibility), runs the engine under test *and* a reference source (e.g., CPU reference for GPU tests), and compares their outputs. This enables incremental migration of existing computed tests to bundles — once the outputs are generated and committed as `.bin` files, the graph-only bundle becomes a full bundle.
 
@@ -219,7 +219,7 @@ Tolerance is looked up at runtime from the graph content: the runner reads the o
 When a golden test fails, the output should give the developer everything needed to diagnose the problem without re-running or adding instrumentation:
 
 ```
-FAIL: ValidateGoldenBundleWithRef/ConvFwd_nhwc_fp16_resnet50_layer3
+FAIL: ValidateGoldenBundleWithPlugin/ConvFwd_nhwc_fp16_resnet50_layer3
   Bundle: quick/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json
   Tensor: y (UID 8, output)
   Shape:  [1, 64, 56, 56]  fp16
@@ -233,20 +233,27 @@ The key fields: which tensor failed, the worst-case error with its location, and
 
 #### Test discovery
 
-The runner uses one `INSTANTIATE_TEST_SUITE_P` per tier, not per operation. These are fixed — they never change as new operations or bundles are added:
+Each runner uses one `INSTANTIATE_TEST_SUITE_P` per tier, not per operation. Both runners discover the same bundles — the test binary determines which runner class is used. These instantiations are fixed — they never change as new operations or bundles are added:
 
 ```cpp
-// Four fixed instantiations — one per tier. Never changes.
+// Ref runner (in hipdnn_test_sdk_tests):
 INSTANTIATE_TEST_SUITE_P(, ValidateGoldenBundleWithRef,
-    discoverGoldenBundles("quick"));          // smoke tier
-
+    discoverGoldenBundles("quick"));
 INSTANTIATE_TEST_SUITE_P(Standard, ValidateGoldenBundleWithRef,
     discoverGoldenBundles("standard"));
-
 INSTANTIATE_TEST_SUITE_P(Comprehensive, ValidateGoldenBundleWithRef,
     discoverGoldenBundles("comprehensive"));
-
 INSTANTIATE_TEST_SUITE_P(Full, ValidateGoldenBundleWithRef,
+    discoverGoldenBundles("full"));
+
+// Plugin runner (in miopen_integration_tests):
+INSTANTIATE_TEST_SUITE_P(, ValidateGoldenBundleWithPlugin,
+    discoverGoldenBundles("quick"));
+INSTANTIATE_TEST_SUITE_P(Standard, ValidateGoldenBundleWithPlugin,
+    discoverGoldenBundles("standard"));
+INSTANTIATE_TEST_SUITE_P(Comprehensive, ValidateGoldenBundleWithPlugin,
+    discoverGoldenBundles("comprehensive"));
+INSTANTIATE_TEST_SUITE_P(Full, ValidateGoldenBundleWithPlugin,
     discoverGoldenBundles("full"));
 ```
 
@@ -325,7 +332,7 @@ The `--verification-mode` flag overrides this default. In golden mode, tests wit
 | Mode | What runs | Reference source |
 |------|-----------|-----------------|
 | `auto` (default) | Per-test fallback: golden → GPU ref → CPU ref | Best available |
-| `computed` | Test-as-code tests (`IntegrationGraphVerificationHarness`) — graph built by `buildGraph()` in C++ | CPU/GPU reference executor at runtime |
+| `computed` | Graph-only bundles (`ValidateGoldenBundleWithRef` / `ValidateGoldenBundleWithPlugin` with no `.bin` files) — graph loaded from JSON, executed against reference executor, outputs compared at runtime | CPU/GPU reference executor at runtime |
 | `golden` | Test-as-data tests (`ValidateGoldenBundleWithRef` / `ValidateGoldenBundleWithPlugin`) — graph loaded from disk; tests without golden data are skipped | Pre-computed data from bundle |
 | `both` | Both suites, independently — both must pass | Runtime executor + pre-computed data |
 
@@ -368,7 +375,7 @@ This evolution changes *how* the default is computed — it does not change the 
 
 #### Current gap
 
-The golden ref framework (`ValidateGoldenBundleWithRef`) takes tolerances as hard-coded function parameters — it bypasses both the TOML override lookup and the operation-based tolerance selection. Golden tests must be connected to the same two-level flow: check TOML override first, fall back to per-operation default.
+The golden ref framework (`ValidateGoldenBundleWithRef` / `ValidateGoldenBundleWithPlugin`) takes tolerances as hard-coded function parameters — it bypasses both the TOML override lookup and the operation-based tolerance selection. Golden tests must be connected to the same two-level flow: check TOML override first, fall back to per-operation default.
 
 **Acceptance criteria**:
 - [ ] Golden data bundles contain no tolerance fields
