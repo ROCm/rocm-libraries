@@ -941,10 +941,15 @@ def _selectF8F6F4InstType(kernel):
   pt = kernel.get("ProblemType")
   if pt is None:
     return None
+
   aType = pt.get("DataTypeA")
   bType = pt.get("DataTypeB")
   if aType is None or bType is None:
     return None
+
+  sourceSwap = bool(kernel.get("SourceSwap", False))
+  if sourceSwap:
+    aType, bType = bType, aType
 
   # Defensive: support MagicMock / minimal stubs that don't define predicates.
   def _pred(t, name):
@@ -967,27 +972,26 @@ def _selectF8F6F4InstType(kernel):
   if aIsF4 and bIsF4:
     return InstType.INST_F4
 
-  # Mixed FP8/BF8 (8-bit only) - SourceSwap flips the suffix.
-  sourceSwap = bool(kernel.get("SourceSwap", False))
+  # Mixed FP8/BF8 (8-bit only)
   if aIsF8 and bIsBF8:
-    return InstType.INST_BF8_F8 if sourceSwap else InstType.INST_F8_BF8
+    return InstType.INST_F8_BF8
 
   if aIsBF8 and bIsF8:
-    return InstType.INST_F8_BF8 if sourceSwap else InstType.INST_BF8_F8
+    return InstType.INST_BF8_F8
 
   # Mixed F8 and F4
   if aIsF8 and bIsF4:
-    return InstType.INST_F4_F8 if sourceSwap else InstType.INST_F8_F4
+    return InstType.INST_F8_F4
 
   if aIsF4 and bIsF8:
-    return InstType.INST_F8_F4 if sourceSwap else InstType.INST_F4_F8
+    return InstType.INST_F4_F8
 
   # Mixed BF8 and F4
   if aIsBF8 and bIsF4:
-    return InstType.INST_F4_B8 if sourceSwap else InstType.INST_B8_F4
+    return InstType.INST_B8_F4
 
   if aIsF4 and bIsBF8:
-    return InstType.INST_B8_F4 if sourceSwap else InstType.INST_F4_B8
+    return InstType.INST_F4_B8
 
   raise RuntimeError(f"Unsupported data types for MFMA instruction: A = {aType}, B = {bType}\n")
 
