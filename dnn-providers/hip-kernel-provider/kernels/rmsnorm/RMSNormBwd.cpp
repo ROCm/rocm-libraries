@@ -16,17 +16,19 @@ using DxType = HIP_PLUGIN_RMSNORM_DX_TYPE;
 using ScaleType = HIP_PLUGIN_RMSNORM_SCALE_TYPE;
 using ComputeType = HIP_PLUGIN_RMSNORM_COMPUTE_TYPE;
 
-extern "C" __global__ void RMSnormBwdWeight(const DyType* __restrict__ dy,
-                                            const XType* __restrict__ x,
-                                            const ComputeType* __restrict__ rstd,
-                                            ScaleType* __restrict__ dweight)
+extern "C" __global__ void RMSnormBwdWeightBias(const DyType* __restrict__ dy,
+                                                const XType* __restrict__ x,
+                                                const ComputeType* __restrict__ rstd,
+                                                ScaleType* __restrict__ dweight,
+                                                ScaleType* __restrict__ dbias)
 {
     static_assert(std::is_same<ComputeType, float>::value,
-                  "ComputeType must be float for the RMSnormBwdWeight kernel");
+                  "ComputeType must be float for the RMSnormBwdWeightBias kernel");
 
     const unsigned int tidx = threadIdx.x + blockIdx.x * LOCAL_SIZE;
 
-    float sum = 0.0f;
+    float sum_dw = 0.0f;
+    float sum_db = 0.0f;
 
     // backward weight calculation
     for(unsigned int o = 0; o < OUTER_SIZE; ++o)
@@ -39,11 +41,16 @@ extern "C" __global__ void RMSnormBwdWeight(const DyType* __restrict__ dy,
             float pdy = to_float32<DyType>(dy[idx]);
             float px = to_float32<XType>(x[idx]);
 
-            sum += pdy * px * prstd;
+            sum_dw += pdy * px * prstd;
+            sum_db += pdy;
         }
     }
 
-    dweight[tidx] = sum;
+    dweight[tidx] = sum_dw;
+    if(dbias)
+    {
+        dbias[tidx] = sum_db;
+    }
 }
 
 extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
