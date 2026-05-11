@@ -5,9 +5,7 @@ run_alg(run_direct_conv<direct_conv::DirectHipConvForward4CFp16Kernel<5>, SIGNAT
 run_alg(run_direct_conv<direct_conv::DirectHipConvForward4CFp16Kernel<6>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvForward4CFp16Kernel<7>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvForward4CFp16Kernel<8>, SIGNATURE>);
-// Disabled: ROCm clang roc-7.1.1 backend crash (exit code 70, "Cannot select: i32 = bitcast")
-// on gfx950 for the {waves_c64=1, waves_q4=1} config.
-//run_alg(run_direct_conv<direct_conv::DirectHipConvForward4CFp16Kernel<9>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward4CFp16Kernel<9>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
 // Direct HIP convolution (streaming) 16c kernels — configs 9-17 are Fprop
