@@ -142,6 +142,45 @@ class TestComputeFlops:
         assert flops == (2 * 16 * 16 * 3 * 3 * 16 * 16 * 16) // 4
         assert partial is False
 
+    def test_conv_fwd_with_zero_output_uid(self):
+        # Regression: sample_conv_fwd.json uses uid=0 for the output
+        # tensor. An ``or`` chain on get() would treat 0 as falsy and
+        # mask the real UID, returning None for FLOPs.
+        graph = {
+            "tensors": [
+                {
+                    "uid": 0,
+                    "dims": [16, 16, 16, 16],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+                {
+                    "uid": 1,
+                    "dims": [16, 16, 16, 16],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+                {
+                    "uid": 2,
+                    "dims": [16, 16, 3, 3],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+            ],
+            "nodes": [
+                {
+                    "name": "conv",
+                    "type": "ConvolutionFwdAttributes",
+                    "inputs": {"x_tensor_uid": 1, "w_tensor_uid": 2},
+                    "outputs": {"y_tensor_uid": 0},
+                    "parameters": {"group_count": 1},
+                }
+            ],
+        }
+        flops, partial = compute_flops(graph)
+        assert flops == 2 * 16 * 16 * 3 * 3 * 16 * 16 * 16
+        assert partial is False
+
     def test_matmul_2d(self):
         flops, partial = compute_flops(_matmul_graph(m=256, n=1024, k=512))
         assert flops == 2 * 256 * 1024 * 512
@@ -159,11 +198,78 @@ class TestComputeFlops:
         assert flops == 4 * 8 * 16 * 16
         assert partial is False
 
-    def test_bandwidth_bound_returns_none(self):
+    def test_batchnorm_inference_4_flops_per_element(self):
+        # 32 * 64 * 28 * 28 elements × 4 ops/elem.
         flops, partial = compute_flops(_bnorm_graph())
-        # BN-only graph has no compute nodes counted; FLOPs is None and
-        # partial stays False because no unrecognised types appeared.
-        assert flops is None
+        assert flops == 4 * 32 * 64 * 28 * 28
+        assert partial is False
+
+    def test_layernorm_8_flops_per_element(self):
+        graph = {
+            "tensors": [
+                {
+                    "uid": 1,
+                    "dims": [8, 256, 1024],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+                {
+                    "uid": 2,
+                    "dims": [8, 256, 1024],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+            ],
+            "nodes": [
+                {
+                    "name": "ln",
+                    "type": "LayerNormAttributes",
+                    "inputs": {"x_tensor_uid": 1},
+                    "outputs": {"y_tensor_uid": 2},
+                }
+            ],
+        }
+        flops, partial = compute_flops(graph)
+        assert flops == 8 * 8 * 256 * 1024
+        assert partial is False
+
+    def test_softmax_4_flops_per_element(self):
+        graph = {
+            "tensors": [
+                {"uid": 1, "dims": [4, 1024], "data_type": "float", "virtual": False},
+                {"uid": 2, "dims": [4, 1024], "data_type": "float", "virtual": False},
+            ],
+            "nodes": [
+                {
+                    "name": "sm",
+                    "type": "SoftmaxAttributes",
+                    "inputs": {"x_tensor_uid": 1},
+                    "outputs": {"y_tensor_uid": 2},
+                }
+            ],
+        }
+        flops, partial = compute_flops(graph)
+        assert flops == 4 * 4 * 1024
+        assert partial is False
+
+    def test_reduction_one_flop_per_input_element(self):
+        graph = {
+            "tensors": [
+                {"uid": 1, "dims": [8, 1024], "data_type": "float", "virtual": False},
+                {"uid": 2, "dims": [8, 1], "data_type": "float", "virtual": False},
+            ],
+            "nodes": [
+                {
+                    "name": "red",
+                    "type": "ReductionAttributes",
+                    "inputs": {"x_tensor_uid": 1},
+                    "outputs": {"y_tensor_uid": 2},
+                }
+            ],
+        }
+        flops, partial = compute_flops(graph)
+        # Reduction work scales with the input size, not the (smaller) output.
+        assert flops == 8 * 1024
         assert partial is False
 
     def test_unknown_node_type_marks_partial(self):
@@ -186,12 +292,66 @@ class TestComputeFlops:
         assert flops is None
         assert partial is False
 
-    def test_mixed_compute_and_bandwidth_returns_compute_only(self):
-        graph = _conv_graph()
-        graph["nodes"].append(_bnorm_graph()["nodes"][0])
+    def test_mixed_graph_sums_all_recognised_flops(self):
+        # Build a combined graph manually so conv and BN don't share UIDs
+        # — _conv_graph and _bnorm_graph each start from uid=1, so simply
+        # concatenating their tensors would let BN tensors overwrite
+        # conv tensors and yield bogus conv shapes.
+        graph = {
+            "tensors": [
+                # Conv tensors (uid 0..2)
+                {
+                    "uid": 0,
+                    "dims": [16, 16, 16, 16],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+                {
+                    "uid": 1,
+                    "dims": [16, 16, 16, 16],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+                {
+                    "uid": 2,
+                    "dims": [16, 16, 3, 3],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+                # BN tensors (uid 10..11)
+                {
+                    "uid": 10,
+                    "dims": [32, 64, 28, 28],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+                {
+                    "uid": 11,
+                    "dims": [32, 64, 28, 28],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+            ],
+            "nodes": [
+                {
+                    "name": "conv",
+                    "type": "ConvolutionFwdAttributes",
+                    "inputs": {"x_tensor_uid": 1, "w_tensor_uid": 2},
+                    "outputs": {"y_tensor_uid": 0},
+                    "parameters": {"group_count": 1},
+                },
+                {
+                    "name": "bn",
+                    "type": "BatchnormInferenceAttributes",
+                    "inputs": {"x_tensor_uid": 10},
+                    "outputs": {"y_tensor_uid": 11},
+                },
+            ],
+        }
         flops, partial = compute_flops(graph)
-        # BN is silently skipped (bandwidth-bound), conv is counted.
-        assert flops == 2 * 16 * 16 * 3 * 3 * 16 * 16 * 16
+        expected_conv = 2 * 16 * 16 * 3 * 3 * 16 * 16 * 16
+        expected_bn = 4 * 32 * 64 * 28 * 28
+        assert flops == expected_conv + expected_bn
         assert partial is False
 
 
@@ -275,13 +435,11 @@ class TestListUnsupportedNodeTypes:
             {"name": "x2", "type": "MysteryAttributes", "inputs": {}, "outputs": {}}
         )
         graph["nodes"].append(
-            {
-                "name": "bn",
-                "type": "BatchnormInferenceAttributes",
-                "inputs": {},
-                "outputs": {},
-            }
+            {"name": "y", "type": "OtherUnknownAttributes", "inputs": {}, "outputs": {}}
         )
-        # ConvolutionFwdAttributes is supported, BN is bandwidth-bound
-        # (intentionally skipped from the list), Mystery* appears once.
-        assert list_unsupported_node_types(graph) == ["MysteryAttributes"]
+        # Conv is supported; the two unknown types each appear once and
+        # in first-seen order.
+        assert list_unsupported_node_types(graph) == [
+            "MysteryAttributes",
+            "OtherUnknownAttributes",
+        ]
