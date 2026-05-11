@@ -1112,16 +1112,15 @@ class TestPlaceGRs:
                     elif gr.tensor == 'A' and gr.mtIteration == 2:
                         a_n2.append((pi, slot.subIterK))
 
-        # 18 B n+1 atoms spread across both subIterK values in P0..P13
+        # 9 B n+1 atoms (grB.mn=2) spread across P0..P10
         assert b_n1 == [
-            (0,0),(0,1),(1,1),(2,0),(3,0),(3,1),(4,1),(5,1),(6,0),
-            (7,0),(7,1),(8,1),(9,1),(10,0),(11,0),(11,1),(12,1),(13,0)]
-        # 5 A n+2 atoms spread across both subIterK values in P14..P17
-        assert a_n2 == [(14,0),(15,0),(15,1),(16,1),(17,0)]
+            (0,0),(1,0),(2,1),(3,1),(5,0),(6,0),(7,1),(8,1),(10,0)]
+        # 5 A n+2 atoms spread across P11..P16
+        assert a_n2 == [(11,0),(12,1),(13,1),(15,0),(16,0)]
 
-        # B n+2 at P18
-        _assert_slot_grs(parts[18][0], ['B'], "P18 s0")
-        _assert_gr(parts[18][0], 'B', 0, 2, 0, 1, mt=2)
+        # B n+2 at P17
+        _assert_slot_grs(parts[17][1], ['B'], "P17 s1")
+        _assert_gr(parts[17][1], 'B', 0, 2, 0, 2, mt=2)
 
     def test_pgr1_gr_before_corresponding_lr(self):
         """PGR=1: GR(T, mt=X) must be placed strictly before first LR(T, mt=X)."""
