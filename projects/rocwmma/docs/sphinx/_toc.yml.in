@@ -9,6 +9,8 @@ subtrees:
 
 - caption: Install
   entries:
+  - file: install/installation
+    title: Install rocWMMA
   - file: install/source-build
     title: Build from source
 

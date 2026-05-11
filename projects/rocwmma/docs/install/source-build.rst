@@ -8,18 +8,15 @@
 Build and install rocWMMA from source
 *************************************
 
+To build rocWMMA as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build rocWMMA standalone using the following
+instructions.
+
 This topic provides instructions for installing and configuring the rocWMMA library.
-The quickest way to install rocWMMA is to use the prebuilt packages that are released with ROCm.
-Alternatively, there are instructions to build the component from the source code.
-
-The available ROCm packages are:
-
-*  rocwmma-dev (source files for development)
-*  rocwmma-samples (sample executables)
-*  rocwmma-samples-dbgsym (sample executables with debug symbols)
-*  rocwmma-tests (test executables)
-*  rocwmma-tests-dbgsym (test executables with debug symbols)
-*  rocwmma-clients (samples, tests, and benchmarks executables)
 
 Prerequisites
 =============
@@ -30,42 +27,6 @@ rocWMMA requires the following prerequisites:
    For more information, see :doc:`ROCm installation <rocm-install-on-linux:index>`.
 *  :doc:`rocBLAS <rocblas:index>` version 4.3.0 for ROCm version 6.3 or later. (Optional: only required if rocWMMA is configured
    to use rocBLAS for validation. See below for more information.)
-
-Installing prebuilt packages
-=============================
-
-To install rocWMMA on Ubuntu or Debian, use these commands:
-
-.. code-block:: shell
-
-   sudo apt-get update
-   sudo apt-get install rocwmma-dev rocwmma-samples rocwmma-tests
-
-To install rocWMMA on RHEL-based platforms, use:
-
-.. code-block:: shell
-
-   sudo yum update
-   sudo yum install rocwmma-dev rocwmma-samples rocwmma-tests
-
-To install rocWMMA on SLES, use:
-
-.. code-block:: shell
-
-   sudo dnf upgrade
-   sudo dnf install rocwmma-dev rocwmma-samples rocwmma-tests
-
-
-After rocWMMA is installed, it can be used just like any other library with a C++ API.
-
-.. note::
-
-   The prebuilt package client executables support the gfx908, gfx90a, gfx942, gfx950,
-   gfx1100, gfx1101, gfx1102, gfx1200, and gfx1201 targets.
-
-After rocWMMA is installed, you can find the ``rocwmma.hpp`` header file in the ``/opt/rocm/include/rocwmma`` directory.
-To make calls into rocWMMA, ensure you only include the ``rocwmma.hpp``, ``rocwmma_coop.hpp``, and ``rocwmma_transforms.hpp`` files in the user code.
-Don't directly include any other rocWMMA files from ``/opt/rocm/include/internal``.
 
 Building and installing rocWMMA from source
 =============================================
