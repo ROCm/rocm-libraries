@@ -1,5 +1,10 @@
 # CMS-vs-Default Diff Skill — Phase 1 Investigation
 
+> **Status: implemented in `~/.claude/skills/cms-vs-default/` as of 2026-05-08.**
+> Phase 2 closed bead `rocm-libraries-prp2`. Skill files are outside this repo
+> (per skill convention) — see `~/.claude/skills/cms-vs-default/SKILL.md` and
+> `~/.claude/skills/cms-vs-default/references/{TAXONOMY,SUBAGENT_PROMPT}.md`.
+
 Bead: `rocm-libraries-prp2`
 Branch: `users/alvasile/validator_long_term_plans` (vlt)
 Phase 1 scope: investigation only. No code changes; no skill created.
