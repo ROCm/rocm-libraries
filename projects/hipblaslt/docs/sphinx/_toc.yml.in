@@ -10,7 +10,9 @@ subtrees:
 - caption: Install
   entries:
   - file: install/building-installing-hipblaslt
-    title: Installation guide
+    title: Install hipBLASLt
+  - file: install/building-installing-hipblaslt
+    title: Build from source
 
 - caption: Conceptual
   entries:
