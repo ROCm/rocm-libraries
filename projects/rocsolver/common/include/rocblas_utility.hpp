@@ -559,6 +559,29 @@ catch(...)
 
 #undef ROCSOLVER_ROCBLAS_HAS_F8_DATATYPES
 
+// RAII class to set and restore pointer mode.
+class rocblas_pointer_mode_saver
+{
+public:
+    // Constructor saves original mode and sets mode to new_mode.
+    rocblas_pointer_mode_saver( rocblas_handle& handle, rocblas_pointer_mode new_mode ):
+        handle_( handle )
+    {
+        rocblas_get_pointer_mode( handle_, &old_mode_ );
+        rocblas_set_pointer_mode( handle_, new_mode );
+    }
+
+    // Destructor restores original mode.
+    ~rocblas_pointer_mode_saver()
+    {
+        rocblas_set_pointer_mode( handle_, old_mode_ );
+    }
+
+private:
+    rocblas_handle& handle_;
+    rocblas_pointer_mode old_mode_;
+};
+
 #ifdef ROCSOLVER_LIBRARY
 ROCSOLVER_END_NAMESPACE
 #endif
