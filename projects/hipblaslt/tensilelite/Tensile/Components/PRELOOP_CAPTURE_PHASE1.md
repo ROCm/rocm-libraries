@@ -373,36 +373,94 @@ today.
 
 ---
 
-## Phase 2 questions to stage
+## Phase 2 decisions — RESOLVED
 
-Per the bead's Phase 2 directive, these are the questions to ask the user
-before any implementation:
+User decisions recorded 2026-05-11.
 
-1. **Worth closing now?** Q4 confirms the gap is latent — no current CMS
-   schedule diverges. Is it worth implementing now (defense-in-depth, makes
-   the validator's stated contract true by construction), or document and
-   defer (P2 stays open as a watching brief, re-evaluate when next CMS
-   schedule lands that touches PLR/Pack)?
-2. **Capture shape:** Option A (extend `FourPartCapture` with
-   `prologue: Optional[LoopBodyCapture]`, accept `FourPartCapture` naming
-   becomes a misnomer) or Option B (separate `PrologueCapture` object on
-   `CaptureContext`, lose cross-graph edges)? Recommendation above is A; user
-   sign-off needed.
-3. **Comparison shape:** Confirm single concatenated graph (Q3 verdict). Is
-   there any reason to prefer the boundary-contract approach (e.g. plans for
-   the validator to compare prologue-only across kernel variants)?
-4. **`UsePLRPack`-vs-non-`UsePLRPack` as an explicit divergence-catching
-   shape:** should Phase 3 build a unit-test fixture that constructs *two*
-   captures from the same kernel module — one with `UsePLRPack=1`, one with
-   `UsePLRPack=0` — and asserts that `compare_graphs` flags the prologue
-   structural difference? This would prove the validator is sensitive to
-   prologue divergences, separate from any production schedule actually
-   exhibiting one.
-5. **Default for absent prologue:** PGR=0 kernels emit no prologue dataflow.
-   Should `prologue` be `None` (matches Option A's `Optional` type), or
-   `LoopBodyCapture(instructions=[])` (would trip the empty-body guard at
-   `:961` — would need to add `BODY_LABEL_PROLOGUE` to the absent-key skip
-   path at `:957`)?
+1. **Implement now → YES.** Worth implementing immediately. Two motivations:
+   (a) catch current CMS divergences in the preloop (defense-in-depth);
+   (b) the change is a precursor to leveraging the validator-on-arbitrary-
+   timeline work — once the validator accepts arbitrary timelines, this
+   capture lets us test different flags that impact the preloop (e.g. the
+   conditions under which `usePLRPack` is initially introduced).
+
+2. **Capture shape → Option A.** Extend `FourPartCapture` with
+   `prologue: Optional[LoopBodyCapture]`. Don't worry about the
+   `FourPartCapture` naming becoming a misnomer or the resulting code
+   churn — everything is on a development branch. Take the change all
+   the way; rename / clean up downstream as needed.
+
+3. **Comparison shape → ONE graph for the whole thing.** Single
+   concatenated graph (Q3's verdict). Don't preserve a prologue-vs-
+   mainloop boundary in the graph structure; the prologue is just more
+   nodes/edges in the same `DataflowGraph`.
+
+4. **`UsePLRPack`-vs-non-`UsePLRPack` divergence-catching tests → YES,
+   plus a parallel whole-kernel test.** Phase 3 builds two parallel
+   tests:
+
+   a. **Preloop-only divergence test.** Construct two captures from
+      the same kernel module — one with `UsePLRPack=1`, one with
+      `UsePLRPack=0`. When comparing JUST the preloop (or the
+      preloop's contribution to the merged graph), `compare_graphs`
+      MUST flag the prologue structural difference.
+
+   b. **Whole-kernel `UsePLRPack` CMS test.** Construct a CMS kernel
+      that uses `UsePLRPack`. Compare it against BOTH:
+        - default with `UsePLRPack=True`, AND
+        - default with `UsePLRPack=False`.
+      BOTH comparisons MUST come out as PASSING. (The CMS schedule
+      compensates for the flag's prologue effect during the mainloop;
+      the whole-kernel comparison should be insensitive to the
+      `UsePLRPack` setting on the default side.)
+
+   These two tests together prove: the validator is structurally
+   sensitive to prologue divergences (test a) AND CMS schedules can
+   correctly absorb prologue-flag differences when the whole kernel
+   is considered (test b).
+
+5. **Default for absent prologue → optional.** PGR=0 kernels emit no
+   prologue; in those cases `prologue: Optional[LoopBodyCapture]` is
+   `None`. Option A's typing already supports this. Update
+   `BODY_LABEL_PROLOGUE` consumers to handle the `None` case cleanly —
+   no changes to the absent-key skip path needed beyond what naturally
+   falls out of the `Optional` shape.
+
+### Phase 2 implementation directives (derived)
+
+- **Capture surface**: `FourPartCapture.prologue: Optional[LoopBodyCapture]`
+  (decision 2). Rename the dataclass if naming clarity warrants — code
+  churn acceptable per decision 2.
+- **Graph integration**: the prologue's nodes/edges land in the same
+  `DataflowGraph` as the mainloop (decision 3). Implement by extending
+  `build_dataflow_graph`'s body-walk to start at the prologue when
+  present.
+- **Default-side prologue capture site**: per Phase 1 §Q1, the prologue
+  ends at a clear checkpoint in `kernelBody`. Plumb a
+  `LoopBodyCaptureBuilder` for the prologue body labelled
+  `BODY_LABEL_PROLOGUE` and finalize at that checkpoint.
+- **Test fixtures (decision 4)**:
+  - `test_preloop_divergence_catches_useplrpack_change` (or similar):
+    same kernel module, two captures (UsePLRPack=1 vs =0), assert
+    `compare_graphs` reports prologue structural diff.
+  - `test_whole_kernel_useplrpack_cms_matches_both_defaults` (or
+    similar): one CMS kernel using `UsePLRPack`, compared against
+    `UsePLRPack=True` default and `UsePLRPack=False` default; assert
+    both comparisons pass.
+- **None-handling (decision 5)**: `Optional` semantics; PGR=0 kernels
+  have `capture.prologue is None`; downstream consumers branch
+  cleanly on the None case (no `BODY_LABEL_PROLOGUE` skip-path
+  changes needed).
+
+### Sequencing
+
+- This bead is **independent** — does not block on anything currently
+  in flight.
+- Soft-aligned with the broader 5gd Timeline-generalization work (3g4
+  scaffold + xe5 bridge already in vlt). Once the validator accepts
+  arbitrary timelines, the prologue-aware capture is one of the
+  flag-toggle test scenarios that timeline shape enables (per decision 1's
+  motivation b).
 
 ---
 
