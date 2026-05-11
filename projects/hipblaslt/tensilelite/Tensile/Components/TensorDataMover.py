@@ -222,9 +222,7 @@ class TensorDataMoverLoad(TensorDataMover):
         mod = Module()
         dataSizeOp = None
 
-        if isMetadata:
-            dataSizeOp = 0
-        elif dtype.isInt8() or dtype.is8bitFloat() or dtype.isFloat4():
+        if isMetadata or dtype.isInt8() or dtype.is8bitFloat() or dtype.isFloat4() or dtype.is6bitFloat():
             dataSizeOp = 0
         elif dtype.isBFloat16() or dtype.isHalf():
             dataSizeOp = 1
