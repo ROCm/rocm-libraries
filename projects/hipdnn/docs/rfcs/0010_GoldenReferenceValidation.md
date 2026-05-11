@@ -75,8 +75,8 @@ The golden reference infrastructure is already built and working for batchnorm. 
 | Component | File(s) | Role |
 |-----------|---------|------|
 | Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | Reads bundles from disk, separates inputs from expected outputs, validates results |
-| CPU runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | Base fixture + `getGoldenReferenceParams(subDir)` — scans a directory for `.json` files, each becomes a gtest parameter |
-| GPU runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern, executes via MIOpen GPU plugin (defined, no tests yet) |
+| Ref runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | Base fixture + `getGoldenReferenceParams(subDir)` — scans a directory for `.json` files, each becomes a gtest parameter. Renamed to `ValidateGoldenBundleWithRef` in this RFC |
+| Plugin runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern, executes via engine plugin (defined, no tests yet). Renamed to `ValidateGoldenBundleWithPlugin` in this RFC |
 | Test instantiation (current) | [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp) | One class + `INSTANTIATE_TEST_SUITE_P` per operation/layout/datatype — replaced by the generic runner in this RFC |
 | Tolerance defaults | [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/TestTolerances.hpp) | Per-operation compile-time atol/rtol constants (e.g., `getToleranceInference<T>()` for batchnorm) |
 | TOML overrides | [`TestSettings.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/TestSettings.hpp), engine `.toml` files | Per-engine `[[tolerance_overrides]]` with glob matching — lets specific tests relax tolerances without code changes |
@@ -95,8 +95,8 @@ The table below maps each existing component to its treatment in this RFC.
 | TOML override infrastructure | **Kept as-is** | `TestSettings.hpp`, `TestConfig.hpp`, and per-engine `.toml` files with `[[tolerance_overrides]]` glob matching are connected to golden tests — a TOML override that matches a golden test name applies automatically. |
 | Python generation framework | **Kept, enhanced** | `reference_data_scripts/utilities/` (`graph.py`, `tensor.py`, `common.py`) remain the generation backbone. Enhanced: generator scripts auto-derive output paths from graph content (operation type, layout, data type) to match the folder convention. |
 | Existing golden data | **Kept, relocated** | 6 batchnorm bundles move from `hipdnn_reference_data/` to `golden_reference_data/quick/BatchnormFwdInference/...` under the new folder convention. Bundle contents unchanged. |
-| `GoldenReferenceCpu.hpp` | **Pattern replaced** | The base fixture pattern (`goldenReferenceTestSuite()`, `getGoldenReferenceParams(subDir)`) is replaced by the generic test runner. Key difference: no per-operation test class, recursive discovery across tier folders, tolerance looked up by operation type instead of hard-coded per fixture. The existing functions inform the generic runner design. |
-| `GoldenReferenceGpu.hpp` | **Pattern replaced** | Same as CPU runner — the per-operation fixture pattern is replaced by a single generic GPU runner class. Currently has no tests; the generic runner provides the first GPU golden tests. |
+| `GoldenReferenceCpu.hpp` → `ValidateGoldenBundleWithRef` | **Pattern replaced** | The base fixture pattern (`goldenReferenceTestSuite()`, `getGoldenReferenceParams(subDir)`) is replaced by the generic test runner. Key difference: no per-operation test class, recursive discovery across tier folders, tolerance looked up by operation type instead of hard-coded per fixture. The existing functions inform the generic runner design. |
+| `GoldenReferenceGpu.hpp` → `ValidateGoldenBundleWithPlugin` | **Pattern replaced** | Same as ref runner — the per-operation fixture pattern is replaced by a single generic plugin runner class. Currently has no tests; the generic runner provides the first plugin golden tests. |
 | `TestCpuFpReferenceBatchnorm.cpp` | **Replaced** | The per-operation test class + `INSTANTIATE_TEST_SUITE_P` pattern is replaced by recursive auto-discovery. Adding a new operation no longer requires writing a C++ test class — drop bundle files in the right tier folder. |
 | `DynamicTolerances.hpp` | **Future integration** | Higham-style error bounds are not connected to golden tests in this RFC. Future work: use dynamic tolerances as a fallback when `TestTolerances.hpp` has no entry for an operation type. |
 
@@ -104,7 +104,7 @@ The table below maps each existing component to its treatment in this RFC.
 
 All of these components operate on a single shared artifact -- the golden data bundle. A bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
 
-The bundle format is **deliberately independent of any test infrastructure**. The JSON follows the FlatBuffers `graph.fbs` schema; the `.bin` files are raw contiguous tensors. Any tool that can parse JSON and read binary can consume bundles — they are not tied to GTest, `TestGoldenReferenceCpu`, or the `getGoldenReferenceParams()` discovery mechanism. Examples of other consumers:
+The bundle format is **deliberately independent of any test infrastructure**. The JSON follows the FlatBuffers `graph.fbs` schema; the `.bin` files are raw contiguous tensors. Any tool that can parse JSON and read binary can consume bundles — they are not tied to GTest, `ValidateGoldenBundleWithRef`, or the `getGoldenReferenceParams()` discovery mechanism. Examples of other consumers:
 
 - **External test harnesses** — a partner's internal test framework loads the same bundles to validate their engine
 - **Python validation scripts** — a PyTorch script loads a bundle, re-runs the computation, compares
@@ -113,6 +113,34 @@ The bundle format is **deliberately independent of any test infrastructure**. Th
 A bundle can be **full** or **graph-only**. A **full bundle** (`{Name}.json` + `.bin` files) is the primary format — it carries pre-computed tensor data and the runner loads it and compares. This is the end-state format: every test is a full bundle with known-good reference data.
 
 A **graph-only bundle** (`{Name}.json` alone, no `.bin` files) is a **transitional tool** for migrating existing computed tests. It carries only the computation definition, no tensor data. The runner generates inputs, runs the engine under test and a reference source, compares their outputs, and optionally writes the resulting `.bin` files back to produce a full bundle. Graph-only bundles let us move test definitions from `buildGraph()` to disk incrementally — once the `.bin` files are generated and committed, the graph-only bundle becomes a full bundle and the migration for that test is complete.
+
+#### Bundle metadata (open for discussion)
+
+A bundle today carries the computation definition and tensor data — everything needed to run the test. It does not carry provenance information: who generated it, when, with what tool version, or from what source model.
+
+Adding an optional `metadata` object to the graph JSON could improve traceability:
+
+```json
+{
+  "metadata": {
+    "generator": "reference_data_scripts/batchnorm_inference.py",
+    "generated_at": "2026-05-11T14:30:00Z",
+    "pytorch_version": "2.3.0",
+    "rocm_version": "6.4.0",
+    "source_model": "resnet50",
+    "notes": "baseline for RFC 0010 migration"
+  }
+}
+```
+
+This is **not required for the test runner** — the runner ignores fields it doesn't recognize. The metadata is purely for humans debugging a failure: "this bundle was generated 6 months ago with PyTorch 2.1 — has the reference changed since then?"
+
+**Open questions**:
+- Which fields (if any) should be standardized vs. freeform?
+- Should the generator scripts populate metadata automatically, or is it opt-in?
+- Is this valuable enough to include in v1, or should it wait until we see a real need?
+
+This section is intentionally left open for team input.
 
 ### Golden Data Format
 
@@ -191,7 +219,7 @@ Tolerance is looked up at runtime from the graph content: the runner reads the o
 When a golden test fails, the output should give the developer everything needed to diagnose the problem without re-running or adding instrumentation:
 
 ```
-FAIL: TestGoldenReference/ConvFwd_nhwc_fp16_resnet50_layer3
+FAIL: ValidateGoldenBundleWithRef/ConvFwd_nhwc_fp16_resnet50_layer3
   Bundle: quick/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json
   Tensor: y (UID 8, output)
   Shape:  [1, 64, 56, 56]  fp16
@@ -209,16 +237,16 @@ The runner uses one `INSTANTIATE_TEST_SUITE_P` per tier, not per operation. Thes
 
 ```cpp
 // Four fixed instantiations — one per tier. Never changes.
-INSTANTIATE_TEST_SUITE_P(, TestGoldenReference,
+INSTANTIATE_TEST_SUITE_P(, ValidateGoldenBundleWithRef,
     discoverGoldenBundles("quick"));          // smoke tier
 
-INSTANTIATE_TEST_SUITE_P(Standard, TestGoldenReference,
+INSTANTIATE_TEST_SUITE_P(Standard, ValidateGoldenBundleWithRef,
     discoverGoldenBundles("standard"));
 
-INSTANTIATE_TEST_SUITE_P(Comprehensive, TestGoldenReference,
+INSTANTIATE_TEST_SUITE_P(Comprehensive, ValidateGoldenBundleWithRef,
     discoverGoldenBundles("comprehensive"));
 
-INSTANTIATE_TEST_SUITE_P(Full, TestGoldenReference,
+INSTANTIATE_TEST_SUITE_P(Full, ValidateGoldenBundleWithRef,
     discoverGoldenBundles("full"));
 ```
 
@@ -298,7 +326,7 @@ The `--verification-mode` flag overrides this default. In golden mode, tests wit
 |------|-----------|-----------------|
 | `auto` (default) | Per-test fallback: golden → GPU ref → CPU ref | Best available |
 | `computed` | Test-as-code tests (`IntegrationGraphVerificationHarness`) — graph built by `buildGraph()` in C++ | CPU/GPU reference executor at runtime |
-| `golden` | Test-as-data tests (`TestGoldenReferenceCpu` / `TestGoldenReferenceGpu`) — graph loaded from disk; tests without golden data are skipped | Pre-computed data from bundle |
+| `golden` | Test-as-data tests (`ValidateGoldenBundleWithRef` / `ValidateGoldenBundleWithPlugin`) — graph loaded from disk; tests without golden data are skipped | Pre-computed data from bundle |
 | `both` | Both suites, independently — both must pass | Runtime executor + pre-computed data |
 
 **Floating-point edge case**: `-0.0` vs `+0.0` uses value comparison, not bitwise. NaN handling is covered in [Data Integrity](#data-integrity).
@@ -340,7 +368,7 @@ This evolution changes *how* the default is computed — it does not change the 
 
 #### Current gap
 
-The golden ref framework (`TestGoldenReferenceCpu`) takes tolerances as hard-coded function parameters — it bypasses both the TOML override lookup and the operation-based tolerance selection. Golden tests must be connected to the same two-level flow: check TOML override first, fall back to per-operation default.
+The golden ref framework (`ValidateGoldenBundleWithRef`) takes tolerances as hard-coded function parameters — it bypasses both the TOML override lookup and the operation-based tolerance selection. Golden tests must be connected to the same two-level flow: check TOML override first, fall back to per-operation default.
 
 **Acceptance criteria**:
 - [ ] Golden data bundles contain no tolerance fields
@@ -466,11 +494,11 @@ The test name is derived from graph content, not the file path. Given these bund
 
 | File path | Graph content | Generated test name |
 |-----------|--------------|---------------------|
-| `quick/BatchnormFwdInference/nchw/fp32/typical/typical.json` | batchnorm fwd inference, nchw, fp32 | `TestGoldenReference/BatchnormFwdInference_nchw_fp32_typical` |
-| `quick/BatchnormFwdInference/nchw/fp16/typical/typical.json` | batchnorm fwd inference, nchw, fp16 | `TestGoldenReference/BatchnormFwdInference_nchw_fp16_typical` |
-| `quick/BatchnormFwdInference/nchw/fp32/odd_spatial/odd_spatial.json` | batchnorm fwd inference, nchw, fp32 | `TestGoldenReference/BatchnormFwdInference_nchw_fp32_odd_spatial` |
-| `standard/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json` | conv fwd, nhwc, fp16 | `Standard/TestGoldenReference/ConvFwd_nhwc_fp16_resnet50_layer3` |
-| `quick/customer_issues/CASE-12345/repro/repro.json` | conv fwd, nchw, fp32 | `TestGoldenReference/ConvFwd_nchw_fp32_repro` |
+| `quick/BatchnormFwdInference/nchw/fp32/typical/typical.json` | batchnorm fwd inference, nchw, fp32 | `ValidateGoldenBundleWithRef/BatchnormFwdInference_nchw_fp32_typical` |
+| `quick/BatchnormFwdInference/nchw/fp16/typical/typical.json` | batchnorm fwd inference, nchw, fp16 | `ValidateGoldenBundleWithRef/BatchnormFwdInference_nchw_fp16_typical` |
+| `quick/BatchnormFwdInference/nchw/fp32/odd_spatial/odd_spatial.json` | batchnorm fwd inference, nchw, fp32 | `ValidateGoldenBundleWithRef/BatchnormFwdInference_nchw_fp32_odd_spatial` |
+| `standard/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json` | conv fwd, nhwc, fp16 | `Standard/ValidateGoldenBundleWithRef/ConvFwd_nhwc_fp16_resnet50_layer3` |
+| `quick/customer_issues/CASE-12345/repro/repro.json` | conv fwd, nchw, fp32 | `ValidateGoldenBundleWithRef/ConvFwd_nchw_fp32_repro` |
 
 Note the last row: the customer dropped a bundle in an unusual folder path, but the test name comes from graph content — the folder path doesn't matter.
 
