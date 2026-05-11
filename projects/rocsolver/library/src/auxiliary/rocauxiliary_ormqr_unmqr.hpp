@@ -38,6 +38,8 @@
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
+#include "print_matrix.hpp"
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <bool BATCHED, typename T>
@@ -159,7 +161,7 @@ rocblas_status rocsolver_ormqr_unmqr_template(rocblas_handle handle,
                                               const rocblas_int shiftA,
                                               const rocblas_int lda,
                                               const rocblas_stride strideA,
-                                              T* ipiv,
+                                              T* tau,
                                               const rocblas_stride strideP,
                                               U C,
                                               const rocblas_int shiftC,
@@ -177,6 +179,8 @@ rocblas_status rocsolver_ormqr_unmqr_template(rocblas_handle handle,
                     "shiftA:", shiftA, "lda:", lda, "shiftC:", shiftC, "ldc:", ldc,
                     "bc:", batch_count);
 
+printf( "%s:%d\n", __func__, __LINE__ );
+
     // quick return
     if(!n || !m || !k || !batch_count)
         return rocblas_status_success;
@@ -187,7 +191,7 @@ rocblas_status rocsolver_ormqr_unmqr_template(rocblas_handle handle,
     // if the matrix is small, use the unblocked variant of the algorithm
     if(k <= xxMQx_BLOCKSIZE)
         return rocsolver_orm2r_unm2r_template<T>(
-            handle, side, trans, m, n, k, A, shiftA, lda, strideA, ipiv, strideP, C, shiftC, ldc,
+            handle, side, trans, m, n, k, A, shiftA, lda, strideA, tau, strideP, C, shiftC, ldc,
             strideC, batch_count, scalars, AbyxORwork, diagORtmptr, workArr);
 
     rocblas_int ldw = xxMQx_BLOCKSIZE;
@@ -247,15 +251,33 @@ rocblas_status rocsolver_ormqr_unmqr_template(rocblas_handle handle,
         }
 
         // generate triangular factor of current block reflector
-        rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_column_wise, nq - i,
-                                    ib, A, shiftA + idx2D(i, i, lda), lda, strideA, ipiv + i, strideP,
-                                    trfact, ldw, strideW, batch_count, scalars, AbyxORwork, workArr);
+        rocsolver_larft_template<T>(
+            handle, rocblas_forward_direction, rocblas_column_wise, nq - i, ib,
+            A, shiftA + idx2D(i, i, lda), lda, strideA,
+            tau + i, strideP,
+            trfact, ldw, strideW,
+            batch_count, scalars, AbyxORwork, workArr);
+
+if constexpr (! BATCHED && ! STRIDED)
+{
+printf( "larft j=%d\n", j );
+check_nan( "Tr", ib, ib, trfact, ldw, stream );
+}
 
         // apply current block reflector
         rocsolver_larfb_template<BATCHED, STRIDED, T>(
-            handle, side, trans, rocblas_forward_direction, rocblas_column_wise, nrow, ncol, ib, A,
-            shiftA + idx2D(i, i, lda), lda, strideA, trfact, 0, ldw, strideW, C,
-            shiftC + idx2D(ic, jc, ldc), ldc, strideC, batch_count, diagORtmptr, workArr);
+            handle, side, trans, rocblas_forward_direction, rocblas_column_wise, nrow, ncol, ib,
+            A, shiftA + idx2D(i, i, lda), lda, strideA,
+            trfact, 0, ldw, strideW,
+            C, shiftC + idx2D(ic, jc, ldc), ldc, strideC,
+            batch_count, diagORtmptr, workArr);
+
+if constexpr (! BATCHED && ! STRIDED)
+{
+printf( "larfb j=%d\n", j );
+check_nan( "C", nrow, ncol, C + idx2D( ic, jc, ldc ), ldc, stream );
+}
+
     }
 
     return rocblas_status_success;
@@ -272,7 +294,7 @@ rocblas_status rocsolver_ormqr_unmqr_template(rocblas_handle handle,
                                               const rocblas_int shiftA,
                                               const rocblas_int lda,
                                               const rocblas_stride strideA,
-                                              T* ipiv,
+                                              T* tau,
                                               const rocblas_stride strideP,
                                               U C,
                                               const rocblas_int shiftC,
@@ -294,6 +316,8 @@ rocblas_status rocsolver_ormqr_unmqr_template(rocblas_handle handle,
                     "shiftA:", shiftA, "lda:", lda, "shiftC:", shiftC, "ldc:", ldc,
                     "bc:", batch_count);
 
+printf( "%s:%d\n", __func__, __LINE__ );  // calls this one
+
     // quick return
     if(!n || !m || !k || !batch_count)
         return rocblas_status_success;
@@ -303,9 +327,12 @@ rocblas_status rocsolver_ormqr_unmqr_template(rocblas_handle handle,
 
     // if the matrix is small, use the unblocked variant of the algorithm
     if(k <= xxMQx_BLOCKSIZE)
+    {
+        printf( "k %d <= xxMQx_BLOCKSIZE %d\n", k, xxMQx_BLOCKSIZE );
         return rocsolver_orm2r_unm2r_template<T>(
-            handle, side, trans, m, n, k, A, shiftA, lda, strideA, ipiv, strideP, C, shiftC, ldc,
+            handle, side, trans, m, n, k, A, shiftA, lda, strideA, tau, strideP, C, shiftC, ldc,
             strideC, batch_count, scalars, AbyxORwork, diagORtmptr, workArr);
+    }
 
     rocblas_int ldw = xxMQx_BLOCKSIZE;
     rocblas_stride strideW = rocblas_stride(ldw) * ldw;
@@ -364,17 +391,34 @@ rocblas_status rocsolver_ormqr_unmqr_template(rocblas_handle handle,
         }
 
         // generate triangular factor of current block reflector
-        rocsolver_larft_inverse_template<T>(handle, rocblas_forward_direction, rocblas_column_wise,
-                                            nq - i, ib, A, shiftA + idx2D(i, i, lda), lda, strideA,
-                                            ipiv + i, strideP, trfact, ldw, strideW, batch_count,
-                                            AbyxORwork, workArr);
+        rocsolver_larft_inverse_template<T>(
+            handle, rocblas_forward_direction, rocblas_column_wise,
+            nq - i, ib,
+            A, shiftA + idx2D(i, i, lda), lda, strideA,
+            tau + i, strideP,
+            trfact, ldw, strideW,
+            batch_count, AbyxORwork, workArr);
+
+if constexpr (! BATCHED && ! STRIDED)
+{
+printf( "larft j=%d\n", j );
+//print_matrix( "Tr", ib, ib, trfact, ldw, 3, stream );
+check_nan( "Tr", ib, ib, trfact, ldw, stream );
+}
 
         // apply current block reflector
         rocsolver_larfb_inverse_template<BATCHED, STRIDED, T>(
-            handle, side, trans, rocblas_forward_direction, rocblas_column_wise, nrow, ncol, ib, A,
-            shiftA + idx2D(i, i, lda), lda, strideA, trfact, 0, ldw, strideW, C,
-            shiftC + idx2D(ic, jc, ldc), ldc, strideC, batch_count, diagORtmptr, AbyxORwork, work2,
-            work3, work4, workArr, optim_mem);
+            handle, side, trans, rocblas_forward_direction, rocblas_column_wise, nrow, ncol, ib,
+            A, shiftA + idx2D(i, i, lda), lda, strideA,
+            trfact, 0, ldw, strideW,
+            C, shiftC + idx2D(ic, jc, ldc), ldc, strideC,
+            batch_count, diagORtmptr, AbyxORwork, work2, work3, work4, workArr, optim_mem);
+
+if constexpr (! BATCHED && ! STRIDED)
+{
+printf( "larfb j=%d\n", j );
+check_nan( "C", nrow, ncol, C + shiftC + idx2D(ic, jc, ldc), ldc, stream );
+}
     }
 
     return rocblas_status_success;
@@ -392,7 +436,7 @@ void rocsolver_ormqr_unmqr_template(rocblas_handle handle,
                                     const rocblas_int shiftA,
                                     const rocblas_int lda,
                                     const rocblas_stride strideA,
-                                    T* ipiv,
+                                    T* tau,
                                     const rocblas_stride strideP,
                                     T* C,
                                     const rocblas_int shiftC,
@@ -406,6 +450,8 @@ void rocsolver_ormqr_unmqr_template(rocblas_handle handle,
                                     T** workArr,
                                     T** workArr2)
 {
+printf( "%s:%d\n", __func__, __LINE__ );
+
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
@@ -414,7 +460,7 @@ void rocsolver_ormqr_unmqr_template(rocblas_handle handle,
                             batch_count);
 
     rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
-        handle, side, trans, m, n, k, A, shiftA, lda, strideA, ipiv, strideP, (T* const*)workArr2,
+        handle, side, trans, m, n, k, A, shiftA, lda, strideA, tau, strideP, (T* const*)workArr2,
         shiftC, ldc, strideC, batch_count, scalars, AbyxORwork, diagORtmptr, trfact, workArr);
 }
 

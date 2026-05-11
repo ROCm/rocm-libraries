@@ -41,6 +41,8 @@
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
 
+#include "print_matrix.hpp"
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 /*************** Main kernels *********************************************************/
@@ -74,7 +76,9 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
         Fp = F + b * strideF;
 
         if(j == i)
+        {
             Fp[idx2D(j, i, ldf)] = tp[i];
+        }
         else if(direct == rocblas_forward_direction)
         {
             if(j < i)
@@ -103,7 +107,9 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
                 }
             }
             else
+            {
                 Fp[idx2D(j, i, ldf)] = 0;
+            }
         }
         else
         {
@@ -135,7 +141,9 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
                 }
             }
             else
+            {
                 Fp[idx2D(j, i, ldf)] = 0;
+            }
         }
     }
 }
@@ -168,7 +176,9 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
         Fp = F + b * strideF;
 
         if(j == i)
+        {
             Fp[idx2D(j, i, ldf)] = tp[i];
+        }
         else if(direct == rocblas_forward_direction)
         {
             if(j < i)
@@ -230,7 +240,9 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
                 }
             }
             else
+            {
                 Fp[idx2D(j, i, ldf)] = 0;
+            }
         }
     }
 }
@@ -279,8 +291,12 @@ ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
 
     // copy F to shared memory
     for(rocblas_int i = tid; i < k; i += tid_inc)
+    {
         for(rocblas_int j = i; j < k; j++)
+        {
             F[i + j * ldf] = Ftemp[i + j * ldfA];
+        }
+    }
     __syncthreads();
 
     // --------- MAIN BODY ---------
@@ -302,7 +318,9 @@ ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
             {
                 T temp = 0;
                 for(rocblas_int j = 0; j < nn; j++)
+                {
                     temp += conj(Vm[j + i * ldv]) * Vx[j];
+                }
                 work[i] = tau[kk] * temp + Fx[i];
             }
         }
@@ -329,7 +347,9 @@ ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
         {
             T temp = 0;
             for(rocblas_int j = i; j < mm; j++)
+            {
                 temp += F[i + j * ldf] * work[j];
+            }
             Fx[i] = temp;
         }
 
@@ -338,8 +358,12 @@ ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
 
     // copy shared memory back to F
     for(rocblas_int i = tid; i < k; i += tid_inc)
+    {
         for(rocblas_int j = i; j < k; j++)
+        {
             Ftemp[i + j * ldfA] = F[i + j * ldf];
+        }
+    }
 }
 
 template <typename T, typename U>
@@ -373,8 +397,12 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
 
     // copy F to shared memory
     for(rocblas_int i = tid; i < k; i += tid_inc)
+    {
         for(rocblas_int j = 0; j <= i; j++)
+        {
             F[i + j * ldf] = Ftemp[i + j * ldfA];
+        }
+    }
     __syncthreads();
 
     // --------- MAIN BODY ---------
@@ -397,7 +425,9 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
             {
                 T temp = 0;
                 for(rocblas_int j = 0; j < nn; j++)
+                {
                     temp += conj(Vm[j + i * ldv]) * Vx[j];
+                }
                 work[i] = tau[kk] * temp + Fx[i];
             }
         }
@@ -411,7 +441,9 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
             {
                 T temp = 0;
                 for(rocblas_int j = 0; j < nn; j++)
+                {
                     temp += Vm[i + j * ldv] * conj(Vx[j * ldv]);
+                }
                 work[i] = tau[kk] * temp + Fx[i];
             }
         }
@@ -424,7 +456,9 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
         {
             T temp = 0;
             for(rocblas_int j = 0; j <= i; j++)
+            {
                 temp += Fm[i + j * ldf] * work[j];
+            }
             Fx[i] = temp;
         }
 
@@ -433,8 +467,12 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
 
     // copy shared memory back to F
     for(rocblas_int i = tid; i < k; i += tid_inc)
+    {
         for(rocblas_int j = 0; j <= i; j++)
+        {
             Ftemp[i + j * ldfA] = F[i + j * ldf];
+        }
+    }
 }
 
 /******************* Host functions *********************************************/
@@ -531,6 +569,8 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     ROCSOLVER_ENTER("larft", "direct:", direct, "storev:", storev, "n:", n, "k:", k,
                     "shiftV:", shiftV, "ldv:", ldv, "ldf:", ldf, "bc:", batch_count);
 
+printf( "%s:%d\n", __func__, __LINE__ );
+
     // quick return
     if(n == 0 || batch_count == 0)
         return rocblas_status_success;
@@ -554,7 +594,8 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     const rocblas_int u1_n = use_gemm ? k : n;
     const rocblas_int u2_n = use_gemm ? n - k : 0;
 
-    // Compute T=V2'*V2 or V2*V2' (V'=[V1' V2'] where V1 is triangular and V is trapezoidal)
+    // Compute T = V2^H * V2 or V2 * V2^H (V^H = [ V1^H  V2^H ]
+    // where V1 is triangular and V is trapezoidal)
     // SYRK/HERK can be used alternatively, but GEMM is currently more performant.
     if(use_gemm)
     {
@@ -587,7 +628,12 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
         }
     }
 
-    // Fix diagonal of T, make zero the not used triangular part,
+if constexpr (std::is_same_v<T*, U>)
+{
+check_nan( "F", k, k, F, ldf, stream );
+}
+
+    // Fix diagonal of T, set the unused triangular part to zero,
     // setup tau (changing signs) and account for the non-stored 1's on the
     // householder vectors
     rocblas_int blocks = (k - 1) / BS2 + 1;
@@ -596,6 +642,11 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
                             direct, storev, use_gemm);
     ROCSOLVER_LAUNCH_KERNEL(set_tau, dim3(blocks, batch_count), dim3(32, 1), 0, stream, k, tau,
                             strideT);
+
+if constexpr (std::is_same_v<T*, U>)
+{
+check_nan( "F", k, k, F, ldf, stream );
+}
 
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
     size_t lmemsize = sizeof(T) * (k + 1) * k;
@@ -633,9 +684,11 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
                 else
                 {
                     if(COMPLEX)
+                    {
                         rocsolver_lacgv_template<T>(handle, n - i - 1, V,
                                                     shiftV + idx2D(i, i + 1, ldv), ldv, strideV,
                                                     batch_count);
+                    }
 
                     trans = rocblas_operation_none;
                     rocblasCall_gemv<T>(handle, trans, i, u1_n - 1 - i, tau + i, strideT, V,
@@ -644,9 +697,11 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
                                         F, idx2D(0, i, ldf), 1, strideF, batch_count, workArr);
 
                     if(COMPLEX)
+                    {
                         rocsolver_lacgv_template<T>(handle, n - i - 1, V,
                                                     shiftV + idx2D(i, i + 1, ldv), ldv, strideV,
                                                     batch_count);
+                    }
                 }
 
                 // multiply by the previous triangular factor
@@ -689,8 +744,10 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
                 else
                 {
                     if(COMPLEX)
+                    {
                         rocsolver_lacgv_template<T>(handle, n - k + i, V, shiftV + idx2D(i, 0, ldv),
                                                     ldv, strideV, batch_count);
+                    }
 
                     trans = rocblas_operation_none;
                     rocblasCall_gemv<T>(handle, trans, k - i - 1, u1_n - k + i, tau + i, strideT, V,
@@ -699,8 +756,10 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
                                         F, idx2D(i + 1, i, ldf), 1, strideF, batch_count, workArr);
 
                     if(COMPLEX)
+                    {
                         rocsolver_lacgv_template<T>(handle, n - k + i, V, shiftV + idx2D(i, 0, ldv),
                                                     ldv, strideV, batch_count);
+                    }
                 }
 
                 // multiply by the previous triangular factor
@@ -855,6 +914,8 @@ rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
     ROCSOLVER_ENTER("larft_inverse", "direct:", direct, "storev:", storev, "n:", n, "k:", k,
                     "shiftV:", shiftV, "ldv:", ldv, "ldf:", ldf, "bc:", batch_count);
 
+printf( "%s:%d\n", __func__, __LINE__ );  // calls this one
+
     // quick return
     if(n == 0 || batch_count == 0)
         return rocblas_status_success;
@@ -900,13 +961,28 @@ rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL((larft_set_tri), gridTri, blockTri, 0, stream, tri_uplo, k, V,
                             shiftV + tri_offset, ldv, strideV, work);
 
-    // compute: V' * V or V * V'
+if constexpr (std::is_same_v<T*, U>)
+{
+check_nan( "V", n, k, V, ldv, stream );
+}
+
+    // compute: V^H * V or V * V^H
     rocsolver_gemm(handle, transA, transB, k, k, n, &one, V, shiftV, ldv, strideV, V, shiftV, ldv,
                    strideV, &zero, F, 0, ldf, strideF, batch_count, workArr);
+
+if constexpr (std::is_same_v<T*, U>)
+{
+check_nan( "F", k, k, F, ldf, stream );
+}
 
     // set F diag to 1 / tau
     ROCSOLVER_LAUNCH_KERNEL(larft_set_diag, dim3(blocks, 1, batch_count), dim3(32, 1), 0, stream, k,
                             tau, strideT, F, ldf, strideF);
+
+if constexpr (std::is_same_v<T*, U>)
+{
+check_nan( "F", k, k, F, ldf, stream );
+}
 
     // restore original V
     ROCSOLVER_LAUNCH_KERNEL((larft_restore_tri), gridTri, blockTri, 0, stream, tri_uplo, k, V,
