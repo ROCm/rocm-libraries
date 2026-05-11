@@ -975,6 +975,20 @@ def _selectF8F6F4InstType(kernel):
   if aIsBF8 and bIsF8:
     return InstType.INST_F8_BF8 if sourceSwap else InstType.INST_BF8_F8
 
+  # Mixed F8 and F4
+  if aIsF8 and bIsF4:
+    return InstType.INST_F4_F8 if sourceSwap else InstType.INST_F8_F4
+
+  if aIsF4 and bIsF8:
+    return InstType.INST_F8_F4 if sourceSwap else InstType.INST_F4_F8
+
+  # Mixed BF8 and F4
+  if aIsBF8 and bIsF4:
+    return InstType.INST_F4_B8 if sourceSwap else InstType.INST_B8_F4
+
+  if aIsF4 and bIsBF8:
+    return InstType.INST_B8_F4 if sourceSwap else InstType.INST_F4_B8
+
   raise RuntimeError(f"Unsupported data types for MFMA instruction: A = {aType}, B = {bType}\n")
 
 
