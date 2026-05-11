@@ -154,12 +154,14 @@ class SchedulerConfig:
         s = spec if spec != 0 else total
         assert 1 <= s <= total, \
             f"partition size for {dim} must be in [1, {total}], got {s}"
-        sizes = []
-        remaining = total
-        while remaining > 0:
-            sizes.append(min(s, remaining))
-            remaining -= sizes[-1]
-        return sizes
+        num_full = total // s
+        remainder = total - num_full * s
+        if remainder == 0:
+            return [s] * num_full
+        if num_full == 1:
+            return [s, remainder]
+        mid = num_full // 2
+        return [s] * mid + [remainder] + [s] * (num_full - mid)
 
     @staticmethod
     def _build_prefix(sizes: List[int]) -> List[int]:
