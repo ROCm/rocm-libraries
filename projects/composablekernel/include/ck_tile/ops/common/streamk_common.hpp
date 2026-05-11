@@ -32,9 +32,11 @@ struct StreamKReductionOps
         return core::arch::is_target_id_any_of<CompilerTarget_,
                                                core::arch::amdgcn_target_id::GFX90A,
                                                core::arch::amdgcn_target_id::GFX942,
-                                               core::arch::amdgcn_target_id::GFX950>() ||
-               core::arch::is_target_family_gfx11<CompilerTarget_>() ||
-               core::arch::is_target_family_gfx12<CompilerTarget_>();
+                                               core::arch::amdgcn_target_id::GFX950,
+                                               core::arch::amdgcn_target_id::GFX1200,
+                                               core::arch::amdgcn_target_id::GFX1201,
+                                               core::arch::amdgcn_target_id::GFX12_GENERIC>() ||
+               core::arch::is_target_family_gfx11<CompilerTarget_>();
     }
 
     /**
@@ -62,6 +64,31 @@ struct StreamKReductionOps
                      :
                      : "s"(1), "s"(sk_flags_ptr), "s"(offset)
                      : "memory");
+    }
+
+    template <typename CompilerTarget_ = CompilerTarget>
+    CK_TILE_DEVICE core::arch::enable_if_target_id_t<CompilerTarget_,
+                                                     core::arch::amdgcn_target_id::GFX1200,
+                                                     core::arch::amdgcn_target_id::GFX1201,
+                                                     core::arch::amdgcn_target_id::GFX12_GENERIC>
+    SignalStorePartialDone(const KernelArgs_& kargs, index_t cta_idx) const
+    {
+        auto* sk_flags_ptr                = static_cast<index_t*>(kargs.workspace_ptr);
+        index_t offset                    = cta_idx * sizeof(index_t);
+        __amdgpu_buffer_rsrc_t buffer_rsc = __builtin_amdgcn_make_buffer_rsrc(
+            sk_flags_ptr,
+            0,
+            sizeof(index_t) * kargs.tile_partitioner.get_sk_ctas(),
+            CK_TILE_BUFFER_RESOURCE_3RD_DWORD);
+        if(threadIdx.x == 0)
+        {
+            __builtin_amdgcn_raw_buffer_store_b32(
+                1,
+                buffer_rsc,
+                offset,
+                0,
+                static_cast<int>(StreamKCoherency<CompilerTarget_>::BUFFER_COHERENCE));
+        }
     }
 
     template <typename CompilerTarget_ = CompilerTarget>
@@ -98,6 +125,26 @@ struct StreamKReductionOps
             // appropriate ISA for details about the GLC modifier.
             asm volatile("s_load_dword %0, %1, %2 glc\n\t"
                          "s_waitcnt lgkmcnt(0)" // Wait for the load to complete
+                         : "=s"(result)
+                         : "s"(sk_flags_ptr), "s"(offset)
+                         : "memory");
+        } while(result != 1);
+    }
+
+    template <typename CompilerTarget_ = CompilerTarget>
+    CK_TILE_DEVICE core::arch::enable_if_target_id_t<CompilerTarget_,
+                                                     core::arch::amdgcn_target_id::GFX1200,
+                                                     core::arch::amdgcn_target_id::GFX1201,
+                                                     core::arch::amdgcn_target_id::GFX12_GENERIC>
+    WaitStorePartialDone(const KernelArgs_& kargs, index_t cta_idx) const
+    {
+        auto* sk_flags_ptr = static_cast<index_t*>(kargs.workspace_ptr);
+        index_t result;
+        index_t offset = cta_idx * sizeof(index_t);
+        do
+        {
+            asm volatile("s_load_b32 %0, %1, %2 scope:SCOPE_DEV\n\t"
+                         "s_wait_kmcnt 0" // Wait for the load to complete
                          : "=s"(result)
                          : "s"(sk_flags_ptr), "s"(offset)
                          : "memory");

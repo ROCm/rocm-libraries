@@ -122,6 +122,7 @@ enum struct amd_buffer_coherence_enum
     SYSTEM_NT0 = 0,
     DEVICE_NT1 = glc,
     SYSTEM_NT1 = slc,
+    DEVICE     = glc, // TODO: temporary hack for StreamKCoherency
 #endif
 };
 
