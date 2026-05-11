@@ -96,26 +96,32 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     //    scale tensor that is not 1.
     // 2) Work out the outerSize as the size of input dimensions for which scale is 1.
     //    We will have a work-group for each of these dimensions.
+    //    When stride is not 1, we are in a channel-last layout and we ignore the
+    //    channel dimension when calculating the outer size.
     // 3) Work out the innerSize as the size of the intput dimensions for which scale nor 1.
     //
     // For an input of [N, C, H, W] with scale [1, C, H, W] this will give: a normalization
     // dimension of 1, outerSize of N, and innerSize of CxHxW.
     // The kernel will therefore consist of N workgroups with each workgroup normalizing over
     // CxHxW elements using a fixed number of threads.
+    // For an input of [N, H, W, C] with scale [1, H, W, 1] this will give: a normalization
+    // dimension of 2, outerSize of N, stride of C, and innerSize of HxW.
+    // The kernel will therefore consist of NxC workgroups with each workgroup normalizing
+    // over HxW elements using a fixed number of threads.
     const unsigned normalizeDim = getNormalizeDim(_params.x()->dims(), _params.scale()->dims());
-    const int64_t outerSize = getOuterSize(_params.x()->dims(), normalizeDim);
-    const int64_t innerSize = getInnerSize(_params.x()->dims(), normalizeDim);
     const int64_t stride = getStride(_params.x(), normalizeDim);
-    if(outerSize >= UINT32_MAX)
+    const int64_t outerSize = getOuterSize(_params.x()->dims(), normalizeDim, stride);
+    const int64_t innerSize = getInnerSize(_params.x()->dims(), normalizeDim);
+    if(outerSize * stride >= UINT32_MAX)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "Unsupported number of workgroups: "
-                                                           + std::to_string(outerSize));
+                                                           + std::to_string(outerSize * stride));
     }
 
     // Calculate block and grid dimensions
     const unsigned int xlocalsize = 256;
-    const auto xgridsize = static_cast<unsigned int>(outerSize);
+    const auto xgridsize = static_cast<unsigned int>(outerSize * stride);
     const unsigned int ylocalsize = 1;
     const unsigned int ygridsize = 1;
     const unsigned int zlocalsize = 1;

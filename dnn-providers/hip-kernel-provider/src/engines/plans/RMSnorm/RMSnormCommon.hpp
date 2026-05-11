@@ -9,12 +9,18 @@
 namespace hip_kernel_provider::rmsnorm
 {
 
-inline int64_t getOuterSize(const flatbuffers::Vector<int64_t>* xDims, unsigned normalizeDim)
+inline int64_t
+    getOuterSize(const flatbuffers::Vector<int64_t>* xDims, unsigned normalizeDim, int64_t stride)
 {
     int64_t outerSize = 1;
     for(unsigned i = 0; i < normalizeDim; ++i)
     {
-        outerSize *= xDims->Get(i);
+        // Add channel size only if there is no stride
+        if(i == 1 && stride != 1)
+        {
+            continue;
+        }
+        outerSize *= static_cast<int64_t>(xDims->Get(i));
     }
     return outerSize;
 }
