@@ -44,12 +44,19 @@
 #define ROCRAND_DETAIL_XORWOW_BM_NOT_IN_STATE
 
 // Use inlined rocrand header for runtime compilation to avoid external dependency
-// For host code compilation, use the regular rocrand header
+// For host code compilation, use the regular rocrand header.
+// Suppress warnings from rocrand's own headers: in TheRock builds rocrand/stage/include
+// is injected globally as -I (not -isystem), so rocrand headers are not treated as system
+// includes and their internal issues trigger our warnings.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast"
+#pragma clang diagnostic ignored "-Wundef"
 #ifdef MIOPEN_HIP_RUNTIME_COMPILE
 #include "rocrand_xorwow_inlined.h"
 #else
 #include <rocrand/rocrand_xorwow.h>
 #endif
+#pragma clang diagnostic pop
 
 namespace prng {
 
