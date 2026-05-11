@@ -23,6 +23,19 @@ struct StreamKReductionOps
     using BlockGemm       = typename GemmPipeline_::BlockGemm;
     using WarpGemm        = typename BlockGemm::WarpGemm;
     using BlockGemmShape  = typename GemmPipeline_::BlockGemmShape;
+    using CompilerTarget  = decltype(core::arch::get_compiler_target());
+
+    // Helper: all supported architectures for specialized versions
+    template <typename CompilerTarget_>
+    static constexpr bool IsStreamKReductionSupportedArch()
+    {
+        return core::arch::is_target_id_any_of<CompilerTarget_,
+                                               core::arch::amdgcn_target_id::GFX90A,
+                                               core::arch::amdgcn_target_id::GFX942,
+                                               core::arch::amdgcn_target_id::GFX950>() ||
+               core::arch::is_target_family_gfx11<CompilerTarget_>() ||
+               core::arch::is_target_family_gfx12<CompilerTarget_>();
+    }
 
     /**
      *@brief Signals that the current thread block(CTA) has completed storing its partial
@@ -31,7 +44,12 @@ struct StreamKReductionOps
      * @param cta_idx The index of the current thread block (CTA).
      * @note This function utilizes a scalar store to write to the flags buffer.
      */
-    CK_TILE_DEVICE void SignalStorePartialDone(const KernelArgs_& kargs, index_t cta_idx) const
+    template <typename CompilerTarget_ = CompilerTarget>
+    CK_TILE_DEVICE core::arch::enable_if_target_id_t<CompilerTarget_,
+                                                     core::arch::amdgcn_target_id::GFX90A,
+                                                     core::arch::amdgcn_target_id::GFX942,
+                                                     core::arch::amdgcn_target_id::GFX950>
+    SignalStorePartialDone(const KernelArgs_& kargs, index_t cta_idx) const
     {
         auto* sk_flags_ptr = static_cast<index_t*>(kargs.workspace_ptr);
         index_t offset     = cta_idx * sizeof(index_t);
@@ -46,6 +64,15 @@ struct StreamKReductionOps
                      : "memory");
     }
 
+    template <typename CompilerTarget_ = CompilerTarget>
+    CK_TILE_DEVICE std::enable_if_t<!IsStreamKReductionSupportedArch<CompilerTarget_>()>
+    SignalStorePartialDone([[maybe_unused]] const KernelArgs_& kargs,
+                           [[maybe_unused]] index_t cta_idx) const
+    {
+        static_assert(IsStreamKReductionSupportedArch<CompilerTarget_>(),
+                      "SignalStorePartialDone not implemented for this architecture.");
+    }
+
     /**
      * @brief Waits for the thread block (cta_idx) to complete storing its partial results.
      * @param kargs Kernel arguments, including the workspace pointer.
@@ -53,7 +80,12 @@ struct StreamKReductionOps
      * @note This function utilizes a scalar load to read from the flags
      * buffer.
      */
-    CK_TILE_DEVICE void WaitStorePartialDone(const KernelArgs_& kargs, index_t cta_idx) const
+    template <typename CompilerTarget_ = CompilerTarget>
+    CK_TILE_DEVICE core::arch::enable_if_target_id_t<CompilerTarget_,
+                                                     core::arch::amdgcn_target_id::GFX90A,
+                                                     core::arch::amdgcn_target_id::GFX942,
+                                                     core::arch::amdgcn_target_id::GFX950>
+    WaitStorePartialDone(const KernelArgs_& kargs, index_t cta_idx) const
     {
         auto* sk_flags_ptr = static_cast<index_t*>(kargs.workspace_ptr);
         index_t result;
@@ -70,6 +102,15 @@ struct StreamKReductionOps
                          : "s"(sk_flags_ptr), "s"(offset)
                          : "memory");
         } while(result != 1);
+    }
+
+    template <typename CompilerTarget_ = CompilerTarget>
+    CK_TILE_DEVICE std::enable_if_t<!IsStreamKReductionSupportedArch<CompilerTarget_>()>
+    WaitStorePartialDone([[maybe_unused]] const KernelArgs_& kargs,
+                         [[maybe_unused]] index_t cta_idx) const
+    {
+        static_assert(IsStreamKReductionSupportedArch<CompilerTarget_>(),
+                      "WaitStorePartialDone not implemented for this architecture.");
     }
 
     /**
