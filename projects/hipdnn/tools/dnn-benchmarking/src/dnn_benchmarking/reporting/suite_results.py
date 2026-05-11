@@ -105,6 +105,29 @@ class ProviderEngineResult:
         correctness: Correctness comparison result.
         error_message: Error message only (no partial timing on error).
         skip_reason: Reason this combination was skipped.
+        workspace_bytes: hipDNN-reserved workspace size in bytes.
+        analytical_flops: Total analytical FLOPs across compute nodes
+            (None for purely bandwidth-bound graphs).
+        analytical_flops_partial: True when at least one node type was
+            unrecognised — ``analytical_flops`` then reflects only the
+            recognised compute nodes.
+        analytical_io_bytes: Sum of non-virtual tensor sizes (bytes).
+        derived_tflops_per_s: Throughput derived from analytical_flops
+            and the GPU kernel mean time.
+        derived_gbytes_per_s: Bandwidth derived from analytical_io_bytes
+            and the GPU kernel mean time.
+        cpu_user_time_ms: User-space CPU time consumed during the
+            benchmark loop (rusage delta).
+        cpu_kernel_time_ms: Kernel-space CPU time consumed during the
+            benchmark loop (rusage delta).
+        host_rss_mb: Resident-set size of the benchmark process at end
+            of the loop, in MiB.
+        host_ram_available_mb: Host RAM available system-wide at end of
+            loop, in MiB.
+        gpu_smi_snapshot: One-shot amdsmi snapshot taken after the
+            benchmark loop (vram, power, clocks, temps, utilisation).
+        extra_metrics: Reserved for Phase 2/3 sources (rocprofv3 PMC,
+            traces, perf, roofline). Always None in Phase 1.
     """
 
     _VALID_STATUSES = {"success", "error", "skipped"}
@@ -119,6 +142,20 @@ class ProviderEngineResult:
     correctness: Optional[CorrectnessResult] = None
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None
+    # Phase 1 always-on metrics (None when collection failed or skipped)
+    workspace_bytes: Optional[int] = None
+    analytical_flops: Optional[int] = None
+    analytical_flops_partial: bool = False
+    analytical_io_bytes: Optional[int] = None
+    derived_tflops_per_s: Optional[float] = None
+    derived_gbytes_per_s: Optional[float] = None
+    cpu_user_time_ms: Optional[float] = None
+    cpu_kernel_time_ms: Optional[float] = None
+    host_rss_mb: Optional[float] = None
+    host_ram_available_mb: Optional[float] = None
+    gpu_smi_snapshot: Optional[Dict[str, Any]] = None
+    # Reserved for Phase 2/3
+    extra_metrics: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         """Validate status field."""
@@ -134,6 +171,10 @@ class ProviderEngineResult:
         Error entries serialize status + error_message only, no timing.
         Correctness, when present, is always serialized regardless of status
         so that error/skip entries can carry their failure context.
+
+        Phase 1 metrics are emitted only inside the ``success`` branch
+        and only when non-None, so the JSON shape stays compact for
+        runs where probes were unavailable.
         """
         d: Dict[str, Any] = {
             "provider": self.provider,
@@ -147,6 +188,32 @@ class ProviderEngineResult:
             )
             d["e2e_stats"] = self.e2e_stats.to_dict() if self.e2e_stats else None
             d["elapsed_time_ms"] = self.elapsed_time_ms
+
+            # Always-on metric fields — emit only when populated.
+            if self.workspace_bytes is not None:
+                d["workspace_bytes"] = self.workspace_bytes
+            if self.analytical_flops is not None:
+                d["analytical_flops"] = self.analytical_flops
+            if self.analytical_flops_partial:
+                d["analytical_flops_partial"] = True
+            if self.analytical_io_bytes is not None:
+                d["analytical_io_bytes"] = self.analytical_io_bytes
+            if self.derived_tflops_per_s is not None:
+                d["derived_tflops_per_s"] = self.derived_tflops_per_s
+            if self.derived_gbytes_per_s is not None:
+                d["derived_gbytes_per_s"] = self.derived_gbytes_per_s
+            if self.cpu_user_time_ms is not None:
+                d["cpu_user_time_ms"] = self.cpu_user_time_ms
+            if self.cpu_kernel_time_ms is not None:
+                d["cpu_kernel_time_ms"] = self.cpu_kernel_time_ms
+            if self.host_rss_mb is not None:
+                d["host_rss_mb"] = self.host_rss_mb
+            if self.host_ram_available_mb is not None:
+                d["host_ram_available_mb"] = self.host_ram_available_mb
+            if self.gpu_smi_snapshot is not None:
+                d["gpu_smi_snapshot"] = self.gpu_smi_snapshot
+            if self.extra_metrics is not None:
+                d["extra_metrics"] = self.extra_metrics
         elif self.status == "error":
             d["error_message"] = self.error_message
         elif self.status == "skipped":
@@ -253,6 +320,17 @@ class SuiteMetadata:
         gpu_model: GPU model name.
         python_version: Python version string.
         hipdnn_version: hipDNN version string.
+        cpu_model: CPU model string from /proc/cpuinfo.
+        cpu_count: Number of logical CPUs.
+        numa_nodes: Number of NUMA nodes on the host.
+        total_ram_gb: Total host RAM in GiB.
+        kernel_version: Linux kernel version.
+        container_runtime: Detected container runtime (docker, enroot,
+            kubernetes, podman, lxc) or None when run on bare metal.
+        gpu_compute_units: Number of GPU compute units.
+        gpu_hbm_gb: Total GPU HBM in GiB.
+        gpu_pcie_link: PCIe link speed/width string (e.g. "gen4 x16").
+        amdgpu_driver_version: amdgpu driver version string.
     """
 
     timestamp: str
@@ -267,6 +345,16 @@ class SuiteMetadata:
     gpu_model: Optional[str] = None
     python_version: Optional[str] = None
     hipdnn_version: Optional[str] = None
+    cpu_model: Optional[str] = None
+    cpu_count: Optional[int] = None
+    numa_nodes: Optional[int] = None
+    total_ram_gb: Optional[float] = None
+    kernel_version: Optional[str] = None
+    container_runtime: Optional[str] = None
+    gpu_compute_units: Optional[int] = None
+    gpu_hbm_gb: Optional[float] = None
+    gpu_pcie_link: Optional[str] = None
+    amdgpu_driver_version: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -283,6 +371,16 @@ class SuiteMetadata:
             "gpu_model": self.gpu_model,
             "python_version": self.python_version,
             "hipdnn_version": self.hipdnn_version,
+            "cpu_model": self.cpu_model,
+            "cpu_count": self.cpu_count,
+            "numa_nodes": self.numa_nodes,
+            "total_ram_gb": self.total_ram_gb,
+            "kernel_version": self.kernel_version,
+            "container_runtime": self.container_runtime,
+            "gpu_compute_units": self.gpu_compute_units,
+            "gpu_hbm_gb": self.gpu_hbm_gb,
+            "gpu_pcie_link": self.gpu_pcie_link,
+            "amdgpu_driver_version": self.amdgpu_driver_version,
         }
 
 
@@ -324,6 +422,16 @@ class SuiteResult:
             gpu_model=env_info.get("gpu_model"),
             python_version=env_info.get("python_version"),
             hipdnn_version=env_info.get("hipdnn_version"),
+            cpu_model=env_info.get("cpu_model"),
+            cpu_count=env_info.get("cpu_count"),
+            numa_nodes=env_info.get("numa_nodes"),
+            total_ram_gb=env_info.get("total_ram_gb"),
+            kernel_version=env_info.get("kernel_version"),
+            container_runtime=env_info.get("container_runtime"),
+            gpu_compute_units=env_info.get("gpu_compute_units"),
+            gpu_hbm_gb=env_info.get("gpu_hbm_gb"),
+            gpu_pcie_link=env_info.get("gpu_pcie_link"),
+            amdgpu_driver_version=env_info.get("amdgpu_driver_version"),
         )
         return cls(metadata=metadata, graphs=graph_results)
 
@@ -359,11 +467,14 @@ class SuiteResult:
         p.write_text(self.to_json())
 
 
-def collect_environment_info() -> Dict[str, Optional[str]]:
-    """Collect ROCm version, GPU model, Python version, hipDNN version.
+def collect_environment_info() -> Dict[str, Any]:
+    """Collect ROCm/GPU/Python/hipDNN versions plus static machine metadata.
 
-    Returns:
-        Dictionary with environment info fields.
+    Combines the legacy version probes (torch hip, hipdnn_frontend) with
+    the host- and GPU-side static info from
+    :func:`metrics.machine_info.collect_machine_info`. Never raises;
+    missing values are ``None`` so :class:`SuiteMetadata` can serialise
+    a stable shape.
     """
     python_version = (
         f"{sys.version_info.major}.{sys.version_info.minor}"
@@ -390,9 +501,20 @@ def collect_environment_info() -> Dict[str, Optional[str]]:
     except ImportError:
         pass
 
-    return {
+    info: Dict[str, Any] = {
         "rocm_version": rocm_version,
         "gpu_model": gpu_model,
         "python_version": python_version,
         "hipdnn_version": hipdnn_version,
     }
+
+    try:
+        from ..metrics.machine_info import collect_machine_info
+
+        info.update(collect_machine_info())
+    except Exception:
+        # machine_info already routes failures through warn_once; avoid
+        # propagating any unexpected exception out of metadata building.
+        pass
+
+    return info

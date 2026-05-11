@@ -20,6 +20,15 @@ from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
 from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
 from ..execution.timing import Timer
+from ..metrics import (
+    GpuSmiProbe,
+    RusageProbe,
+    compute_flops,
+    compute_io_bytes,
+    derive_throughputs,
+    host_memory_snapshot,
+)
+from ..metrics._diagnostic import warn_once
 from ..reporting.reporter import Reporter
 from ..reporting.statistics import BenchmarkStats
 from ..reporting.suite_results import (
@@ -305,6 +314,23 @@ def run_graph_all_providers(
 
     ref_provider = _get_reference_provider(config, graph_json)
 
+    # Compute analytical metrics once per graph — they're a function of
+    # the graph shape only and don't change across engines. Both calls
+    # are pure-Python and microsecond-cheap, but no point repeating
+    # them per engine. Failures route through warn_once and yield None.
+    analytical_flops: Optional[int] = None
+    analytical_flops_partial = False
+    analytical_io_bytes: Optional[int] = None
+    if config.metrics.basic_enabled:
+        try:
+            analytical_flops, analytical_flops_partial = compute_flops(graph_json)
+        except Exception as e:
+            warn_once("analytical", f"compute_flops failed for {graph_name}: {e}")
+        try:
+            analytical_io_bytes = compute_io_bytes(tensor_infos)
+        except Exception as e:
+            warn_once("analytical", f"compute_io_bytes failed for {graph_name}: {e}")
+
     pe_results: List[ProviderEngineResult] = []
     for engine_id in engine_ids:
         engine_name = _resolve_engine_name(engine_id)
@@ -323,6 +349,9 @@ def run_graph_all_providers(
                 ref_provider=ref_provider,
                 validation_requested=validation_requested,
                 graph_json=graph_json,
+                analytical_flops=analytical_flops,
+                analytical_flops_partial=analytical_flops_partial,
+                analytical_io_bytes=analytical_io_bytes,
             )
         pe_result.elapsed_time_ms = t.elapsed_ms
         if reporter is not None:
@@ -349,6 +378,9 @@ def _run_single_provider_engine(
     ref_provider: Optional[ReferenceProvider],
     validation_requested: bool,
     graph_json: Dict[str, Any],
+    analytical_flops: Optional[int] = None,
+    analytical_flops_partial: bool = False,
+    analytical_io_bytes: Optional[int] = None,
 ) -> ProviderEngineResult:
     """Execute a single engine for a graph (single attempt)."""
     # Initialise the result conservatively as an error and mutate fields as
@@ -358,6 +390,8 @@ def _run_single_provider_engine(
         engine_id=engine_id,
         status="error",
     )
+
+    metrics_basic = config.metrics.basic_enabled
 
     try:
         bench_config = BenchmarkConfig(
@@ -374,6 +408,8 @@ def _run_single_provider_engine(
         )
         executor.prepare(handle, engine_id=engine_id)
         result.cpu_build_time_ms = executor.init_time_ms
+        if metrics_basic:
+            result.workspace_bytes = executor.workspace_size
 
         with BufferManager(tensor_infos) as bm:
             bm.allocate_all()
@@ -383,15 +419,63 @@ def _run_single_provider_engine(
             variant_pack = bm.create_variant_pack()
             executor.warmup(handle, variant_pack)
 
-            bench_result = executor.benchmark(
-                handle, variant_pack, graph_name=graph_name
-            )
+            # Wrap the timed loop with always-on host probes when basic
+            # tier is enabled. The probes are designed to be no-cost on
+            # the GPU side: rusage is read-only kernel calls before/after
+            # the loop, and the amdsmi snapshot fires once after the
+            # benchmark returns. Failures inside probes are swallowed
+            # and surface as None fields on the result.
+            rusage_probe = RusageProbe() if metrics_basic else None
+            if rusage_probe is not None:
+                rusage_probe.__enter__()
+            try:
+                bench_result = executor.benchmark(
+                    handle, variant_pack, graph_name=graph_name
+                )
+            finally:
+                if rusage_probe is not None:
+                    rusage_probe.__exit__(None, None, None)
 
             result.e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
             if bench_result.has_kernel_timings:
                 result.gpu_kernel_stats = BenchmarkStats.from_timings(
                     bench_result.kernel_timings
                 )
+
+            if metrics_basic:
+                if rusage_probe is not None and rusage_probe.delta is not None:
+                    result.cpu_user_time_ms = rusage_probe.delta.user_time_ms
+                    result.cpu_kernel_time_ms = rusage_probe.delta.kernel_time_ms
+
+                # Analytical totals were computed once at the graph level;
+                # propagate them onto every engine's result so JSON
+                # consumers don't have to look up across structures.
+                result.analytical_flops = analytical_flops
+                result.analytical_flops_partial = analytical_flops_partial
+                result.analytical_io_bytes = analytical_io_bytes
+
+                kernel_mean = (
+                    result.gpu_kernel_stats.mean_ms
+                    if result.gpu_kernel_stats is not None
+                    else None
+                )
+                tflops, gbytes = derive_throughputs(
+                    analytical_flops, analytical_io_bytes, kernel_mean
+                )
+                result.derived_tflops_per_s = tflops
+                result.derived_gbytes_per_s = gbytes
+
+                try:
+                    host_mem = host_memory_snapshot()
+                    result.host_rss_mb = host_mem.get("host_rss_mb")
+                    result.host_ram_available_mb = host_mem.get("host_ram_available_mb")
+                except Exception as e:
+                    warn_once("host", f"host_memory_snapshot failed: {e}")
+
+                try:
+                    result.gpu_smi_snapshot = GpuSmiProbe().snapshot()
+                except Exception as e:
+                    warn_once("gpu_smi", f"snapshot failed: {e}")
 
             if ref_provider is not None:
                 result.correctness = _check_correctness(

@@ -235,4 +235,60 @@ Tarball Input:
         help="Path to directory containing hipDNN engine plugin .so files",
     )
 
+    # Metrics options
+    metrics_group = parser.add_argument_group("Metrics")
+    metrics_group.add_argument(
+        "--metrics-tier",
+        type=str,
+        choices=["basic", "off"],
+        default="basic",
+        metavar="TIER",
+        help=(
+            "Always-on metric tier (default: basic). 'basic' adds "
+            "analytical FLOPs/IO, workspace size, host CPU rusage + RAM, "
+            "amdsmi GPU snapshot, and machine metadata at zero extra "
+            "runtime cost. 'off' disables all extra metric collection."
+        ),
+    )
+    metrics_group.add_argument(
+        "--emit-trace",
+        type=str,
+        choices=["pftrace", "kineto"],
+        default=None,
+        metavar="FORMAT",
+        help=(
+            "[Phase 2 — not yet wired] Re-run benchmark under rocprofv3 "
+            "and export a kernel trace in the given format."
+        ),
+    )
+    metrics_group.add_argument(
+        "--pmc",
+        type=str,
+        choices=["basic", "memory", "flops", "all"],
+        default=None,
+        metavar="SET",
+        help=(
+            "[Phase 2 — not yet wired] Re-run benchmark under rocprofv3 "
+            "with the named PMC counter set."
+        ),
+    )
+    metrics_group.add_argument(
+        "--perf",
+        action="store_true",
+        default=False,
+        help=(
+            "[Phase 3 — not yet wired] Wrap re-run in 'perf stat' to "
+            "collect CPU cycles/instructions."
+        ),
+    )
+    metrics_group.add_argument(
+        "--roofline",
+        action="store_true",
+        default=False,
+        help=(
+            "[Phase 3 — not yet wired] Re-run under "
+            "'rocprof-compute --roof-only' for a roofline plot."
+        ),
+    )
+
     return parser

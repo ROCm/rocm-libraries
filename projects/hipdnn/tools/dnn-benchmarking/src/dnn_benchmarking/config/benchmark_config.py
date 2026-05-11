@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 
 @dataclass
@@ -121,6 +121,74 @@ class ValidationConfig:
 
 
 @dataclass
+class MetricsConfig:
+    """Controls which metric sources are collected during benchmarking.
+
+    Phase 1 only wires ``tier``. The remaining fields reserve the CLI
+    surface for Phase 2 (``emit_trace``, ``pmc_set``) and Phase 3
+    (``perf``, ``roofline``); they are validated here so unknown values
+    fail at config-build time rather than at run time, but the suite
+    runner currently treats them as no-ops with a clear error if used.
+    See ``docs/metrics-phase2.md`` and ``docs/metrics-phase3.md``.
+
+    Attributes:
+        tier: ``basic`` enables always-on probes (analytical FLOPs/IO,
+            workspace, host rusage + RAM, amdsmi GPU snapshot, machine
+            metadata). ``off`` disables all metric collection — useful
+            for clean A/B timing comparisons.
+        emit_trace: Phase 2 — export rocprofv3 kernel/memory traces in
+            the named format. Not yet implemented.
+        pmc_set: Phase 2 — collect a named PMC counter set under
+            rocprofv3. Not yet implemented.
+        perf: Phase 3 — wrap benchmark in ``perf stat`` for CPU
+            cycles/instructions. Not yet implemented.
+        roofline: Phase 3 — run ``rocprof-compute --roof-only`` for a
+            roofline plot. Not yet implemented.
+    """
+
+    tier: Literal["basic", "off"] = "basic"
+    emit_trace: Optional[Literal["pftrace", "kineto"]] = None
+    pmc_set: Optional[Literal["basic", "memory", "flops", "all"]] = None
+    perf: bool = False
+    roofline: bool = False
+
+    def __post_init__(self) -> None:
+        valid_tiers = {"basic", "off"}
+        if self.tier not in valid_tiers:
+            raise ValueError(
+                f"Invalid metrics tier: '{self.tier}'. " f"Valid options: {valid_tiers}"
+            )
+        if self.emit_trace is not None and self.emit_trace not in {
+            "pftrace",
+            "kineto",
+        }:
+            raise ValueError(
+                f"Invalid emit_trace: '{self.emit_trace}'. "
+                "Valid options: pftrace, kineto"
+            )
+        if self.pmc_set is not None and self.pmc_set not in {
+            "basic",
+            "memory",
+            "flops",
+            "all",
+        }:
+            raise ValueError(
+                f"Invalid pmc_set: '{self.pmc_set}'. "
+                "Valid options: basic, memory, flops, all"
+            )
+
+    @property
+    def basic_enabled(self) -> bool:
+        """True when always-on probes should run."""
+        return self.tier == "basic"
+
+    @property
+    def opt_in_pass_requested(self) -> bool:
+        """True when any Phase 2/3 opt-in source was requested."""
+        return bool(self.emit_trace or self.pmc_set or self.perf or self.roofline)
+
+
+@dataclass
 class SuiteConfig:
     """Configuration for suite execution mode.
 
@@ -137,6 +205,8 @@ class SuiteConfig:
         gpu_backend: GPU timer backend to use.
         reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
+        metrics: Metric collection configuration. Defaults to ``basic`` tier
+            (always-on probes, no extra runs).
     """
 
     warmup_iters: int = 10
@@ -148,6 +218,7 @@ class SuiteConfig:
     gpu_backend: str = "auto"
     reference_provider: str = "none"
     verbose: bool = False
+    metrics: MetricsConfig = field(default_factory=MetricsConfig)
 
     def __post_init__(self) -> None:
         """Validate configuration values."""

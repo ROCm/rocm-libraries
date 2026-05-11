@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from ..common.exceptions import ExecutionError, GraphLoadError
-from ..config.benchmark_config import SuiteConfig
+from ..config.benchmark_config import MetricsConfig, SuiteConfig
 from ..execution.suite_runner import run_graph_all_providers
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
@@ -152,6 +152,20 @@ def run_suite_cli(
 ) -> int:
     """Validate suite CLI args, build config, and delegate to run_suite_benchmark."""
     try:
+        metrics_config = MetricsConfig(
+            tier=getattr(args, "metrics_tier", "basic"),
+            emit_trace=getattr(args, "emit_trace", None),
+            pmc_set=getattr(args, "pmc", None),
+            perf=getattr(args, "perf", False),
+            roofline=getattr(args, "roofline", False),
+        )
+        if metrics_config.opt_in_pass_requested:
+            reporter.print_error(
+                "--emit-trace, --pmc, --perf, and --roofline are reserved "
+                "for Phase 2/3 of the metrics expansion and are not yet "
+                "wired. See docs/metrics-phase2.md and docs/metrics-phase3.md."
+            )
+            return 1
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,
@@ -162,6 +176,7 @@ def run_suite_cli(
             gpu_backend="auto",
             reference_provider=args.validate,
             verbose=args.verbose,
+            metrics=metrics_config,
         )
     except ValueError as e:
         reporter.print_error(f"Suite configuration error: {e}")

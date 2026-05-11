@@ -431,13 +431,50 @@ class Reporter:
     def print_suite_header(
         self, total_graphs: int, tarball_source: Optional[str] = None
     ) -> None:
-        """Print suite execution header."""
+        """Print suite execution header.
+
+        Includes a one-line machine summary (CPU + GPU + ROCm + container
+        runtime) collected by ``metrics.machine_info`` so console
+        output matches the JSON metadata. Failures are silent —
+        ``machine_info`` already routes them through ``warn_once``.
+        """
         self._print_line("=")
         self._print(f"hipDNN Benchmark Suite: {total_graphs} graph(s)")
         self._print_line("=")
         if tarball_source is not None:
             self._print(f"Source:  {tarball_source} (extracted)")
+        self._print_machine_summary()
         self._print("")
+
+    def _print_machine_summary(self) -> None:
+        """Print a compact machine identity line if any field is known."""
+        try:
+            from ..metrics.machine_info import collect_machine_info
+            from .suite_results import collect_environment_info
+        except ImportError:
+            return
+        try:
+            env = collect_environment_info()
+        except Exception:
+            return
+        cpu = env.get("cpu_model") or "unknown CPU"
+        gpu = env.get("gpu_model") or "unknown GPU"
+        rocm = env.get("rocm_version") or "unknown ROCm"
+        container = env.get("container_runtime")
+        cu = env.get("gpu_compute_units")
+        hbm = env.get("gpu_hbm_gb")
+        gpu_extras = []
+        if cu is not None:
+            gpu_extras.append(f"{cu} CUs")
+        if hbm is not None:
+            gpu_extras.append(f"{hbm:g} GB HBM")
+        gpu_label = gpu + (f" ({', '.join(gpu_extras)})" if gpu_extras else "")
+        self._print(f"Host:    {cpu}")
+        self._print(f"GPU:     {gpu_label}")
+        line = f"ROCm:    {rocm}"
+        if container:
+            line += f"   Container: {container}"
+        self._print(line)
 
     def print_suite_graph_start(self, index: int, total: int, graph_name: str) -> None:
         """Print per-graph progress line at start (no trailing newline).
@@ -536,6 +573,7 @@ class Reporter:
 
             if pe.status == "success":
                 self._print_pe_stats(pe)
+                self._print_pe_metrics(pe)
                 if pe.correctness is not None:
                     self._print_pe_correctness(pe.correctness, suite_config)
             elif pe.status == "skipped":
@@ -561,6 +599,74 @@ class Reporter:
         elif pe.e2e_stats is not None:
             self._print("Kernel Timing: Not available")
             self._print("")
+
+    def _print_pe_metrics(self, pe: ProviderEngineResult) -> None:
+        """Render the always-on metrics block in verbose mode.
+
+        Suppresses the entire section when no metric fields are
+        populated (e.g. when the user passed ``--metrics-tier off``)
+        so the output stays compact.
+        """
+        any_present = any(
+            v is not None
+            for v in (
+                pe.workspace_bytes,
+                pe.analytical_flops,
+                pe.analytical_io_bytes,
+                pe.derived_tflops_per_s,
+                pe.derived_gbytes_per_s,
+                pe.cpu_user_time_ms,
+                pe.host_rss_mb,
+                pe.gpu_smi_snapshot,
+            )
+        )
+        if not any_present:
+            return
+
+        self._print("Derived Metrics:")
+        if pe.workspace_bytes is not None:
+            self._print(
+                f"  Workspace:            {pe.workspace_bytes / 1024 / 1024:.2f} MiB"
+            )
+        if pe.analytical_flops is not None:
+            partial = " (partial)" if pe.analytical_flops_partial else ""
+            self._print(f"  Analytical FLOPs:     {pe.analytical_flops:,}{partial}")
+        if pe.derived_tflops_per_s is not None:
+            self._print(
+                f"  Throughput:           {pe.derived_tflops_per_s:.3f} TFLOP/s"
+            )
+        if pe.analytical_io_bytes is not None:
+            self._print(
+                f"  Analytical I/O:       {pe.analytical_io_bytes / 1024 / 1024:.2f} MiB"
+            )
+        if pe.derived_gbytes_per_s is not None:
+            self._print(f"  Bandwidth:            {pe.derived_gbytes_per_s:.2f} GB/s")
+        if pe.cpu_user_time_ms is not None or pe.cpu_kernel_time_ms is not None:
+            user = pe.cpu_user_time_ms if pe.cpu_user_time_ms is not None else 0.0
+            kern = pe.cpu_kernel_time_ms if pe.cpu_kernel_time_ms is not None else 0.0
+            self._print(f"  CPU (user/kern):      {user:.1f} ms / {kern:.1f} ms")
+        if pe.host_rss_mb is not None:
+            avail = pe.host_ram_available_mb
+            avail_str = f"  (host avail {avail:.0f} MiB)" if avail is not None else ""
+            self._print(f"  Host RSS:             {pe.host_rss_mb:.1f} MiB{avail_str}")
+        if pe.gpu_smi_snapshot is not None:
+            snap = pe.gpu_smi_snapshot
+            parts = []
+            vram = snap.get("vram_used_mb")
+            vram_total = snap.get("vram_total_mb")
+            if vram is not None and vram_total:
+                parts.append(f"vram {vram:.0f}/{vram_total:.0f} MiB")
+            elif vram is not None:
+                parts.append(f"vram {vram:.0f} MiB")
+            if snap.get("power_w") is not None:
+                parts.append(f"{snap['power_w']:.0f} W")
+            if snap.get("sclk_mhz") is not None:
+                parts.append(f"sclk {snap['sclk_mhz']:.0f} MHz")
+            if snap.get("temp_edge_c") is not None:
+                parts.append(f"{snap['temp_edge_c']:.0f}°C")
+            if parts:
+                self._print(f"  GPU snapshot:         {', '.join(parts)}")
+        self._print("")
 
     def _print_pe_correctness(
         self, correctness: CorrectnessResult, suite_config: SuiteConfig
