@@ -95,13 +95,14 @@ class DAGSchedulerPassTest : public ::testing::Test {
     }
 };
 
-// .cost overwrite: v_wmma_f32_16x16x16_bf16 (format WMMA) has explicit .cost in def -> issue=4,
-// latency=8
-TEST_F(DAGSchedulerPassTest, CostOverwrite_VWmmaF3216x16x16Bf16_HasIssue4Latency8) {
+// v_wmma_f32_16x16x16_bf16 (format WMMA): issue=1, latency=8, coIssueMask=0x00F0
+TEST_F(DAGSchedulerPassTest, CostOverwrite_VWmmaF3216x16x16Bf16_HasIssue1Latency8CoIssueF0) {
     const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, arch);
     ASSERT_NE(desc, nullptr);
-    EXPECT_EQ(desc->issue, 4) << "v_wmma_f32_16x16x16_bf16 .cost overwrite: issue should be 4";
-    EXPECT_EQ(desc->latency, 8) << "v_wmma_f32_16x16x16_bf16 .cost overwrite: latency should be 8";
+    EXPECT_EQ(desc->issue, 1) << "v_wmma_f32_16x16x16_bf16: issue should be 1";
+    EXPECT_EQ(desc->latency, 8) << "v_wmma_f32_16x16x16_bf16: latency should be 8";
+    EXPECT_EQ(desc->coIssueMask, 0x00F0)
+        << "v_wmma_f32_16x16x16_bf16: coIssueMask should be 0x00F0";
 }
 
 // Empty block: pass should not crash

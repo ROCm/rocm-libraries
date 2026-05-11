@@ -644,6 +644,8 @@ def _build_prologue(sgprs, num_agprs, mt0, mt1, stride_d=None, use_input_buf=Tru
     if "subtileMValidBlocks" in sgprs:
         import math
         miM = 16
+        miWaveGroup0 = mt0 // (miM * (mt0 // (miM * max(1, mt0 // (miM * 4)))))
+        miWaveGroup1 = num_agprs // (mt0 // miM * mt1 // 16) if mt1 > 16 else 1
         # Derive MIWaveGroup from tile: same logic as _create_kernel
         if ((mt0 // 16) % 2 == 0) and ((mt1 // 16) % 2 == 0):
             wg0, wg1 = 2, 2
@@ -1381,7 +1383,6 @@ def _verify_bf16_positions(out, round_mt0, round_mt1, kernel, check_ncol=True, c
         )
 
 
-
 def _build_accvgpr_init_matrix_asm(agpr_indices, kernel, tileInfoD, sgprs, tmp_v, vaddr, vtmp2):
     """Init accvgprs from a column-major MT_a×MT_b host matrix using the MFMA output layout.
 
@@ -2012,6 +2013,8 @@ def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=Non
 
     kw.states.subtileM32ValidBlocksSgpr = sgprs["subtileMValidBlocks"]
     kw.states.subtileN16ValidBlocksSgpr = sgprs["subtileNValidBlocks"]
+    kw.sgprs["SubtileMGuard"] = sgprs["subtileMValidBlocks"]
+    kw.sgprs["SubtileNGuard"] = sgprs["subtileNValidBlocks"]
     kw.states.subtileMBlockSize         = 16
 
     tmp_v = writer.vgprPool.checkOut(1, "tmp_v", preventOverflow=False)

@@ -70,20 +70,22 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                     "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_DIMENSIONS:
-        getInt64Vector(_data.dims,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::getAttribute()");
+        getScalarVector<int64_t>(_data.dims,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 requestedElementCount,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_STRIDES:
-        getInt64Vector(_data.strides,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::getAttribute()");
+        getScalarVector<int64_t>(_data.strides,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 requestedElementCount,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_IS_VIRTUAL:
         getScalar(_data.virtual_,
@@ -146,18 +148,20 @@ void TensorDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                     "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_DIMENSIONS:
-        setInt64Vector(_data.dims,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::setAttribute()");
+        setScalarVector<int64_t>(_data.dims,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_STRIDES:
-        setInt64Vector(_data.strides,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::setAttribute()");
+        setScalarVector<int64_t>(_data.strides,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_IS_VIRTUAL:
         setScalar(_data.virtual_,
