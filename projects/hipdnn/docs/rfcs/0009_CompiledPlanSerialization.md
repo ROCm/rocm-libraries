@@ -96,7 +96,6 @@ table SerializedExecutionPlan {
     engine_id: int64;
     workspace_size: int64;
     tensor_uids: [int64];
-    engine_config: [ubyte];
     plugin_payload: [ubyte];
 }
 
@@ -109,7 +108,6 @@ Field ownership:
 - `engine_id`: selected backend engine ID.
 - `workspace_size`: workspace size reported for the compiled plan.
 - `tensor_uids`: hipDNN-level tensor UID metadata needed for UID-based execution.
-- `engine_config`: serialized engine config bytes used to recreate the plugin execution context.
 - `plugin_payload`: opaque plugin-specific execution context bytes.
 
 There is deliberately no operation graph in the envelope. A backend may not use graph execution, and
@@ -132,7 +130,6 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroySerializedExecutionContext_ext(
 
 hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized_ext(
     hipdnnEnginePluginHandle_t handle,
-    const hipdnnPluginConstData_t* engineConfig,
     const hipdnnPluginConstData_t* serializedContext,
     hipdnnEnginePluginExecutionContext_t* executionContext);
 ```
@@ -161,7 +158,6 @@ The descriptor stores enough state to execute without `EngineConfig -> Engine ->
 - Engine ID.
 - Workspace size.
 - Tensor UIDs.
-- Serialized engine config bytes.
 - Plugin resource manager.
 - Plugin execution context wrapper.
 
