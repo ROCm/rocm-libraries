@@ -139,7 +139,7 @@ TEST(TestCurrentPlatform, ReturnsLowercase)
     // Schema contract: values match against TOML 'platforms' entries which
     // we document as lowercase. Verify the helper itself returns lowercase.
     const auto p = currentPlatform();
-    for(char c : p)
+    for(const char c : p)
     {
         EXPECT_FALSE(std::isupper(static_cast<unsigned char>(c))) << "non-lowercase char: " << c;
     }

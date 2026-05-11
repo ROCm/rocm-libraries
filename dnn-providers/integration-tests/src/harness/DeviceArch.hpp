@@ -26,7 +26,7 @@ inline std::string currentDeviceArchRaw()
     {
         return {};
     }
-    return std::string(props.gcnArchName);
+    return {props.gcnArchName};
 }
 
 } // namespace hipdnn_integration_tests

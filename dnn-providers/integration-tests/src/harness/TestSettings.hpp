@@ -245,32 +245,32 @@ private:
 
     static OverrideEntry parseToleranceOverride(const toml::node& node)
     {
-        static constexpr const char* kSection = "TestSettings: [[tolerance_overrides]]";
+        static constexpr const char* K_SECTION = "TestSettings: [[tolerance_overrides]]";
 
         const auto* table = node.as_table();
         if(table == nullptr)
         {
-            throw std::runtime_error(std::string(kSection) + " entry is not a table");
+            throw std::runtime_error(std::string(K_SECTION) + " entry is not a table");
         }
 
         OverrideEntry parsed;
-        parsed.filters = parseStringArray(*table, "filters", kSection);
+        parsed.filters = parseStringArray(*table, "filters", K_SECTION);
         if(parsed.filters.empty())
         {
-            throw std::runtime_error(std::string(kSection) + " entry missing 'filters' array");
+            throw std::runtime_error(std::string(K_SECTION) + " entry missing 'filters' array");
         }
 
         auto atol = (*table)["atol"].value<double>();
         if(!atol.has_value())
         {
-            throw std::runtime_error(std::string(kSection) + " entry missing 'atol'");
+            throw std::runtime_error(std::string(K_SECTION) + " entry missing 'atol'");
         }
         parsed.atol = static_cast<float>(*atol);
 
         auto rtol = (*table)["rtol"].value<double>();
         if(!rtol.has_value())
         {
-            throw std::runtime_error(std::string(kSection) + " entry missing 'rtol'");
+            throw std::runtime_error(std::string(K_SECTION) + " entry missing 'rtol'");
         }
         parsed.rtol = static_cast<float>(*rtol);
 
@@ -279,28 +279,28 @@ private:
 
     static SkipEntry parseTestSkip(const toml::node& node)
     {
-        static constexpr const char* kSection = "TestSettings: [[test_skips]]";
+        static constexpr const char* K_SECTION = "TestSettings: [[test_skips]]";
 
         const auto* table = node.as_table();
         if(table == nullptr)
         {
-            throw std::runtime_error(std::string(kSection) + " entry is not a table");
+            throw std::runtime_error(std::string(K_SECTION) + " entry is not a table");
         }
 
         SkipEntry parsed;
         // 'archs' and 'platforms' are both optional. Empty = matches any.
-        parsed.archs = parseStringArray(*table, "archs", kSection);
-        parsed.platforms = parseStringArray(*table, "platforms", kSection);
-        parsed.filters = parseStringArray(*table, "filters", kSection);
+        parsed.archs = parseStringArray(*table, "archs", K_SECTION);
+        parsed.platforms = parseStringArray(*table, "platforms", K_SECTION);
+        parsed.filters = parseStringArray(*table, "filters", K_SECTION);
         if(parsed.filters.empty())
         {
-            throw std::runtime_error(std::string(kSection) + " entry missing 'filters' array");
+            throw std::runtime_error(std::string(K_SECTION) + " entry missing 'filters' array");
         }
 
         auto reason = (*table)["reason"].value<std::string>();
         if(!reason.has_value() || reason->empty())
         {
-            throw std::runtime_error(std::string(kSection) + " entry missing 'reason'");
+            throw std::runtime_error(std::string(K_SECTION) + " entry missing 'reason'");
         }
         parsed.reason = std::move(*reason);
 
