@@ -285,6 +285,14 @@ typedef struct _rocsparse_spic0_descr* rocsparse_spic0_descr;
  */
 typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
 
+/*! \ingroup types_module
+ * \brief \p rocsparse_fsai_descr is a structure holding the rocSPARSE FSAI
+ * (Factorized Sparse Approximate Inverse) descriptor data. It must be initialized using
+ * the rocsparse_create_fsai_descr() routine. It should be destroyed at the
+ * end using rocsparse_destroy_fsai_descr().
+ */
+typedef struct _rocsparse_fsai_descr* rocsparse_fsai_descr;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1201,6 +1209,43 @@ typedef enum rocsparse_spilu0_output_
     rocsparse_spilu0_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpILU0 calculation for output from the SpILU0 descriptor. */
     rocsparse_spilu0_output_singularity_position, /**< Get the singularity \p int64_t based position for output from the SpILU0 descriptor. */
 } rocsparse_spilu0_output;
+
+/*! \ingroup types_module
+ *  \brief List of FSAI algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_fsai_alg types that are used to compute
+ *  the Factorized Sparse Approximate Inverse preconditioner.
+ */
+typedef enum rocsparse_fsai_alg_
+{
+    rocsparse_fsai_alg_default = 0 /**< Default FSAI algorithm. */
+} rocsparse_fsai_alg;
+
+/*! \ingroup types_module
+ *  \brief List of FSAI stages.
+ *
+ *  \details
+ *  This is a list of possible stages during FSAI computation. The typical order is
+ *  \ref rocsparse_fsai_stage_analysis, then \ref rocsparse_fsai_stage_compute.
+ */
+typedef enum rocsparse_fsai_stage_
+{
+    rocsparse_fsai_stage_analysis = 0, /**< Analysis stage. */
+    rocsparse_fsai_stage_compute  = 1 /**< Performs the actual FSAI computation. */
+} rocsparse_fsai_stage;
+
+/*! \ingroup types_module
+ *  \brief List of inputs to the FSAI descriptor.
+ *
+ *  \details
+ *  This is a list of possible inputs to the FSAI descriptor.
+ */
+typedef enum rocsparse_fsai_input_
+{
+    rocsparse_fsai_input_alg, /**< Select algorithm \ref rocsparse_fsai_alg for input on an FSAI descriptor. */
+    rocsparse_fsai_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on an FSAI descriptor. */
+} rocsparse_fsai_input;
 
 /*! \ingroup types_module
  *  \brief List of SpGEAM stages.
