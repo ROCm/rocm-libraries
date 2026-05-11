@@ -20,6 +20,9 @@ import sys
 from pathlib import Path
 
 
+# Default kernel config for fallback — a single fwd fp16 kernel with
+# known-good tile (128x128x32, qr_async) for basic smoke-test capability.
+# Source: tile dims from fmha_fwd.py FmhaFwdTileSize for hdim=128 fp16.
 DEFAULT_CONFIG = {
     "arch": "gfx950",
     "signature": {
@@ -141,7 +144,7 @@ def compile_kernels(output_dir: Path, gpu_target: str, include_dirs: str) -> Pat
     import re
 
     # Use the shared compile flags from fmha_utils
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
     from fmha_utils import fmha_compile_flags  # noqa: E402
 
     base_flags = fmha_compile_flags(gpu_target, hipcc, family="bwd")
@@ -195,7 +198,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     codegen_dir = Path(__file__).parent
-    codegen_script = codegen_dir / "unified_fmha_codegen.py"
+    codegen_script = codegen_dir / "codegen.py"
 
     # Accept either a single config dict or a list of configs
     if args.config_json:

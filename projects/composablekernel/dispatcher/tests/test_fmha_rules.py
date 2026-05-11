@@ -8,7 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "codegen"))
 
-from fmha_rules import validate_config, load_arch_specs
+from fmha.specs import validate_config, load_arch_specs
 
 SPECS = load_arch_specs()
 
@@ -157,7 +157,7 @@ class TestMaskDistinction(unittest.TestCase):
     """Verify that top_left and bottom_right are distinct after fix."""
 
     def test_mask_canonical_distinguishes(self):
-        from fmha_symbol_map import canonical_mask, MASK_TO_INT
+        from fmha.symbol_map import canonical_mask, MASK_TO_INT
 
         self.assertEqual(canonical_mask("top_left"), "top_left")
         self.assertEqual(canonical_mask("bottom_right"), "bottom_right")

@@ -5,15 +5,20 @@
 
 import json
 import hashlib
-from pathlib import Path
 
-_ARCH_SPECS_PATH = Path(__file__).with_name("fmha_arch_specs.json")
-_ARCH_SPECS = json.loads(_ARCH_SPECS_PATH.read_text())
-
+# Architecture tag → C++ arch trait type.
+# Source: CK's include/ck_tile/core/arch/amd_gpu_traits.hpp
+#   gfx9* → gfx9_t, gfx11* → gfx11_t, gfx12* → gfx12_t.
 ARCH_TAG_MAP = {
-    arch: spec["arch_tag"] for arch, spec in _ARCH_SPECS["architectures"].items()
+    "gfx90a": "ck_tile::gfx9_t",
+    "gfx942": "ck_tile::gfx9_t",
+    "gfx950": "ck_tile::gfx9_t",
+    "gfx1100": "ck_tile::gfx11_t",
+    "gfx1201": "ck_tile::gfx12_t",
 }
 
+# Architecture → preprocessor guard for conditional compilation.
+# Source: HIP compiler predefined macros (__gfx90a__, __gfx942__, etc.).
 ARCH_PREPROC_MAP = {
     "gfx90a": "defined(__gfx90a__)",
     "gfx942": "defined(__gfx942__)",
@@ -22,6 +27,9 @@ ARCH_PREPROC_MAP = {
     "gfx1201": "defined(__gfx1201__)",
 }
 
+# Forward dtype → C++ type config struct.
+# Source: example/ck_tile/01_fmha/fmha_fwd.hpp FmhaFwdTypeConfig<> specializations
+#   and codegen/cpp_symbol_map.py FWD_DTYPE_MAP.
 FWD_DTYPE_MAP = {
     "fp32": "FmhaFwdFp32",
     "fp16": "FmhaFwdFp16",
@@ -33,12 +41,17 @@ FWD_DTYPE_MAP = {
     "fp8fp32": "FmhaFwdFp8Fp32",
 }
 
+# Backward dtype → C++ type config struct.
+# Source: example/ck_tile/01_fmha/fmha_bwd.hpp FmhaBwdTypeConfig<> specializations.
+# BWD currently only supports fp16/bf16/fp32.
 BWD_DTYPE_MAP = {
     "fp32": "FmhaBwdFp32",
     "fp16": "FmhaBwdFp16",
     "bf16": "FmhaBwdBf16",
 }
 
+# Kernel family → C++ enum.
+# Source: include/ck_tile/dispatcher/fmha_types.hpp FmhaKernelFamily enum.
 KERNEL_FAMILY_TO_ENUM = {
     "fwd": "FmhaKernelFamily::Fwd",
     "fwd_pagedkv": "FmhaKernelFamily::FwdPagedKv",
@@ -51,6 +64,8 @@ KERNEL_FAMILY_TO_ENUM = {
     "bwd_convert_dq": "FmhaKernelFamily::BwdConvertDq",
 }
 
+# API family → C++ enum.
+# Source: include/ck_tile/dispatcher/fmha_types.hpp FmhaApiFamily enum.
 API_FAMILY_TO_ENUM = {
     "fwd": "FmhaApiFamily::Fwd",
     "fwd_pagedkv": "FmhaApiFamily::FwdPagedKv",
@@ -60,6 +75,9 @@ API_FAMILY_TO_ENUM = {
     "bwd": "FmhaApiFamily::Bwd",
 }
 
+# Mask type → canonical form and C++ types.
+# Source: include/ck_tile/ops/fmha/block/block_attention_mask.hpp
+#   SimplifiedGenericAttentionMask<is_causal> and GenericAttentionMask<has_mask, has_local>.
 MASK_CANONICAL = {
     "no": "no",
     "no_mask": "no",
@@ -94,6 +112,8 @@ MASK_TO_INT = {
     "generic": 3,
 }
 
+# Bias type → canonical form and C++ enum.
+# Source: include/ck_tile/ops/fmha/block/block_attention_bias_enum.hpp.
 BIAS_CANONICAL = {
     "no": "no",
     "no_bias": "no",
@@ -115,6 +135,8 @@ BIAS_TO_INT = {
     "alibi": 2,
 }
 
+# Quantization scale type → canonical form and C++ enum.
+# Source: include/ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp.
 QSCALE_CANONICAL = {
     "no": "no",
     "no_scale": "no",
@@ -137,6 +159,8 @@ QSCALE_TO_INT = {
     "kv_blockscale": 3,
 }
 
+# Rotary embedding type → canonical form and C++ enum.
+# Source: include/ck_tile/ops/fmha/block/rotary_embedding_enum.hpp.
 ROPE_CANONICAL = {
     "none": "none",
     "no": "none",
@@ -158,6 +182,8 @@ ROPE_TO_INT = {
     "half": 2,
 }
 
+# V layout → C++ bool (true = row-major, false = column-major).
+# Source: TileFmhaShape<..., IsVLayoutRowMajor> template parameter.
 LAYOUT_TO_BOOL = {
     "r": "true",
     "row": "true",
@@ -167,6 +193,8 @@ LAYOUT_TO_BOOL = {
     "col_major": "false",
 }
 
+# KV cache memory layout → canonical form and C++ enum.
+# Source: include/ck_tile/ops/fmha/block/block_attention_kv_cache.hpp.
 KV_MEMORY_LAYOUT_CANONICAL = {
     "vectorized": "vectorized",
     "linear": "linear",
@@ -182,6 +210,8 @@ KV_MEMORY_LAYOUT_TO_INT = {
     "linear": 1,
 }
 
+# KV lookup table type → canonical form and C++ enum.
+# Source: include/ck_tile/ops/fmha/block/block_attention_kv_cache.hpp.
 KV_LOOKUP_CANONICAL = {
     "sglang": "sglang",
     "vllm": "vllm",
@@ -197,6 +227,8 @@ KV_LOOKUP_TO_INT = {
     "sglang": 1,
 }
 
+# Pipeline tag → C++ pipeline class.
+# Source: include/ck_tile/ops/fmha/pipeline/ — one header per pipeline variant.
 PIPELINE_TO_CPP = {
     "qr": "ck_tile::BlockFmhaPipelineQRKSVS",
     "qr_async": "ck_tile::BlockFmhaPipelineQRKSVSAsync",
@@ -210,6 +242,8 @@ PIPELINE_TO_CPP = {
     "batch_prefill_async": "ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSAsync",
 }
 
+# Pipeline tag → C++ pipeline enum value.
+# Source: include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_enum.hpp.
 PIPELINE_ENUM_TO_CPP = {
     "qr": "ck_tile::BlockFmhaPipelineEnum::QRKSVS",
     "qr_async": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC",

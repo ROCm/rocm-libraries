@@ -312,7 +312,7 @@ def _jit_one(key: tuple, out_dir: Path, arch: str) -> Tuple[bool, str, float]:
     r = subprocess.run(
         [
             sys.executable,
-            str(codegen_dir / "generate_fmha_fallback.py"),
+            str(codegen_dir / "fmha" / "generate_fallback.py"),
             "--output-dir",
             str(out_dir),
             "--gpu-target",
@@ -417,7 +417,7 @@ def _jit_one_bwd(key: tuple, out_dir: Path, arch: str) -> Tuple[bool, str, float
         r = subprocess.run(
             [
                 sys.executable,
-                str(codegen_dir / "unified_fmha_codegen.py"),
+                str(codegen_dir / "fmha" / "codegen.py"),
                 "--output-dir",
                 str(out_dir),
                 "--gpu-target",
@@ -438,7 +438,8 @@ def _jit_one_bwd(key: tuple, out_dir: Path, arch: str) -> Tuple[bool, str, float
         return (False, "no wrappers dir", time.perf_counter() - t0)
 
     sys.path.insert(0, str(codegen_dir))
-    from generate_fmha_fallback import generate_dispatch_header
+    sys.path.insert(0, str(codegen_dir / "fmha"))
+    from generate_fallback import generate_dispatch_header
 
     generate_dispatch_header(out_dir, wrapper_dir)
 

@@ -48,7 +48,7 @@ from fmha_utils import (  # noqa: E402
     detect_gpu_arch,
     setup_multiple_fmha_dispatchers,
 )
-from fmha_instance_builder import expand_sweep, apply_filter  # noqa: E402
+from fmha.instance_gen import expand_sweep, apply_filter  # noqa: E402
 
 YAML_PATH = _THIS_DIR / "ck_fmha_testing_matrix.yaml"
 
