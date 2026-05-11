@@ -48,7 +48,7 @@ static constexpr int CFG_VEC1    = 47;
 // Test kernel: templated on config index.
 // Calls weight_load_to_lds and copies LDS content to global memory.
 // ============================================================================
-template <int CfgIdx>
+template <int CfgIdx, bool Padding>
 __global__ void test_weight_load_kernel(const _Float16* __restrict__ wei,
                                         _Float16* __restrict__ lds_out,
                                         int groups,
@@ -69,7 +69,7 @@ __global__ void test_weight_load_kernel(const _Float16* __restrict__ wei,
         lds_buf[i] = uint4{0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu};
     __syncthreads();
 
-    weight_load_to_lds<TC, cfg>(bc, lds_buf, wei, c_per_group, k_per_group);
+    weight_load_to_lds<TC, cfg, Padding>(bc, lds_buf, wei, c_per_group, k_per_group);
     __syncthreads();
 
     const _Float16* lds_fp16 = reinterpret_cast<const _Float16*>(lds_buf);
@@ -113,7 +113,7 @@ protected:
     }
 
     // Launch the kernel for the given config index and verify LDS contents.
-    template <int CfgIdx>
+    template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int k_per_group)
     {
         using TC = TileConstants<configs[CfgIdx]>;
@@ -133,7 +133,7 @@ protected:
         ck_tile::hip_check_error(hipMemcpy(
             d_wei, wei_host.data(), wei_host.size() * sizeof(_Float16), hipMemcpyHostToDevice));
 
-        test_weight_load_kernel<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
+        test_weight_load_kernel<CfgIdx, Padding><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
             d_wei, d_lds_out, groups, c_per_group, k_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
@@ -176,7 +176,7 @@ protected:
 // Unpadded path (config 9, vector_size=8): c==GROUP_SIZE, k==GROUP_SIZE.
 TEST_F(WeightLoaderTest, Unpadded_C4_K4)
 {
-    run_and_verify<CFG_UNPADDED>(GROUP_SIZE, GROUP_SIZE);
+    run_and_verify<CFG_UNPADDED, false>(GROUP_SIZE, GROUP_SIZE);
 }
 
 // C padding only (k == GROUP_SIZE).
@@ -319,7 +319,7 @@ static constexpr int CFG_16C_UNPADDED = 9;
 static constexpr int CFG_16C_VEC4     = 81;
 static constexpr int CFG_16C_VEC1     = 83;
 
-template <int CfgIdx>
+template <int CfgIdx, bool Padding>
 __global__ void test_weight_load_kernel_16c(const _Float16* __restrict__ wei,
                                             _Float16* __restrict__ lds_out,
                                             int groups,
@@ -340,7 +340,7 @@ __global__ void test_weight_load_kernel_16c(const _Float16* __restrict__ wei,
         lds_buf[i] = uint4{0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu};
     __syncthreads();
 
-    weight_load_to_lds<TC, cfg>(bc, lds_buf, wei, c_per_group, k_per_group);
+    weight_load_to_lds<TC, cfg, Padding>(bc, lds_buf, wei, c_per_group, k_per_group);
     __syncthreads();
 
     const _Float16* lds_fp16 = reinterpret_cast<const _Float16*>(lds_buf);
@@ -375,7 +375,7 @@ protected:
         return static_cast<float>(wei[idx]);
     }
 
-    template <int CfgIdx>
+    template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int k_per_group)
     {
         using TC = ns_16c::TileConstants<ns_16c::configs[CfgIdx]>;
@@ -392,7 +392,7 @@ protected:
         ck_tile::hip_check_error(hipMemcpy(
             d_wei, wei_host.data(), wei_host.size() * sizeof(_Float16), hipMemcpyHostToDevice));
 
-        test_weight_load_kernel_16c<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
+        test_weight_load_kernel_16c<CfgIdx, Padding><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
             d_wei, d_lds_out, groups, c_per_group, k_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
@@ -428,7 +428,7 @@ protected:
 };
 
 // Unpadded 16c
-TEST_F(WeightLoader16cTest, Unpadded_C16_K16) { run_and_verify<CFG_16C_UNPADDED>(16, 16); }
+TEST_F(WeightLoader16cTest, Unpadded_C16_K16) { run_and_verify<CFG_16C_UNPADDED, false>(16, 16); }
 
 // C padding only (k == GROUP_SIZE)
 TEST_F(WeightLoader16cTest, Vec1_C12_K16) { run_and_verify<CFG_16C_VEC1>(12, 16); }
@@ -461,7 +461,7 @@ static constexpr int CFG_8C_UNPADDED = 9;
 static constexpr int CFG_8C_VEC4     = 79;
 static constexpr int CFG_8C_VEC1     = 81;
 
-template <int CfgIdx>
+template <int CfgIdx, bool Padded>
 __global__ void test_weight_load_kernel_8c(const _Float16* __restrict__ wei,
                                            _Float16* __restrict__ lds_out,
                                            int groups,
@@ -482,7 +482,7 @@ __global__ void test_weight_load_kernel_8c(const _Float16* __restrict__ wei,
         lds_buf[i] = uint4{0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu};
     __syncthreads();
 
-    weight_load_to_lds<TC, cfg>(bc, lds_buf, wei, c_per_group, k_per_group);
+    weight_load_to_lds<TC, cfg, Padded>(bc, lds_buf, wei, c_per_group, k_per_group);
     __syncthreads();
 
     const _Float16* lds_fp16 = reinterpret_cast<const _Float16*>(lds_buf);
@@ -517,7 +517,7 @@ protected:
         return static_cast<float>(wei[idx]);
     }
 
-    template <int CfgIdx>
+    template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int k_per_group)
     {
         using TC = ns_8c::TileConstants<ns_8c::configs[CfgIdx]>;
@@ -534,7 +534,7 @@ protected:
         ck_tile::hip_check_error(hipMemcpy(
             d_wei, wei_host.data(), wei_host.size() * sizeof(_Float16), hipMemcpyHostToDevice));
 
-        test_weight_load_kernel_8c<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
+        test_weight_load_kernel_8c<CfgIdx, Padding><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
             d_wei, d_lds_out, groups, c_per_group, k_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
@@ -570,7 +570,7 @@ protected:
 };
 
 // Unpadded 8c
-TEST_F(WeightLoader8cTest, Unpadded_C8_K8) { run_and_verify<CFG_8C_UNPADDED>(8, 8); }
+TEST_F(WeightLoader8cTest, Unpadded_C8_K8) { run_and_verify<CFG_8C_UNPADDED, false>(8, 8); }
 
 // C padding only (k == GROUP_SIZE)
 TEST_F(WeightLoader8cTest, Vec1_C6_K8) { run_and_verify<CFG_8C_VEC1>(6, 8); }

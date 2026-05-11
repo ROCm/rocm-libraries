@@ -92,7 +92,7 @@ struct WeightAccessor8
 //
 // cfg must provide:
 //   cfg.kh, cfg.kw, cfg.block_size()
-template <typename TC, auto cfg, typename BlockCoords_>
+template <typename TC, auto cfg, bool Padded, typename BlockCoords_>
 __device__ void weight_load_to_lds(const BlockCoords_& bc,
                                    uint4* weight_lds,
                                    const _Float16* __restrict__ wei,
@@ -102,63 +102,69 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
     constexpr auto weight_dram_desc = TC::Weight::MakeDramReadDescriptor();
     constexpr auto weight_dram_dist = TC::Weight::MakeDramReadTileDistribution();
 
-    if (TC::GROUP_SIZE != c_per_group || TC::GROUP_SIZE != k_per_group)
+    // When Padded=true, check at runtime whether padding is actually needed.
+    // When Padded=false, skip the padded path entirely (dead code elimination).
+    if constexpr(Padded)
     {
-        // Padded path: c_per_group < GROUP_SIZE or k_per_group < GROUP_SIZE.
-        //
-        // MakeDramReadDescriptorPadded returns a 2D [WEIGHT_LDS_PADDED_UINT4, 8]
-        // descriptor (same shape as MakeDramReadDescriptor) built by:
-        //   1. 4D raw DRAM view: [BLOCK_GROUPS, k_per_group, KH_KW, c_per_group]
-        //   2. Pad K → GROUP_SIZE, pad C → GROUP_SIZE (OOB reads as zero)
-        //   3. Merge all 4 dims → flat 1D
-        //   4. Unmerge → [WEIGHT_LDS_SIZE_UINT4, 8]
-        //   5. Pad rows → [WEIGHT_LDS_PADDED_UINT4, 8]
-        //
-        // The buffer base is offset to bc.block_group so the BLOCK_GROUPS
-        // dimension covers exactly this block's groups.
-        const auto weight_padded_dram_desc =
-            TC::Weight::template MakeDramReadDescriptorPadded<cfg.vector_size>(k_per_group, c_per_group);
+        if(TC::GROUP_SIZE != c_per_group || TC::GROUP_SIZE != k_per_group)
+        {
+            // Padded path: c_per_group < GROUP_SIZE or k_per_group < GROUP_SIZE.
+            //
+            // MakeDramReadDescriptorPadded returns a 2D [WEIGHT_LDS_PADDED_UINT4, 8]
+            // descriptor (same shape as MakeDramReadDescriptor) built by:
+            //   1. 4D raw DRAM view: [BLOCK_GROUPS, k_per_group, KH_KW, c_per_group]
+            //   2. Pad K → GROUP_SIZE, pad C → GROUP_SIZE (OOB reads as zero)
+            //   3. Merge all 4 dims → flat 1D
+            //   4. Unmerge → [WEIGHT_LDS_SIZE_UINT4, 8]
+            //   5. Pad rows → [WEIGHT_LDS_PADDED_UINT4, 8]
+            //
+            // The buffer base is offset to bc.block_group so the BLOCK_GROUPS
+            // dimension covers exactly this block's groups.
+            const auto weight_padded_dram_desc =
+                TC::Weight::template MakeDramReadDescriptorPadded<cfg.vector_size>(k_per_group, c_per_group);
 
-        // Offset wei to bc.block_group * k_per_group * KH_KW * c_per_group.
-        const _Float16* wei_block =
-            wei + static_cast<size_t>(bc.block_group) * k_per_group * cfg.kh * cfg.kw * c_per_group;
+            // Offset wei to bc.block_group * k_per_group * KH_KW * c_per_group.
+            const _Float16* wei_block =
+                wei + static_cast<size_t>(bc.block_group) * k_per_group * cfg.kh * cfg.kw * c_per_group;
 
-        auto weight_padded_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
-            wei_block, weight_padded_dram_desc);
+            auto weight_padded_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+                wei_block, weight_padded_dram_desc);
 
-        auto weight_padded_dram_window = ck_tile::make_tile_window(
-            weight_padded_dram_view,
-            ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
-            {0, 0},
-            weight_dram_dist);
+            auto weight_padded_dram_window = ck_tile::make_tile_window(
+                weight_padded_dram_view,
+                ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
+                {0, 0},
+                weight_dram_dist);
 
-        constexpr auto weight_lds_desc = TC::Weight::MakeLdsWriteDescriptor();
-        auto weight_lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-            reinterpret_cast<_Float16*>(weight_lds), weight_lds_desc);
+            constexpr auto weight_lds_desc = TC::Weight::MakeLdsWriteDescriptor();
+            auto weight_lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+                reinterpret_cast<_Float16*>(weight_lds), weight_lds_desc);
 
-        // LDS window needs the same distribution as the DRAM window so that
-        // store_tile knows where each thread writes its register tile elements.
-        auto weight_lds_window = ck_tile::make_tile_window(
-            weight_lds_view,
-            ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
-            {0, 0},
-            weight_dram_dist);
+            // LDS window needs the same distribution as the DRAM window so that
+            // store_tile knows where each thread writes its register tile elements.
+            auto weight_lds_window = ck_tile::make_tile_window(
+                weight_lds_view,
+                ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
+                {0, 0},
+                weight_dram_dist);
 
-        static_for<TC::Weight::NUM_WEIGHT_PASSES>(
-            [&]<int Pass>()
-            {
-                // load_tile applies per-element OOB checking via the pad transforms,
-                // correctly zeroing padded K and C positions. This is correct for any
-                // c_per_group, unlike async_load_tile which issues vector loads that
-                // bypass per-element OOB checks.
-                auto weight_reg = ck_tile::load_tile(weight_padded_dram_window);
-                ck_tile::store_tile(weight_lds_window, weight_reg);
-                if constexpr(Pass < TC::Weight::NUM_WEIGHT_PASSES - 1)
+            static_for<TC::Weight::NUM_WEIGHT_PASSES>(
+                [&]<int Pass>()
                 {
-                    ck_tile::move_tile_window(weight_padded_dram_window, {cfg.block_size(), 0});
-                    ck_tile::move_tile_window(weight_lds_window, {cfg.block_size(), 0});
-                }
-            });
+                    // load_tile applies per-element OOB checking via the pad transforms,
+                    // correctly zeroing padded K and C positions. This is correct for any
+                    // c_per_group, unlike async_load_tile which issues vector loads that
+                    // bypass per-element OOB checks.
+                    auto weight_reg = ck_tile::load_tile(weight_padded_dram_window);
+                    ck_tile::store_tile(weight_lds_window, weight_reg);
+                    if constexpr(Pass < TC::Weight::NUM_WEIGHT_PASSES - 1)
+                    {
+                        ck_tile::move_tile_window(weight_padded_dram_window, {cfg.block_size(), 0});
+                        ck_tile::move_tile_window(weight_lds_window, {cfg.block_size(), 0});
+                    }
+                });
+            return;
+        }
     }
     else
     {

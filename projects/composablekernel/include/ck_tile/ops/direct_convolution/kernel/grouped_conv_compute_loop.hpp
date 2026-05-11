@@ -31,6 +31,7 @@ namespace direct_conv {
 //   INNER_KW       — inner loop width (defaults to cfg.kw; set to 1 for Toeplitz)
 template <typename TC,
           auto cfg,
+          bool Padded,
           typename MfmaFn,
           typename BlockCoordsT,
           typename InputLoaderT,
@@ -95,7 +96,7 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     // --- Weight loading (uses start of buffer, before input phase) ---
     // Weight tensor layout is always GKYXC with the original c/k_per_group.
     WeightLoaderT wl;
-    WeightLoaderT::load_to_lds(bc, lds_buf, wei, c_per_group, k_per_group);
+    WeightLoaderT::template load_to_lds<Padded>(bc, lds_buf, wei, c_per_group, k_per_group);
     wait_vmcnt<0>();
     __syncthreads();
 

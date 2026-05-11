@@ -47,7 +47,7 @@ static constexpr int CFG_VEC1     = 49;
 // Test kernel: templated on config index.
 // Constructs InputLoader, loads one row into LDS, copies LDS to global.
 // ============================================================================
-template <int CfgIdx>
+template <int CfgIdx, bool Padding>
 __global__ void test_input_load_kernel(const _Float16* __restrict__ in,
                                        _Float16* __restrict__ lds_out,
                                        int groups,
@@ -78,7 +78,7 @@ __global__ void test_input_load_kernel(const _Float16* __restrict__ in,
     __syncthreads();
 
     // Construct InputLoader and prefetch first row (row 0) into LDS buffer 0.
-    ck_tile::direct_conv::InputLoader<TC, cfg> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
+    ck_tile::direct_conv::InputLoader<TC, cfg, ck_tile::fp16x4_t, Padding> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
     il.prefetch_tile_to_lds(0);
 
     __syncthreads();
@@ -127,7 +127,7 @@ protected:
     // Launch the kernel for the given config index and verify LDS contents.
     // k_per_group controls the output channel count passed to BlockCoords.
     // When 0 (default), uses c_per_group for backward compatibility.
-    template <int CfgIdx>
+    template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int px = 0, int k_per_group = 0)
     {
         using TC = TileConstants<configs[CfgIdx]>;
@@ -155,7 +155,7 @@ protected:
         ck_tile::hip_check_error(hipMemcpy(
             d_in, inp_host.data(), inp_host.size() * sizeof(_Float16), hipMemcpyHostToDevice));
 
-        test_input_load_kernel<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
+        test_input_load_kernel<CfgIdx, Padding><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
             d_in, d_lds_out, groups, c_per_group, hi, wi, px, k_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
@@ -235,7 +235,7 @@ protected:
 // ============================================================================
 
 // Unpadded path: c_per_group == GROUP_SIZE.
-TEST_F(InputLoaderTest, Unpadded_C4) { run_and_verify<CFG_UNPADDED>(GROUP_SIZE); }
+TEST_F(InputLoaderTest, Unpadded_C4) { run_and_verify<CFG_UNPADDED, false>(GROUP_SIZE); }
 
 // Padded path: c_per_group < GROUP_SIZE.
 TEST_F(InputLoaderTest, Vec1_C3) { run_and_verify<CFG_VEC1>(3); }
@@ -255,9 +255,9 @@ TEST_F(InputLoaderTest, Vec1_C1_px2) { run_and_verify<CFG_VEC1>(1, 2); }
 TEST_F(InputLoaderTest, Vec2_C2_px2) { run_and_verify<CFG_VEC2>(2, 2); }
 
 // Unpadded with spatial padding.
-TEST_F(InputLoaderTest, Unpadded_C4_px1) { run_and_verify<CFG_UNPADDED>(GROUP_SIZE, 1); }
-TEST_F(InputLoaderTest, Unpadded_C4_px2) { run_and_verify<CFG_UNPADDED>(GROUP_SIZE, 2); }
-TEST_F(InputLoaderTest, Unpadded_C4_px3) { run_and_verify<CFG_UNPADDED>(GROUP_SIZE, 3); }
+TEST_F(InputLoaderTest, Unpadded_C4_px1) { run_and_verify<CFG_UNPADDED, false>(GROUP_SIZE, 1); }
+TEST_F(InputLoaderTest, Unpadded_C4_px2) { run_and_verify<CFG_UNPADDED, false>(GROUP_SIZE, 2); }
+TEST_F(InputLoaderTest, Unpadded_C4_px3) { run_and_verify<CFG_UNPADDED, false>(GROUP_SIZE, 3); }
 
 // C != K tests: verify InputLoader works correctly when BlockCoords has C_in != C_out.
 // The InputLoader should only depend on c_per_group (C_in), not k_per_group (C_out).
@@ -285,7 +285,7 @@ static constexpr int CFG_16C_UNPADDED = 17;
 static constexpr int CFG_16C_VEC4     = 81;
 static constexpr int CFG_16C_VEC1     = 83;
 
-template <int CfgIdx>
+template <int CfgIdx, bool Padding>
 __global__ void test_input_load_kernel_16c(const _Float16* __restrict__ in,
                                            _Float16* __restrict__ lds_out,
                                            int groups,
@@ -311,7 +311,7 @@ __global__ void test_input_load_kernel_16c(const _Float16* __restrict__ in,
         lds_buf[i] = uint4{0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu};
     __syncthreads();
 
-    ck_tile::direct_conv::InputLoader<TC, cfg> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
+    ck_tile::direct_conv::InputLoader<TC, cfg, ck_tile::fp16x4_t, Padding> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
     il.prefetch_tile_to_lds(0);
     __syncthreads();
 
@@ -341,7 +341,7 @@ protected:
         return static_cast<float>(inp[h * wi * C_total + w * C_total + c]);
     }
 
-    template <int CfgIdx>
+    template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int px = 0, int k_per_group = 0)
     {
         using TC = ns_16c::TileConstants<ns_16c::configs[CfgIdx]>;
@@ -366,7 +366,7 @@ protected:
         ck_tile::hip_check_error(hipMemcpy(
             d_in, inp_host.data(), inp_host.size() * sizeof(_Float16), hipMemcpyHostToDevice));
 
-        test_input_load_kernel_16c<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
+        test_input_load_kernel_16c<CfgIdx, Padding><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
             d_in, d_lds_out, groups, c_per_group, hi, wi, px, k_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
@@ -419,8 +419,8 @@ protected:
 };
 
 // Unpadded 16c
-TEST_F(InputLoader16cTest, Unpadded_C16)     { run_and_verify<CFG_16C_UNPADDED>(16); }
-TEST_F(InputLoader16cTest, Unpadded_C16_px1) { run_and_verify<CFG_16C_UNPADDED>(16, 1); }
+TEST_F(InputLoader16cTest, Unpadded_C16)     { run_and_verify<CFG_16C_UNPADDED, false>(16); }
+TEST_F(InputLoader16cTest, Unpadded_C16_px1) { run_and_verify<CFG_16C_UNPADDED, false>(16, 1); }
 
 // Padded 16c: c_per_group < 16
 TEST_F(InputLoader16cTest, Vec1_C12)     { run_and_verify<CFG_16C_VEC1>(12); }
@@ -431,8 +431,8 @@ TEST_F(InputLoader16cTest, Vec1_C12_px1) { run_and_verify<CFG_16C_VEC1>(12, 1); 
 TEST_F(InputLoader16cTest, Vec1_C9_px1)  { run_and_verify<CFG_16C_VEC1>(9, 1); }
 
 // Spatial padding px = 2, 3.
-TEST_F(InputLoader16cTest, Unpadded_C16_px2) { run_and_verify<CFG_16C_UNPADDED>(16, 2); }
-TEST_F(InputLoader16cTest, Unpadded_C16_px3) { run_and_verify<CFG_16C_UNPADDED>(16, 3); }
+TEST_F(InputLoader16cTest, Unpadded_C16_px2) { run_and_verify<CFG_16C_UNPADDED, false>(16, 2); }
+TEST_F(InputLoader16cTest, Unpadded_C16_px3) { run_and_verify<CFG_16C_UNPADDED, false>(16, 3); }
 TEST_F(InputLoader16cTest, Vec1_C12_px2) { run_and_verify<CFG_16C_VEC1>(12, 2); }
 TEST_F(InputLoader16cTest, Vec1_C12_px3) { run_and_verify<CFG_16C_VEC1>(12, 3); }
 TEST_F(InputLoader16cTest, Vec1_C9_px2)  { run_and_verify<CFG_16C_VEC1>(9, 2); }
@@ -455,7 +455,7 @@ static constexpr int CFG_8C_UNPADDED = 17;
 static constexpr int CFG_8C_VEC4     = 79;
 static constexpr int CFG_8C_VEC1     = 81;
 
-template <int CfgIdx>
+template <int CfgIdx, bool Padding>
 __global__ void test_input_load_kernel_8c(const _Float16* __restrict__ in,
                                           _Float16* __restrict__ lds_out,
                                           int groups,
@@ -481,7 +481,7 @@ __global__ void test_input_load_kernel_8c(const _Float16* __restrict__ in,
         lds_buf[i] = uint4{0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu};
     __syncthreads();
 
-    ck_tile::direct_conv::InputLoader<TC, cfg> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
+    ck_tile::direct_conv::InputLoader<TC, cfg, ck_tile::fp16x4_t, Padding> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
     il.prefetch_tile_to_lds(0);
     __syncthreads();
 
@@ -511,7 +511,7 @@ protected:
         return static_cast<float>(inp[h * wi * C_total + w * C_total + c]);
     }
 
-    template <int CfgIdx>
+    template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int px = 0, int k_per_group = 0)
     {
         using TC = ns_8c::TileConstants<ns_8c::configs[CfgIdx]>;
@@ -536,7 +536,7 @@ protected:
         ck_tile::hip_check_error(hipMemcpy(
             d_in, inp_host.data(), inp_host.size() * sizeof(_Float16), hipMemcpyHostToDevice));
 
-        test_input_load_kernel_8c<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
+        test_input_load_kernel_8c<CfgIdx, Padding><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
             d_in, d_lds_out, groups, c_per_group, hi, wi, px, k_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
@@ -589,8 +589,8 @@ protected:
 };
 
 // Unpadded 8c
-TEST_F(InputLoader8cTest, Unpadded_C8)     { run_and_verify<CFG_8C_UNPADDED>(8); }
-TEST_F(InputLoader8cTest, Unpadded_C8_px1) { run_and_verify<CFG_8C_UNPADDED>(8, 1); }
+TEST_F(InputLoader8cTest, Unpadded_C8)     { run_and_verify<CFG_8C_UNPADDED, false>(8); }
+TEST_F(InputLoader8cTest, Unpadded_C8_px1) { run_and_verify<CFG_8C_UNPADDED, false>(8, 1); }
 
 // Padded 8c: c_per_group < 8
 TEST_F(InputLoader8cTest, Vec1_C6)     { run_and_verify<CFG_8C_VEC1>(6); }
@@ -600,8 +600,8 @@ TEST_F(InputLoader8cTest, Vec1_C6_px1) { run_and_verify<CFG_8C_VEC1>(6, 1); }
 TEST_F(InputLoader8cTest, Vec1_C5_px1) { run_and_verify<CFG_8C_VEC1>(5, 1); }
 
 // Spatial padding px = 2, 3.
-TEST_F(InputLoader8cTest, Unpadded_C8_px2) { run_and_verify<CFG_8C_UNPADDED>(8, 2); }
-TEST_F(InputLoader8cTest, Unpadded_C8_px3) { run_and_verify<CFG_8C_UNPADDED>(8, 3); }
+TEST_F(InputLoader8cTest, Unpadded_C8_px2) { run_and_verify<CFG_8C_UNPADDED, false>(8, 2); }
+TEST_F(InputLoader8cTest, Unpadded_C8_px3) { run_and_verify<CFG_8C_UNPADDED, false>(8, 3); }
 TEST_F(InputLoader8cTest, Vec1_C6_px2) { run_and_verify<CFG_8C_VEC1>(6, 2); }
 TEST_F(InputLoader8cTest, Vec1_C6_px3) { run_and_verify<CFG_8C_VEC1>(6, 3); }
 TEST_F(InputLoader8cTest, Vec1_C5_px2) { run_and_verify<CFG_8C_VEC1>(5, 2); }

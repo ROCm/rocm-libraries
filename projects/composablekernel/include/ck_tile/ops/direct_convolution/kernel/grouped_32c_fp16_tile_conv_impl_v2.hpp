@@ -467,10 +467,10 @@ using BlockCoords = direct_conv::BlockCoords<cfg>;
 // LDS read offset:
 //   (lane_q, wave_group * GROUP_SIZE_8 + wave_half * (GROUP_SIZE_8/2) + lane_c8)
 // ===================================================================
-template <Config cfg>
-struct InputLoader32c : direct_conv::InputLoader<TileConstants<cfg>, cfg, ck_tile::fp16x8_t>
+template <Config cfg, bool Padded = true>
+struct InputLoader32c : direct_conv::InputLoader<TileConstants<cfg>, cfg, ck_tile::fp16x8_t, Padded>
 {
-    using base = direct_conv::InputLoader<TileConstants<cfg>, cfg, ck_tile::fp16x8_t>;
+    using base = direct_conv::InputLoader<TileConstants<cfg>, cfg, ck_tile::fp16x8_t, Padded>;
     using TC = TileConstants<cfg>;
 
     template <typename BlockCoords_>
@@ -533,14 +533,14 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw>
 {
     using TC = TileConstants<cfg>;
 
-    template <typename BlockCoords_>
+    template <bool Padded_ = true, typename BlockCoords_>
     __device__ static void load_to_lds(const BlockCoords_& bc,
                                        uint4* weight_lds,
                                        const _Float16* __restrict__ wei,
                                        int c_per_group,
                                        int k_per_group)
     {
-        direct_conv::weight_load_to_lds<TC, cfg>(bc, weight_lds, wei, c_per_group, k_per_group);
+        direct_conv::weight_load_to_lds<TC, cfg, Padded_>(bc, weight_lds, wei, c_per_group, k_per_group);
     }
 
     // Read weights from LDS into registers (this->weights[]).
@@ -627,15 +627,15 @@ __device__ void weight_read_fprop_32c(WeightAccessor8<KH, KW>& wa, uint4* weight
 }
 
 // OutputWriter — direct DRAM writes (RegistersToGlobalMemory epilogue).
-template <Config cfg>
-using OutputWriter = direct_conv::OutputWriter<TileConstants<cfg>>;
+template <Config cfg, bool Padded = true>
+using OutputWriter = direct_conv::OutputWriter<TileConstants<cfg>, Padded>;
 
 // OutputWriterLds — LDS-staged writes (RegistersToLdsToGlobalMemory).
-template <Config cfg>
-using OutputWriterLds = direct_conv::OutputWriterLds<TileConstants<cfg>>;
+template <Config cfg, bool Padded = true>
+using OutputWriterLds = direct_conv::OutputWriterLds<TileConstants<cfg>, Padded>;
 
 // Main device function.
-template <Config cfg>
+template <Config cfg, bool Padded = true>
 __device__ void ck_tile_conv2d_grouped_32c_fp16_nhwc_impl(const _Float16* __restrict__ in,
                                                             const _Float16* __restrict__ wei,
                                                             double alpha,
@@ -660,15 +660,16 @@ __device__ void ck_tile_conv2d_grouped_32c_fp16_nhwc_impl(const _Float16* __rest
 {
     constexpr bool use_lds_epilogue = (cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory);
     using TC = TileConstants<cfg>;
-    using OutputWriterType = std::conditional_t<use_lds_epilogue, OutputWriterLds<cfg>, OutputWriter<cfg>>;
+    using OutputWriterType = std::conditional_t<use_lds_epilogue,
+        OutputWriterLds<cfg, Padded>, OutputWriter<cfg, Padded>>;
 
     direct_conv::grouped_conv_compute_loop<
-        TC, cfg, Mfma16x16x32_32c,
-        BlockCoords<cfg>, InputLoader32c<cfg>, WeightLoader<cfg>, OutputWriterType>(
+        TC, cfg, Padded, Mfma16x16x32_32c,
+        BlockCoords<cfg>, InputLoader32c<cfg, Padded>, WeightLoader<cfg>, OutputWriterType>(
         in, wei, out, N, groups, c_per_group, k_per_group, hi, wi, ho, wo, py, px);
 }
 
-template <Config cfg>
+template <Config cfg, bool Padded = true>
 __global__ void ck_tile_conv2d_grouped_32c_fp16_nhwc(const _Float16* __restrict__ in,
                                                        const _Float16* __restrict__ wei,
                                                        double alpha,
@@ -691,7 +692,7 @@ __global__ void ck_tile_conv2d_grouped_32c_fp16_nhwc(const _Float16* __restrict_
                                                        int py,
                                                        int px)
 {
-    ck_tile_conv2d_grouped_32c_fp16_nhwc_impl<cfg>(in, wei, alpha, beta, out,
+    ck_tile_conv2d_grouped_32c_fp16_nhwc_impl<cfg, Padded>(in, wei, alpha, beta, out,
                                                      N, groups, c_per_group, k_per_group,
                                                      hi, wi, ho, wo, fy, fx, sy, sx, dy, dx, py, px);
 }
@@ -706,10 +707,13 @@ void launch_dispatch(int config_idx,
                      void* out,
                      hipStream_t stream)
 {
-    auto kernel_launch = [&]<size_t I>()
+    const bool needs_padding = par.channels_per_group() != configs[0].group_size() ||
+                               par.filters_per_group() != configs[0].group_size();
+
+    auto kernel_launch = [&]<size_t I, bool P>()
     {
         auto view = SizeView<configs[I].direction>(par);
-        ck_tile_conv2d_grouped_32c_fp16_nhwc<configs[I]>
+        ck_tile_conv2d_grouped_32c_fp16_nhwc<configs[I], P>
             <<<lp.grid, lp.block_size, lp.dynamic_shared_bytes, stream>>>(
                 static_cast<const _Float16*>(in),
                 static_cast<const _Float16*>(wei),
@@ -733,7 +737,16 @@ void launch_dispatch(int config_idx,
                 view.pad_h(),
                 view.pad_w());
     };
-    (void)((config_idx == static_cast<int>(Is) ? (kernel_launch.template operator()<Is>(), true)
+
+    auto dispatch_config = [&]<size_t I>()
+    {
+        if(needs_padding)
+            kernel_launch.template operator()<I, true>();
+        else
+            kernel_launch.template operator()<I, false>();
+    };
+
+    (void)((config_idx == static_cast<int>(Is) ? (dispatch_config.template operator()<Is>(), true)
                                                : false) ||
            ...);
 }

@@ -27,7 +27,7 @@ namespace direct_conv {
 //   TC::Mfma::MakeAccTileDistribution()
 //   TC::TOTAL_SPATIAL, TC::BLOCK_W, TC::BLOCK_C8, TC::BLOCK_C4, TC::BLOCK_Q
 //   TC::INPUT_LDS_BUFFER_SIZE_C8, TC::INPUT_LDS_BUFFER_SIZE_FP16
-template <typename TC, auto cfg, typename InputType = ck_tile::fp16x4_t>
+template <typename TC, auto cfg, typename InputType = ck_tile::fp16x4_t, bool Padded = true>
 struct InputLoader
 {
     // Register type for MFMA input operand (matches read_from_lds parameter type).
@@ -68,20 +68,25 @@ struct InputLoader
     ck_tile::index_t                  mfma_lds_offsets[cfg.kw]; // precomputed element offsets per kw slice
 
     // Additional state for padded path (c_per_group < GROUP_SIZE).
-    bool                              padded_;              // true when using load_tile path
-    int                               hi_;                  // input height
-    int                               wi_;                  // input width
-    int                               C_in_;                // groups * c_per_group
-    int                               c_per_group_;         // channels per group (< GROUP_SIZE)
-    int                               px_;                  // spatial padding in width
-    int                               py_;                  // spatial padding in height
-    int                               dx_;                  // dilation in width
-    int                               dy_;                  // dilation in height
-    int                               sx_;                  // stride in width
-    int                               sy_;                  // stride in height
-    int                               current_row_;         // current input row for padded fetch
-    int                               block_q_;             // spatial block offset
-    const _Float16*                   input_base_padded_;   // base pointer for padded DRAM reads
+    // When Padded=false, these are not needed and are eliminated by the compiler.
+    struct PaddedState
+    {
+        int               hi_;                  // input height
+        int               wi_;                  // input width
+        int               C_in_;                // groups * c_per_group
+        int               c_per_group_;         // channels per group (< GROUP_SIZE)
+        int               px_;                  // spatial padding in width
+        int               py_;                  // spatial padding in height
+        int               dx_;                  // dilation in width
+        int               dy_;                  // dilation in height
+        int               sx_;                  // stride in width
+        int               sy_;                  // stride in height
+        int               current_row_;         // current input row for padded fetch
+        int               block_q_;             // spatial block offset
+        const _Float16*   input_base_padded_;   // base pointer for padded DRAM reads
+    };
+    struct EmptyState {};
+    [[no_unique_address]] std::conditional_t<Padded, PaddedState, EmptyState> padded_state_;
 
     template <typename BlockCoords_>
     __device__ InputLoader(const BlockCoords_& bc,
@@ -97,8 +102,7 @@ struct InputLoader
                            int sy,
                            int c_per_group = TC::GROUP_SIZE,
                            bool init_mfma_offsets = true)
-                : input_lds_ptr(input_lds),
-                  padded_(c_per_group != TC::GROUP_SIZE)
+                : input_lds_ptr(input_lds)
     {
         constexpr auto input_dram_dist = TC::Input::MakeDramReadTileDistribution();
         constexpr auto tile_lengths = ck_tile::make_tuple(
@@ -119,8 +123,8 @@ struct InputLoader
         };
 
         // ---- Unpadded init: extracted as a lambda so it can be called from
-        // both the has_padded_descriptor=true (but padded_=false) case and
-        // the has_padded_descriptor=false case without code duplication. ----
+        // both the Padded=true (but c_per_group==GROUP_SIZE at runtime) case
+        // and the Padded=false case without code duplication. ----
         auto init_unpadded = [&]() {
             const auto input_dram_desc = TC::Input::MakeDramReadDescriptor(hi, wi, bc.C, px, py, dx, dy, sx, sy);
             const _Float16* input_base = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k;
@@ -165,41 +169,48 @@ struct InputLoader
             row_stride_bytes = static_cast<ck_tile::index_t>(wi * bc.C * sizeof(_Float16));
         };
 
-        if(padded_)
+        if constexpr(Padded)
         {
-            // ---- Padded path: c_per_group < GROUP_SIZE ----
-            // Store scalar state for creating temporary tile_windows per row.
-            hi_               = hi;
-            wi_               = wi;
-            C_in_             = bc.C_in;
-            c_per_group_      = c_per_group;
-            px_               = px;
-            py_               = py;
-            dx_               = dx;
-            dy_               = dy;
-            sx_               = sx;
-            sy_               = sy;
-            current_row_      = 0;
-            block_q_          = bc.block_q;
-            input_base_padded_ = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C_in + bc.block_k_in;
-
-            // Extract load_active using the padded DRAM descriptor (correct strides).
+            if(c_per_group != TC::GROUP_SIZE)
             {
-                const auto padded_desc =
-                    TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
-                        hi, wi, bc.C_in, c_per_group, px, py, dx, dy, sx, sy);
-                auto padded_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
-                    input_base_padded_, padded_desc);
-                auto tmp_window = ck_tile::make_tile_window(
-                    padded_view, tile_lengths, {0, bc.block_q, 0, 0}, input_dram_dist);
-                load_active = compute_load_active(tmp_window);
-            }
+                // ---- Padded path: c_per_group < GROUP_SIZE ----
+                // Store scalar state for creating temporary tile_windows per row.
+                padded_state_.hi_               = hi;
+                padded_state_.wi_               = wi;
+                padded_state_.C_in_             = bc.C_in;
+                padded_state_.c_per_group_      = c_per_group;
+                padded_state_.px_               = px;
+                padded_state_.py_               = py;
+                padded_state_.dx_               = dx;
+                padded_state_.dy_               = dy;
+                padded_state_.sx_               = sx;
+                padded_state_.sy_               = sy;
+                padded_state_.current_row_      = 0;
+                padded_state_.block_q_          = bc.block_q;
+                padded_state_.input_base_padded_ = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C_in + bc.block_k_in;
 
-            // Mark async path members as unused.
-            input_voffset = 0;
-            store_input_lds = nullptr;
-            row_stride_bytes = 0;
-            is_valid = 0;
+                // Extract load_active using the padded DRAM descriptor (correct strides).
+                {
+                    const auto padded_desc =
+                        TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
+                            hi, wi, bc.C_in, c_per_group, px, py, dx, dy, sx, sy);
+                    auto padded_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+                        padded_state_.input_base_padded_, padded_desc);
+                    auto tmp_window = ck_tile::make_tile_window(
+                        padded_view, tile_lengths, {0, bc.block_q, 0, 0}, input_dram_dist);
+                    load_active = compute_load_active(tmp_window);
+                }
+
+                // Mark async path members as unused.
+                input_voffset = 0;
+                store_input_lds = nullptr;
+                row_stride_bytes = 0;
+                is_valid = 0;
+            }
+            else
+            {
+                init_unpadded();
+            }
         }
         else
         {
@@ -235,9 +246,19 @@ struct InputLoader
 
     __device__ __forceinline__ void fetch_tile_to_lds(int lds_buffer_index)
     {
-        if(padded_)
+        if constexpr(Padded)
         {
-            current_row_++;
+            if(padded_state_.c_per_group_ != TC::GROUP_SIZE)
+            {
+                padded_state_.current_row_++;
+            }
+            else
+            {
+                if(load_active)
+                {
+                    input_voffset += row_stride_bytes;
+                }
+            }
         }
         else
         {
@@ -253,47 +274,62 @@ struct InputLoader
     {
         if(load_active)
         {
-            if (padded_)
+            if constexpr(Padded)
             {
-                prefetch_tile_to_lds_padded(lds_buffer_index);
+                if(padded_state_.c_per_group_ != TC::GROUP_SIZE)
+                {
+                    prefetch_tile_to_lds_padded(lds_buffer_index);
+                }
+                else
+                {
+                    prefetch_tile_to_lds_unpadded(lds_buffer_index);
+                }
             }
-            else 
+            else
             {
-                CK_TILE_LDS_ADDR _Float16* lds_dest =
-                store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
-
-                ck_tile::amd_async_buffer_load<_Float16, 8,
-                    ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
-                    lds_dest,
-                    input_rsrc,
-                    input_voffset,
-                    0,
-                    ck_tile::number<0>{},
-                    is_valid);
+                prefetch_tile_to_lds_unpadded(lds_buffer_index);
             }
         }
+    }
+
+    __device__ __forceinline__ void prefetch_tile_to_lds_unpadded(int lds_buffer_index)
+    {
+        CK_TILE_LDS_ADDR _Float16* lds_dest =
+            store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
+
+        ck_tile::amd_async_buffer_load<_Float16, 8,
+            ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
+            lds_dest,
+            input_rsrc,
+            input_voffset,
+            0,
+            ck_tile::number<0>{},
+            is_valid);
     }
 
     // Padded path: create temporary tile_windows per row, use load_tile + store_tile.
     // This correctly zero-pads channels beyond c_per_group via the pad transform's
     // per-element OOB checking.
     __device__ __forceinline__ void prefetch_tile_to_lds_padded(int lds_buffer_index)
+        requires(Padded)
     {
         constexpr auto input_dram_dist = TC::Input::MakeDramReadTileDistribution();
 
         // Create padded DRAM descriptor and view.
         const auto padded_dram_desc =
             TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
-                hi_, wi_, C_in_, c_per_group_, px_, py_, dx_, dy_, sx_, sy_);
+                padded_state_.hi_, padded_state_.wi_, padded_state_.C_in_,
+                padded_state_.c_per_group_, padded_state_.px_, padded_state_.py_,
+                padded_state_.dx_, padded_state_.dy_, padded_state_.sx_, padded_state_.sy_);
 
         auto padded_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
-            input_base_padded_, padded_dram_desc);
+            padded_state_.input_base_padded_, padded_dram_desc);
 
         auto padded_dram_window = ck_tile::make_tile_window(
             padded_dram_view,
             ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
                                 ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
-            {current_row_, block_q_, 0, 0},
+            {padded_state_.current_row_, padded_state_.block_q_, 0, 0},
             input_dram_dist);
 
         // Load from DRAM with per-element OOB checking (pad transform zeros padded channels).
