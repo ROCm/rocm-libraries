@@ -1220,7 +1220,7 @@ def mainLoop(writer, kernel):
   M = tiA.localMMATileGrid[0]
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
-    for partSizeM, partSizeN in candidates:
+  for partSizeM, partSizeN in candidates:
       cfg = MFMASchedulerConfig(
           numMFMATilesM=M,
           numMFMATilesN=N,
