@@ -31,7 +31,7 @@ from ._64x128x64_TF32 import _get_schedule_64x128x64_TF32
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 64, 64, 2, 1, 1, False, 0, 0),
+    tile_config=TileConfig(128, 64, 64, 2, 1, 1, False, 0, 0, isa=(9, 5, 0)),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],

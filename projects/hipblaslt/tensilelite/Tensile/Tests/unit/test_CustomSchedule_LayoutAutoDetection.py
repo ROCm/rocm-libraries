@@ -61,7 +61,7 @@ class TestLayoutAutoDetection:
         del _SCHEDULE_METADATA[orig_metadata_len:]
 
     # Shared tile config for all fake functions (arbitrary but valid)
-    TILE = TileConfig(256, 256, 64, 2, 1, 1, True, 0, 0)
+    TILE = TileConfig(256, 256, 64, 2, 1, 1, True, 0, 0, isa=(9, 5, 0))
 
     def test_detect_tn_only(self):
         """A function that only handles TN should detect exactly ['TN']."""

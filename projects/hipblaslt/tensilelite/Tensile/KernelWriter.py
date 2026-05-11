@@ -501,6 +501,38 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self._capture_context.default_main = value
 
   ##############################################################################
+  # Public capture lifecycle hook
+  ##############################################################################
+  def enable_capture_default_schedule(self):
+    """Force the default-schedule shadow capture to run during the next kernel build.
+
+    The capture machinery in ``_loopBody``/``noLoadLoop``/``kernelBody`` reads
+    ``self.states._captureDefaultSchedule`` (set after ``_initKernel`` and
+    consulted before ``_loopBody`` runs). Auto-activation already turns this on
+    for any kernel with ``UseCustomMainLoopSchedule`` (see
+    ``kernelBody`` head). This method exists so callers — the converter
+    (``Tensile.Components.CustomSchedule.cms_from_default``) and unit tests —
+    can switch capture on for arbitrary kernels and avoid hand-rolling the
+    timing dance (set the flag *after* ``setupNewTile`` initializes
+    ``self.states`` but *before* ``_loopBody`` reads it).
+
+    Implementation: monkey-patch ``setupNewTile`` once with a wrapper that
+    sets the flag on ``self.states`` immediately after the underlying
+    method returns. Idempotent — calling twice is harmless.
+    """
+    if getattr(self, "_capture_default_schedule_enabled", False):
+      return
+    self._capture_default_schedule_enabled = True
+    original_setupNewTile = self.setupNewTile
+
+    def _setupNewTile_with_flag(*args, **kwargs):
+      result = original_setupNewTile(*args, **kwargs)
+      self.states._captureDefaultSchedule = True
+      return result
+
+    self.setupNewTile = _setupNewTile_with_flag
+
+  ##############################################################################
   # Init
   ##############################################################################
   def __init__(

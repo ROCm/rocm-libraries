@@ -300,5 +300,5 @@ class TileConfig:
     dtl_plus_lds_buf: bool
     wave_separate_global_read_a: int
     wave_separate_global_read_b: int
-    isa: tuple = (9, 5, 0)
+    isa: tuple                              # required (no fallback to gfx950)
     wavefront_size: int = 64

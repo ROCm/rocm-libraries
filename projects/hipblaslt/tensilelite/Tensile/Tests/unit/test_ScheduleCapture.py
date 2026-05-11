@@ -1034,12 +1034,7 @@ class TestPhase4DefaultCapture:
         # flag enabled.
         # Workaround for the test: monkey-patch self.states after states
         # init by hooking into one of the early kernel-build phases.
-        original_setupNewTile = writer.setupNewTile
-        def _setupNewTile_with_flag(*args, **kwargs):
-            result = original_setupNewTile(*args, **kwargs)
-            writer.states._captureDefaultSchedule = True
-            return result
-        writer.setupNewTile = _setupNewTile_with_flag
+        writer.enable_capture_default_schedule()
 
         writer._getKernelSource(solution)
 
@@ -1092,12 +1087,7 @@ class TestPhase4DefaultCapture:
         solution = _make_solution(config, asm, isaInfoMap)
         writer = KernelWriterAssembly(asm, DebugConfig())
 
-        original_setupNewTile = writer.setupNewTile
-        def _setupNewTile_with_flag(*args, **kwargs):
-            result = original_setupNewTile(*args, **kwargs)
-            writer.states._captureDefaultSchedule = True
-            return result
-        writer.setupNewTile = _setupNewTile_with_flag
+        writer.enable_capture_default_schedule()
 
         writer._getKernelSource(solution)
 
@@ -1143,12 +1133,7 @@ class TestPhase5DefaultTailCapture:
         solution = _make_solution(config, asm, isaInfoMap)
         writer = KernelWriterAssembly(asm, DebugConfig())
 
-        original_setupNewTile = writer.setupNewTile
-        def _setupNewTile_with_flag(*args, **kwargs):
-            result = original_setupNewTile(*args, **kwargs)
-            writer.states._captureDefaultSchedule = True
-            return result
-        writer.setupNewTile = _setupNewTile_with_flag
+        writer.enable_capture_default_schedule()
 
         writer._getKernelSource(solution)
         return writer
@@ -1232,12 +1217,7 @@ class TestDataflowGraphIntegration:
         solution = _make_solution(config, asm, isaInfoMap)
         writer = KernelWriterAssembly(asm, DebugConfig())
 
-        original_setupNewTile = writer.setupNewTile
-        def _setupNewTile_with_flags(*args, **kwargs):
-            result = original_setupNewTile(*args, **kwargs)
-            writer.states._captureDefaultSchedule = True
-            return result
-        writer.setupNewTile = _setupNewTile_with_flags
+        writer.enable_capture_default_schedule()
 
         return writer, solution
 
@@ -1455,12 +1435,7 @@ class TestPgrPlrCaptureMatrixEndToEnd:
         solution = _make_solution(config, asm, isaInfoMap)
         writer = KernelWriterAssembly(asm, DebugConfig())
 
-        original_setupNewTile = writer.setupNewTile
-        def _setupNewTile_with_flag(*args, **kwargs):
-            result = original_setupNewTile(*args, **kwargs)
-            writer.states._captureDefaultSchedule = True
-            return result
-        writer.setupNewTile = _setupNewTile_with_flag
+        writer.enable_capture_default_schedule()
         return writer, solution
 
     def test_pgr2_snll_false_matches_baseline(self, isa_infrastructure):

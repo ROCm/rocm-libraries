@@ -35,7 +35,7 @@ from ._224x128x64_16bit import _get_schedule_224x128x64_16bit
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 224, 64, 2, 1, 1, False, 0, 0),
+    tile_config=TileConfig(128, 224, 64, 2, 1, 1, False, 0, 0, isa=(9, 5, 0)),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],

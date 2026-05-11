@@ -33,7 +33,7 @@ from ..shared import (
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(240, 256, 64, 2, 1, 1, False, 0, 0),
+    tile_config=TileConfig(240, 256, 64, 2, 1, 1, False, 0, 0, isa=(9, 5, 0)),
     dtype_predicate=is16bit,
     vector_widths=[2, 8, 8],
     matrix_inst=[16, 16, 32, 1],
