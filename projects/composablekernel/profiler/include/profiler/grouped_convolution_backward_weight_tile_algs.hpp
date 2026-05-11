@@ -133,7 +133,7 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                         [&](std::string_view name,
                             const auto& desc,
                             void* ckt::Outputs<SIGNATURE>::*ptr) {
-                            report.check(name, desc, outputs.*ptr, (*reference).*ptr, rtol, atol);
+                            report.check(name, desc, outputs.*ptr, reference->*ptr, rtol, atol);
                         });
 
                     valid = report.get_errors().empty();
