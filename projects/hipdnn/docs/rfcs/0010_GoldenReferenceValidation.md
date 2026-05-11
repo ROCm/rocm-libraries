@@ -90,21 +90,19 @@ The golden reference infrastructure is already built and working for batchnorm. 
 | Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | Generates bundles using PyTorch as reference source |
 | Golden data | [`hipdnn_reference_data/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm bundles across 4 layout/datatype combinations |
 
-#### What this RFC keeps, modifies, and replaces
-
-The table below maps each existing component to its treatment in this RFC.
+#### What changes per component
 
 | Component | Status | What changes |
 |-----------|--------|-------------|
-| `LoadGraphAndTensors.hpp` | **Kept, extended** | Core loading functions (`loadGraphAndTensors()`, `extractAndClearOutputTensorData()`, `validateTensors()`) are the foundation of the generic test runner. Add tensor size validation after loading (check #2). |
-| `TestTolerances.hpp` | **Kept, extended** | Per-operation compile-time defaults remain the starting point. The generic runner adds a lookup-by-operation-type mechanism to select the right defaults from this file at runtime. |
-| TOML override infrastructure | **Kept as-is** | `TestSettings.hpp`, `TestConfig.hpp`, and per-engine `.toml` files with `[[tolerance_overrides]]` glob matching are connected to golden tests — a TOML override that matches a golden test name applies automatically. |
-| Python generation framework | **Kept, enhanced** | `reference_data_scripts/utilities/` (`graph.py`, `tensor.py`, `common.py`) remain the generation backbone. Enhanced: generator scripts auto-derive output paths from graph content (operation type, layout, data type) to match the folder convention. |
-| Existing golden data | **Kept, relocated** | 6 batchnorm bundles move from `hipdnn_reference_data/` to `golden_reference_data/quick/BatchnormFwdInference/...` under the new folder convention. Bundle contents unchanged. |
-| `GoldenReferenceCpu.hpp` → `ValidateGoldenBundleWithRef` | **Pattern replaced** | The base fixture pattern is replaced by `ValidateGoldenBundleWithRef` (inherits `ValidateGoldenBundleBase`). Validates bundles against the reference executor. Key difference from today: no per-operation test class, recursive discovery across tier folders, tolerance looked up by operation type instead of hard-coded per fixture. |
-| `GoldenReferenceGpu.hpp` → `ValidateGoldenBundleWithPlugin` | **Pattern replaced** | Same pattern replaced by `ValidateGoldenBundleWithPlugin` (inherits `ValidateGoldenBundleBase`). Validates bundles against the GPU plugin. Handles plugin setup/teardown, device buffers, and "unsupported" as SKIP. |
-| `TestCpuFpReferenceBatchnorm.cpp` | **Replaced** | The per-operation test class + `INSTANTIATE_TEST_SUITE_P` pattern is replaced by recursive auto-discovery. Adding a new operation no longer requires writing a C++ test class — drop bundle files in the right tier folder. |
-| `DynamicTolerances.hpp` | **Future integration** | Higham-style error bounds are not connected to golden tests in this RFC. Future work: use dynamic tolerances as a fallback when `TestTolerances.hpp` has no entry for an operation type. |
+| `LoadGraphAndTensors.hpp` | **Kept, extended** | Add tensor size validation after loading ([check #2](#data-integrity)) |
+| `TestTolerances.hpp` | **Kept, extended** | Generic runner adds lookup-by-operation-type to select defaults at runtime |
+| TOML override infrastructure | **Kept as-is** | Golden tests connected to existing `[[tolerance_overrides]]` glob matching |
+| Python generation framework | **Kept, enhanced** | Generator scripts auto-derive output paths from graph content |
+| Existing golden data | **Kept, relocated** | 6 batchnorm bundles move to `golden_reference_data/quick/BatchnormFwdInference/...` |
+| `GoldenReferenceCpu.hpp` | **→ `ValidateGoldenBundleWithRef`** | Inherits `ValidateGoldenBundleBase`. Recursive discovery, tolerance looked up by operation type |
+| `GoldenReferenceGpu.hpp` | **→ `ValidateGoldenBundleWithPlugin`** | Inherits `ValidateGoldenBundleBase`. Plugin setup/teardown, device buffers, "unsupported" as SKIP |
+| `TestCpuFpReferenceBatchnorm.cpp` | **Replaced** | Per-operation C++ class eliminated — bundles discovered automatically |
+| `DynamicTolerances.hpp` | **Future** | Not connected in this RFC — future fallback when no fixed tolerance exists |
 
 ### Self-Contained Bundles
 
@@ -207,7 +205,7 @@ For a **full bundle** (`.json` + `.bin` files):
 
 1. **Discover** — at GTest startup, `discoverGoldenBundles(tierDir)` recursively scans the tier directory for `.json` files. Each `.json` path becomes a GTest parameter. GTest creates one test case per parameter — no C++ code per test.
 2. **Load** — when a test case runs, the runner calls `loadGraphAndTensors()` which deserializes the `.json` into an executable graph object and loads the corresponding `.bin` files into tensors.
-3. **Execute** — run the graph through the engine under test (CPU reference or GPU plugin)
+3. **Execute** — run the graph through the engine under test
 4. **Compare** — check engine output against golden output from the `.bin` files — PASS or FAIL
 
 For a **graph-only bundle** (`.json` only, no `.bin` files — transitional): the runner loads the graph, generates inputs, runs the engine under test and a reference source, and compares their outputs at runtime.
@@ -257,9 +255,7 @@ INSTANTIATE_TEST_SUITE_P(Full, ValidateGoldenBundleWithPlugin,
     discoverGoldenBundles("full"));
 ```
 
-`discoverGoldenBundles(tierDir)` recursively scans the tier directory for `.json` files and returns each as a gtest parameter. The test name is derived from the graph content (operation, layout, data type) and the bundle name — not from the folder path. If the tier directory is empty or missing, it returns an empty list (no tests, no failure).
-
-At startup, the runner also scans the golden data root for **unexpected top-level directories** — any directory that is not one of the four tier names (`quick`, `standard`, `comprehensive`, `full`) triggers a warning. This catches tier folder typos (e.g., `quik/` instead of `quick/`) that would otherwise silently leave bundles undiscovered.
+If the tier directory is empty or missing, `discoverGoldenBundles` returns an empty list (no tests, no failure). Unexpected top-level directories (e.g., `quik/` instead of `quick/`) trigger a warning to catch typos.
 
 #### What changes from today
 
@@ -342,7 +338,7 @@ The `--verification-mode` flag overrides this default. In golden mode, tests wit
 
 ### Tolerance Framework
 
-Tolerances are **always defined in code and configuration**, never stored in the data bundle. A bundle says *what* to compute and *what* to expect — the tolerance says *how close is close enough*. Keeping tolerances out of the bundle means the same bundle can be validated with different tolerance policies (strict for a CPU reference engine, looser for a GPU engine that trades precision for throughput) without regenerating data.
+Tolerances are **always defined in code and configuration**, never stored in the data bundle. This means the same bundle can be validated with different tolerance policies (strict for a reference engine, looser for a GPU engine) without regenerating data.
 
 #### Two questions, two levels
 
