@@ -34,7 +34,7 @@ BenchmarkProblems:
       MacDataTypeA: F4
       MacDataTypeB: F6
       DataType: F4
-      DestDataType: s
+      DestDataType: B
       ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: True
@@ -94,7 +94,7 @@ BenchmarkProblems:
       MacDataTypeA: F6
       MacDataTypeB: F4
       DataType: F6
-      DestDataType: s
+      DestDataType: B
       ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: True
