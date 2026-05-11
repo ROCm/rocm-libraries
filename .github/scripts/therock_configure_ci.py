@@ -10,13 +10,18 @@ import json
 import logging
 import subprocess
 from pathlib import Path
-import random
+import sys
 from therock_matrix import subtree_to_project_map, collect_projects_to_run
 import time
 from typing import Mapping, Optional, Iterable, List
 import os
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 from config_loader import load_repo_config
+
+# Add TheRock's github_actions to path for shared utilities
+THEROCK_ACTIONS_PATH = Path("TheRock") / "build_tools" / "github_actions"
+sys.path.insert(0, str(THEROCK_ACTIONS_PATH))
+from amdgpu_family_matrix import BUILD_RUNNER_LABELS, select_weighted_label
 
 logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -146,47 +151,6 @@ def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
     valid_prefixes = get_valid_prefixes(config)
     matched_subtrees = find_matched_subtrees(paths, valid_prefixes)
     return matched_subtrees
-
-
-"""
-CPU builder runner selection
-As we slowly migrate from Azure to AWS, this is a temporary measure to distribute load
-"""
-
-BUILD_RUNNER_LABELS = {
-    "linux": {
-        "default": [
-            {"label": "azure-linux-scale-rocm", "weight": 0.90},
-            {"label": "aws-linux-scale-rocm-prod", "weight": 0.10},
-        ],
-    },
-    "windows": {
-        "default": [
-            {"label": "azure-windows-scale-rocm", "weight": 1.0},
-        ],
-    },
-}
-
-
-def select_weighted_label(labels_config: list[dict], context_name: str) -> str:
-    """Select a runner label based on weighted random selection."""
-    rand_val = random.random()
-    cumulative = 0.0
-    for config in labels_config:
-        cumulative += config["weight"]
-        if rand_val < cumulative:
-            print(
-                f"  {context_name}: selected runner (weight={config['weight']}): "
-                f"{config['label']}"
-            )
-            return config["label"]
-    # Fallback to last label if rounding errors
-    selected = labels_config[-1]
-    print(
-        f"  {context_name}: selected runner (weight={selected['weight']}): "
-        f"{selected['label']}"
-    )
-    return selected["label"]
 
 
 def select_build_runner(platform: str) -> str:
