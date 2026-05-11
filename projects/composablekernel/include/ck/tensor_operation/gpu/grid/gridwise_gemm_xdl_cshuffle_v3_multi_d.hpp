@@ -1151,6 +1151,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
         }
 
         constexpr long_index_t TwoGB = (long_index_t{1} << 31);
+        // test comment...
         if(!(karg.M * karg.K * sizeof(ADataType) <= TwoGB &&
              karg.N * karg.K * sizeof(BDataType) <= TwoGB &&
              karg.M * karg.N * sizeof(CDataType) <= TwoGB))
