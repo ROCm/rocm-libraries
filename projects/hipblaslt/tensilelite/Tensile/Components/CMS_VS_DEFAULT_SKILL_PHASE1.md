@@ -542,37 +542,85 @@ a layout (`TN`/`NN`/`NT`/`TT`), or a path to a `.py` schedule file or
 
 ---
 
-## Phase 2 decisions staged for user
+## Phase 2 decisions — RESOLVED
 
-1. **Multi-codepath handling policy.** Phase 1 recommends Option (c):
-   diff codepath 0; report codepath divergence as one-line annotation.
-   Confirm or override.
-2. **Difference taxonomy.** Phase 1 proposes Tier 1 (5 themes), Tier 2
-   (4 themes), Tier 3 (4+ to-be-discovered). Confirm starting set or
-   prune.
-3. **Skill UX:** per-schedule reports separate or aggregate-only?
-   Recommendation: aggregate-only by default; add `--per-schedule` flag
-   for verbose mode.
-4. **Scope of bodies analyzed.** Recommendation: main-loop only in v1;
-   revisit n_gl/n_ll in v2 once main-loop diff narrative stabilizes.
-5. **Coordination with `rocm-libraries-wlrp`.** Phase 1 confirms the
-   skill can start independently. If wlrp lands first, the skill
-   reuses its "linearise default-side capture" helper. Confirm: start
-   independently, or wait for wlrp?
-6. **Comparison-baseline source.** Should the skill auto-derive the
-   matching default-codegen output by re-running codegen with
-   `hasCustomSchedule(kernel) → False`, or should the user supply a
-   pre-captured default-side dump? Recommendation: **auto-derive**, so
-   the skill becomes one-input — pass it a `CMSKernelInfo` (or a
-   YAML/path arg that resolves to one) and it reconstructs both sides
-   from the same kernel config. Avoids drift between captured baselines
-   and the live default scheduler.
-7. **Host-arch availability.** A CMS schedule may target `gfx950` while
-   the host machine is `gfx90a` or `gfx942`. The capture pipeline runs
-   at codegen time and does not require a matching GPU, so analysis
-   still succeeds. Document explicitly in SKILL.md: *the skill operates
-   on captured codegen output, not runtime traces; host arch is
-   irrelevant.* Confirm assumption.
+User decisions recorded 2026-05-11. Phase 2 is unblocked once wlrp Phase 2 lands (see decision 5).
+
+1. **Multi-codepath handling → Option (a) + summary pass.** Override of
+   Phase 1's recommendation. Compare default against EACH CMS codepath
+   separately. Then run a second pass over the per-codepath diffs to
+   summarize codepath-vs-codepath differences. If the codepath-vs-
+   codepath differences are minor (1-2 indices apart), the final per-
+   schedule report contains:
+   - the full default-vs-codepath-0 diff, AND
+   - a short 1-2 sentence summary stating how the other codepaths
+     differ from codepath 0.
+   If codepath-vs-codepath differences are substantial, the report
+   contains the full per-codepath diffs (no summary collapse). The
+   skill must support more complex schedules where codepaths diverge
+   meaningfully — the Phase 1 "phase-shifted dual-issue" pattern is
+   the common case but not the only one to design for.
+
+2. **Difference taxonomy → starting set looks good. Add discovery
+   directive.** The Tier 1 / Tier 2 / Tier 3 list (in §4 above) is the
+   starting set. The per-schedule subagent's prompt MUST include an
+   instruction to look for additional patterns NOT in this taxonomy and
+   to flag them in the per-schedule narrative as candidate new themes.
+   The aggregator then surfaces those candidates so the human can
+   decide whether to fold them into the canonical taxonomy.
+
+3. **Skill UX → per-schedule reports included by default.** Override
+   of Phase 1's "aggregate-only by default + --per-schedule flag"
+   recommendation. The default invocation produces both the per-
+   schedule narratives AND the aggregate theme-frequency table.
+
+4. **Scope of bodies → main-loop only.** No n_gl / n_ll in v1.
+   Revisiting deferred (no follow-up bead until v1 ships and the
+   user signals appetite for tail-loop coverage).
+
+5. **Coordination with wlrp → wait for wlrp.** This bead is
+   **dependent on rocm-libraries-wlrp** landing. The skill imports
+   wlrp's `default_schedule_to_cms` (or whichever name the converter
+   exposes) as the linearization primitive. The skill's per-schedule
+   analysis becomes "convert default to CMS form via wlrp → diff
+   against captured CMS form." No bespoke linearizer in the skill.
+   wlrp Phase 2 landed in vlt at commit `d83baa1174f` (2026-05-11);
+   prp2 Phase 2 is now unblocked.
+
+6. **Comparison-baseline source → auto-derive.** The skill takes
+   one input (a `CMSKernelInfo`, or a YAML / path arg that resolves
+   to one) and reconstructs both sides — default and CMS — from the
+   same kernel config. No pre-captured dumps as input.
+
+7. **Host-arch availability → run on any machine.** Confirmed. The
+   skill operates on captured codegen output, not runtime traces;
+   host arch is irrelevant. The `arch` selector lives on the Tensile
+   side: there is a flag for `Tensile()` / `tensile-cli` that
+   specifies the target arch even when no matching GPU is on the host.
+   The SKILL.md must document this flag, and the skill must use it
+   when invoking codegen so analysis doesn't accidentally bind to the
+   host machine's GPU.
+
+### Phase 2 implementation directives (derived)
+
+- **Sequencing**: dispatch only after wlrp Phase 2 lands (already
+  satisfied as of 2026-05-11).
+- **Per-schedule subagent prompt**: must include a "look for new
+  patterns not in the taxonomy" instruction (decision 2).
+- **Per-codepath analysis**: each subagent runs N analyses for an
+  N-codepath schedule, then synthesizes a codepath-divergence summary
+  (decision 1). If divergence is minor (1-2 index slots), summary
+  collapses to a short sentence; if substantial, full per-codepath
+  diffs are kept.
+- **Default invocation produces both per-schedule + aggregate**
+  (decision 3). No `--per-schedule` flag needed.
+- **Tensile arch-flag**: skill must specify the target arch
+  explicitly when invoking codegen — never rely on host-GPU
+  auto-detection (decision 7).
+- **Linearization via wlrp**: skill imports wlrp's converter
+  primitive (decision 5).
+- **Main-loop only** (decision 4). Tail-loop coverage is out of
+  scope for v1; no follow-up bead filed until user signals appetite.
 
 ---
 
