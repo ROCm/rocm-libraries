@@ -105,9 +105,7 @@ public:
         }
 
         // Detect device 0's gfx arch once at startup. Used by [[test_skips]]
-        // entries in the TOML config. SKIP_IF_NO_DEVICES() in the harness
-        // SetUp() handles the no-GPU case, so an empty result here just
-        // means arch-scoped skip rules won't match (global rules still do).
+        // todo: In future allow the test runner to use any specified device.
         instance._currentArch = currentDeviceArchRaw();
 
         // Detect platform once at startup (always succeeds; PlatformUtils.hpp

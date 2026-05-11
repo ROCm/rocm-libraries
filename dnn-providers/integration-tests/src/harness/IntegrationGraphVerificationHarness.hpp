@@ -57,8 +57,7 @@ protected:
         ASSERT_EQ(hipInit(0), hipSuccess);
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
-        // Honor [[test_skips]] entries from the TOML config (if any).
-        // Skip happens before the test does any real work.
+        // Check for any engine specific test skips
         if(auto* info = ::testing::UnitTest::GetInstance()->current_test_info(); info != nullptr)
         {
             const std::string testName = std::string(info->test_suite_name()) + "." + info->name();
