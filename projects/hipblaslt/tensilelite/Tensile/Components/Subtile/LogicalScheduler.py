@@ -722,12 +722,9 @@ class LogicalScheduler:
                 self.next_id = 0
                 self.active_count = 0
                 self.peak = 0
-            def alloc(self, preferred=None):
-                if preferred is not None and preferred in self.free:
-                    self.free.remove(preferred)
-                    vid = preferred
-                elif self.free:
-                    vid = self.free.popleft()
+            def alloc(self):
+                if self.free:
+                    vid = self.free.popleft()  # FIFO for convergence
                 else:
                     vid = self.next_id
                     self.next_id += 1
@@ -797,7 +794,7 @@ class LogicalScheduler:
                                 seen_keys.add(key)
                                 if key in target:
                                     pools[tensor].release(target[key])
-                                vid = pools[tensor].alloc(preferred=group)
+                                vid = pools[tensor].alloc()
                                 target[key] = vid
                                 tile_map[group] = vid
                         lr.vgpr_tile_map.append(tile_map)
