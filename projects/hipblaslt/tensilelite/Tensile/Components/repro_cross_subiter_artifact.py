@@ -355,9 +355,8 @@ def main():
     print()
 
     # ---- Run compare_graphs against the captured pair.
-    from Tensile.Components import CMSValidator
     from Tensile.Components.CMSValidator import (
-        build_dataflow_graph, compare_graphs,
+        GraphNode, build_dataflow_graph, compare_graphs,
     )
 
     print("Building dataflow graphs...")
@@ -371,11 +370,13 @@ def main():
 
     # In production the section-7.3 carve-out absorbs the artifact edges,
     # so `compare_graphs` returns []. To SURFACE the artifact edges we
-    # neutralize the carve-out's `_node_subiter` predicate (mirrors the
-    # probe in `Tests/scratch/run_with_carveout_off.py` per bwfr memo
-    # section 3.2). With the predicate forced to 0, the
-    # `_node_subiter(p) != _node_subiter(c)` gate fails, the carve-out
-    # branch is skipped, and the OrderInvertedFailure path fires.
+    # neutralize the carve-out's `GraphNode.subiter()` predicate (post-nn0
+    # the per-byte resolver-side predicate is a method on GraphNode; both
+    # mirrored carve-out sites in `diagnose_missing_edge` and
+    # `_alu_cross_subiter_passthrough` consult it). With `subiter()`
+    # forced to return 0, the `producer.subiter(nmps) != consumer.subiter(nmps)`
+    # gate fails, the carve-out branch is skipped, and the
+    # OrderInvertedFailure path fires.
     print("Running compare_graphs WITH carve-out engaged (production "
           "behavior) ...")
     failures_with_carveout = compare_graphs(ref_graph, subj_graph)
@@ -384,14 +385,63 @@ def main():
     print()
 
     print("Running compare_graphs with section-7.3 carve-out NEUTRALIZED ...")
-    original = CMSValidator._node_subiter
-    CMSValidator._node_subiter = lambda n, nmps: 0
+    # Pre-flight guard #1: confirm the patch target exists. If a future
+    # refactor renames or relocates `GraphNode.subiter` (it migrated from
+    # a free `_node_subiter(node, nmps)` function in pre-nn0 vlt to a
+    # method on GraphNode post-nn0; the OLD patch silently no-op'd in
+    # this script for ~1 week before the carveout-verify pinning test
+    # caught it), this assertion fires loudly instead of letting the
+    # script silently report 0 failures.
+    if not hasattr(GraphNode, "subiter"):
+        raise RuntimeError(
+            "Cannot neutralize section-7.3 carve-out: GraphNode.subiter "
+            "not found. The carve-out's predicate has likely been "
+            "refactored. Update the patch target to whatever method the "
+            "carve-out now consults (grep for 'cross_subiter_alu_artifact' "
+            "and the diagnose_missing_edge early-return for current sites)."
+        )
+    original_subiter = GraphNode.subiter
+    GraphNode.subiter = lambda self, nmps: 0
     try:
+        # Pre-flight guard #2: confirm the patch took effect on actual
+        # graph nodes. Catches scenarios where the attribute exists but
+        # the carve-out consults a different surface (e.g. a free
+        # function shadowed by the method, or a per-instance override).
+        # `subj_graph.nodes` is a dict keyed by node identity, not a list.
+        nodes_iter = iter(subj_graph.nodes.values())
+        probe_node = next(nodes_iter, None)
+        if probe_node is not None:
+            probe_result = probe_node.subiter(1)
+            if probe_result != 0:
+                raise RuntimeError(
+                    f"GraphNode.subiter patch did not take effect on a "
+                    f"real node: probe returned {probe_result!r} instead "
+                    f"of 0. The carve-out neutralization is silently "
+                    f"broken — fix the patch target before relying on "
+                    f"this script's output."
+                )
         failures_neutralized = compare_graphs(ref_graph, subj_graph)
     finally:
-        CMSValidator._node_subiter = original
+        GraphNode.subiter = original_subiter
     print(f"  -> {len(failures_neutralized)} failures surfaced when the "
           f"carve-out is off.")
+    # Post-flight guard #3: the canonical TF32 4x4 kernel is expected to
+    # produce ~768 OrderInvertedFailure instances when the carve-out is
+    # off (per bwfr memo section 3.2 and the carveout-verify pinning
+    # test at test_cross_subiter_alu_carveout_real_kernel.py). If the
+    # neutralized count is suspiciously low (especially 0), the patch
+    # didn't propagate into the actual carve-out code paths — fail
+    # loudly rather than print a misleading "0 failures" line.
+    if len(failures_neutralized) < 100:
+        raise RuntimeError(
+            f"Expected ~768 OrderInvertedFailure instances when the "
+            f"section-7.3 carve-out is neutralized; got "
+            f"{len(failures_neutralized)}. Either (a) the canonical "
+            f"kernel under test has changed shape, or (b) the patch "
+            f"didn't reach the actual carve-out code path. See "
+            f"test_cross_subiter_alu_carveout_real_kernel.py for the "
+            f"pinned-down ground truth."
+        )
     print()
 
     # ---- Edge-set diff using the same edge_keys() machinery the validator
