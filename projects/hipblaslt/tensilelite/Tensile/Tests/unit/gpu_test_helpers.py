@@ -177,7 +177,7 @@ def create_writer(cfg, mi_wave_group=None):
     readSize = 2 * tileInfoA.subtileSize
     numASubtiles = tileInfoA.globalSubtileGrid[0] * tileInfoA.globalSubtileGrid[1]
     writer.ldsStartOffsetA = 0
-    writer.ldsStartOffsetB = ((numASubtiles * tileInfoA.subtileSize + readSize-1) // readSize) * readSize
+    writer.ldsStartOffsetB = int(((numASubtiles * tileInfoA.subtileSize + readSize-1) // readSize) * readSize)
 
     return writer, kernel, tileInfoA, tileInfoB
 
@@ -192,13 +192,16 @@ def generate_set_directives(sgprs):
 
 
 def init_rocisa():
-    """Initialize rocIsa singleton if needed."""
+    """Initialize rocIsa singleton for gfx950.
+
+    Always calls ri.init() because other module imports (e.g. KernelWriter)
+    may have already initialized the singleton with a different target.
+    """
+    import shutil
     from rocisa import rocIsa
     ri = rocIsa.getInstance()
-    if not ri.isInit():
-        import shutil
-        asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
-        ri.init((9, 5, 0), asmpath)
+    asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+    ri.init((9, 5, 0), asmpath)
     ri.setKernel((9, 5, 0), WAVESIZE)
 
 
@@ -269,6 +272,7 @@ def generate_kernel_asm(inner_asm, writer, args, lds_size=0, num_threads=None):
     """
     if num_threads is None:
         num_threads = NUM_THREADS
+    lds_size = int(lds_size)
     set_directives = generate_set_directives(writer.sgprs)
     args_metadata, kernarg_size = _generate_args_metadata(args)
 
