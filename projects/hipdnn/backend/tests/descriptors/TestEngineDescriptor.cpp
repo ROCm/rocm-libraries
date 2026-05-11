@@ -412,11 +412,8 @@ TEST_F(TestEngineDescriptor, FinalizePreservesUnknownBehaviorNote)
 
     hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
     int64_t returnedCount = 0;
-    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
-                                         HIPDNN_TYPE_BEHAVIOR_NOTE,
-                                         1,
-                                         &returnedCount,
-                                         &note));
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, &returnedCount, &note));
     EXPECT_EQ(returnedCount, 1);
     EXPECT_EQ(note, UNKNOWN_NOTE);
 }
