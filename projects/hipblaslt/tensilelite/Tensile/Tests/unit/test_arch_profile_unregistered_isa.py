@@ -72,6 +72,7 @@ from Tensile.Components.CMSValidator import (
     TimingTooCloseFailure,
     _ARCH_PROFILES_BY_ISA,
     _DEFAULT_CDNA4_ARCH_PROFILE,
+    _DEFAULT_RDNA35_ARCH_PROFILE,
     _cvt_to_mfma_gap_ok,
     _mfma_pack_to_cvt_gap_ok,
     ArchProfile,
@@ -449,3 +450,99 @@ class TestEndToEndTimingSuppression:
         # property, not an instruction-classification property.
         mfma_nodes = [n for n in g.nodes.values() if n.category == "MFMA"]
         assert mfma_nodes, "MFMA node must still be classified on unregistered-ISA path"
+
+
+# =============================================================================
+# 7. RDNA3.5 stub profile (rocm-libraries-e8ni).
+# =============================================================================
+#
+# gfx1151 is a real codegen target (CustomSchedule/dispatch.py allows
+# `kernel_isa in {gfx950, gfx1151}`), but its per-class quad-cycle
+# constants from the RDNA3.5 ISA are not yet characterized. The stub
+# `_DEFAULT_RDNA35_ARCH_PROFILE` registers the arch so the resolver does
+# NOT emit the unregistered-ISA warning, but every quad-cycle gap helper
+# short-circuits to `arch_not_supported` instead of reading the placeholder
+# zero constants.
+
+
+class TestRdna35StubProfile:
+    """Shape-and-behavior snapshot for `_DEFAULT_RDNA35_ARCH_PROFILE`."""
+
+    def test_rdna35_profile_registered_for_gfx1151(self):
+        """`(11, 5, 1)` resolves to the RDNA3.5 stub — no warning, no None."""
+        assert (11, 5, 1) in _ARCH_PROFILES_BY_ISA
+        profile = ArchProfile.for_isa((11, 5, 1))
+        assert profile is _DEFAULT_RDNA35_ARCH_PROFILE, (
+            f"gfx1151 ISA (11, 5, 1) must resolve to the registered RDNA3.5 "
+            f"stub profile. Got {profile!r}."
+        )
+
+    def test_rdna35_profile_resolution_emits_no_warning(self, capsys):
+        """Stub profile suppresses the unregistered-ISA warning. The arch
+        is "known" — the warning fires only for ISAs absent from
+        `_ARCH_PROFILES_BY_ISA`."""
+        ArchProfile.for_isa((11, 5, 1))
+        captured = capsys.readouterr()
+        assert "WARNING" not in captured.out, (
+            f"Resolving the registered RDNA3.5 stub must NOT emit the "
+            f"unregistered-ISA warning. Got stdout: {captured.out!r}"
+        )
+
+    def test_rdna35_profile_shape_mirrors_cdna4(self):
+        """Snapshot the stub's structural shape against the CDNA4 default
+        so a future refactor that adds fields to ArchProfile must touch the
+        stub too (catches "added field but forgot RDNA3.5 stub" drift)."""
+        # Same set of dataclass fields as CDNA4.
+        from dataclasses import fields
+        cdna4_field_names = {f.name for f in fields(_DEFAULT_CDNA4_ARCH_PROFILE)}
+        rdna35_field_names = {f.name for f in fields(_DEFAULT_RDNA35_ARCH_PROFILE)}
+        assert cdna4_field_names == rdna35_field_names, (
+            f"RDNA3.5 stub must have identical field set as CDNA4 default. "
+            f"CDNA4-only: {cdna4_field_names - rdna35_field_names}; "
+            f"RDNA3.5-only: {rdna35_field_names - cdna4_field_names}."
+        )
+        # Identity values.
+        assert _DEFAULT_RDNA35_ARCH_PROFILE.name == "RDNA3.5"
+        assert _DEFAULT_RDNA35_ARCH_PROFILE.isa == (11, 5, 1)
+        # The flag that drives the short-circuit.
+        assert _DEFAULT_RDNA35_ARCH_PROFILE.arch_not_supported is True, (
+            "RDNA3.5 stub must carry arch_not_supported=True so quad-cycle "
+            "gap helpers short-circuit instead of reading placeholder zeros."
+        )
+        # Sanity check that CDNA4 does NOT carry the flag (regression pin
+        # against accidentally promoting CDNA4 to stub status).
+        assert _DEFAULT_CDNA4_ARCH_PROFILE.arch_not_supported is False, (
+            "CDNA4 default must NOT carry arch_not_supported — it has real "
+            "per-class quad-cycle constants from ISA section 7.6."
+        )
+
+    def test_rdna35_quad_cycle_gap_ok_returns_arch_not_supported(self):
+        """`ArchProfile.quad_cycle_gap_ok` returns ARCH_NOT_SUPPORTED for
+        the RDNA3.5 stub regardless of producer/consumer/graph — the
+        placeholder finish-cycle constants must NEVER be evaluated."""
+        # Pass None for everything; the short-circuit fires before any
+        # field access. Exercises the contract, not the mechanics.
+        check = _DEFAULT_RDNA35_ARCH_PROFILE.quad_cycle_gap_ok(None, None, None)
+        assert check.result == TimingResult.ARCH_NOT_SUPPORTED, (
+            f"RDNA3.5 stub must short-circuit quad_cycle_gap_ok to "
+            f"ARCH_NOT_SUPPORTED. Got result={check.result!r}."
+        )
+        assert check.observed == 0 and check.required == 0
+
+    def test_rdna35_cvt_to_mfma_gap_ok_returns_arch_not_supported(self):
+        """`_cvt_to_mfma_gap_ok` short-circuits when the carrying graph's
+        profile is the RDNA3.5 stub."""
+        class _StubGraph:
+            arch_profile = _DEFAULT_RDNA35_ARCH_PROFILE
+        check = _cvt_to_mfma_gap_ok(None, None, _StubGraph())
+        assert check.result == TimingResult.ARCH_NOT_SUPPORTED
+        assert check.observed == 0 and check.required == 0
+
+    def test_rdna35_mfma_pack_to_cvt_gap_ok_returns_arch_not_supported(self):
+        """`_mfma_pack_to_cvt_gap_ok` short-circuits when the carrying
+        graph's profile is the RDNA3.5 stub."""
+        class _StubGraph:
+            arch_profile = _DEFAULT_RDNA35_ARCH_PROFILE
+        check = _mfma_pack_to_cvt_gap_ok(None, None, _StubGraph())
+        assert check.result == TimingResult.ARCH_NOT_SUPPORTED
+        assert check.observed == 0 and check.required == 0

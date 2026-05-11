@@ -131,6 +131,19 @@ class ArchProfile:
         default_issue_quad_cycles  — base issue cost for non-SNop
             instructions (CDNA 4 = 1; arch-specific overrides go here).
 
+      Stub-profile flag:
+        arch_not_supported  — when True, all quad-cycle gap helpers
+            (`quad_cycle_gap_ok`, `_cvt_to_mfma_gap_ok`,
+            `_mfma_pack_to_cvt_gap_ok`) short-circuit to
+            `TimingCheck.arch_not_supported()` regardless of the
+            timing-constant fields. Use for archs that are real
+            codegen targets but whose per-class quad-cycle constants
+            have not been characterized yet (e.g. gfx1151 RDNA3.5 — see
+            `_DEFAULT_RDNA35_ARCH_PROFILE`). The arch is "known" so the
+            resolver does NOT emit the unregistered-ISA warning, but the
+            timing checks are skipped exactly as they would be for a
+            `None` profile (rocm-libraries-zkzw / e8ni precedent).
+
     Adding a new arch: instantiate ArchProfile and register it in
     `_ARCH_PROFILES_BY_ISA`. Tests that exercise the new arch attach the
     profile to the FourPartCapture / DataflowGraph via the `arch_profile`
@@ -145,6 +158,7 @@ class ArchProfile:
     mfma_type_switch_threshold_from_standard: int
     mfma_type_switch_threshold_from_4x4: int
     default_issue_quad_cycles: int = 1
+    arch_not_supported: bool = False
 
     @classmethod
     def for_isa(
@@ -267,7 +281,15 @@ class ArchProfile:
         `cumulative_issue_cycles`. The hardware MFMA pipeline does not reset
         at body boundaries — `mfma_free_at` and the type-switch stall carry
         through.
+
+        Stub-profile short-circuit: when the profile carries
+        `arch_not_supported=True` (e.g. the RDNA3.5 stub), return
+        `TimingCheck.arch_not_supported()` instead of evaluating the
+        finish-cycle constants — those constants are placeholder zeros for
+        the stub and would silently pass every gap.
         """
+        if self.arch_not_supported:
+            return TimingCheck.arch_not_supported()
         finish = self.mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None))
         required = finish
         observed = cumulative_issue_cycles(graph, producer, consumer)
@@ -293,9 +315,42 @@ _DEFAULT_CDNA4_ARCH_PROFILE = ArchProfile(
 )
 
 
+# RDNA 3.5 (gfx1151) — STUB profile (rocm-libraries-e8ni). gfx1151 is a
+# real codegen target (see CustomSchedule/dispatch.py: hasCustomSchedule
+# gates ISA in {gfx950, gfx1151}), but the per-class quad-cycle constants
+# from RDNA3.5 ISA section 7.6 / 7.9.1 / 16.5 (S_DELAY_ALU vocabulary,
+# WMMA scheduling, VOPD pair restrictions) have NOT been characterized
+# yet. See `ISA_GAP_GENERALIZATION_AUDIT.md` §2.3 (R-1..R-17 inventory).
+#
+# `arch_not_supported=True` makes every quad-cycle gap helper short-circuit
+# to `TimingCheck.arch_not_supported()` — the same behavior an unregistered
+# ISA would get, but WITHOUT the "no ArchProfile registered" warning. The
+# scalar timing fields are placeholder zeros; future work (a sibling
+# `gap-rule-table-rdna35` bead per the audit memo §5.2) replaces this stub
+# with a real gap-rule table and per-class finish-cycle constants.
+#
+# DO NOT populate the timing fields with "best-guess" CDNA4-shaped values:
+# the helpers must report `arch_not_supported` cleanly until per-class
+# RDNA3.5 constants are sourced from the ISA. Silent approximation would
+# produce wrong timing answers without any signal.
+_DEFAULT_RDNA35_ARCH_PROFILE = ArchProfile(
+    name="RDNA3.5",
+    isa=(11, 5, 1),
+    standard_mfma_finish_cycles=0,         # Placeholder — never read (arch_not_supported).
+    mfma_4x4_finish_cycles=0,              # Placeholder.
+    cvt_before_mfma_quad_cycles=0,         # Placeholder.
+    mfma_4x4_before_cvt_quad_cycles=0,     # Placeholder.
+    mfma_type_switch_threshold_from_standard=0,
+    mfma_type_switch_threshold_from_4x4=0,
+    default_issue_quad_cycles=1,
+    arch_not_supported=True,               # Skip all quad-cycle gap helpers.
+)
+
+
 # Lookup table — extend with new archs as their profiles are characterized.
 _ARCH_PROFILES_BY_ISA: Dict[Tuple[int, int, int], ArchProfile] = {
     _DEFAULT_CDNA4_ARCH_PROFILE.isa: _DEFAULT_CDNA4_ARCH_PROFILE,
+    _DEFAULT_RDNA35_ARCH_PROFILE.isa: _DEFAULT_RDNA35_ARCH_PROFILE,
 }
 
 
@@ -1761,6 +1816,10 @@ def _cvt_to_mfma_gap_ok(
         return TimingCheck.arch_not_supported()
 
     profile = subj_graph.arch_profile
+    # Stub-profile short-circuit (rocm-libraries-e8ni): arch is registered
+    # but per-class quad-cycle constants are placeholder zeros — skip.
+    if profile.arch_not_supported:
+        return TimingCheck.arch_not_supported()
     required = profile.cvt_before_mfma_quad_cycles
 
     observed = cumulative_issue_cycles(subj_graph, producer, consumer)
@@ -1811,6 +1870,10 @@ def _mfma_pack_to_cvt_gap_ok(
         return TimingCheck.arch_not_supported()
 
     profile = subj_graph.arch_profile
+    # Stub-profile short-circuit (rocm-libraries-e8ni): arch is registered
+    # but per-class quad-cycle constants are placeholder zeros — skip.
+    if profile.arch_not_supported:
+        return TimingCheck.arch_not_supported()
     required = profile.mfma_4x4_before_cvt_quad_cycles
 
     observed = cumulative_issue_cycles(subj_graph, producer, consumer)
