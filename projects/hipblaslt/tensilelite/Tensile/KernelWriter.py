@@ -5780,12 +5780,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Run StinkyTofu conversion for supported architectures
     t0_start = time.perf_counter()
-    if globalParameters["StinkyTofuOptLevel"] is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
+    stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
+    if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
       print2(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
 
       moduleKernelBody.body.setParent()
-
-      stinky_opt_level = int(globalParameters.get("StinkyTofuOptLevel") or 0)
 
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
