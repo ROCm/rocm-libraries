@@ -532,6 +532,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.setupNewTile = _setupNewTile_with_flag
 
+  def enable_capture_default_schedule_no_assert(self):
+    """Same as `enable_capture_default_schedule` but also disables the
+    in-`kernelBody` compare_graphs + validate_edge_wait_coverage assertion
+    gate (see kernelBody around the `_capture_skip_internal_validate`
+    check).
+
+    Intended for unit tests that intentionally drive the prologue down an
+    off-nominal branch (e.g. forced UsePLRPack=1 on a default schedule
+    that doesn't natively schedule for it, which trips
+    TimingTooCloseFailure on the prologue's back-to-back Pack chain). The
+    test is then responsible for calling `build_dataflow_graph` /
+    `compare_graphs` / `validate_edge_wait_coverage` explicitly and
+    filtering the legitimate residual (e.g. `TimingTooCloseFailure`) by
+    isinstance — NOT by message-substring match. Production callers MUST
+    use `enable_capture_default_schedule` instead so the gate stays armed.
+    """
+    self.enable_capture_default_schedule()
+    self._capture_skip_internal_validate = True
+
   ##############################################################################
   # Init
   ##############################################################################
@@ -5622,6 +5641,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self._capture_context.prefetch_pack_a = [_Module_for_prefetch_snap() for _ in range(self.states.numItersPLR)]
           self._capture_context.prefetch_pack_b = [_Module_for_prefetch_snap() for _ in range(self.states.numItersPLR)]
 
+        # rocm-libraries-oram Phase 2: per-plrIdx snapshot modules for the
+        # prologue capture. We collect the prefetch-side pack chain
+        # (packPrePrefetchA/B contents that get added to module via
+        # _interleavePackAB) under PackA{plrIdx}/PackB{plrIdx}. The pack
+        # snapshots are populated AFTER `_interleavePackAB` per plrIdx
+        # below, so they reflect exactly what landed in `module`.
+        # NOTE: LR/LW/GR prologue capture is deferred — tracked as
+        # rocm-libraries-6jbr (requires concurrent capture of the
+        # prologue's s_waitcnt + s_barrier to keep
+        # validate_edge_wait_coverage clean).
+        if getattr(self.states, "_captureDefaultSchedule", False):
+          from rocisa.code import Module as _Module_for_prologue_snap
+          self._capture_context.prologue_prefetch_pack_a = [_Module_for_prologue_snap() for _ in range(self.states.numItersPLR)]
+          self._capture_context.prologue_prefetch_pack_b = [_Module_for_prologue_snap() for _ in range(self.states.numItersPLR)]
+
       # prefetch-local
       if self.states.numItersPLR:
         # in some cases need an extra copy of the LDS read with appropriate double buffer offsets
@@ -5718,6 +5752,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # Gather A, B conversion code based on scheduling order
           packPrePrefetchItems = []
           self._interleavePackAB(kernel, packPrePrefetchA.flatitems(), packPrePrefetchB.flatitems(), packPrePrefetchItems, prefetch=True)
+          # rocm-libraries-oram Phase 2: snapshot the per-plrIdx prologue
+          # pack chain (the contents of packPrePrefetchA/B that get
+          # appended to module via addItems below). This is non-empty
+          # only when usePLRPack is active — that emptiness is the
+          # structural divergence the preloop-divergence test asserts
+          # compare_graphs catches.
+          if getattr(self.states, "_captureDefaultSchedule", False):
+            for _leaf in packPrePrefetchA.flatitems():
+              self._capture_context.prologue_prefetch_pack_a[plrIdx].add(_leaf)
+            for _leaf in packPrePrefetchB.flatitems():
+              self._capture_context.prologue_prefetch_pack_b[plrIdx].add(_leaf)
           if len(packPrePrefetchItems) > 0:
             module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete (for pre Pack code)"))
 
@@ -5775,6 +5820,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
         module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
       module.add(skipGL2Label)
+
+    # rocm-libraries-oram Phase 2: prologue-end checkpoint. Everything
+    # between `setupNewTile` and `openLoop` (the prefetch-local block
+    # above) has now been emitted. Build the prologue capture from the
+    # snapshots stashed during emission and stash on ctx.prologue; the
+    # default-side FourPartCapture assembly (later in this method) will
+    # promote it onto ctx.default.prologue. Skipped when default-side
+    # capture is off (non-CMS kernels) and no-op when the prefetch block
+    # was skipped (PGR=0 leaves all prologue snapshots empty;
+    # build_prologue_capture returns None and ctx.prologue stays None).
+    if getattr(self.states, "_captureDefaultSchedule", False):
+      from Tensile.Components.ScheduleCapture import build_prologue_capture
+      ctx_for_prologue = self._capture_context
+      ctx_for_prologue.prologue = build_prologue_capture(
+        prefetch_pack_a=ctx_for_prologue.prologue_prefetch_pack_a,
+        prefetch_pack_b=ctx_for_prologue.prologue_prefetch_pack_b,
+      )
 
     loopCopies = 3 if kernel["HalfPLR"] else 2 if expand else 1
     isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])
@@ -6099,6 +6161,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
               ctx.default_n_gl.name_to_idx = dict(regset_stream)
             if ctx.default_n_ll is not None:
               ctx.default_n_ll.name_to_idx = dict(regset_stream)
+            # rocm-libraries-oram Phase 2: seed the prologue's name_to_idx
+            # from the same RegSet stream so symbolic operands in the
+            # prologue (vgprValuA0/vgprValuB0/vgprG2L*) resolve to the
+            # same numeric byte-keys as in the mainloop bodies. This is
+            # the load-bearing invariant that lets cross-body
+            # prologue->ML-1 dataflow edges form during graph construction.
+            if ctx.prologue is not None:
+              ctx.prologue.name_to_idx = dict(regset_stream)
           ctx.default = FourPartCapture(
             main_loop={0: main},
             main_loop_prev={0: clone_loop_body(main)},
@@ -6109,6 +6179,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             source="default-sia3",
             num_mfma_per_subiter=self.states.numMfmaPerIter,
             arch_profile=arch_profile,
+            prologue=ctx.prologue,
           )
           # Deferred CMS expansion: customMainLoopSchedule stashed the
           # macro + walker inputs but did not expand, because the
@@ -6134,7 +6205,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # compare apples-to-apples through the per-arch helpers.
           if ctx.cms is not None:
             ctx.cms.arch_profile = arch_profile
-          if ctx.cms is not None:
+          if ctx.cms is not None and not getattr(
+              self, "_capture_skip_internal_validate", False):
+            # Test fixtures that intentionally exercise off-nominal
+            # prologue branches (e.g. forced UsePLRPack=1 on a default
+            # schedule that doesn't natively schedule for it) can opt out
+            # of this gate via `enable_capture_default_schedule_no_assert`
+            # and re-run compare_graphs / validate_edge_wait_coverage
+            # explicitly with category-specific filtering on the residual.
+            # See test_prologue_capture.py for the canonical pattern.
             kernel_label = (
               f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}"
             )

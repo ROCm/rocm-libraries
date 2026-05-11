@@ -46,6 +46,7 @@ from Tensile.Common.Utilities import printWarning
 # on demand. (br4.6 added the helper-related symbols below.)
 from Tensile.Components.ScheduleCapture import (
     SchedulePosition,
+    BODY_LABEL_PROLOGUE,
     BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL,
     BODY_LABEL_TO_LOOP_INDEX,
     CaptureConsistencyError,
@@ -1617,8 +1618,14 @@ def _make_node(
 
 
 # Body order for graph construction. Cross-body queue state persists in the
-# order ML-1 -> ML -> NGL -> NLL (matching hardware execution order).
-_BODY_BUILD_ORDER = (BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL)
+# order PRO -> ML-1 -> ML -> NGL -> NLL (matching hardware execution order).
+# PRO (the pre-mainloop prologue, rocm-libraries-oram Phase 2) is the
+# pre-loop initialization block emitted between `setupNewTile` and `openLoop`
+# in `KernelWriter.kernelBody`. PRO is always optional: PGR=0 kernels emit no
+# prologue at all, in which case the corresponding `FourPartCapture.prologue`
+# field is `None` and the body-walk skips PRO via the same absent-key path
+# that handles missing n_gl/n_ll bodies.
+_BODY_BUILD_ORDER = (BODY_LABEL_PROLOGUE, BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL)
 
 
 # =============================================================================
@@ -1693,6 +1700,18 @@ def build_dataflow_graph(four_part_capture):
         return DataflowGraph(nodes={}, edges=[], captures=captures)
 
     # Seed captures dict and validate bodies are non-empty.
+    # PRO is sourced from the optional `prologue` field; the rest from the
+    # per-codepath dicts. The prologue (rocm-libraries-oram Phase 2) is
+    # `None` for PGR=0 kernels (no prologue emitted) and skipped here, the
+    # same absent-body path used for n_gl/n_ll dict-omission.
+    prologue_body = four_part_capture.prologue
+    if prologue_body is not None:
+        if not prologue_body.instructions:
+            raise CaptureEmptyBodyError(
+                f"Body {BODY_LABEL_PROLOGUE!r} has zero captured instructions; "
+                f"a present prologue capture must contain at least one instruction."
+            )
+        captures[BODY_LABEL_PROLOGUE] = prologue_body
     body_sources = (
         (BODY_LABEL_ML_PREV, four_part_capture.main_loop_prev),
         (BODY_LABEL_ML, four_part_capture.main_loop),
@@ -1710,12 +1729,12 @@ def build_dataflow_graph(four_part_capture):
             )
         captures[label] = body
 
-    num_mfma_per_subiter = getattr(four_part_capture, 'num_mfma_per_subiter', 0) or 0
+    num_mfma_per_subiter = four_part_capture.num_mfma_per_subiter or 0
     # Forward the FourPartCapture's arch_profile (or None) to the graph so
     # the four pair-specific quad-cycle helpers can resolve the per-arch
     # constants. `None` means "no profile registered for this kernel's
     # ISA; timing checks are skipped." Tracked: `rocm-libraries-zkzw`.
-    arch_profile = getattr(four_part_capture, 'arch_profile', None)
+    arch_profile = four_part_capture.arch_profile
 
     nodes_by_identity = {}
     nodes_per_body = {label: [] for label in _BODY_BUILD_ORDER}

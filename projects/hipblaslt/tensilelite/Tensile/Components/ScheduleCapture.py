@@ -586,6 +586,31 @@ class CaptureContext:
     # leaves consumed at iter 0 (which never enter PackCodeAAllIters).
     prefetch_pack_a: list = field(default_factory=list)
     prefetch_pack_b: list = field(default_factory=list)
+    # rocm-libraries-oram Phase 2 prologue scratch state. Populated in
+    # `kernelBody` during the prefetch-local block (between `setupNewTile`
+    # and `openLoop`); harvested at the prologue-end checkpoint to build
+    # `ctx.prologue`.
+    #
+    # `prologue_prefetch_pack_a` / `..._pack_b` are populated only when
+    # usePLRPack is active — they hold the per-plrIdx pack chain that
+    # `_interleavePackAB` lays into module via `addItems`. When
+    # usePLRPack=False these stay empty (the pack code lives in
+    # `pack[plrIdx]` for the mainloop instead). That emptiness is the
+    # load-bearing structural divergence the preloop-divergence test
+    # asserts compare_graphs catches.
+    #
+    # NOTE: LR/LW/GR prologue capture is intentionally out of scope for
+    # rocm-libraries-oram Phase 2. Capturing those producers without also
+    # capturing the prologue's s_waitcnt + s_barrier instructions surfaces
+    # uncovered prologue->mainloop edges in `validate_edge_wait_coverage`.
+    # Tracked as a follow-up: rocm-libraries-6jbr.
+    #
+    # `prologue` is the finalized capture (None when PGR=0 or when the
+    # build skipped prologue collection). Promoted into
+    # `ctx.default.prologue` during FourPartCapture assembly.
+    prologue_prefetch_pack_a: list = field(default_factory=list)
+    prologue_prefetch_pack_b: list = field(default_factory=list)
+    prologue: object = None  # LoopBodyCapture | None
 
     def reset(self):
         """Clear all per-kernel scratch state. `default` and `cms` are
@@ -597,6 +622,9 @@ class CaptureContext:
         self.builder = None
         self.prefetch_pack_a = []
         self.prefetch_pack_b = []
+        self.prologue_prefetch_pack_a = []
+        self.prologue_prefetch_pack_b = []
+        self.prologue = None
 
 
 @dataclass
@@ -642,6 +670,19 @@ class FourPartCapture:
     # (e.g. `_DEFAULT_CDNA4_ARCH_PROFILE`) or accept that timing checks
     # will be skipped. Tracked: `rocm-libraries-zkzw`.
     arch_profile: Optional[ArchProfile] = None
+    # Pre-mainloop prologue capture (rocm-libraries-oram Phase 2). When
+    # populated, contains the dataflow-bearing instructions emitted between
+    # `setupNewTile` and `openLoop` in `KernelWriter.kernelBody`: the
+    # preLoopLocalWrite (LWA/LWB) and the prefetch-local block's local
+    # reads (LRA{plrIdx}/LRB{plrIdx}) and pack chain
+    # (PackA{plrIdx}/PackB{plrIdx}, populated only when usePLRPack=True).
+    # `None` means PGR=0 / no prologue was emitted; the
+    # `build_dataflow_graph` body-walk handles `None` cleanly. The prologue
+    # has no codepath structure (the prologue runs once per kernel
+    # invocation, before any code-path divergence in the main loop), so it
+    # is a single `LoopBodyCapture` rather than a per-codepath dict like
+    # `main_loop` and `main_loop_prev`.
+    prologue: Optional['LoopBodyCapture'] = None
 
 
 # =============================================================================
@@ -650,14 +691,16 @@ class FourPartCapture:
 # Stable string labels used in GraphNode.body_label and as keys in
 # DataflowGraph.captures. The numeric loop_index inside SchedulePosition is
 # derived via BODY_LABEL_TO_LOOP_INDEX so cross-body order is well-defined
-# (ML-1 < ML < NGL < NLL by construction).
+# (PRO < ML-1 < ML < NGL < NLL by construction).
 
+BODY_LABEL_PROLOGUE = "PRO"
 BODY_LABEL_ML_PREV = "ML-1"
 BODY_LABEL_ML = "ML"
 BODY_LABEL_NGL = "NGL"
 BODY_LABEL_NLL = "NLL"
 
 BODY_LABEL_TO_LOOP_INDEX = {
+    BODY_LABEL_PROLOGUE: -1,
     BODY_LABEL_ML_PREV: 0,
     BODY_LABEL_ML: 1,
     BODY_LABEL_NGL: 2,
@@ -1899,6 +1942,80 @@ def clone_loop_body(body):
     return deepcopy(body)
 
 
+def build_prologue_capture(*, prefetch_pack_a=None, prefetch_pack_b=None):
+    """Build a `LoopBodyCapture` for the pre-mainloop prologue
+    (rocm-libraries-oram Phase 2).
+
+    Produces a body labelled `BODY_LABEL_PROLOGUE` ("PRO") that
+    `build_dataflow_graph` consumes alongside the four mainloop bodies.
+    The prologue's loop_index is -1, sorting strictly before ML-1, so all
+    prologue writes are visible to mainloop reads in the per-byte
+    latest-writer resolution.
+
+    Source modules / source-module lists:
+
+      prefetch_pack_a, prefetch_pack_b: lists indexed by plrIdx. Each
+        entry is a `Module` containing the pack leaves emitted into the
+        prologue when `usePLRPack` is active (the pack chain that
+        `_interleavePackAB` lays into module via `addItems` at line 5044
+        of KernelWriter.py). Tagged as PackA{plrIdx} / PackB{plrIdx}.
+        When usePLRPack=False these modules are empty (the pack code
+        lands in `pack[plrIdx]` for the mainloop instead) — that
+        emptiness is the load-bearing structural divergence the
+        rocm-libraries-oram Phase 2 preloop-divergence test asserts.
+
+    NOTE: LR/LW/GR prologue capture is intentionally out of scope for
+    rocm-libraries-oram Phase 2. Capturing those producers without also
+    capturing the prologue's s_waitcnt + s_barrier instructions surfaces
+    uncovered prologue->mainloop edges in `validate_edge_wait_coverage`.
+    Tracked as a follow-up: rocm-libraries-6jbr.
+
+    Returns None when ALL source inputs are absent or empty (PGR=0
+    kernels emit no prologue at all, and usePLRPack=False kernels emit
+    no prologue Pack producers). A non-empty body is returned as a
+    `LoopBodyCapture`. The caller is responsible for setting the
+    capture's `name_to_idx` after harvesting RegSet directives.
+    """
+    builder = LoopBodyCaptureBuilder()
+    any_appended = False
+
+    def _append_module(module, category):
+        nonlocal any_appended
+        if module is None:
+            return
+        for leaf in module.flatitems():
+            if leaf is None:
+                continue
+            # Skip TextBlock/comments (no rocisa wiring; finalize would
+            # raise CaptureWiringError on inst=None). Also skip Label
+            # markers — they are scheduling markers, not dataflow nodes.
+            cls_name = type(leaf).__name__
+            if cls_name in ("TextBlock", "Label"):
+                continue
+            # A leaf with no rocisa inst (e.g., Module returned without
+            # being flattened) signals an upstream wiring bug; surface it
+            # via the existing finalize() guard rather than silently dropping.
+            builder.append(
+                inst=leaf,
+                category=category,
+                subiter=0,
+                slot_kind=SLOT_KIND_PRE_LOOP,
+                mfma_index=-1,
+            )
+            any_appended = True
+
+    if prefetch_pack_a is not None:
+        for plr_idx, mod in enumerate(prefetch_pack_a):
+            _append_module(mod, f"PackA{plr_idx}")
+    if prefetch_pack_b is not None:
+        for plr_idx, mod in enumerate(prefetch_pack_b):
+            _append_module(mod, f"PackB{plr_idx}")
+
+    if not any_appended:
+        return None
+    return builder.finalize()
+
+
 # =============================================================================
 # CMS macro walker
 # =============================================================================
@@ -2317,4 +2434,15 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
         num_codepaths=num_codepaths,
         source="cms",
         num_mfma_per_subiter=num_mfma_per_subiter,
+        # CMS does not directly emit the prologue (the prologue is emitted
+        # in `kernelBody` between `setupNewTile` and `openLoop`, above the
+        # `_loopBody`-level CMS dispatch). Both default-side and CMS-side
+        # captures observe the SAME prologue stream from the same
+        # kernelBody invocation, so the CMS-side capture inherits the
+        # default-side prologue verbatim. Cloning isn't needed: the
+        # LoopBodyCapture object is read-only from the validator's
+        # perspective — graph nodes carry their own per-body slot tags via
+        # `_make_node`, and `name_to_idx` is per-body and seeded once.
+        # rocm-libraries-oram Phase 2.
+        prologue=default_capture.prologue,
     )
