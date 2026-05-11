@@ -37,52 +37,6 @@ void checkGetArgs(hipdnnBackendAttributeType_t expectedType,
                    std::string(errorPrefix) + ": attributeType mismatch");
 }
 
-void setInt64Vector(std::vector<int64_t>& target,
-                    hipdnnBackendAttributeType_t attributeType,
-                    int64_t elementCount,
-                    const void* arrayOfElements,
-                    const char* errorPrefix)
-{
-    checkSetArgs(HIPDNN_TYPE_INT64, attributeType, arrayOfElements, errorPrefix);
-    THROW_IF_FALSE(elementCount > 0,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(errorPrefix) + ": elementCount must be positive");
-    target.resize(static_cast<size_t>(elementCount));
-    std::memcpy(
-        target.data(), arrayOfElements, static_cast<size_t>(elementCount) * sizeof(int64_t));
-}
-
-void getInt64Vector(const std::vector<int64_t>& source,
-                    hipdnnBackendAttributeType_t attributeType,
-                    int64_t requestedElementCount,
-                    int64_t* elementCount,
-                    void* arrayOfElements,
-                    const char* errorPrefix)
-{
-    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, errorPrefix);
-
-    if(arrayOfElements == nullptr || requestedElementCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      std::string(errorPrefix) + ": elementCount is null");
-        *elementCount = static_cast<int64_t>(source.size());
-        return;
-    }
-
-    THROW_IF_LT(requestedElementCount,
-                static_cast<int64_t>(0),
-                HIPDNN_STATUS_BAD_PARAM,
-                std::string(errorPrefix) + ": requestedElementCount is negative");
-
-    auto copyCount = std::min<size_t>(static_cast<size_t>(requestedElementCount), source.size());
-    if(elementCount != nullptr)
-    {
-        *elementCount = static_cast<int64_t>(copyCount);
-    }
-    std::memcpy(arrayOfElements, source.data(), copyCount * sizeof(int64_t));
-}
-
 void setString(std::string& target,
                hipdnnBackendAttributeType_t attributeType,
                int64_t elementCount,
