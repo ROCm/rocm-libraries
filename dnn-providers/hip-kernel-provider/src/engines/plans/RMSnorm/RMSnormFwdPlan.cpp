@@ -3,12 +3,12 @@
 
 #include "RMSnormFwdPlan.hpp"
 #include "../PlanUtils.hpp"
+#include "RMSnormCommon.hpp"
 #include "hip/HipKernelCompileOptions.hpp"
 
 #include "HipKernelUtils.hpp"
 #include "hip/IKernelCompiler.hpp"
 
-#include <cstdint>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -79,57 +79,6 @@ size_t RMSnormFwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& 
     return 0;
 }
 
-int64_t RMSnormFwdPlan::getOuterSize(unsigned normalizeDim) const
-{
-    const auto* xDims = _params.x()->dims();
-    int64_t outerSize = 1;
-    for(unsigned i = 0; i < normalizeDim; ++i)
-    {
-        outerSize *= xDims->Get(i);
-    }
-    return outerSize;
-}
-
-int64_t RMSnormFwdPlan::getInnerSize(unsigned normalizeDim) const
-{
-    const auto* xDims = _params.x()->dims();
-
-    int64_t innerSize = 1;
-    for(unsigned i = normalizeDim; i < xDims->size(); ++i)
-    {
-        innerSize *= xDims->Get(i);
-    }
-    return innerSize;
-}
-
-int64_t RMSnormFwdPlan::getStride(unsigned normalizeDim) const
-{
-    int64_t stride = 1;
-    auto isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(_params.x());
-    if(normalizeDim > 1 && isLayoutNHWC)
-    {
-        stride = static_cast<int64_t>(_params.x()->dims()->Get(1));
-    }
-    return stride;
-}
-
-unsigned RMSnormFwdPlan::getNormalizeDim() const
-{
-    const std::vector<int64_t> scaleDims(_params.scale()->dims()->begin(),
-                                         _params.scale()->dims()->end());
-    const std::vector<int64_t> xDims(_params.x()->dims()->begin(), _params.x()->dims()->end());
-
-    // Find number of trailing dims where scaleDims[i] == inputDims[i]
-    const auto [scaleMismatch, _]
-        = std::mismatch(scaleDims.rbegin(), scaleDims.rend(), xDims.rbegin(), xDims.rend());
-    const auto matchCount = static_cast<size_t>(std::distance(scaleDims.rbegin(), scaleMismatch));
-
-    // Scale must have at least one normalization axis, so account for the case where input has a single batch and scale
-    // matches exactly.
-    const auto normalizeDim = (matchCount == scaleDims.size()) ? 1 : scaleDims.size() - matchCount;
-    return static_cast<unsigned>(normalizeDim);
-}
-
 void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                              const hipDeviceProp_t& deviceProperties)
 {
@@ -153,10 +102,10 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     // dimension of 1, outerSize of N, and innerSize of CxHxW.
     // The kernel will therefore consist of N workgroups with each workgroup normalizing over
     // CxHxW elements using a fixed number of threads.
-    const unsigned normalizeDim = getNormalizeDim();
-    const int64_t outerSize = getOuterSize(normalizeDim);
-    const int64_t innerSize = getInnerSize(normalizeDim);
-    const int64_t stride = getStride(normalizeDim);
+    const unsigned normalizeDim = getNormalizeDim(_params.x()->dims(), _params.scale()->dims());
+    const int64_t outerSize = getOuterSize(_params.x()->dims(), normalizeDim);
+    const int64_t innerSize = getInnerSize(_params.x()->dims(), normalizeDim);
+    const int64_t stride = getStride(_params.x(), normalizeDim);
     if(outerSize >= UINT32_MAX)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
