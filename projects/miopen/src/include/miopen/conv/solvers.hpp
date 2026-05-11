@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -361,11 +338,11 @@ struct MIOPEN_INTERNALS_EXPORT ConvAsm7x7c3h224w224k64u2v2p3q3f1 final : ConvSol
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd11x11 final : ConvSolver
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwd11x11 final : ConvSolver
 {
     const std::string& SolverDbId() const override
     {
-        return GetSolverDbId<ConvOclDirectFwd11x11>();
+        return GetSolverDbId<ConvHipDirectFwd11x11>();
     }
 
     bool IsApplicable(const ExecutionContext&,
@@ -1717,24 +1694,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd final : ConvOclDirectFwdLegacyEx
     bool IsValidPerformanceConfig(const ExecutionContext&,
                                   const miopen::conv::ProblemDescription&,
                                   const LegacyPerformanceConfig&) const override;
-};
-
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd1x1 final : ConvOclDirectFwdLegacyExhaustiveSearch
-{
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclDirectFwd1x1>(); }
-
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&,
-                             const LegacyPerformanceConfig&) const override;
-
-    bool IsValidPerformanceConfig(const ExecutionContext&,
-                                  const miopen::conv::ProblemDescription&,
-                                  const LegacyPerformanceConfig&) const override
-    {
-        return true;
-    }
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvBinWinograd3x3U final : ConvSolver
@@ -4171,6 +4130,7 @@ struct PerformanceConfigHipImplicitGemmGroupFwdXdlops
     : PerfConfigBaseCK<PerformanceConfigHipImplicitGemmGroupFwdXdlops>
 {
     int index             = 0;
+    int split_k           = 0; // not used for FWD, but required for AI heuristics interface
     std::string kernel_id = "";
     std::vector<std::string> valid_kernels;
 
@@ -4202,16 +4162,29 @@ struct PerformanceConfigHipImplicitGemmGroupFwdXdlops
                       const miopen::conv::ProblemDescription& problem) const;
     bool UseTF32() const { return use_tf32; }
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
+    template <typename DataType>
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+#endif
+
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
-    template <typename DataType>
-    bool RunParameterPredictionModel(const ExecutionContext& ctx,
-                                     const miopen::conv::ProblemDescription& problem);
-    void InitHeuristicKernelIDs(const std::string& type);
-    bool ModelApplyToken(int idx, std::string value, const std::string& arch);
+
+    void InitHeuristicKernelIDsKTN(const std::string& type);
+    bool ModelApplyTokenKTN(int idx, std::string value, const std::string& arch);
 #endif
+
+    template <typename DataType, typename ComputeType>
+    void Init(const miopen::conv::ProblemDescription&);
+    template <typename DataType>
+    void Init(const miopen::conv::ProblemDescription&);
+    void InitValidKernels(const miopen::conv::ProblemDescription&);
+    template <typename DataType>
+    bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
 };
 
@@ -4507,18 +4480,32 @@ struct PerformanceConfigHipImplicitGemmGroupBwdXdlops
                       const miopen::conv::ProblemDescription& problem) const;
     bool UseTF32() const { return use_tf32; }
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
+    template <typename DataType>
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+#endif
+
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
-    bool RunParameterPredictionModel(const ExecutionContext& ctx,
-                                     const miopen::conv::ProblemDescription& problem);
-    void InitHeuristicKernelIDs();
-    bool ModelApplyToken(int idx,
-                         std::string value,
-                         const std::string& arch,
-                         const miopen::conv::ProblemDescription& problem);
+
+    void InitHeuristicKernelIDsKTN();
+    bool ModelApplyTokenKTN(int idx,
+                            std::string value,
+                            const std::string& arch,
+                            const miopen::conv::ProblemDescription& problem);
 #endif
+
+    template <typename DataType, typename ComputeType>
+    void Init(const miopen::conv::ProblemDescription&);
+    template <typename DataType>
+    void Init(const miopen::conv::ProblemDescription&);
+    void InitValidKernels(const miopen::conv::ProblemDescription&);
+    template <typename DataType>
+    bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
 };
 
@@ -4597,18 +4584,32 @@ struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
                       const miopen::conv::ProblemDescription& problem) const;
     bool UseTF32() const { return use_tf32; }
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
+    template <typename DataType>
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+#endif
+
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
-    bool RunParameterPredictionModel(const ExecutionContext& ctx,
-                                     const miopen::conv::ProblemDescription& problem);
-    void InitHeuristicKernelIDs(const std::string& type);
-    bool ModelApplyToken(int idx,
-                         std::string value,
-                         const std::string& arch,
-                         const miopen::conv::ProblemDescription& problem);
+
+    void InitHeuristicKernelIDsKTN(const std::string& type);
+    bool ModelApplyTokenKTN(int idx,
+                            std::string value,
+                            const std::string& arch,
+                            const miopen::conv::ProblemDescription& problem);
 #endif
+
+    template <typename DataType, typename ComputeType>
+    void Init(const miopen::conv::ProblemDescription&);
+    template <typename DataType>
+    void Init(const miopen::conv::ProblemDescription&);
+    void InitValidKernels(const miopen::conv::ProblemDescription&);
+    template <typename DataType>
+    bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
 };
 

@@ -10,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <initializer_list>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -119,11 +120,42 @@ public:
      * @param timeout Maximum time to wait
      * @return true if target reached, false if timed out
      */
-    bool waitForLogCount(size_t targetCount, std::chrono::milliseconds timeout)
+    [[nodiscard]] bool waitForLogCount(size_t targetCount, std::chrono::milliseconds timeout)
     {
         std::unique_lock<std::mutex> lock(_logsMutex);
         return _cvLogRecorded.wait_for(
             lock, timeout, [&] { return _recordedLogs.size() >= targetCount; });
+    }
+
+    /**
+     * @brief Wait until logs containing all given texts are recorded, with a single shared timeout
+     * @param texts The substrings to search for in log messages
+     * @param timeout Maximum total time to wait for all texts to appear
+     * @return true if all matching logs found, false if timed out
+     */
+    [[nodiscard]] bool waitForLogsContaining(std::initializer_list<std::string> texts,
+                                             std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(_logsMutex);
+        return _cvLogRecorded.wait_for(lock, timeout, [&] {
+            for(const auto& text : texts)
+            {
+                bool found = false;
+                for(const auto& log : _recordedLogs)
+                {
+                    if(log.message.find(text) != std::string::npos)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if(!found)
+                {
+                    return false;
+                }
+            }
+            return true;
+        });
     }
 
     LogRecording(const LogRecording&) = delete;
@@ -383,9 +415,21 @@ public:
      * @param timeout Maximum time to wait
      * @return true if target reached, false if timed out
      */
-    bool waitForLogCount(size_t targetCount, std::chrono::milliseconds timeout)
+    [[nodiscard]] bool waitForLogCount(size_t targetCount, std::chrono::milliseconds timeout)
     {
         return LogRecording::instance(_recordingId).waitForLogCount(targetCount, timeout);
+    }
+
+    /**
+     * @brief Wait until logs containing all given texts are recorded, with a single shared timeout
+     * @param texts The substrings to search for in log messages
+     * @param timeout Maximum total time to wait for all texts to appear
+     * @return true if all matching logs found, false if timed out
+     */
+    [[nodiscard]] bool waitForLogsContaining(std::initializer_list<std::string> texts,
+                                             std::chrono::milliseconds timeout)
+    {
+        return LogRecording::instance(_recordingId).waitForLogsContaining(texts, timeout);
     }
 
 protected:

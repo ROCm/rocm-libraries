@@ -50,13 +50,21 @@ hipDNN provides several C++ SDK libraries for plugin development:
 
 ### Data SDK (`data_sdk`)
 
-The Data SDK contains the FlatBuffers schemas and data structures for graph representation. It includes:
+The Data SDK contains shared types and utilities used across hipDNN. It includes:
+
+- Type helpers (e.g., `half`, `bfloat16`)
+- Tensor and memory utilities
+- The engine name registry (`EngineNames.hpp`)
+
+### FlatBuffers SDK (`flatbuffers_sdk`)
+
+The FlatBuffers SDK contains the FlatBuffers schemas, generated headers, and graph wrapper classes. It includes:
 
 - FlatBuffers schema definitions for graphs, nodes, and attributes
-- Data structures for deserializing serialized graphs
-- Utilities for working with graph data
+- Generated headers under `hipdnn_flatbuffers_sdk/data_objects/`
+- Wrapper classes (`GraphWrapper`, `NodeWrapper`, `IEngineConfig`) for working with serialized graphs
 
-For adding new operations to the Data SDK (schemas, nodes, attributes), see the [How-To Guide](./HowTo.md#adding-a-new-operation-to-existing-plugins).
+For adding new operations to the FlatBuffers SDK (schemas, nodes, attributes), see the [How-To Guide](./HowTo.md#adding-a-new-operation-to-existing-plugins).
 
 ### Plugin SDK (`plugin_sdk`)
 
@@ -281,29 +289,29 @@ The [`IPlanBuilder`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBui
 Plugins expose knobs through the `IPlanBuilder::getCustomKnobs()` method. When hipDNN queries your engine for its details, the engine collects knobs from all applicable plan builders and includes them in the response.
 
 ```cpp
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT> MyPlanBuilder::getCustomKnobs(
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> MyPlanBuilder::getCustomKnobs(
     const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> knobs;
 
     if(!isApplicable(handle, opGraph))
     {
         return knobs;
     }
 
-    hipdnn_data_sdk::data_objects::KnobT sampleKnob;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT sampleKnob;
     sampleKnob.knob_id = "myplugin.myoperation.myknob";
     sampleKnob.description = "Sample Knob Description";
 
-    hipdnn_data_sdk::data_objects::IntValueT defaultValue;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT defaultValue;
     defaultValue.value = 1;
     sampleKnob.default_value.Set(defaultValue);
 
-    hipdnn_data_sdk::data_objects::IntConstraintT constraint;
+    hipdnn_flatbuffers_sdk::data_objects::IntConstraintT constraint;
     constraint.min_value = 0;
     constraint.max_value = 4;
     constraint.step = 1;
@@ -336,9 +344,9 @@ class MyPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<MyHandle, MySetting
 {
 public:
     // Define the knobs this plan builder supports
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> getCustomKnobs(
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> getCustomKnobs(
         const MyHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override
     {
         // Return knob definitions (see "Registering Knobs" section above)
         return {};
@@ -347,8 +355,8 @@ public:
     // Initialize execution settings from knob values
     void initializeExecutionSettings(
         const MyHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         MySettings& executionSettings) const override
     {
         // Extract and apply knob settings to execution settings
@@ -367,8 +375,8 @@ public:
     // Build the plan using the configured settings
     void buildPlan(
         const MyHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         MyContext& executionContext) const override
     {
         // Build plan using engineConfig knob settings

@@ -25,6 +25,7 @@
 #include <memory>
 #include <string>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
@@ -47,7 +48,7 @@ struct DumpStinkyFunctionPassConfig {
 };
 
 /// Writes the current Function to disk as Stinky IR text and/or as emitted GPU assembly.
-class DumpStinkyFunctionPass : public Pass {
+class STINKYTOFU_EXPORT DumpStinkyFunctionPass : public Pass {
    public:
     static char ID;
 
@@ -62,7 +63,7 @@ class DumpStinkyFunctionPass : public Pass {
         return "DumpStinkyFunctionPass";
     }
 
-    void run(Function& func, PassContext& passCtx) override;
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override;
 
     const DumpStinkyFunctionPassConfig& getConfig() const {
         return config_;
@@ -76,5 +77,6 @@ class DumpStinkyFunctionPass : public Pass {
     DumpStinkyFunctionPassConfig config_;
 };
 
-std::unique_ptr<Pass> createDumpStinkyFunctionPass(DumpStinkyFunctionPassConfig config = {});
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createDumpStinkyFunctionPass(
+    DumpStinkyFunctionPassConfig config = {});
 }  // namespace stinkytofu

@@ -41,6 +41,21 @@ void graph_bindings(nb::module_& m)
              &graph::Graph::create_execution_plans,
              nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
              "Create execution plans with specified heuristic modes")
+        .def(
+            "get_ranked_engine_ids",
+            [](graph::Graph& g, const std::vector<HeuristicMode>& modes) {
+                std::vector<int64_t> ids;
+                auto err = g.get_ranked_engine_ids(ids, modes);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get ranked engine ids: "
+                                             + err.get_message());
+                }
+                return ids;
+            },
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            "Get ranked engine IDs for the built operation graph. Requires "
+            "build_operation_graph() to have been called first.")
         .def("check_support", &graph::Graph::check_support)
         .def("build_plans", &graph::Graph::build_plans)
         .def(
