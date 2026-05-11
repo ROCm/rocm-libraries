@@ -945,7 +945,7 @@ def _selectF8F6F4InstType(kernel):
   aType = pt.get("DataTypeA")
   bType = pt.get("DataTypeB")
   if aType is None or bType is None:
-    return None
+    raise RuntimeError(f"Unsupported data types for MFMA instruction: A = {aType}, B = {bType}\n")
 
   sourceSwap = bool(kernel.get("SourceSwap", False))
   if sourceSwap:
