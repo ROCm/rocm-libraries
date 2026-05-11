@@ -483,27 +483,16 @@ def make_position(body_label: str, stream_index: int) -> SchedulePosition:
 # reverse-imports back.
 
 
-# Class-name lists for finalize() guards. Class-name matching (not isinstance)
-# keeps this module free of hard rocisa imports — the same names work for
-# real rocisa classes and for synthetic test stand-ins.
-
-_SMEM_CLASS_NAMES = {
-    "SLoadB32", "SLoadB64", "SLoadB128", "SLoadB256", "SLoadB512",
-    "SStoreB32", "SStoreB64", "SStoreB128",
-    "SMemLoadInstruction", "SMemStoreInstruction",
-}
-
-_FLAT_CLASS_NAMES = {
-    "FlatLoadB8", "FlatLoadB16", "FlatLoadB32", "FlatLoadB64", "FlatLoadB128",
-    "FlatStoreB8", "FlatStoreB16", "FlatStoreB32", "FlatStoreB64", "FlatStoreB128",
-    "FLATReadInstruction", "FLATStoreInstruction",
-}
-
-_VECTOR_STORE_CLASS_NAMES = {
-    "BufferStoreB32", "BufferStoreB64", "BufferStoreB128",
-    "GlobalStoreB32", "GlobalStoreB64", "GlobalStoreB128",
-    "BufferStoreInstruction", "GlobalStoreInstruction",
-}
+# SMEM / FLAT / VECTOR_STORE finalize() guards are dispatched through the
+# central InstructionCategory map (rocm-libraries-009 re-scoped). Class-name
+# matching (not isinstance) is preserved — the central map keys on
+# `type(inst).__name__` for the same reason: keeps this module free of hard
+# rocisa imports so synthetic test stand-ins continue to dispatch correctly.
+from Tensile.Components.InstructionCategory import (
+    InstructionCategory,
+    category as _category,
+    category_of_class_name as _category_of_class_name,
+)
 
 
 class LoopBodyCaptureBuilder:
@@ -558,21 +547,22 @@ class LoopBodyCaptureBuilder:
                     f"rocisa wiring failed during capture."
                 )
             cls_name = type(inst).__name__
-            if cls_name in _SMEM_CLASS_NAMES:
+            inst_cat = _category_of_class_name(cls_name)
+            if inst_cat is InstructionCategory.SMEM:
                 raise CaptureSMEMError(
                     f"LoopBodyCaptureBuilder.finalize: SMEM op "
                     f"{cls_name} in category {ti.category!r}. "
                     f"SMEM also decrements dscnt and would desync the "
                     f"per-counter FIFO model used by build_dataflow_graph."
                 )
-            if cls_name in _FLAT_CLASS_NAMES:
+            if inst_cat is InstructionCategory.FLAT:
                 raise CaptureFlatError(
                     f"LoopBodyCaptureBuilder.finalize: flat op "
                     f"{cls_name} in category {ti.category!r}. "
                     f"Flat ops decrement both vmcnt and dscnt simultaneously, "
                     f"which the per-counter queue model doesn't handle."
                 )
-            if cls_name in _VECTOR_STORE_CLASS_NAMES:
+            if inst_cat is InstructionCategory.VECTOR_STORE:
                 raise CaptureStoreError(
                     f"LoopBodyCaptureBuilder.finalize: vector-memory store "
                     f"{cls_name} in category {ti.category!r}. "
@@ -883,179 +873,14 @@ def assert_idmap_completeness(idmap, capture):
 # Detection by class-name string keeps this module free of hard rocisa
 # imports — both tests and production wire real rocisa instances.
 
-# Class names (as returned by type(inst).__name__) recognized by the builder.
-_LR_CLASS_NAMES = {
-    # Real rocisa LR classes: DSLoadB32 / DSLoadB64 / DSLoadB128 / DSLoadB256
-    "DSLoadB32", "DSLoadB64", "DSLoadB128", "DSLoadB256",
-    # Generic class umbrella (for isinstance fallback if needed)
-    "DSLoadInstruction",
-}
-_LW_CLASS_NAMES = {
-    "DSStoreB8", "DSStoreB16", "DSStoreB32", "DSStoreB64", "DSStoreB128",
-    # Wider DSStore variants from rocisa/include/instruction/mem.hpp. All
-    # are subclasses of DSStoreInstruction with the same Python ctor
-    # signature `(dstAddr, src, ds, comment)`. _DSStoreRule already
-    # handles them correctly via `getParams()` slot 0 (lds_addr) + slot 1
-    # (src_data). Listed here defensively so the type-name dispatch in
-    # `_is_lw` does not misclassify them as UNKNOWN if a CMS kernel
-    # emits them.
-    "DSStoreU16", "DSStoreB96", "DSStoreB192", "DSStoreB256",
-    # D16HI / B8HID16 partial-half-word LDS stores. These are real
-    # DSStore subclasses (rocisa/include/instruction/mem.hpp) with the
-    # same Python constructor signature (dstAddr, src, ds, comment) as
-    # DSStoreB16. The "D16HI"/"B8HID16" semantic only changes which
-    # 16/8 bits of the LDS word are written — it does NOT change
-    # register-side dataflow: the source vgpr is read in full (not as a
-    # partial read; the upper or lower bits are selected by the LDS
-    # write itself, not by the register read), and no register is
-    # written. So the existing _DSStoreRule
-    # (reads = (lds_addr, src_data); writes = ()) is correct as-is.
-    "DSStoreD16HIB16", "DSStoreB8HID16",
-    # DSStore2B32 — `ds_store2_b32` writes TWO independent 32-bit values
-    # to LDS in a single instruction. Python ctor signature is
-    # `(dstAddr, src0, src1, ds, comment)` (rocisa/src/instruction/mem.cpp
-    # bindings; rocisa/include/instruction/mem.hpp::DSStore2B32). Unlike
-    # the single-src DSStore* family, both src0 AND src1 are real register
-    # operands. No special-case extract logic is needed because
-    # `DSStoreInstruction::getSrcParams` (mem.hpp:883) already returns
-    # `{dstAddr, src0, src1}` for ALL DSStoreInstruction subclasses; the
-    # generic `_DSStoreRule.extract` routes that through
-    # `_operands_with_slots` and `Register.is_register`, which correctly
-    # captures both src registers for DSStore2B32 (and filters out the
-    # None src1 hole for single-src variants like DSStoreB32).
-    "DSStore2B32",
-    "DSStoreInstruction",
-}
-_GR_CLASS_NAMES = {
-    # rocisa BufferLoad classes
-    "BufferLoadB32", "BufferLoadB64", "BufferLoadB128",
-    "GlobalLoadB32", "GlobalLoadB64", "GlobalLoadB128",
-    "BufferLoadInstruction", "GlobalLoadInstruction",
-    "GlobalReadInstruction",
-}
-_MFMA_CLASS_NAMES = {
-    "MFMAInstruction",
-}
-_SWAIT_CLASS_NAMES = {
-    "SWaitCnt",
-}
-_SBARRIER_CLASS_NAMES = {
-    "SBarrier",
-}
-_SNOP_CLASS_NAMES = {
-    "SNop",
-}
-# SSetPrior (s_setprio) — sets the wave priority. Pure scheduling-control
-# scalar instruction with NO register dataflow: the only constructor param
-# is an `int prior` (rocisa/include/instruction/common.hpp::SSetPrior), and
-# `getParams()` returns `{prior}` — no RegisterContainer reads or writes.
-# Treated like SNop/SBarrier/SWaitCnt for validator purposes:
-#   - claimed by `_NoDataflowRule` (no reads/writes contributed),
-#   - excluded from the cross-graph data-flow node identity set
-#     (`build_dataflow_graph` Phase 1, around `:2949`),
-#   - issue cost is the default 1 quad-cycle (NO wait_state add — unlike
-#     SNop which encodes a wait_state in its first param).
-# Witnessed under gfx950 HSS MT256x256x64 #2 and BBS Range MT256x256x64
-# under CMS=1+PGR=2+PLR=1+DTL=T/T.
-_SSETPRIO_CLASS_NAMES = {
-    "SSetPrior",
-}
-# CVT-pack rocisa classes (TF32 emulation: v_cvt_pk_bf16_f32 and friends).
-# Used by `_is_cvt_pack` to identify CVTPack producers whose results feed
-# downstream MFMAs and need the 2-quad-cycle settle window
-# (`_QUAD_CYCLES_CVT_BEFORE_MFMA` in this file). Mirrors the class-name-set
-# lookup pattern used for MFMA / LR / LW / GR; the production rocisa class
-# is `VCvtPkF32toBF16` (CMSValidator.py:676 PACK_TYPE_MAP entry binds it to
-# the `CVTPack` validator dataclass). Test fixtures use plain
-# `_FakeCVTPack` if and when they need to exercise this branch with a
-# non-rocisa stub; today the production class is the only entry.
-_CVT_PACK_CLASS_NAMES = {
-    "VCvtPkF32toBF16",
-}
-
-# MiddlePack rocisa classes (TF32 emulation: the 16 instructions in the middle
-# of each 24-pack group that compute the bf16 error terms via paired
-# v_cvt_f32_bf16 + v_sub_f32 instructions). Used by `_is_middle_pack` and
-# `validate_middle_pack_pair_interleaving` to identify the pair-leader /
-# pair-consumer relationships independently of the structural `MiddlePack`
-# validator-dataclass binding (CMSValidator.py:627-630 PACK_TYPE_MAP entries).
-# The pairing semantics: middle-16 packs in each category (e.g. PackA0) are
-# paired adjacently in stream order — pair (0,1), pair (2,3), etc. — and each
-# pair's two halves share a temporary VGPR, so no OTHER middle-16 pack (from
-# any category, even another one in this category) may appear between them in
-# the global stream.
-_MIDDLE_PACK_CLASS_NAMES = {
-    "PVCvtBF16toFP32",
-    "VCvtBF16toFP32",
-    "VSubF32",
-    "VDot2CF32BF16",
-}
-
-
-def _is_lr(inst):
-    return type(inst).__name__ in _LR_CLASS_NAMES
-
-
-def _is_lw(inst):
-    return type(inst).__name__ in _LW_CLASS_NAMES
-
-
-def _is_gr(inst):
-    return type(inst).__name__ in _GR_CLASS_NAMES
-
-
-def _is_mfma(inst):
-    return type(inst).__name__ in _MFMA_CLASS_NAMES
-
-
-def _is_middle_pack(inst):
-    """True for MiddlePack rocisa instances (TF32 middle-16 v_cvt_f32_bf16
-    + v_sub_f32 / PVCvtBF16toFP32 / VDot2CF32BF16 family).
-
-    These are the 16 instructions in each 24-pack group that compute the
-    bf16 error terms. Per CMSValidator.py PACK_TYPE_MAP, all of them bind
-    to the `MiddlePack` validator dataclass which carries the pair-consumer
-    interleaving invariant. The graph-side classifier in
-    `validate_middle_pack_pair_interleaving` uses this discriminator to
-    identify pair leaders / consumers from the GraphNode stream without
-    re-importing the validator dataclass (which would create an import
-    cycle). Test fixtures may use any of the four production rocisa
-    classes, or a stub class whose `type(...).__name__` matches one of
-    the names in `_MIDDLE_PACK_CLASS_NAMES`.
-    """
-    return type(inst).__name__ in _MIDDLE_PACK_CLASS_NAMES
-
-
-def _is_cvt_pack(inst):
-    """True for CVT-pack rocisa instances (`v_cvt_pk_bf16_f32` family).
-
-    These are the TF32 CVT0/CVT1 packs that bind to the validator-side
-    `CVTPack` dataclass via PACK_TYPE_MAP (CMSValidator.py:676). When such
-    an instruction writes a vgpr that a downstream MFMA reads, the CDNA 4
-    ISA (section 7.6) requires 2 quad-cycles between them
-    (`_QUAD_CYCLES_CVT_BEFORE_MFMA` in this file). The graph-side
-    enforcement of this rule routes CVTPack producers through
-    `_cvt_to_mfma_gap_ok` instead of the ALU-immediate exemption.
-    """
-    return type(inst).__name__ in _CVT_PACK_CLASS_NAMES
-
-
-def _is_swait(inst):
-    return type(inst).__name__ in _SWAIT_CLASS_NAMES
-
-
-def _is_sbarrier(inst):
-    return type(inst).__name__ in _SBARRIER_CLASS_NAMES
-
-
-def _is_snop(inst):
-    return type(inst).__name__ in _SNOP_CLASS_NAMES
-
-
-def _is_ssetprio(inst):
-    """SSetPrior — wave-priority scalar op, no register dataflow. See
-    `_SSETPRIO_CLASS_NAMES` for the rationale."""
-    return type(inst).__name__ in _SSETPRIO_CLASS_NAMES
+# The 13 historical `_*_CLASS_NAMES` sets and the 10 `_is_*` discriminator
+# predicates have been collapsed into the single registry in
+# `Tensile/Components/InstructionCategory.py` (rocm-libraries-009 re-scoped,
+# 2026-05-08). Production code now writes
+# `category(inst) is InstructionCategory.MFMA`, etc., directly. The pre-
+# existing module-level sets and predicate functions were deleted to avoid
+# parallel-API drift; the central `category()` function and
+# `InstructionCategory` enum are imported above.
 
 
 # Stable hashable signatures for RegisterContainers are obtained via
@@ -1311,7 +1136,8 @@ class _DSLoadRule:
     """DSLoadB* — `getDstParams() = {dst}`, `getSrcParams() = {src_lds_addr, ...}`.
     Both filtered through `Register.is_register` (modifiers/None drop out).
     """
-    def applies(self, inst, category=None): return _is_lr(inst)
+    def applies(self, inst, category=None):
+        return _category(inst) is InstructionCategory.LR
     def extract(self, inst, category=None):
         return _operands_with_slots(inst)
 
@@ -1320,7 +1146,8 @@ class _DSStoreRule:
     """DSStoreB* — `getDstParams() = {}` (LDS write has no register dst);
     `getSrcParams() = {dstAddr, src0, src1}` (None src1 filtered out).
     """
-    def applies(self, inst, category=None): return _is_lw(inst)
+    def applies(self, inst, category=None):
+        return _category(inst) is InstructionCategory.LW
     def extract(self, inst, category=None):
         return _operands_with_slots(inst)
 
@@ -1346,7 +1173,7 @@ class _BufferLoadRule:
     singleton instead of reconstructing `mgpr(0)` per call.
     """
     def applies(self, inst, category=None):
-        return _is_gr(inst)
+        return _category(inst) is InstructionCategory.GR
     def extract(self, inst, category=None):
         reads, read_slots, writes, write_slots = _operands_with_slots(inst)
         # DTL-mode loads (dst=None, mubuf->lds=True) implicitly read m0.
@@ -1386,7 +1213,7 @@ class _MFMARule:
     be revisited as a follow-up.
     """
     def applies(self, inst, category=None):
-        if not _is_mfma(inst):
+        if _category(inst) is not InstructionCategory.MFMA:
             return False
         if category is not None and category.startswith("Pack"):
             return False
@@ -1407,13 +1234,15 @@ class _NoDataflowRule:
     this rule remains well-defined for any class-name-only stand-ins
     that may surface in ad-hoc tests.
     """
+    _NO_DATAFLOW_CATEGORIES = frozenset({
+        InstructionCategory.SWAIT,
+        InstructionCategory.SBARRIER,
+        InstructionCategory.SNOP,
+        InstructionCategory.SSETPRIO,
+    })
+
     def applies(self, inst, category=None):
-        return (
-            _is_swait(inst)
-            or _is_sbarrier(inst)
-            or _is_snop(inst)
-            or _is_ssetprio(inst)
-        )
+        return _category(inst) in self._NO_DATAFLOW_CATEGORIES
     def extract(self, inst, category=None):
         return (), (), (), ()
 

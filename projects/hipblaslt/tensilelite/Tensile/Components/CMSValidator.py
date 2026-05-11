@@ -56,9 +56,17 @@ from Tensile.Components.ScheduleCapture import (
     make_position,
     assign_stream_indices_for_body,
     _canonical_render,
-    _is_lr, _is_lw, _is_gr, _is_mfma, _is_swait, _is_sbarrier, _is_snop,
-    _is_ssetprio, _is_cvt_pack, _is_middle_pack,
     _byte_keys_for_resource, _resolve_producers,
+)
+# rocm-libraries-009 (re-scoped): the 13 `_*_CLASS_NAMES` sets and 10
+# `_is_*` discriminator predicates that used to live in ScheduleCapture
+# have been collapsed into a single class-name -> InstructionCategory
+# registry in `Tensile/Components/InstructionCategory.py`. CMSValidator
+# call sites compare directly against `InstructionCategory.X` rather than
+# routing through per-bucket boolean predicates.
+from Tensile.Components.InstructionCategory import (
+    InstructionCategory,
+    category as _category,
 )
 
 if TYPE_CHECKING:
@@ -571,6 +579,50 @@ def barriers_in_window(
     return out
 
 
+# Categories that have real wait-counter or finish-time semantics — i.e.
+# producers whose results are NOT immediately visible. The complement is
+# the ALU set (`_is_alu_producer`); see that function's docstring for the
+# DTL-m0 / PackMFMA carve-outs that the surrounding code applies on top.
+_NON_ALU_CATEGORIES = frozenset({
+    InstructionCategory.LR,
+    InstructionCategory.LW,
+    InstructionCategory.GR,
+    InstructionCategory.MFMA,
+})
+
+# Categories whose instances participate in the cross-graph data-flow
+# identity set. Excludes the four scheduler-control categories
+# (SWAIT / SBARRIER / SNOP / SSETPRIO) — they're emitted by scheduler
+# choice, not by user-program semantics, and would create spurious
+# identity collisions across captures that picked different wait/nop
+# placement. Used by `build_dataflow_graph` Phase 1 (see the
+# `nodes_by_identity` accumulation below).
+_NO_DATAFLOW_IDENTITY_CATEGORIES = frozenset({
+    InstructionCategory.SWAIT,
+    InstructionCategory.SBARRIER,
+    InstructionCategory.SNOP,
+    InstructionCategory.SSETPRIO,
+})
+
+# Subset of InstructionCategory members whose enum-name doubles as the
+# stable class tag string used in identity tuples (and as a category
+# fallback in `_class_tag_from_category`). The remaining categories
+# (CVT_PACK / MIDDLE_PACK / SMEM / FLAT / VECTOR_STORE) are not used as
+# identity-tuple class tags — CVT/MIDDLE packs come through the "PACK"
+# category-derived tag, and SMEM/FLAT/VECTOR_STORE are finalize() guards
+# that reject the body before it ever reaches identity construction.
+_CLASS_TAG_CATEGORIES = frozenset({
+    InstructionCategory.LR,
+    InstructionCategory.LW,
+    InstructionCategory.GR,
+    InstructionCategory.MFMA,
+    InstructionCategory.SWAIT,
+    InstructionCategory.SBARRIER,
+    InstructionCategory.SNOP,
+    InstructionCategory.SSETPRIO,
+})
+
+
 def _class_tag(inst) -> str:
     """Return the stable class tag
     (LR/LW/GR/MFMA/SWAIT/SBARRIER/SNOP/SSETPRIO) for an instruction.
@@ -586,23 +638,17 @@ def _class_tag(inst) -> str:
     `CaptureUnknownInstructionError`. These tags are excluded from the
     cross-graph data-flow identity set (`build_dataflow_graph` Phase 1)
     just like SWait/SBarrier.
+
+    Collapsed onto the central `InstructionCategory` map per
+    rocm-libraries-009 (re-scoped). Each enum member's `name` IS the tag
+    string; the only thing this helper still does is restrict to the
+    subset of categories that participate in identity tuples and raise
+    `CaptureUnknownInstructionError` for unknown classes (preserving the
+    legacy throw-on-unknown contract).
     """
-    if _is_lr(inst):
-        return "LR"
-    if _is_lw(inst):
-        return "LW"
-    if _is_gr(inst):
-        return "GR"
-    if _is_mfma(inst):
-        return "MFMA"
-    if _is_swait(inst):
-        return "SWAIT"
-    if _is_sbarrier(inst):
-        return "SBARRIER"
-    if _is_snop(inst):
-        return "SNOP"
-    if _is_ssetprio(inst):
-        return "SSETPRIO"
+    cat = _category(inst)
+    if cat in _CLASS_TAG_CATEGORIES:
+        return cat.name
     raise CaptureUnknownInstructionError(
         f"_class_tag: cannot classify instruction class "
         f"{type(inst).__name__!r}."
@@ -794,7 +840,7 @@ def _min_issue_quad_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = Non
     base = p.default_issue_quad_cycles
     if rocisa_inst is None:
         return base
-    if _is_snop(rocisa_inst):
+    if _category(rocisa_inst) is InstructionCategory.SNOP:
         # SNop stores wait_state as the first param of getParams()
         # (matches CMSValidator.py SNop branches: `snop.getParams()[0]`).
         # Tests build real SNop instances too, so this is the only path.
@@ -991,10 +1037,7 @@ def build_dataflow_graph(four_part_capture):
             # per-instruction issue cycles contribute to
             # `cumulative_issue_cycles` walks; cross-body cycle counting
             # depends on it.
-            if not (
-                _is_swait(inst) or _is_sbarrier(inst)
-                or _is_snop(inst) or _is_ssetprio(inst)
-            ):
+            if _category(inst) not in _NO_DATAFLOW_IDENTITY_CATEGORIES:
                 nodes_by_identity[node.identity] = node
 
         # Stash per-body GraphNodes on the LoopBodyCapture for the helpers.
@@ -1436,7 +1479,7 @@ def _is_mfma_pack_producer(producer: GraphNode) -> bool:
     inst = getattr(producer, "rocisa_inst", None)
     if inst is None:
         return False
-    return _is_mfma(inst)
+    return _category(inst) is InstructionCategory.MFMA
 
 
 def _is_mfma_producer(producer: GraphNode) -> bool:
@@ -1479,7 +1522,7 @@ def _is_cvt_pack_producer(producer: GraphNode) -> bool:
     inst = getattr(producer, "rocisa_inst", None)
     if inst is None:
         return False
-    return _is_cvt_pack(inst)
+    return _category(inst) is InstructionCategory.CVT_PACK
 
 
 def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer: GraphNode) -> int:
@@ -1642,7 +1685,7 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
             ti = instructions[i]
             wrapped = getattr(ti, "wrapped", None)
             inst = getattr(wrapped, "rocisa_inst", None) if wrapped is not None else None
-            is_mfma = inst is not None and _is_mfma(inst)
+            is_mfma = inst is not None and _category(inst) is InstructionCategory.MFMA
             if is_mfma:
                 current_issue = max(current_issue, mfma_free_at)
                 current_mfma_class = _mfma_finish_cycles_for(inst, profile)
@@ -1921,7 +1964,7 @@ def _is_alu_producer(producer: GraphNode) -> bool:
         return False
     inst = getattr(producer, "rocisa_inst", None)
     if inst is not None:
-        if _is_lr(inst) or _is_lw(inst) or _is_gr(inst) or _is_mfma(inst):
+        if _category(inst) in _NON_ALU_CATEGORIES:
             return False
         # Real ALU instance regardless of category bucket.
         return True
@@ -3141,7 +3184,7 @@ def validate_middle_pack_pair_interleaving(graph: "DataflowGraph") -> List["Over
         inst = getattr(node, "rocisa_inst", None)
         if inst is None:
             continue
-        if not _is_middle_pack(inst):
+        if _category(inst) is not InstructionCategory.MIDDLE_PACK:
             continue
         # Defensive: only honor nodes whose category looks like a Pack* tag.
         # A MiddlePack rocisa class with a non-Pack category would mean the

@@ -1391,7 +1391,9 @@ class TestMFMAQuadCycleGap:
         feeding a non-MFMA consumer (e.g. another Pack) must STILL hit the
         ALU exemption — only the MFMA-consuming edge carries the timing
         constraint."""
-        from Tensile.Components.ScheduleCapture import _is_cvt_pack
+        from Tensile.Components.InstructionCategory import (
+            InstructionCategory, category as instruction_category,
+        )
         from Tensile.Components.CMSValidator import (
             _is_alu_producer, _is_cvt_pack_producer, _is_mfma_producer,
             _classify_edge_coverage,
@@ -1408,9 +1410,9 @@ class TestMFMAQuadCycleGap:
                 self.rocisa_inst = tagged.wrapped.rocisa_inst
         cvt_node = _StubNode(cvt_tagged)
 
-        # Class-name-set predicate matches the production rocisa class.
-        assert _is_cvt_pack(cvt), (
-            "_is_cvt_pack must return True for VCvtPkF32toBF16 instances."
+        # Central-map dispatch matches the production rocisa class.
+        assert instruction_category(cvt) is InstructionCategory.CVT_PACK, (
+            "VCvtPkF32toBF16 must classify as InstructionCategory.CVT_PACK."
         )
         # Producer-classifier sees Pack* category + CVT-class shape.
         assert _is_cvt_pack_producer(cvt_node), (
@@ -3359,12 +3361,15 @@ class TestDSStoreD16HIB16Coverage:
 
     def test_d16hi_dispatches_through_dsstore_rule(self):
         from Tensile.Components.ScheduleCapture import (
-            WrappedInstruction, _populate_wrapper, _is_lw,
+            WrappedInstruction, _populate_wrapper,
+        )
+        from Tensile.Components.InstructionCategory import (
+            InstructionCategory, category as instruction_category,
         )
         inst = self._build_d16hi()
-        assert _is_lw(inst), (
-            "DSStoreD16HIB16 must be recognized as an LW class so the "
-            "existing _DSStoreRule claims it."
+        assert instruction_category(inst) is InstructionCategory.LW, (
+            "DSStoreD16HIB16 must be classified as InstructionCategory.LW so "
+            "the existing _DSStoreRule claims it."
         )
         wrapper = WrappedInstruction(inst)
         _populate_wrapper(wrapper)
@@ -3437,19 +3442,19 @@ class TestSSetPriorCoverage:
         return SSetPrior(prior=3, comment="raise priority")
 
     def test_ssetprio_recognized_by_helpers(self):
-        from Tensile.Components.ScheduleCapture import (
-            _is_ssetprio, _is_snop, _is_swait, _is_sbarrier,
+        from Tensile.Components.InstructionCategory import (
+            InstructionCategory, category as instruction_category,
         )
         inst = self._build_ssetprio()
-        assert _is_ssetprio(inst), (
-            "SSetPrior must be recognized by `_is_ssetprio` so "
+        assert instruction_category(inst) is InstructionCategory.SSETPRIO, (
+            "SSetPrior must be classified as InstructionCategory.SSETPRIO so "
             "_NoDataflowRule and the build_dataflow_graph identity-set "
             "skip both claim it."
         )
-        # Disjoint from the other scheduling-control predicates.
-        assert not _is_snop(inst)
-        assert not _is_swait(inst)
-        assert not _is_sbarrier(inst)
+        # Disjoint from the other scheduling-control categories.
+        assert instruction_category(inst) is not InstructionCategory.SNOP
+        assert instruction_category(inst) is not InstructionCategory.SWAIT
+        assert instruction_category(inst) is not InstructionCategory.SBARRIER
 
     def test_ssetprio_dispatches_to_no_dataflow_rule(self):
         from Tensile.Components.ScheduleCapture import (
