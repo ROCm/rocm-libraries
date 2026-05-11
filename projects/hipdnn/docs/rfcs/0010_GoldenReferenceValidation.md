@@ -99,8 +99,9 @@ The golden reference infrastructure is already built and working for batchnorm. 
 | TOML override infrastructure | **Kept as-is** | Golden tests connected to existing `[[tolerance_overrides]]` glob matching |
 | Python generation framework | **Kept, enhanced** | Generator scripts auto-derive output paths from graph content |
 | Existing golden data | **Kept, relocated** | 6 batchnorm bundles move to `golden_reference_data/quick/BatchnormFwdInference/...` |
+| (new) `ValidateGoldenBundleBase` | **New** | New file in `test_sdk/`. Base class — owns discovery, loading, tolerance lookup, and comparison |
 | `GoldenReferenceCpu.hpp` | **→ `ValidateGoldenBundleWithRef.hpp`** | New file in `test_sdk/tests/`. Inherits `ValidateGoldenBundleBase`. Overrides execution to run via reference executor (CPU or GPU) |
-| `GoldenReferenceGpu.hpp` | **→ `ValidateGoldenBundleWithPlugin.hpp`** | New file in `miopen-provider/tests/`. Inherits `ValidateGoldenBundleBase`. Overrides execution to run via GPU plugin — handles device buffers, plugin setup/teardown, "unsupported" as SKIP |
+| `GoldenReferenceGpu.hpp` | **→ `ValidateGoldenBundleWithPlugin.hpp`** | New file in `miopen-provider/tests/`. Inherits `ValidateGoldenBundleBase`. Overrides execution to run via GPU plugin — plugin setup/teardown, "unsupported" as SKIP |
 | `TestCpuFpReferenceBatchnorm.cpp` | **Replaced** | Per-operation C++ class eliminated — bundles discovered automatically |
 | `DynamicTolerances.hpp` | **Future** | Not connected in this RFC — future fallback when no fixed tolerance exists |
 
