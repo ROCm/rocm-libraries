@@ -835,7 +835,8 @@ class LogicalScheduler:
             carry_active = next_iter
         else:
             assert False, (f"assign_vgpr_tiles did not converge after "
-                           f"{MAX_UNROLL} unroll iterations")
+                           f"{MAX_UNROLL} unroll iterations\n"
+                           f"{self.print_vgpr()}")
 
         # ── Phase 3: record results ──
         # unroll_factor = number of unique iterations (convergence iteration excluded)
@@ -2502,12 +2503,15 @@ class LogicalScheduler:
         """Print assign_vgpr_tiles output: LRs + MFMAs with vgprTileId annotations."""
         partitions = self._partitions
         buf = io.StringIO()
-        buf.write(f"needsUnrolling: {self.needs_unrolling}, "
-                  f"unrollFactor: {self.unroll_factor}\n")
-        peaks_str = ", ".join(f"{t}: {cnt}" for t, cnt in sorted(self.tile_peaks.items()))
+        needs = getattr(self, 'needs_unrolling', None)
+        factor = getattr(self, 'unroll_factor', 1)
+        peaks = getattr(self, 'tile_peaks', {})
+        buf.write(f"needsUnrolling: {needs}, "
+                  f"unrollFactor: {factor}\n")
+        peaks_str = ", ".join(f"{t}: {cnt}" for t, cnt in sorted(peaks.items()))
         buf.write(f"vgprTiles: {peaks_str}\n")
-        for ui in range(self.unroll_factor):
-            if self.unroll_factor > 1:
+        for ui in range(factor):
+            if factor > 1:
                 buf.write(f"MAINLOOP (unroll {ui}):\n")
             else:
                 buf.write("MAINLOOP:\n")
