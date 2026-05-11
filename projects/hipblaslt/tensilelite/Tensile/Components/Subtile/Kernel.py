@@ -952,13 +952,13 @@ def _selectF8F6F4InstType(kernel):
     return bool(fn()) if callable(fn) else False
 
   # Pure types
-  aIsF8  = _pred(aType, "isAnyFloat8")
-  bIsF8  = _pred(bType, "isAnyFloat8")
+  aIsF8  = _pred(aType, "isFloat8")
+  bIsF8  = _pred(bType, "isFloat8")
   if aIsF8 and bIsF8:
     return InstType.INST_F8
 
-  aIsBF8 = _pred(aType, "isAnyBFloat8")
-  bIsBF8 = _pred(bType, "isAnyBFloat8")
+  aIsBF8 = _pred(aType, "isBFloat8")
+  bIsBF8 = _pred(bType, "isBFloat8")
   if aIsBF8 and bIsBF8:
     return InstType.INST_BF8
 
@@ -975,7 +975,8 @@ def _selectF8F6F4InstType(kernel):
   if aIsBF8 and bIsF8:
     return InstType.INST_F8_BF8 if sourceSwap else InstType.INST_BF8_F8
 
-  return None
+  raise RuntimeError(f"Unsupported data types for MFMA instruction: A = {aType}, B = {bType}\n")
+
 
 ##################################################
 # Subroutine to generate MMA Instruction
