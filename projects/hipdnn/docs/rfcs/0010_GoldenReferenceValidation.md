@@ -70,19 +70,25 @@ Generation produces bundles. Validation loads a bundle, runs the computation, an
 
 ### Existing Infrastructure
 
-The golden reference infrastructure is already built and working for batchnorm. The table below summarizes each existing component. This RFC **keeps** the bundle format, core loader, and Python framework. It **adds** a fully generic test runner (recursive scan, no per-operation C++ code), graph-derived test identity, a golden-first fallback chain, a bundle verifier, data integrity checks, per-engine tolerance overrides, and CI integration. It **replaces** the per-operation `INSTANTIATE_TEST_SUITE_P` discovery with recursive auto-discovery, and **moves** the data location to the integration suite.
+The golden reference infrastructure is already built and working for batchnorm. The table below summarizes each existing component.
 
-| Component | File(s) | Role |
-|-----------|---------|------|
+- **Keeps**: bundle format, core loader, TOML tolerance overrides, Python generation framework
+- **Adds**: generic test runner (one test class for all operations), graph-derived test identity, golden-first fallback chain, bundle verifier, data integrity checks, CI integration
+- **Replaces**: per-operation `INSTANTIATE_TEST_SUITE_P` discovery → recursive auto-discovery
+- **Moves**: golden data from `hipdnn_reference_data/` to `integration-tests/golden_reference_data/`
+- **Connects**: golden tests to the existing TOML tolerance override mechanism
+
+| Component | File(s) | What it does |
+|-----------|---------|--------------|
 | Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | Reads bundles from disk, separates inputs from expected outputs, validates results |
-| Ref runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | Base fixture + `getGoldenReferenceParams(subDir)`. Replaced by `ValidateGoldenBundleWithRef` — validates bundles against the reference executor |
-| Plugin runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern, executes via engine plugin. Replaced by `ValidateGoldenBundleWithPlugin` — validates bundles against the GPU plugin |
-| Test instantiation (current) | [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp) | One class + `INSTANTIATE_TEST_SUITE_P` per operation/layout/datatype — replaced by the generic runner in this RFC |
-| Tolerance defaults | [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/TestTolerances.hpp) | Per-operation compile-time atol/rtol constants (e.g., `getToleranceInference<T>()` for batchnorm) |
-| TOML overrides | [`TestSettings.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/TestSettings.hpp), engine `.toml` files | Per-engine `[[tolerance_overrides]]` with glob matching — lets specific tests relax tolerances without code changes |
-| Dynamic tolerances | [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/DynamicTolerances.hpp) | Higham-style error bounds computed from tensor dimensions and data type — not yet connected to golden tests |
-| Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | Generates bundles: defines graphs, runs PyTorch, writes output files |
-| Golden data | [`hipdnn_reference_data/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm bundles across 4 layout/datatype combinations. Currently flat (no tier folder) — will be moved under `quick/` when the new folder convention is adopted |
+| Ref runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | Test fixture that runs bundles against the reference executor |
+| Plugin runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Test fixture that runs bundles against the GPU plugin |
+| Test instantiation | [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp) | One C++ class per operation — wires bundles to GTest |
+| Tolerance defaults | [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/TestTolerances.hpp) | Per-operation compile-time atol/rtol constants |
+| TOML overrides | [`TestSettings.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/TestSettings.hpp), engine `.toml` files | Per-engine tolerance overrides with glob matching |
+| Dynamic tolerances | [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/DynamicTolerances.hpp) | Higham-style error bounds computed from tensor dimensions — not yet connected to golden tests |
+| Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | Generates bundles using PyTorch as reference source |
+| Golden data | [`hipdnn_reference_data/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm bundles across 4 layout/datatype combinations |
 
 #### What this RFC keeps, modifies, and replaces
 
