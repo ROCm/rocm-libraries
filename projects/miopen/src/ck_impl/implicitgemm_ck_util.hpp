@@ -411,7 +411,8 @@ template <typename DeviceOpType,
           typename CKArgsType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription,
           bool CheckSplitK                = false>
-bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string& kernel_id)
+bool IsCKArgsSupported([[maybe_unused]] const ProblemDescriptionType& problem,
+                       [[maybe_unused]] const std::string& kernel_id)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(!kernel_id.empty())
@@ -669,7 +670,7 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
 }
 
 template <typename DataType, typename OutElemOp>
-OutElemOp GetOutElementOp(const miopen::fusion::ActivationOpInvokeParam& activationOp)
+OutElemOp GetOutElementOp([[maybe_unused]] const miopen::fusion::ActivationOpInvokeParam& activationOp)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto activationMode = activationOp.activMode;
@@ -875,12 +876,12 @@ template <bool ZeroOutputs,
           typename Input1TposeOp,
           typename Input2TposeOp,
           typename OutputTposeOp>
-ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
-                                    const miopen::conv::ProblemDescription& problem,
-                                    const std::string& kernel_id,
-                                    const Input1TposeOp& input1_op,
-                                    const Input2TposeOp& input2_op,
-                                    const OutputTposeOp& output_op)
+ConvSolution InitInvokerFactoryNCHW([[maybe_unused]] const ExecutionContext& ctx,
+                                    [[maybe_unused]] const miopen::conv::ProblemDescription& problem,
+                                    [[maybe_unused]] const std::string& kernel_id,
+                                    [[maybe_unused]] const Input1TposeOp& input1_op,
+                                    [[maybe_unused]] const Input2TposeOp& input2_op,
+                                    [[maybe_unused]] const OutputTposeOp& output_op)
 {
     assert(problem.IsLayoutDefault());
 
@@ -1051,7 +1052,7 @@ template <bool ZeroOutputs,
           typename CastType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
-                                    const ProblemDescriptionType& problem,
+                                    [[maybe_unused]] const ProblemDescriptionType& problem,
                                     const std::string& kernel_id)
 {
     ConvSolution result;
@@ -1271,10 +1272,10 @@ ConvSolution InitInvokerFactoryWrwNCHW(const ExecutionContext& ctx,
 
 template <typename InvokerFactoryMakerNCHW, typename InvokerFactoryMakerNHWC>
 ConvSolution
-MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& problem,
-                                        InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
-                                        InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
-                                        const bool use_tf32 = false)
+MakeSolutionGroupConvImplicitGemmXdlops([[maybe_unused]] const miopen::conv::ProblemDescription& problem,
+                                        [[maybe_unused]] InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
+                                        [[maybe_unused]] InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
+                                        [[maybe_unused]] const bool use_tf32 = false)
 {
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
