@@ -2769,22 +2769,46 @@ class _PositionStr(str):
 # `GraphNode`). New code reads `node.position` directly.
 
 
-def _node_display_idx(node: NodeLike) -> int:
-    """Source-aware "user-facing N" for failure rendering.
+def _node_position_string(node: NodeLike, body_capture: "LoopBodyCapture") -> str:
+    """Source-aware position string for `node`.
 
-    For CMS-side nodes: recover the kernel-writer's `slot.mfma_index` from
-    `tagged_inst.slot` so existing pinning tests that match `@ idx=N` keep
-    seeing the kernel-writer's MFMA-slot id. For nodes without a tagged
-    instruction (SWaitCnt / SBarrier / SNop in the sidecar; ValidatorInstruction
-    on the structural side), fall back to `position.stream_index` — these
-    nodes never carried a meaningful CMS `vmfma_index` either, so the
-    bridge-collapsed sort key is the best we can do without the
-    source-aware label dispatch tracked under rocm-libraries-3dy.
+    Returns the rendered string (e.g. `"@ idx=7"` for CMS,
+    `"@ asm_line=42"` for asm) by routing through the
+    `TaggedInstructionLike.render_position()` Protocol on a
+    body-context-wrapped renderer. `body_capture` MUST be the
+    LoopBodyCapture for the body that emitted `node` (typically resolved
+    by the caller via `subj_graph.body_for(node)`); the same invariant
+    that backs `cms_node_label` guarantees `node.tagged_inst` appears in
+    `body_capture.instructions`, so the per-category index lookup
+    cannot miss.
+
+    Bare `TaggedInstruction` reaching this site is wrapped in a
+    `CmsLabelRenderer` with body-context-derived `name_idx` (mirroring
+    `cms_node_label`); `tagged_inst` instances that already implement
+    the Protocol (the Timeline path, where the bridge wraps via
+    `_name_idx_for(...)`) are used directly. There is no fallback for a
+    missing or non-Protocol `tagged_inst` — both cases are upstream
+    bugs the validator should surface, not handle.
     """
-    ti = getattr(node, "tagged_inst", None)
-    if ti is not None and getattr(ti, "slot", None) is not None:
-        return ti.slot.mfma_index
-    return node.position.stream_index
+    from Tensile.Components.cms_to_timeline import (
+        CmsLabelRenderer,
+        _name_idx_for,
+    )
+    ti = node.tagged_inst
+    if isinstance(ti, CmsLabelRenderer):
+        renderer = ti
+    else:
+        # Plain CMS TaggedInstruction (legacy graph path) — wrap with
+        # body-context-derived name_idx so the Protocol surface works.
+        # name_idx is unused by render_position() (only slot is read),
+        # but the wrapper's invariant requires a valid index, so compute
+        # it for non-MFMA categories (cheap); plain MFMA passes 0.
+        if node.category == "MFMA":
+            name_idx = 0
+        else:
+            name_idx = _name_idx_for(ti, body_capture.instructions)
+        renderer = CmsLabelRenderer(tagged_inst=ti, name_idx=name_idx)
+    return renderer.render_position()
 
 
 @dataclass(frozen=True)
@@ -2911,7 +2935,7 @@ class OrderInvertedFailure(Failure):
 # ----------------------------------------------------------------------------
 # 2. MissingWaitFailure — no SWaitCnt drains the expected counter in the
 #    window between producer and consumer. If other-counter SWaitCnts ARE
-#    in the window, they're surfaced via `nearby_wait_indices` so
+#    in the window, they're surfaced via `nearby_wait_positions` so
 #    the user knows they could extend an existing SWaitCnt rather than
 #    insert a new one. (Bead `hof` collapsed the former
 #    WaitOnWrongCounterFailure into this single type — the user-facing
@@ -2922,19 +2946,29 @@ class MissingWaitFailure(Failure):
     producer: FailureNodeLabel = None
     consumer: FailureNodeLabel = None
     counter_kind: str = ""  # 'dscnt' / 'vlcnt' / 'vscnt'
-    # Pre-extracted vmfma indices of nearby SWaitCnts that drain OTHER counters
-    # (formerly stored as full GraphNode list under
-    # `nearby_other_counter_waits`; reduced to scalars so the Failure carries
-    # no graph back-references).
-    nearby_wait_indices: Tuple[int, ...] = ()
+    # Pre-rendered source-aware position strings for nearby SWaitCnts that
+    # drain OTHER counters. Each string is the output of the SWaitCnt
+    # node's `TaggedInstructionLike.render_position()` (CMS form: "@ idx=7";
+    # asm form: "@ asm_line=42"). Storing the rendered strings (vs. bare
+    # ints) keeps the formatter source-agnostic — the formatter just splices
+    # them into the prose without any per-source format-string branching.
+    nearby_wait_positions: Tuple[str, ...] = ()
 
     def _format_canonical(self) -> str:
         # Optional hint when other-counter SWaitCnts exist in the window:
         # the user could extend one of them rather than insert a new SWaitCnt.
         hint = ""
-        if self.nearby_wait_indices:
-            indices = ", ".join(f"idx={i}" for i in self.nearby_wait_indices)
-            hint = f" (existing SWaitCnts at {indices} drain other counters)"
+        if self.nearby_wait_positions:
+            # Each entry is already a rendered position string like
+            # "@ idx=7" (CMS) or "@ asm_line=42" (asm). Strip the leading
+            # "@ " for the comma-joined inner phrasing, since the
+            # surrounding "existing SWaitCnts at {…} drain other
+            # counters" prose reads more naturally without the "@".
+            stripped = ", ".join(
+                p[2:] if p.startswith("@ ") else p
+                for p in self.nearby_wait_positions
+            )
+            hint = f" (existing SWaitCnts at {stripped} drain other counters)"
         return (
             f"SWaitCnt({self.counter_kind}) missing between producer "
             f"{self.producer.primary} {self.producer.position} and consumer "
@@ -2950,7 +2984,13 @@ class MissingWaitFailure(Failure):
 class WaitInsufficientFailure(Failure):
     producer: FailureNodeLabel = None
     consumer: FailureNodeLabel = None
-    wait_idx: int = 0  # vmfma_index of the failing SWaitCnt
+    # Pre-rendered source-aware position string of the failing SWaitCnt.
+    # CMS form: "@ idx={vmfma_index}"; asm form: "@ asm_line=42". Produced
+    # at Failure-construction time via
+    # `_node_position_string(swait_node, subj_graph.body_for(swait_node))`,
+    # which routes through the source-aware
+    # `TaggedInstructionLike.render_position()` Protocol.
+    wait_position: str = ""
     counter_kind: str = ""  # 'dscnt' / 'vlcnt' / 'vscnt'
     counter_value: int = 0
     queue_depth_at_wait: int = 0
@@ -2967,7 +3007,7 @@ class WaitInsufficientFailure(Failure):
         else:
             bound = f"must be in range [0, {max_acceptable}]"
         return (
-            f"{self.counter_kind} for SWaitCnt @ idx={self.wait_idx} "
+            f"{self.counter_kind} for SWaitCnt {self.wait_position} "
             f"is too high to guarantee producer "
             f"{self.producer.primary} {self.producer.position} for consumer "
             f"{self.consumer.primary} {self.consumer.position}"
@@ -2989,11 +3029,18 @@ class MissingBarrierFailure(Failure):
     # Used by tests to assert which scenario triggered; not rendered in the
     # user-facing message (producer/consumer categories make the direction obvious).
     role: str = "must_start_after"
-    wait_idx: Optional[int] = None  # vmfma_index of the SWaitCnt that drained the producer
+    # Pre-rendered source-aware position string of the SWaitCnt that
+    # drained the producer (None if no covering wait was identified).
+    # CMS form: "@ idx={vmfma_index}"; asm form: "@ asm_line=42". Produced
+    # at Failure-construction time via
+    # `_node_position_string(wait_node, subj_graph.body_for(wait_node))`,
+    # which routes through the source-aware
+    # `TaggedInstructionLike.render_position()` Protocol.
+    wait_position: Optional[str] = None
 
     def _format_canonical(self) -> str:
-        if self.wait_idx is not None:
-            wait_part = f"between SWaitCnt @ idx={self.wait_idx} and consumer"
+        if self.wait_position is not None:
+            wait_part = f"between SWaitCnt {self.wait_position} and consumer"
         else:
             wait_part = "between covering SWaitCnt and consumer"
         return (
@@ -3030,10 +3077,13 @@ class TimingTooCloseFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class InvalidCounterValueFailure(Failure):
-    # Pre-extracted vmfma index of the offending SWaitCnt. Single-instruction
-    # structural failure — no producer/consumer pair, so iter_delta stays at
-    # the base default (0).
-    swait_idx: int = 0
+    # Pre-rendered source-aware position string of the offending SWaitCnt.
+    # Single-instruction structural failure — no producer/consumer pair,
+    # so iter_delta stays at the base default (0). CMS form:
+    # "@ idx={vmfma_index}"; asm form: "@ asm_line=42". Produced at
+    # Failure-construction time via
+    # `_node_position_string(swait_node, subj_graph.body_for(swait_node))`.
+    swait_position: str = ""
     dscnt: int = 0
     vlcnt: int = 0
     vscnt: int = 0
@@ -3044,7 +3094,7 @@ class InvalidCounterValueFailure(Failure):
                if val < -1]
         bad_str = ", ".join(f"{name}={val}" for name, val in bad)
         return (
-            f"SWaitCnt @ idx={self.swait_idx} is invalid: "
+            f"SWaitCnt {self.swait_position} is invalid: "
             f"{bad_str}. All counter fields must be >= -1."
         )
 
@@ -3155,43 +3205,49 @@ def cms_node_label(
 ) -> FailureNodeLabel:
     """Construct a FailureNodeLabel for a CMS-side GraphNode.
 
-    Wording is identical to the old `_node_with_pos`:
-      - primary: 'category[N]' (per-category-stream 0-based index in the
-        node's body capture); plain MFMA omits '[N]'.
-      - position: '@ idx={vmfma_index}'.
+    Wording is identical to the old `_node_with_pos`, but produced via
+    the source-aware `TaggedInstructionLike` Protocol surfaces (rocm-
+    libraries-3dy):
+      - primary  -> `CmsLabelRenderer.render()`           ("category[N]")
+      - position -> `CmsLabelRenderer.render_position()`  ("@ idx={vmfma_index}")
 
     `body_capture` is the LoopBodyCapture for the body that emitted this
     node (resolved by the caller from `node.body_label`, typically via
-    `_body_for_node`). It is required and non-None: every GraphNode is
-    constructed from a body that lives in `graph.captures`, so the lookup
-    cannot miss. The same invariant guarantees `node.tagged_inst` appears
-    in `body_capture.instructions`, so the per-category index lookup also
-    cannot miss; the `same_cat.index` call uses an explicit assertion to
-    surface any future violation rather than silently degrading.
+    `graph.body_for(node)`). It is required and non-None: every GraphNode
+    is constructed from a body that lives in `graph.captures`, so the
+    lookup cannot miss. The same invariant guarantees `node.tagged_inst`
+    appears in `body_capture.instructions`, so the per-category index
+    lookup also cannot miss; the `_name_idx_for` helper asserts the
+    invariant rather than silently degrading.
+
+    For nodes whose `tagged_inst` is the bare CMS `TaggedInstruction`
+    (legacy graph-only path before sub-bead `rocm-libraries-iig` reroutes
+    onto Timeline), wrap on-the-fly in a `CmsLabelRenderer`. For nodes
+    whose `tagged_inst` is already a `CmsLabelRenderer` (Timeline path),
+    use it directly. The Protocol surface is the same in both cases —
+    the wrap step is a one-liner that captures body context.
     """
-    cat = node.category
-    if cat == "MFMA":
-        primary = cat
+    from Tensile.Components.cms_to_timeline import (
+        CmsLabelRenderer,
+        _name_idx_for,
+    )
+    ti = node.tagged_inst
+    if isinstance(ti, CmsLabelRenderer):
+        renderer = ti
     else:
-        same_cat = [
-            t for t in body_capture.instructions
-            if getattr(t, "category", None) == cat
-        ]
-        # node.tagged_inst is guaranteed to be in body_capture.instructions
-        # (the node was constructed from this body in build_dataflow_graph),
-        # so it must appear in same_cat. Any miss indicates a capture-
-        # pipeline bug — surface it loudly rather than degrade the label.
-        assert node.tagged_inst in same_cat, (
-            f"cms_node_label: node.tagged_inst not found in body_capture "
-            f"instructions for category {cat!r} (body_label={node.body_label!r}). "
-            f"Every GraphNode must be constructed from the body it indexes."
-        )
-        idx = same_cat.index(node.tagged_inst)
-        primary = f"{cat}[{idx}]"
+        # Plain CMS TaggedInstruction (legacy graph path) — wrap with
+        # body-context-derived name_idx so the Protocol surfaces work.
+        # Plain MFMA: name_idx is unused by `render()`, but the wrapper's
+        # invariant requires a valid index, so compute it anyway (cheap).
+        if node.category == "MFMA":
+            name_idx = 0  # Unused by render() for plain MFMA.
+        else:
+            name_idx = _name_idx_for(ti, body_capture.instructions)
+        renderer = CmsLabelRenderer(tagged_inst=ti, name_idx=name_idx)
     return FailureNodeLabel(
-        primary=primary,
-        position=_PositionStr(f"@ idx={_node_display_idx(node)}"),
-        category=cat,
+        primary=renderer.render(),
+        position=_PositionStr(renderer.render_position()),
+        category=node.category,
         body_label=node.body_label,
     )
 
@@ -3500,17 +3556,20 @@ def diagnose_missing_edge(
 
     if not waits:
         # No SWait on the expected counter at all in the window. If other-
-        # counter SWaits exist, surface their vmfma indices via
-        # `nearby_wait_indices` so the user can extend one of them rather
-        # than insert a new SWaitCnt; the underlying fix is the same either
-        # way.
-        nearby_indices = tuple(_node_display_idx(w) for w in waits_other)
+        # counter SWaits exist, surface their pre-rendered position strings
+        # via `nearby_wait_positions` so the user can extend one of them
+        # rather than insert a new SWaitCnt; the underlying fix is the
+        # same either way. Each entry is produced via the source-aware
+        # `TaggedInstructionLike.render_position()` Protocol.
+        nearby_positions = tuple(
+            _node_position_string(w, subj_graph.body_for(w)) for w in waits_other
+        )
         failures.append(MissingWaitFailure(
             producer=p_label,
             consumer=c_label,
             iter_delta=iter_delta,
             counter_kind=expected_counter,
-            nearby_wait_indices=nearby_indices,
+            nearby_wait_positions=nearby_positions,
         ))
         wait_failure_emitted = True
     else:
@@ -3526,7 +3585,8 @@ def diagnose_missing_edge(
                     producer=p_label,
                     consumer=c_label,
                     iter_delta=iter_delta,
-                    wait_idx=_node_display_idx(insufficient),
+                    wait_position=_node_position_string(
+                        insufficient, subj_graph.body_for(insufficient)),
                     counter_kind=expected_counter,
                     counter_value=cv if cv is not None else 0,
                     queue_depth_at_wait=depth,
@@ -3565,7 +3625,8 @@ def diagnose_missing_edge(
                     consumer=c_label,
                     iter_delta=iter_delta,
                     role=role,
-                    wait_idx=_node_display_idx(last_drain),
+                    wait_position=_node_position_string(
+                        last_drain, subj_graph.body_for(last_drain)),
                 ))
 
     if not failures:
@@ -3727,12 +3788,14 @@ def _classify_edge_coverage(
 
     if not waits:
         # See note in _classify_edge_coverage's MissingWaitFailure emit.
-        nearby_indices = tuple(_node_display_idx(w) for w in waits_other)
+        nearby_positions = tuple(
+            _node_position_string(w, subj_graph.body_for(w)) for w in waits_other
+        )
         failures.append(MissingWaitFailure(
             producer=p_label, consumer=c_label,
             iter_delta=iter_delta,
             counter_kind=expected_counter,
-            nearby_wait_indices=nearby_indices,
+            nearby_wait_positions=nearby_positions,
         ))
         wait_failure_emitted = True
     else:
@@ -3745,7 +3808,8 @@ def _classify_edge_coverage(
                 failures.append(WaitInsufficientFailure(
                     producer=p_label, consumer=c_label,
                     iter_delta=iter_delta,
-                    wait_idx=_node_display_idx(insufficient),
+                    wait_position=_node_position_string(
+                        insufficient, subj_graph.body_for(insufficient)),
                     counter_kind=expected_counter,
                     counter_value=cv if cv is not None else 0,
                     queue_depth_at_wait=depth,
@@ -3775,7 +3839,8 @@ def _classify_edge_coverage(
                     producer=p_label, consumer=c_label,
                     iter_delta=iter_delta,
                     role=role,
-                    wait_idx=_node_display_idx(last_drain),
+                    wait_position=_node_position_string(
+                        last_drain, subj_graph.body_for(last_drain)),
                 ))
 
     # No fall-through case here: every reachable end-state of this

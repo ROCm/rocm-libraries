@@ -184,12 +184,19 @@ def _assert_event_matches_tagged(event: TimelineEvent,
                                  ti: TaggedInstruction,
                                  body_label: str,
                                  stream_index: int) -> None:
+    from Tensile.Components.cms_to_timeline import CmsLabelRenderer
     assert isinstance(event, TimelineEvent)
     # Identity preservation — the validator currently reaches the rocisa
     # instance via `node.tagged_inst.wrapped.rocisa_inst`; the bridge
     # promises the timeline's `event.rocisa_inst` IS that same instance.
     assert event.rocisa_inst is ti.wrapped.rocisa_inst
-    assert event.tagged_inst is ti
+    # Post-3dy: the bridge wraps the original CMS TaggedInstruction in a
+    # CmsLabelRenderer that satisfies `TaggedInstructionLike` with the
+    # body-context-derived `[N]` rendering. The original is preserved as
+    # the wrapper's `tagged_inst` field (so downstream consumers can still
+    # reach `wrapped.rocisa_inst`/`slot`/etc. through it).
+    assert isinstance(event.tagged_inst, CmsLabelRenderer)
+    assert event.tagged_inst.tagged_inst is ti
 
     # Operand tuples — must be tuples (not lists) per Timeline contract.
     assert isinstance(event.reads, tuple)
@@ -211,12 +218,21 @@ def _assert_event_matches_tagged(event: TimelineEvent,
     assert event.position.loop_index == BODY_LABEL_TO_LOOP_INDEX[body_label]
     assert event.position.stream_index == stream_index
 
-    # The TaggedInstruction now satisfies the TaggedInstructionLike Protocol
-    # via its `render()` method (added on the CMS side as part of this bead).
+    # CmsLabelRenderer satisfies the TaggedInstructionLike Protocol with
+    # both rendering surfaces. `render()` returns `category[N]` (or bare
+    # `MFMA` for plain MFMA); `render_position()` returns
+    # `@ idx={vmfma_index}`.
     assert hasattr(event.tagged_inst, "render")
+    assert hasattr(event.tagged_inst, "render_position")
     rendered = event.tagged_inst.render()
     assert isinstance(rendered, str)
-    assert rendered == ti.category
+    if ti.category == "MFMA":
+        assert rendered == "MFMA"
+    else:
+        assert rendered == f"{ti.category}[{event.tagged_inst.name_idx}]"
+    rendered_pos = event.tagged_inst.render_position()
+    assert isinstance(rendered_pos, str)
+    assert rendered_pos == f"@ idx={ti.slot.mfma_index}"
 
 
 # =============================================================================

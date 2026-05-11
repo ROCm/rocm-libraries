@@ -269,7 +269,7 @@ class TestPerFailureDiagnosis:
         assert miss, f"Expected MissingWaitFailure, got: {[type(f).__name__ for f in failures]}"
         wf = miss[0]
         assert wf.counter_kind == "dscnt"
-        assert len(wf.nearby_wait_indices) >= 1
+        assert len(wf.nearby_wait_positions) >= 1
 
     def test_wait_insufficient_diagnosis(self):
         """Schedule has 5 LRs in flight + SWait(dscnt=2) which only drains

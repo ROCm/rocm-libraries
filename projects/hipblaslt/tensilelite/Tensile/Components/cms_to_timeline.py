@@ -44,6 +44,7 @@ Discipline (from the parent bead):
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Dict, List
 
 from Tensile.Components.ScheduleCapture import (
@@ -62,6 +63,84 @@ from Tensile.Components.Timeline import (
     TimelineBody,
     TimelineEvent,
 )
+
+
+# =============================================================================
+# CmsLabelRenderer — CMS-side `TaggedInstructionLike` implementation
+# =============================================================================
+# Wraps a CMS `TaggedInstruction` plus the body-context-derived per-category
+# stream index N so `render()` can return `category[N]` without needing to
+# re-scan the body at render time. Body context is captured exactly once at
+# wrap time (either by the bridge here, or by `cms_node_label` on the
+# legacy graph-only path) and frozen onto the wrapper.
+#
+# The wrapper holds a reference to the original `TaggedInstruction` so
+# downstream consumers that need the raw underlying state (e.g.
+# `wrapped.rocisa_inst`, `slot`) can still reach it via `tagged_inst`.
+@dataclass(frozen=True)
+class CmsLabelRenderer:
+    """CMS-side renderer satisfying `TaggedInstructionLike`.
+
+    Holds a reference to the underlying `TaggedInstruction` plus the
+    pre-computed per-category-stream index `name_idx` (the `[N]` in
+    `LRA0[N]`). Both rendering surfaces are pure reads off these fields
+    plus `tagged_inst.slot.mfma_index`.
+
+    Constructed at exactly two sites:
+      * `cms_capture_to_timeline._body_to_timeline_body` — for events
+        emitted into a `TimelineBody` (the new path).
+      * `CMSValidator.cms_node_label` — for `FailureNodeLabel` construction
+        on the legacy `(GraphNode, LoopBodyCapture)` path until that path
+        is rerouted onto Timeline by sub-bead `rocm-libraries-iig`.
+    Both sites compute `name_idx` by scanning the body's instructions for
+    same-category entries and finding this `tagged_inst`'s position.
+
+    `render()` returns:
+      * `category[name_idx]` for any non-MFMA category.
+      * Bare `category` (no `[N]`) for plain MFMA — preserves the existing
+        CMS rendering convention (vmfma_index is the canonical identity for
+        plain MFMA, so `[N]` is redundant).
+
+    `render_position()` returns `@ idx={tagged_inst.slot.mfma_index}` —
+    the kernel-writer's MFMA-slot id (NOT the bridge-collapsed
+    `position.stream_index`). This preserves byte-identical output of every
+    existing CMS pinning test.
+    """
+    tagged_inst: TaggedInstruction
+    name_idx: int
+
+    def render(self) -> str:
+        cat = self.tagged_inst.category
+        if cat == "MFMA":
+            return cat
+        return f"{cat}[{self.name_idx}]"
+
+    def render_position(self) -> str:
+        slot = self.tagged_inst.slot
+        return f"@ idx={slot.mfma_index}"
+
+
+def _name_idx_for(
+    tagged_inst: TaggedInstruction,
+    body_instructions: list,
+) -> int:
+    """Per-category-stream index of `tagged_inst` within `body_instructions`.
+
+    The `[N]` in `LRA0[N]`: count of same-category TaggedInstructions
+    appearing earlier in the body, returned as the 0-based index.
+
+    `tagged_inst` is required to appear in `body_instructions`; an absence
+    would indicate a capture-pipeline bug and is asserted (matches the
+    existing `cms_node_label` invariant — every GraphNode is constructed
+    from the body it indexes).
+    """
+    cat = tagged_inst.category
+    same_cat = [t for t in body_instructions if getattr(t, "category", None) == cat]
+    assert tagged_inst in same_cat, (
+        f"_name_idx_for: tagged_inst not found in body for category {cat!r}. "
+        f"Every event/node must originate from the body it indexes."
+    )
+    return same_cat.index(tagged_inst)
 
 
 # Canonical body build order, matching CMSValidator._BODY_BUILD_ORDER. Kept
@@ -94,6 +173,12 @@ def _body_to_timeline_body(
     for tagged_inst in loop_body.instructions:
         wrapped = tagged_inst.wrapped
         stream_index = stream_index_by_id[id(tagged_inst)]
+        # Wrap in CmsLabelRenderer so the event's `tagged_inst` field
+        # satisfies `TaggedInstructionLike` with body-context-derived
+        # `[N]` rendering. The renderer holds a back-reference to the
+        # original TaggedInstruction so downstream consumers can still
+        # reach `wrapped.rocisa_inst`/`slot`/etc. through it.
+        name_idx = _name_idx_for(tagged_inst, loop_body.instructions)
         events.append(TimelineEvent(
             rocisa_inst=wrapped.rocisa_inst,
             reads=tuple(wrapped.reads),
@@ -103,7 +188,7 @@ def _body_to_timeline_body(
             category=tagged_inst.category,
             position=make_position(body_label, stream_index),
             body_label=body_label,
-            tagged_inst=tagged_inst,
+            tagged_inst=CmsLabelRenderer(tagged_inst=tagged_inst, name_idx=name_idx),
         ))
     return TimelineBody(
         events=events,
@@ -167,4 +252,4 @@ def cms_capture_to_timeline(capture: FourPartCapture) -> Timeline:
     )
 
 
-__all__ = ["cms_capture_to_timeline"]
+__all__ = ["cms_capture_to_timeline", "CmsLabelRenderer", "_name_idx_for"]

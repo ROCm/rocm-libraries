@@ -175,13 +175,18 @@ def test_missing_wait_failure_format_cross_iteration():
 def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
     """When the window contains a wrong-counter SWaitCnt (former
     WaitOnWrongCounterFailure case), MissingWaitFailure surfaces it via
-    nearby_wait_indices (a tuple of vmfma indices) + appends a hint to the
-    message."""
+    nearby_wait_positions (a tuple of pre-rendered source-aware position
+    strings, e.g. CMS form `"@ idx=7"`) + appends a hint to the message.
+
+    Post-3dy: positions are rendered via the source-aware
+    `TaggedInstructionLike.render_position()` Protocol at Failure-
+    construction time; the formatter strips the leading "@ " for the
+    inner comma-joined phrasing."""
     failure = MissingWaitFailure(
         producer=_cms_label("LRA0", 5, name_idx=0),
         consumer=_cms_label("MFMA", 10),
         counter_kind="dscnt",
-        nearby_wait_indices=(7,),
+        nearby_wait_positions=("@ idx=7",),
     )
     msg = failure.format()
     assert msg == (
@@ -200,7 +205,7 @@ def test_wait_insufficient_failure_format_dscnt_range():
     failure = WaitInsufficientFailure(
         producer=_cms_label("LRA0", 5, name_idx=1),
         consumer=_cms_label("MFMA", 10),
-        wait_idx=7,
+        wait_position="@ idx=7",
         counter_kind="dscnt", counter_value=4,
         queue_depth_at_wait=5, producer_position=2,
     )
@@ -219,7 +224,7 @@ def test_wait_insufficient_failure_format_vlcnt_range():
     failure = WaitInsufficientFailure(
         producer=_cms_label("GRA", 3, name_idx=0),
         consumer=_cms_label("LRA1", 8, name_idx=0),
-        wait_idx=6,
+        wait_position="@ idx=6",
         counter_kind="vlcnt", counter_value=3,
         queue_depth_at_wait=4, producer_position=1,
     )
@@ -238,7 +243,7 @@ def test_wait_insufficient_failure_format_must_be_zero():
     failure = WaitInsufficientFailure(
         producer=_cms_label("LRA0", 5, name_idx=0),
         consumer=_cms_label("MFMA", 10),
-        wait_idx=7,
+        wait_position="@ idx=7",
         counter_kind="dscnt", counter_value=2,
         queue_depth_at_wait=5, producer_position=4,
     )
@@ -258,7 +263,7 @@ def test_wait_insufficient_failure_format_cross_iteration():
         producer=_cms_label("LRA0", 5, name_idx=0),
         consumer=_cms_label("MFMA", 10),
         iter_delta=1,
-        wait_idx=7,
+        wait_position="@ idx=7",
         counter_kind="dscnt", counter_value=4,
         queue_depth_at_wait=5, producer_position=2,
     )
@@ -272,7 +277,7 @@ def test_missing_barrier_failure_must_start_after_format():
     failure = MissingBarrierFailure(
         producer=_cms_label("LRA0", 8, name_idx=0),
         consumer=_cms_label("GRA", 12, name_idx=0),
-        wait_idx=10,
+        wait_position="@ idx=10",
     )
     msg = failure.format()
     assert msg == (
@@ -288,7 +293,7 @@ def test_missing_barrier_failure_needed_by_format():
     failure = MissingBarrierFailure(
         producer=_cms_label("GRA", 8, name_idx=0),
         consumer=_cms_label("LRA1", 22, name_idx=0),
-        wait_idx=18,
+        wait_position="@ idx=18",
     )
     msg = failure.format()
     assert msg == (
@@ -303,7 +308,7 @@ def test_missing_barrier_failure_format_with_capture_brackets():
     failure = MissingBarrierFailure(
         producer=_cms_label("LRA0", 8, name_idx=0),
         consumer=_cms_label("GRA", 12, name_idx=1),
-        wait_idx=10,
+        wait_position="@ idx=10",
     )
     msg = failure.format()
     assert "consumer GRA[1] @ idx=12" in msg
@@ -316,7 +321,7 @@ def test_missing_barrier_failure_format_cross_iteration():
         producer=_cms_label("LRA0", 8, name_idx=0),
         consumer=_cms_label("GRA", 2, name_idx=0),
         iter_delta=1,
-        wait_idx=0,
+        wait_position="@ idx=0",
     )
     msg = failure.format()
     assert "consumer GRA[0] @ idx=2 (of next iteration)" in msg
@@ -371,7 +376,7 @@ def test_invalid_counter_value_failure_format_single_bad():
     """Only the field below -1 appears in the message; valid fields (>= -1)
     are omitted so the user sees just what's wrong."""
     failure = InvalidCounterValueFailure(
-        swait_idx=4, dscnt=-2, vlcnt=0, vscnt=-1
+        swait_position="@ idx=4", dscnt=-2, vlcnt=0, vscnt=-1
     )
     msg = failure.format()
     assert msg == (
@@ -383,7 +388,7 @@ def test_invalid_counter_value_failure_format_single_bad():
 def test_invalid_counter_value_failure_format_multiple_bad():
     """Two fields below -1 -> both listed, comma-separated."""
     failure = InvalidCounterValueFailure(
-        swait_idx=7, dscnt=-2, vlcnt=-1, vscnt=-3
+        swait_position="@ idx=7", dscnt=-2, vlcnt=-1, vscnt=-3
     )
     msg = failure.format()
     assert msg == (

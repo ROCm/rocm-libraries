@@ -236,7 +236,7 @@ class TestGRBeforeLR1_MissingWait(GraphNativeValidationTest):
         assert f.consumer.category == "LRA1"
         # The wrong-counter SWait (dscnt drain at slot=2) is surfaced
         # as a nearby SWait the user could extend.
-        assert len(f.nearby_wait_indices) >= 1
+        assert len(f.nearby_wait_positions) >= 1
 
     def test_grs_no_swait_at_all(self):
         """No SWait of ANY kind in the window — diagnose_missing_edge

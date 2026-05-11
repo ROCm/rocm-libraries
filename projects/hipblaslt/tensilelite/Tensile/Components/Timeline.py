@@ -86,18 +86,54 @@ from Tensile.Components.ScheduleCapture import SchedulePosition
 class TaggedInstructionLike(Protocol):
     """Source-agnostic carrier for the per-event source-aware label.
 
-    Both `Tensile.Components.ScheduleCapture.TaggedInstruction` (CMS source)
-    and the future asm-side wrapper satisfy this Protocol structurally.
+    Both `Tensile.Components.ScheduleCapture.TaggedInstruction` (CMS source,
+    via `Tensile.Components.cms_to_timeline.CmsLabelRenderer` wrapper that
+    captures body context) and the asm-side wrapper
+    (`Tensile.Components.asm_to_timeline_renderers.AsmLabelRenderer`)
+    satisfy this Protocol structurally.
+
+    `render()` and `render_position()` are the two and only two surfaces the
+    failure-rendering pipeline calls on the carrier. They return strings;
+    the formatter is pure string composition over those returned strings
+    plus per-Failure scalar fields. By construction the formatter has no
+    knowledge of which source emitted the timeline — a CMS-source carrier
+    and an asm-source carrier produce the same `(primary, position)` pair
+    shape via different rendering bodies.
+
+    Why both surfaces live on the same carrier (vs. a separate
+    `PositionRenderer` object): both rendering surfaces are functions of
+    source-side state that the carrier already owns (CMS slot.mfma_index;
+    asm-stream line number). Splitting them across two objects forces the
+    caller to thread parallel objects per event and re-establish their
+    pairing — pure overhead with no decoupling benefit, since neither
+    renderer makes sense in isolation from the other.
     """
 
     def render(self) -> str:
         """Render the underlying instruction for a failure label.
 
-        CMS source: implemented in `rocm-libraries-3dy`. Returns the
-        `LRA0[3]`-style per-category-stream label.
+        CMS source: returns `category[N]` where N is the per-category-stream
+        index in the body that emitted this event (e.g. `LRA0[3]`). Plain
+        `MFMA` omits the `[N]` suffix.
 
-        Asm source: returns the rocisa render string (e.g.
-        `ds_load_b128 v[0:3], v255 offset:0`).
+        Asm source: returns `mnemonic + operands`, the rocisa-canonical
+        render string (e.g. `ds_load_b128 v[0:3], v255 offset:0`).
+        """
+        ...
+
+    def render_position(self) -> str:
+        """Render the source-native position string for this event.
+
+        CMS source: returns `@ idx={vmfma_index}` where vmfma_index is the
+        kernel-writer's MFMA-slot id (recovered from
+        `tagged_inst.slot.mfma_index`). Existing CMS pinning tests pin this
+        wording byte-identically.
+
+        Asm source: returns `@ asm_line={line_number}` (or whichever
+        asm-native location the asm bridge supplies). Asm has no MFMA-slot
+        concept; faking `@ idx=N` for asm would lie in failure messages,
+        so the asm carrier returns its native position shape and the
+        formatter inserts whatever the carrier produced.
         """
         ...
 
