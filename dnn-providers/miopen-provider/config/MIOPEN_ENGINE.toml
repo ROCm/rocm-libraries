@@ -44,6 +44,7 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
 # 1913. Scoped to gfx11 (RDNA3/3.5 family) since that's where it was observed;
 # expand the arch list if/when failures are seen elsewhere.
 [[test_skips]]
+platforms = ["windows"]
 archs   = ["gfx11"]
 filters = ["Full/*BatchnormBackwardCalcStats3d*.Correctness/0"]
 reason  = "DSCALE ~1% low vs CPU reference on [1,16,8,112,112] (Full tier only) — see epic 1913 follow-up ticket"
