@@ -4,9 +4,9 @@
 
 .. _installation:
 
-*********************************
-Installing and building rocWMMA
-*********************************
+*************************************
+Build and install rocWMMA from source
+*************************************
 
 This topic provides instructions for installing and configuring the rocWMMA library.
 The quickest way to install rocWMMA is to use the prebuilt packages that are released with ROCm.
