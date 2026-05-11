@@ -166,10 +166,11 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
             return;
         }
     }
-    else
+
+    // Unpadded path: c_per_group == GROUP_SIZE && k_per_group == GROUP_SIZE.
+    // Reached when Padded=false, or when Padded=true but no padding is needed.
+    // Use efficient async_load_tile (buffer_load_lds) with the flat 2D descriptor.
     {
-        // Unpadded path: c_per_group == GROUP_SIZE && k_per_group == GROUP_SIZE.
-        // Use efficient async_load_tile (buffer_load_lds) with the flat 2D descriptor.
         auto weight_dram_buf = ck_tile::make_buffer_view<ck_tile::address_space_enum::global>(
             wei + static_cast<size_t>(bc.block_k) * cfg.kh * cfg.kw * TC::GROUP_SIZE,
             static_cast<ck_tile::index_t>(weight_dram_desc.get_element_space_size()));

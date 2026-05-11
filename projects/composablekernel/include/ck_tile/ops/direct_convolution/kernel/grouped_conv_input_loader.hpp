@@ -210,6 +210,9 @@ struct InputLoader
             else
             {
                 init_unpadded();
+                // Initialize c_per_group_ so runtime checks in fetch_tile_to_lds
+                // and prefetch_tile_to_lds correctly take the unpadded path.
+                padded_state_.c_per_group_ = TC::GROUP_SIZE;
             }
         }
         else

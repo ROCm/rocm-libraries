@@ -80,6 +80,7 @@ __global__ void test_input_load_kernel(const _Float16* __restrict__ in,
     // Construct InputLoader and prefetch first row (row 0) into LDS buffer 0.
     ck_tile::direct_conv::InputLoader<TC, cfg, ck_tile::fp16x4_t, Padding> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
     il.prefetch_tile_to_lds(0);
+    ck_tile::direct_conv::wait_vmcnt<0>();
 
     __syncthreads();
 
@@ -313,6 +314,7 @@ __global__ void test_input_load_kernel_16c(const _Float16* __restrict__ in,
 
     ck_tile::direct_conv::InputLoader<TC, cfg, ck_tile::fp16x4_t, Padding> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
     il.prefetch_tile_to_lds(0);
+    ck_tile::direct_conv::wait_vmcnt<0>();
     __syncthreads();
 
     const _Float16* lds_fp16 = reinterpret_cast<const _Float16*>(lds_buf);
@@ -483,6 +485,7 @@ __global__ void test_input_load_kernel_8c(const _Float16* __restrict__ in,
 
     ck_tile::direct_conv::InputLoader<TC, cfg, ck_tile::fp16x4_t, Padding> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
     il.prefetch_tile_to_lds(0);
+    ck_tile::direct_conv::wait_vmcnt<0>();
     __syncthreads();
 
     const _Float16* lds_fp16 = reinterpret_cast<const _Float16*>(lds_buf);
