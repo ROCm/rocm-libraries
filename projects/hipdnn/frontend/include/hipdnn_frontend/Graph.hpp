@@ -2866,8 +2866,9 @@ public:
      *
      * @note If `dx` dimensions are not provided, the channel count is
      *       inferred assuming `groups = 1`. For grouped convolutions,
-     *       set `dx` dimensions explicitly to avoid an incorrect
-     *       channel count on the inferred input-gradient tensor.
+     *       set dimensions on the returned `dx` tensor before graph
+     *       validation/finalization to avoid an incorrect channel count
+     *       on the inferred input-gradient tensor.
      *
      * @see hipdnn_frontend::graph::ConvDgradAttributes
      */
@@ -2923,8 +2924,9 @@ public:
      *
      * @note If `dw` dimensions are not provided, the channel count is
      *       inferred assuming `groups = 1`. For grouped convolutions,
-     *       set `dw` dimensions explicitly to avoid an incorrect
-     *       channel count on the inferred weight tensor.
+     *       set dimensions on the returned `dw` tensor before graph
+     *       validation/finalization to avoid an incorrect channel count
+     *       on the inferred weight tensor.
      *
      * @see hipdnn_frontend::graph::ConvWgradAttributes
      */
