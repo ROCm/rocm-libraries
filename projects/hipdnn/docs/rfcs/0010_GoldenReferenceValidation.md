@@ -84,9 +84,9 @@ The golden reference infrastructure is already built and working for batchnorm. 
 | Ref runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | Test fixture that runs bundles against the reference executor |
 | Plugin runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Test fixture that runs bundles against the GPU plugin |
 | Test instantiation | [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp) | One C++ class per operation — wires bundles to GTest |
-| Tolerance defaults | [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/TestTolerances.hpp) | Per-operation compile-time atol/rtol constants |
-| TOML overrides | [`TestSettings.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/TestSettings.hpp), engine `.toml` files | Per-engine tolerance overrides with glob matching |
-| Dynamic tolerances | [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/test/DynamicTolerances.hpp) | Higham-style error bounds computed from tensor dimensions — not yet connected to golden tests |
+| Tolerance defaults | [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) | Per-operation compile-time atol/rtol constants |
+| TOML overrides | [`TestSettings.hpp`](../../../../dnn-providers/integration-tests/src/harness/TestSettings.hpp), engine `.toml` files | Per-engine tolerance overrides with glob matching |
+| Dynamic tolerances | [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) | Higham-style error bounds computed from tensor dimensions — not yet connected to golden tests |
 | Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | Generates bundles using PyTorch as reference source |
 | Golden data | [`hipdnn_reference_data/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm bundles across 4 layout/datatype combinations |
 
@@ -99,8 +99,8 @@ The golden reference infrastructure is already built and working for batchnorm. 
 | TOML override infrastructure | **Kept as-is** | Golden tests connected to existing `[[tolerance_overrides]]` glob matching |
 | Python generation framework | **Kept, enhanced** | Generator scripts auto-derive output paths from graph content |
 | Existing golden data | **Kept, relocated** | 6 batchnorm bundles move to `golden_reference_data/quick/BatchnormFwdInference/...` |
-| `GoldenReferenceCpu.hpp` | **→ `ValidateGoldenBundleWithRef`** | Inherits `ValidateGoldenBundleBase`. Recursive discovery, tolerance looked up by operation type |
-| `GoldenReferenceGpu.hpp` | **→ `ValidateGoldenBundleWithPlugin`** | Inherits `ValidateGoldenBundleBase`. Plugin setup/teardown, device buffers, "unsupported" as SKIP |
+| `GoldenReferenceCpu.hpp` | **→ `ValidateGoldenBundleWithRef.hpp`** | New file in `test_sdk/tests/`. Inherits `ValidateGoldenBundleBase`. Recursive discovery, tolerance looked up by operation type |
+| `GoldenReferenceGpu.hpp` | **→ `ValidateGoldenBundleWithPlugin.hpp`** | New file in `miopen-provider/tests/`. Inherits `ValidateGoldenBundleBase`. Plugin setup/teardown, device buffers, "unsupported" as SKIP |
 | `TestCpuFpReferenceBatchnorm.cpp` | **Replaced** | Per-operation C++ class eliminated — bundles discovered automatically |
 | `DynamicTolerances.hpp` | **Future** | Not connected in this RFC — future fallback when no fixed tolerance exists |
 
@@ -357,7 +357,7 @@ These compose into a two-level priority chain:
 
 If a TOML override matches, it wins. Otherwise the per-operation default applies. This chain is permanent — it does not change as the system evolves.
 
-The TOML mechanism already exists. Each engine's config (e.g., [`MIOPEN_ENGINE.toml`](../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. The integration harness queries these via `TestConfig::findToleranceOverride(testName)`.
+The TOML mechanism already exists. Each engine's config (e.g., [`MIOPEN_ENGINE.toml`](../../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. The integration harness queries these via `TestConfig::findToleranceOverride(testName)`.
 
 #### How the per-operation default evolves
 
@@ -424,7 +424,7 @@ In the source tree, golden data lives with the integration test suite at `dnn-pr
 
 ### Tier folders
 
-The top-level folder determines the tier. The runner scans each tier directory separately (see [Generic Test Runner](#test-discovery)), mapping to the standard [tier cascade](../../../dnn-providers/integration-tests/README.md#test-tiers):
+The top-level folder determines the tier. The runner scans each tier directory separately (see [Generic Test Runner](#test-discovery)), mapping to the standard [tier cascade](../../../../dnn-providers/integration-tests/README.md#test-tiers):
 
 | Folder | GTest prefix | `ctest -L` |
 |--------|-------------|------------|
@@ -558,7 +558,7 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 ### CI Integration
 
-Tiers are determined by the top-level folder (see [Folder Convention](#folder-convention)), following the same [tier cascade](../../../dnn-providers/integration-tests/README.md#how-tiers-cascade) as all other integration tests.
+Tiers are determined by the top-level folder (see [Folder Convention](#folder-convention)), following the same [tier cascade](../../../../dnn-providers/integration-tests/README.md#how-tiers-cascade) as all other integration tests.
 
 | CI Stage | ctest Command | Verification Mode | Notes |
 |----------|--------------|-------------------|-------|
