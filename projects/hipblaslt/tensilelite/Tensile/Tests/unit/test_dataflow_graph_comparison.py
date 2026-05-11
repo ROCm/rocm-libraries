@@ -172,6 +172,15 @@ class TestCleanComparison:
 
         @dataclass
         class _LccInst:
+            # `_populate_wrapper` reads `reads_scc` / `writes_scc` off
+            # every wrapped instruction (the rocisa Instruction
+            # contract). LCC is `s_add_u32` which writes SCC in
+            # hardware, but this stand-in only exercises identity-set
+            # comparison (no dataflow edges), so flagging both False
+            # keeps it dataflow-inert.
+            reads_scc: bool = False
+            writes_scc: bool = False
+
             def __str__(self):
                 return "s_add_u32 s[sgprLoopCounterL], s[sgprLoopCounterL], 1"
 

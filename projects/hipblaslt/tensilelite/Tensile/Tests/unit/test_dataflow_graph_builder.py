@@ -533,7 +533,9 @@ class TestStructuralProperties:
 
         @dataclass
         class _UnknownInst:
-            pass
+            # rocisa Instruction contract surface; see _populate_wrapper.
+            reads_scc: bool = False
+            writes_scc: bool = False
 
         from Tensile.Components.ScheduleCapture import (
             TaggedInstruction, WrappedInstruction, SlotKey, SLOT_KIND_MFMA,
@@ -560,6 +562,10 @@ class TestStructuralProperties:
 
         @dataclass
         class _PackInst:
+            # rocisa Instruction contract surface; see _populate_wrapper.
+            reads_scc: bool = False
+            writes_scc: bool = False
+
             def __str__(self):
                 return "v_perm_b32 v[0:0], v[1:1], v[2:2], s[3:3]"
 

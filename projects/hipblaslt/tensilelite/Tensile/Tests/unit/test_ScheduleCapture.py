@@ -116,6 +116,22 @@ class TestSlotKey:
 # LoopBodyCaptureBuilder
 # =============================================================================
 
+def _opaque_inst():
+    """Return a fresh, cheap rocisa instruction usable as a stand-in token
+    in capture-pipeline bookkeeping tests.
+
+    `LoopBodyCaptureBuilder.append`'s `inst` parameter must satisfy the
+    rocisa-shape contract enforced by `_populate_wrapper` (every
+    Instruction subclass exposes `reads_scc` / `writes_scc`). `SNop` is
+    the cheapest such instance (no operands, no dataflow contribution)
+    and gives every callsite a fresh identity for `is`-based assertions
+    on slot ordering / sequence assignment without exercising real
+    dataflow semantics.
+    """
+    from rocisa.instruction import SNop
+    return SNop(waitState=0)
+
+
 class TestLoopBodyCaptureBuilder:
     def test_empty_finalize(self):
         body = LoopBodyCaptureBuilder().finalize()
@@ -123,9 +139,9 @@ class TestLoopBodyCaptureBuilder:
 
     def test_sequence_increments_within_same_slot(self):
         b = LoopBodyCaptureBuilder()
-        b.append(inst="i0", category="LRA0", subiter=0, mfma_index=3)
-        b.append(inst="i1", category="LRA0", subiter=0, mfma_index=3)
-        b.append(inst="i2", category="LRA0", subiter=0, mfma_index=3)
+        b.append(inst=_opaque_inst(), category="LRA0", subiter=0, mfma_index=3)
+        b.append(inst=_opaque_inst(), category="LRA0", subiter=0, mfma_index=3)
+        b.append(inst=_opaque_inst(), category="LRA0", subiter=0, mfma_index=3)
         body = b.finalize()
         assert [ti.slot.sequence for ti in body.instructions] == [0, 1, 2]
 
@@ -139,25 +155,26 @@ class TestLoopBodyCaptureBuilder:
         the same bucket continues from where it left off across subiters.
         """
         b = LoopBodyCaptureBuilder()
-        b.append(inst="i0", category="LRA0", subiter=0, mfma_index=3)  # bucket(MFMA,3) seq=0
-        b.append(inst="i1", category="LRA0", subiter=0, mfma_index=4)  # bucket(MFMA,4) seq=0
-        b.append(inst="i2", category="LRA0", subiter=1, mfma_index=3)  # bucket(MFMA,3) seq=1
+        b.append(inst=_opaque_inst(), category="LRA0", subiter=0, mfma_index=3)  # bucket(MFMA,3) seq=0
+        b.append(inst=_opaque_inst(), category="LRA0", subiter=0, mfma_index=4)  # bucket(MFMA,4) seq=0
+        b.append(inst=_opaque_inst(), category="LRA0", subiter=1, mfma_index=3)  # bucket(MFMA,3) seq=1
         body = b.finalize()
         assert [ti.slot.sequence for ti in body.instructions] == [0, 0, 1]
 
     def test_emission_order_preserved_in_instructions_list(self):
+        first, second, third = _opaque_inst(), _opaque_inst(), _opaque_inst()
         b = LoopBodyCaptureBuilder()
-        b.append(inst="first", category="GRA", subiter=0, mfma_index=0)
-        b.append(inst="second", category="LRA0", subiter=0, mfma_index=1)
-        b.append(inst="third", category="MFMA", subiter=0, mfma_index=1)
+        b.append(inst=first, category="GRA", subiter=0, mfma_index=0)
+        b.append(inst=second, category="LRA0", subiter=0, mfma_index=1)
+        b.append(inst=third, category="MFMA", subiter=0, mfma_index=1)
         body = b.finalize()
-        assert [ti.wrapped.rocisa_inst for ti in body.instructions] == ["first", "second", "third"]
+        assert [ti.wrapped.rocisa_inst for ti in body.instructions] == [first, second, third]
 
     def test_finalize_returns_independent_copy(self):
         b = LoopBodyCaptureBuilder()
-        b.append(inst="i0", category="GRA", subiter=0, mfma_index=0)
+        b.append(inst=_opaque_inst(), category="GRA", subiter=0, mfma_index=0)
         body = b.finalize()
-        b.append(inst="i1", category="GRB", subiter=0, mfma_index=0)
+        b.append(inst=_opaque_inst(), category="GRB", subiter=0, mfma_index=0)
         assert len(body.instructions) == 1
 
 
@@ -234,7 +251,7 @@ def _make_capture(
                                mfma_index=ti.slot.mfma_index)
             for cat, count in extra_main_cats:
                 for j in range(count):
-                    builder.append(inst=f"{cat}_{j}", category=cat,
+                    builder.append(inst=_opaque_inst(), category=cat,
                                    subiter=0, mfma_index=0)
             main_b = builder.finalize()
         main_bodies[cp] = main_b
@@ -277,7 +294,7 @@ class TestFourPartCaptureShape:
 class TestCloneLoopBody:
     def test_clone_is_deep(self):
         b = LoopBodyCaptureBuilder()
-        b.append(inst="x", category="GRA", subiter=0, mfma_index=0)
+        b.append(inst=_opaque_inst(), category="GRA", subiter=0, mfma_index=0)
         original = b.finalize()
         cloned = clone_loop_body(original)
         assert cloned is not original
@@ -286,7 +303,7 @@ class TestCloneLoopBody:
 
     def test_clone_preserves_tags(self):
         b = LoopBodyCaptureBuilder()
-        b.append(inst="x", category="GRA", subiter=2, mfma_index=5)
+        b.append(inst=_opaque_inst(), category="GRA", subiter=2, mfma_index=5)
         original = b.finalize()
         cloned = clone_loop_body(original)
         assert cloned.instructions[0].category == "GRA"
@@ -416,17 +433,22 @@ class TestEvaluateGuard:
 # Minimal stand-in classes for the macro AST so the walker can be tested
 # without requiring a built rocisa Macro object.
 #
-# KEPT (post-vvcm rocm-libraries-vvcm): these `_Fake*` classes mock the
-# rocisa Macro AST (ValueIf / ValueElseIf / ValueEndif / TextBlock /
-# Macro). They are NOT rocisa instruction impostors — they don't pass
-# through `_populate_wrapper` or any operand-rule dispatch. The walker
-# (`expand_cms_macro`) detects them via `type(item).__name__` for the
-# AST nodes and via injected (`mfma_classes`, `sync_class`, `snop_class`)
-# parameters for the instruction stand-ins. Replacing them with real
-# rocisa Macro instances would require building a full asmpass / rocIsa
-# context per test (~ 1000 lines of setup), and the walker contract
-# doesn't depend on rocisa specifics — only on the AST class names and
-# the injectable instruction class tuples.
+# KEPT (post-vvcm rocm-libraries-vvcm, post-5sfa): these `_Fake*` classes
+# mock the rocisa Macro AST (ValueIf / ValueElseIf / ValueEndif /
+# TextBlock / Macro). The walker (`expand_cms_macro`) detects the AST
+# nodes via `type(item).__name__` and the instruction stand-ins via
+# injected (`mfma_classes`, `sync_class`, `snop_class`) parameters.
+# Replacing them with real rocisa Macro instances would require building
+# a full asmpass / rocIsa context per test (~ 1000 lines of setup), and
+# the walker contract doesn't depend on rocisa specifics.
+#
+# The instruction stand-ins (`_FakeInst`, `_FakeMFMA`, `_FakeSWaitCnt`,
+# `_FakeSNop`) DO flow through `LoopBodyCaptureBuilder.finalize()` ->
+# `_populate_wrapper`, which directly reads `reads_scc` / `writes_scc`
+# off the wrapped instruction (the rocisa Instruction surface — see
+# `_SCCRule.applies`). Each stand-in therefore carries the contract as
+# class-level `False` flags so it's dataflow-inert without needing the
+# old `hasattr` shape gate (deleted in 5sfa).
 
 class _FakeValueIf:
     def __init__(self, value):
@@ -447,24 +469,43 @@ class _FakeTextBlock:
         self.text = text
 
 
+# `_populate_wrapper`'s operand rules read `reads_scc` / `writes_scc`
+# directly off every wrapped instruction (the rocisa Instruction
+# contract). The walker (`expand_cms_macro`) routes these stand-ins
+# through `LoopBodyCaptureBuilder.append` -> `finalize()` -> the
+# operand-rule registry, so the stand-ins must honor that contract.
+# Setting both flags False makes them dataflow-inert (the SCC rule
+# rejects them; only generic ALU rules with positional reads might
+# claim them, and the fake's lack of `getParams` means
+# `_GenericALURule.applies` returns False).
 class _FakeInst:
+    reads_scc = False
+    writes_scc = False
+
     def __init__(self, name):
         self.name = name
 
 
 class _FakeMFMA:
+    reads_scc = False
+    writes_scc = False
+
     def __init__(self, name):
         self.name = name
 
 
 class _FakeSWaitCnt:
+    reads_scc = False
+    writes_scc = False
+
     def __init__(self, vlcnt=-1, dscnt=-1):
         self.vlcnt = vlcnt
         self.dscnt = dscnt
 
 
 class _FakeSNop:
-    pass
+    reads_scc = False
+    writes_scc = False
 
 
 # Ensure walker recognizes class names by looking at type(item).__name__.

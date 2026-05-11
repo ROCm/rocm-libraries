@@ -1525,10 +1525,10 @@ class _SCCRule:
         # check is sufficient for current rocisa; the no-dst SCC opcodes
         # (SCmp*/SCBranchSCC*/SBitcmp1B32) all have one of the flags set.
         # Direct attribute access: every rocisa Instruction-derived class
-        # carries reads_scc/writes_scc as bound C++ fields. Non-rocisa
-        # opaque stand-ins (e.g. capture-pipeline bookkeeping tests that
-        # wrap plain strings) are filtered out by `_populate_wrapper`'s
-        # rocisa-shape gate before this rule's `applies()` is reached.
+        # carries reads_scc/writes_scc as bound C++ fields. The
+        # LoopBodyCaptureBuilder.append `inst=` contract guarantees only
+        # real rocisa Instruction instances reach here (including
+        # bookkeeping tests, which use cheap stand-ins like SNop).
         return inst.reads_scc or inst.writes_scc
 
     def extract(self, inst, category=None):
@@ -1709,19 +1709,13 @@ def _populate_wrapper(wrapper, category=None) -> None:
     Idempotent: rules are pure functions of (inst, category).
     """
     inst = wrapper._rocisa_inst
-    # Rocisa-shape gate: the operand rules (notably _SCCRule) do direct
-    # attribute access on rocisa-bound flags like reads_scc / writes_scc.
-    # Capture-pipeline tests sometimes wrap opaque tokens (plain strings,
-    # tag-only stand-ins) that exercise the LoopBodyCaptureBuilder /
-    # macro-walker bookkeeping without ever forming a dataflow edge.
-    # Skip rule dispatch for any inst that doesn't expose the rocisa-
-    # universal SCC flag pair (every real Instruction subclass has them).
-    if not (hasattr(inst, "reads_scc") and hasattr(inst, "writes_scc")):
-        wrapper.reads = ()
-        wrapper.writes = ()
-        wrapper.read_slots = ()
-        wrapper.write_slots = ()
-        return
+    # Every wrapped instruction reaching this point is a real rocisa
+    # Instruction subclass (LoopBodyCaptureBuilder.append's `inst=`
+    # contract; capture-pipeline tests use real rocisa stand-ins like
+    # SNop for bookkeeping coverage). The operand rules (notably
+    # _SCCRule) do direct attribute access on rocisa-bound flags like
+    # reads_scc / writes_scc; those flags are guaranteed bound on every
+    # rocisa Instruction class, so no shape gate is needed.
     for rule in _OPERAND_RULES:
         if rule.applies(inst, category):
             reads, read_slots, writes, write_slots = rule.extract(inst, category)
