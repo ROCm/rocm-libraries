@@ -100,21 +100,24 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
 
 
 def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
-                         grSA_k=2, grSA_mn=8, grSB_k=2, grSB_mn=8, pgr=2):
+                         grSA_k=2, grSA_mn=8, grSB_k=2, grSB_mn=8, pgr=2,
+                         miWaveGroup=None):
     """Build FP4 config with scale tensors. k_gran applies to LR A/B."""
-    kernel = create_kernel(256, 256, fp4=True, depthU=depthU)
+    kernel = create_kernel(256, 256, fp4=True, depthU=depthU, miWaveGroup=miWaveGroup)
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
     scaleTiA = makeTileInfo('MXSA', kernel)
     scaleTiB = makeTileInfo('MXSB', kernel)
+    grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
         numSubIterK=tiA.localMMATileGrid[1],
         lrA=ReadGranularity(mn=1, k=k_gran),
         lrB=ReadGranularity(mn=1, k=k_gran),
-        grA=ReadGranularity(mn=1, k=2),
-        grB=ReadGranularity(mn=1, k=2),
+        grA=grA,
+        grB=grB,
         lrSA=ReadGranularity(mn=2, k=2),
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
@@ -126,20 +129,26 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
 
 
 def make_cfg_bf16(MT0=256, MT1=256, depthU=64, partSizeM=0, partSizeN=0,
-                  miWaveGroup=None, sourceSwap=False):
+                  miWaveGroup=None, sourceSwap=False, lrA=None, lrB=None):
     """Build BF16 config without scale tensors."""
     kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU,
                            miWaveGroup=miWaveGroup, sourceSwap=sourceSwap)
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
+    if lrA is None:
+        lrA = ReadGranularity(mn=1, k=1)
+    if lrB is None:
+        lrB = ReadGranularity(mn=1, k=1)
+    grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
         numSubIterK=tiA.localMMATileGrid[1],
-        lrA=ReadGranularity(mn=1, k=1),
-        lrB=ReadGranularity(mn=1, k=1),
-        grA=ReadGranularity(mn=1, k=2),
-        grB=ReadGranularity(mn=1, k=2),
+        lrA=lrA,
+        lrB=lrB,
+        grA=grA,
+        grB=grB,
         partitionSizeM=partSizeM,
         partitionSizeN=partSizeN,
     )
@@ -617,10 +626,11 @@ class TestPlaceLRs:
 class TestAssignVgprTiles:
 
     def _assert_no_conflict_and_unrolling(self, sched):
-        """Validate no MFMA/LR vgprTileId overlap and unrolling continuity."""
+        """Validate vgprTileId invariants: no overlap, bounds, alternation, continuity."""
         parts = sched._partitions
         num_iters = sched.unroll_factor
 
+        # 1. No MFMA/LR vgprTileId overlap
         for pi, slots in enumerate(parts):
             for slot in slots:
                 if not slot.mfma:
@@ -635,6 +645,62 @@ class TestAssignVgprTiles:
                         assert mfma_vids.isdisjoint(lr_vids), \
                             f"P{pi} k={slot.subIterK} iter={ui}: MFMA/LR {lr.tensor} overlap"
 
+        # 2. All vgprTileIds within [0, tile_peaks)
+        for pi, slots in enumerate(parts):
+            for slot in slots:
+                if slot.mfma:
+                    for tensor, maps in slot.mfma.vgpr_tile_maps.items():
+                        peak = sched.tile_peaks[tensor]
+                        for ui, tile_map in enumerate(maps):
+                            for tid, vid in tile_map.items():
+                                assert 0 <= vid < peak, \
+                                    f"P{pi} k={slot.subIterK} iter={ui}: " \
+                                    f"MFMA {tensor} vid={vid} out of [0, {peak})"
+                for lr in slot.lrs:
+                    if not lr.vgpr_tile_map:
+                        continue
+                    peak = sched.tile_peaks[lr.tensor]
+                    for ui, tile_map in enumerate(lr.vgpr_tile_map):
+                        for tid, vid in tile_map.items():
+                            assert 0 <= vid < peak, \
+                                f"P{pi} k={slot.subIterK} iter={ui}: " \
+                                f"LR {lr.tensor} vid={vid} out of [0, {peak})"
+
+        # 3. Double-buffer alternation: MFMAs in different K-groups use different sets.
+        cfg = sched.config
+        lr_grans = {'A': cfg.lrA, 'B': cfg.lrB}
+        if cfg.hasScale:
+            lr_grans['SA'] = cfg.lrSA
+            lr_grans['SB'] = cfg.lrSB
+
+        for ui in range(num_iters):
+            for pi, slots in enumerate(parts):
+                by_k = {}
+                for slot in slots:
+                    if not slot.mfma:
+                        continue
+                    by_k.setdefault(slot.subIterK, []).append(slot)
+                sorted_ks = sorted(by_k.keys())
+                for i in range(len(sorted_ks) - 1):
+                    k0, k1 = sorted_ks[i], sorted_ks[i + 1]
+                    for s0 in by_k[k0]:
+                        for s1 in by_k[k1]:
+                            for tensor in sched.tile_peaks:
+                                gran = lr_grans[tensor]
+                                if k0 // gran.k == k1 // gran.k:
+                                    continue
+                                maps0 = s0.mfma.vgpr_tile_maps.get(tensor, [])
+                                maps1 = s1.mfma.vgpr_tile_maps.get(tensor, [])
+                                if ui >= len(maps0) or ui >= len(maps1):
+                                    continue
+                                common_tiles = (set(maps0[ui].keys())
+                                                & set(maps1[ui].keys()))
+                                for tid in common_tiles:
+                                    assert maps0[ui][tid] != maps1[ui][tid], \
+                                        f"P{pi} iter={ui}: {tensor} tile {tid} " \
+                                        f"same vid at k={k0} and k={k1}"
+
+        # 4. Unrolling continuity
         if sched.needs_unrolling:
             last_ui = num_iters - 1
             wrapping_writes = {}
@@ -728,6 +794,174 @@ class TestAssignVgprTiles:
                 assert len(slot.mfma.vgpr_tile_maps['A']) > 0
 
         assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 1: BF16 2x2 ──
+
+    @pytest.mark.parametrize("depthU", [64, 128])
+    def test_bf16_2x2(self, depthU):
+        """BF16 256x256 with default miWaveGroup=[2,2]."""
+        cfg = make_cfg_bf16(depthU=depthU)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 16, 'B': 16}
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 2: BF16 1x4 / 4x1 ──
+
+    @pytest.mark.parametrize("depthU", [64, 128])
+    def test_bf16_1x4(self, depthU):
+        """BF16 256x256 miWaveGroup=[1,4]: 16 M-tiles, 4 N-tiles."""
+        cfg = make_cfg_bf16(depthU=depthU, miWaveGroup=[1, 4])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 32, 'B': 8}
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("depthU", [64, 128])
+    def test_bf16_4x1(self, depthU):
+        """BF16 256x256 miWaveGroup=[4,1]: 4 M-tiles, 16 N-tiles."""
+        cfg = make_cfg_bf16(depthU=depthU, miWaveGroup=[4, 1])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 8, 'B': 32}
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 3: BF16 multi-partition along N ──
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B", [
+        (4, 8),
+        (3, 6),
+        (2, 4),
+    ])
+    def test_bf16_partition_N(self, partSizeN, expected_peak_B):
+        """BF16 256x256 (tilesN=8) with partitions along N."""
+        cfg = make_cfg_bf16(depthU=64, partSizeN=partSizeN)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 16
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 3b: BF16 multi-partition on asymmetric macro tiles ──
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B", [
+        (6, 12),
+        (4, 8),
+        (3, 6),
+        (5, 10),
+    ])
+    def test_bf16_partition_256x384(self, partSizeN, expected_peak_B):
+        """BF16 256x384 (tilesN=12) with partitions along N."""
+        cfg = make_cfg_bf16(MT1=384, depthU=64, partSizeN=partSizeN)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 16
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B", [
+        (4, 8),
+        (3, 6),
+        (6, 12),
+    ])
+    def test_bf16_partition_256x352(self, partSizeN, expected_peak_B):
+        """BF16 256x352 (tilesN=11, odd) with partitions along N."""
+        cfg = make_cfg_bf16(MT1=352, depthU=64, partSizeN=partSizeN)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 16
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B", [
+        (4, 8),
+        (6, 12),
+        (8, 16),
+    ])
+    def test_bf16_partition_256x368(self, partSizeN, expected_peak_B):
+        """BF16 256x368 miWaveGroup=[4,1] (tilesM=4, tilesN=23) with partitions along N."""
+        cfg = make_cfg_bf16(MT1=368, depthU=64, miWaveGroup=[4, 1],
+                            partSizeN=partSizeN)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 8
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 4: FP4 2x2 ──
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
+    def test_fp4_2x2(self, depthU, expect_unrolling):
+        """FP4 256x256 with default miWaveGroup=[2,2]."""
+        cfg = make_cfg_256x256_fp4(depthU=depthU)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 16, 'B': 16, 'SA': 8, 'SB': 8}
+        assert sched.needs_unrolling == expect_unrolling
+
+        for pi in range(cfg.numPartitions):
+            for slot in sched._partitions[pi]:
+                if slot.mfma:
+                    assert len(slot.mfma.vgpr_tile_maps['SA']) > 0
+                    assert len(slot.mfma.vgpr_tile_maps['SB']) > 0
+
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 5: FP4 1x4 / 4x1 ──
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
+    def test_fp4_1x4(self, depthU, expect_unrolling):
+        """FP4 256x256 miWaveGroup=[1,4]: 16 M-tiles, 4 N-tiles."""
+        cfg = make_cfg_256x256_fp4(depthU=depthU, miWaveGroup=[1, 4])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 32, 'B': 8, 'SA': 16, 'SB': 4}
+        assert sched.needs_unrolling == expect_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
+    def test_fp4_4x1(self, depthU, expect_unrolling):
+        """FP4 256x256 miWaveGroup=[4,1]: 4 M-tiles, 16 N-tiles."""
+        cfg = make_cfg_256x256_fp4(depthU=depthU, miWaveGroup=[4, 1])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 8, 'B': 32, 'SA': 4, 'SB': 16}
+        assert sched.needs_unrolling == expect_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 6: BF16 with lrA/lrB k=2 granularity ──
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(64, True), (128, False)])
+    def test_bf16_lr_k2(self, depthU, expect_unrolling):
+        """BF16 with LR k=2 granularity — odd k-groups trigger unrolling."""
+        cfg = make_cfg_bf16(
+            depthU=depthU,
+            lrA=ReadGranularity(mn=1, k=2),
+            lrB=ReadGranularity(mn=1, k=2),
+        )
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 16, 'B': 16}
+        assert sched.needs_unrolling == expect_unrolling
         self._assert_no_conflict_and_unrolling(sched)
 
 
