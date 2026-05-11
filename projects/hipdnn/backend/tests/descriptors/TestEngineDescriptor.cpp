@@ -389,10 +389,10 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesInsufficientOutputCount)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestEngineDescriptor, FinalizeFailsWithInvalidBehaviorNote)
+TEST_F(TestEngineDescriptor, FinalizePreservesUnknownBehaviorNote)
 {
-    serializeEngineDetailsWithBehaviorNotes(
-        0, {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT)});
+    constexpr hipdnnBackendBehaviorNote_t UNKNOWN_NOTE = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1;
+    serializeEngineDetailsWithBehaviorNotes(0, {UNKNOWN_NOTE});
 
     setGraph();
     setGlobalIndex(0);
@@ -407,7 +407,18 @@ TEST_F(TestEngineDescriptor, FinalizeFailsWithInvalidBehaviorNote)
         }));
     EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _));
 
-    ASSERT_THROW_HIPDNN_STATUS(getEngineDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    auto engine = getEngineDescriptor();
+    ASSERT_NO_THROW(engine->finalize());
+
+    hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
+    int64_t returnedCount = 0;
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
+                                         HIPDNN_TYPE_BEHAVIOR_NOTE,
+                                         1,
+                                         &returnedCount,
+                                         &note));
+    EXPECT_EQ(returnedCount, 1);
+    EXPECT_EQ(note, UNKNOWN_NOTE);
 }
 
 TEST_F(TestEngineDescriptor, FinalizeFailsWithNegativeBehaviorNote)

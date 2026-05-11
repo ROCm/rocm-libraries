@@ -57,11 +57,10 @@ void EngineDescriptor::finalize()
         behaviorNotes.reserve(rawBehaviorNotes.size());
         for(auto rawNote : rawBehaviorNotes)
         {
-            THROW_IF_TRUE(rawNote < 0
-                              || rawNote >= static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT),
+            THROW_IF_TRUE(rawNote < 0,
                           HIPDNN_STATUS_BAD_PARAM,
                           "EngineDescriptor::finalize() failed: Invalid behavior note value.");
-            behaviorNotes.push_back(static_cast<hipdnnBackendBehaviorNote_t>(rawNote));
+            behaviorNotes.push_back(rawNote);
         }
         _behaviorNotes = std::move(behaviorNotes);
 

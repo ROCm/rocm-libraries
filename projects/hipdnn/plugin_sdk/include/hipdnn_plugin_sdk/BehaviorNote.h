@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 /**
  * @file BehaviorNote.h
  * @brief Behavior note values for engine metadata.
@@ -24,10 +26,14 @@ extern "C" {
 #define HIPDNN_BEHAVIOR_NOTE_TYPES_DEFINED
 
 /**
- * @enum hipdnnBackendBehaviorNote_t
  * @brief Advisory behavior notes for hipDNN engines.
+ *
+ * The transport type is intentionally an int32_t so newer plugins can pass
+ * future note values through older backends/frontends without truncation.
  */
-typedef enum
+typedef int32_t hipdnnBackendBehaviorNote_t;
+
+enum
 {
     HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION = 0,
     HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM = 1,
@@ -35,7 +41,7 @@ typedef enum
     HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY = 3,
     HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 4,
     HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT = 5
-} hipdnnBackendBehaviorNote_t;
+};
 
 #endif // HIPDNN_BEHAVIOR_NOTE_TYPES_DEFINED
 

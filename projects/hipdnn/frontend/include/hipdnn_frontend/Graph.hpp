@@ -1085,15 +1085,7 @@ public:
         notes.reserve(backendNotes.size());
         for(auto note : backendNotes)
         {
-            auto frontendNote = fromHipdnnBehaviorNote(note);
-            if(!frontendNote.has_value())
-            {
-                HIPDNN_FE_LOG_WARN("Skipping unknown hipdnnBackendBehaviorNote_t value: "
-                                   << static_cast<int>(note));
-                continue;
-            }
-
-            notes.push_back(frontendNote.value());
+            notes.push_back(fromHipdnnBehaviorNote(note));
         }
 
         return {ErrorCode::OK, ""};

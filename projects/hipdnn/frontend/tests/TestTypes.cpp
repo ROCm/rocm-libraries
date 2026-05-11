@@ -27,9 +27,9 @@ TEST(TestTypes, BehaviorNoteFromBackend)
               BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY);
     EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
               BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
-    EXPECT_FALSE(fromHipdnnBehaviorNote(
-                     static_cast<hipdnnBackendBehaviorNote_t>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1))
-                     .has_value());
+
+    constexpr hipdnnBackendBehaviorNote_t UNKNOWN_NOTE = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1;
+    EXPECT_EQ(fromHipdnnBehaviorNote(UNKNOWN_NOTE), static_cast<BehaviorNote>(UNKNOWN_NOTE));
 }
 
 TEST(TestTypes, BehaviorNoteToString)

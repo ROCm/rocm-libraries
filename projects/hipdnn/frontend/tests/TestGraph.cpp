@@ -287,7 +287,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEnginePropagatesNoteQueryFailure)
     EXPECT_TRUE(notes.empty());
 }
 
-TEST_F(TestGraph, GetBehaviorNotesForEngineSkipsUnknownNotes)
+TEST_F(TestGraph, GetBehaviorNotesForEnginePreservesUnknownNotes)
 {
     Graph graph;
     createBasicBatchnormGraph(graph);
@@ -329,9 +329,10 @@ TEST_F(TestGraph, GetBehaviorNotesForEngineSkipsUnknownNotes)
     auto result = graph.get_behavior_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    ASSERT_EQ(notes.size(), 2u);
+    ASSERT_EQ(notes.size(), 3u);
     EXPECT_EQ(notes[0], BehaviorNote::RUNTIME_COMPILATION);
-    EXPECT_EQ(notes[1], BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+    EXPECT_EQ(notes[1], static_cast<BehaviorNote>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1));
+    EXPECT_EQ(notes[2], BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 }
 
 TEST_F(TestGraph, GetBehaviorNotesForEngineRejectsNegativeNoteCount)

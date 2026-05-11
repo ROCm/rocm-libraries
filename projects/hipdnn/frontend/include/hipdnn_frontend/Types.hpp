@@ -38,6 +38,7 @@
 
 #include <hipdnn_frontend/Error.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -234,7 +235,7 @@ typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
  * @enum BehaviorNote
  * @brief Advisory behavior metadata reported by an engine
  */
-enum class BehaviorNote
+enum class BehaviorNote : int32_t
 {
     RUNTIME_COMPILATION = 0,
     REQUIRES_LAYOUT_TRANSFORM = 1,
@@ -873,8 +874,8 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 }
 
 /// @brief Convert backend behavior note to frontend behavior note.
-/// @return Empty optional when the backend provides a note this frontend does not know.
-inline std::optional<BehaviorNote> fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
+/// @return A frontend behavior note. Unknown values are preserved numerically.
+inline BehaviorNote fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
 {
     switch(note)
     {
@@ -889,7 +890,7 @@ inline std::optional<BehaviorNote> fromHipdnnBehaviorNote(hipdnnBackendBehaviorN
     case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
         return BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
     default:
-        return std::nullopt;
+        return static_cast<BehaviorNote>(note);
     }
 }
 
