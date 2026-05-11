@@ -1670,6 +1670,11 @@ class Solution(collections.abc.Mapping):
     packedC0 = len(state["PackedC0IdxChars"])>1
     packedC1 = len(state["PackedC1IdxChars"])>1
 
+    # gfx1250 MX layout requires TDMInst
+    if not state["TDMInst"] and state["ISA"] == (12, 5, 0) and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
+      reject(state, printRejectionReason, "MX layout requires TDMInst on gfx1250")
+      return
+
     bufferLoad = state["BufferLoad"] and state["KernelLanguage"] == "Assembly"
     if not bufferLoad:
       state["DirectToLds"] = 0
