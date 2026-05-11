@@ -76,18 +76,17 @@ struct triton_hierarchical_split_t {
 /**
  * @brief Compute optimal local/global tile split for hierarchical work-stealing.
  *
- * @param m Problem M dimension
- * @param n Problem N dimension
- * @param block_m Tile M dimension
- * @param block_n Tile N dimension
- * @param num_xcds Number of XCDs
- * @param n_cu Total CU count
- * @param cu_per_l2 CUs per L2 slice
+ * @param m        Problem M dimension
+ * @param n        Problem N dimension
+ * @param block_m  Tile M dimension
+ * @param block_n  Tile N dimension
+ * @param num_xcds Number of XCDs (used for the local/global tile split)
+ * @param n_cu     Total CU count (must be > 0)
  * @return triton_hierarchical_split_t Split parameters.
  */
 triton_hierarchical_split_t compute_triton_hierarchical_split(
     size_t m, size_t n, size_t block_m, size_t block_n,
-    size_t num_xcds, size_t n_cu, size_t cu_per_l2);
+    size_t num_xcds, size_t n_cu);
 
 /**
  * @brief Compute Triton-specific StreamK grid size.
@@ -107,9 +106,6 @@ size_t compute_triton_sk_grid(size_t m, size_t n, size_t k,
                               size_t n_cu, size_t out_dtype_bits);
 
 /**
- * @brief Filter candidate configs based on architecture-specific heuristics.
- *
-/**
  * @brief Architecture-specific tile search ranges for Triton config generation.
  */
 struct triton_tile_ranges_t {
@@ -122,17 +118,15 @@ struct triton_tile_ranges_t {
  *
  * Returns architecture-specific block_m/n and block_k ranges that should be used
  * when generating candidate Triton GEMM configs. Accounts for:
- *   - gfx950 F8/F4: wider K range (128, 256), restricted MN to 32-256
- *   - gfx942 F8: adds 512 to MN range, 128/256 to K range
- *   - Default: MN in {16,32,64,128,256}, K in {16,32,64,128,256,512}
+ *   - gfx950 F8/F4: restricted MN to 32-256
+ *   - gfx942 F8:    adds 512 to the MN range
+ *   - Default:      MN in {16,32,64,128,256}, K in {16,32,64,128,256,512}
  *
- * @param hardware Hardware characteristics
+ * @param hardware   Hardware characteristics
  * @param dtype_bits Bits per element of the narrower input dtype
- * @param k Problem K dimension (used for alignment checks on gfx950)
  * @return triton_tile_ranges_t Tile search ranges
  */
 triton_tile_ranges_t get_triton_default_tile_ranges(const hardware_t& hardware,
-                                                    size_t dtype_bits,
-                                                    size_t k = 0);
+                                                    size_t dtype_bits);
 
 }  // namespace origami

@@ -19,11 +19,15 @@ size_t estimate_triton_lds_bytes(dim3_t mt,
                                  data_type_t a_dtype,
                                  data_type_t b_dtype,
                                  int num_stages) {
-  const size_t bytes_a = static_cast<size_t>(data_type_to_bytes(a_dtype));
-  const size_t bytes_b = static_cast<size_t>(data_type_to_bytes(b_dtype));
+  // Compute in bits then ceil-divide to bytes so sub-byte dtypes (F4/F6) do
+  // not truncate to zero. data_type_to_bytes() returns a double (e.g. 0.5 for
+  // F4); a direct cast to size_t would silently floor that to 0 and make the
+  // LDS estimate unconditionally pass capacity checks.
+  const size_t bits_a = static_cast<size_t>(datatype_to_bits(a_dtype));
+  const size_t bits_b = static_cast<size_t>(datatype_to_bits(b_dtype));
 
-  const size_t a_tile = mt.m * mt.k * bytes_a;
-  const size_t b_tile = mt.k * mt.n * bytes_b;
+  const size_t a_tile = math::safe_ceil_div(mt.m * mt.k * bits_a, static_cast<size_t>(8));
+  const size_t b_tile = math::safe_ceil_div(mt.k * mt.n * bits_b, static_cast<size_t>(8));
 
   if (num_stages <= 1)
     return std::max(a_tile, b_tile);
@@ -67,12 +71,12 @@ triton_ws_params_t select_triton_ws_params(size_t m, size_t n, size_t block_m, s
 //   > 4 tiles/CU:  local_frac decreases linearly, floor at 50%
 triton_hierarchical_split_t compute_triton_hierarchical_split(
     size_t m, size_t n, size_t block_m, size_t block_n,
-    size_t num_xcds, size_t n_cu, size_t cu_per_l2) {
+    size_t num_xcds, size_t n_cu) {
   const size_t total = math::safe_ceil_div(m, block_m) * math::safe_ceil_div(n, block_n);
 
   if (num_xcds == 0) num_xcds = 1;
-  const size_t hw_cus = num_xcds * (cu_per_l2 > 0 ? cu_per_l2 : 1);
-  const double tiles_per_cu = static_cast<double>(total) / std::max(hw_cus, static_cast<size_t>(1));
+  const double tiles_per_cu =
+      static_cast<double>(total) / std::max(n_cu, static_cast<size_t>(1));
 
   double local_frac = std::max(0.5, 1.0 - std::max(0.0, tiles_per_cu - 4.0) * 0.05);
   size_t local = static_cast<size_t>(total * local_frac) / num_xcds;
@@ -128,12 +132,14 @@ size_t compute_triton_sk_grid(size_t m, size_t n, size_t k,
   if (tiles % sk_grid != 0)
     sk_grid = tiles;
 
-  // Last-wave compensation for gfx942 CU counts
+  // Last-wave compensation: when only a small partial wave (< 128 tiles)
+  // would land on the trailing CUs, fall back to the largest power-of-two
+  // grid <= n_cu so the workload distributes more evenly. No-op when n_cu
+  // is already a power of two.
   if (tiles >= n_cu) {
     size_t remainder = tiles % n_cu;
-    if (remainder > 0 && remainder < 128 &&
-        (n_cu == 304 || n_cu == 80 || n_cu == 64)) {
-      sk_grid = (n_cu == 304) ? 256 : 64;
+    if (remainder > 0 && remainder < 128) {
+      sk_grid = math::prev_pow2(n_cu);
     }
   }
 
@@ -142,21 +148,21 @@ size_t compute_triton_sk_grid(size_t m, size_t n, size_t k,
 
 // Get default Triton tile search ranges for the given architecture and dtype.
 triton_tile_ranges_t get_triton_default_tile_ranges(const hardware_t& hardware,
-                                                    size_t dtype_bits,
-                                                    size_t k) {
+                                                    size_t dtype_bits) {
   std::vector<size_t> block_mn = {16, 32, 64, 128, 256};
   std::vector<size_t> block_k  = {16, 32, 64, 128, 256, 512};
 
   if (hardware.arch == hardware_t::architecture_t::gfx950) {
     if (dtype_bits <= 8) {
+      // Restrict MN to >=32 for F8/F4 on gfx950; K range already covers
+      // {16..512} including 128 and 256, so no extra K entries are needed.
       block_mn = {32, 64, 128, 256};
-      block_k.push_back(k % 256 == 0 ? 256 : 128);
     }
   } else if (hardware.arch == hardware_t::architecture_t::gfx942) {
     if (dtype_bits == 8) {
+      // 512 MN is genuinely additive on gfx942 F8; 128/256 K are already
+      // present in the default block_k range, so don't re-push them.
       block_mn.push_back(512);
-      block_k.push_back(128);
-      block_k.push_back(256);
     } else if (dtype_bits < 8) {
       // F4/F6 unsupported on gfx942
     }

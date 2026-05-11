@@ -131,12 +131,12 @@ class TestTritonHierarchicalSplit:
     """Tests for Triton hierarchical split computation."""
 
     def test_basic_split(self):
-        result = origami.compute_triton_hierarchical_split(4096, 4096, 128, 128, 8, 304, 38)
+        result = origami.compute_triton_hierarchical_split(4096, 4096, 128, 128, 8, 304)
         assert result.local_per_xcd > 0
         assert result.local_per_xcd + result.global_tiles > 0
 
     def test_struct_fields(self):
-        result = origami.compute_triton_hierarchical_split(2048, 2048, 128, 128, 8, 304, 38)
+        result = origami.compute_triton_hierarchical_split(2048, 2048, 128, 128, 8, 304)
         assert hasattr(result, "local_per_xcd")
         assert hasattr(result, "global_tiles")
 

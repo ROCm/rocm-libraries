@@ -85,5 +85,18 @@ inline double ceiling_math(double value, double significance = 1.0)
     return std::ceil(value / significance) * significance;
 }
 
+/**
+ * @brief Largest power of two that is <= v. Returns 0 for v == 0.
+ *
+ * Useful for last-wave compensation in StreamK grid sizing where the desired
+ * grid is the largest power-of-two CU count not exceeding the available CUs.
+ */
+inline constexpr size_t prev_pow2(size_t v) {
+    if (v == 0) return 0;
+    size_t p = 1;
+    while ((p << 1) <= v) p <<= 1;
+    return p;
+}
+
 }  // namespace math
 }  // namespace origami

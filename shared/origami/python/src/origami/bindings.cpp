@@ -375,7 +375,6 @@ NB_MODULE(origami, m) {
         &origami::get_triton_default_tile_ranges,
         nanobind::arg("hardware"),
         nanobind::arg("dtype_bits"),
-        nanobind::arg("k") = 0,
         "Get arch-specific default tile search ranges for Triton");
   m.def("compute_mem_bw_from_occupancy",
         &origami::compute_mem_bw_from_occupancy,
