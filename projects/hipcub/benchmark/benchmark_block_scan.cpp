@@ -22,7 +22,6 @@
 
 #include "common_benchmark_header.hpp"
 #include "hipcub/backend/rocprim/block/block_scan.hpp"
-#include "primbench.hpp"
 
 // hipCUB API
 #include <hipcub/block/block_scan.hpp>

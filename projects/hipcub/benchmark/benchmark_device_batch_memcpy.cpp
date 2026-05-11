@@ -23,7 +23,6 @@
 #include "benchmark/benchmark.h"
 #include "cmdparser.hpp"
 #include "common_benchmark_header.hpp"
-#include "primbench.hpp"
 
 #include <hipcub/block/block_load.hpp>
 #include <hipcub/block/block_store.hpp>

@@ -22,7 +22,6 @@
 
 #include "common_benchmark_header.hpp"
 #include "hipcub/backend/rocprim/block/block_reduce.hpp"
-#include "primbench.hpp"
 
 // HIP API
 #include <hipcub/block/block_reduce.hpp>

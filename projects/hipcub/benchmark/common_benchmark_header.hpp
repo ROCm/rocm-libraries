@@ -85,5 +85,5 @@ PRIMBENCH_REGISTER_TYPE(__half, "f16")
 using custom_float2  = benchmark_utils::custom_type<float, float>;
 using custom_double2 = benchmark_utils::custom_type<double, double>;
 
-PRIMBENCH_REGISTER_TYPE(custom_float2, "custom<f32, f32>")
-PRIMBENCH_REGISTER_TYPE(custom_double2, "custom<f64, f64>")
+PRIMBENCH_REGISTER_TYPE(custom_float2, "custom<f32,f32>")
+PRIMBENCH_REGISTER_TYPE(custom_double2, "custom<f64,f64>")

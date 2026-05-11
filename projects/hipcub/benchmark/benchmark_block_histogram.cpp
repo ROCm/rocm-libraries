@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "common_benchmark_header.hpp"
-#include "primbench.hpp"
 
 // HIP API
 #include <hipcub/block/block_histogram.hpp>
@@ -115,8 +114,10 @@ class block_histogram_benchmark : public primbench::benchmark_interface
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())
             .add("block_size", BlockSize)
-            .add("items_per_thread", ItemsPerThread)
-            .add("bin_size", BinSize);
+            .add("items_per_thread", ItemsPerThread);
+
+        //  BinSize is always equal to BlockSize
+        // .add("bin_size", BinSize);
     }
 
     void run(primbench::state& state) override

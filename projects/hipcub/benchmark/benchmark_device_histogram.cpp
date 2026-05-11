@@ -22,7 +22,6 @@
 
 // CUB's implementation of DeviceRunLengthEncode has unused parameters,
 // disable the warning because all warnings are threated as errors:
-#include "primbench.hpp"
 #ifdef __HIP_PLATFORM_NVIDIA__
     #pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
