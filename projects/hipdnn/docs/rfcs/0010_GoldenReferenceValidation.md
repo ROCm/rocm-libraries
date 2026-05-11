@@ -42,7 +42,7 @@ The integration test suite validates engine outputs by computing references at r
 
 A prior effort established a golden reference pattern -- golden data bundles (graph JSON + tensor `.bin` files) loaded from disk and validated against engine outputs. The initial infrastructure is in place for batchnorm. This RFC extends golden data coverage to all operation types, formalizes the folder convention, adds data integrity checks, and integrates with CI.
 
-**Long-term direction**: Every integration test becomes a data bundle — no C++ test code, no `buildGraph()` functions, no per-operation test classes. Adding a test means dropping files in a folder. Both validation modes — golden (compare against `.bin` data) and computed (compare against reference executor) — load the graph from the bundle JSON. The regression suite's end state is entirely data-driven.
+**Long-term direction**: Every integration test becomes a data bundle. Adding a test means dropping files in a folder — no C++ code, no `buildGraph()` functions, no per-operation test classes. The graph is always loaded from the bundle JSON. The regression suite's end state is entirely data-driven.
 
 ---
 
@@ -50,7 +50,7 @@ A prior effort established a golden reference pattern -- golden data bundles (gr
 
 Golden reference validation uses two pipelines -- [**generation**](#generation-pipeline) and [**validation**](#generic-test-runner) -- that share a common data format: the **golden data bundle** (`{Name}.json` + `{Name}.tensor{uid}.bin`). A bundle is a self-contained test case: the graph JSON defines the computation, the `.bin` files carry the tensor data (inputs and expected outputs).
 
-The graph JSON is a complete computation description — operation type, tensor shapes, data types, and all operation parameters. Generation produces bundles. Validation loads a bundle — graph from `{Name}.json`, tensor data from `{Name}.tensor{uid}.bin` — executes the graph through the engine under test, and compares the result to the expected output. The test fixture determines which engine runs the graph (CPU reference, MIOpen GPU plugin, etc.); the bundle itself is engine-agnostic.
+Generation produces bundles. Validation loads a bundle, executes the graph through the engine under test, and compares the result to the expected output. The bundle itself is engine-agnostic — the test fixture determines which engine runs the graph.
 
 **Design principle — test identity comes from the graph, not the filesystem.** The graph JSON contains everything that defines a test: operation type, tensor shapes, data types, parameters. The runner derives the test name from the graph content, not from the folder path where the bundle is stored. This decouples test identity from storage layout, which means: folders can be reorganized without breaking filters, TOML skip rules match stable graph-derived names, and customer-submitted bundles get meaningful test names regardless of where they're dropped.
 
@@ -104,15 +104,9 @@ The table below maps each existing component to its treatment in this RFC.
 
 All of these components operate on a single shared artifact -- the golden data bundle. A bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
 
-The bundle format is **deliberately independent of any test infrastructure**. The JSON follows the FlatBuffers `graph.fbs` schema; the `.bin` files are raw contiguous tensors. Any tool that can parse JSON and read binary can consume bundles — they are not tied to GTest, `ValidateGoldenBundleWithRef`, or the `getGoldenReferenceParams()` discovery mechanism. Examples of other consumers:
+The bundle format is independent of any test infrastructure. The JSON follows the FlatBuffers `graph.fbs` schema; the `.bin` files are raw contiguous tensors. Any tool that can parse JSON and read binary can produce or consume bundles.
 
-- **External test harnesses** — a partner's internal test framework loads the same bundles to validate their engine
-- **Python validation scripts** — a PyTorch script loads a bundle, re-runs the computation, compares
-- **Pre-commit bundle verifier** — the proposed [verifier](#data-integrity) consumes bundles directly for integrity checking
-
-A bundle can be **full** or **graph-only**. A **full bundle** (`{Name}.json` + `.bin` files) is the primary format — it carries pre-computed tensor data and the runner loads it and compares. This is the end-state format: every test is a full bundle with known-good reference data.
-
-A **graph-only bundle** (`{Name}.json` alone, no `.bin` files) is a **transitional tool** for migrating existing computed tests. It carries only the computation definition, no tensor data. The runner generates inputs, runs the engine under test and a reference source, compares their outputs, and optionally writes the resulting `.bin` files back to produce a full bundle. Graph-only bundles let us move test definitions from `buildGraph()` to disk incrementally — once the `.bin` files are generated and committed, the graph-only bundle becomes a full bundle and the migration for that test is complete.
+A bundle can be **full** or **graph-only**. A **full bundle** (`{Name}.json` + `.bin` files) is the primary format — it carries pre-computed tensor data for comparison. A **graph-only bundle** (`{Name}.json` alone, no `.bin` files) is a **transitional tool** for migrating existing computed tests — the runner generates inputs and computes references at runtime instead of loading them from disk. Once `.bin` files are generated and committed, the graph-only bundle becomes a full bundle.
 
 #### Bundle metadata (open for discussion)
 
@@ -206,11 +200,11 @@ The runner is a **base class** (`ValidateGoldenBundleBase`) with two concrete su
 For a **full bundle** (`.json` + `.bin` files):
 
 1. **Discover** — at GTest startup, `discoverGoldenBundles(tierDir)` recursively scans the tier directory for `.json` files. Each `.json` path becomes a GTest parameter. GTest creates one test case per parameter — no C++ code per test.
-2. **Load** — when a test case runs, the runner calls `loadGraphAndTensors()` which deserializes the `.json` into a graph object and loads the corresponding `.bin` files into tensors. The graph object is a fully executable computation — the same object that `buildGraph()` used to construct in C++, now created from JSON.
+2. **Load** — when a test case runs, the runner calls `loadGraphAndTensors()` which deserializes the `.json` into an executable graph object and loads the corresponding `.bin` files into tensors.
 3. **Execute** — run the graph through the engine under test (CPU reference or GPU plugin)
 4. **Compare** — check engine output against golden output from the `.bin` files — PASS or FAIL
 
-For a **graph-only bundle** (`.json` only, no `.bin` files — transitional): the runner loads the graph, generates inputs (using a fixed seed for reproducibility), runs the engine under test *and* a reference source (e.g., CPU reference for GPU tests), and compares their outputs. This enables incremental migration of existing computed tests to bundles — once the outputs are generated and committed as `.bin` files, the graph-only bundle becomes a full bundle.
+For a **graph-only bundle** (`.json` only, no `.bin` files — transitional): the runner loads the graph, generates inputs, runs the engine under test and a reference source, and compares their outputs at runtime.
 
 Tolerance is looked up at runtime from the graph content: the runner reads the operation type and data type from the JSON, then follows the [tolerance priority chain](#two-questions-two-levels) (TOML override → per-operation default). No per-operation test class needed.
 
@@ -332,8 +326,8 @@ The `--verification-mode` flag overrides this default. In golden mode, tests wit
 | Mode | What runs | Reference source |
 |------|-----------|-----------------|
 | `auto` (default) | Per-test fallback: golden → GPU ref → CPU ref | Best available |
-| `computed` | Graph-only bundles (`ValidateGoldenBundleWithRef` / `ValidateGoldenBundleWithPlugin` with no `.bin` files) — graph loaded from JSON, executed against reference executor, outputs compared at runtime | CPU/GPU reference executor at runtime |
-| `golden` | Test-as-data tests (`ValidateGoldenBundleWithRef` / `ValidateGoldenBundleWithPlugin`) — graph loaded from disk; tests without golden data are skipped | Pre-computed data from bundle |
+| `computed` | Graph-only bundles (no `.bin` files) — outputs compared at runtime | CPU/GPU reference executor at runtime |
+| `golden` | Full bundles — tests without golden data are skipped | Pre-computed data from bundle |
 | `both` | Both suites, independently — both must pass | Runtime executor + pre-computed data |
 
 **Floating-point edge case**: `-0.0` vs `+0.0` uses value comparison, not bitwise. NaN handling is covered in [Data Integrity](#data-integrity).
@@ -538,7 +532,7 @@ Filters match the generated test name:
 
 ## CLI and Configuration
 
-The test binary will accept two flags (neither exists today). `--verification-mode` controls **what** runs. `--golden-data-dir` controls **where** golden data is read from (ignored when mode is `computed`).
+`--verification-mode` controls **what** runs. `--golden-data-dir` controls **where** golden data is read from (ignored when mode is `computed`).
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
@@ -564,7 +558,7 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 ### CI Integration
 
-Golden tests follow the same [tier cascade](../../../dnn-providers/integration-tests/README.md#how-tiers-cascade) as all other integration tests. Tiers are determined by the top-level folder (see [Folder Convention](#folder-convention)), mapped to GTest prefixes by the four fixed `INSTANTIATE_TEST_SUITE_P` calls.
+Tiers are determined by the top-level folder (see [Folder Convention](#folder-convention)), following the same [tier cascade](../../../dnn-providers/integration-tests/README.md#how-tiers-cascade) as all other integration tests.
 
 | CI Stage | ctest Command | Verification Mode | Notes |
 |----------|--------------|-------------------|-------|
