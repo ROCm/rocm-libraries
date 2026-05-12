@@ -282,7 +282,10 @@ inline uint32_t hipblaslt_drain_check_numerics_window(uint32_t* d_flag,
                                                      uint32_t    scan_every,
                                                      uint32_t    scan_from,
                                                      uint32_t    scan_until,
-                                                     const char* label /* "window" or "teardown" */)
+                                                     const char* label /* "window" or "teardown" */,
+                                                     bool                   stop_on_first,
+                                                     std::atomic<bool>*     short_circuit_out,
+                                                     std::atomic<uint32_t>* first_nan_out)
 {
     if(!d_flag)
         return 0u;
@@ -293,9 +296,26 @@ inline uint32_t hipblaslt_drain_check_numerics_window(uint32_t* d_flag,
                                 d_flag,
                                 sizeof(uint32_t),
                                 hipMemcpyDeviceToHost));
-    // Reset for the next window. Mid-stream drains rely on this so each
-    // window's "first NaN" is meaningful in isolation.
-    static_cast<void>(hipMemset(d_flag, 0, sizeof(uint32_t)));
+    // Under STOP_ON_FIRST after the first NaN, the slot is sticky -- do NOT
+    // reset (scan_D's host poll reads it; clearing would let post-NaN calls
+    // re-launch the kernel and re-drains would lose the first-NaN id). All
+    // other cases reset so the next window starts fresh.
+    // Same case also trips the cross-call short-circuit (idempotent; cache id
+    // with release BEFORE the gate so acquire readers see a non-zero id).
+    const bool sticky = stop_on_first && h_flag != 0u;
+    if(!sticky)
+        static_cast<void>(hipMemset(d_flag, 0, sizeof(uint32_t)));
+    if(sticky)
+    {
+        if(first_nan_out)
+        {
+            uint32_t expected = 0u;
+            first_nan_out->compare_exchange_strong(
+                expected, h_flag, std::memory_order_release, std::memory_order_relaxed);
+        }
+        if(short_circuit_out)
+            short_circuit_out->store(true, std::memory_order_release);
+    }
 
     const bool log_anything = (mode
                                & (hipblaslt_check_numerics_mode_info
@@ -352,6 +372,8 @@ inline uint32_t hipblaslt_drain_check_numerics_window(uint32_t* d_flag,
             *sink << " To bisect, re-run with HIPBLASLT_CHECK_NUMERICS_SCAN_FROM="
                   << bisect_lo << " HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL="
                   << bisect_hi << " HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY=1.";
+        if(stop_on_first)
+            *sink << " (STOP_ON_FIRST: further scans suppressed after this call.)";
         *sink << std::endl;
     }
     else if(mode & hipblaslt_check_numerics_mode_info)
@@ -412,6 +434,34 @@ inline rocblaslt_status hipblaslt_check_numerics_scan_D(rocblaslt_handle handle,
     if(!handle || !handle->check_numerics)
         return rocblaslt_status_success;
 
+    // STOP_ON_FIRST short-circuit. Sticky bypass first; otherwise (when the
+    // mapped flag is available) poll it with ACQUIRE -- a plain *flag_host
+    // would race and the compiler could hoist/elide it, and the bypass would
+    // silently never trip under -O. ACQUIRE pairs with the kernel's atomicCAS.
+    //
+    // Visibility caveat: without a stream sync between the producing matmul
+    // and this poll, the short-circuit can fire one call late (the late call
+    // still launches the scanner; the call after that takes the sticky path).
+    // We accept that to preserve the v0 zero-per-call-sync property.
+    if(handle->check_numerics_short_circuit.load(std::memory_order_acquire))
+        return rocblaslt_status_success;
+
+    if(handle->check_numerics_stop_on_first && handle->check_numerics_flag_host)
+    {
+        const uint32_t observed
+            = __atomic_load_n(handle->check_numerics_flag_host, __ATOMIC_ACQUIRE);
+        if(observed != 0u)
+        {
+            // Cache the id with release BEFORE flipping the gate with release,
+            // so any acquire-reader that sees short_circuit=true also sees the id.
+            uint32_t expected = 0u;
+            handle->check_numerics_first_nan_call.compare_exchange_strong(
+                expected, observed, std::memory_order_release, std::memory_order_relaxed);
+            handle->check_numerics_short_circuit.store(true, std::memory_order_release);
+            return rocblaslt_status_success;
+        }
+    }
+
     const rocblaslt_status st
         = hipblaslt_check_numerics_output_D(stream,
                                             m, n, batch, type_d,
@@ -469,7 +519,10 @@ inline uint32_t hipblaslt_check_numerics_drain_handle(rocblaslt_handle handle)
         handle->check_numerics_scan_every,
         handle->check_numerics_scan_from,
         handle->check_numerics_scan_until,
-        "on-demand drain");
+        "on-demand drain",
+        handle->check_numerics_stop_on_first,
+        &handle->check_numerics_short_circuit,
+        &handle->check_numerics_first_nan_call);
 }
 
 #endif // HIPBLASLT_CHECK_NUMERICS_MATRIX_HPP

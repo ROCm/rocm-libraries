@@ -47,6 +47,7 @@ namespace
     constexpr const char* kEnvScanEvery     = "HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY";
     constexpr const char* kEnvScanFrom      = "HIPBLASLT_CHECK_NUMERICS_SCAN_FROM";
     constexpr const char* kEnvScanUntil     = "HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL";
+    constexpr const char* kEnvStopOnFirst   = "HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST";
 } // namespace
 
 /*******************************************************************************
@@ -172,24 +173,76 @@ _rocblaslt_handle::_rocblaslt_handle()
         check_numerics_scan_until = ~uint32_t(0);
     }
 
-    // v0 deferred-sync: allocate the persistent NaN flag once per handle.
-    // The scanner kernel atomicCAS(0, call_id)'s into this slot for every
-    // scanned matmul. Failure to allocate is best-effort: we disable
-    // scanning rather than failing handle creation, since the matmul itself
+    // HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST=1|on|true: enable the host-mapped
+    // flag + cross-call short-circuit (see scan_D in check_numerics_matrix.hpp).
+    // No-op when CHECK_NUMERICS is off (no scan runs to set the flag).
+    if(const char* sof = std::getenv(kEnvStopOnFirst))
+    {
+        std::string s(sof);
+        s.erase(0, s.find_first_not_of(" \t"));
+        if(auto p = s.find_last_not_of(" \t"); p != std::string::npos)
+            s.erase(p + 1);
+        for(auto& c : s)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        check_numerics_stop_on_first = (s == "1" || s == "on" || s == "true");
+    }
+
+    // Allocate the persistent NaN flag. Two paths:
+    //   STOP_ON_FIRST=1: hipHostMalloc(MAPPED) so scan_D can poll the value
+    //                    without sync. flag_host owns the allocation; flag is
+    //                    the device-visible alias from hipHostGetDevicePointer.
+    //   default:         hipMalloc, device-only (v0 behavior).
+    // On any failure of the mapped path we fall through to hipMalloc and log
+    // once so the user knows cross-call short-circuit will only trip on drains.
+    // If hipMalloc itself fails we disable scanning -- best-effort, the matmul
     // is unaffected.
     if(check_numerics != hipblaslt_check_numerics_mode_no_check)
     {
-        if(hipMalloc(&check_numerics_flag, sizeof(uint32_t)) != hipSuccess
-           || hipMemset(check_numerics_flag, 0, sizeof(uint32_t)) != hipSuccess)
+        bool ok = false;
+        if(check_numerics_stop_on_first)
         {
-            // Best-effort: leave flag null and disable scanning. The scanner
-            // entrypoint short-circuits on a null flag pointer.
-            if(check_numerics_flag)
+            if(hipHostMalloc(reinterpret_cast<void**>(&check_numerics_flag_host),
+                             sizeof(uint32_t),
+                             hipHostMallocMapped) == hipSuccess
+               && check_numerics_flag_host)
             {
-                static_cast<void>(hipFree(check_numerics_flag));
-                check_numerics_flag = nullptr;
+                *check_numerics_flag_host = 0u;
+                ok = (hipHostGetDevicePointer(reinterpret_cast<void**>(&check_numerics_flag),
+                                              check_numerics_flag_host,
+                                              0) == hipSuccess);
             }
-            check_numerics = hipblaslt_check_numerics_mode_no_check;
+            if(!ok)
+            {
+                if(check_numerics_flag_host)
+                {
+                    static_cast<void>(hipHostFree(check_numerics_flag_host));
+                    check_numerics_flag_host = nullptr;
+                }
+                check_numerics_flag = nullptr;
+                std::lock_guard<std::mutex> lk(log_mutex);
+                std::ostream*               sink = get_logger_os();
+                if(!sink)
+                    sink = &std::cerr;
+                *sink << hipblaslt_check_numerics_ts()
+                      << "[hipBLASLt CHECK_NUMERICS] " << kEnvStopOnFirst
+                      << "=1 requested but mapped-flag alloc failed;"
+                      << " falling back to device-only flag (cross-call"
+                      << " short-circuit will only trip on drain/teardown)."
+                      << std::endl;
+            }
+        }
+        if(!ok)
+        {
+            if(hipMalloc(&check_numerics_flag, sizeof(uint32_t)) != hipSuccess
+               || hipMemset(check_numerics_flag, 0, sizeof(uint32_t)) != hipSuccess)
+            {
+                if(check_numerics_flag)
+                {
+                    static_cast<void>(hipFree(check_numerics_flag));
+                    check_numerics_flag = nullptr;
+                }
+                check_numerics = hipblaslt_check_numerics_mode_no_check;
+            }
         }
     }
 }
@@ -224,7 +277,10 @@ _rocblaslt_handle::~_rocblaslt_handle()
                                                             every,
                                                             check_numerics_scan_from,
                                                             check_numerics_scan_until,
-                                                            "handle teardown"));
+                                                            "handle teardown",
+                                                            check_numerics_stop_on_first,
+                                                            &check_numerics_short_circuit,
+                                                            &check_numerics_first_nan_call));
 
     // Unscanned-tail warning. Compute the exact [tail_lo..tail_hi] range of
     // call_ids that completed but were never inspected, and tell the user
@@ -256,7 +312,33 @@ _rocblaslt_handle::~_rocblaslt_handle()
                                                 : check_numerics_scan_from;
         const uint32_t tail_hi = observed_hi;
 
-        if(tail_hi >= tail_lo)
+        // STOP_ON_FIRST: if short-circuit fired, the calls AFTER the first NaN
+        // were intentionally skipped, not an oversight. Replace the standard
+        // "calls were NOT scanned, here's how to inspect them" warning with a
+        // dedicated note so the user isn't told to chase down a tail they
+        // explicitly asked us to ignore. The pre-NaN gap (if SCAN_EVERY > 1
+        // left one before the first NaN) is reported by the existing drain
+        // line's bisect hint, so we don't duplicate that here.
+        const bool short_circuited
+            = check_numerics_short_circuit.load(std::memory_order_acquire);
+        if(short_circuited)
+        {
+            const uint32_t first_nan
+                = check_numerics_first_nan_call.load(std::memory_order_relaxed);
+            if(first_nan > 0 && call_id_snapshot > first_nan)
+            {
+                std::ostream* sink = get_logger_os();
+                if(!sink)
+                    sink = &std::cerr;
+                *sink << hipblaslt_check_numerics_ts()
+                      << "[hipBLASLt CHECK_NUMERICS] handle teardown: matmul calls ("
+                      << first_nan << ".." << call_id_snapshot
+                      << "] were intentionally skipped due to "
+                      << kEnvStopOnFirst << "=1 (first NaN at call #"
+                      << first_nan << ")." << std::endl;
+            }
+        }
+        else if(tail_hi >= tail_lo)
         {
             std::ostream* sink = get_logger_os();
             if(!sink)
@@ -293,8 +375,14 @@ _rocblaslt_handle::~_rocblaslt_handle()
               << " first failure's rocblaslt_status code." << std::endl;
     }
 
-    static_cast<void>(hipFree(check_numerics_flag));
-    check_numerics_flag = nullptr;
+    // Mapped path: host pointer owns; device pointer is an alias and must NOT
+    // be hipFree'd. Device-only path: hipFree the device pointer.
+    if(check_numerics_flag_host)
+        static_cast<void>(hipHostFree(check_numerics_flag_host));
+    else
+        static_cast<void>(hipFree(check_numerics_flag));
+    check_numerics_flag_host = nullptr;
+    check_numerics_flag      = nullptr;
 }
 
 _rocblaslt_attribute::~_rocblaslt_attribute()

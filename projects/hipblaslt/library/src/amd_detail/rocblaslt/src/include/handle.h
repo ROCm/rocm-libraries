@@ -142,6 +142,23 @@ struct _rocblaslt_handle
     // off the first time still see that the scanner was non-functional.
     // Atomic so concurrent callers race to a single log line, not many.
     std::atomic<bool> check_numerics_launch_failed{false};
+
+    // HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST=1: skip every scan_D after the
+    // first observed NaN. See check_numerics_matrix.hpp for the mechanism.
+    bool check_numerics_stop_on_first = false;
+
+    // Host-mapped mirror of check_numerics_flag (null when stop_on_first is
+    // off or when hipHostMalloc(MAPPED) failed and we fell back to hipMalloc).
+    uint32_t* check_numerics_flag_host = nullptr;
+
+    // Set once any caller observes h_flag != 0; gates the scan_D fast-out.
+    // Idempotent; release/acquire pairs with the cached id below.
+    std::atomic<bool> check_numerics_short_circuit{false};
+
+    // Cached first-NaN call_id, paired with short_circuit. Used by the dtor
+    // to compute the intentionally-skipped tail and by re-drains to keep
+    // reporting the same id (the device flag is not reset under STOP_ON_FIRST).
+    std::atomic<uint32_t> check_numerics_first_nan_call{0};
 };
 
 /********************************************************************************

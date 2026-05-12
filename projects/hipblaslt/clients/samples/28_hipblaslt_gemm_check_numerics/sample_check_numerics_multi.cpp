@@ -6,6 +6,8 @@
 //
 //   ./sample_check_numerics_multi [N=20] [inject_at=7]
 //
+// inject_at=0 means "no injection" (clean-run sanity test).
+//
 // Use cases:
 //   inject_at=7, SCAN_EVERY=5 -> calls 5,10,15,20 sampled; #7 is NOT in
 //                                that set, so no NaN reported (expected
@@ -133,7 +135,10 @@ int main(int argc, char** argv)
     int inject_at = (argc >= 3) ? std::atoi(argv[2]) : 7;
     if(total < 1)
         total = 20;
-    if(inject_at < 1 || inject_at > total)
+    // inject_at == 0 is an explicit opt-out: no NaN is ever injected
+    // (used for clean-run sanity tests). Other out-of-range values are
+    // clamped so accidental misconfiguration still exercises the scanner.
+    if(inject_at != 0 && (inject_at < 1 || inject_at > total))
         inject_at = total / 2;
 
     if(const char* cn = std::getenv("HIPBLASLT_CHECK_NUMERICS"))
