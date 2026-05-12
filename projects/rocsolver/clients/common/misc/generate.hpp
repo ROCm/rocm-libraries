@@ -30,6 +30,7 @@
 #include "common/misc/rocblas_random.hpp"
 #include "common/misc/rocsolver_test.hpp"
 
+#include <limits>
 #include <random>
 
 //------------------------------------------------------------------------------
@@ -209,6 +210,8 @@ void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int
     using S = decltype(std::real(T{}));
     std::uniform_real_distribution<S> dist(S(-1), S(1));
 
+    T const nan = std::numeric_limits<double>::quiet_NaN();
+
     if(n < 0 || kl < 0 || ku < 0 || ldab < kl + ku + 1)
         throw rocblas_status_invalid_size;
     if(!Aband)
@@ -265,7 +268,7 @@ void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int
     {
         for(rocblas_int k = 0; k < ku - j; ++k)
         {
-            Aband[k + j * ldab] = nan("");
+            Aband[k + j * ldab] = nan;
         }
     }
     // For lower band, work from right-most column (n-1) to left.
@@ -273,7 +276,7 @@ void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int
     {
         for(rocblas_int k = j; k < kl; ++k)
         {
-            Aband[idiag + 1 + k + (n - 1 - j) * ldab] = nan("");
+            Aband[idiag + 1 + k + (n - 1 - j) * ldab] = nan;
         }
     }
 }
