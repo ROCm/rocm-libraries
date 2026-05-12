@@ -63,6 +63,45 @@ file(WRITE "${INSTALL_TEST_FILE}"
 # Target that will trigger build of all tests
 add_custom_target(hiptensor_tests)
 
+# On Windows, DLL search order is: application dir -> System32 -> PATH.
+# A system-installed ROCm places amdhip64_7.dll and amd_comgr_3.dll in
+# System32, which always wins over PATH. If the test binary is compiled with
+# a newer toolchain but an older runtime is loaded from System32, kernel launches
+# may crash (SEH 0xC0000005) if the code-object format is incompatible.
+if(WIN32 AND CREATE_TEST_APP_LOCAL_DEPLOY)
+    # hip_DIR is set by find_package(HIP) to <HIP_ROOT>/lib/cmake/hip.
+    # Walk up three directory levels to reach <HIP_ROOT>, then append /bin.
+    get_filename_component(_hip_cmake_dir  "${hip_DIR}"          DIRECTORY) # .../lib/cmake
+    get_filename_component(_hip_lib_dir    "${_hip_cmake_dir}"   DIRECTORY) # .../lib
+    get_filename_component(_hip_root       "${_hip_lib_dir}"     DIRECTORY) # <HIP_ROOT>
+    set(_hip_bin_dir "${_hip_root}/bin")
+
+    message(STATUS "HIP runtime DLL source: ${_hip_bin_dir}")
+    message(STATUS "HIP runtime DLL destination: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+
+    if(EXISTS "${_hip_bin_dir}")
+        file(MAKE_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+        file(GLOB _hip_dlls
+            "${_hip_bin_dir}/amd_comgr*.dll"   # code-object manager
+            "${_hip_bin_dir}/amdhip64*.dll"    # HIP runtime
+            "${_hip_bin_dir}/amdhiprtc*.dll"   # HIP RTC
+            "${_hip_bin_dir}/rocm_kpack*.dll"  # kernel packaging
+        )
+        if(_hip_dlls)
+            foreach(_dll ${_hip_dlls})
+                file(COPY "${_dll}" DESTINATION "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+            endforeach()
+            list(LENGTH _hip_dlls _hip_dll_count)
+            message(STATUS "Staged ${_hip_dll_count} HIP runtime DLL(s) into ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+        else()
+            message(WARNING "No DLLs found in ${_hip_bin_dir} - tests may load wrong HIP runtime from System32")
+        endif()
+    else()
+        message(WARNING "HIP DLL source directory not found: ${_hip_bin_dir} - "
+                        "tests may load wrong HIP runtime from System32")
+    endif()
+endif()
+
 set(HIPTENSOR_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/common.cpp
                                   ${CMAKE_CURRENT_SOURCE_DIR}/hip_resource.cpp
                                   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_gtest_main.cpp)
@@ -141,6 +180,14 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
     # Set working directory to bin/ for proper DLL/resource loading on Windows
     set_property(TEST ${BINARY_NAME} PROPERTY WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
+    # On Windows, ensure the ROCm/HIP DLLs (amdhip64_7.dll, etc.) are discoverable by ctest.
+    # ctest may not inherit the user's PATH that includes the ROCm bin directory, causing
+    # HIP runtime DLL load failures (SEH 0xC0000005) on the first HIP call in a test fixture.
+    if(WIN32)
+        set_property(TEST ${BINARY_NAME} PROPERTY ENVIRONMENT
+            "PATH=${CMAKE_INSTALL_PREFIX}/bin$<SEMICOLON>${CMAKE_RUNTIME_OUTPUT_DIRECTORY}$<SEMICOLON>$ENV{PATH}")
+    endif()
+
     # Install with rocm pkg
     rocm_install_targets(
     TARGETS ${BINARY_NAME}
@@ -202,6 +249,14 @@ function(add_hiptensor_unit_test)
     set_property(TEST ${BINARY_NAME} PROPERTY SKIP_REGULAR_EXPRESSION "HIPTENSOR_STATUS_ARCH_MISMATCH" "unsupported host device")
     # Set working directory to bin/ for proper DLL/resource loading on Windows
     set_property(TEST ${BINARY_NAME} PROPERTY WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+    # On Windows, ensure the ROCm/HIP DLLs (amdhip64_7.dll, etc.) are discoverable by ctest.
+    # ctest may not inherit the user's PATH that includes the ROCm bin directory, causing
+    # HIP runtime DLL load failures (SEH 0xC0000005) on the first HIP call in a test fixture.
+    if(WIN32)
+        set_property(TEST ${BINARY_NAME} PROPERTY ENVIRONMENT
+            "PATH=${CMAKE_INSTALL_PREFIX}/bin$<SEMICOLON>${CMAKE_RUNTIME_OUTPUT_DIRECTORY}$<SEMICOLON>$ENV{PATH}")
+    endif()
 
     # Install with rocm pkg
     rocm_install_targets(

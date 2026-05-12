@@ -5,16 +5,16 @@ cmake_minimum_required(VERSION 3.25.2)
 message(STATUS "Building miopen provider plugin standalone")
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Include version utilities (must be before project() call)
-include(${CMAKE_CURRENT_LIST_DIR}/cmake/VersionUtils.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
 
 # Version handling
-miopen_provider_setup_version(miopen_provider)
+dnn_provider_setup_version(miopen_provider ${CMAKE_CURRENT_LIST_DIR})
 
 # Set project with version
 project(miopen-provider VERSION ${MIOPEN_PROVIDER_VERSION} LANGUAGES CXX)
@@ -43,8 +43,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip
-     ${HIP_DIR}/cmake
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+     ${CMAKE_CURRENT_SOURCE_DIR}/../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
 )
 
 # Migrate HIP_DNN_SKIP_TESTS -> MIOPENPROVIDER_SKIP_TESTS
@@ -108,6 +108,9 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
     if(NOT TARGET hipdnn_data_sdk)
         find_package(hipdnn_data_sdk CONFIG REQUIRED)
     endif()
+    if(NOT TARGET hipdnn_flatbuffers_sdk)
+        find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
+    endif()
     if(NOT TARGET hipdnn_plugin_sdk)
         find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
     endif()
@@ -118,6 +121,9 @@ include(ClangTidy)
 include(Sanitizers)
 
 include(Dependencies)
+if(NOT MIOPENPROVIDER_SKIP_TESTS)
+    fetch_gtest_dependency()
+endif()
 include(Tests)
 
 if(MIOPENPROVIDER_ENABLE_COVERAGE)
@@ -167,7 +173,7 @@ add_library(
     MiopenPluginPublic.cpp
 )
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 target_compile_options(miopen_plugin_impl PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
@@ -182,10 +188,10 @@ clang_tidy_check(miopen_plugin_impl)
 add_library(miopen_plugin_private STATIC $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_include_directories(miopen_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Link to miopen_plugin_impl to inherit its PUBLIC properties
-target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk miopen_plugin_impl)
+target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk miopen_plugin_impl)
 
 add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
-target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 if(NOT WIN32)
     target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
@@ -210,7 +216,7 @@ set_target_properties(miopen_plugin PROPERTIES
     THEROCK_INSTALL_RPATH_ORIGIN "lib/hipdnn_plugins/engines")
 
 # Generate version header
-miopen_provider_generate_version_header(miopen_provider miopen_plugin_impl)
+dnn_provider_generate_version_header(miopen_provider miopen_plugin_impl ${CMAKE_CURRENT_LIST_DIR})
 
 if(NOT MIOPENPROVIDER_SKIP_TESTS)
     add_subdirectory(tests)
@@ -219,11 +225,15 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets("${PROJECT_NAME}")
+    if(MIOPENPROVIDER_ENABLE_COVERAGE)
+        finalize_test_targets("${PROJECT_NAME}" ENABLE_COVERAGE)
+    else()
+        finalize_test_targets("${PROJECT_NAME}")
+    endif()
 
     # For standalone builds we need to install the ctest files
     if(NOT ROCM_LIBS_SUPERBUILD)
-        install_miopen_plugin_ctest_files()
+        install_provider_ctest_files("miopen_plugin")
     endif()
 
     if(NOT TARGET hipdnn_integration_tests)
@@ -235,6 +245,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             TARGET_NAME   ${PROJECT_NAME}-external-integration-check
             PLUGIN_TARGET miopen_plugin
             ENGINE_NAME   MIOPEN_ENGINE
+            TEST_CONFIG   ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
             GTEST_FILTER
                 *IsSupported*
                 *ConvFwd*

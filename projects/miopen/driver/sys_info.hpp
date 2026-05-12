@@ -83,9 +83,9 @@ public:
                   << "RAM Size: " << ramSize << "; " << "GPU Model: " << gpuInfo << "; "
                   << "AMDGPU Driver: " << amdgpuVer << std::endl;
 #else
-        miopMajor;
-        miopMinor;
-        miopPatch;
+        (void)miopMajor;
+        (void)miopMinor;
+        (void)miopPatch;
 #endif
     }
 

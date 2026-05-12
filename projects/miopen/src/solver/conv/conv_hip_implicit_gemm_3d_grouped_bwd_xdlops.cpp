@@ -36,7 +36,7 @@
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
-#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
@@ -50,6 +50,63 @@ namespace solver {
 namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
+
+namespace {
+
+// ============================================================================
+// Solver Configuration for Backward Data 3D Grouped Convolution
+// ============================================================================
+
+/**
+ * @brief Configuration for the 3D Backward Data grouped convolution solver
+ *
+ * This solver does NOT use split_k parameter (unlike 2D Backward which does).
+ * Only supports Candidate Selection heuristics (gfx942/gfx950).
+ * Note: 3D solvers do not have KTN models, so solver_name is used for all architectures.
+ */
+// clang-format off
+constexpr SolverHeuristicConfig k3DBwdSolverConfig = {
+    /* solver_name                 */ "ConvHipImplicitGemm3DGroupBwdXdlops",
+    /* solver_name_ktn             */ "ConvHipImplicitGemm3DGroupBwdXdlops", // No KTN for 3D
+    /* spatial_dims                */ 3,
+    /* uses_split_k                */ false,
+    /* split_k_min                 */ 0,
+    /* split_k_max                 */ 0,
+    /* supports_split_k_autodeduce */ false,
+    /* supports_ktn                */ false,
+};
+// clang-format on
+
+// clang-format off
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
+const std::vector<std::string> ranked_gemm_3d_grp_bwd = {
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Filter1x1Stride1Pad0, 32, 32, 1, 1, 16, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 2, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 2, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 4, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 1, 8, 1, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 2, 2, 1, 1, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Default, 32, 32, 1, 1, 16, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Default, 32, 32, 1, 1, 8, 2, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Default, 16, 16, 1, 1, 8, 1, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 128, 32, 8, 8, Default, 32, 32, 1, 2, 1, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>"
+};
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
+const std::vector<std::string> ranked_gemm_3d_grp_bwd_navi = {
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 128, 128, 32, 8, 8, Default, 16, 16, 8, 2, 8, 4, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Filter1x1Stride1Pad0, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 128, 64, 64, Default, 8, 8, 2>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 1, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Default, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>"
+};
+// clang-format on
+
+} // namespace
 
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
     const ProblemDescription& problem)
@@ -70,35 +127,6 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
         kernel_id = valid_kernels[index];
     }
 }
-
-// clang-format off
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static const std::vector<std::string> ranked_gemm_3d_grp_bwd = {
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Filter1x1Stride1Pad0, 32, 32, 1, 1, 16, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 4, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 1, 8, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 2, 2, 1, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Default, 32, 32, 1, 1, 16, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Default, 32, 32, 1, 1, 8, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Default, 16, 16, 1, 1, 8, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 128, 32, 8, 8, Default, 32, 32, 1, 2, 1, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>"
-};
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static const std::vector<std::string> ranked_gemm_3d_grp_bwd_navi = {
-"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 128, 128, 32, 8, 8, Default, 16, 16, 8, 2, 8, 4, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Filter1x1Stride1Pad0, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 128, 64, 64, Default, 8, 8, 2>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Default, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>"
-};
-// clang-format on
 
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::DefaultKernelFromList(
     const ExecutionContext& ctx)
@@ -128,125 +156,51 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::DefaultKernelFromList(
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
     const miopen::ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    index     = 0;
-    kernel_id = "None";
-    split_k   = 0; // split_k is not used in this solver, but it is required by the interface
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.Reset(k3DBwdSolverConfig.uses_split_k);
 
     const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return;
 
-        // 1. AI heuristics (if enabled)
+        // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR))
     {
-        MIOPEN_LOG_I2(
-            "Step 1: Attempting AI heuristics for data type: " << problem.GetInDataType());
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        std::string solver_name = "ConvHipImplicitGemm3DGroupBwdXdlops";
-
-        bool ai_success = false;
-        miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
-
-        auto run_ai_heuristics = [&](auto CKDataType, auto CKComputeType) {
-            using T        = decltype(CKDataType);
-            using TCompute = decltype(CKComputeType);
-            constexpr bool mode_use_tf32 =
-                std::is_same_v<T, float> && std::is_same_v<TCompute, TF32Tag>;
-
-            auto fill_valid_kernels =
-                [&loader](const ProblemDescription& p) -> std::vector<std::string> {
-                return loader.FillValidKernels(
-                    CKSolverType::GrpConv3dBwd, p, p.GetInDataType(), mode_use_tf32);
-            };
-            // Validation lambda for AI-predicted kernel + split_k combinations
-            auto is_kernel_split_k_valid = [&](int kernel_index, int split_k_value) -> bool {
-                if(kernel_index < 0 || kernel_index >= static_cast<int>(valid_kernels.size()))
-                    return false;
-
-                // TODO: Add split_k validation if split_k support is implemented
-                // for now, only allow split_k_value == 0
-                if(split_k_value != 0)
-                    return false;
-
-                return true;
-            };
-
-            auto ai_result =
-                miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
-                                                                     problem,
-                                                                     valid_kernels,
-                                                                     index,
-                                                                     split_k,
-                                                                     kernel_id,
-                                                                     fill_valid_kernels,
-                                                                     solver_name,
-                                                                     is_kernel_split_k_valid);
-            if(ai_result.first && !ai_result.second.IsEmpty())
-                use_tf32 = mode_use_tf32;
-            return ai_result;
+        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
+            return loader.FillValidKernels(
+                CKSolverType::GrpConv3dBwd, p, p.GetInDataType(), try_tf32);
         };
-        switch(problem.GetInDataType())
-        {
-        case miopenHalf:
-            std::tie(ai_success, result) = run_ai_heuristics(HalfTag{}, HalfTag{});
-            break;
-        case miopenFloat:
-            if(problem.UseTF32())
-            {
-                std::tie(ai_success, result) = run_ai_heuristics(float{}, TF32Tag{});
-                if(!ai_success || result.IsEmpty())
-                {
-                    MIOPEN_LOG_I2("Step 1: AI heuristics with TF32 failed, retrying with FP32");
-                    std::tie(ai_success, result) = run_ai_heuristics(float{}, float{});
-                }
-            }
-            else
-            {
-                std::tie(ai_success, result) = run_ai_heuristics(float{}, float{});
-            }
-            break;
-        case miopenBFloat16:
-            std::tie(ai_success, result) = run_ai_heuristics(BFloat16Tag{}, BFloat16Tag{});
-            break;
-        default: break;
-        }
 
-        if(ai_success && !result.IsEmpty())
+        auto ck_val_creator = MakeCKValidatorCreator(
+            loader, CKSolverType::GrpConv3dBwd, problem.GetInDataType(), mode_use_tf32);
+
+        // Note: No KTN runner needed for 3D (supports_ktn = false)
+        if(RunAIHeuristics(k3DBwdSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           false,
+                           fill_valid_kernels,
+                           nullptr,
+                           ck_val_creator,
+                           mode_use_tf32))
         {
-            MIOPEN_LOG_I("Step 1: AI heuristics selected kernel: " << kernel_id);
             return;
         }
-        else
-        {
-            MIOPEN_LOG_I2("Step 1: AI heuristics failed, proceeding to default initialization");
-            // Continue to default initialization
-        }
     }
-    else
-    {
-        MIOPEN_LOG_I2("Step 1: AI heuristics skipped (disabled or dummy context)");
-    }
-#else
-    MIOPEN_LOG_I2("Step 1: AI heuristics not available (MIOPEN_ENABLE_AI_KERNEL_TUNING disabled)");
 #endif
 
-    // 2. Default: index remains 0, first valid_kernel will be used
+    // Fallback to default initialization
     InitValidKernels(problem);
     if(!valid_kernels.empty())
     {
-        index     = 0;
-        kernel_id = valid_kernels[index];
         if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
             DefaultKernelFromList(ctx);
-
-        MIOPEN_LOG_I("Step 2: Default initialization selected kernel: " << kernel_id
-                                                                        << " at index: " << index);
-    }
-    else
-    {
-        MIOPEN_LOG_W("Step 2: Default initialization failed - no valid kernels found");
+        state.SetResult(index, split_k, k3DBwdSolverConfig.uses_split_k);
     }
 }
 

@@ -13,9 +13,9 @@ namespace hipdnn_sdk_test_utils
 {
 
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildRMSNormFwdGraph(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                         hipdnn_data_sdk::data_objects::DataType scaleDataType,
-                         hipdnn_data_sdk::data_objects::DataType computeDataType,
+    buildRMSNormFwdGraph(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                         hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,
+                         hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                          const std::vector<int64_t>& dims,
                          const hipdnn_data_sdk::utilities::TensorLayout& layout)
 {
@@ -28,7 +28,10 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
-    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    // Scale/bias shape matches input except batch is broadcast. Non-1 non-batch
+    // dims form a trailing suffix matching input — required by validateScaleNormalizedShape.
+    auto derivedDims = dims;
+    derivedDims[0] = 1;
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     int64_t uid = 1;
@@ -73,9 +76,11 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     yTensorAttr->set_stride(strides);
     yTensorAttr->set_is_virtual(false);
 
-    // invRms has one value per (batch, spatial) position: shape [N, 1, H, W, ...]
-    auto invRmsDims = dims;
-    invRmsDims[1] = 1;
+    // invRms derived from scale (validateNormStatsShapeIfSet): where scale is
+    // non-1, inv_rms is 1; where scale is 1, inv_rms matches input.
+    // With scale matching input except batch, inv_rms is [N, 1, 1, 1, ...].
+    auto invRmsDims = std::vector<int64_t>(dims.size(), 1);
+    invRmsDims[0] = dims[0];
     auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
 
     auto& invRmsTensorAttr = outputTensorsAttr[1];
@@ -93,9 +98,9 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 }
 
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildRMSNormFwdGraphWithBias(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                                 hipdnn_data_sdk::data_objects::DataType scaleDataType,
-                                 hipdnn_data_sdk::data_objects::DataType computeDataType,
+    buildRMSNormFwdGraphWithBias(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                                  const std::vector<int64_t>& dims,
                                  const hipdnn_data_sdk::utilities::TensorLayout& layout)
 {
@@ -108,7 +113,10 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
-    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    // Scale/bias shape matches input except batch is broadcast. Non-1 non-batch
+    // dims form a trailing suffix matching input — required by validateScaleNormalizedShape.
+    auto derivedDims = dims;
+    derivedDims[0] = 1;
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     int64_t uid = 1;
@@ -163,9 +171,11 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     yTensorAttr->set_stride(strides);
     yTensorAttr->set_is_virtual(false);
 
-    // invRms has one value per (batch, spatial) position: shape [N, 1, H, W, ...]
-    auto invRmsDims = dims;
-    invRmsDims[1] = 1;
+    // invRms derived from scale (validateNormStatsShapeIfSet): where scale is
+    // non-1, inv_rms is 1; where scale is 1, inv_rms matches input.
+    // With scale matching input except batch, inv_rms is [N, 1, 1, 1, ...].
+    auto invRmsDims = std::vector<int64_t>(dims.size(), 1);
+    invRmsDims[0] = dims[0];
     auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
 
     auto& invRmsTensorAttr = outputTensorsAttr[1];

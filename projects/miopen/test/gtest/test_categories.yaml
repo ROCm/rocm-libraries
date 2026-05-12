@@ -347,7 +347,7 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "*GPU_Dropout_FP16*"
   - "*GPU_GroupConv3D_BackwardData_FP16.GroupConv3D_BackwardData_half_Test*"
   - "*GPU_GroupConv3D_BackwardData_BFP16.GroupConv3D_BackwardData_bfloat16_Test*"
-  - "*GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_BFP16.ConvHipImplicitGemmGroupWrwXdlops*"
+  - "*GPU_UnitTestConvSolverImplicitGemmGroup*" # issue: ALMIOPEN-1841
   - "Smoke/GPU_MultiMarginLoss*"
   - "*CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_FP16.ConvHipImplicitGemmGroupWrwXdlops*"
   # Slow tests to exclude (from #3362)

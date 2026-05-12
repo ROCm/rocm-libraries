@@ -2,17 +2,24 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM 4.4.0 for ROCm 7.13
+## Since last release ROCm 7.12
 
 ### Added
 
 * Added type trait definitions for `__hip_bfloat16`. This should resolve issues where this type did not work with radix-based algorithms.
+* Unit tests for config_types
 
-### Changed
+### Optimized
 
-* Building benchmarks on Windows is not currently possible because of the dependency on AMD SMI. 
-  * A CMake-level check has been added to prevent them from being built on Windows.
-  * The rmake.py build script no longer builds benchmarks by default on Windows when passed the `--clients` option.
+* Reduced build times for unit tests.
+* Memory usage in unit tests.
+
+### Resolved issues
+
+* Fixed a silent overflow in `rocprim::device_segmented_reduce` where it could exceed the maximum number of HIP threads, resulting in missing output.
+* Certain large unit tests now properly detect if insufficient system memory is present and skip the test case accordingly.
+* Fixed out-of-bounds memory access in block run length decode.
+* Fixed memory leak in unit tests.
 
 ## rocPRIM 4.3.0 for ROCm 7.12
 
@@ -34,6 +41,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Benchmarking now requires [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) to be installed.
   * rocPRIM now uses the new single-header library 'primbench' for benchmarks, rather than Google Benchmark. primbench requires AMD SMI.
   * See `shared/primbench/README.md` for primbench its documentation.
+* Uses mold linker for compilation if availible.
 
 ### Removed
 

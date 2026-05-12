@@ -3,6 +3,7 @@ TestParameters:
 
 GlobalParameters:
   NumElementsToValidate: -1
+  SyncsPerBenchmark: 0
   PrintSolutionRejectionReason: True
   DataInitTypeA: 12
   DataInitTypeB: 13
