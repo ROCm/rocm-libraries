@@ -1480,8 +1480,7 @@ class GSUOn(GSU):
         loadOffsetSgpr = tmpSgpr.idx + 1
         storeOffsetSgprRes = ContinuousRegister(storeOffsetSgpr, 1)
         
-        # GSU reduction always reads/writes workspace via buffer instructions (SRD-based)
-        useBuffer = True
+        useBuffer = kernel["BufferStore"]
         addr1 = sgpr(tmpS06, 4)
         addr0 = vgpr(vgproffset)
         bps = kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
@@ -1673,15 +1672,6 @@ class GSUOn(GSU):
                     if useBuffer:
                         module.add(VCmpGEI32(dst=sgpr(tmpS05,2), src0=0, src1=sgpr("GSUSync"), comment=""))
                         module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=sgpr(tmpS05,2), comment="protect if OOB"))
-                    else:
-                        # Flat mode: rebuild VGPR addr from updated sgpr base
-                        addrDVgpr = addrCalc.addrDVgpr
-                        module.add(vectorStaticMultiply(vgpr(addrDVgpr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, storeOffsetSgprRes))
-                        module.add(VMovB32(dst=vgpr(addrDVgpr+1), src=0, comment="zero hi addr bits"))
-                        module.add(VAddCOU32(dst=vgpr(addrDVgpr), dst1=VCC(), src0=sgpr(tmpS06+0), src1=vgpr(addrDVgpr), comment="add WS base lo"))
-                        module.add(VAddCCOU32(dst=vgpr(addrDVgpr+1), dst1=VCC(), src0=sgpr(tmpS06+1), src1=vgpr(addrDVgpr+1), src2=VCC(), comment="add WS base hi"))
-
-                    if useBuffer:
                         if(kernel["ProblemType"]["DestDataType"].numRegisters() > 1):
                             module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*kernel["ProblemType"]["DestDataType"].numRegisters()*i, \
                                         vgpr(GSUMvgpr), addr1, soffset=0, offset=0, glc=True, slc=True, \
@@ -1691,14 +1681,37 @@ class GSUOn(GSU):
                                         vgpr(GSUMvgpr), addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True, \
                                         comment="prefetch GSU WG element %d" % elementIdx))
                     else:
-                        if(kernel["ProblemType"]["DestDataType"].numRegisters() > 1):
-                            module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*kernel["ProblemType"]["DestDataType"].numRegisters()*i, \
+                        # Flat mode: skip prefetch and zero dest vgprs if OOB (GSUSync <= 0)
+                        # Buffer loads return 0 for OOB; flat must explicitly zero to match.
+                        numRegisters = kernel["ProblemType"]["DestDataType"].numRegisters()
+                        flatOobSkipLabel = Label(writer.labels.getNameInc("flat_oob_skip"), "skip flat prefetch if OOB")
+                        flatOobDoneLabel = Label(writer.labels.getNameInc("flat_oob_done"), "flat OOB done")
+                        module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="GSUSync <= 0?"))
+                        module.add(SCBranchSCC1(labelName=flatOobSkipLabel.getLabelName(), comment="skip flat prefetch if OOB"))
+                        # Rebuild VGPR addr from updated sgpr base
+                        addrDVgpr = addrCalc.addrDVgpr
+                        module.add(vectorStaticMultiply(vgpr(addrDVgpr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, storeOffsetSgprRes))
+                        module.add(VMovB32(dst=vgpr(addrDVgpr+1), src=0, comment="zero hi addr bits"))
+                        module.add(VAddCOU32(dst=vgpr(addrDVgpr), dst1=VCC(), src0=sgpr(tmpS06+0), src1=vgpr(addrDVgpr), comment="add WS base lo"))
+                        module.add(VAddCCOU32(dst=vgpr(addrDVgpr+1), dst1=VCC(), src0=sgpr(tmpS06+1), src1=vgpr(addrDVgpr+1), src2=VCC(), comment="add WS base hi"))
+                        if numRegisters > 1:
+                            module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*numRegisters*i, \
                                         addr0, addr1, soffset=0, offset=0, glc=True, slc=True, \
                                         comment="prefetch GSU WG element %d" % elementIdx))
                         else:
                             module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*i, \
                                         addr0, addr1, soffset=0, offset=0, glc=True, slc=True, \
                                         comment="prefetch GSU WG element %d" % elementIdx))
+                        module.add(SBranch(labelName=flatOobDoneLabel.getLabelName(), comment="skip OOB zeroing"))
+                        # OOB path: zero destination vgprs so accumulation adds 0
+                        module.add(flatOobSkipLabel)
+                        if numRegisters > 1:
+                            for j in range(gwvw * numRegisters):
+                                module.add(VMovB32(dst=vgpr(tmpVAdd+gwvw*numRegisters*i+j), src=0, comment="zero OOB prefetch vgpr"))
+                        else:
+                            for j in range(gwvw):
+                                module.add(VMovB32(dst=vgpr(tmpVAdd+gwvw*i+j), src=0, comment="zero OOB prefetch vgpr"))
+                        module.add(flatOobDoneLabel)
                     vlcnt += 1
 
                 module.addComment("buffer add end")

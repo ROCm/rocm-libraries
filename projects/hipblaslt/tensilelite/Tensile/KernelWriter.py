@@ -6262,12 +6262,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # - tailloopInNll (cannot support staggerU)
     # - StreamK + MX (not enough sgpr. gfx950 only for now)
     # also disable for BufferLoad=0: stagger uses SRD increment which only exists in buffer mode
+    # remove staggerU code for tailloopInNll (cannot support staggerU)
     self.states.staggerUCode = not self.states.tailloopInNll and kernel["BufferLoad"]
     if (kernel["StreamK"] and \
         (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) and \
         isgfx950) or kernel["UseSubtileImpl"]:
       self.states.staggerUCode = False
-    # remove staggerU code for tailloopInNll (cannot support staggerU)
     
     self.states.tailloopInNllmaxUnit = 1
     if self.states.tailloopInNll:
