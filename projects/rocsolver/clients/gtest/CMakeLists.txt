@@ -140,6 +140,8 @@ set(rocunit_test_source
   unit/gemm_gtest.cpp
   # generate helpers
   unit/gerand_gtest.cpp
+  unit/herand_gtest.cpp
+  unit/syrand_gtest.cpp
 )
 
 set(others_test_source
