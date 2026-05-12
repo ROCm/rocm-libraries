@@ -564,11 +564,18 @@ class rocblas_pointer_mode_saver
 {
 public:
     // Constructor saves original mode and sets mode to new_mode.
+    // Throws rocblas_status exception for a bad handle, which is expected
+    // to be caught in _impl functions.
     rocblas_pointer_mode_saver( rocblas_handle& handle, rocblas_pointer_mode new_mode ):
         handle_( handle )
     {
-        rocblas_get_pointer_mode( handle_, &old_mode_ );
-        rocblas_set_pointer_mode( handle_, new_mode );
+        rocblas_status status = rocblas_get_pointer_mode( handle_, &old_mode_ );
+        if (status != rocblas_status_success)
+            throw status;
+
+        status = rocblas_set_pointer_mode( handle_, new_mode );
+        if (status != rocblas_status_success)
+            throw status;
     }
 
     // Destructor restores original mode.
