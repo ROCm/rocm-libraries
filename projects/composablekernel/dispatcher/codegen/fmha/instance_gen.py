@@ -61,8 +61,11 @@ from specs import (  # noqa: E402
     VALID_BM0,
     VALID_BN0,
     WARP_CLASSES,
-    check_logits_bias,
+    check_gfx9_tile_constraints,
+    check_gfx950_tile_constraints,
     check_group_mode_padding,
+    check_logits_bias,
+    check_qr_mfma_insts,
     receipt_filter,
     tile_passes_all_constraints,
 )
@@ -1354,11 +1357,6 @@ def tile_compatible(
     tile: Tuple[int, ...],
 ) -> bool:
     """Check if a tile tuple passes arch-specific constraints (subset of tile_passes_all_constraints)."""
-    from specs import (
-        check_gfx9_tile_constraints,
-        check_gfx950_tile_constraints,
-        check_qr_mfma_insts,
-    )
 
     bm0, bn0, bk0 = tile[0], tile[1], tile[2]
 
