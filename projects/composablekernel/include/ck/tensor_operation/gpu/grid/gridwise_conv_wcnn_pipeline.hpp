@@ -1490,7 +1490,7 @@ struct GridwiseConvPipeline_v1<1, true, false, true, true>
 
         // tail
         {
-            block_sync_lds();
+            block_sync_lds_async_load();
 
             blockwise_conv.Run(wei_block_buf,
                                in_block_buf,
