@@ -577,6 +577,12 @@ public:
         rocblas_set_pointer_mode( handle_, old_mode_ );
     }
 
+    // Non-copyable and non-movable.
+    rocblas_pointer_mode_saver( const rocblas_pointer_mode_saver& ) = delete;
+    rocblas_pointer_mode_saver( rocblas_pointer_mode_saver&& )      = delete;
+    rocblas_pointer_mode_saver& operator=( const rocblas_pointer_mode_saver& ) = delete;
+    rocblas_pointer_mode_saver& operator=( rocblas_pointer_mode_saver&& )      = delete;
+
 private:
     rocblas_handle& handle_;
     rocblas_pointer_mode old_mode_;
