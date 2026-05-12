@@ -37,6 +37,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
 )
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -192,3 +193,91 @@ foreach(PATH fast slow)
         )
     endforeach()
 endforeach()
+
+#################################################
+#        FP8 tests (fast & slow)                #
+#################################################
+if(NOT WIN32)
+    foreach(TYPE f8 bf8 f8fnuz bf8fnuz)
+        foreach(PATH fast slow)
+            if("${PATH}" STREQUAL "fast")
+                set(PATH_FLAGS --tryFastPath)
+            else()
+                set(PATH_FLAGS "")
+            endif()
+
+            # Transpose combos
+            foreach(TRANS NN TN NT TT)
+                get_trans_flags(${TRANS} TFLAGS)
+                add_cpu_gemm_test(${PATH}_${TYPE}_${TRANS}
+                    ARGS ${F16_SIZES} ${TFLAGS} --type ${TYPE} --validate ${PATH_FLAGS}
+                )
+            endforeach()
+
+            # Feature tests
+            add_cpu_gemm_test(${PATH}_${TYPE}_Beta
+                ARGS ${F16_SIZES} --type ${TYPE} --beta 1.0 --validate ${PATH_FLAGS}
+            )
+            add_cpu_gemm_test(${PATH}_${TYPE}_Beta_Half
+                ARGS ${F16_SIZES} --type ${TYPE} --beta 0.5 --validate ${PATH_FLAGS}
+            )
+            add_cpu_gemm_test(${PATH}_${TYPE}_Bias
+                ARGS ${F16_SIZES} --type ${TYPE} --validate --bias ${PATH_FLAGS}
+            )
+            add_cpu_gemm_test(${PATH}_${TYPE}_AllFeatures
+                ARGS ${F16_SIZES} --type ${TYPE} --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+            )
+            add_cpu_gemm_test(${PATH}_${TYPE}_TN_AllFeatures
+                ARGS ${F16_SIZES} --transA --type ${TYPE} --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+            )
+
+            # ScaleAB tests
+            foreach(MODE Scalar Vector)
+                add_cpu_gemm_test(${PATH}_${TYPE}_ScaleAB_${MODE}
+                    ARGS ${F16_SIZES} --type ${TYPE} --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+                )
+            endforeach()
+        endforeach()
+    endforeach()
+endif()
+
+#################################################
+# Mixed-input-type FP8 tests (fast & slow path).#
+# Reproduces production failure where A and B   #
+# have different storage types but share a      #
+# narrower MAC compute-input type (the kernel   #
+# quantizes the wider operand for F8 MFMA).     #
+# See: sk_f8ngemm_quick.yaml F8NH_F8NSS NN.     #
+#################################################
+if(NOT WIN32)
+    foreach(PATH fast slow)
+        if("${PATH}" STREQUAL "fast")
+            set(PATH_FLAGS --tryFastPath)
+        else()
+            set(PATH_FLAGS "")
+        endif()
+
+        # A=F8N, B=Half, both quantized to F8N at the MAC. This is the exact
+        # shape that failed in sk_f8ngemm_quick.yaml's F8NH_F8NSS NN test.
+        # Pre-fix, the fast path skipped the B->F8N quantization while the slow
+        # path applied it, and the two diverged.
+        add_cpu_gemm_test(${PATH}_f8fnuz_x_h_macF8N
+            ARGS ${F16_SIZES} --typeA f8fnuz --typeB f16 --computeInputB f8fnuz --validate ${PATH_FLAGS}
+        )
+        # OCP F8 counterpart (same shape, non-fnuz storage).
+        # NB: BFloat8_fnuz x Half is intentionally absent - the slow path
+        # has no TypedGemm dispatch for that combination.
+        add_cpu_gemm_test(${PATH}_f8_x_h_macF8
+            ARGS ${F16_SIZES} --typeA f8 --typeB f16 --computeInputB f8 --validate ${PATH_FLAGS}
+        )
+        # Mirror cases - A is the wider operand and gets quantized to F8 at
+        # the MAC. Exercises the symmetric A-side quantization path on both
+        # the test driver init and the GEMM implementations.
+        add_cpu_gemm_test(${PATH}_h_x_f8fnuz_macF8N
+            ARGS ${F16_SIZES} --typeA f16 --typeB f8fnuz --computeInputA f8fnuz --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_h_x_f8_macF8
+            ARGS ${F16_SIZES} --typeA f16 --typeB f8 --computeInputA f8 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+endif()

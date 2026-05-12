@@ -205,7 +205,7 @@ class TestCLIParser:
 
         args = create_parser().parse_args(["--graph", "/test/graph.json"])
 
-        assert args.graph == "/test/graph.json"
+        assert args.graph == ["/test/graph.json"]
         assert args.warmup == 10
         assert args.iters == 100
         # --engine defaults to None (= run all discovered engines)
@@ -228,7 +228,7 @@ class TestCLIParser:
             ]
         )
 
-        assert args.graph == "/test/graph.json"
+        assert args.graph == ["/test/graph.json"]
         assert args.warmup == 20
         assert args.iters == 200
         assert args.engine == [2]
@@ -241,7 +241,7 @@ class TestCLIParser:
             ["-g", "/test/graph.json", "-w", "5", "-i", "50", "-e", "3"]
         )
 
-        assert args.graph == "/test/graph.json"
+        assert args.graph == ["/test/graph.json"]
         assert args.warmup == 5
         assert args.iters == 50
         assert args.engine == [3]

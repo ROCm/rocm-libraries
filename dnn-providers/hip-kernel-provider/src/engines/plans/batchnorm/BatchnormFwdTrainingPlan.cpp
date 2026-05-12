@@ -387,20 +387,19 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     bool isGfx115X = (archName.find("gfx115") == 0);
 
     // Get activation mode
-    int nrnOpId = 0;
-
+    auto activationMode = hip_kernel_utils::ActivationMode::PASTHRU;
     if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
     {
-        const auto& activation = *_trainingParams.optActivation();
-        nrnOpId = static_cast<int>(activation.mode);
+        activationMode = (*_trainingParams.optActivation()).mode;
     }
 
     // Prepare compilation options
-    HipKernelCompileOptions options(_trainingParams.x(), deviceProperties);
+    HipKernelCompileOptions options(_trainingParams.x(), deviceProperties, activationMode);
     options.add("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.add("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
-    options.update("HIP_PLUGIN_USE_FP16",
-                   0); // Not using this path due to scale/bias data type requirements
+    // Not using FP16 and BFP16 paths due to affine data type requirements
+    options.update("HIP_PLUGIN_USE_FP16", 0);
+    options.update("HIP_PLUGIN_USE_BFP16", 0);
     options.add("HIP_PLUGIN_SAVE_MEAN_VARIANCE", _trainingParams.hasSaveMeanVariance());
     options.add("HIP_PLUGIN_RUNNING_RESULT", _trainingParams.hasRunningStats());
     options.add("HIP_PLUGIN_BN_VARIANT", variant);
@@ -428,7 +427,6 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     options.add("HIP_PLUGIN_BN_VECTORIZE", vectorsize > 1);
     options.add("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
     options.add("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
-    options.add("HIP_PLUGIN_NRN_OP_ID", nrnOpId);
 
     // Compile the kernel and configure launch parameters based on the selected variant
     _compiledProgram = kernelCompiler.compile("BatchNormFwdTrainSpatial.cpp", options);

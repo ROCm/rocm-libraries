@@ -7,12 +7,16 @@
 #include "hip/HipKernel.hpp"
 #include "hip/HipProgram.hpp"
 
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
 #include <vector>
 
 using namespace hip_kernel_provider;
 
 TEST(TestHipProgram, CompilesAndGetsKernel)
 {
+    SKIP_IF_NO_DEVICES();
+
     HipProgram program("vector_add.cpp", {"-O3"});
     hipFunction_t kernel = program.getKernel("vector_add");
     EXPECT_NE(nullptr, kernel);
@@ -20,6 +24,8 @@ TEST(TestHipProgram, CompilesAndGetsKernel)
 
 TEST(TestHipKernel, LaunchesVectorAdd)
 {
+    SKIP_IF_NO_DEVICES();
+
     constexpr int N = 256;
 
     // Allocate and initialize

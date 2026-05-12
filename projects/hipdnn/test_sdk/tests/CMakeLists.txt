@@ -37,6 +37,7 @@ add_executable(
     utilities/TestDynamicTolerancesMatmul.cpp
     utilities/TestDynamicTolerancesPointwise.cpp
     utilities/TestDynamicTolerancesRMSNorm.cpp
+    utilities/TestDynamicTolerancesSdpa.cpp
     utilities/TestGraphTestHelpers.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
     utilities/TestFlatbufferTensorAttributesUtils.cpp

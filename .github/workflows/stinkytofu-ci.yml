@@ -11,7 +11,6 @@ on:
   pull_request:
     paths:
       - 'shared/stinkytofu/**'
-      - 'projects/hipblaslt/tensilelite/rocisa/**'
       - '.github/workflows/stinkytofu-ci.yml'
   workflow_dispatch:
 
@@ -36,31 +35,19 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install -r shared/stinkytofu/requirements.txt
-          pip install boto3 nanobind
 
-      - name: Checkout TheRock
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
         with:
-          repository: ROCm/TheRock
-          ref: dc88ae1f34e0ac09d46f0147df82c1184abd6ae4 # 2026-04-22
-          path: TheRock
-          sparse-checkout: build_tools
-
-      - name: Install ROCm
-        run: |
-          python3 TheRock/build_tools/install_rocm_from_artifacts.py \
-            --latest-release \
-            --amdgpu-family gfx94X-dcgpu \
-            --output-dir /opt/rocm \
-            --base-only
-
-      - name: Build
-        working-directory: shared/stinkytofu
-        run: invoke build
+          amdgpu_family: gfx94X-dcgpu
 
       - name: Build (GCC)
         working-directory: shared/stinkytofu
         run: invoke build --gcc --build-dir build_gcc --clean
+
+      - name: Build
+        working-directory: shared/stinkytofu
+        run: invoke build
 
       - name: Debug stinkytofu-opt
         working-directory: shared/stinkytofu/build
@@ -72,20 +59,11 @@ jobs:
         working-directory: shared/stinkytofu/build
         run: ctest --output-on-failure
 
-      - name: Build rocisa
-        working-directory: projects/hipblaslt/tensilelite/rocisa
-        run: |
-          cmake -B build \
-            -DCMAKE_CXX_COMPILER="$ROCM_PATH/lib/llvm/bin/amdclang++" \
-            -DCMAKE_C_COMPILER="$ROCM_PATH/lib/llvm/bin/amdclang" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DROCISA_STANDALONE=ON \
-            -Dnanobind_DIR=$(python3 -c "import nanobind; print(nanobind.cmake_dir())")
-          cmake --build build
-
-      - name: Test rocisa import
-        working-directory: projects/hipblaslt/tensilelite/rocisa/build
-        run: PYTHONPATH=. python3 -c "import rocisa; print('rocisa import OK')"
+      - name: Test pip install
+        uses: ./.github/actions/pip-install-test
+        with:
+          package_path: shared/stinkytofu
+          test_path: python_module/tests
 
   Windows:
     runs-on: azure-windows-scale-rocm
@@ -109,27 +87,14 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install -r shared/stinkytofu/requirements.txt
-          pip install boto3 nanobind
 
       - name: Install GTest
         run: vcpkg install gtest
 
-      - name: Checkout TheRock
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-windows
         with:
-          repository: ROCm/TheRock
-          ref: dc88ae1f34e0ac09d46f0147df82c1184abd6ae4 # 2026-04-22
-          path: TheRock
-          sparse-checkout: build_tools
-
-      - name: Install ROCm
-        run: |
-          python3 TheRock/build_tools/install_rocm_from_artifacts.py \
-            --latest-release \
-            --amdgpu-family gfx1151 \
-            --output-dir B:/ROCm \
-            --base-only
-          echo "ROCM_PATH=B:/ROCm" >> $GITHUB_ENV
+          amdgpu_family: gfx1151
 
       - name: Build
         working-directory: shared/stinkytofu
@@ -147,25 +112,8 @@ jobs:
         working-directory: ${{ env.BUILD_DIR }}/stinkytofu-static
         run: ctest --output-on-failure
 
-      - name: Build rocisa
-        working-directory: projects/hipblaslt/tensilelite/rocisa
-        shell: cmd
-        run: |
-          for /f "delims=" %%i in ('"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find VC\Auxiliary\Build\vcvarsall.bat') do call "%%i" amd64
-          set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\llvm\bin;%PATH%
-          for /f "delims=" %%i in ('python3 -c "import nanobind; print(nanobind.cmake_dir())"') do set NANOBIND_DIR=%%i
-          for /f "delims=" %%i in ('where amdclang++') do set CXX_COMPILER=%%i
-          for /f "delims=" %%i in ('where amdclang') do set C_COMPILER=%%i
-          cmake -B %BUILD_DIR%/rocisa -G "NMake Makefiles" -DCMAKE_CXX_COMPILER="%CXX_COMPILER%" -DCMAKE_C_COMPILER="%C_COMPILER%" -DCMAKE_BUILD_TYPE=Release -DROCISA_STANDALONE=ON -DCMAKE_PREFIX_PATH="%ROCM_PATH%" -Dnanobind_DIR="%NANOBIND_DIR%"
-          cmake --build %BUILD_DIR%/rocisa
-
-      - name: Test rocisa import
-        run: |
-          python3 -c "
-          import os, sys
-          build_dir = os.environ['BUILD_DIR']
-          os.add_dll_directory(os.path.join(build_dir, 'rocisa', 'rocisa'))
-          sys.path.insert(0, os.path.join(build_dir, 'rocisa'))
-          import rocisa
-          print('rocisa import OK')
-          "
+      - name: Test pip install
+        uses: ./.github/actions/pip-install-test
+        with:
+          package_path: shared/stinkytofu
+          test_path: python_module/tests

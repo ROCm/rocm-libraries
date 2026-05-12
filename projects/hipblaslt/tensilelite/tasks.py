@@ -11,6 +11,30 @@ import sys
 def _cmake_bool(value):
     return "ON" if value else "OFF"
 
+
+def _detect_rocm():
+    """Detect ROCm installation path.
+
+    Priority: ROCM_PATH env > rocm-sdk path --root > /opt/rocm.
+    """
+    env_path = os.environ.get("ROCM_PATH")
+    if env_path:
+        return env_path
+
+    import shutil
+    if shutil.which("rocm-sdk"):
+        try:
+            result = subprocess.check_output(
+                ["rocm-sdk", "path", "--root"], stderr=subprocess.DEVNULL
+            ).decode().strip()
+            if result:
+                return result
+        except subprocess.CalledProcessError:
+            pass
+
+    return "/opt/rocm"
+
+
 def detect_gpu_arch():
     try:
         result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
@@ -50,7 +74,10 @@ def rocisa(c, rocisa_dir=None):
     import pathlib
 
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else pathlib.Path(__file__).parent / "rocisa"
-    c.run(f"pip install -e {shlex.quote(str(src))}")
+    rocm = _detect_rocm()
+    cmake_args = f"-DROCM_PATH={rocm} -DROCISA_INCLUDE_BUILD_INFO=ON"
+    env = dict(os.environ, CMAKE_ARGS=cmake_args)
+    c.run(f"pip install -e {shlex.quote(str(src))}", env=env)
 
 
 @task(

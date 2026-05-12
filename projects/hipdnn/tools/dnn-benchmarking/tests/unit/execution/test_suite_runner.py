@@ -13,10 +13,9 @@ from dnn_benchmarking.execution.suite_runner import (
     _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
-    _is_support_error,
 )
 from dnn_benchmarking.config.benchmark_config import SuiteConfig
-from dnn_benchmarking.common.exceptions import ExecutionError
+from dnn_benchmarking.common.exceptions import ExecutionError, UnsupportedGraphError
 from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
     CorrectnessResult,
@@ -182,13 +181,13 @@ class TestRunGraphAllProviders:
         mock_get_ref,
         mock_resolve_name,
     ):
-        """An ExecutionError that looks like a support-check failure is recorded as skipped."""
+        """An UnsupportedGraphError is recorded as skipped."""
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
         mock_exec_cls.side_effect = _make_exec_factory(
             engine_ids=[0],
-            prepare_side_effect=ExecutionError(
+            prepare_side_effect=UnsupportedGraphError(
                 "Backend support check failed: not supported"
             ),
         )
@@ -313,11 +312,10 @@ class TestDiscoveryFailure:
         assert "No engines discovered" in result.results[0].error_message
 
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
-    def test_no_engines_runtime_error_recorded_as_skipped(self, mock_exec_cls):
-        """C++ binding throws RuntimeError when no engines support the graph;
-        we classify that as 'skipped' (unsupported) rather than 'error'."""
+    def test_no_engines_unsupported_error_recorded_as_skipped(self, mock_exec_cls):
+        """UnsupportedGraphError during discovery is recorded as skipped."""
         mock_exec_cls.side_effect = _make_exec_factory(
-            discover_side_effect=RuntimeError(
+            discover_side_effect=UnsupportedGraphError(
                 "Failed to get ranked engine ids: No engine configurations available for the graph."
             )
         )
@@ -411,32 +409,6 @@ class TestSuiteConfigValidation:
             SuiteConfig(gpu_backend=backend)
         for provider in ("none", "pytorch", "cpu_plugin"):
             SuiteConfig(reference_provider=provider)
-
-
-class TestIsSupportError:
-    """Tests for _is_support_error keyword classification."""
-
-    def test_support_check_failed_is_support_error(self):
-        assert _is_support_error("Backend support check failed: bad config") is True
-
-    def test_not_supported_is_support_error(self):
-        assert _is_support_error("Operation not supported on this engine") is True
-
-    def test_unsupported_is_support_error(self):
-        assert _is_support_error("unsupported tensor layout") is True
-
-    def test_no_engine_is_support_error(self):
-        assert _is_support_error("no engine available for this graph") is True
-
-    def test_case_insensitive(self):
-        assert _is_support_error("UNSUPPORTED") is True
-        assert _is_support_error("Not Supported") is True
-
-    def test_unrelated_error_not_support_error(self):
-        assert _is_support_error("out of memory") is False
-
-    def test_empty_string_not_support_error(self):
-        assert _is_support_error("") is False
 
 
 class TestEngineFilter:
