@@ -44,19 +44,30 @@ RH_major = 2         →  H sub-dimensions of X[1]  ← HsLengthss[1]
 RH_major = NDimX     →  H sub-dimensions of X[NDimX-1]
 ```
 
-Within a given `RH_major`, `RH_minor` is the index within that group's sub-dimensions.
+Within a given `RH_major`, `RH_minor` is the index into the inner sequence of that group:
+
+- When `RH_major = 0`: `RH_minor` indexes into `RsLengths` (the R factor sizes).
+- When `RH_major = i+1`: `RH_minor` indexes into `HsLengthss[i]` (the H factor sizes for X[i]).
+
+So `(RH_major, RH_minor)` uniquely identifies a single scalar factor, and its size is:
+
+```
+size(RH_major=0,   RH_minor=j)  =  RsLengths[j]
+size(RH_major=i+1, RH_minor=j)  =  HsLengthss[i][j]
+```
 
 Example with `HsLengthss = tuple<seq<1>, seq<4,8>, seq<16>>`:
 
 ```
-(RH_major=1, RH_minor=0)  →  length 1   (trivial factor of X[0])
-(RH_major=2, RH_minor=0)  →  length 4   (outer factor of X[1])
-(RH_major=2, RH_minor=1)  →  length 8   (inner factor of X[1])
-(RH_major=3, RH_minor=0)  →  length 16  (only factor of X[2])
+(RH_major=1, RH_minor=0)  →  HsLengthss[0][0] = 1   (only factor of X[0], trivial)
+(RH_major=2, RH_minor=0)  →  HsLengthss[1][0] = 4   (outer factor of X[1])
+(RH_major=2, RH_minor=1)  →  HsLengthss[1][1] = 8   (inner factor of X[1])
+(RH_major=3, RH_minor=0)  →  HsLengthss[2][0] = 16  (only factor of X[2])
 ```
 
-**The X coordinate** is the product of all its H factors:
-`X[i] = H[i][0] * H[i][1] * ...`, reconstructed by unmerging the H indices.
+**The X coordinate** is reconstructed from its H factors by a mixed-radix sum (see Section 4.2 for the precise formula), where each factor's stride is the product of the *sizes* of all inner factors from `HsLengthss[i]`.
+
+Note: the number factors can be different for each `i`. It is determined by `HsLengthss[i].size()`.
 
 ---
 
@@ -79,16 +90,30 @@ tile_distribution_encoding<
 
 ### 4.2 `HsLengthss` — Hidden Factor Lengths per X Dimension
 
-`tuple<seq<a0,a1,...>, seq<b0,b1,...>, ...>` — one inner sequence per X dimension. Each inner sequence lists the factor lengths for that X dimension.
+`tuple<seq<a0,a1,...>, seq<b0,b1,...>, ...>` — one inner sequence per X dimension. Each inner sequence lists the factor *sizes* (lengths) for that X dimension. The number of factors can differ across X dimensions.
 
-**Critical rule**: the X coordinate is recovered by unmerging in order, with the **first factor being outermost (big stride)** and the **last factor being innermost (unit stride)**:
+**Naming convention**: the double "ss" follows the CK Tile convention of pluralizing with "s" twice when the type is a *tuple of sequences*. `HsLengths` would be the factor lengths for a single X dimension (e.g. `seq<4, 8>`); `HsLengthss` is the collection of those, one per X dimension (e.g. `tuple<seq<1>, seq<4,8>, seq<16>>`). The same pattern applies to `Ps2RHssMajor` / `Ps2RHssMinor` (tuple of sequences, one per P dimension), while `Ys2RHsMajor` / `Ys2RHsMinor` are plain sequences (one entry per Y dimension).
+
+**Critical rule**: the X coordinate is recovered by a mixed-radix unmerge, with the **first factor being outermost (largest stride)** and the **last factor being innermost (unit stride)**. The stride for each factor is the product of the *sizes* of all inner factors as given by `HsLengthss[i]`:
 
 ```
-X[i] = H[i][0] * (H[i][1] * ... * H[i][last])
-      + H[i][1] * (H[i][2] * ... * H[i][last])
+X[i] = H[i][0] * stride[0]
+      + H[i][1] * stride[1]
       + ...
       + H[i][last]
+
+where stride[j] = HsLengthss[i][j+1] * HsLengthss[i][j+2] * ... * HsLengthss[i][last]
+  and stride[last] = 1
 ```
+
+Here `H[i][j]` are *coordinate values* (runtime indices in `[0, HsLengthss[i][j])`), while the strides are determined entirely by the *sizes* in `HsLengthss[i]`.
+
+Example with `HsLengthss[1] = seq<4, 8>`:
+```
+stride[0] = 8,  stride[1] = 1
+X[1] = H[1][0] * 8 + H[1][1]     H[1][0] ∈ [0,4),  H[1][1] ∈ [0,8)
+```
+X[1] ranges over `[0, 32)`, covering all `4 × 8 = 32` values.
 
 ### 4.3 `Ps2RHssMajor` and `Ps2RHssMinor` — P → RH Mapping
 
@@ -98,16 +123,26 @@ These are parallel structures: one entry per P dimension, each holding a sequenc
 
 The P value is **unmerged** (using the product-of-sizes rule) into indices for each of those RH sub-dimensions, in the order listed. The **first listed is the outer (highest-weight) factor**, last is inner.
 
-Example — P[0] maps to two factors of X[1] where `H[1] = seq<4, 8>`:
+Example — P[0] controls two H factors, both belonging to X[1], where `HsLengthss[1] = seq<4, 8>`:
 
 ```
 Ps2RHssMajor[0] = seq<2, 2>
 Ps2RHssMinor[0] = seq<0, 1>
-
-// P[0] ∈ [0, 32):
-H[1][0] = P[0] / 8     (outer factor, size 4)
-H[1][1] = P[0] % 8     (inner factor, size 8)
 ```
+
+Reading the mapping:
+- Entry 0: `(RH_major=2, RH_minor=0)` → from Section 3, RH_major=2 corresponds to X[1], and RH_minor=0 is the first (outer) factor, with size `HsLengthss[1][0] = 4`.
+- Entry 1: `(RH_major=2, RH_minor=1)` → also X[1], RH_minor=1 is the second (inner) factor, with size `HsLengthss[1][1] = 8`.
+
+Entry 0 is listed first so it is the **outer** factor; P[0] is unmerged outer→inner using the inner factor's size (8) as the divisor:
+
+```
+// P[0] ∈ [0, 32):
+H[1][0] = P[0] / 8     (outer factor, size 4,  range [0,4))
+H[1][1] = P[0] % 8     (inner factor, size 8,  range [0,8))
+```
+
+The connection to X[1] comes entirely from `RH_major = 2`: the RH system maps `RH_major = i+1` to `X[i]`, so `RH_major=2` always means X[1], regardless of which P or Y dimension references it.
 
 ### 4.4 `Ys2RHsMajor` and `Ys2RHsMinor` — Y → RH Mapping
 
@@ -134,10 +169,12 @@ Given `thread_id = warp_id * 64 + lane_id`, decomposed into P values:
 H[major-1][minor] = unmerge_outermost(P[p], product_of_remaining_rh_lengths)
 ```
 
-**Step 3** — For each X dimension, collect all its H sub-dimension indices. The X coordinate is:
+**Step 3** — For each X dimension, collect all its H sub-dimension indices. The X coordinate is the mixed-radix sum where strides come from `HsLengthss[i]`:
 
 ```
-X[i] = H[i][0] * prod(H[i][1..]) + H[i][1] * prod(H[i][2..]) + ... + H[i][last]
+X[i] = H[i][0] * stride[0] + H[i][1] * stride[1] + ... + H[i][last]
+
+where stride[j] = HsLengthss[i][j+1] * ... * HsLengthss[i][last],  stride[last] = 1
 ```
 
 **Step 4** — For each Y[j], the thread iterates over `0 .. length(RH[Ys2RHsMajor[j]][Ys2RHsMinor[j]])`. For each Y combination, the H factor it controls gets the current Y value, and the full X coordinate is recomputed.

@@ -12,10 +12,10 @@ For the original README, see [`projects/miopen/src/hipconv/README.md`](../../../
 - **Layout**: NHWC input, KYXC weights, NHWK output
 - **Direction**: Fprop (Forward), Dgrad (Backward Data)
 - **Filter**: 3x3, stride 1, dilation 1
-- **Group size**: 4 or 16 channels per group
-- **Constraint**: input channels == output channels (`c == k`)
+- **Group size**: 4, 8, 16, or 32 channels per group
+- **Constraint**: input channels == output channels (`c == k`), but can be relaxed by using the padding version of the kernels.
 
-The kernel uses MFMA 4x4x4 batch-16 instructions with buffer-load-to-LDS for input staging.
+The kernel uses MFMA instructions with buffer-load-to-LDS for input staging to compute direct convolution.
 
 ## Supported device architectures
 
@@ -48,12 +48,11 @@ The unit and integration tests are located in directory `projects/composablekern
 
 Detailed documentation is available at `projects/composablekernel/docs/direct_convolution`:
 
-- [Utility Components](../../../../../composablekernel/docs/direct_convolution/utils.md) — Conv2dParams, SizeView, MatrixLayout, Swizzle, and other utilities
-- [4-Channel FP16 Kernel](../../../../../composablekernel/docs/direct_convolution/kernel_4c_fp16.md) — Kernel architecture, MFMA usage, streaming pipeline, Dgrad specifics
+- [HIP conv Utility Components](../../../../../composablekernel/docs/direct_convolution/utils.md) — Conv2dParams, SizeView, MatrixLayout, Swizzle, and other utilities
+- [HIP conv 4-Channel FP16 Kernel](../../../../../composablekernel/docs/direct_convolution/kernel_4c_fp16.md) — Kernel architecture, MFMA usage, streaming pipeline, Dgrad specifics
+- [CK Tile distributions encoding for direct convolution](./docs/tile_distribution_encoding.md) - Description of tile distribution encodings relevant to direct convolutions.
 
 ## Basic CK Tile utilities
-
-We want to port the `grouped_4c_fp16_hip_conv_impl.hpp` from pure HIP to use the CK Tile abstractions
 
 - BufferView - `projects/composablekernel/include/ck_tile/core/tensor/buffer_view.hpp` (raw linear memory access abstraction)
 - TensorDescriptor - `projects/composablekernel/include/ck_tile/core/tensor/tensor_descriptor.hpp` (multi-dimensional strided access to linear memory) 
@@ -67,7 +66,7 @@ We want to port the `grouped_4c_fp16_hip_conv_impl.hpp` from pure HIP to use the
 
 The CK Tile direct convolutions are integrated to the CK Profiler and they are included in the profiling runs. This requires that the CMake flag `D CK_EXPERIMENTAL_BUILDER=ON` is defined. 
 Additionally, it is possible to disable the implicit-GEMM instances from the CK Profiler build 
-by defining an additional CMake flag `-D DISABLE_IMPLICIT_GEMM_INSTANCES` (building the implciti-GEMM instance might take a long time). All in all, if the focus in on the direct convolutions, one can run the followinf CMake configure step
+by defining an additional CMake flag `-D DISABLE_IMPLICIT_GEMM_INSTANCES` (building the implcit-GEMM instances might take a long time). All in all, if the focus in on the direct convolutions, one can run the following CMake configure step
 
 ```
 cmake                                                                                             \
@@ -77,7 +76,7 @@ cmake                                                                           
   -D GPU_TARGETS="gfx950"                                                                         \
   -D CK_EXPERIMENTAL_BUILDER=ON                                                                   \
   -D CMAKE_CXX_STANDARD=20                                                                        \
-  -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                              \
+  -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                           \
   -G Ninja                                                                                        \
   ..
 ```
