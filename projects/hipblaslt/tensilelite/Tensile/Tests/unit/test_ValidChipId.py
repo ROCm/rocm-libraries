@@ -29,23 +29,6 @@ from pathlib import Path
 
 import pytest
 
-# When the rocisa C-extension is not importable (e.g. CI lint job), install a
-# minimal stub so that `from rocisa import rocIsa` (in Tensile.Common.Utilities)
-# and `import rocisa` (in Tensile.Common.Architectures) both succeed. When the
-# real rocisa IS available we leave it untouched.
-try:  # pragma: no cover - environment-dependent
-    import rocisa  # noqa: F401
-except ImportError:  # pragma: no cover
-    _rocisa_stub = types.ModuleType("rocisa")
-
-    class _RocIsaStub:  # noqa: D401 - test helper
-        @staticmethod
-        def getInstance():
-            return None
-
-    _rocisa_stub.rocIsa = _RocIsaStub
-    sys.modules["rocisa"] = _rocisa_stub
-
 
 # Load ValidChipId.py via importlib to bypass Tensile/TensileLogic/__init__.py,
 # which transitively imports joblib / heavy build deps via Run.py.
@@ -58,17 +41,51 @@ def _load_validchipid_mod():
     return mod
 
 
-_vci = _load_validchipid_mod()
-_validateChipId = _vci._validateChipId
-_fallbackFamily = _vci._fallbackFamily
+def _install_rocisa_stub(monkeypatch):
+    # When the rocisa C-extension is not importable (e.g. CI lint job), install
+    # a minimal fixture-scoped stub so this module does not pollute sys.modules
+    # for the rest of the pytest session.
+    try:  # pragma: no cover - environment-dependent
+        import rocisa  # noqa: F401
+        return
+    except ImportError:  # pragma: no cover
+        _rocisa_stub = types.ModuleType("rocisa")
 
-# Architectures.py uses package-relative imports, so spec_from_file_location
-# is not viable here. The rocisa stub above is sufficient to import it
-# normally without the C-extension.
-from Tensile.Common import Architectures as _arch  # noqa: E402
+        class _RocIsaStub:  # noqa: D401 - test helper
+            @staticmethod
+            def getInstance():
+                return None
 
-GFX_CHIP_IDS = _arch.GFX_CHIP_IDS
-SUPPORTED_CHIP_ID_FALLBACKS = _arch.SUPPORTED_CHIP_ID_FALLBACKS
+        _rocisa_stub.rocIsa = _RocIsaStub
+        monkeypatch.setitem(sys.modules, "rocisa", _rocisa_stub)
+
+
+@pytest.fixture
+def validchipid_mod(monkeypatch):
+    _install_rocisa_stub(monkeypatch)
+    return _load_validchipid_mod()
+
+
+@pytest.fixture
+def validate_chip_id(validchipid_mod):
+    return validchipid_mod._validateChipId
+
+
+@pytest.fixture
+def fallback_family(validchipid_mod):
+    return validchipid_mod._fallbackFamily
+
+
+
+@pytest.fixture
+def arch_mod(monkeypatch):
+    # Architectures.py uses package-relative imports, so spec_from_file_location
+    # is not viable here. The fixture-scoped rocisa stub is sufficient to import
+    # it normally without the C-extension.
+    _install_rocisa_stub(monkeypatch)
+    from Tensile.Common import Architectures
+
+    return Architectures
 
 
 def _writeLogicFile(
@@ -105,33 +122,37 @@ def _malformedVariantGfx950Path(tmp_path: Path, chip_id: str = "75a3") -> Path:
     return tmp_path / "gfx950" / f"gfx950_{chip_id}" / "Equality" / "logic.yaml"
 
 
-def test_validateChipIdAcceptsBaseDefaultChipId(tmp_path):
+def test_validateChipIdAcceptsBaseDefaultChipId(tmp_path, validate_chip_id):
     logic_file = _writeLogicFile(_baseGfx950Path(tmp_path), devices="Device 75a0")
 
-    assert _validateChipId(logic_file)
+    assert validate_chip_id(logic_file)
 
 
-def test_validateChipIdAcceptsVariantChipIdWithFallbackFamily(tmp_path):
+def test_validateChipIdAcceptsVariantChipIdWithFallbackFamily(tmp_path, validate_chip_id):
     logic_file = _writeLogicFile(
         _variantGfx950Path(tmp_path, "75a3"),
         devices="Device 75a3, Device 75a2",
     )
 
-    assert _validateChipId(logic_file)
+    assert validate_chip_id(logic_file)
 
 
-def test_validateChipIdRejectsDefaultFallbackChipIdInVariantDirectory(tmp_path, capsys):
+def test_validateChipIdRejectsDefaultFallbackChipIdInVariantDirectory(
+    tmp_path,
+    capsys,
+    validate_chip_id,
+):
     logic_file = _writeLogicFile(
         _variantGfx950Path(tmp_path, "75a3"),
         devices="Device 75a3, Device 75a2, Device 75a0",
     )
 
-    assert not _validateChipId(logic_file)
-    out = capsys.readouterr().out
-    assert "may not declare default fallback chip IDs" in out
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "may not declare default fallback chip IDs" in err
 
 
-def test_validateChipIdRejectsEmptyDeviceList(tmp_path, capsys):
+def test_validateChipIdRejectsEmptyDeviceList(tmp_path, capsys, validate_chip_id):
     # `- [Device]` (no chip after the keyword) is the only form that yields
     # an empty DeviceIds set without raising in the parser. ValidChipId must
     # surface the specific "must declare at least one Device chip ID" branch.
@@ -149,12 +170,12 @@ def test_validateChipIdRejectsEmptyDeviceList(tmp_path, capsys):
         )
     )
 
-    assert not _validateChipId(logic_file)
-    out = capsys.readouterr().out
-    assert "must declare at least one Device chip ID" in out
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "must declare at least one Device chip ID" in err
 
 
-def test_validateChipIdRejectsMissingDeviceLine(tmp_path, capsys):
+def test_validateChipIdRejectsMissingDeviceLine(tmp_path, capsys, validate_chip_id):
     # File with no Device line raises LogicFileError in the parser, which
     # ValidChipId must surface via the "Chip ID validation failed" path.
     logic_file = _baseGfx950Path(tmp_path)
@@ -170,79 +191,102 @@ def test_validateChipIdRejectsMissingDeviceLine(tmp_path, capsys):
         )
     )
 
-    assert not _validateChipId(logic_file)
-    out = capsys.readouterr().out
-    assert "Chip ID validation failed" in out
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "Chip ID validation failed" in err
 
 
-def test_validateChipIdRejectsMismatchedChipIdReportsPredicateError(tmp_path, capsys):
+def test_validateChipIdRejectsMismatchedChipIdReportsPredicateError(
+    tmp_path,
+    capsys,
+    validate_chip_id,
+):
     # 74a0 belongs to gfx942, not gfx950 — _verifyPredicate must reject it.
     logic_file = _writeLogicFile(_baseGfx950Path(tmp_path), devices="Device 74a0")
 
-    assert not _validateChipId(logic_file)
-    out = capsys.readouterr().out
-    assert "not associated with gfx950" in out
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "not associated with gfx950" in err
 
 
-def test_validateChipIdRejectsUnsupportedChipIdReportsPredicateError(tmp_path, capsys):
+def test_validateChipIdRejectsUnsupportedChipIdReportsPredicateError(
+    tmp_path,
+    capsys,
+    validate_chip_id,
+):
     logic_file = _writeLogicFile(_baseGfx950Path(tmp_path), devices="Device ffff")
 
-    assert not _validateChipId(logic_file)
-    out = capsys.readouterr().out
-    assert "device ID not supported" in out
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "device ID not supported" in err
 
 
-def test_validateChipIdAcceptsSourceChipIdInBaseDirectory(tmp_path):
+def test_validateChipIdAcceptsSourceChipIdInBaseDirectory(tmp_path, validate_chip_id):
     logic_file = _writeLogicFile(_baseGfx950Path(tmp_path), devices="Device 75a3")
 
-    assert _validateChipId(logic_file)
+    assert validate_chip_id(logic_file)
 
 
-def test_validateChipIdAcceptsMixedSourceAndDefaultChipIdsInPlainArchDirectory(tmp_path):
+def test_validateChipIdAcceptsMixedSourceAndDefaultChipIdsInPlainArchDirectory(
+    tmp_path,
+    validate_chip_id,
+):
     logic_file = _writeLogicFile(
         tmp_path / "gfx950" / "GridBased" / "logic.yaml",
         devices="Device 75a3, Device 75a0",
     )
 
-    assert _validateChipId(logic_file)
+    assert validate_chip_id(logic_file)
 
 
-def test_validateChipIdRejectsVariantDirectoryWithoutMatchingChipId(tmp_path, capsys):
+def test_validateChipIdRejectsVariantDirectoryWithoutMatchingChipId(
+    tmp_path,
+    capsys,
+    validate_chip_id,
+):
     logic_file = _writeLogicFile(
         _variantGfx950Path(tmp_path, "75a3"),
         devices="Device 75a8",
     )
 
-    assert not _validateChipId(logic_file)
-    out = capsys.readouterr().out
-    assert "directory must contain id=75a3" in out
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "directory must contain id=75a3" in err
 
 
-def test_validateChipIdRejectsDefaultChipIdInVariantDirectory(tmp_path, capsys):
+def test_validateChipIdRejectsDefaultChipIdInVariantDirectory(
+    tmp_path,
+    capsys,
+    validate_chip_id,
+):
     logic_file = _writeLogicFile(
         _variantGfx950Path(tmp_path, "75a0"),
         devices="Device 75a0",
     )
 
-    assert not _validateChipId(logic_file)
-    out = capsys.readouterr().out
-    assert "non-source chip ID" in out
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "non-source chip ID" in err
 
 
-def test_validateChipIdRejectsFallbackChipIdInMalformedVariantDirectory(tmp_path, capsys):
+def test_validateChipIdRejectsFallbackChipIdInMalformedVariantDirectory(
+    tmp_path,
+    capsys,
+    validate_chip_id,
+):
     logic_file = _writeLogicFile(
         _malformedVariantGfx950Path(tmp_path, "75a3"),
         devices="Device 75a0",
     )
 
-    assert not _validateChipId(logic_file)
-    out = capsys.readouterr().out
-    assert "must use gfx950_id<chip> format" in out
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "must use gfx950_id<chip> format" in err
     # Offending directory name must be reported so the user can act on it.
-    assert "gfx950_75a3" in out
+    assert "gfx950_75a3" in err
 
 
-def test_validateChipIdDoesNotRequireChipIdDirectoryForNonGatedArch(tmp_path):
+def test_validateChipIdDoesNotRequireChipIdDirectoryForNonGatedArch(tmp_path, validate_chip_id):
     logic_file = _writeLogicFile(
         tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "logic.yaml",
         gfx="gfx942",
@@ -250,10 +294,10 @@ def test_validateChipIdDoesNotRequireChipIdDirectoryForNonGatedArch(tmp_path):
         devices="Device 74a0",
     )
 
-    assert _validateChipId(logic_file)
+    assert validate_chip_id(logic_file)
 
 
-def test_validateChipIdIgnoresUnsupportedChipIdForNonGatedArch(tmp_path):
+def test_validateChipIdIgnoresUnsupportedChipIdForNonGatedArch(tmp_path, validate_chip_id):
     logic_file = _writeLogicFile(
         tmp_path / "aquavanjaram" / "gfx942_20cu" / "GridBased" / "logic.yaml",
         gfx="gfx942",
@@ -261,7 +305,7 @@ def test_validateChipIdIgnoresUnsupportedChipIdForNonGatedArch(tmp_path):
         devices="Device 0050",
     )
 
-    assert _validateChipId(logic_file)
+    assert validate_chip_id(logic_file)
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +314,10 @@ def test_validateChipIdIgnoresUnsupportedChipIdForNonGatedArch(tmp_path):
 # last-match-wins bug in _chipIdDirFromPath.
 # ---------------------------------------------------------------------------
 
-def test_validateChipIdResolvesNearestChipIdDirWithEnclosingGfxAncestor(tmp_path):
+def test_validateChipIdResolvesNearestChipIdDirWithEnclosingGfxAncestor(
+    tmp_path,
+    validate_chip_id,
+):
     # Layout: <tmp>/gfx950/checkout/gfx950/gfx950_id75a3/Equality/logic.yaml
     # The inner 'gfx950' must NOT reset the chip-ID dir state and cause the
     # variant directory to be missed.
@@ -279,10 +326,10 @@ def test_validateChipIdResolvesNearestChipIdDirWithEnclosingGfxAncestor(tmp_path
         devices="Device 75a3",
     )
 
-    assert _validateChipId(logic_file, display_path=logic_file.relative_to(tmp_path))
+    assert validate_chip_id(logic_file, logic_relative_path=logic_file.relative_to(tmp_path))
 
 
-def test_validateChipIdAcceptsUppercaseHexInYaml(tmp_path):
+def test_validateChipIdAcceptsUppercaseHexInYaml(tmp_path, validate_chip_id):
     # Regression: uppercase hex in YAML must canonicalize before predicate
     # check; otherwise gets falsely reported as "device ID not supported".
     logic_file = _writeLogicFile(
@@ -290,7 +337,7 @@ def test_validateChipIdAcceptsUppercaseHexInYaml(tmp_path):
         devices="Device 75A3",
     )
 
-    assert _validateChipId(logic_file)
+    assert validate_chip_id(logic_file)
 
 
 # ---------------------------------------------------------------------------
@@ -300,87 +347,82 @@ def test_validateChipIdAcceptsUppercaseHexInYaml(tmp_path):
 # test stays in sync with the registry.
 # ---------------------------------------------------------------------------
 
-def _gated_archs():
+def _gated_archs(arch_mod):
     """Archs currently gated by supportsChipIdPredicate (only gfx950 today)."""
-    return [gfx for gfx in GFX_CHIP_IDS if _arch.supportsChipIdPredicate(gfx)]
-
-
-def _default_chip_ids(gfx):
-    arch_keys = {f"id={cid.lower()}" for cid in GFX_CHIP_IDS[gfx]}
     return [
-        cid for cid in GFX_CHIP_IDS[gfx]
-        if f"id={cid.lower()}" not in SUPPORTED_CHIP_ID_FALLBACKS
+        gfx
+        for gfx in arch_mod.GFX_CHIP_IDS
+        if arch_mod.supportsChipIdPredicate(gfx)
+    ]
+
+
+def _source_chip_ids(arch_mod, gfx):
+    arch_keys = {f"id={cid.lower()}" for cid in arch_mod.GFX_CHIP_IDS[gfx]}
+    return [
+        cid for cid in arch_mod.GFX_CHIP_IDS[gfx]
+        if f"id={cid.lower()}" in arch_mod.SUPPORTED_CHIP_ID_FALLBACKS
         and f"id={cid.lower()}" in arch_keys
     ]
 
 
-def _source_chip_ids(gfx):
-    arch_keys = {f"id={cid.lower()}" for cid in GFX_CHIP_IDS[gfx]}
-    return [
-        cid for cid in GFX_CHIP_IDS[gfx]
-        if f"id={cid.lower()}" in SUPPORTED_CHIP_ID_FALLBACKS
-        and f"id={cid.lower()}" in arch_keys
+def test_validateChipIdAcceptsAllArchChipIdsInBaseDir(
+    tmp_path,
+    validate_chip_id,
+    arch_mod,
+):
+    for gfx in _gated_archs(arch_mod):
+        for chip_id in arch_mod.GFX_CHIP_IDS[gfx]:
+            logic_file = _writeLogicFile(
+                tmp_path / gfx / gfx / "Equality" / f"{chip_id}.yaml",
+                gfx=gfx,
+                name=gfx,
+                devices=f"Device {chip_id}",
+            )
+
+            assert validate_chip_id(logic_file), (
+                f"chip ID {chip_id} should validate in base {gfx} directory"
+            )
+
+
+def test_validateChipIdAcceptsEverySourceChipIdInItsVariantDir(
+    tmp_path,
+    validate_chip_id,
+    arch_mod,
+):
+    for gfx in _gated_archs(arch_mod):
+        for chip_id in _source_chip_ids(arch_mod, gfx):
+            logic_file = _writeLogicFile(
+                tmp_path / gfx / f"{gfx}_id{chip_id}" / "Equality" / "logic.yaml",
+                gfx=gfx,
+                name=gfx,
+                devices=f"Device {chip_id}",
+            )
+
+            assert validate_chip_id(logic_file), (
+                f"source chip ID {chip_id} should validate in {gfx}_id{chip_id} directory"
+            )
+
+
+def test_validateChipIdSkipsAllNonGatedArchs(tmp_path, validate_chip_id, arch_mod):
+    non_gated_archs = [
+        gfx
+        for gfx in arch_mod.GFX_CHIP_IDS
+        if not arch_mod.supportsChipIdPredicate(gfx)
     ]
+    assert non_gated_archs
 
+    for gfx in non_gated_archs:
+        # Pick any chip ID for the arch — placement rules don't apply to
+        # non-gated archs, so the validator must short-circuit to True.
+        chip_id = arch_mod.GFX_CHIP_IDS[gfx][0]
+        logic_file = _writeLogicFile(
+            tmp_path / gfx / gfx / "Equality" / f"{chip_id}.yaml",
+            gfx=gfx,
+            name=gfx,
+            devices=f"Device {chip_id}",
+        )
 
-_BASE_DIR_MATRIX = [
-    (gfx, cid)
-    for gfx in _gated_archs()
-    for cid in GFX_CHIP_IDS[gfx]
-]
-
-
-@pytest.mark.parametrize("gfx,chip_id", _BASE_DIR_MATRIX)
-def test_validateChipIdAcceptsAllArchChipIdsInBaseDir(tmp_path, gfx, chip_id):
-    logic_file = _writeLogicFile(
-        tmp_path / gfx / gfx / "Equality" / "logic.yaml",
-        gfx=gfx,
-        name=gfx,
-        devices=f"Device {chip_id}",
-    )
-
-    assert _validateChipId(logic_file), (
-        f"chip ID {chip_id} should validate in base {gfx} directory"
-    )
-
-
-_VARIANT_DIR_MATRIX = [
-    (gfx, source_id)
-    for gfx in _gated_archs()
-    for source_id in _source_chip_ids(gfx)
-]
-
-
-@pytest.mark.parametrize("gfx,chip_id", _VARIANT_DIR_MATRIX)
-def test_validateChipIdAcceptsEverySourceChipIdInItsVariantDir(tmp_path, gfx, chip_id):
-    logic_file = _writeLogicFile(
-        tmp_path / gfx / f"{gfx}_id{chip_id}" / "Equality" / "logic.yaml",
-        gfx=gfx,
-        name=gfx,
-        devices=f"Device {chip_id}",
-    )
-
-    assert _validateChipId(logic_file), (
-        f"source chip ID {chip_id} should validate in {gfx}_id{chip_id} directory"
-    )
-
-
-_NON_GATED_ARCHS = [gfx for gfx in GFX_CHIP_IDS if not _arch.supportsChipIdPredicate(gfx)]
-
-
-@pytest.mark.parametrize("gfx", _NON_GATED_ARCHS)
-def test_validateChipIdSkipsAllNonGatedArchs(tmp_path, gfx):
-    # Pick any chip ID for the arch — placement rules don't apply to
-    # non-gated archs, so the validator must short-circuit to True.
-    chip_id = GFX_CHIP_IDS[gfx][0]
-    logic_file = _writeLogicFile(
-        tmp_path / gfx / gfx / "Equality" / "logic.yaml",
-        gfx=gfx,
-        name=gfx,
-        devices=f"Device {chip_id}",
-    )
-
-    assert _validateChipId(logic_file)
+        assert validate_chip_id(logic_file)
 
 
 # ---------------------------------------------------------------------------
@@ -389,23 +431,27 @@ def test_validateChipIdSkipsAllNonGatedArchs(tmp_path, gfx):
 # fail loudly here, not silently in placement validation.
 # ---------------------------------------------------------------------------
 
-def test_fallbackFamilyForDefaultChipIdIsSingleton():
+def test_fallbackFamilyForDefaultChipIdIsSingleton(fallback_family):
     # A default chip ID has no entry in SUPPORTED_CHIP_ID_FALLBACKS; its
     # family must be just itself.
-    assert _fallbackFamily("id=75a0", "gfx950") == {"id=75a0"}
+    assert fallback_family("id=75a0", "gfx950") == {"id=75a0"}
 
 
-def test_fallbackFamilyForSourceChipIdIncludesSiblingsAndFallback():
+def test_fallbackFamilyForSourceChipIdIncludesSiblingsAndFallback(
+    fallback_family,
+    arch_mod,
+):
     # All gfx950 source IDs share id=75a0 as their direct fallback. The
     # family expansion is intentionally permissive so a single variant
     # directory can host logic for siblings sharing a fallback root.
-    family = _fallbackFamily("id=75a3", "gfx950")
+    family = fallback_family("id=75a3", "gfx950")
     assert "id=75a3" in family           # the chip itself
     assert "id=75a0" in family           # its direct fallback
     # All other source IDs whose direct fallback is also id=75a0 are siblings.
     expected_siblings = {
         src
-        for src, fallbacks in _arch.SUPPORTED_CHIP_ID_FALLBACKS.items()
-        if "id=75a0" in fallbacks and src in {f"id={c.lower()}" for c in GFX_CHIP_IDS["gfx950"]}
+        for src, fallbacks in arch_mod.SUPPORTED_CHIP_ID_FALLBACKS.items()
+        if "id=75a0" in fallbacks
+        and src in {f"id={c.lower()}" for c in arch_mod.GFX_CHIP_IDS["gfx950"]}
     }
     assert expected_siblings.issubset(family)

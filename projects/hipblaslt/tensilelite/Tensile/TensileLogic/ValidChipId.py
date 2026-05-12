@@ -30,6 +30,7 @@ placed under the directory that matches the chip-ID fallback rules.
 """
 
 import re
+import sys
 
 from pathlib import Path
 from typing import NamedTuple, Optional, Set
@@ -114,7 +115,7 @@ def _chipIdDirFromPath(gfx: str, filepath: Path) -> _ChipIdDir:
 
 
 def _reportChipIdFailure(filepath: Path, detail: str) -> None:
-    print(f"Error: {detail} (file: {filepath})")
+    print(f"Error: {detail} (file: {filepath})", file=sys.stderr)
 
 
 def _validateChipIdPlacement(gfx: str, device_ids: Set[str], filepath: Path) -> Optional[str]:
@@ -159,12 +160,20 @@ def _validateChipIdPlacement(gfx: str, device_ids: Set[str], filepath: Path) -> 
     return None
 
 
-def _validateChipId(filepath: Path, display_path: Optional[Path] = None) -> bool:
-    display_path = display_path or filepath
+def _validateChipId(
+    filepath: Path,
+    logic_relative_path: Optional[Path] = None,
+    report_path: Optional[Path] = None,
+) -> bool:
+    placement_path = logic_relative_path or filepath
+    report_path = report_path or placement_path
     try:
-        arch_info = _extractArchInfo(filepath, validateDeviceIds=False)
+        arch_info = _extractArchInfo(
+            filepath,
+            validateDeviceIds=False,
+        )
     except LogicFileError as e:
-        _reportChipIdFailure(display_path, f"Chip ID validation failed: {e}")
+        _reportChipIdFailure(report_path, f"Chip ID validation failed: {e}")
         return False
 
     try:
@@ -173,7 +182,7 @@ def _validateChipId(filepath: Path, display_path: Optional[Path] = None) -> bool
 
         if not arch_info.DeviceIds:
             _reportChipIdFailure(
-                display_path,
+                report_path,
                 f"{arch_info.Gfx} logic must declare at least one Device chip ID",
             )
             return False
@@ -187,12 +196,12 @@ def _validateChipId(filepath: Path, display_path: Optional[Path] = None) -> bool
         # Walk the logic-root-relative path so that ancestor directories outside
         # the logic root (e.g. CI workspaces containing 'gfx950') cannot
         # masquerade as chip-ID directories.
-        placement_error = _validateChipIdPlacement(arch_info.Gfx, device_ids, display_path)
+        placement_error = _validateChipIdPlacement(arch_info.Gfx, device_ids, placement_path)
         if placement_error:
-            _reportChipIdFailure(display_path, placement_error)
+            _reportChipIdFailure(report_path, placement_error)
             return False
 
         return True
     except (LogicFileError, ValueError) as e:
-        _reportChipIdFailure(display_path, f"ValidChipId failed ({type(e).__name__}): {e}")
+        _reportChipIdFailure(report_path, f"ValidChipId failed ({type(e).__name__}): {e}")
         return False
