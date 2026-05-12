@@ -9,16 +9,13 @@ hipDNN installation
 *******************
 
 The hipDNN frontend API is distributed as a header-only library. It requires a development ROCm package installation.
-These development packages contain the ``.dev`` prefix.
-
-System requirements
-===================
-
-- `An AMD GPU with ROCm support <https://github.com/ROCm/TheRock/blob/main/SUPPORTED_GPUS.md>`_
-- Linux or Windows operating system (see `Install AMD ROCm <https://advanced-micro-devices-rocm-internal--692.com.readthedocs.build/en/692/install/rocm.html?fam=instinct&gpu=mi355x&os=ubuntu&os-version=24.04&i=pkgman>`_)
+These development packages contain the ``-dev`` prefix.
 
 Dependencies
 ============
+
+Before you begin, verify that your system is supported. For more information,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
 .. list-table::
    :widths: 3 3 5
@@ -40,17 +37,87 @@ Dependencies
      - C++17 compatible
      - hipDNN API supports C++17
 
-Install ROCm and hipDNN
+.. _install-rocm:
+
+Install the ROCm Core SDK
+=========================
+
+hipDNN is included with the ROCm Core SDK on Linux and Windows. For the most
+complete installation on Linux, we recommend that developers use the
+``amdrocm-core-sdk`` meta package.
+
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on that page to view instructions appropriate for your system
+environment.
+
+.. _install-base:
+
+Install ROCm DNN libraries on Linux
+===================================
+
+Alternatively, if you want to install hipDNN as part of the ROCm
+DNN package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
+additional ROCm libraries and tools, install the ``amdrocm-dnn`` package.
+
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
+
+2. Install the ROCm DNN package that matches your desired ROCm version,
+   development package needs, and AMD GPU architecture. Package names use the
+   following format:
+
+   .. code-block:: shell-session
+
+      amdrocm-dnn<dev/devel><rocm_version>-<llvm_target>
+
+   Where:
+
+   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+     suffix to install the latest available version.
+
+   * ``<dev/devel>`` specifies whether to install library files and
+     headers. Omit this suffix to only install runtime packages.
+
+     * ``-dev`` is used on Debian-based distributions, including Ubuntu.
+
+     * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
+
+   * ``<llvm_target>`` (starting with ``gfx``) is used if you are installing
+     for a single AMD GPU architecture. Omit this suffix to install for all
+     architectures at the cost of disk space.
+
+   For example, to install the latest DNN development package release for
+   supported GPU architectures:
+
+   .. tab-set::
+
+      .. tab-item:: Debian-based distros
+
+         .. code-block:: bash
+
+            sudo apt install amdrocm-dnn-dev
+
+      .. tab-item:: RHEL-based distros
+
+         .. code-block:: bash
+
+            sudo dnf install amdrocm-dnn-devel
+
+      .. tab-item:: SLES
+
+         .. code-block:: bash
+
+            sudo zypper install amdrocm-dnn-devel
+
+.. _install-nightly:
+
+Install a nightly build
 =======================
 
-Follow the instructions at `Install AMD ROCm <https://advanced-micro-devices-rocm-internal--692.com.readthedocs.build/en/692/install/rocm.html?fam=instinct&gpu=mi355x&os=ubuntu&os-version=24.04&i=pkgman>`_ to install a ROCm development package that includes hipDNN.
-ROCm development packages contain the ``.dev`` prefix.
-
-.. important::
-
-  The base ROCm install package doesn't include the hipDNN frontend API header files. You must use the development ROCm packages.
-
-  For example, on Linux with an AMD Instinct MI350X Series GPU, install the ``amdrocm-core-dev7.12-gfx950`` package instead of the ``amdrocm7.12-gfx950`` package (``amdrocm-core-dev7.12-gfx950`` includes the ``amdrocm7.12-gfx950`` package, so only the ``amdrocm-core-dev7.12-gfx950`` package needs to be installed).
+The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
+nightly builds for the ROCm Core SDK and its components, including MIOpen.
+See `Nightly release status
+<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
 
 Verify hipDNN installation
 ==========================
