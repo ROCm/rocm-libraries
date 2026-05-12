@@ -17,6 +17,10 @@ on:
   schedule:
     - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
 
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   trigger:
     runs-on: ubuntu-latest
