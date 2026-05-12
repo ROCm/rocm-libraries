@@ -60,6 +60,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/LoopRegionRemarkPassTest.cpp
     unit/asm/BranchHelpersTest.cpp
     unit/asm/CallReturnModifiersTest.cpp
+    unit/asm/SetpcSwappcCfgTest.cpp
 )
 
 # High-Level IR Tests
