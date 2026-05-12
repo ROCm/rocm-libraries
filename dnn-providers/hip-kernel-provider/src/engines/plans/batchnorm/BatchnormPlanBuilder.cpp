@@ -525,10 +525,9 @@ bool BatchnormPlanBuilder::isApplicable(
         try
         {
             BatchnormValidator validator(opGraph.getTensorMap());
-            validator.checkInferenceActivationBackwardTensorConfigSupported(
-                std::get<0>(nodeAttrs.value()),
-                std::get<1>(nodeAttrs.value()),
-                std::get<2>(nodeAttrs.value()));
+            validator.checkBwdActivationTensorConfigSupported(std::get<0>(nodeAttrs.value()),
+                                                              std::get<1>(nodeAttrs.value()),
+                                                              std::get<2>(nodeAttrs.value()));
         }
         catch(const std::exception& e)
         {
@@ -551,11 +550,10 @@ bool BatchnormPlanBuilder::isApplicable(
     }
 }
 
-size_t BatchnormPlanBuilder::
-    getMaxWorkspaceSize( // NOLINT(readability-convert-member-functions-to-static)
-        [[maybe_unused]] const HipKernelHandle& handle,
-        [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-        [[maybe_unused]] const HipKernelSettings& executionSettings) const
+size_t BatchnormPlanBuilder::getMaxWorkspaceSize(
+    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const HipKernelSettings& executionSettings) const
 {
     //batchnorm plan builder does not require workspace size
     return 0u;
@@ -794,10 +792,9 @@ void BatchnormPlanBuilder::buildPlan(
     }
 }
 
-std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
-    BatchnormPlanBuilder::getCustomKnobs( // NOLINT(readability-convert-member-functions-to-static)
-        [[maybe_unused]] const HipKernelHandle& handle,
-        [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> BatchnormPlanBuilder::getCustomKnobs(
+    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};
 }
