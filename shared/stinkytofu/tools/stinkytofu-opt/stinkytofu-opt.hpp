@@ -33,6 +33,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
@@ -71,6 +72,7 @@ const std::vector<PassInfo> availablePasses = {
     {"StinkyIRVerifierPass", []() { return createStinkyIRVerifierPass(); }},
     {"RemoveDelayAluPass", []() { return createRemoveDelayAluPass(); }},
     {"InsertDelayAluPass", []() { return createInsertDelayAluPass(); }},
+    {"LongBranchLoweringPass", []() { return createLongBranchLoweringPass(); }},
 };
 
 /**
