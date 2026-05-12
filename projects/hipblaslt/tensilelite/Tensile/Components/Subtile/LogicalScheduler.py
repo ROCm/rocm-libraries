@@ -143,6 +143,12 @@ class SchedulerConfig:
     partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
 
+    # Resolve a partition spec into the concrete list of per-partition sizes
+    # along one dimension. The spec is either an explicit list (must sum to
+    # `total`) or a single tile size; passing 0 means "one partition covering
+    # the whole dimension". When the dimension does not divide evenly, the
+    # remainder is placed in the middle of the list so the smaller partition
+    # is bracketed by full ones rather than landing at an edge.
     @staticmethod
     def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str) -> List[int]:
         if isinstance(spec, (list, tuple)):
