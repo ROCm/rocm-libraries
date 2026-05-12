@@ -549,6 +549,31 @@ void parseCustomOperand(IRLexer& lexer, ParsedInstruction& inst,
 // Modifier parsing
 //----------------------------------------------------------------------
 
+/// Generic key→value map used while collecting modifier tokens before they
+/// are dispatched to a modifier namespace.
+using FieldMap = std::unordered_map<std::string, std::string>;
+
+/// True when \p fields holds any matrix-format modifier keys produced by the
+/// `v_wmma_scale_*` family. Used by inferModKeyFromFields() to assign
+/// `mod.matrix_fmt` when the microcode-based switch did not (matrix_fmt
+/// rides on top of generic VOP3PX2/3 encodings, so the encoding alone is
+/// not a reliable indicator).
+bool hasMatrixFmtFields(const FieldMap& fields) {
+    return fields.count("matrix_a_fmt") || fields.count("matrix_b_fmt") ||
+           fields.count("matrix_a_scale_fmt") || fields.count("matrix_b_scale_fmt") ||
+           fields.count("matrix_a_reuse") || fields.count("matrix_b_reuse");
+}
+
+/// Single decision point for "this generic field set looks like which modKey?".
+/// Used after field collection, only when the microcode-based switch did not
+/// already assign a modKey. Modifier kinds that ride on top of generic
+/// encoding shapes (matrix_fmt on VOP3PX2/3, DPP on many VOP*) are detected
+/// here by field presence rather than by microcode format.
+std::string inferModKeyFromFields(const FieldMap& fields) {
+    if (hasMatrixFmtFields(fields)) return "mod.matrix_fmt";
+    return {};
+}
+
 /// Parse trailing modifier tokens into inst.modifiers.
 /// modifier_key is determined by hwInstDesc->microcode and the instruction mnemonic.
 ///
@@ -562,8 +587,6 @@ void parseCustomOperand(IRLexer& lexer, ParsedInstruction& inst,
 /// line round-trips verbatim instead of silently dropping the unmodelled
 /// modifier.
 bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* hwInstDesc) {
-    using FieldMap = std::unordered_map<std::string, std::string>;
-
     const std::string& mnemonic = inst.opcodeStr;
     bool isWaitcnt = (mnemonic == "s_waitcnt");
 
@@ -652,14 +675,15 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
                 fields[tok] = std::move(folded);
                 sawAnyModifier = true;
             } else if (vk == TokenKind::Identifier) {
-                // `th:TH_LOAD_NT`, `scope:SCOPE_DEV`, `matrix_a_fmt:MATRIX_FMT_FP8`,
-                // etc. — gfx12+ memory-hint / matrix-format syntax. Not
-                // modelled by any of the existing modifier structs, so
-                // consume the rhs to keep the lexer in sync but signal
-                // that the line cannot be losslessly round-tripped via
-                // inst.modifiers; the caller will route to TEXTBLOCK.
-                lexer.consume();
-                sawUnrepresentable = true;
+                // `key:Identifier` modifiers (e.g. `matrix_a_fmt:MATRIX_FMT_FP8`,
+                // `th:TH_LOAD_NT`, `scope:SCOPE_DEV`). Store the value in the
+                // generic fields collection; the per-modKey dispatch below
+                // decides which ones are recognized. Fields with no consumer
+                // are silently dropped — same outcome as any other unhandled
+                // modifier token. Formats with no modKey at all are still
+                // caught by the existing `modKey.empty() && sawAnyModifier`
+                // check below and routed to TEXTBLOCK.
+                fields[tok] = std::string(lexer.consume().text);
                 sawAnyModifier = true;
             }
         } else if (lexer.peek().kind == TokenKind::LeftParen) {
@@ -691,6 +715,13 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
             sawAnyModifier = true;
         }
     }
+
+    // Post-hoc: if the microcode-based switch did not assign a modKey, infer
+    // one from the collected field names. Modifier kinds that ride on top of
+    // generic encoding shapes (matrix_fmt on VOP3PX2/3, DPP on many VOP*)
+    // can't be detected from the microcode format alone — only some opcodes
+    // within those encodings carry the modifier.
+    if (modKey.empty()) modKey = inferModKeyFromFields(fields);
 
     // Modifier-bearing instruction with no modKey to put them into (e.g.
     // TENSOR-format `tensor_load_to_lds offset:0`). Anything in `fields`
@@ -737,6 +768,22 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         if (fields.contains("offset")) modFields["offset"] = fields["offset"];
         if (fields.contains("glc")) modFields["glc"] = "true";
         if (fields.contains("nv")) modFields["nv"] = "true";
+
+    } else if (modKey == "mod.matrix_fmt") {
+        // Map asm-form keys to the field names the mod.matrix_fmt deserializer
+        // expects (parseMatrixFmt / parseMatrixScaleFmt accept the asm symbolic
+        // form like "MATRIX_FMT_FP8" directly).
+        if (fields.contains("matrix_a_fmt")) modFields["fmtA"] = fields["matrix_a_fmt"];
+        if (fields.contains("matrix_b_fmt")) modFields["fmtB"] = fields["matrix_b_fmt"];
+        if (fields.contains("matrix_a_scale_fmt"))
+            modFields["scaleFmtA"] = fields["matrix_a_scale_fmt"];
+        if (fields.contains("matrix_b_scale_fmt"))
+            modFields["scaleFmtB"] = fields["matrix_b_scale_fmt"];
+        // matrix_a_reuse / matrix_b_reuse live on MFMAModifiers, not
+        // MatrixFmtModifiers — write them to a separate dict entry so the
+        // deserializer creates both modifier types.
+        if (fields.contains("matrix_a_reuse")) inst.modifiers["mod.mfma"]["reuseA"] = "true";
+        if (fields.contains("matrix_b_reuse")) inst.modifiers["mod.mfma"]["reuseB"] = "true";
     }
 
     return !sawUnrepresentable;
