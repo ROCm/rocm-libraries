@@ -44,12 +44,19 @@ jobs:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Get TheRock version from develop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          THEROCK_REF=$(gh api repos/ROCm/rocm-libraries/contents/.github/therock-version?ref=develop --jq '.content' | base64 -d | tr -d '[:space:]')
+          echo "THEROCK_REF=$THEROCK_REF" >> $GITHUB_ENV
+
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 482ff586c261379e1132cf776f122e1d0972a8a0 # 2026-05-11 commit
+          ref: ${{ env.THEROCK_REF }}
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
