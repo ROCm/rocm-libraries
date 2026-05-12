@@ -118,6 +118,7 @@ struct Config
 // Group 2 (indices 32-47): XOR swizzle, direct DRAM epilogue
 // Group 3 (indices 48-63): XOR swizzle, LDS-staged epilogue
 constexpr Config configs[] = {
+    // TODO: Prune the configurations: we need 2, 4, 8, 16 waves per workgroup.
     // ---- Group 0: No swizzle, direct DRAM epilogue (default) ----
     // Dgrad (indices 0-7)
     {.waves_per_wg = 16, .direction = Direction::Dgrad},
@@ -275,10 +276,10 @@ constexpr Config configs[] = {
      // Dgrad CyclicShift (indices 68-72)
      {.waves_per_wg = 8, .direction = Direction::Dgrad,
       .swizzle_type = SwizzleType::CyclicShift,
-      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 16},
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 16}, // TODO: Remove
      {.waves_per_wg = 8, .direction = Direction::Dgrad,
       .swizzle_type = SwizzleType::CyclicShift,
-      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 8},
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 8}, // TODO: Remove
      {.waves_per_wg = 8, .direction = Direction::Dgrad,
       .swizzle_type = SwizzleType::CyclicShift,
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 4},
@@ -291,10 +292,10 @@ constexpr Config configs[] = {
      // Fprop CyclicShift (indices 73-77)
      {.waves_per_wg = 8,
       .swizzle_type = SwizzleType::CyclicShift,
-      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 16},
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 16}, // TODO: Remove
      {.waves_per_wg = 8,
       .swizzle_type = SwizzleType::CyclicShift,
-      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 8},
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 8},  // TODO: Remove
      {.waves_per_wg = 8,
       .swizzle_type = SwizzleType::CyclicShift,
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 4},
@@ -309,6 +310,19 @@ constexpr Config configs[] = {
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
      {.waves_per_wg = 8,
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
+      // Additional cyclic-shift epilogue
+    {.waves_per_wg = 4,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+     {.waves_per_wg = 4,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToGlobalMemory},
+     {.waves_per_wg = 4, .direction=Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+     {.waves_per_wg = 4, .direction=Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToGlobalMemory},
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);

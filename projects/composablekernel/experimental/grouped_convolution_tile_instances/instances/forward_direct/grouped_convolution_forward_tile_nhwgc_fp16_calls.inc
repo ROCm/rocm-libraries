@@ -240,3 +240,10 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<76, dire
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<77, direct_conv::Version::v2>, SIGNATURE>);
 // Padded no-swizzle fallback — Fprop index 79 (vector_size = 1)
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<79, direct_conv::Version::v2>, SIGNATURE>);
+
+
+// Additional cyclic shift instances for 8-channel kernel and 32-channel kernels.
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<84, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<85, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<80, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<81, direct_conv::Version::v2>, SIGNATURE>);
