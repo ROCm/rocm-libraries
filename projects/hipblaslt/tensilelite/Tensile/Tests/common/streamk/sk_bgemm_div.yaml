@@ -46,8 +46,6 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [True]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - 1LDSBuffer: [1]
         - DepthU: [ 32 ]
         - ExpandPointerSwap: [False]

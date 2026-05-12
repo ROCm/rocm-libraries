@@ -59,11 +59,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-<<<<<<< HEAD
 =======
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
->>>>>>> 35cc06f39e3 (Added BL/BS params to common test files.)
+>>>>>>> 02a88531051 (Cleaned up test files.)
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [1]
         - MatrixInstruction:
@@ -102,21 +99,12 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-<<<<<<< HEAD
           # - Exact: [127, 127, 1, 1024]
           - Exact: [128, 128, 1, 1024]
           # - Exact: [129, 129, 1, 1024]
           # - Exact: [127, 127, 1, 1056]
           - Exact: [128, 128, 1, 1056]
           # - Exact: [129, 129, 1, 1056]
-=======
-          - Exact: [127, 127, 1, 1024]
-          - Exact: [128, 128, 1, 1024]
-          - Exact: [129, 129, 1, 1024]
-          - Exact: [127, 127, 1, 1056]
-          - Exact: [128, 128, 1, 1056]
-          - Exact: [129, 129, 1, 1056]
->>>>>>> 35cc06f39e3 (Added BL/BS params to common test files.)
 
     - # SIA0 TDM PGR2 coverage
       InitialSolutionParameters:
@@ -201,11 +189,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-<<<<<<< HEAD
-=======
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
->>>>>>> 35cc06f39e3 (Added BL/BS params to common test files.)
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [1]
         - MatrixInstruction:
@@ -281,10 +264,13 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         - BufferLoad: [0, 1]
         - BufferStore: [0, 1]
 >>>>>>> 35cc06f39e3 (Added BL/BS params to common test files.)
+=======
+>>>>>>> 02a88531051 (Cleaned up test files.)
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [1]
         - MatrixInstruction:
@@ -360,10 +346,13 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         - BufferLoad: [0, 1]
         - BufferStore: [0, 1]
 >>>>>>> 35cc06f39e3 (Added BL/BS params to common test files.)
+=======
+>>>>>>> 02a88531051 (Cleaned up test files.)
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [1]
         - MatrixInstruction:

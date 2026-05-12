@@ -41,8 +41,6 @@ BenchmarkProblems:
     BenchmarkCommonParameters:
     - KernelLanguage: [Assembly]
     ForkParameters:
-    - BufferLoad: [0, 1]
-    - BufferStore: [0, 1]
     - 1LDSBuffer: [1]
     - DepthU: [64]
     - PrefetchGlobalRead: [2]
