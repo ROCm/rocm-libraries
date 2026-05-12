@@ -2,6 +2,12 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.4.0
+
+### Added
+
+* Complex datatype support for gfx942 and gfx950.
+
 ## hipBLASLt 1.3.0
 
 ### Added
