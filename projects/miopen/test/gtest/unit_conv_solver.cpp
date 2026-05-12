@@ -88,6 +88,22 @@ bool IsDeviceSupported(Gpu supported_devs, Gpu dev)
     return false;
 }
 
+bool IsDeviceExcluded(const UnitTestConvSolverParams& params, std::string_view dev_name)
+{
+    // Runtime device names can include target properties such as xnack/sramecc.
+    // Test exclusions are written against the bare architecture name.
+    return params.excluded_devices.count(GetBaseDeviceName(dev_name)) != 0;
+}
+
+bool IsDeviceSupported(const UnitTestConvSolverParams& params,
+                       Gpu dev,
+                       std::string_view dev_name,
+                       bool xnack_enabled)
+{
+    return IsDeviceSupported(params.supported_devs, dev) && !IsDeviceExcluded(params, dev_name) &&
+           !(params.check_xnack_disabled && xnack_enabled);
+}
+
 } // namespace
 
 //************************************************************************************
@@ -863,7 +879,7 @@ void UnitTestConvSolverBase::SetUpImpl(const UnitTestConvSolverParams& params)
     {
         GTEST_SKIP();
     }
-    else if(params.excluded_devices.count(get_handle().GetDeviceName()) > 0)
+    else if(IsDeviceExcluded(params, get_handle().GetDeviceName()))
     {
         GTEST_SKIP();
     }
@@ -902,6 +918,34 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
 
     const auto problem = conv_config.GetProblemDescription(direction);
 
+    // CK dynamic-library solvers can consult runtime-loaded plugins and HIP state.
+    // Mock-device contexts are not valid for that path, so check only the real device.
+    if(params.uses_ck_dynamic_lib)
+    {
+        auto&& handle  = get_handle();
+        const auto ctx = [&] {
+            auto tmp = miopen::ExecutionContext{&handle};
+            problem.SetupFloats(tmp);
+            problem.SetupComputeType(tmp);
+            return tmp;
+        }();
+
+        const auto current_dev_name = ctx.GetStream().GetDeviceName();
+        auto supported              = IsDeviceSupported(
+            params, GetGpuType(current_dev_name), current_dev_name, get_handle_xnack());
+        if(supported && !miopen::solver::CkImplLibLoader::Get(current_dev_name).IsLoaded())
+            supported = false;
+
+        const auto is_applicable = solver.IsApplicable(ctx, problem);
+        if(is_applicable != supported)
+        {
+            GTEST_FAIL() << current_dev_name << " is" << (is_applicable ? "" : " not")
+                         << " applicable for " << solver.SolverDbId() << " but "
+                         << (supported ? "" : "not ") << "marked as supported";
+        }
+        return;
+    }
+
     const auto all_known_devs = GetAllKnownDevices();
     for(const auto& [dev, dev_descr] : all_known_devs)
     {
@@ -921,15 +965,6 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
         // std::cout << "IsApplicable: " << is_applicable << std::endl;
         if(is_applicable != supported)
         {
-            // If the solver uses CK dynamic libraries and the library for this
-            // device wasn't built, the solver correctly reports not-applicable.
-            if(params.uses_ck_dynamic_lib && supported && !is_applicable)
-            {
-                const auto& loader =
-                    miopen::solver::CkImplLibLoader::Get(std::string(dev_descr.name));
-                if(!loader.IsLoaded())
-                    continue;
-            }
             GTEST_FAIL() << dev_descr << " is" << (is_applicable ? "" : " not")
                          << " applicable for " << solver.SolverDbId() << " but "
                          << (supported ? "" : "not ") << "marked as supported";
