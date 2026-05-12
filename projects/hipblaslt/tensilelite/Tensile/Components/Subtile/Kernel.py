@@ -1237,17 +1237,14 @@ def mainLoop(writer, kernel):
           partitionSizeN=partSizeN,
           pgr=schedulerPgr
       )
-      try:
-        scheduler = LogicalScheduler(cfg)
-        scheduler.build()
+      
+      scheduler = LogicalScheduler(cfg)
+      scheduler.build()
 
-        print(f"  Trying partition: M={cfg.partitionSizesM}, N={cfg.partitionSizesN} ({cfg.numPartitions} partitions)")
-        numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
-        print(f"  partition: M={cfg.partitionSizesM}, N={cfg.partitionSizesN} ({cfg.numPartitions} partitions, {numVgpr} vgprs)")
-        if vgprUsed + numVgpr <= vgprBudget:
-            break
-      except Exception:
-          continue
+      numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+      if vgprUsed + numVgpr <= vgprBudget:
+          break
+      
       
   
   scheduler.allocVgprTiles(writer, tiA, tiB,
