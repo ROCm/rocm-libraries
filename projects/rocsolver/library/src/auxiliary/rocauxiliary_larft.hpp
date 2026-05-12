@@ -860,8 +860,8 @@ rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    // everything must be executed with scalars on the device
-    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
+    // everything must be executed with scalars on the host
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     T one = 1;
     T zero = 0;
