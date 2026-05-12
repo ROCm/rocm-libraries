@@ -559,15 +559,15 @@ catch(...)
 
 #undef ROCSOLVER_ROCBLAS_HAS_F8_DATATYPES
 
-/// @return ceil( x / y ), for integers x, y.
-/// This formula returns 0 for x = 0, but may overflow for huge x + y.
+/// @return ceil( x / y ), for integers x >= 0, y > 0.
+/// This formula returns 0 for x = 0 and avoids overflow.
 template <typename Ix, typename Iy>
 __device__ __host__ constexpr auto ceildiv(const Ix x, const Iy y)
 {
-    return (x + y - 1) / y;
+    return x / y + (x % y != 0);
 }
 
-/// @return ceil( x / y )*y, for integers x, y.
+/// @return ceil( x / y )*y, for integers x >= 0, y > 0.
 /// That is, round x up to the next multiple of y.
 template <typename Ix, typename Iy>
 __device__ __host__ constexpr auto roundup(Ix x, Iy y)
