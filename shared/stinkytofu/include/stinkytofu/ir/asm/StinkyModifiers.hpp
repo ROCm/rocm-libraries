@@ -203,6 +203,12 @@ struct Modifier {
         COMMENT,
         MATRIX_FMT,
         MEM_TOKEN,
+        // Inter-Function transfer-of-control metadata. Stamped by the rocisa
+        // converter on s_swappc_b64 / s_setpc_b64 instructions so that the
+        // CFG builder treats them as opaque inside one Function while the
+        // call graph carries the actual call/return edges.
+        CALL_TARGET,
+        RETURN_TERMINATOR,
     };
 
     Modifier(Type type) : type(type) {}
@@ -903,6 +909,33 @@ struct MemTokenData : public TypedModifier<MemTokenData> {
 
     MemTokenData(const std::vector<int>& tokens = {})
         : TypedModifier<MemTokenData>(), tokens(tokens) {}
+};
+
+/// Marks an instruction as a function-call site whose targets are known callee
+/// Function names. Stamped by the converter on s_swappc_b64 instructions when
+/// the rocisa frontend supplied callTargets. Consumed by CallGraphAnalysis to
+/// build inter-Function call edges; CFGBuilderPass uses its presence as a
+/// signal that the instruction has no intra-Function successor (the call
+/// transfers control to a callee Function, not to a label in this Function).
+struct CallTargetData : public TypedModifier<CallTargetData> {
+    static constexpr Modifier::Type Type = Modifier::Type::CALL_TARGET;
+
+    std::vector<std::string> calleeNames;
+
+    CallTargetData(const std::vector<std::string>& calleeNames = {})
+        : TypedModifier<CallTargetData>(), calleeNames(calleeNames) {}
+};
+
+/// Marks an instruction (typically s_setpc_b64) as the return point of a
+/// callee Function. Stamped by the converter when the rocisa frontend tagged
+/// the setpc with returnSiteTag. CFGBuilderPass treats it as having no
+/// intra-Function successor; CallGraphAnalysis collects it via
+/// Function::getReturnBlocks() so callers can model return-edges in the call
+/// graph instead of as local fall-through.
+struct ReturnTerminatorData : public TypedModifier<ReturnTerminatorData> {
+    static constexpr Modifier::Type Type = Modifier::Type::RETURN_TERMINATOR;
+
+    ReturnTerminatorData() = default;
 };
 
 }  // namespace stinkytofu
