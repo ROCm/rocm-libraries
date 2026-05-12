@@ -27,6 +27,11 @@ extern "C" __global__ void RMSnormBwdWeightBias(const DyType* __restrict__ dy,
 
     const unsigned int tidx = threadIdx.x + blockIdx.x * LOCAL_SIZE;
 
+    if(tidx >= INNER_SIZE)
+    {
+        return;
+    }
+
     float sum_dw = 0.0f;
     float sum_db = 0.0f;
 
