@@ -4881,63 +4881,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # _defaultNLLCapture. Cross-scheduler comparison moved to kernelBody for
       # the same reason.
       if getattr(self.states, "_captureDefaultSchedule", False):
+        # rocm-libraries-vybd (F3): the previous leftover pack[*] / packPre[*]
+        # walk that ran here was scaffolding to make the SHADOW capture's
+        # main_loop comparable to CMS's main_loop (CMS aggregates all iters'
+        # pack content into its main_loop macro, so a SHADOW-vs-CMS framing
+        # required leftover content on the shadow side). Under
+        # rocm-libraries-71hw Approach A, the default-side build is a true
+        # non-CMS reference kernel (UseCustomMainLoopSchedule=0), not a
+        # shadow — both sides of compare_graphs are real emittable+runnable
+        # kernels with their own naturally-emitted main-loop body. The
+        # leftover walk became dead scaffolding that also caused
+        # canonical-text cross-tagging defects (rocm-libraries-flpk) and
+        # double-capture aliasing (rocm-libraries-xbi0). Deleting the walk
+        # is the architectural fix that supersedes both.
+        #
+        # The finalize/handoff below is preserved: ctx.default_main is
+        # consumed downstream in kernelBody (see line ~5274) to assemble
+        # the FourPartCapture for cross-scheduler validation.
         builder = self._capture_context.builder
         if builder is not None:
-          # Capture leftover pack[*] / packPre[*] content that wasn't
-          # consumed by any iter's _makeSubIterSchedule. Under CMS the
-          # for-uIdx loop uses pack as a circular buffer with
-          # storeIdx=(u+pflr)%N and consumeIdx=u%N; when storeIdx wraps
-          # back into a slot already consumed earlier in the loop (e.g.
-          # iter 3 stores to pack[0] for F32X with LoopIters=4 numPackBuffer=4),
-          # that content is the cross-outer-iteration handoff for the
-          # NEXT loop pass. CMS aggregates ALL iters' pack content into
-          # its main_loop macro, so for a comparable framing the shadow's
-          # main_loop must also include the leftover. Tag via the same
-          # build_idmap-derived id-to-cat that the in-loop iters used.
-          from Tensile.Components.ScheduleCapture import (
-            build_idmap, invert_idmap_to_id_to_category, SLOT_KIND_POST_LOOP,
-          )
-          leftover_idmap = build_idmap(
-            num_loop_iter=len(LRCodeAAllIters),
-            LRCodeA=LRCodeAAllIters, PackCodeA=PackCodeAAllIters,
-            LRCodeB=LRCodeBAllIters, PackCodeB=PackCodeBAllIters,
-            globalReadA=self.codes.globalReadA,
-            globalReadB=self.codes.globalReadB,
-            globalReadIncACode=globalReadIncACode,
-            globalReadIncBCode=globalReadIncBCode,
-            localWriteA=self.codes.localWriteA,
-            localWriteB=self.codes.localWriteB,
-            LRSwapA=LRSwapAAllIters, LRSwapB=LRSwapBAllIters,
-            LWSwapA=LWSwapAAllIters, LWSwapB=LWSwapBAllIters,
-            loopCounterCode=Module(),
-            syncCode=Module(),
-            snopCode=Module(),
-          )
-          leftover_id_to_cat = invert_idmap_to_id_to_category(leftover_idmap)
-          # Same prefetch-pack tagging as the per-iter capture path so leftover
-          # leaves still in pack[*] from prefetch get categorized correctly.
-          for _plrIdx, _prefetch_mod in enumerate(self._capture_context.prefetch_pack_a):
-            for _leaf in _prefetch_mod.flatitems():
-              leftover_id_to_cat.setdefault(id(_leaf), f"PackA{_plrIdx}")
-          for _plrIdx, _prefetch_mod in enumerate(self._capture_context.prefetch_pack_b):
-            for _leaf in _prefetch_mod.flatitems():
-              leftover_id_to_cat.setdefault(id(_leaf), f"PackB{_plrIdx}")
-          for buf in list(pack) + list(packPre):
-            if buf is None:
-              continue
-            for leaf in buf.flatitems():
-              cat = leftover_id_to_cat.get(id(leaf))
-              if cat is None:
-                # Untagged leaf in leftover pack — shouldn't happen if
-                # build_idmap covers PackCodeAAllIters fully, but skip
-                # rather than crash. The strict missed-instruction guard
-                # in build_dataflow_graph would surface a real gap.
-                continue
-              builder.append(
-                inst=leaf, category=cat,
-                subiter=kernel["LoopIters"],
-                slot_kind=SLOT_KIND_POST_LOOP, mfma_index=-1,
-              )
           self._capture_context.default_main = builder.finalize()
           self._capture_context.builder = None
 
