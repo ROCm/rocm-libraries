@@ -877,9 +877,38 @@ body-label-sensitivity becomes critical-path). D is the most radical and
 the most principled but has the largest blast radius (~800-1000 LoC per
 §3).
 
-**The implementation choice between A, D, and H remains open.** The user
-has decided the principle ("no shadow comparison"), not the
-implementation.
+**Implementation choice (recorded 2026-05-12): Approach A — true
+non-CMS reference build.** A second isolated kernel build with
+`UseCustomMainLoopSchedule=0`, captured via a non-shadow path and used
+as `ref`. Both sides are real emittable+runnable kernels. Approaches
+D and H remain documented in §3 for reference but are not the chosen
+path.
+
+Implications of choosing A specifically (additional cascading
+consequences beyond the principle-level ones below):
+
+- The auto-activation at `KernelWriter.py:4755-4756` and the 9
+  `_captureDefaultSchedule` flag-check sites become obsolete in a
+  clean A implementation. They should be deleted, not retained as
+  optional.
+- `oram.1` (compare_graphs body_label-sensitivity) is the load-bearing
+  blocker — A's reference kernel will produce a real prologue body
+  with `BODY_LABEL_PROLOGUE`/`loop_index=-1`, and the per-tile
+  schedule's `UsePLRPack=True` flip will move pack instructions from
+  the mainloop body to the prologue body across the two builds.
+  Without oram.1's resolution, every UsePLRPack-flipping schedule will
+  surface spurious failures.
+- §5 Q2 ("schedule flag-mutations: API or implementation detail?") is
+  still open and load-bearing — see §5 below for what's blocked by it.
+- §3's "PRELOOP_CAPTURE_PHASE1 design-intent objection" must be
+  resolved by the comparator (not by build-time scoping). Per
+  `PRELOOP_CAPTURE_PHASE1 §1`, UsePLRPack is pipelining-only, so the
+  dataflow IS equivalent across the flag flip — but `compare_graphs`
+  must be made body-label-tolerant (oram.1) for that equivalence to
+  surface.
+- Build-time cost ~doubles on every CMS kernel build that runs the
+  validator (the assert path now does TWO `_getKernelSource` calls).
+  See §5 Q3 below.
 
 ### Cascading consequences
 
