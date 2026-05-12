@@ -16,22 +16,7 @@
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_4c_fp16_hip_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_4c_fp16_hip_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_4c_fp16_tile_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_4c_fp16_tile_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_16c_fp16_hip_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_16c_fp16_hip_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_16c_fp16_tile_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_16c_fp16_tile_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_8c_fp16_hip_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_8c_fp16_hip_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_8c_fp16_tile_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_8c_fp16_tile_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_32c_fp16_hip_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_32c_fp16_hip_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_32c_fp16_tile_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_32c_fp16_tile_conv_kernel.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/direct_conv_kernels.hpp"
 #pragma clang diagnostic pop
 
 namespace ck_tile::builder::profiling {

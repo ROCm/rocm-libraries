@@ -2,14 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "test_grouped_4c_fp16_harness.hpp"
-#include "ck_tile/ops/direct_convolution/utils/common.hpp"
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_4c_fp16_tile_conv_kernel.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_4c_fp16_tile_conv_kernel.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/direct_conv_kernels.hpp"
 #pragma clang diagnostic pop
 
 constexpr auto v3 = ck_tile::direct_conv::Version::v3;
