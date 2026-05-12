@@ -5,6 +5,8 @@ subtrees:
 
 - caption: Install
   entries:
+  - file: install/Composable-Kernel-install.rst
+    title: Install Composable Kernel
   - file: install/Composable-Kernel-build.rst
     title: Build from source
   - file: install/Composable-Kernel-Docker.rst
