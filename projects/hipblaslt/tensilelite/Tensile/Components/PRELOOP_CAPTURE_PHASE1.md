@@ -798,6 +798,41 @@ body-label-mismatched pack edges per §2.4.
 
 ### §4 — Approaches to fix (sketched; full catalog in sub-bead)
 
+> **Update 2026-05-12 — context rewrite per user direction.** Two
+> structural changes have landed since this section was first written:
+>
+> 1. **Bead `rocm-libraries-4up4`** (`Tensile/Components/EMISSION_ORDINAL_DESIGN.md`)
+>    proposes to drop `class_tag` from identity entirely. New identity
+>    tuple: `(loop_index, canonical_render, emission_ordinal)`. The
+>    body-label (encoded as `loop_index`) STILL appears in this new
+>    tuple — 4up4 does not solve oram.1's blocker. oram.1's chosen
+>    approach must compose orthogonally with 4up4's new shape.
+> 2. **Umbrella bead `rocm-libraries-xqj3`** (CMS→rocisa categorization
+>    refactor) requires that any fix to identity-layer mechanics be
+>    grounded in rocisa-derivable properties (instruction class,
+>    register byte-keys, canonical render-text), NOT in CMS-scheduler-
+>    shaped concepts (body-name buckets, category-string labels,
+>    macro-expansion artifacts). Tactical fixes that perpetuate CMS
+>    coupling are explicitly rejected.
+>
+> **User direction 2026-05-12: rule out approaches B, C, and H** below
+> for baking in CMS-shaped concepts:
+> - **B** (body-label-equivalence layer with bucket boundaries like
+>   `{STEADY, TAIL}`) — CMS-body-name-shaped, not rocisa-derivable.
+> - **C** (cross-body pipeline-aware fallback in
+>   `diagnose_missing_edge`) — classifier patch rather than a
+>   structural fix; coupled to the existing CMS-shaped category
+>   strings via the canonical-render-modulo-register-rotation match.
+> - **H** (`cms_from_default`-driven synthesis) — depends on the
+>   CMS-emit path being the single source of comparison; locks in
+>   CMS as the validator's reference shape rather than removing the
+>   coupling.
+>
+> The live approach set is therefore **{A, D, E}** plus combinations.
+> The sub-bead's investigator must evaluate these under the 4up4 +
+> xqj3 framing and recommend the most principled and clean approach
+> that does NOT introduce false positives or false negatives.
+
 The sub-bead filed alongside this memo will develop a full
 approach catalog. Five distinct directions are sketched here so
 the user can react to the framing before the sub-bead's
@@ -832,7 +867,7 @@ ambiguous when `p_node.body_label != c_node.body_label` is the
 ONLY discriminator. Probably safe — the order check already
 skips cross-body — but a full audit is needed.
 
-#### Approach B — "Body-label-equivalence layer"
+#### Approach B — "Body-label-equivalence layer" — **RULED OUT 2026-05-12** (CMS-shaped bucketing)
 
 Mechanism: keep `identity_for` as-is, but add a normalizer that
 maps `{PROLOGUE, ML-1, ML, NGL, NLL}` into "iteration buckets"
@@ -857,7 +892,7 @@ from ML-1 to ML still fails comparison. Likely insufficient for
 the full pipelining model where producers can drift across
 arbitrary iteration boundaries.
 
-#### Approach C — "Cross-body pipeline-aware comparison"
+#### Approach C — "Cross-body pipeline-aware comparison" — **RULED OUT 2026-05-12** (classifier patch; coupled to CMS-shaped categories)
 
 Mechanism: leave identity as-is. Add a new comparison phase to
 `compare_graphs` (or a new `diagnose_missing_edge` branch) that
@@ -933,16 +968,23 @@ the d0xd resolution layer.
 
 #### Hybrid candidates
 
-- **A + C**: drop body from identity; add a cross-body pipeline-
+- **A + C**: ~~drop body from identity; add a cross-body pipeline-
   aware fallback for the few cases where dropping body causes
-  identity collisions to lose information.
-- **B + E**: bucket loop indices for identity AND switch
-  edge_key matching to resource-key based.
+  identity collisions to lose information.~~ **RULED OUT** (C
+  component is CMS-coupled per ruling above).
+- **B + E**: ~~bucket loop indices for identity AND switch
+  edge_key matching to resource-key based.~~ **RULED OUT** (B
+  component is CMS-coupled per ruling above).
 - **D + E**: combine canonicalization at render time with
   resource-key matching; the most thorough fix and likely the
-  most expensive.
+  most expensive. **LIVE candidate** for the sub-bead's analysis.
+- **A + D**: drop body from identity AND canonicalize register
+  rotation. **LIVE candidate.**
+- **A + E**: drop body from identity AND switch edge_key matching
+  to resource-key based. **LIVE candidate.**
+- **A + D + E**: full stack. **LIVE candidate.**
 
-**Approach H — `cms_from_default`-driven same-direction synthesis
+**Approach H — `cms_from_default`-driven same-direction synthesis — RULED OUT 2026-05-12** (locks in CMS as the reference shape)
 (borrowed from 2lzd memo, `2LZD_INVESTIGATION.md:593`).** Bypasses
 the body-label issue entirely: build BOTH kernels from the same
 synthesized CMS schedule (one real CMS, one default-converted-to-CMS
