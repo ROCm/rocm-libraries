@@ -224,8 +224,8 @@ def test_FP4_no_scale_unchanged_fallback(writer):
 
 
 def test_legacy_no_DataType_falls_back_to_F4(writer):
-    """If DataTypeA/B are absent (legacy callers), helper returns None and
-    caller defaults to INST_F4 -> cbsz:4 blgp:4. Bit-stable behavior."""
+    """If DataTypeA/B are absent (legacy callers), helper should raise a
+    runtime error"""
     kernel = {
         "MatrixInstK": 128,
         "MIArchVgpr": True,
@@ -236,8 +236,9 @@ def test_legacy_no_DataType_falls_back_to_F4(writer):
     tB = _mkTile(8, 4, writer.vgprPool)
     tC = _mkTile(16, 4, writer.vgprPool)
     tD = _mkTile(32, 4, writer.vgprPool)
-    asm = str(emitMfmaInstruction(writer, kernel, tA, tB, tC, tD))
-    assert "cbsz:4 blgp:4" in asm  # FP4 default preserved
+
+    with pytest.raises(RuntimeError):
+      emitMfmaInstruction(writer, kernel, tA, tB, tC, tD)
 
 
 # ---- Backward-compat (BF16) -----------------------------------------------
