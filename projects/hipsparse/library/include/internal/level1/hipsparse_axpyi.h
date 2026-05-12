@@ -95,6 +95,8 @@ hipsparseStatus_t hipsparseSaxpyi(hipsparseHandle_t    handle,
                                   hipsparseIndexBase_t idxBase);
 
 /*! \ingroup level1_module
+ *  \brief Scale a sparse vector and add it to a dense vector.
+ *
  *  \copydoc hipsparseSaxpyi
  */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
@@ -108,6 +110,8 @@ hipsparseStatus_t hipsparseDaxpyi(hipsparseHandle_t    handle,
                                   hipsparseIndexBase_t idxBase);
 
 /*! \ingroup level1_module
+ *  \brief Scale a sparse vector and add it to a dense vector.
+ *
  *  \copydoc hipsparseSaxpyi
  */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
@@ -121,6 +125,8 @@ hipsparseStatus_t hipsparseCaxpyi(hipsparseHandle_t    handle,
                                   hipsparseIndexBase_t idxBase);
 
 /*! \ingroup level1_module
+ *  \brief Scale a sparse vector and add it to a dense vector.
+ *
  *  \copydoc hipsparseSaxpyi
  */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

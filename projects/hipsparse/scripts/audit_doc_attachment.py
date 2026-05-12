@@ -53,8 +53,11 @@ def audit(path: Path) -> tuple[int, int]:
         if c.location.file is None or not str(c.location.file).endswith(path.name):
             continue
         if c.raw_comment:
+            print("raw_comment:", c.raw_comment)
             print(f"  {c.spelling:50s} -> documented")
             documented += 1
+        if c.brief_comment:
+            print("brief_comment:", c.brief_comment)
         else:
             print(f"  {c.spelling:50s} -> UNDOCUMENTED")
             undocumented += 1
