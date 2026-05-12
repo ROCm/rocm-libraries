@@ -22,8 +22,8 @@ The hipSPARSELt public repository is located at `<https://github.com/ROCm/rocm-l
 
   .. grid-item-card:: Install
 
-    * :doc:`Install hipSPARSELt <./install/quick-start-install>`
-    * :doc:`Build from source <./install/install-hipsparselt>`
+    * :doc:`Install hipSPARSELt <./install/install>`
+    * :doc:`Build from source <./install/build>`
 
 .. grid:: 2
   :gutter: 3
