@@ -15,9 +15,6 @@
 name: TheRock Multi-Arch CI
 
 on:
-  push:
-    branches:
-      - users/geomin12/specific-projs # TEMPORARY: remove before merging
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:

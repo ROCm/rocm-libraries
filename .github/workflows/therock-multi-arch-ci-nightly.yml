@@ -11,6 +11,9 @@
 name: TheRock Multi-Arch CI Nightly Trigger
 
 on:
+  push:
+    branches:
+      - users/geomin12/specific-projs # TEMPORARY: remove before merging
   schedule:
     - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
 
