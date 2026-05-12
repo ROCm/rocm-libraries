@@ -3,6 +3,8 @@
 
 """Tests for MetricsConfig dataclass and its embedding in SuiteConfig."""
 
+from pathlib import Path
+
 import pytest
 
 from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
@@ -59,3 +61,33 @@ class TestSuiteConfigEmbedding:
     def test_metrics_can_be_overridden(self):
         sc = SuiteConfig(metrics=MetricsConfig(tier="off"))
         assert sc.metrics.basic_enabled is False
+
+
+class TestProfilingFields:
+    def test_profiling_output_dir_str_coerced_to_path(self):
+        cfg = MetricsConfig(profiling_output_dir="/tmp/out")
+        assert isinstance(cfg.profiling_output_dir, Path)
+        assert cfg.profiling_output_dir == Path("/tmp/out")
+
+    def test_default_roofline_data_type_is_fp32(self):
+        cfg = MetricsConfig()
+        assert cfg.roofline_data_type == "FP32"
+
+    def test_invalid_roofline_data_type_raises(self):
+        with pytest.raises(ValueError, match="Invalid roofline_data_type"):
+            MetricsConfig(roofline_data_type="FP4")  # type: ignore[arg-type]
+
+    def test_pmc_all_without_multipass_flag_raises(self):
+        with pytest.raises(
+            ValueError, match="--pmc all requires --pmc-allow-multipass"
+        ):
+            MetricsConfig(pmc_set="all")
+
+    def test_pmc_all_with_multipass_flag_accepted(self):
+        cfg = MetricsConfig(pmc_set="all", pmc_allow_multipass=True)
+        assert cfg.pmc_set == "all"
+        assert cfg.opt_in_pass_requested is True
+
+    def test_pmc_basic_does_not_require_multipass(self):
+        cfg = MetricsConfig(pmc_set="basic")
+        assert cfg.pmc_set == "basic"

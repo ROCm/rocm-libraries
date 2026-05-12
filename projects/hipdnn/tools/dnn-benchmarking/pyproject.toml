@@ -51,4 +51,7 @@ markers = [
     "amd: marks tests requiring AMD ROCm GPUs",
     "nvidia: marks tests requiring NVIDIA CUDA GPUs",
     "slow: marks slow integration tests",
+    "rocprofv3: requires rocprofv3 binary on PATH",
+    "perf: requires Linux perf binary on PATH and perf_event_paranoid <= 1",
+    "rocprof_compute: requires rocprof-compute binary on PATH",
 ]

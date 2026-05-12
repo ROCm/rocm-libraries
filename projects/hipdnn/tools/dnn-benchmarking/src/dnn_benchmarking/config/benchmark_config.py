@@ -124,26 +124,46 @@ class ValidationConfig:
 class MetricsConfig:
     """Controls which metric sources are collected during benchmarking.
 
-    Phase 1 only wires ``tier``. The remaining fields reserve the CLI
-    surface for Phase 2 (``emit_trace``, ``pmc_set``) and Phase 3
-    (``perf``, ``roofline``); they are validated here so unknown values
-    fail at config-build time rather than at run time, but the suite
-    runner currently treats them as no-ops with a clear error if used.
-    See ``docs/metrics-phase2.md`` and ``docs/metrics-phase3.md``.
+    Two collection modes:
+
+    * Always-on (``tier``) — zero-overhead probes wrapped around the
+      timed loop: analytical FLOPs/IO, workspace, host rusage + RAM,
+      amdsmi GPU snapshot, machine metadata.
+    * Opt-in profiling pass (``pmc_set``, ``emit_trace``, ``perf``,
+      ``roofline``) — each runs the workload again under an external
+      profiling tool. Kept separate from the timed pass so PMC sampling
+      and roofline replay don't pollute the headline timing.
 
     Attributes:
-        tier: ``basic`` enables always-on probes (analytical FLOPs/IO,
-            workspace, host rusage + RAM, amdsmi GPU snapshot, machine
-            metadata). ``off`` disables all metric collection — useful
-            for clean A/B timing comparisons.
-        emit_trace: Phase 2 — export rocprofv3 kernel/memory traces in
-            the named format. Not yet implemented.
-        pmc_set: Phase 2 — collect a named PMC counter set under
-            rocprofv3. Not yet implemented.
-        perf: Phase 3 — wrap benchmark in ``perf stat`` for CPU
-            cycles/instructions. Not yet implemented.
-        roofline: Phase 3 — run ``rocprof-compute --roof-only`` for a
-            roofline plot. Not yet implemented.
+        tier: ``basic`` enables always-on probes. ``off`` disables all
+            metric collection — useful for clean A/B timing comparisons.
+        emit_trace: ``pftrace`` or ``kineto`` — re-run benchmark under
+            ``rocprofv3 --kernel-trace --memory-copy-trace`` and write a
+            trace file. ``kineto`` falls back to pftrace if the rocpd
+            Python module is not importable.
+        pmc_set: ``basic`` | ``memory`` | ``flops`` | ``all`` — re-run
+            under ``rocprofv3 --pmc <set>`` and fold per-kernel counter
+            aggregates into ``extra_metrics["pmc"]``. ``all`` requires
+            ``pmc_allow_multipass`` because the union of sets crosses the
+            single-pass replay budget on most arches.
+        perf: Re-run wrapped in ``perf stat -x,`` to collect CPU cycles
+            and instructions. Kernel-space events are dropped silently
+            when ``/proc/sys/kernel/perf_event_paranoid > 1``.
+        roofline: Re-run under ``rocprof-compute profile --roof-only``
+            to generate a roofline PDF. Path-only recording — the plot
+            itself is the user-facing artifact.
+        roofline_data_type: ``FP32`` | ``FP16`` | ``BF16`` | ``FP64`` |
+            ``INT8`` — passed through to ``rocprof-compute
+            --roofline-data-type``. Stack-style (multiple types in one
+            PDF) is not exposed; users who want it can re-run
+            rocprof-compute against the recorded db_path.
+        pmc_allow_multipass: Required for ``--pmc all``. Without it,
+            ``all`` is rejected at config-build time because Phase 1
+            testing measured a 4-min hang on a 0.4 s baseline when the
+            rocprofv3 multi-pass replay budget was exceeded.
+        profiling_output_dir: Root directory for profiling artefacts.
+            ``None`` until the orchestrator resolves a default
+            (``./profiling-output/<utc-timestamp>/``) at suite start.
     """
 
     tier: Literal["basic", "off"] = "basic"
@@ -151,6 +171,9 @@ class MetricsConfig:
     pmc_set: Optional[Literal["basic", "memory", "flops", "all"]] = None
     perf: bool = False
     roofline: bool = False
+    roofline_data_type: Literal["FP32", "FP16", "BF16", "FP64", "INT8"] = "FP32"
+    pmc_allow_multipass: bool = False
+    profiling_output_dir: Optional[Path] = None
 
     def __post_init__(self) -> None:
         valid_tiers = {"basic", "off"}
@@ -176,6 +199,25 @@ class MetricsConfig:
                 f"Invalid pmc_set: '{self.pmc_set}'. "
                 "Valid options: basic, memory, flops, all"
             )
+        valid_data_types = {"FP32", "FP16", "BF16", "FP64", "INT8"}
+        if self.roofline_data_type not in valid_data_types:
+            raise ValueError(
+                f"Invalid roofline_data_type: '{self.roofline_data_type}'. "
+                f"Valid options: {sorted(valid_data_types)}"
+            )
+        # The 'all' PMC set unions every counter group; rocprofv3 falls
+        # back to multi-pass replay, which Phase 1 measurements showed
+        # could hang for minutes on what should be a sub-second run.
+        # Require the explicit opt-in so users discover the cost.
+        if self.pmc_set == "all" and not self.pmc_allow_multipass:
+            raise ValueError(
+                "--pmc all requires --pmc-allow-multipass: rocprofv3 "
+                "falls back to multi-pass replay for the unioned counter "
+                "set, which can hang on small workloads. Pick "
+                "--pmc basic|memory|flops for a single-pass run."
+            )
+        if isinstance(self.profiling_output_dir, str):
+            self.profiling_output_dir = Path(self.profiling_output_dir)
 
     @property
     def basic_enabled(self) -> bool:
@@ -184,7 +226,7 @@ class MetricsConfig:
 
     @property
     def opt_in_pass_requested(self) -> bool:
-        """True when any Phase 2/3 opt-in source was requested."""
+        """True when any opt-in profiling source was requested."""
         return bool(self.emit_trace or self.pmc_set or self.perf or self.roofline)
 
 
@@ -219,6 +261,10 @@ class SuiteConfig:
     reference_provider: str = "none"
     verbose: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
+    # Forwarded to the orchestrator's inner subprocess so the child
+    # picks up the same plugin .so directory the parent loaded. Not used
+    # outside of the opt-in profiling path.
+    plugin_path: Optional[Path] = None
 
     def __post_init__(self) -> None:
         """Validate configuration values."""

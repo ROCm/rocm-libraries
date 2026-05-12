@@ -257,8 +257,10 @@ Tarball Input:
         default=None,
         metavar="FORMAT",
         help=(
-            "[Phase 2 — not yet wired] Re-run benchmark under rocprofv3 "
-            "and export a kernel trace in the given format."
+            "Re-run benchmark under rocprofv3 and export a kernel + "
+            "memory-copy trace in the given format. 'kineto' falls back "
+            "to pftrace when the rocpd Python module is not importable. "
+            "Adds ~1 extra workload run (~5%% kernel-time overhead)."
         ),
     )
     metrics_group.add_argument(
@@ -268,8 +270,21 @@ Tarball Input:
         default=None,
         metavar="SET",
         help=(
-            "[Phase 2 — not yet wired] Re-run benchmark under rocprofv3 "
-            "with the named PMC counter set."
+            "Re-run benchmark under rocprofv3 with the named PMC counter "
+            "set. Per-kernel aggregates land in extra_metrics['pmc']. "
+            "'all' requires --pmc-allow-multipass. Adds ~1 extra workload "
+            "run (~30%% wallclock overhead)."
+        ),
+    )
+    metrics_group.add_argument(
+        "--pmc-allow-multipass",
+        action="store_true",
+        default=False,
+        help=(
+            "Required to use --pmc all. The unioned counter set crosses "
+            "the single-pass replay budget and can hang on small "
+            "workloads (Phase 1 testing observed a 4-min hang on a "
+            "0.4 s baseline)."
         ),
     )
     metrics_group.add_argument(
@@ -277,8 +292,10 @@ Tarball Input:
         action="store_true",
         default=False,
         help=(
-            "[Phase 3 — not yet wired] Wrap re-run in 'perf stat' to "
-            "collect CPU cycles/instructions."
+            "Wrap re-run in 'perf stat -x,' to collect CPU cycles, "
+            "instructions, IPC, and task-clock. Kernel-space events drop "
+            "silently when /proc/sys/kernel/perf_event_paranoid > 1. "
+            "Adds ~1 extra workload run."
         ),
     )
     metrics_group.add_argument(
@@ -286,9 +303,55 @@ Tarball Input:
         action="store_true",
         default=False,
         help=(
-            "[Phase 3 — not yet wired] Re-run under "
-            "'rocprof-compute --roof-only' for a roofline plot."
+            "Re-run under 'rocprof-compute profile --roof-only' for a "
+            "roofline plot. PDF + db paths land in "
+            "extra_metrics['roofline']. Adds ~3 extra workload runs."
         ),
+    )
+    metrics_group.add_argument(
+        "--roofline-data-type",
+        type=str,
+        choices=["FP32", "FP16", "BF16", "FP64", "INT8"],
+        default="FP32",
+        metavar="DTYPE",
+        help=(
+            "Data type for the roofline plot (default: FP32). Passed "
+            "through to rocprof-compute --roofline-data-type."
+        ),
+    )
+    metrics_group.add_argument(
+        "--profiling-output-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Root directory for profiling artefacts (rocpd dbs, "
+            "pftraces, perf CSVs, roofline PDFs). Default: "
+            "./profiling-output/<utc-timestamp>/."
+        ),
+    )
+
+    # Hidden re-exec sub-mode: when an opt-in profiling source is
+    # requested, the parent process shells out to a fresh CLI invocation
+    # under the profiler. The child process picks up these flags to
+    # short-circuit setup and run a single (graph, engine) workload.
+    parser.add_argument(
+        "--internal-profiling-run",
+        action="store_true",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--internal-profiling-engine",
+        type=int,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--internal-profiling-graph",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS,
     )
 
     return parser

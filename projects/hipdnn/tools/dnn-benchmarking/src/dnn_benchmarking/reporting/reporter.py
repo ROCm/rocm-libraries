@@ -719,6 +719,86 @@ class Reporter:
         if pe.vram_used_mb is not None:
             self._print(f"  VRAM used:            {self._fmt_mib(pe.vram_used_mb)}")
         self._print("")
+        self._print_profiling_block(pe)
+
+    def _print_profiling_block(self, pe: ProviderEngineResult) -> None:
+        """Render the opt-in profiling artefacts when extra_metrics is set.
+
+        Each line is conditional: a user who runs only --pmc sees one
+        line, only --emit-trace sees a different one, and so on. Long
+        counter lists fold to ``[N more, see JSON]`` so the console
+        block stays compact — full nested data is always in the JSON.
+        """
+        extra = pe.extra_metrics
+        if not extra:
+            return
+        any_present = any(
+            isinstance(extra.get(k), dict) for k in ("trace", "pmc", "perf", "roofline")
+        )
+        if not any_present:
+            return
+        self._print("Profiling:")
+
+        trace = extra.get("trace")
+        if isinstance(trace, dict):
+            path = trace.get("path") or trace.get("db_path")
+            fmt = trace.get("format", "?")
+            if path:
+                self._print(f"  Trace ({fmt}):         {path}")
+            elif "skipped" in trace:
+                self._print(f"  Trace ({fmt}):         skipped — {trace['skipped']}")
+
+        pmc = extra.get("pmc")
+        if isinstance(pmc, dict):
+            arch = pmc.get("arch", "?")
+            pmc_set = pmc.get("set", "?")
+            counters = pmc.get("counters") or {}
+            if counters:
+                head = list(counters.items())[:3]
+                rendered = "  ".join(
+                    f"{name}={int(v.get('sum', 0)):,}" for name, v in head
+                )
+                more = len(counters) - len(head)
+                suffix = f"  [{more} more, see JSON]" if more > 0 else ""
+                self._print(f"  PMC ({pmc_set}, {arch}):  {rendered}{suffix}")
+            elif "skipped" in pmc:
+                self._print(f"  PMC ({pmc_set}, {arch}):  skipped — {pmc['skipped']}")
+            elif "error_tail" in pmc:
+                self._print(
+                    f"  PMC ({pmc_set}, {arch}):  rocprofv3 errored "
+                    f"(rc={pmc.get('returncode', '?')})"
+                )
+
+        perf = extra.get("perf")
+        if isinstance(perf, dict):
+            if "skipped" in perf:
+                self._print(f"  CPU (perf):           skipped — {perf['skipped']}")
+            else:
+                bits = []
+                ipc = perf.get("ipc_user")
+                if isinstance(ipc, (int, float)):
+                    bits.append(f"IPC={ipc:.2f}")
+                cu = perf.get("cycles_user")
+                if isinstance(cu, (int, float)):
+                    bits.append(f"cycles_u={cu:,.0f}")
+                iu = perf.get("instructions_user")
+                if isinstance(iu, (int, float)):
+                    bits.append(f"instr_u={iu:,.0f}")
+                tc = perf.get("task_clock_ms")
+                if isinstance(tc, (int, float)):
+                    bits.append(f"task_clock={tc:.1f}ms")
+                if bits:
+                    self._print(f"  CPU (perf):           {'  '.join(bits)}")
+
+        roofline = extra.get("roofline")
+        if isinstance(roofline, dict):
+            dt = roofline.get("data_type", "?")
+            pdf = roofline.get("pdf_path")
+            if pdf:
+                self._print(f"  Roofline ({dt}):       {pdf}")
+            elif "skipped" in roofline:
+                self._print(f"  Roofline ({dt}):       skipped — {roofline['skipped']}")
+        self._print("")
 
     def _print_pe_correctness(
         self, correctness: CorrectnessResult, suite_config: SuiteConfig

@@ -158,14 +158,10 @@ def run_suite_cli(
             pmc_set=getattr(args, "pmc", None),
             perf=getattr(args, "perf", False),
             roofline=getattr(args, "roofline", False),
+            roofline_data_type=getattr(args, "roofline_data_type", "FP32"),
+            pmc_allow_multipass=getattr(args, "pmc_allow_multipass", False),
+            profiling_output_dir=getattr(args, "profiling_output_dir", None),
         )
-        if metrics_config.opt_in_pass_requested:
-            reporter.print_error(
-                "--emit-trace, --pmc, --perf, and --roofline are reserved "
-                "for Phase 2/3 of the metrics expansion and are not yet "
-                "wired. See docs/metrics-phase2.md and docs/metrics-phase3.md."
-            )
-            return 1
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,
@@ -177,6 +173,7 @@ def run_suite_cli(
             reference_provider=args.validate,
             verbose=args.verbose,
             metrics=metrics_config,
+            plugin_path=args.plugin_path,
         )
     except ValueError as e:
         reporter.print_error(f"Suite configuration error: {e}")

@@ -1,18 +1,24 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Always-on metric probes and derivations for dnn-benchmarking.
+"""Metric probes and derivations for dnn-benchmarking.
 
-Phase 1 surface:
+Always-on probes (zero overhead, wrapped around the timed loop):
     * Analytical FLOPs / IO bytes from graph JSON (:mod:`analytical`).
     * Host CPU rusage delta and host RAM snapshot (:mod:`host`).
     * GPU telemetry snapshot via amdsmi (:mod:`gpu_smi`).
     * One-shot machine metadata (:mod:`machine_info`).
 
-Phase 2/3 sources (rocprofv3 PMC + trace, perf, rocprof-compute roofline)
-are documented in ``docs/metrics-phase2.md`` and
-``docs/metrics-phase3.md`` and will land in the ``extra_metrics`` bag on
-``ProviderEngineResult`` without breaking the Phase 1 schema.
+Opt-in profiling sources (separate workload re-run, orchestrated via
+:mod:`profiling_orchestrator`):
+    * rocprofv3 PMC counters (:mod:`rocprof_pmc`).
+    * rocprofv3 kernel/memory trace (:mod:`rocprof_trace`).
+    * Linux ``perf stat`` CPU counters (:mod:`perf`).
+    * ``rocprof-compute --roof-only`` roofline plot (:mod:`roofline`).
+
+Each opt-in source runs after the timed pass so PMC sampling and roof
+replay can't pollute the headline timing. Results land in
+``ProviderEngineResult.extra_metrics`` under per-source keys.
 """
 
 from .analytical import (
