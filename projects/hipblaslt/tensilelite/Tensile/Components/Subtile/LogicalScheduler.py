@@ -143,23 +143,33 @@ class SchedulerConfig:
     partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
 
-    # Resolve a partition spec into the concrete list of per-partition sizes
-    # along one dimension. The spec is either an explicit list (must sum to
-    # `total`) or a single tile size; passing 0 means "one partition covering
-    # the whole dimension". When the dimension does not divide evenly, the
-    # remainder is placed in the middle of the list so the smaller partition
-    # is bracketed by full ones rather than landing at an edge.
+    # Resolve a partition spec into per-partition sizes along one dimension.
+    # spec is either:
+    #  - an explicit list (must sum to total)
+    #  - a single tile size (0 means full dim).
+    # Uneven splits place the remainder in the middle so the smaller partition is bracketed by full ones.
+    #
+    # Every partition size must be a multiple of `mn` (LR read granularity) to avoid emitting under-sized LRs.
+    # Single-int specs are rounded DOWN to an mn-multiple (smaller partition, less VGPR usage).
+    # If no solution exists, we return [total] (single partition).
     @staticmethod
-    def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str) -> List[int]:
+    def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str, mn: int = 1) -> List[int]:
         if isinstance(spec, (list, tuple)):
             assert sum(spec) == total, \
                 f"partition sizes for {dim} must sum to {total}, got {sum(spec)}"
             assert all(s >= 1 for s in spec), \
                 f"all partition sizes for {dim} must be >= 1"
+            assert all(s % mn == 0 for s in spec), \
+                f"partition sizes for {dim} must be multiples of mn={mn}, got {list(spec)}"
             return list(spec)
         s = spec if spec != 0 else total
         assert 1 <= s <= total, \
             f"partition size for {dim} must be in [1, {total}], got {s}"
+        if total % mn != 0:
+            return [total]
+        s = max(mn, (s // mn) * mn)
+        if s > total:
+            return [total]
         num_full = total // s
         remainder = total - num_full * s
         if remainder == 0:
@@ -178,10 +188,12 @@ class SchedulerConfig:
 
     def __post_init__(self):
         assert self.pgr in (0, 1, 2), f"pgr must be 0, 1, or 2, got {self.pgr}"
+        mn_M = max((g.mn for g in (self.lrA, self.lrSA) if g is not None), default=1)
+        mn_N = max((g.mn for g in (self.lrB, self.lrSB) if g is not None), default=1)
         self._partitionSizesM = self._normalize_partition_sizes(
-            self.partitionSizeM, self.numMFMATilesM, 'M')
+            self.partitionSizeM, self.numMFMATilesM, 'M', mn_M)
         self._partitionSizesN = self._normalize_partition_sizes(
-            self.partitionSizeN, self.numMFMATilesN, 'N')
+            self.partitionSizeN, self.numMFMATilesN, 'N', mn_N)
         self._prefixM = self._build_prefix(self._partitionSizesM)
         self._prefixN = self._build_prefix(self._partitionSizesN)
         self.plr = 0 if self.pgr == 0 else 1

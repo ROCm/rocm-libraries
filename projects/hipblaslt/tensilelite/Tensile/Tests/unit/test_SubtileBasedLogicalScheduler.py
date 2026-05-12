@@ -1717,6 +1717,158 @@ class TestPartitionCandidates:
         assert candidates == [(2, 6), (2, 3), (2, 2), (2, 1)]
 
 
+# ══════════════════════════════════════════════════════════════
+# _normalize_partition_sizes
+# ══════════════════════════════════════════════════════════════
+
+class TestNormalizePartitionSizes:
+    """Pin the current behavior of SchedulerConfig._normalize_partition_sizes.
+
+    These tests exercise the staticmethod directly; they bypass __post_init__
+    so no full SchedulerConfig is constructed.
+    """
+
+    norm = staticmethod(SchedulerConfig._normalize_partition_sizes)
+
+    # ── single-int spec ──────────────────────────────────────
+
+    def test_zero_means_full_dim(self):
+        assert self.norm(0, 16, 'N') == [16]
+
+    def test_spec_equals_total(self):
+        assert self.norm(16, 16, 'N') == [16]
+
+    def test_divides_evenly(self):
+        assert self.norm(8, 16, 'N') == [8, 8]
+        assert self.norm(8, 24, 'N') == [8, 8, 8]
+        assert self.norm(1, 5, 'N') == [1, 1, 1, 1, 1]
+
+    def test_single_full_with_remainder(self):
+        # num_full == 1 → [s, remainder]
+        assert self.norm(8, 12, 'N') == [8, 4]
+        assert self.norm(22, 23, 'N') == [22, 1]
+
+    def test_remainder_placed_in_middle(self):
+        # num_full=2, remainder=4, mid=1 → [s, rem, s]
+        assert self.norm(8, 20, 'N') == [8, 4, 8]
+        # num_full=2, remainder=7, mid=1 → [8,7,8]
+        assert self.norm(8, 23, 'N') == [8, 7, 8]
+        # num_full=5, remainder=3, mid=2 → [4,4,3,4,4,4]
+        assert self.norm(4, 23, 'N') == [4, 4, 3, 4, 4, 4]
+        # num_full=3, remainder=2, mid=1 → [4,2,4,4]
+        assert self.norm(4, 14, 'N') == [4, 2, 4, 4]
+
+    def test_spec_one(self):
+        assert self.norm(1, 4, 'N') == [1, 1, 1, 1]
+
+    # ── invalid single-int spec ──────────────────────────────
+
+    def test_spec_negative_raises(self):
+        with pytest.raises(AssertionError, match="must be in"):
+            self.norm(-1, 16, 'N')
+
+    def test_spec_larger_than_total_raises(self):
+        with pytest.raises(AssertionError, match="must be in"):
+            self.norm(20, 16, 'N')
+
+    # ── explicit list spec ───────────────────────────────────
+
+    def test_list_passthrough(self):
+        assert self.norm([8, 8], 16, 'N') == [8, 8]
+        assert self.norm([22, 1], 23, 'N') == [22, 1]
+        assert self.norm([4, 4, 3, 4, 4, 4], 23, 'N') == [4, 4, 3, 4, 4, 4]
+
+    def test_tuple_spec_returned_as_list(self):
+        result = self.norm((8, 8), 16, 'N')
+        assert result == [8, 8]
+        assert isinstance(result, list)
+
+    def test_list_wrong_sum_raises(self):
+        with pytest.raises(AssertionError, match="must sum to 16"):
+            self.norm([8, 7], 16, 'N')
+
+    def test_list_with_zero_raises(self):
+        with pytest.raises(AssertionError, match="must be >= 1"):
+            self.norm([8, 0, 8], 16, 'N')
+
+    def test_list_with_negative_raises(self):
+        with pytest.raises(AssertionError, match="must be >= 1"):
+            self.norm([10, -2, 8], 16, 'N')
+
+    def test_dim_label_in_error(self):
+        with pytest.raises(AssertionError, match="for M"):
+            self.norm([1, 2], 16, 'M')
+
+    # ── mn-aware behavior ────────────────────────────────────
+
+    def test_mn_default_is_one(self):
+        # Default mn=1: behavior identical to the pre-mn algorithm.
+        assert self.norm(8, 23, 'N') == [8, 7, 8]
+
+    def test_mn_already_aligned_passthrough(self):
+        assert self.norm(8, 16, 'N', 2) == [8, 8]
+        assert self.norm(8, 24, 'N', 4) == [8, 8, 8]
+
+    def test_mn_snaps_spec_down(self):
+        # 7 snaps down to 6 (largest mn-multiple <= 7), then split as usual.
+        assert self.norm(7, 16, 'N', 2) == [6, 4, 6]
+
+    def test_mn_snaps_spec_clamped_to_mn(self):
+        # spec=1 with mn=2 snaps up to mn (the floor of valid sizes).
+        assert self.norm(1, 16, 'N', 2) == [2] * 8
+
+    def test_mn_remainder_stays_aligned(self):
+        # total=22, s=8 → num_full=2, remainder=6 (even). mid=1 → [8,6,8].
+        assert self.norm(8, 22, 'N', 2) == [8, 6, 8]
+        # total=20, s=8 → [8,4,8]; remainder 4 is mn-aligned.
+        assert self.norm(8, 20, 'N', 4) == [8, 4, 8]
+
+    def test_mn_zero_spec_uses_full_dim(self):
+        # spec=0 means "one partition for the whole dim"; if the whole dim
+        # is mn-aligned the result is [total].
+        assert self.norm(0, 16, 'N', 2) == [16]
+
+    def test_mn_total_not_aligned_falls_back_to_single(self):
+        # total=23, mn=2: no multi-partition split is mn-valid → [total].
+        # Caller's vgpr-budget loop sees a single big partition and moves on.
+        assert self.norm(0, 23, 'N', 2) == [23]
+        assert self.norm(8, 23, 'N', 2) == [23]
+        assert self.norm(22, 23, 'N', 2) == [23]
+
+    def test_mn_spec_equals_total(self):
+        assert self.norm(16, 16, 'N', 2) == [16]
+        # Aligned total but spec snaps down → multi-partition.
+        assert self.norm(16, 16, 'N', 4) == [16]
+
+    def test_mn_one_full_with_aligned_remainder(self):
+        # num_full=1 path with mn-aligned remainder.
+        assert self.norm(8, 12, 'N', 4) == [8, 4]
+        assert self.norm(12, 16, 'N', 4) == [12, 4]
+
+    def test_mn_explicit_list_aligned_passes(self):
+        assert self.norm([8, 4, 8], 20, 'N', 2) == [8, 4, 8]
+        assert self.norm([4, 4, 4, 4], 16, 'N', 4) == [4, 4, 4, 4]
+
+    def test_mn_explicit_list_unaligned_raises(self):
+        # The [22,1] FP4 case from standalone: 1 is not a multiple of mn=2.
+        with pytest.raises(AssertionError, match="multiples of mn=2"):
+            self.norm([22, 1], 23, 'N', 2)
+
+    def test_mn_explicit_list_one_unaligned_element_raises(self):
+        with pytest.raises(AssertionError, match="multiples of mn=4"):
+            self.norm([8, 6, 8], 22, 'N', 4)
+
+    def test_mn_monotonic_candidate_sweep(self):
+        # Mirrors how Kernel.py iterates get_partition_candidates from large
+        # to small. Snapping DOWN must keep the post-normalization sequence
+        # non-increasing in partition size, so the vgpr-budget loop never
+        # re-tries a size it already rejected.
+        candidates = [16, 8, 7, 6, 5, 4, 3, 2, 1]
+        normalized_first = [self.norm(s, 16, 'N', 2)[0] for s in candidates]
+        # Each step is <= the previous step.
+        for prev, cur in zip(normalized_first, normalized_first[1:]):
+            assert cur <= prev, f"non-monotonic: {normalized_first}"
+
 
 # ══════════════════════════════════════════════════════════════
 # getNumVgpr
