@@ -36,7 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          THEROCK_REF=$(gh api repos/ROCm/rocm-libraries/contents/.github/therock-version?ref=develop --jq '.content' | base64 -d | tr -d '[:space:]')
+          THEROCK_REF=$(gh api repos/ROCm/rocm-libraries/contents/.github/therock-hash-version?ref=develop --jq '.content' | base64 -d | tr -d '[:space:]')
           echo "THEROCK_REF=$THEROCK_REF" >> $GITHUB_ENV
 
       - name: Checkout TheRock repository
