@@ -591,9 +591,10 @@ struct verify_forward_conv : conv_base<T, Tout>
                     << "FAILED: Using immediate mode error in GetSolutionCount.";
                 if(count == 0)
                 {
-                    // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-                    // return {};
+                    // The commented out return statement below triggers a 'not eliding copy on
+                    // return' warning, so it had to be replaced.
 
+                    // return {};
                     rout = {};
                     return rout;
                 }
@@ -607,9 +608,10 @@ struct verify_forward_conv : conv_base<T, Tout>
                     << " Solution count: " << count;
                 if(count == 0)
                 {
-                    // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-                    // return {};
+                    // The commented out return statement below triggers a 'not eliding copy on
+                    // return' warning, so it had to be replaced.
 
+                    // return {};
                     rout = {};
                     return rout;
                 }
@@ -669,9 +671,10 @@ struct verify_forward_conv : conv_base<T, Tout>
                     << "FAILED: Using immediate mode error in GetSolutionCount.";
                 if(count == size_t{0})
                 {
-                    // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-                    // return {};
+                    // The commented out return statement below triggers a 'not eliding copy on
+                    // return' warning, so it had to be replaced.
 
+                    // return {};
                     rout = {};
                     return rout;
                 }
@@ -685,9 +688,10 @@ struct verify_forward_conv : conv_base<T, Tout>
                     << " Solution count: " << count;
                 if(count == size_t{0})
                 {
-                    // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-                    // return {};
+                    // The commented out return statement below triggers a 'not eliding copy on
+                    // return' warning, so it had to be replaced.
 
+                    // return {};
                     rout = {};
                     return rout;
                 }
@@ -1092,9 +1096,10 @@ struct verify_backward_conv : conv_base<T>
                     << "FAILED: Using immediate mode error in GetSolutionCount.";
                 if(count == size_t{0})
                 {
-                    // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-                    // return {};
+                    // The commented out return statement below triggers a 'not eliding copy on
+                    // return' warning, so it had to be replaced.
 
+                    // return {};
                     rinput = {};
                     return rinput;
                 }
@@ -1109,9 +1114,10 @@ struct verify_backward_conv : conv_base<T>
                     << " Solution count: " << count;
                 if(count == size_t{0})
                 {
-                    // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-                    // return {};
+                    // The commented out return statement below triggers a 'not eliding copy on
+                    // return' warning, so it had to be replaced.
 
+                    // return {};
                     rinput = {};
                     return rinput;
                 }
@@ -1166,9 +1172,10 @@ struct verify_backward_conv : conv_base<T>
                     << "FAILED: Using immediate mode error in GetSolutionCount.";
                 if(count == size_t{0})
                 {
-                    // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-                    // return {};
+                    // The commented out return statement below triggers a 'not eliding copy on
+                    // return' warning, so it had to be replaced.
 
+                    // return {};
                     rinput = {};
                     return rinput;
                 }
@@ -1182,9 +1189,10 @@ struct verify_backward_conv : conv_base<T>
                     << " Solution count: " << count;
                 if(count == size_t{0})
                 {
-                    // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-                    // return {};
+                    // The commented out return statement below triggers a 'not eliding copy on
+                    // return' warning, so it had to be replaced.
 
+                    // return {};
                     rinput = {};
                     return rinput;
                 }
@@ -1467,9 +1475,10 @@ struct verify_backward_weights_conv : conv_base<T>
                 << "FAILED: Using immediate mode error in GetSolutionCount.";
             if(count == size_t{0})
             {
-                // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-                // return {};
+                // The commented out return statement below triggers a 'not eliding copy on
+                // return' warning, so it had to be replaced.
 
+                // return {};
                 rweights = {};
                 return rweights;
             }
@@ -1483,9 +1492,10 @@ struct verify_backward_weights_conv : conv_base<T>
                 << " Solution count: " << count;
             if(count == size_t{0})
             {
-                // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-                // return {};
+                // The commented out return statement below triggers a 'not eliding copy on
+                // return' warning, so it had to be replaced.
 
+                // return {};
                 rweights = {};
                 return rweights;
             }
@@ -1741,9 +1751,10 @@ struct verify_forward_conv_int8 : conv_base<T>
         EXPECT_NE(count, size_t{0}) << "FAILED: Using immediate mode error in GetSolutionCount.";
         if(count == size_t{0})
         {
-            // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-            // return {};
+            // The commented out return statement below triggers a 'not eliding copy on
+            // return' warning, so it had to be replaced.
 
+            // return {};
             rout = {};
             return rout;
         }
@@ -1758,9 +1769,10 @@ struct verify_forward_conv_int8 : conv_base<T>
             << " Solution count: " << count;
         if(count == size_t{0})
         {
-            // The following line of code triggers a 'not eliding copy on return' warning, so it had to be replaced.
-            // return {};
+            // The commented out return statement below triggers a 'not eliding copy on
+            // return' warning, so it had to be replaced.
 
+            // return {};
             rout = {};
             return rout;
         }
