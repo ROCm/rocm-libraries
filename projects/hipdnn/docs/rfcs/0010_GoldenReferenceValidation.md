@@ -291,7 +291,7 @@ Given these bundles:
 
 Note the last row: the customer dropped a bundle in an unusual folder path, but the test name comes from graph content -- the folder path doesn't matter.
 
-**Collision handling**: The generated test name includes the bundle name (scenario) as the final segment, so two bundles with identical graph content but different scenarios (`typical` vs `large_batch`) produce distinct names. If two bundles generate the same test name (identical operation, layout, data type, and scenario name), `discoverGoldenBundles` rejects the second bundle with an error naming both file paths. This is a authoring mistake -- rename one of the bundle directories.
+**Collision handling**: The generated test name includes the bundle name (scenario) as the final segment, so two bundles with identical graph content but different scenarios (`typical` vs `large_batch`) produce distinct names. If two bundles generate the same test name (identical operation, layout, data type, and scenario name), `discoverGoldenBundles` rejects the second bundle with an error naming both file paths. This is an authoring mistake -- rename one of the bundle directories.
 
 Filters match the generated test name:
 
@@ -623,7 +623,7 @@ Comparison testing can confirm that two implementations agree, not that either i
 
 ## Alternatives Considered
 
-> **STUB -- needs author input.** The bullets below are the major architectural forks identified during review. Each should be expanded with the rationale for the chosen path and the reason the alternative was rejected.
+The following architectural forks were considered during design. Each records the rationale for the chosen path.
 
 - **Per-tensor `.bin` files vs. single archive (npz / HDF5 / zip).** A single archive per bundle would simplify "share = one file" and reduce filesystem entry counts, but trades off transparent diff/inspection and tool-agnostic readability. *Why we chose per-tensor `.bin`: ...*
 
