@@ -460,15 +460,18 @@ def main():
     print()
 
     # Map missing/extra edge keys back to DataflowEdge objects for display.
+    # Per EMISSION_ORDINAL_DESIGN.md §4.2, role positions come from
+    # `_role(node)` (rocisa-derived), matching `DataflowGraph.edge_keys`.
+    from Tensile.Components.CMSValidator import _role
     ref_edges_by_key = {
-        (e.producer.identity[0], e.producer.position, e.src_operand_slot,
-         e.consumer.identity[0], e.consumer.position, e.sink_operand_slot,
+        (_role(e.producer), e.producer.position, e.src_operand_slot,
+         _role(e.consumer), e.consumer.position, e.sink_operand_slot,
          e.edge_kind, e.intra_operand_byte_offset): e
         for e in ref_graph.edges
     }
     subj_edges_by_key = {
-        (e.producer.identity[0], e.producer.position, e.src_operand_slot,
-         e.consumer.identity[0], e.consumer.position, e.sink_operand_slot,
+        (_role(e.producer), e.producer.position, e.src_operand_slot,
+         _role(e.consumer), e.consumer.position, e.sink_operand_slot,
          e.edge_kind, e.intra_operand_byte_offset): e
         for e in subj_graph.edges
     }

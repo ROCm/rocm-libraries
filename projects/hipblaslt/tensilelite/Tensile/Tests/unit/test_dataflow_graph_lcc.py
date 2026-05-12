@@ -125,7 +125,13 @@ class TestLCCInGraph:
         cls_names = sorted(type(n.rocisa_inst).__name__ for n in lcc_nodes)
         assert cls_names == ["SCmpEQI32", "SSubU32"], cls_names
         for node in lcc_nodes:
-            assert node.identity[0] == "LCC", node.identity
+            # Per EMISSION_ORDINAL_DESIGN.md §4.5 the identity tuple is now
+            # `(loop_index, canonical_render, emission_ordinal)`; LCC's
+            # rocisa classes (SSubU32 / SCmpEQI32) lack a registered category
+            # in `_CLASS_NAME_TO_CATEGORY`, so the rocisa-derived classifier
+            # returns None for them. The CMS-shaped role string lives on
+            # `node.category`; pin it there.
+            assert node.category == "LCC", node.category
             assert node.body_label == BODY_LABEL_ML, node.body_label
             assert node.issue_cycles == 1, (
                 f"LCC node {type(node.rocisa_inst).__name__} expected 1 "

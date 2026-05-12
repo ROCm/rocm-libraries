@@ -913,7 +913,7 @@ class GraphNode:
     `estimate_quad_cycles`) have been removed; `cumulative_issue_cycles` is
     the single source of truth.
     """
-    identity: tuple                     # (rocisa_class_name, loop_index, signature_tuple)
+    identity: tuple                     # (loop_index, canonical_render, emission_ordinal)
     position: SchedulePosition
     category: str                       # propagated from TaggedInstruction
     rocisa_inst: object                 # back-reference to the rocisa instruction
@@ -1214,7 +1214,17 @@ class DataflowGraph:
              edge_kind, intra_operand_byte_offset)
 
         * `src_role` / `sink_role` are the producer/consumer scheduler-role
-          tags (`identity[0]` — LR/LW/GR/MFMA/PACK/...). Allocation-invariant.
+          tags (LR/LW/GR/MFMA/CVT_PACK/MIDDLE_PACK/...). Per
+          `EMISSION_ORDINAL_DESIGN.md` §4.2, computed by `_role(node)` from
+          the rocisa-derived `_CLASS_NAME_TO_CATEGORY` registry rather than
+          reading a CMS-shaped class_tag string out of `identity[0]`. The
+          role vocabulary is the `InstructionCategory` enum values; the
+          PACK slot loses its CMS-shaped distinction because pack-MFMAs
+          are real `MFMAInstruction` rocisa objects whose
+          `_category()` returns `InstructionCategory.MFMA` — the
+          discrimination that pack-MFMAs need at the timing-dispatch layer
+          is independent of the edge-key role and lives on
+          `node.category` (see `is_mfma_pack_producer`).
         * `src_position` / `sink_position` are SchedulePositions. Position-
           sensitive so cross-body register reuse remains distinct; legitimate
           CMS reorders are absorbed by `diagnose_missing_edge`'s pipeline
@@ -1234,12 +1244,12 @@ class DataflowGraph:
           the connected operand (0..N-1) — allocation-invariant. NOT the
           absolute physical-register byte-key.
 
-        The render-string (`identity[2]`) and the `resource` object stay on
+        The render-string (`identity[1]`) and the `resource` object stay on
         DataflowEdge for human-facing `Failure` rendering only — they drop
         out of the matching path entirely.
         """
-        return {(e.producer.identity[0], e.producer.position, e.src_operand_slot,
-                 e.consumer.identity[0], e.consumer.position, e.sink_operand_slot,
+        return {(_role(e.producer), e.producer.position, e.src_operand_slot,
+                 _role(e.consumer), e.consumer.position, e.sink_operand_slot,
                  e.edge_kind, e.intra_operand_byte_offset)
                 for e in self.edges}
 
@@ -1516,6 +1526,39 @@ _NO_DATAFLOW_IDENTITY_CATEGORIES = frozenset({
     InstructionCategory.SSETPRIO,
 })
 
+# Categories whose nodes participate in the cross-graph data-flow identity
+# coverage check at `compare_graphs` entry. Per EMISSION_ORDINAL_DESIGN.md
+# §4.1, computed by consulting the rocisa-derived `_CLASS_NAME_TO_CATEGORY`
+# registry on each node's `rocisa_inst` rather than reading a CMS-shaped
+# class_tag string out of `identity[0]`. The historical tuple was
+# `("LR", "LW", "GR", "MFMA")`; the new set has the same membership for
+# the load-bearing categories.
+_DATA_FLOW_CATEGORIES = frozenset({
+    InstructionCategory.LR,
+    InstructionCategory.LW,
+    InstructionCategory.GR,
+    InstructionCategory.MFMA,
+})
+
+
+def _role(node) -> str:
+    """Return a node's rocisa-derived scheduler-role tag.
+
+    Used by `DataflowGraph.edge_keys` and `compare_graphs`'s ref-edge
+    lookup to compute the producer/consumer role positions of the
+    edge-equality tuple. Consults `node.rocisa_inst` via the centralized
+    `_CLASS_NAME_TO_CATEGORY` registry (`Components/InstructionCategory.py`)
+    so the role vocabulary is rocisa-derived rather than CMS-string-derived.
+
+    Returns the `InstructionCategory` enum value (e.g. `"LR"`, `"LW"`,
+    `"GR"`, `"MFMA"`, `"CVT_PACK"`, `"MIDDLE_PACK"`, `"SWAIT"`, ...) for
+    a registered class, `"UNKNOWN"` for any class not in the registry
+    (e.g. LCC `SSubU32` / `SCmpEQI32`, ALU pack helpers like `VPermB32`
+    that ride synthetic categories without rocisa class entries).
+    """
+    cat = _category(getattr(node, "rocisa_inst", None))
+    return cat.value if cat is not None else "UNKNOWN"
+
 
 # `_class_tag(inst)` and `_class_tag_from_category(category, inst)` are now
 # `WrappedInstruction.class_tag(inst)` and
@@ -1594,6 +1637,26 @@ def _make_node(
     profile: Optional[ArchProfile] = None,
 ) -> GraphNode:
     inst = tagged_inst.wrapped.rocisa_inst
+    # Missed-instruction guard: an instruction whose category is unrecognized
+    # (UNKNOWN / arbitrary text) AND whose rocisa class isn't in
+    # `_CLASS_NAME_TO_CATEGORY` raises CaptureUnknownInstructionError. The
+    # historical guard piggy-backed on `class_tag(inst)` being called from
+    # inside `identity_for` — under EMISSION_ORDINAL_DESIGN.md the identity
+    # tuple no longer consults class_tag, so we must invoke the rocisa-derived
+    # recognition check explicitly here. Outcome is unchanged: synthetic
+    # stand-ins whose Python class is not a registered rocisa class still
+    # raise on entry to graph construction.
+    if WrappedInstruction.class_tag_for_category(
+            tagged_inst.category, inst) is None:
+        # Defensive: class_tag_for_category is documented to raise rather than
+        # return None, so this branch is unreachable in practice. Kept for
+        # belt-and-suspenders against a future refactor that loosens the
+        # contract.
+        raise CaptureUnknownInstructionError(
+            f"_make_node: cannot classify instruction "
+            f"{type(inst).__name__!r} (category={tagged_inst.category!r}) "
+            f"in body {body_label!r}."
+        )
     identity = tagged_inst.identity_for(body_label)
     position = make_position(body_label, stream_index)
     # Node name continues to reference the kernel-writer's slot fields
@@ -3347,34 +3410,49 @@ def compare_graphs(
     # capture-pipeline bugs. The check guards against the only true
     # capture-pipeline failure mode: a producer or consumer present in
     # one capture but missing from the other.
-    _DATA_FLOW_KINDS = ("LR", "LW", "GR", "MFMA")
-
+    #
+    # Per EMISSION_ORDINAL_DESIGN.md §4.1, the data-flow filter consults
+    # each node's `rocisa_inst` against the rocisa-derived
+    # `_CLASS_NAME_TO_CATEGORY` registry (via `_category(...)`) instead of
+    # reading a CMS-shaped class_tag string out of `identity[0]`. The
+    # historical class_tag slot has been dropped from the identity tuple
+    # entirely; identity is now `(loop_index, canonical_render,
+    # emission_ordinal)`.
     def _data_flow_ids(graph):
-        return {k for k in graph.nodes.keys() if k and k[0] in _DATA_FLOW_KINDS}
+        return {n.identity for n in graph.nodes.values()
+                if _category(n.rocisa_inst) in _DATA_FLOW_CATEGORIES}
 
     ref_ids = _data_flow_ids(reference)
     subj_ids = _data_flow_ids(subject)
     if ref_ids != subj_ids:
         only_ref = ref_ids - subj_ids
         only_subj = subj_ids - ref_ids
-        # Categorize the diff by class_tag (LR/LW/GR/MFMA) to make the
-        # error actionable. The full identity tuple list is too long for
-        # a single error string when 16+ identities differ.
-        def _summary_by_class(ids):
+        # Categorize the diff by rocisa-derived category to make the error
+        # actionable. The full identity tuple list is too long for a single
+        # error string when 16+ identities differ. Threads the per-graph
+        # `nodes_by_id` dict so the per-identity rocisa lookup goes through
+        # the same registry as the entry-time filter — no class_tag
+        # extraction from the identity tuple.
+        def _summary_by_class(ids, nodes_by_id):
             counts = {}
             for ident in ids:
-                cls_tag = ident[0] if ident else "?"
-                counts[cls_tag] = counts.get(cls_tag, 0) + 1
+                node = nodes_by_id.get(ident)
+                if node is None:
+                    counts["?"] = counts.get("?", 0) + 1
+                    continue
+                cat = _category(node.rocisa_inst)
+                key = cat.value if cat is not None else "UNKNOWN"
+                counts[key] = counts.get(key, 0) + 1
             return counts
         msg_parts = []
         if only_ref:
-            counts = _summary_by_class(only_ref)
+            counts = _summary_by_class(only_ref, reference.nodes)
             msg_parts.append(
                 f"in reference but not subject: {len(only_ref)} identities "
                 f"({counts}); first 3: {sorted(only_ref)[:3]}"
             )
         if only_subj:
-            counts = _summary_by_class(only_subj)
+            counts = _summary_by_class(only_subj, subject.nodes)
             msg_parts.append(
                 f"in subject but not reference: {len(only_subj)} identities "
                 f"({counts}); first 3: {sorted(only_subj)[:3]}"
@@ -3394,10 +3472,12 @@ def compare_graphs(
     # (src_role, src_position, src_operand_slot,
     #  sink_role, sink_position, sink_operand_slot,
     #  edge_kind, intra_operand_byte_offset).
+    # Per EMISSION_ORDINAL_DESIGN.md §4.2, role positions come from
+    # `_role(node)` (rocisa-derived) — same as `DataflowGraph.edge_keys`.
     failures = []
     ref_edges_by_key = {
-        (e.producer.identity[0], e.producer.position, e.src_operand_slot,
-         e.consumer.identity[0], e.consumer.position, e.sink_operand_slot,
+        (_role(e.producer), e.producer.position, e.src_operand_slot,
+         _role(e.consumer), e.consumer.position, e.sink_operand_slot,
          e.edge_kind, e.intra_operand_byte_offset): e
         for e in reference.edges
     }

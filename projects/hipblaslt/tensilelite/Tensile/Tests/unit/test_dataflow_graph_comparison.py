@@ -212,9 +212,15 @@ class TestCleanComparison:
         g_subj = build_dataflow_graph(_wrap(subj_cap))
         # Identity sets match — both include the LCC node.
         assert set(g_ref.nodes.keys()) == set(g_subj.nodes.keys())
-        assert any(ident[0] == "LCC" for ident in g_ref.nodes.keys()), (
+        # Per EMISSION_ORDINAL_DESIGN.md §4.5 the identity tuple is now
+        # `(loop_index, canonical_render, emission_ordinal)` with no class_tag
+        # slot. Pin the LCC participation by inspecting node.category instead
+        # — `category` is the public display attribute for the CMS-shaped
+        # role string and stays unchanged.
+        lcc_nodes = [n for n in g_ref.nodes.values() if n.category == "LCC"]
+        assert lcc_nodes, (
             f"LCC nodes should participate in the identity set as of 2bu.2; "
-            f"got cls tags {sorted({i[0] for i in g_ref.nodes.keys()})}"
+            f"got categories {sorted({n.category for n in g_ref.nodes.values()})}"
         )
         assert compare_graphs(g_ref, g_subj) == []
 
@@ -426,19 +432,24 @@ class TestIdentityCoverage:
 
 class TestRenderStringIdentity:
     def test_identity_is_assembly_text(self):
-        """The identity tuple's third element should be the canonical
+        """The identity tuple's second element should be the canonical
         rendered assembly. This is what makes identity robust to
-        register-naming variations."""
+        register-naming variations.
+
+        Per EMISSION_ORDINAL_DESIGN.md the identity tuple is now
+        `(loop_index, canonical_render, emission_ordinal)`. The historical
+        class_tag slot has been dropped.
+        """
         lr_tagged = make_lr(8, 4, 64, slot=0, category="LRA0")
         ident = lr_tagged.identity_for(BODY_LABEL_ML)
-        assert ident[0] == "LR"             # class tag
-        assert isinstance(ident[1], int)    # loop_index
-        assert isinstance(ident[2], str)    # render-string
+        assert isinstance(ident[0], int)    # loop_index
+        assert isinstance(ident[1], str)    # canonical render-string
+        assert isinstance(ident[2], int)    # emission_ordinal
         # The render contains a vgpr reference and the LDS offset.
         # `make_lr` builds a real `rocisa.DSLoadB128`, which renders as
         # `ds_read_b128 v[8:11], v0 offset:64`.
-        assert "v[" in ident[2]
-        assert "offset:64" in ident[2]
+        assert "v[" in ident[1]
+        assert "offset:64" in ident[1]
 
     def test_comment_differences_dont_change_identity(self):
         """Two instructions with identical operations but different
@@ -547,66 +558,18 @@ class TestRenderStringIdentity:
         assert sym_keys == num_keys
         assert sym_keys == (("v", 8), ("v", 9), ("v", 10), ("v", 11))
 
-    def test_category_overrides_isinstance_class_tag(self):
-        """A pack-categorized MFMAInstruction (TF32 bf16-emulation pattern)
-        must not get cls_tag='MFMA' in the identity tuple — that confuses
-        compare_graphs into reporting it as a missing main-loop MFMA when
-        the two captures see different counts of pack-MFMAs.
-
-        With a Pack* category, `TaggedInstruction.identity_for` must use the
-        category as the discriminator: PackA{u}/PackB{u} -> 'PACK',
-        LRA{u} -> 'LR', etc. (See `class_tag_for_category` for the mapping
-        consulted by the identity tuple.)
-        """
-        from Tensile.Components.ScheduleCapture import (
-            WrappedInstruction, TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
-        )
-        from rocisa.instruction import MFMAInstruction
-        from rocisa.container import vgpr
-        from rocisa.enum import InstType
-
-        pack_mfma = MFMAInstruction(
-            instType=InstType.INST_BF16, accType=InstType.INST_F32,
-            variant=[4, 4, 4, 16], mfma1k=False,
-            acc=vgpr("ValuA_T0_I0", 4),
-            a=vgpr(74, 2),
-            b=vgpr("ValuA_X0_I0", 2),
-        )
-
-        def _tag(category):
-            return TaggedInstruction(
-                wrapped=WrappedInstruction(pack_mfma),
-                category=category,
-                slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
-                             mfma_index=0, sequence=0),
-            )
-
-        # Without category -> isinstance fallback says 'MFMA'.
-        assert _tag("MFMA").identity_for(BODY_LABEL_ML)[0] == "MFMA"
-        # With pack category -> 'PACK'.
-        assert _tag("PackA0").identity_for(BODY_LABEL_ML)[0] == "PACK"
-        assert _tag("PackB3").identity_for(BODY_LABEL_ML)[0] == "PACK"
-        # Sanity-check the underlying mapping for the other categories.
-        assert WrappedInstruction.class_tag_for_category("LRA0", pack_mfma) == "LR"
-        assert WrappedInstruction.class_tag_for_category("LRB3", pack_mfma) == "LR"
-        assert WrappedInstruction.class_tag_for_category("LWA",  pack_mfma) == "LW"
-        assert WrappedInstruction.class_tag_for_category("GRA",  pack_mfma) == "GR"
-        assert WrappedInstruction.class_tag_for_category("GRIncA", pack_mfma) == "GRINC"
-        assert WrappedInstruction.class_tag_for_category("LRSA", pack_mfma) == "LRS"
-        assert WrappedInstruction.class_tag_for_category("LWSA", pack_mfma) == "LWS"
-        assert WrappedInstruction.class_tag_for_category("LCC",  pack_mfma) == "LCC"
-        # category="SYNC" lumps SWaitCnt and SBarrier together (capture-side
-        # bucket); fall back to isinstance to disambiguate.
-        assert WrappedInstruction.class_tag_for_category("SYNC", pack_mfma) == "MFMA"  # isinstance fallback
-        from rocisa.instruction import SWaitCnt, SBarrier
-        sw = SWaitCnt(comment="t")
-        sb = SBarrier()
-        assert WrappedInstruction.class_tag_for_category("SYNC", sw) == "SWAIT"
-        assert WrappedInstruction.class_tag_for_category("SYNC", sb) == "SBARRIER"
-        assert WrappedInstruction.class_tag_for_category("BARRIER", pack_mfma) == "SBARRIER"
-        # Unrecognized category falls back to isinstance.
-        assert WrappedInstruction.class_tag_for_category("UNKNOWN", pack_mfma) == "MFMA"
-        assert WrappedInstruction.class_tag_for_category(None, pack_mfma) == "MFMA"
+    # `test_category_overrides_isinstance_class_tag` was DELETED by the
+    # rocm-libraries-4up4 identity-tuple refactor (2026-05-12). Per
+    # EMISSION_ORDINAL_DESIGN.md §4.5 the test became obsolete: it pinned
+    # `class_tag_for_category`'s identity-tuple-position behavior, and
+    # `class_tag_for_category` is no longer consulted by identity. The
+    # pack-MFMA / main-loop-MFMA same-render disambiguation is now handled
+    # by `emission_ordinal` instead — see the new ordinal-disambiguation
+    # tests in `test_dataflow_graph_emission_ordinal.py`. The
+    # `WrappedInstruction.class_tag_for_category` static helper itself
+    # remains as a public API; the test_dataflow_graph_register_gaps suite
+    # still exercises its rocisa-derived recognition behavior on bare
+    # rocisa instances (e.g. SSetPrior).
 
 
 # =============================================================================

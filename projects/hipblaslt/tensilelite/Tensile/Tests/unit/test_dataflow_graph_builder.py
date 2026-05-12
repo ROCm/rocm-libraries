@@ -587,7 +587,11 @@ class TestStructuralProperties:
         g = build_dataflow_graph(_wrap(cap))
         pack_nodes = [n for n in g.nodes.values() if n.category == "PackA0"]
         assert len(pack_nodes) == 1
-        assert pack_nodes[0].identity[0] == "PACK"
+        # Per EMISSION_ORDINAL_DESIGN.md §4.5 the identity tuple is now
+        # `(loop_index, canonical_render, emission_ordinal)` with no
+        # class_tag slot. The Pack node's role discrimination lives on
+        # `node.category` (the public display attribute).
+        assert pack_nodes[0].category.startswith("Pack")
 
     def test_empty_body_raises(self):
         """A captured body with zero TaggedInstructions is a capture-pipeline

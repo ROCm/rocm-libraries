@@ -3434,12 +3434,19 @@ class TestSSetPriorCoverage:
             arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         graph = build_dataflow_graph(cap)
-        # SSetPrior must NOT appear as a data-flow node identity.
-        for ident in graph.nodes.keys():
-            assert ident[0] != "SSETPRIO", (
+        # SSetPrior must NOT appear as a data-flow node identity. Per
+        # EMISSION_ORDINAL_DESIGN.md the identity tuple no longer carries a
+        # class_tag slot — inspect the node's category (or rocisa class
+        # name) directly to confirm the SSetPrior didn't leak in.
+        for ident, node in graph.nodes.items():
+            assert type(node.rocisa_inst).__name__ != "SSetPrior", (
                 f"SSetPrior leaked into nodes_by_identity as {ident!r}; "
                 "build_dataflow_graph Phase 1 must skip SSetPrior in "
                 "the cross-graph identity set, mirroring SNop."
+            )
+            assert node.category != "SSETPRIO", (
+                f"SSetPrior leaked into nodes_by_identity with category="
+                f"{node.category!r} as {ident!r}; mirror SNop's exclusion."
             )
 
     def test_ssetprio_default_issue_cycle_is_one(self):

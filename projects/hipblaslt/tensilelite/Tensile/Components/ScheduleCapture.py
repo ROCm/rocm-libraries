@@ -486,10 +486,23 @@ class TaggedInstruction:
     `make_capture` in dataflow_fixtures populates reads/writes for them.
 
     The underlying rocisa instruction is reachable via `wrapped.rocisa_inst`.
+
+    `emission_ordinal` is a per-`(body_label, canonical_render)` monotonic
+    counter assigned in `LoopBodyCaptureBuilder.finalize` (after canonical
+    sort). Two physically distinct emissions of the same canonical render
+    text in the same body get distinct ordinals (0, 1, 2, ...). Sentinel
+    `-1` indicates the field has not yet been assigned (test fixtures that
+    construct `TaggedInstruction` directly without going through `finalize`
+    pick up the per-render-text counter via `make_capture` /
+    `dataflow_fixtures` helpers, which call the same finalize-equivalent
+    logic). The per-emission ordinal is the third slot of `identity_for`'s
+    new tuple shape `(loop_index, canonical_render, emission_ordinal)` —
+    see `EMISSION_ORDINAL_DESIGN.md` for the architectural rationale.
     """
     wrapped: "WrappedInstruction"
     category: str
     slot: SlotKey
+    emission_ordinal: int = -1
 
     def render(self) -> str:
         """Render this instruction for a failure label.
@@ -507,12 +520,29 @@ class TaggedInstruction:
     def identity_for(self, body_label: str) -> tuple:
         """Build a content-based identity tuple for this tagged instruction.
 
-        Uses `self.category` so pack-MFMAs (TF32 emulation MFMAInstruction
-        objects categorized as `PackA*`/`PackB*`) get the `PACK` class tag
-        rather than masquerading as main-loop MFMAs.
+        Format: `(loop_index, canonical_render, emission_ordinal)`. See
+        `EMISSION_ORDINAL_DESIGN.md` for the architectural rationale.
 
-        The body-label argument selects the loop_index component of the tuple.
-        Format: `(class_tag, loop_index, canonical_render)`.
+        * `loop_index` derives from `body_label` via
+          `BODY_LABEL_TO_LOOP_INDEX`.
+        * `canonical_render` is the normalized render-string (see
+          `WrappedInstruction.canonical_str`); two instructions producing the
+          same render-string represent the same GPU operation regardless of
+          how their constructor was invoked.
+        * `emission_ordinal` is a per-`(body_label, canonical_render)`
+          monotonic counter assigned at `LoopBodyCaptureBuilder.finalize`
+          time (after canonical sort). Two physically distinct emissions of
+          the same canonical render in the same body get distinct ordinals
+          (0, 1, 2, ...) and therefore distinct identities — closing the
+          on0t collision pattern (`s_cmp_eq_u32 LoopCounterL, StaggerUIter`
+          emitted once for the GRIncA lowering and once for GRIncB; both
+          previously collapsed under last-writer-wins in
+          `nodes_by_identity`).
+
+        `class_tag` is intentionally absent: the disambiguator role is taken
+        by `emission_ordinal`, and the historical filter / edge-key consumers
+        of `identity[0]` have migrated to consult `node.rocisa_inst` via the
+        rocisa-derived `_CLASS_NAME_TO_CATEGORY` registry directly.
 
         Render-string identity (rather than a per-class structured signature
         of register fields) makes the comparison robust to register-naming
@@ -532,8 +562,8 @@ class TaggedInstruction:
         )
         inst = self.wrapped.rocisa_inst
         loop_idx = BODY_LABEL_TO_LOOP_INDEX[body_label]
-        cls_tag = WrappedInstruction.class_tag_for_category(self.category, inst)
-        return (cls_tag, loop_idx, WrappedInstruction.canonical_str(inst))
+        return (loop_idx, WrappedInstruction.canonical_str(inst),
+                self.emission_ordinal)
 
 
 @dataclass
@@ -760,6 +790,40 @@ def assign_stream_indices_for_body(instructions: list) -> Dict[int, int]:
     return {id(ti): i for i, ti in enumerate(sorted_tis)}
 
 
+def assign_emission_ordinals(instructions: list) -> None:
+    """Assign per-`(canonical_render)` emission ordinals to TaggedInstructions.
+
+    Mutates each TaggedInstruction's `emission_ordinal` field in place. The
+    ordinal counter is keyed on the pure canonical render-text — no
+    category, no class_tag — and increments per render-text in the order
+    the bridge (`assign_stream_indices_for_body`) walks the body
+    (`(slot.mfma_index, slot.sequence)` lex sort). Two physically distinct
+    emissions of the same canonical render in the same body get distinct
+    ordinals (0, 1, 2, ...).
+
+    Ordinals are body-scoped: each body's `LoopBodyCaptureBuilder` lifetime
+    owns one counter dict, so a render-string emitted in ML and again in
+    NGL gets ordinal 0 in each body — the body_label (encoded in
+    `loop_index` of the identity tuple) disambiguates them.
+
+    Called by `LoopBodyCaptureBuilder.finalize` after the SMEM/FLAT/store
+    guards and reads/writes population. Test fixtures that bypass the
+    builder (constructing TaggedInstructions directly) must call this
+    helper themselves to produce a meaningful identity tuple — see
+    `dataflow_fixtures.make_capture`.
+    """
+    sorted_tis = sorted(
+        instructions,
+        key=lambda ti: (ti.slot.mfma_index, ti.slot.sequence),
+    )
+    counter: Dict[str, int] = {}
+    for ti in sorted_tis:
+        render = WrappedInstruction.canonical_str(ti.wrapped.rocisa_inst)
+        ord_idx = counter.get(render, 0)
+        ti.emission_ordinal = ord_idx
+        counter[render] = ord_idx + 1
+
+
 def make_position(body_label: str, stream_index: int) -> SchedulePosition:
     """Construct a SchedulePosition from a body label and a precomputed
     per-body `stream_index`.
@@ -874,6 +938,13 @@ class LoopBodyCaptureBuilder:
             # append(); we only need to populate it now that the instruction
             # has cleared the SMEM/flat/store guards.
             _populate_wrapper(ti.wrapped, category=ti.category)
+        # Assign per-(canonical_render) emission ordinals over the canonical-
+        # sort order, NOT the natural append order. Ordinals are assigned
+        # AFTER the lex-sort the bridge (`assign_stream_indices_for_body`)
+        # uses so two builds whose append timing differs but whose lex-sorted
+        # event order matches still get identical ordinals per render. See
+        # `EMISSION_ORDINAL_DESIGN.md` §2.6 for the determinism argument.
+        assign_emission_ordinals(self._instructions)
         return LoopBodyCapture(instructions=list(self._instructions))
 
 

@@ -48,6 +48,7 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_TO_LOOP_INDEX,
     WrappedInstruction,
     _populate_wrapper,
+    assign_emission_ordinals,
 )
 
 
@@ -360,4 +361,10 @@ def make_capture(body_label: str, instructions: Sequence[TaggedInstruction]
     insts = list(instructions)
     for ti in insts:
         _populate_wrapper(ti.wrapped, category=ti.category)
+    # Mirror LoopBodyCaptureBuilder.finalize: assign per-canonical-render
+    # emission ordinals so synthetic captures get real identity tuples
+    # (fixtures bypass the production builder, so without this step every
+    # TaggedInstruction would carry the sentinel `emission_ordinal=-1` and
+    # collide on identity).
+    assign_emission_ordinals(insts)
     return LoopBodyCapture(instructions=insts)
