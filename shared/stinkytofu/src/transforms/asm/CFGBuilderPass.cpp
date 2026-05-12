@@ -174,10 +174,12 @@ class CFGBuilderPassImpl : public Pass {
             if (terminator) {
                 StinkyInstruction* termInst = cast<StinkyInstruction>(terminator);
                 if (isBranch(*termInst)) {
-                    // Get the branch target label using utility function
-                    std::string targetLabel = getBranchTarget(*termInst);
-                    auto targetIt = labelMap.find(targetLabel);
-                    if (targetIt != labelMap.end()) func.addEdge(&bb, targetIt->second);
+                    // A single instruction may carry multiple intra-Function targets
+                    // (e.g. an indirect jump table); add an edge for each one we know.
+                    for (const std::string& targetLabel : getBranchTargets(*termInst)) {
+                        auto targetIt = labelMap.find(targetLabel);
+                        if (targetIt != labelMap.end()) func.addEdge(&bb, targetIt->second);
+                    }
                 }
             }
 
