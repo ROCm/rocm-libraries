@@ -142,6 +142,7 @@ set(rocunit_test_source
   unit/gerand_gtest.cpp
   unit/herand_gtest.cpp
   unit/syrand_gtest.cpp
+  unit/hbrand_gtest.cpp
 )
 
 set(others_test_source
