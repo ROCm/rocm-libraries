@@ -384,6 +384,8 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
 
 TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitBwd)
 {
+    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+    SKIP_IF_ASAN();
     // Configuration matching multiple MIOpen solvers with different workspace requirements
     std::vector<int64_t> dxDims = {2, 16, 28, 28};
     auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(dxDims);

@@ -141,6 +141,8 @@ TEST_P(IntegrationGpuConvFwdNchwBfp16, Correctness)
 
 TEST_P(IntegrationGpuConvFwdNcdhwBfp16, Correctness)
 {
+    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+    SKIP_IF_ASAN();
     const auto& testCase = GetParam();
     auto tolerance
         = calculateConvFpropTolerance<bfloat16, bfloat16, float>(static_cast<double>(_minVal),
