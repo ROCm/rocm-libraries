@@ -9,6 +9,7 @@ target_sources(stinkytofu PRIVATE
     PhiPlacement.cpp
     BuildDefUseChain.cpp
     CFGBuilderPass.cpp
+    LongBranchLoweringPass.cpp
     PeepholeOptimizationPass.cpp
     DeadCodeEliminationPass.cpp
     RedundantMovEliminationPass.cpp
