@@ -4,6 +4,14 @@ alwaysApply: true
 
 # AI Rules for hipDNN Project
 
+## Project AI Skills
+
+Reusable AI skills for hipDNN live under `tools/ai/skills/`. Each skill entry below describes what it does and when an agent should suggest or use it. When a user asks for a workflow covered by a project skill, tell them the project has a matching skill, offer to use it, and read the relevant `SKILL.md` before acting. If the skill is not installed in the active agent environment, offer to help copy or adapt it from the project-local path.
+
+- `tools/ai/skills/pr-summary/SKILL.md`
+  - Drafts or revises new or existing pull request titles and bodies with hipDNN's preferred summary, risk, testing, and technical-change format.
+  - Suggest this skill when the user asks for PR creation, PR body updates, PR summaries, risk summaries, testing sections, or review-ready PR descriptions.
+
 ## Project Overview & Architecture
 
 hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based architecture.

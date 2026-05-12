@@ -87,6 +87,10 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR),
                  "HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR");
 
+    EXPECT_STREQ(
+        hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR),
+        "HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR");
+
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
                  "UNKNOWN_TYPE");
@@ -675,6 +679,30 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_NAME_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_TYPE_EXT),
                  "HIPDNN_ATTR_OPERATION_TYPE_EXT");
+
+    // Resample forward operation attributes
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC),
+                 "HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_YDESC),
+                 "HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_YDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC),
+                 "HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_MODE),
+                 "HIPDNN_ATTR_RESAMPLE_MODE");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_PRE_PADDINGS),
+                 "HIPDNN_ATTR_RESAMPLE_PRE_PADDINGS");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_POST_PADDINGS),
+                 "HIPDNN_ATTR_RESAMPLE_POST_PADDINGS");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_STRIDES),
+                 "HIPDNN_ATTR_RESAMPLE_STRIDES");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_WINDOW_DIMS),
+                 "HIPDNN_ATTR_RESAMPLE_WINDOW_DIMS");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_PADDING_MODE),
+                 "HIPDNN_ATTR_RESAMPLE_PADDING_MODE");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT),
+                 "HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_COMP_TYPE),
+                 "HIPDNN_ATTR_RESAMPLE_COMP_TYPE");
 
     // Unknown attribute
     EXPECT_STREQ(hipdnnGetAttributeNameString(static_cast<hipdnnBackendAttributeName_t>(-1)),

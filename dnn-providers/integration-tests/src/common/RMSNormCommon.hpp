@@ -101,9 +101,9 @@ inline std::vector<RMSNormTestCase> getRMSNormTestCases()
     cases.reserve(shapes.size() * 4);
     for(const auto& [xDims, scaleDims] : shapes)
     {
-        for(bool isTraining : {false, true})
+        for(const bool isTraining : {false, true})
         {
-            for(bool withBias : {false, true})
+            for(const bool withBias : {false, true})
             {
                 std::optional<std::vector<int64_t>> biasDims
                     = withBias ? std::optional<std::vector<int64_t>>(scaleDims) : std::nullopt;
