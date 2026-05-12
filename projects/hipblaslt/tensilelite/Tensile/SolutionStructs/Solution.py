@@ -2115,13 +2115,16 @@ class Solution(collections.abc.Mapping):
                "MXLoadInst=TDM currently always produces MXScaleFormat=InMemorySwizzle "
                "(got %s)" % state["MXScaleFormat"])
         return
-      # MXScaleFormat=NoSwizzle is only validated against the StreamK
-      # decomposition. The non-StreamK path (GSU) is not yet supported and
-      # is rejected here to keep regressions out of the default tuning.
-      if state["MXScaleFormat"] == "NoSwizzle" and state["StreamK"] == 0:
+      # gfx1250 MX layout requires TDMInst, except for the StreamK-only
+      # BufferLoad + NoSwizzle path which has been validated end-to-end.
+      # StreamK!=0 also implies GSU is forced to 0 (see line ~1378), so this
+      # also excludes the unvalidated GSU-only NoSwizzle path. This reject
+      # subsumes the prior standalone "NoSwizzle requires StreamK" check.
+      if state["ISA"] == (12, 5, 0) and not state["TDMInst"] and state["StreamK"] == 0:
         reject(state, printRejectionReason,
-               "MXScaleFormat=NoSwizzle requires StreamK (non-StreamK NoSwizzle "
-               "MX scales are not yet supported)")
+               "MX layout requires TDMInst on gfx1250 (TDMInst=0 is only "
+               "permitted with StreamK; the non-StreamK NoSwizzle path is "
+               "not yet supported)")
         return
     # --------------------------------------------------------------------------
 

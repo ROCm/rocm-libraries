@@ -12141,15 +12141,20 @@ class KernelWriterAssembly(KernelWriter):
           if "MXS" in tc:
             subTc = tc[3]
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-            # K-step between MFMA-K sub-iterations for MX scales, gated by MXScaleFormat:
-            #   - Swizzled (HostPreSwizzle/InMemorySwizzle): MT * mxUnit (M-blocks interleaved on K)
-            #   - NoSwizzle (canonical):                       mxUnit (K-scales contiguous per M)
+            # K-step between MFMA-K sub-iterations for MX scales:
+            #   - Swizzled (HostPreSwizzle/InMemorySwizzle):
+            #       MT * mxUnit (M-blocks interleaved on K)
+            #   - NoSwizzle (canonical), LDS layout follows UnrollMajorLDS<tc>:
+            #       UMLDS=1 (K-major LDS):  mxUnit (K-scales contiguous per M)
+            #       UMLDS=0 (M-major LDS):  (MT + LdsPad) * mxUnit (step over M-row, mxUnit K-scales)
             mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
             isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
             if isMxSwizzled:
               offsetInc = kernel["MacroTile%s"%tP["tensorChar"]] * mxUnit
-            else:
+            elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
               offsetInc = mxUnit
+            else:
+              offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * mxUnit
           elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             if tc in ("MXSA", "MXSB"):
               offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
