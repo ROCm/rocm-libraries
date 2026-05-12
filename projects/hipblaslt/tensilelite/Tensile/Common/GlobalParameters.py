@@ -309,13 +309,6 @@ globalParameters["DisableAsmComments"] = False  # Set to True to disable assembl
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
-# StinkyTofu optimization level
-# None: Disable StinkyTofu feature (set null in yaml file)
-# 0: No optimization
-# 1: Basic optimization
-# 2: Full optimization
-globalParameters["StinkyTofuOptLevel"] = 0
-
 # StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
 # 0: Silent (default)
 # 1: Pass names + AnalysisManager cache activity to stdout
@@ -515,6 +508,7 @@ defaultBenchmarkCommonParameters = [
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
+    {"TDMSplit": [False]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter
