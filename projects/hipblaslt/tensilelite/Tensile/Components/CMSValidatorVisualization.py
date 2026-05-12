@@ -70,10 +70,21 @@ def visualize_dataflow_graph(graph, output_path: str,
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    # Local import keeps CMSValidatorVisualization importable in environments
+    # without networkx/matplotlib (the function-level imports above already
+    # establish that pattern); CMSValidator is always available wherever the
+    # validator runs.
+    from Tensile.Components.CMSValidator import render_node_label
+
     def _node_label(node):
         pos = node.position
         pos_str = f"L{pos.loop_index}/S{pos.stream_index}"
-        name = node.name or node.category
+        # rocm-libraries-aprv: render_node_label distinguishes PRE_LOOP /
+        # POST_LOOP @-1 entries (which collide on the raw node.name string)
+        # so the visualization labels are unambiguous in the same way the
+        # dump tool's per-node lines are.
+        rendered = render_node_label(node)
+        name = rendered or node.category
         return f"{name}\n[{node.body_label}]\n{pos_str}"
 
     def _edge_label(e):

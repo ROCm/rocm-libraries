@@ -54,6 +54,9 @@ from Tensile.Components.ScheduleCapture import (
     CaptureUnknownInstructionError,
     UnexplainedMissingEdgeError,
     MemoryRegion,
+    SLOT_KIND_MFMA,
+    SLOT_KIND_PRE_LOOP,
+    SLOT_KIND_POST_LOOP,
     WrappedInstruction,
     make_position,
     assign_stream_indices_for_body,
@@ -1615,6 +1618,52 @@ def _make_node(
         name=name,
         issue_cycles=issue_cycles,
     )
+
+
+# rocm-libraries-aprv: PRE_LOOP vs POST_LOOP @-1 disambiguation. The base
+# `node.name` (`category@mfma_index.sequence`) is `slot_kind`-independent, so
+# pre-mainloop and post-mainloop entries that both stamp `mfma_index=-1`
+# render identically (e.g. `PackA0@-1.5` could mean either). Per the Q6
+# investigation memo (`Components/Q6_PRE_POST_LOOP_DISAMBIGUATION_INVESTIGATION.md`),
+# `node.name` itself stays byte-stable for in-process consumers (identity is
+# unaffected; failure-rendering goes through `cms_node_label`'s separate
+# `[N]`-indexed primary). The disambiguation is renderer-only: the dump tool
+# and the matplotlib visualization call this helper to render
+# `category@PRE-1.X` / `category@POST-1.X` instead of the colliding
+# `category@-1.X`. MFMA-slot nodes (the common case) pass through unchanged.
+
+def render_node_label(node) -> str:
+    """Return a human-readable label for `node` that disambiguates
+    PRE_LOOP and POST_LOOP entries sharing `mfma_index=-1`.
+
+    For MFMA-slot nodes (`slot_kind == SLOT_KIND_MFMA`) returns `node.name`
+    unchanged — the common case stays byte-stable. For PRE_LOOP / POST_LOOP
+    entries the `@<mfma_index>.<sequence>` suffix is replaced with
+    `@PRE<mfma_index>.<sequence>` / `@POST<mfma_index>.<sequence>` so two
+    series that previously collided on `@-1.X` render distinctly.
+
+    Examples (mfma_index=-1):
+      MFMA slot         : `MFMA@5.0`               (unchanged)
+      PRE_LOOP slot     : `PackA0@-1.13`  ->  `PackA0@PRE-1.13`
+      POST_LOOP slot    : `PackA3@-1.13`  ->  `PackA3@POST-1.13`
+
+    Reads `node.tagged_inst.slot.slot_kind`, which is always populated by
+    `_make_node` (every GraphNode in the validator carries its source
+    TaggedInstruction).
+    """
+    slot = node.tagged_inst.slot
+    if slot.slot_kind == SLOT_KIND_MFMA:
+        return node.name
+    if slot.slot_kind == SLOT_KIND_PRE_LOOP:
+        prefix = "PRE"
+    elif slot.slot_kind == SLOT_KIND_POST_LOOP:
+        prefix = "POST"
+    else:
+        # Defensive: unknown slot_kind constants render with the kind
+        # token uppercased so the disambiguation extends naturally if a
+        # new SLOT_KIND_* is added.
+        prefix = slot.slot_kind.upper()
+    return f"{node.category}@{prefix}{slot.mfma_index}.{slot.sequence}"
 
 
 # Body order for graph construction. Cross-body queue state persists in the

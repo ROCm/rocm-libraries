@@ -62,9 +62,15 @@ def _slice_window(graph, body_label: str, lo_pos, hi_pos):
 
 
 def _print_window(label: str, producer, consumer, between, prefix: str = ""):
-    """Pretty-print a producer -> ... -> consumer window."""
+    """Pretty-print a producer -> ... -> consumer window.
+
+    Renders node labels via `render_node_label` (CMSValidator) so PRE_LOOP
+    and POST_LOOP entries that share `mfma_index=-1` are visually
+    distinguishable in the dump output (rocm-libraries-aprv).
+    """
+    from Tensile.Components.CMSValidator import render_node_label
     print(f"\n{prefix}--- {label} window (body={producer.body_label}) ---")
-    print(f"{prefix}FIRST  pos={producer.position}  cat={producer.category}  name={producer.name}")
+    print(f"{prefix}FIRST  pos={producer.position}  cat={producer.category}  name={render_node_label(producer)}")
     print(f"{prefix}            asm: {_render_asm(producer)}")
     n_between = len(between)
     if n_between > WINDOW_CAP:
@@ -83,10 +89,10 @@ def _print_window(label: str, producer, consumer, between, prefix: str = ""):
             idx, n = entry
             print(
                 f"{prefix}  [{idx:3d}] pos={n.position} cat={n.category:14s}"
-                f" body={n.body_label} name={n.name!r}"
+                f" body={n.body_label} name={render_node_label(n)!r}"
             )
             print(f"{prefix}         asm: {_render_asm(n)}")
-    print(f"{prefix}LAST   pos={consumer.position}  cat={consumer.category}  name={consumer.name}")
+    print(f"{prefix}LAST   pos={consumer.position}  cat={consumer.category}  name={render_node_label(consumer)}")
     print(f"{prefix}            asm: {_render_asm(consumer)}")
 
 
@@ -103,7 +109,13 @@ def _dump_full_stream(graph, out_path):
     validator's data-flow graph contents.
 
     `_graph_nodes` is already in stream order; we sort defensively anyway.
+
+    Per-node `name=` rendering uses `render_node_label` so PRE_LOOP and
+    POST_LOOP entries with the shared `mfma_index=-1` slot are
+    distinguishable as `@PRE-1.X` vs `@POST-1.X` instead of the colliding
+    `@-1.X` (rocm-libraries-aprv).
     """
+    from Tensile.Components.CMSValidator import render_node_label
     captures = graph.captures or {}
     body_order = []
     by_body = {}
@@ -130,7 +142,7 @@ def _dump_full_stream(graph, out_path):
             in_graph = n.identity in graph.nodes
             graph_tag = "" if in_graph else "  [NOT-IN-GRAPH]"
             lines.append(
-                f"// pos={n.position} cat={n.category} name={n.name}{graph_tag}\n"
+                f"// pos={n.position} cat={n.category} name={render_node_label(n)}{graph_tag}\n"
                 f"{_render_asm(n)}"
             )
         lines.append("")
@@ -175,7 +187,7 @@ def test_dump_carveout_assembly_windows(isa_infrastructure, monkeypatch):
     from cms_test_utils import _make_solution
     from Tensile.KernelWriterAssembly import KernelWriterAssembly, DebugConfig
     from Tensile.Components.CMSValidator import (
-        GraphNode, compare_graphs, build_dataflow_graph,
+        GraphNode, compare_graphs, build_dataflow_graph, render_node_label,
     )
     import Tensile.Components.CMSValidator as cms_mod
 
@@ -296,12 +308,12 @@ def test_dump_carveout_assembly_windows(isa_infrastructure, monkeypatch):
 
         print(f"\n  Producer (subj):")
         print(f"    identity = {subj_p.identity}")
-        print(f"    category = {subj_p.category}  body = {subj_p.body_label}  name = {subj_p.name}")
+        print(f"    category = {subj_p.category}  body = {subj_p.body_label}  name = {render_node_label(subj_p)}")
         print(f"    position = {subj_p.position}")
         print(f"    asm      = {_render_asm(subj_p)}")
         print(f"  Consumer (subj):")
         print(f"    identity = {subj_c.identity}")
-        print(f"    category = {subj_c.category}  body = {subj_c.body_label}  name = {subj_c.name}")
+        print(f"    category = {subj_c.category}  body = {subj_c.body_label}  name = {render_node_label(subj_c)}")
         print(f"    position = {subj_c.position}")
         print(f"    asm      = {_render_asm(subj_c)}")
         print(f"  default_producer_position = {chosen.default_producer_position}")
