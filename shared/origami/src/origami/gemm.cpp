@@ -376,16 +376,41 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
       reduction_strategy, num_wgs, num_active_cus, num_timesteps, splitting_factor);
 }
 
+// Estimate LDS bytes for a macro tile (no-padding model).
+// See gemm.hpp for the formula and assumptions.
+size_t estimate_lds_bytes(const problem_t& problem, const config_t& config) {
+  // Compute in bits then ceil-divide to bytes so sub-byte dtypes (F4/F6) do
+  // not truncate to zero. data_type_to_bytes() returns a double (e.g. 0.5 for
+  // F4); a direct cast to size_t would silently floor that to 0 and make any
+  // capacity check unconditionally pass.
+  const size_t bits_a = static_cast<size_t>(datatype_to_bits(problem.a_dtype));
+  const size_t bits_b = static_cast<size_t>(datatype_to_bits(problem.b_dtype));
+
+  const size_t a_tile = math::safe_ceil_div(config.mt.mk() * bits_a, static_cast<size_t>(8));
+  const size_t b_tile = math::safe_ceil_div(config.mt.nk() * bits_b, static_cast<size_t>(8));
+
+  if (config.target == target_t::triton && config.has_triton_params()) {
+    const int num_stages = config.triton().num_stages;
+    if (num_stages <= 1)
+    {
+      const size_t max_tile = std::max(a_tile, b_tile);
+      return max_tile;
+    }
+    else
+    {
+      const size_t total_tile = static_cast<size_t>(num_stages - 1) * (a_tile + b_tile);
+      return total_tile;
+    }
+  }
+
+  return a_tile + b_tile;
+}
+
 // Check if MT fits in LDS
 bool check_lds_capacity(const hardware_t& hardware,
-                        const dim3_t& mt,
-                        const data_type_t& a_dtype,
-                        const data_type_t& b_dtype) {
-  const auto a_loads_in_bytes = mt.mk() * data_type_to_bytes(a_dtype);
-  const auto b_loads_in_bytes = mt.nk() * data_type_to_bytes(b_dtype);
-  const auto LDS_usage        = a_loads_in_bytes + b_loads_in_bytes;
-
-  return LDS_usage <= hardware.lds_capacity;
+                        const problem_t& problem,
+                        const config_t& config) {
+  return estimate_lds_bytes(problem, config) <= hardware.lds_capacity;
 }
 
 // Compute limited achievable memory bandwidth based on active CUs

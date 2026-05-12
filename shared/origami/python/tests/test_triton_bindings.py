@@ -29,13 +29,33 @@ class TestTargetT:
         assert config.target == origami.target_t.triton
 
 
+def _make_problem(a_dtype=None, b_dtype=None):
+    """Build a minimal problem_t carrying just the dtypes we care about."""
+    p = origami.problem_t()
+    p.a_dtype = a_dtype if a_dtype is not None else origami.data_type_t.Half
+    p.b_dtype = b_dtype if b_dtype is not None else origami.data_type_t.Half
+    return p
+
+
+def _make_triton_config(bm, bn, bk, num_stages=2):
+    """Build a minimal Triton-targeted config_t for LDS estimation."""
+    c = origami.config_t()
+    c.mt = origami.dim3_t(bm, bn, bk)
+    c.mi = origami.dim3_t(16, 16, 16)
+    c.occupancy = 1
+    c.target = origami.target_t.triton
+    c.triton().num_stages = num_stages
+    return c
+
+
 class TestTritonLDS:
-    """Tests for Triton LDS estimation functions.
+    """Tests for unified LDS estimation with Triton pipeline-stage handling.
 
     Reference formula validated against Triton 3.6.0 compiled kernel metadata
     (n_shared_bytes) on AMD Instinct GPUs:
         stages == 1  →  max(A_tile_bytes, B_tile_bytes)
         stages >= 2  →  (stages - 1) * (A_tile_bytes + B_tile_bytes)
+    Tensile path (no triton_params) always returns 1 * (A + B).
     """
 
     @staticmethod
@@ -51,61 +71,73 @@ class TestTritonLDS:
         return HARDWARE["gfx942"]
 
     def test_estimate_1stage_symmetric(self):
-        mt = origami.dim3_t(128, 128, 32)
-        result = origami.estimate_triton_lds_bytes(mt, origami.data_type_t.Half, origami.data_type_t.Half, 1)
-        assert result == max(128 * 32 * 2, 32 * 128 * 2)  # max(A, B)
+        result = origami.estimate_lds_bytes(_make_problem(), _make_triton_config(128, 128, 32, 1))
+        assert result == max(128 * 32 * 2, 32 * 128 * 2)
 
     def test_estimate_1stage_asymmetric(self):
-        mt = origami.dim3_t(128, 64, 64)
-        result = origami.estimate_triton_lds_bytes(mt, origami.data_type_t.Half, origami.data_type_t.Half, 1)
+        result = origami.estimate_lds_bytes(_make_problem(), _make_triton_config(128, 64, 64, 1))
         a_tile, b_tile = 128 * 64 * 2, 64 * 64 * 2
         assert result == max(a_tile, b_tile)
 
     def test_estimate_2stage(self):
-        mt = origami.dim3_t(128, 128, 32)
-        result = origami.estimate_triton_lds_bytes(mt, origami.data_type_t.Half, origami.data_type_t.Half, 2)
-        assert result == 1 * (128 * 32 * 2 + 32 * 128 * 2)  # (2-1)*(A+B)
+        result = origami.estimate_lds_bytes(_make_problem(), _make_triton_config(128, 128, 32, 2))
+        assert result == 1 * (128 * 32 * 2 + 32 * 128 * 2)
 
     def test_estimate_3stage(self):
-        mt = origami.dim3_t(128, 128, 32)
-        result = origami.estimate_triton_lds_bytes(mt, origami.data_type_t.Half, origami.data_type_t.Half, 3)
-        assert result == 2 * (128 * 32 * 2 + 32 * 128 * 2)  # (3-1)*(A+B)
+        result = origami.estimate_lds_bytes(_make_problem(), _make_triton_config(128, 128, 32, 3))
+        assert result == 2 * (128 * 32 * 2 + 32 * 128 * 2)
 
-    def test_estimate_default_stages(self):
-        mt = origami.dim3_t(256, 256, 64)
-        result_default = origami.estimate_triton_lds_bytes(mt, origami.data_type_t.Half, origami.data_type_t.Half)
-        result_explicit = origami.estimate_triton_lds_bytes(mt, origami.data_type_t.Half, origami.data_type_t.Half, 2)
-        assert result_default == result_explicit
+    def test_estimate_tensile_path_no_triton_params(self):
+        """Without triton_params, we get the Tensile single-buffer formula."""
+        p = _make_problem()
+        c = origami.config_t()
+        c.mt = origami.dim3_t(128, 128, 32)
+        c.mi = origami.dim3_t(16, 16, 16)
+        c.occupancy = 1
+        # target left at default (tensilelite); no triton_params set.
+        result = origami.estimate_lds_bytes(p, c)
+        assert result == 128 * 32 * 2 + 32 * 128 * 2
 
-    def test_check_triton_lds_capacity_fits(self, hw):
-        mt = origami.dim3_t(64, 64, 32)
-        assert origami.check_triton_lds_capacity(hw, mt, origami.data_type_t.Half, origami.data_type_t.Half)
+    def test_check_lds_capacity_fits(self, hw):
+        c = _make_triton_config(64, 64, 32, 2)
+        assert origami.check_lds_capacity(hw, _make_problem(), c)
 
-    def test_check_triton_lds_capacity_too_large(self, hw):
-        mt = origami.dim3_t(512, 512, 128)
-        assert not origami.check_triton_lds_capacity(hw, mt, origami.data_type_t.Half, origami.data_type_t.Half)
+    def test_check_lds_capacity_too_large(self, hw):
+        c = _make_triton_config(512, 512, 128, 2)
+        assert not origami.check_lds_capacity(hw, _make_problem(), c)
 
-    def test_stages_ordering(self, hw):
-        mt = origami.dim3_t(128, 128, 32)
-        t1 = origami.estimate_triton_lds_bytes(mt, origami.data_type_t.Half, origami.data_type_t.Half, 1)
-        t2 = origami.estimate_triton_lds_bytes(mt, origami.data_type_t.Half, origami.data_type_t.Half, 2)
-        t3 = origami.estimate_triton_lds_bytes(mt, origami.data_type_t.Half, origami.data_type_t.Half, 3)
+    def test_stages_ordering(self):
+        p = _make_problem()
+        t1 = origami.estimate_lds_bytes(p, _make_triton_config(128, 128, 32, 1))
+        t2 = origami.estimate_lds_bytes(p, _make_triton_config(128, 128, 32, 2))
+        t3 = origami.estimate_lds_bytes(p, _make_triton_config(128, 128, 32, 3))
         assert t1 < t2 < t3
 
     def test_estimate_matches_reference_sweep(self):
         """Sweep tile sizes and verify C++ matches the validated formula."""
+        p = _make_problem()
         for bm in [16, 32, 64, 128, 256]:
             for bn in [16, 32, 64, 128, 256]:
                 for bk in [16, 32, 64, 128, 256, 512]:
                     for ns in [1, 2, 3]:
-                        mt = origami.dim3_t(bm, bn, bk)
-                        cpp = origami.estimate_triton_lds_bytes(
-                            mt, origami.data_type_t.Half, origami.data_type_t.Half, ns
-                        )
+                        c = _make_triton_config(bm, bn, bk, ns)
+                        cpp = origami.estimate_lds_bytes(p, c)
                         ref = self._reference_estimate(bm, bn, bk, 2, 2, ns)
                         assert cpp == ref, (
                             f"Mismatch at {bm}x{bn}x{bk} stages={ns}: C++={cpp} ref={ref}"
                         )
+
+    def test_subbyte_dtype_no_truncation(self):
+        """F4 dtype must not truncate to zero (sub-byte fix)."""
+        # Skip if Float4 isn't exposed by this build
+        if not hasattr(origami.data_type_t, "Float4"):
+            pytest.skip("Float4 not available in this build")
+        p = _make_problem(origami.data_type_t.Float4, origami.data_type_t.Float4)
+        c = _make_triton_config(128, 128, 64, 2)
+        result = origami.estimate_lds_bytes(p, c)
+        # 128*64 elements * 4 bits / 8 = 4096 bytes per tile; 2 tiles total
+        assert result == 1 * (4096 + 4096)
+        assert result > 0
 
 
 class TestTritonWSParams:

@@ -554,14 +554,9 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   latencies_configs.reserve(configs.size());
 
   for (auto& config : configs) {
-    // Use Triton-aware LDS check (accounts for pipeline stages + padding) when target is Triton
-    if (config.target == target_t::triton) {
-      if (!check_triton_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype))
-        continue;
-    } else {
-      if (!check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype))
-        continue;
-    }
+    // Unified LDS check; Triton's pipeline-buffer multiplier comes from
+    // config.triton().num_stages when target is triton (see estimate_lds_bytes).
+    if (!check_lds_capacity(hardware, problem, config)) continue;
 
     double latency = compute_total_latency(problem, hardware, config, hardware.N_CU);
     if (latency != std::numeric_limits<double>::max())

@@ -195,10 +195,10 @@ TEST_CASE("GEMM: check_lds_capacity", "[gemm]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - 256x256x64 tile fits in LDS") {
       auto hardware = make_hardware(gpu_arch);
-      origami::dim3_t mt{256, 256, 64};
+      auto problem  = make_problem(4096, 4096, 1024);  // dtypes default to BFloat16
+      auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
-      auto fits = origami::check_lds_capacity(
-          hardware, mt, origami::data_type_t::BFloat16, origami::data_type_t::BFloat16);
+      auto fits = origami::check_lds_capacity(hardware, problem, config);
 
       REQUIRE(fits == true);
     }
@@ -895,125 +895,168 @@ TEST_CASE("GEMM: arithmetic_intensity and emulated_tf32_arithmetic_intensity uni
 }
 
 TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
+  // Local helper: build a (problem, config) pair carrying an MT and dtype pair.
+  // Tensile-style call (no triton_params), so estimate_lds_bytes returns A+B.
+  auto check_lds = [](const origami::hardware_t& hw,
+                      origami::dim3_t mt,
+                      origami::data_type_t a_dtype,
+                      origami::data_type_t b_dtype) {
+    origami::problem_t problem;
+    problem.a_dtype = a_dtype;
+    problem.b_dtype = b_dtype;
+    origami::config_t config;
+    config.mt        = mt;
+    config.mi        = {16, 16, 16};
+    config.occupancy = 1;
+    return origami::check_lds_capacity(hw, problem, config);
+  };
+
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - check_lds_capacity unit test") {
       auto hardware = make_hardware(gpu_arch);
 
       if (gpu_arch == 942) {
         // Test 1: Test with tiles that exceed LDS capacity
-        auto result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
-                                        {256, 256, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
-
-        result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
-                                        {128, 128, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
-
-        result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
-                                        {64, 128, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
+        REQUIRE(check_lds(hardware,
+                          {128, 128, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
+        REQUIRE(check_lds(hardware,
+                          {64, 128, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
 
         // Test 2: Test with different data type combinations
-        auto result_different_data_type = origami::check_lds_capacity(
-            hardware, {64, 64, 256}, origami::data_type_t::Half, origami::data_type_t::Half);
-        REQUIRE(result_different_data_type == true);
-
-        result_different_data_type = origami::check_lds_capacity(
-            hardware, {256, 256, 512}, origami::data_type_t::Double, origami::data_type_t::Double);
-        REQUIRE(result_different_data_type == false);
-
-        result_different_data_type = origami::check_lds_capacity(
-            hardware, {128, 128, 64}, origami::data_type_t::Int8, origami::data_type_t::Int8);
-        REQUIRE(result_different_data_type == true);
-
-        result_different_data_type = origami::check_lds_capacity(
-            hardware, {128, 128, 32}, origami::data_type_t::Int64, origami::data_type_t::Int64);
-        REQUIRE(result_different_data_type == true);
+        REQUIRE(check_lds(hardware,
+                          {64, 64, 256},
+                          origami::data_type_t::Half,
+                          origami::data_type_t::Half) == true);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 512},
+                          origami::data_type_t::Double,
+                          origami::data_type_t::Double) == false);
+        REQUIRE(check_lds(hardware,
+                          {128, 128, 64},
+                          origami::data_type_t::Int8,
+                          origami::data_type_t::Int8) == true);
+        REQUIRE(check_lds(hardware,
+                          {128, 128, 32},
+                          origami::data_type_t::Int64,
+                          origami::data_type_t::Int64) == true);
 
         // Test 3: Test with Float (element_size = 16) (TODO: Need more clarification)
 
         // Test 4: Test edge cases (exactly at capacity, just over)
-        auto result_exactly_at_capacity =
-            origami::check_lds_capacity(hardware,
-                                        {256, 256, 64},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::Float8);  // exactly at capacity
-        REQUIRE(result_exactly_at_capacity == true);
-
-        result_exactly_at_capacity =
-            origami::check_lds_capacity(hardware,
-                                        {192, 96, 128},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);  // just over
-        REQUIRE(result_exactly_at_capacity == false);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 64},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::Float8) == true);  // exactly at capacity
+        REQUIRE(check_lds(hardware,
+                          {192, 96, 128},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);  // just over
       } else if (gpu_arch == 950) {
         // Test 1: Test with tiles that exceed LDS capacity
-        auto result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
-                                        {512, 512, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
-
-        result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
-                                        {256, 256, 512},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
-
-        result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
-                                        {512, 128, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
+        REQUIRE(check_lds(hardware,
+                          {512, 512, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 512},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
+        REQUIRE(check_lds(hardware,
+                          {512, 128, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
 
         // Test 2: Test with different data type combinations
-        auto result_different_data_type = origami::check_lds_capacity(
-            hardware, {64, 64, 256}, origami::data_type_t::Half, origami::data_type_t::Half);
-        REQUIRE(result_different_data_type == true);
-
-        result_different_data_type = origami::check_lds_capacity(
-            hardware, {256, 256, 512}, origami::data_type_t::Double, origami::data_type_t::Double);
-        REQUIRE(result_different_data_type == false);
-
-        result_different_data_type = origami::check_lds_capacity(
-            hardware, {256, 256, 64}, origami::data_type_t::Int8, origami::data_type_t::Int8);
-        REQUIRE(result_different_data_type == true);
-
-        result_different_data_type = origami::check_lds_capacity(
-            hardware, {256, 256, 32}, origami::data_type_t::Int64, origami::data_type_t::Int64);
-        REQUIRE(result_different_data_type == true);
+        REQUIRE(check_lds(hardware,
+                          {64, 64, 256},
+                          origami::data_type_t::Half,
+                          origami::data_type_t::Half) == true);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 512},
+                          origami::data_type_t::Double,
+                          origami::data_type_t::Double) == false);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 64},
+                          origami::data_type_t::Int8,
+                          origami::data_type_t::Int8) == true);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 32},
+                          origami::data_type_t::Int64,
+                          origami::data_type_t::Int64) == true);
 
         // Test 3: Test with Float (element_size = 16) (TODO: Need more clarification)
 
         // Test 4: Test edge cases (exactly at capacity, just over)
-        auto result_exactly_at_capacity =
-            origami::check_lds_capacity(hardware,
-                                        {512, 128, 256},
-                                        origami::data_type_t::Float8,
-                                        origami::data_type_t::Float8);  // exactly at capacity
-        REQUIRE(result_exactly_at_capacity == true);
-
-        result_exactly_at_capacity =
-            origami::check_lds_capacity(hardware,
-                                        {512, 192, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);  // just over
-        REQUIRE(result_exactly_at_capacity == false);
+        REQUIRE(check_lds(hardware,
+                          {512, 128, 256},
+                          origami::data_type_t::Float8,
+                          origami::data_type_t::Float8) == true);  // exactly at capacity
+        REQUIRE(check_lds(hardware,
+                          {512, 192, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);  // just over
       }
     }
   }
+}
+
+TEST_CASE("GEMM: estimate_lds_bytes pipeline-stage scaling", "[gemm]") {
+  // Verifies the Triton-aware buffer multiplier when triton_params_t is set.
+  // Tensile (no triton_params): always 1 * (A + B).
+  // Triton ns=1: max(A, B).
+  // Triton ns=2: 1 * (A + B).
+  // Triton ns=3: 2 * (A + B).
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::Half;  // 2 bytes
+  problem.b_dtype = origami::data_type_t::Half;
+
+  origami::config_t config;
+  config.mt        = {128, 128, 32};
+  config.mi        = {16, 16, 16};
+  config.occupancy = 1;
+
+  const size_t a_tile = 128 * 32 * 2;
+  const size_t b_tile = 32 * 128 * 2;
+
+  // Tensile path (no triton_params)
+  REQUIRE(origami::estimate_lds_bytes(problem, config) == a_tile + b_tile);
+
+  // Triton path: must set target AND backend variant
+  config.target               = origami::target_t::triton;
+  config.triton().num_stages  = 1;
+  REQUIRE(origami::estimate_lds_bytes(problem, config) == std::max(a_tile, b_tile));
+
+  config.triton().num_stages = 2;
+  REQUIRE(origami::estimate_lds_bytes(problem, config) == 1 * (a_tile + b_tile));
+
+  config.triton().num_stages = 3;
+  REQUIRE(origami::estimate_lds_bytes(problem, config) == 2 * (a_tile + b_tile));
+}
+
+TEST_CASE("GEMM: estimate_lds_bytes sub-byte dtypes", "[gemm]") {
+  // Sub-byte dtypes (F4) must not truncate to zero via double-cast floor.
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::Float4;
+  problem.b_dtype = origami::data_type_t::Float4;
+
+  origami::config_t config;
+  config.mt        = {128, 128, 64};
+  config.mi        = {16, 16, 16};
+  config.occupancy = 1;
+  config.target    = origami::target_t::triton;
+  config.triton().num_stages = 2;
+
+  // 128*64 elements * 4 bits / 8 = 4096 bytes per tile; 2 tiles = 8192.
+  const size_t expected = 1 * (4096 + 4096);
+  REQUIRE(origami::estimate_lds_bytes(problem, config) == expected);
 }
 
 TEST_CASE("GEMM: estimate_l2_hit and estimate_mall_hit unit test", "[gemm]") {

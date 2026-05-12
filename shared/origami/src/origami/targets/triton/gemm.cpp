@@ -10,40 +10,6 @@
 
 namespace origami {
 
-// Estimate Triton kernel LDS usage in bytes.
-// Validated against actual Triton 3.6.0 compiled kernel metadata (n_shared_bytes).
-// The compiler allocates:
-//   stages == 1  →  max(A_tile_bytes, B_tile_bytes)        (A & B share the same LDS region)
-//   stages >= 2  →  (stages - 1) * (A_tile_bytes + B_tile_bytes)
-size_t estimate_triton_lds_bytes(dim3_t mt,
-                                 data_type_t a_dtype,
-                                 data_type_t b_dtype,
-                                 int num_stages) {
-  // Compute in bits then ceil-divide to bytes so sub-byte dtypes (F4/F6) do
-  // not truncate to zero. data_type_to_bytes() returns a double (e.g. 0.5 for
-  // F4); a direct cast to size_t would silently floor that to 0 and make the
-  // LDS estimate unconditionally pass capacity checks.
-  const size_t bits_a = static_cast<size_t>(datatype_to_bits(a_dtype));
-  const size_t bits_b = static_cast<size_t>(datatype_to_bits(b_dtype));
-
-  const size_t a_tile = math::safe_ceil_div(mt.m * mt.k * bits_a, static_cast<size_t>(8));
-  const size_t b_tile = math::safe_ceil_div(mt.k * mt.n * bits_b, static_cast<size_t>(8));
-
-  if (num_stages <= 1)
-    return std::max(a_tile, b_tile);
-
-  return static_cast<size_t>(num_stages - 1) * (a_tile + b_tile);
-}
-
-// Check if tile fits in LDS for Triton kernels.
-bool check_triton_lds_capacity(const hardware_t& hardware,
-                               dim3_t mt,
-                               data_type_t a_dtype,
-                               data_type_t b_dtype,
-                               int num_stages) {
-  return estimate_triton_lds_bytes(mt, a_dtype, b_dtype, num_stages) <= hardware.lds_capacity;
-}
-
 // Select work-stealing parameters for Triton.
 // Empirically tuned on MI300X via autotune sweeps.
 triton_ws_params_t select_triton_ws_params(size_t m, size_t n, size_t block_m, size_t block_n) {
