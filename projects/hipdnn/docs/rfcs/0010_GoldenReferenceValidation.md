@@ -71,7 +71,7 @@ The golden reference pattern is already in production for batchnorm: six bundles
 
 ### What this RFC adds on top
 
-1. **A generic runner** -- one base class plus two execution-step subclasses (ref executor, plugin) -- that replaces the per-operation test classes. Bundles are discovered recursively at GTest startup; adding an operation no longer requires new C++.
+1. **A generic runner** -- one base class plus three execution-step subclasses (CPU ref, GPU ref, engine) -- that replaces the per-operation test classes. Bundles are discovered recursively at GTest startup; adding an operation no longer requires new C++.
 2. **A tolerance lookup chain** that connects golden tests to the existing TOML override mechanism, falling back to the per-operation default. Dynamic tolerances stay future work.
 3. **Integrity checks** at generation, load, and pre-commit time. See [Data Integrity](#data-integrity).
 4. **A formalized folder convention** with the same tier cascade as the rest of the integration suite. See [Folder Convention](#folder-convention).
@@ -83,16 +83,17 @@ The functional changes are described in the relevant Detailed Design subsections
 
 | File | Disposition | Notes |
 |------|-------------|-------|
-| [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | Kept, extended | Add tensor-size check after load ([Data Integrity #2](#data-integrity)) |
-| [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | -> `ValidateGoldenBundleWithRef.hpp` | New base + subclass; reference executor execution step |
-| [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | -> `ValidateGoldenBundleWithPlugin.hpp` | New base + subclass; plugin execution step, "unsupported" -> SKIP |
+| [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | Kept, extended | Add tensor-size check after load ([Data Integrity #1](#data-integrity)) |
+| [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | -> `TestCpuReferenceUsingGoldenValues.hpp` | Subclass; CPU reference executor execution step |
+| (new) `TestGpuReferenceUsingGoldenValues.hpp` | New | Subclass; GPU reference executor execution step |
+| [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | -> `IntegrationGpuGoldenReferenceEngineValidation.hpp` | Subclass; engine execution step, "unsupported" -> SKIP |
 | [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp) | Removed | Per-operation C++ class no longer needed |
 | [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) | Kept, extended | Generic runner adds operation-type lookup |
 | [`TestSettings.hpp`](../../../../dnn-providers/integration-tests/src/harness/TestSettings.hpp), engine `.toml` files | Kept as-is | Existing TOML overrides apply to golden tests unchanged |
 | [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) | Future | Wired in later as the per-operation default |
 | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | Kept, enhanced | Generators auto-derive output path from graph content |
 | [`hipdnn_reference_data/`](../../hipdnn_reference_data/BatchnormFwdInference/) (6 batchnorm bundles) | Relocated | Moves to `golden_reference_data/quick/BatchnormFwdInference/` |
-| (new) `ValidateGoldenBundleBase` | New | Owns discovery, loading, tolerance lookup, comparison |
+| (new) `IntegrationGraphGoldenReferenceVerificationHarness` | New | Owns discovery, loading, tolerance lookup, comparison |
 
 ---
 
@@ -194,6 +195,8 @@ The file size in bytes equals `element_space x sizeof(element_type)`, where `ele
 
 **To read a `.bin` file**: allocate `element_space x sizeof(T)` bytes, read the file into that buffer, then index using the strides from JSON. For contiguous tensors this is a straightforward row-major (C-order) array.
 
+**v1 scope: dense (packed) tensors only.** The binary format supports strided layouts but not sparse representations (CSR, COO, etc.). Sparse tensor support is deferred to a future revision.
+
 #### Folder Convention
 
 The top-level directory is organized by **tier**. Below that, the runner recursively scans for `.json` files regardless of subfolder depth. The recommended convention is `{Operation}/{Layout}/{DataType}/`, but any structure works.
@@ -206,7 +209,7 @@ golden_reference_data/
         {Name}.json + {Name}.tensor{uid}.bin
 ```
 
-In the source tree, golden data lives with the integration test suite at `dnn-providers/integration-tests/golden_reference_data/`. At build time, CMake copies it to `<exe_dir>/../lib/golden_reference_data` via `file(COPY ...)` at configure time and `install(DIRECTORY ...)` at install time. At runtime, `--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR` can override the path.
+In the source tree, golden data lives with the integration test suite at `dnn-providers/integration-tests/golden_reference_data/`. At runtime, the test binary reads directly from the source tree location -- no CMake copy step. The default path is resolved relative to the executable, and `--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR` can override it.
 
 ##### Tier folders
 
@@ -279,11 +282,11 @@ Given these bundles:
 
 | File path | Graph content | Generated test name |
 |-----------|--------------|---------------------|
-| `quick/BatchnormFwdInference/nchw/fp32/typical/typical.json` | batchnorm fwd inference, nchw, fp32 | `ValidateGoldenBundleWithRef/BatchnormFwdInference_nchw_fp32_typical` |
-| `quick/BatchnormFwdInference/nchw/fp16/typical/typical.json` | batchnorm fwd inference, nchw, fp16 | `ValidateGoldenBundleWithRef/BatchnormFwdInference_nchw_fp16_typical` |
-| `quick/BatchnormFwdInference/nchw/fp32/odd_spatial/odd_spatial.json` | batchnorm fwd inference, nchw, fp32 | `ValidateGoldenBundleWithRef/BatchnormFwdInference_nchw_fp32_odd_spatial` |
-| `standard/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json` | conv fwd, nhwc, fp16 | `Standard/ValidateGoldenBundleWithRef/ConvFwd_nhwc_fp16_resnet50_layer3` |
-| `quick/customer_issues/CASE-12345/repro/repro.json` | conv fwd, nchw, fp32 | `ValidateGoldenBundleWithRef/ConvFwd_nchw_fp32_repro` |
+| `quick/BatchnormFwdInference/nchw/fp32/typical/typical.json` | batchnorm fwd inference, nchw, fp32 | `TestCpuReferenceUsingGoldenValues/BatchnormFwdInference_nchw_fp32_typical` |
+| `quick/BatchnormFwdInference/nchw/fp16/typical/typical.json` | batchnorm fwd inference, nchw, fp16 | `TestCpuReferenceUsingGoldenValues/BatchnormFwdInference_nchw_fp16_typical` |
+| `quick/BatchnormFwdInference/nchw/fp32/odd_spatial/odd_spatial.json` | batchnorm fwd inference, nchw, fp32 | `TestCpuReferenceUsingGoldenValues/BatchnormFwdInference_nchw_fp32_odd_spatial` |
+| `standard/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json` | conv fwd, nhwc, fp16 | `Standard/TestCpuReferenceUsingGoldenValues/ConvFwd_nhwc_fp16_resnet50_layer3` |
+| `quick/customer_issues/CASE-12345/repro/repro.json` | conv fwd, nchw, fp32 | `TestCpuReferenceUsingGoldenValues/ConvFwd_nchw_fp32_repro` |
 
 Note the last row: the customer dropped a bundle in an unusual folder path, but the test name comes from graph content -- the folder path doesn't matter.
 
@@ -354,7 +357,7 @@ The golden data format is **reference-source-agnostic**. Any tool that produces 
 
 ![Validation Pipeline](images/validation_pipeline.png)
 
-The runner is a **base class** (`ValidateGoldenBundleBase`) with two concrete subclasses: `ValidateGoldenBundleWithRef` (reference executor) and `ValidateGoldenBundleWithPlugin` (GPU plugin). The base class owns discovery, loading, tolerance lookup, and comparison. Each subclass overrides the execution step. Neither subclass knows what operation a bundle contains until it loads the graph JSON at runtime.
+The runner is a **base class** (`IntegrationGraphGoldenReferenceVerificationHarness`) with three concrete subclasses: `TestCpuReferenceUsingGoldenValues` (CPU reference executor), `TestGpuReferenceUsingGoldenValues` (GPU reference executor), and `IntegrationGpuGoldenReferenceEngineValidation` (GPU plugin). The base class owns discovery, loading, tolerance lookup, and comparison. Each subclass overrides the execution step. Neither subclass knows what operation a bundle contains until it loads the graph JSON at runtime.
 
 ##### How it works
 
@@ -374,7 +377,7 @@ Tolerance is looked up at runtime from the graph content: the runner reads the o
 When a golden test fails, the output should give the developer everything needed to diagnose the problem without re-running or adding instrumentation:
 
 ```
-FAIL: ValidateGoldenBundleWithPlugin/ConvFwd_nhwc_fp16_resnet50_layer3
+FAIL: IntegrationGpuGoldenReferenceEngineValidation/ConvFwd_nhwc_fp16_resnet50_layer3
   Bundle: quick/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json
   Tensor: y (UID 8, output)
   Shape:  [1, 64, 56, 56]  fp16
@@ -386,19 +389,13 @@ FAIL: ValidateGoldenBundleWithPlugin/ConvFwd_nhwc_fp16_resnet50_layer3
 
 ##### Test discovery
 
-Each runner uses one `INSTANTIATE_TEST_SUITE_P` per tier, not per operation. Both runners discover the same bundles -- the test binary determines which runner class is used. These instantiations are fixed -- they never change as new operations or bundles are added:
+At GTest startup, `discoverGoldenBundles(tierDir)` recursively scans a tier directory for `.json` files and registers one test case per bundle. All three runners discover the same bundles -- the test binary determines which runner class is used. Registration is per tier, not per operation -- it never changes as new operations or bundles are added.
 
-```cpp
-// Ref runner (in hipdnn_test_sdk_tests) -- plugin runner mirrors this with ValidateGoldenBundleWithPlugin:
-INSTANTIATE_TEST_SUITE_P(, ValidateGoldenBundleWithRef,
-    discoverGoldenBundles("quick"));
-INSTANTIATE_TEST_SUITE_P(Standard, ValidateGoldenBundleWithRef,
-    discoverGoldenBundles("standard"));
-INSTANTIATE_TEST_SUITE_P(Comprehensive, ValidateGoldenBundleWithRef,
-    discoverGoldenBundles("comprehensive"));
-INSTANTIATE_TEST_SUITE_P(Full, ValidateGoldenBundleWithRef,
-    discoverGoldenBundles("full"));
-```
+Two GTest mechanisms can achieve this:
+- **`INSTANTIATE_TEST_SUITE_P`** -- parameterized tests, one call per tier. Simpler, well-understood.
+- **[Programmatic `RegisterTest`](https://google.github.io/googletest/advanced.html#registering-tests-programmatically)** -- registers each bundle as its own test at runtime. More flexible naming and grouping.
+
+Both are viable; the implementation will explore both and pick the better fit.
 
 If the tier directory is empty or missing, `discoverGoldenBundles` returns an empty list (no tests, no failure). Unexpected top-level directories (e.g., `quik/` instead of `quick/`) trigger a warning to catch typos.
 
@@ -409,7 +406,7 @@ If the tier directory is empty or missing, `discoverGoldenBundles` returns an em
 | Test class | One per operation/layout/datatype | One generic class for all |
 | Discovery | `getGoldenReferenceParams(subDir)` -- shallow scan, one call per directory | `discoverGoldenBundles(tierDir)` -- recursive scan, one call per tier |
 | Adding a test | Drop files (existing op) or write C++ class (new op) | Drop files. Always. |
-| Tier assignment | GTest prefix per `INSTANTIATE_TEST_SUITE_P` | Tier folder at top level |
+| Tier assignment | GTest prefix per instantiation call | Tier folder at top level |
 | Tolerance | Hard-coded per test class | Looked up from graph content at runtime |
 
 **Acceptance criteria**:
@@ -474,7 +471,7 @@ This evolution changes *how* the default is computed -- it does not change the t
 
 ##### Current gap
 
-The golden ref framework (`ValidateGoldenBundleWithRef` / `ValidateGoldenBundleWithPlugin`) takes tolerances as hard-coded function parameters -- it bypasses both the TOML override lookup and the operation-based tolerance selection. Golden tests must be connected to the same two-level flow: check TOML override first, fall back to per-operation default.
+The golden ref framework (`TestCpuReferenceUsingGoldenValues` / `TestGpuReferenceUsingGoldenValues` / `IntegrationGpuGoldenReferenceEngineValidation`) takes tolerances as hard-coded function parameters -- it bypasses both the TOML override lookup and the operation-based tolerance selection. Golden tests must be connected to the same two-level flow: check TOML override first, fall back to per-operation default.
 
 **Acceptance criteria**:
 - [ ] Golden data bundles contain no tolerance fields
@@ -487,9 +484,9 @@ Internal consistency is guaranteed by construction: `Graph.save()` writes the JS
 
 Four checks catch the real failure modes:
 
-1. **Per-tensor SHA-256 checksum (generation + load time)** -- *proposed*. The generator computes a SHA-256 hash of each `.bin` file and stores it in the tensor's JSON entry. At load time, the hash is recomputed and mismatches are rejected. Catches truncated downloads, wrong-file swaps, and file corruption.
+1. **Tensor size validation (load time)** -- *proposed*. Verify that the loaded byte count matches `element_space x sizeof(element_type)` declared in the graph JSON (see [binary tensor format](#binary-tensor-format)). Not performed today -- a truncated file silently produces garbage. This is the primary load-time integrity check -- fast and sufficient to catch truncated downloads and wrong-file swaps.
 
-2. **Tensor size validation (load time)** -- *proposed*. Verify that the loaded byte count matches `element_space x sizeof(element_type)` declared in the graph JSON (see [binary tensor format](#binary-tensor-format)). Not performed today -- a truncated file silently produces garbage.
+2. **Per-tensor SHA-256 checksum (pre-commit verifier only)** -- *proposed*. The generator computes a SHA-256 hash of each `.bin` file and stores it in the tensor's JSON entry. The pre-commit verifier recomputes and compares. Not checked at load time to avoid the performance cost on every test run.
 
 3. **NaN/Inf rejection (generation time)** -- *proposed*. Reject output tensors containing NaN or Inf before writing any files. All-same-value tensors are valid (e.g., a bias-only layer can produce uniform output).
 
@@ -565,7 +562,7 @@ Tiers are determined by the top-level folder (see [Folder Convention](#folder-co
 3. The bundle is self-contained -- no environment-specific setup beyond the engine under test
 
 **Add golden test support for a new plugin** (provider developer):
-1. Subclass `ValidateGoldenBundleBase` in your provider's tests directory -- override the execution step with your plugin's setup/teardown
+1. Subclass `IntegrationGraphGoldenReferenceVerificationHarness` in your provider's tests directory -- override the execution step with your plugin's setup/teardown
 2. The same bundles are automatically validated against your plugin -- no new test data needed
 
 ---
@@ -576,7 +573,7 @@ Golden data lives in two places -- **source tree** and **runtime**:
 
 - **Source tree**: Golden data lives at `dnn-providers/integration-tests/golden_reference_data/`. The existing batchnorm data currently lives at `projects/hipdnn/hipdnn_reference_data/` and will be moved here. Small bundles are committed directly to git. Larger bundles are stored in **DVC** (Data Version Control), which the repo already uses for large binary assets. Golden data can grow large (a single test case with `8x512x64x64` fp32 tensors is ~64 MB), so DVC is the natural fit.
 
-- **Runtime**: CMake copies golden data to `<exe_dir>/../lib/golden_reference_data` via `file(COPY ...)` at configure time and `install(DIRECTORY ...)` at install time. The `--golden-data-dir` CLI flag or `HIPDNN_TEST_GOLDEN_DATA_DIR` env var overrides this location.
+- **Runtime**: The test binary reads golden data directly from the source tree -- no CMake copy step. The default path is resolved relative to the executable. The `--golden-data-dir` CLI flag or `HIPDNN_TEST_GOLDEN_DATA_DIR` env var overrides this location.
 
 **Open question**: How to ship golden data to ROCm CI. The data must be available at test time without bloating the build tree. Options include DVC pull at CI time, a pre-staged CI cache, or a separate data artifact. Input from the broader team is needed here.
 
