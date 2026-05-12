@@ -2890,6 +2890,12 @@ public:
      *        (must match forward pass)
      * @return dx: Gradient w.r.t. input (same shape as forward input)
      *
+     * @note If `dx` dimensions are not provided, the channel count is
+     *       inferred assuming `groups = 1`. For grouped convolutions,
+     *       set dimensions on the returned `dx` tensor before graph
+     *       validation/finalization to avoid an incorrect channel count
+     *       on the inferred input-gradient tensor.
+     *
      * @see hipdnn_frontend::graph::ConvDgradAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
@@ -2941,6 +2947,12 @@ public:
      * @param attributes Convolution parameters: padding, stride, dilation
      *        (must match forward pass)
      * @return dw: Gradient w.r.t. filter weights (same shape as forward weights)
+     *
+     * @note If `dw` dimensions are not provided, the channel count is
+     *       inferred assuming `groups = 1`. For grouped convolutions,
+     *       set dimensions on the returned `dw` tensor before graph
+     *       validation/finalization to avoid an incorrect channel count
+     *       on the inferred weight tensor.
      *
      * @see hipdnn_frontend::graph::ConvWgradAttributes
      */

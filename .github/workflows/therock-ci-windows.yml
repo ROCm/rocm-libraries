@@ -156,17 +156,16 @@ jobs:
             --build-dir ${{ env.BUILD_DIR }} \
             --upload
 
-      - name: Notify MIOpen Teams Channel on Failure
-        # Channel name "MIOpen CI Reporting"
-        if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && !github.event.pull_request.head.repo.fork }}
+      - name: Notify Teams Channel on Failure
+        if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
         run: |
           python3 .github/scripts/notify_teams.py \
-            --project miopen \
             --failure-stage build \
             --log-path "${{ env.BUILD_DIR }}/logs" \
-            --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            --webhook-urls '{"miopen":"${{ secrets.MIOPEN_CI_WEBHOOK_URL }}","hipdnn":"${{ secrets.HIPDNN_CI_WEBHOOK_URL }}"}' \
             --pr-number "${{ github.event.pull_request.number }}" \
-            --pr-title "${{ github.event.pull_request.title }}"
+            --pr-title "${{ github.event.pull_request.title }}" \
+            --component-name "${{ inputs.projects_to_test }}"
 
   therock-test-windows:
     name: Test (${{ inputs.amdgpu_families }})
