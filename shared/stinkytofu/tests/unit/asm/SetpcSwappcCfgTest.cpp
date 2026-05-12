@@ -150,6 +150,46 @@ TEST_F(SetpcSwappcCfgTest, SwappcFallsThroughToNextBlock) {
     EXPECT_EQ(preds.front(), callBlock);
 }
 
+// Commit 6 contract: when the rocisa->StinkyTofu converter encounters an
+// SSetPCB64 with non-empty longBranchLabel, it stamps a LabelData{...} modifier
+// on the s_setpc_b64. This test verifies the StinkyTofu-side behaviour the
+// converter relies on: an s_setpc_b64 carrying LabelData{X} must produce a CFG
+// edge to the basic block labelled X, with no fall-through and no other
+// successors. It exercises the contract directly without running
+// LongBranchLoweringPass, isolating the converter's stamp-LabelData
+// responsibility.
+TEST_F(SetpcSwappcCfgTest, SetpcWithLabelDataYieldsDirectCFGEdge) {
+    StinkyInstruction* setpc = createSetpc(entry, /*srcSGPR=*/62);
+    /// Mirror what ToStinkyTofuUtils.cpp::legalizeInstruction does for
+    /// rocisa::SSetPCB64 with longBranchLabel="label_target".
+    setpc->addModifier<LabelData>(LabelData{"label_target"});
+    createLabelInst(entry, "fall_through");
+    createNop(entry);
+    createLabelInst(entry, "label_target");
+    createNop(entry);
+
+    runCFGBuilder();
+
+    BasicBlock* setpcBlock = func->getEntryBlock();
+    BasicBlock* fallBlock = findBlock("fall_through");
+    BasicBlock* targetBlock = findBlock("label_target");
+    ASSERT_NE(setpcBlock, nullptr);
+    ASSERT_NE(fallBlock, nullptr);
+    ASSERT_NE(targetBlock, nullptr);
+
+    const auto& succs = setpcBlock->getSuccessors();
+    ASSERT_EQ(succs.size(), 1u)
+        << "Converter-stamped LabelData must produce exactly one CFG successor.";
+    EXPECT_EQ(succs.front(), targetBlock);
+
+    EXPECT_TRUE(fallBlock->getPredecessors().empty())
+        << "Block immediately after the s_setpc_b64 must remain unreachable.";
+
+    const auto& preds = targetBlock->getPredecessors();
+    EXPECT_NE(std::find(preds.begin(), preds.end(), setpcBlock), preds.end())
+        << "Target block must list the s_setpc_b64 source block as a predecessor.";
+}
+
 // A normal s_branch must still build a single successor edge to its labelled
 // target. Sanity check that the new fall-through rule did not regress
 // unconditional-branch handling.
