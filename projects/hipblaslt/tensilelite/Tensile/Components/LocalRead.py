@@ -607,8 +607,21 @@ class LocalReadMFMA(LocalRead):
         if "MXS" in tc:
             subTc = tc[3]
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-            tileStride = mxUnit
-            UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] * mxUnit
+            # MX scale LDS strides, gated by MXScaleFormat:
+            #   - Swizzled (HostPreSwizzle/InMemorySwizzle):
+            #       tileStride   = mxUnit
+            #       UnrollStride = MT * mxUnit  (M-blocks interleaved on K)
+            #   - NoSwizzle (canonical):
+            #       tileStride   = _DepthU_MXS + LdsPad
+            #       UnrollStride = mxUnit       (K-scales contiguous per M)
+            mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+            isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+            if isMxSwizzled:
+                tileStride = mxUnit
+                UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] * mxUnit
+            else:
+                tileStride = kernel["_DepthU%s" % tc] + LdsPad
+                UnrollStride = mxUnit
 
         enableLDSTr = tP["enableLDSTr"]
         matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
