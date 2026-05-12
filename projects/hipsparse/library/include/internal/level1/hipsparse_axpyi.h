@@ -95,7 +95,7 @@ hipsparseStatus_t hipsparseSaxpyi(hipsparseHandle_t    handle,
                                   hipsparseIndexBase_t idxBase);
 
 /*! \ingroup level1_module
- *  \brief Scale a sparse vector and add it to a dense vector.
+ *  \brief Scale a sparse vector and add it to a dense vector. See hipsparseSaxpyi.
  *
  *  \copydoc hipsparseSaxpyi
  */
@@ -110,7 +110,7 @@ hipsparseStatus_t hipsparseDaxpyi(hipsparseHandle_t    handle,
                                   hipsparseIndexBase_t idxBase);
 
 /*! \ingroup level1_module
- *  \brief Scale a sparse vector and add it to a dense vector.
+ *  \brief Scale a sparse vector and add it to a dense vector. See hipsparseSaxpyi.
  *
  *  \copydoc hipsparseSaxpyi
  */
@@ -125,7 +125,7 @@ hipsparseStatus_t hipsparseCaxpyi(hipsparseHandle_t    handle,
                                   hipsparseIndexBase_t idxBase);
 
 /*! \ingroup level1_module
- *  \brief Scale a sparse vector and add it to a dense vector.
+ *  \brief Scale a sparse vector and add it to a dense vector. See hipsparseSaxpyi.
  *
  *  \copydoc hipsparseSaxpyi
  */
