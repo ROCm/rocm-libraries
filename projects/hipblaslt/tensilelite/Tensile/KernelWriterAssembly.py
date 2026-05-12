@@ -6993,7 +6993,7 @@ class KernelWriterAssembly(KernelWriter):
 
       if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
         module.add(SWaitCnt(dscnt=0, comment="TDM PGR=0: wait all ds_reads before TDM overwrite"))
-        module.add(SBarrier(comment="TDM PGR=0: signal+wait done reading LDS"))
+        module.add(SBarrier(comment="TDM PGR=0: signal+wait done reading LDS", memoryToken=[self.states.memTokenLdsBuffer0]))
 
       # If PrefetchGlobalRead=1 the loads in the loop prefetch next macro-tile
       # For the final trip through the unroll loop we need to ensure those loads stay in bounds.

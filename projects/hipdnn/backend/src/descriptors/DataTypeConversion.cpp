@@ -519,4 +519,68 @@ hipdnnReduceTensorOp_t
     }
 }
 
+hipdnn_flatbuffers_sdk::data_objects::ResampleMode toSdkResampleMode(hipdnnResampleMode_t mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::ResampleMode;
+
+    switch(mode)
+    {
+    case HIPDNN_RESAMPLE_MAXPOOL:
+        return ResampleMode::MAXPOOL;
+    case HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING:
+        return ResampleMode::AVGPOOL_EXCLUDE_PADDING;
+    case HIPDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING:
+        return ResampleMode::AVGPOOL_INCLUDE_PADDING;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnResampleMode_t value");
+    }
+}
+
+hipdnnResampleMode_t fromSdkResampleMode(hipdnn_flatbuffers_sdk::data_objects::ResampleMode mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::ResampleMode;
+
+    switch(mode)
+    {
+    case ResampleMode::MAXPOOL:
+        return HIPDNN_RESAMPLE_MAXPOOL;
+    case ResampleMode::AVGPOOL_EXCLUDE_PADDING:
+        return HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING;
+    case ResampleMode::AVGPOOL_INCLUDE_PADDING:
+        return HIPDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK ResampleMode value");
+    }
+}
+
+hipdnn_flatbuffers_sdk::data_objects::PaddingMode toSdkPaddingMode(hipdnnPaddingMode_t mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PaddingMode;
+
+    switch(mode)
+    {
+    case HIPDNN_PADDING_NEG_INF_PAD:
+        return PaddingMode::NEG_INF_PAD;
+    case HIPDNN_PADDING_ZERO_PAD:
+        return PaddingMode::ZERO_PAD;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnPaddingMode_t value");
+    }
+}
+
+hipdnnPaddingMode_t fromSdkPaddingMode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PaddingMode;
+
+    switch(mode)
+    {
+    case PaddingMode::NEG_INF_PAD:
+        return HIPDNN_PADDING_NEG_INF_PAD;
+    case PaddingMode::ZERO_PAD:
+        return HIPDNN_PADDING_ZERO_PAD;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK PaddingMode value");
+    }
+}
+
 } // namespace hipdnn_backend
