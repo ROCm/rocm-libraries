@@ -526,28 +526,17 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroySerializedExecutionContext(
 
 hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized(
     hipdnnEnginePluginHandle_t handle,
-    const hipdnnPluginConstData_t *engineConfig,
     const hipdnnPluginConstData_t *serializedContext,
     hipdnnEnginePluginExecutionContext_t *executionContext) {
-  LOG_API_ENTRY("handle=" << static_cast<void *>(handle) << ", engineConfig="
-                          << static_cast<const void *>(engineConfig)
+  LOG_API_ENTRY("handle=" << static_cast<void *>(handle)
                           << ", serializedContext="
                           << static_cast<const void *>(serializedContext)
                           << ", executionContext="
                           << static_cast<void *>(executionContext));
   FUSILLI_PLUGIN_CHECK_NULL(handle);
-  FUSILLI_PLUGIN_CHECK_NULL(engineConfig);
   FUSILLI_PLUGIN_CHECK_NULL(serializedContext);
   FUSILLI_PLUGIN_CHECK_NULL(serializedContext->ptr);
   FUSILLI_PLUGIN_CHECK_NULL(executionContext);
-
-  hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
-      engineConfigWrapper(engineConfig->ptr, engineConfig->size);
-  if (engineConfigWrapper.engineId() !=
-      hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID) {
-    return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "unexpected engine id");
-  }
 
   hipdnnPluginConstData_t serializedOpGraph{nullptr, 0};
   auto payloadStatus =

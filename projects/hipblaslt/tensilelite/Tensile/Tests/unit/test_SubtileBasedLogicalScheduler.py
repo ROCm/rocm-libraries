@@ -15,8 +15,10 @@ Organized by pass:
   12. Integration    — Full pipeline with real instructions
 """
 
-from Tensile.Components.SubtileBasedKernel import TileInfo
-from Tensile.Components.SubtileBasedLogicalScheduler import (
+from Tensile.Components.Subtile.Kernel import (
+    TileInfo, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
+)
+from Tensile.Components.Subtile.LogicalScheduler import (
     LogicalScheduler,
     MFMATileRange,
     ReadGranularity,
@@ -29,6 +31,19 @@ from Tensile.Components.SubtileBasedLogicalScheduler import (
     fmt_mt,
 )
 from unittest.mock import MagicMock
+
+
+def makeTileInfo(tc, kernel):
+    """Compatibility wrapper: select geometry from kernel config and return TileInfo."""
+    fp4 = kernel["ProblemType"].get("MXBlockA", 0) > 0
+    _geo = {
+        'A': AB_B4 if fp4 else AB_B16,
+        'B': AB_B4 if fp4 else AB_B16,
+        'MXSA': MXSA_B4,
+        'MXSB': MXSB_B4,
+        'D': CD_F32,
+    }
+    return TileInfo(_geo[tc], tc, None, kernel)
 
 
 # ── Shared fixtures ───────────────────────────────────────────
@@ -84,10 +99,10 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None):
 def make_cfg_256x256_fp4(depthU=256, k_gran=1, numPartM=1, numPartN=1):
     """Build FP4 config with scale tensors. k_gran applies to LR A/B."""
     kernel = create_kernel(256, 256, fp4=True, depthU=depthU)
-    tiA = TileInfo('A', kernel)
-    tiB = TileInfo('B', kernel)
-    scaleTiA = TileInfo('MXSA', kernel)
-    scaleTiB = TileInfo('MXSB', kernel)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
+    scaleTiA = makeTileInfo('MXSA', kernel)
+    scaleTiB = makeTileInfo('MXSB', kernel)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
@@ -108,8 +123,8 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, numPartM=1, numPartN=1):
 def make_cfg_bf16(MT0=256, MT1=256, depthU=64, numPartM=1, numPartN=1):
     """Build BF16 config without scale tensors."""
     kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU)
-    tiA = TileInfo('A', kernel)
-    tiB = TileInfo('B', kernel)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
@@ -154,10 +169,10 @@ def make_writer_and_tileinfos(kernel, fp4=False):
         ri.init((9, 5, 0), asmpath)
     ri.setKernel((9, 5, 0), 64)
 
-    tiA = TileInfo('A', kernel)
-    tiB = TileInfo('B', kernel)
-    scaleTiA = TileInfo('MXSA', kernel) if fp4 else None
-    scaleTiB = TileInfo('MXSB', kernel) if fp4 else None
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
+    scaleTiA = makeTileInfo('MXSA', kernel) if fp4 else None
+    scaleTiB = makeTileInfo('MXSB', kernel) if fp4 else None
 
     writer = SimpleNamespace()
     writer.vgprPool = RegisterPool(0, RegisterType.Vgpr, False)
@@ -166,8 +181,8 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     writer.states = SimpleNamespace(
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
     )
-    dTileInfo = TileInfo('D', kernel)
-    dTileInfo.allocVgprTileRegisters(writer, kernel)
+    dTileInfo = makeTileInfo('D', kernel)
+    dTileInfo.allocVgprTileRegisters_legacy(writer, kernel)
     writer.states.d = SimpleNamespace(tileInfo=dTileInfo)
     writer.states.a = SimpleNamespace(tileInfo=tiA)
     writer.states.b = SimpleNamespace(tileInfo=tiB)
@@ -1246,10 +1261,10 @@ class TestFromTileInfo:
     def test_64x64_fp4(self):
         """MT=64, FP4 — matches design doc Example Granularities 1 tile counts."""
         kernel = create_kernel(64, 64, fp4=True)
-        tiA = TileInfo('A', kernel)
-        tiB = TileInfo('B', kernel)
-        scaleTiA = TileInfo('MXSA', kernel)
-        scaleTiB = TileInfo('MXSB', kernel)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
 
         cfg = SchedulerConfig(
             numMFMATilesM=tiA.localMMATileGrid[0],
@@ -1293,24 +1308,24 @@ class TestPartitionCandidates:
     def test_square(self):
         """M==N: partitions N."""
         kernel = create_kernel(256, 256)
-        tiA = TileInfo('A', kernel)
-        tiB = TileInfo('B', kernel)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
         assert candidates == [(1, 1), (1, 2), (1, 4), (1, 8)]
 
     def test_n_larger(self):
         """N > M: partitions N."""
         kernel = create_kernel(64, 256)
-        tiA = TileInfo('A', kernel)
-        tiB = TileInfo('B', kernel)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
         assert candidates == [(1, 1), (1, 2), (1, 4), (1, 8)]
 
     def test_m_larger(self):
         """M > N: partitions M."""
         kernel = create_kernel(256, 64)
-        tiA = TileInfo('A', kernel)
-        tiB = TileInfo('B', kernel)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
         assert candidates == [(1, 1), (2, 1), (4, 1), (8, 1)]
 
@@ -1342,8 +1357,8 @@ class TestGetNumVgpr:
     def test_no_scale(self):
         """A+B total without scale."""
         kernel = create_kernel(256, 256)
-        tiA = TileInfo('A', kernel)
-        tiB = TileInfo('B', kernel)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
         cfg = make_cfg_bf16(256, 256)
         sched = LogicalScheduler(cfg)
         sched.build()
@@ -1360,10 +1375,10 @@ class TestGetNumVgpr:
     def test_with_scale(self):
         """Including SA+SB increases total."""
         kernel = create_kernel(256, 256, fp4=True)
-        tiA = TileInfo('A', kernel)
-        tiB = TileInfo('B', kernel)
-        scaleTiA = TileInfo('MXSA', kernel)
-        scaleTiB = TileInfo('MXSB', kernel)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
 
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
@@ -1376,10 +1391,10 @@ class TestGetNumVgpr:
     def test_decreases_with_partitions(self):
         """More partitions → fewer VGPRs."""
         kernel = create_kernel(256, 256, fp4=True)
-        tiA = TileInfo('A', kernel)
-        tiB = TileInfo('B', kernel)
-        scaleTiA = TileInfo('MXSA', kernel)
-        scaleTiB = TileInfo('MXSB', kernel)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
 
         def _build_and_count(numPartM, numPartN):
             cfg = make_cfg_256x256_fp4(numPartM=numPartM, numPartN=numPartN)
@@ -1403,7 +1418,7 @@ class TestIntegration:
 
     def test_populate_instructions_256x256_fp4(self):
         """Full pipeline: emit → populate_instructions → instructionSchedule."""
-        from Tensile.Components.SubtileBasedInstructionScheduler import instructionSchedule
+        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
 
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
@@ -1520,8 +1535,8 @@ if __name__ == "__main__":
 
     if use_bf16:
         kernel = create_kernel(384, 256, fp4=False, depthU=64)
-        tiA = TileInfo('A', kernel)
-        tiB = TileInfo('B', kernel)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
         scaleTiA = None
         scaleTiB = None
 
@@ -1537,11 +1552,11 @@ if __name__ == "__main__":
             numPartitionsN=1,
         )
     else:
-        kernel = create_kernel(128, 128, fp4=True,depthU=512)
-        tiA = TileInfo('A', kernel)
-        tiB = TileInfo('B', kernel)
-        scaleTiA = TileInfo('MXSA', kernel)
-        scaleTiB = TileInfo('MXSB', kernel)
+        kernel = create_kernel(128, 128, fp4=True, depthU=512)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
 
         cfg = SchedulerConfig(
             numMFMATilesM=tiA.localMMATileGrid[0],
@@ -1728,7 +1743,7 @@ class TestBuildNll:
                         assert src.mtIteration == 0, \
                             f"NLL should only have LR(n=0), got mt={src.mtIteration}"
                     if em.opType == 'wait_gr':
-                        from Tensile.Components.SubtileBasedLogicalScheduler import WaitGROp
+                        from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
                         if isinstance(src, WaitGROp) and src.wait_gr_counts:
                             cnts = src.wait_gr_counts
                             assert cnts.A == 0 and cnts.B == 0 and cnts.SA == 0 and cnts.SB == 0, \

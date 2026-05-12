@@ -175,6 +175,8 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/sdpa_attributes.fbs
             schemas/sdpa_backward_attributes.fbs
             schemas/reduction_attributes.fbs
+            schemas/resample_common.fbs
+            schemas/resample_fwd_attributes.fbs
             schemas/tensor_attributes.fbs
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
         GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects"

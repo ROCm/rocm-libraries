@@ -13,6 +13,8 @@ on:
         type: string
       test_runs_on:
         type: string
+      build_runs_on:
+        type: string
 
 permissions:
   contents: read
@@ -20,7 +22,7 @@ permissions:
 jobs:
   therock-build-windows:
     name: Build (${{ inputs.amdgpu_families }})
-    runs-on: azure-windows-scale-rocm
+    runs-on: ${{ inputs.build_runs_on }}
     outputs:
       AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:
@@ -47,7 +49,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 70a6335b27d48f3781ba07eab89269f75a00f527 # 2026-05-03 commit
+          ref: 482ff586c261379e1132cf776f122e1d0972a8a0 # 2026-05-11 commit
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0

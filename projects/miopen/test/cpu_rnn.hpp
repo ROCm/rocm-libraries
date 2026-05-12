@@ -30,6 +30,7 @@
  * LSTM CPU verification functions
  **********************************************/
 #include "gemm.hpp"
+#include "gtest/gtest_desc_guard.hpp"
 
 template <class T>
 void LSTMFwdCPUVerify(const miopen::Handle& handle,
@@ -92,7 +93,8 @@ void LSTMFwdCPUVerify(const miopen::Handle& handle,
     std::vector<rocrand_state_xorwow> dropout_states_host;
     std::vector<unsigned char> dropout_reservespace_host;
     std::vector<T> dropout_hid_state;
-    miopenTensorDescriptor_t dropout_inputTensor{}, dropout_outputTensor{};
+    TensorDescGuard dropout_inputTensor;
+    TensorDescGuard dropout_outputTensor;
     if(use_dropout)
     {
         size_t states_size  = dropoutDesc.stateSizeInBytes / sizeof(rocrand_state_xorwow);
@@ -102,8 +104,6 @@ void LSTMFwdCPUVerify(const miopen::Handle& handle,
         std::array<int, 2> drop_in_len  = {{batch_n_cpu, hy_h * bi}};
         std::array<int, 2> drop_in_str  = {{hy_stride, 1}};
         std::array<int, 2> drop_out_str = {{hy_h * bi, 1}};
-        miopenCreateTensorDescriptor(&dropout_inputTensor);
-        miopenCreateTensorDescriptor(&dropout_outputTensor);
         miopenSetTensorDescriptor(
             dropout_inputTensor, miopenFloat, 2, drop_in_len.data(), drop_in_str.data());
         miopenSetTensorDescriptor(
@@ -204,9 +204,9 @@ void LSTMFwdCPUVerify(const miopen::Handle& handle,
 
                 DropoutForwardVerify<T>(handle,
                                         dropoutDesc,
-                                        miopen::deref(dropout_inputTensor),
+                                        miopen::deref(dropout_inputTensor.get()),
                                         rsvspace,
-                                        miopen::deref(dropout_outputTensor),
+                                        miopen::deref(dropout_outputTensor.get()),
                                         dropout_hid_state,
                                         dropout_reservespace_host,
                                         dropout_states_tmp,
@@ -710,13 +710,12 @@ void LSTMBwdDataCPUVerify(bool use_dropout_cpu,
     }
 
     // initial dropoput
-    miopenTensorDescriptor_t dropout_inputTensor{};
+    TensorDescGuard dropout_inputTensor;
     std::vector<unsigned char> dropout_reservespace_host;
     if(use_dropout_cpu)
     {
         std::array<int, 2> drop_in_len = {{batch_n_cpu, hy_h * bi}};
         std::array<int, 2> drop_in_str = {{hy_stride, 1}};
-        miopenCreateTensorDescriptor(&dropout_inputTensor);
         miopenSetTensorDescriptor(
             dropout_inputTensor, miopenFloat, 2, drop_in_len.data(), drop_in_str.data());
 
@@ -781,9 +780,9 @@ void LSTMBwdDataCPUVerify(bool use_dropout_cpu,
             if(use_dropout_cpu)
             {
                 DropoutBackwardVerify<T>(dropoutDesc,
-                                         miopen::deref(dropout_inputTensor),
+                                         miopen::deref(dropout_inputTensor.get()),
                                          wkspace,
-                                         miopen::deref(dropout_inputTensor),
+                                         miopen::deref(dropout_inputTensor.get()),
                                          wkspace,
                                          dropout_reservespace_host,
                                          hid_shift + bi * 5 * hy_h,
@@ -1601,7 +1600,8 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
     std::vector<rocrand_state_xorwow> dropout_states_host;
     std::vector<unsigned char> dropout_reservespace_host;
     std::vector<T> dropout_hid_state;
-    miopenTensorDescriptor_t dropout_inputTensor{}, dropout_outputTensor{};
+    TensorDescGuard dropout_inputTensor;
+    TensorDescGuard dropout_outputTensor;
     if(use_dropout)
     {
         size_t states_size  = dropoutDesc.stateSizeInBytes / sizeof(rocrand_state_xorwow);
@@ -1611,8 +1611,6 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
         std::array<int, 2> drop_in_len  = {{batch_n, hy_h * bi}};
         std::array<int, 2> drop_in_str  = {{hy_stride, 1}};
         std::array<int, 2> drop_out_str = {{hy_h * bi, 1}};
-        miopenCreateTensorDescriptor(&dropout_inputTensor);
-        miopenCreateTensorDescriptor(&dropout_outputTensor);
         miopenSetTensorDescriptor(
             dropout_inputTensor, miopenFloat, 2, drop_in_len.data(), drop_in_str.data());
         miopenSetTensorDescriptor(
@@ -1708,9 +1706,9 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
 
                 DropoutForwardVerify<T>(handle,
                                         dropoutDesc,
-                                        miopen::deref(dropout_inputTensor),
+                                        miopen::deref(dropout_inputTensor.get()),
                                         rsvspace,
-                                        miopen::deref(dropout_outputTensor),
+                                        miopen::deref(dropout_outputTensor.get()),
                                         dropout_hid_state,
                                         dropout_reservespace_host,
                                         dropout_states_tmp,
@@ -2070,13 +2068,12 @@ void RNNBwdDataCPUVerify(bool use_dropout,
     }
 
     // initial dropoput
-    miopenTensorDescriptor_t dropout_inputTensor{};
+    TensorDescGuard dropout_inputTensor;
     std::vector<unsigned char> dropout_reservespace_host;
     if(use_dropout)
     {
         std::array<int, 2> drop_in_len = {{batch_n, hy_h * bi}};
         std::array<int, 2> drop_in_str = {{hy_stride, 1}};
-        miopenCreateTensorDescriptor(&dropout_inputTensor);
         miopenSetTensorDescriptor(
             dropout_inputTensor, miopenFloat, 2, drop_in_len.data(), drop_in_str.data());
 
@@ -2140,9 +2137,9 @@ void RNNBwdDataCPUVerify(bool use_dropout,
             if(use_dropout)
             {
                 DropoutBackwardVerify<T>(dropoutDesc,
-                                         miopen::deref(dropout_inputTensor),
+                                         miopen::deref(dropout_inputTensor.get()),
                                          wkspace,
-                                         miopen::deref(dropout_inputTensor),
+                                         miopen::deref(dropout_inputTensor.get()),
                                          wkspace,
                                          dropout_reservespace_host,
                                          hid_shift,
@@ -2748,7 +2745,8 @@ void GRUFwdCPUVerify(const miopen::Handle& handle,
     std::vector<rocrand_state_xorwow> dropout_states_host;
     std::vector<unsigned char> dropout_reservespace_host;
     std::vector<T> dropout_hid_state;
-    miopenTensorDescriptor_t dropout_inputTensor{}, dropout_outputTensor{};
+    TensorDescGuard dropout_inputTensor;
+    TensorDescGuard dropout_outputTensor;
     if(use_dropout)
     {
         size_t states_size  = dropoutDesc.stateSizeInBytes / sizeof(rocrand_state_xorwow);
@@ -2758,8 +2756,6 @@ void GRUFwdCPUVerify(const miopen::Handle& handle,
         std::array<int, 2> drop_in_len  = {{batch_n, hy_h * bi}};
         std::array<int, 2> drop_in_str  = {{hy_stride, 1}};
         std::array<int, 2> drop_out_str = {{hy_h * bi, 1}};
-        miopenCreateTensorDescriptor(&dropout_inputTensor);
-        miopenCreateTensorDescriptor(&dropout_outputTensor);
         miopenSetTensorDescriptor(
             dropout_inputTensor, miopenFloat, 2, drop_in_len.data(), drop_in_str.data());
         miopenSetTensorDescriptor(
@@ -2858,9 +2854,9 @@ void GRUFwdCPUVerify(const miopen::Handle& handle,
 
                 DropoutForwardVerify<T>(handle,
                                         dropoutDesc,
-                                        miopen::deref(dropout_inputTensor),
+                                        miopen::deref(dropout_inputTensor.get()),
                                         rsvspace,
-                                        miopen::deref(dropout_outputTensor),
+                                        miopen::deref(dropout_outputTensor.get()),
                                         dropout_hid_state,
                                         dropout_reservespace_host,
                                         dropout_states_tmp,
@@ -3517,13 +3513,12 @@ void GRUBwdDataCPUVerify(bool use_dropout,
     }
 
     // initial dropoput
-    miopenTensorDescriptor_t dropout_inputTensor{};
+    TensorDescGuard dropout_inputTensor;
     std::vector<unsigned char> dropout_reservespace_host;
     if(use_dropout)
     {
         std::array<int, 2> drop_in_len = {{batch_n, hy_h * bi}};
         std::array<int, 2> drop_in_str = {{hy_stride, 1}};
-        miopenCreateTensorDescriptor(&dropout_inputTensor);
         miopenSetTensorDescriptor(
             dropout_inputTensor, miopenFloat, 2, drop_in_len.data(), drop_in_str.data());
 
@@ -3589,9 +3584,9 @@ void GRUBwdDataCPUVerify(bool use_dropout,
             if(use_dropout)
             {
                 DropoutBackwardVerify<T>(dropoutDesc,
-                                         miopen::deref(dropout_inputTensor),
+                                         miopen::deref(dropout_inputTensor.get()),
                                          wkspace,
-                                         miopen::deref(dropout_inputTensor),
+                                         miopen::deref(dropout_inputTensor.get()),
                                          wkspace,
                                          dropout_reservespace_host,
                                          hid_shift + bi * 3 * hy_h,

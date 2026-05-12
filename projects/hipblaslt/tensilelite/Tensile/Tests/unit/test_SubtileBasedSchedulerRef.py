@@ -4,12 +4,27 @@ These tests capture the expected scheduling output at specific pipeline steps
 to detect unintended regressions. 
 """
 
-from Tensile.Components.SubtileBasedKernel import TileInfo
-from Tensile.Components.SubtileBasedLogicalScheduler import (
+from Tensile.Components.Subtile.Kernel import (
+    TileInfo, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
+)
+from Tensile.Components.Subtile.LogicalScheduler import (
     LogicalScheduler,
     ReadGranularity,
     SchedulerConfig,
 )
+
+
+def makeTileInfo(tc, kernel):
+    """Compatibility wrapper: select geometry from kernel config and return TileInfo."""
+    fp4 = kernel["ProblemType"].get("MXBlockA", 0) > 0
+    _geo = {
+        'A': AB_B4 if fp4 else AB_B16,
+        'B': AB_B4 if fp4 else AB_B16,
+        'MXSA': MXSA_B4,
+        'MXSB': MXSB_B4,
+        'D': CD_F32,
+    }
+    return TileInfo(_geo[tc], tc, None, kernel)
 
 
 def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None):
@@ -59,8 +74,8 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None):
 
 def make_256x256_bf16():
     kernel = create_kernel(256, 256, fp4=False, depthU=64)
-    tiA = TileInfo('A', kernel)
-    tiB = TileInfo('B', kernel)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
@@ -107,8 +122,8 @@ MAINLOOP (dependency paths):
 
 def make_384x256_bf16():
     kernel = create_kernel(384, 256, fp4=False, depthU=64)
-    tiA = TileInfo('A', kernel)
-    tiB = TileInfo('B', kernel)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
@@ -202,8 +217,8 @@ def test_256x256_bf16_partition_1x1():
 
 def make_320x320_bf16():
     kernel = create_kernel(320, 320, fp4=False, depthU=64)
-    tiA = TileInfo('A', kernel)
-    tiB = TileInfo('B', kernel)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
@@ -339,10 +354,10 @@ def test_320x320_bf16_partition_1x5():
 
 def make_256x256_fp4():
     kernel = create_kernel(256, 256, fp4=True, depthU=256)
-    tiA = TileInfo('A', kernel)
-    tiB = TileInfo('B', kernel)
-    scaleTiA = TileInfo('MXSA', kernel)
-    scaleTiB = TileInfo('MXSB', kernel)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
+    scaleTiA = makeTileInfo('MXSA', kernel)
+    scaleTiB = makeTileInfo('MXSB', kernel)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
@@ -415,8 +430,8 @@ def test_256x256_fp4_partition_1x1():
 
 def make_128x128_bf16():
     kernel = create_kernel(128, 128, fp4=False, depthU=128)
-    tiA = TileInfo('A', kernel)
-    tiB = TileInfo('B', kernel)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
@@ -497,10 +512,10 @@ def test_128x128_bf16_partition_1x1():
 
 def make_128x128_fp4():
     kernel = create_kernel(128, 128, fp4=True, depthU=512)
-    tiA = TileInfo('A', kernel)
-    tiB = TileInfo('B', kernel)
-    scaleTiA = TileInfo('MXSA', kernel)
-    scaleTiB = TileInfo('MXSB', kernel)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
+    scaleTiA = makeTileInfo('MXSA', kernel)
+    scaleTiB = makeTileInfo('MXSB', kernel)
     return SchedulerConfig(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
