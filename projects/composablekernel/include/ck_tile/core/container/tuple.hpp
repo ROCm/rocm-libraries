@@ -15,6 +15,7 @@
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#pragma clang diagnostic ignored "-Wlifetime-safety-lifetimebound-violation"
 
 #ifndef CK_TILE_TUPLE_IMPL
 #define CK_TILE_TUPLE_IMPL 1
