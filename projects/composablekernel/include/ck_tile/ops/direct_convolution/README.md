@@ -48,9 +48,9 @@ The unit and integration tests are located in directory `projects/composablekern
 
 Detailed documentation is available at `projects/composablekernel/docs/direct_convolution`:
 
-- [HIP conv Utility Components](../../../../../composablekernel/docs/direct_convolution/utils.md) — Conv2dParams, SizeView, MatrixLayout, Swizzle, and other utilities
-- [HIP conv 4-Channel FP16 Kernel](../../../../../composablekernel/docs/direct_convolution/kernel_4c_fp16.md) — Kernel architecture, MFMA usage, streaming pipeline, Dgrad specifics
-- [CK Tile distributions encoding for direct convolution](./docs/tile_distribution_encoding.md) - Description of tile distribution encodings relevant to direct convolutions.
+- [HIP conv Utility Components](../../../../docs/direct_convolution/utils.md) — Conv2dParams, SizeView, MatrixLayout, Swizzle, and other utilities
+- [HIP conv 4-Channel FP16 Kernel](../../../../docs/direct_convolution/kernel_4c_fp16.md) — Kernel architecture, MFMA usage, streaming pipeline, Dgrad specifics
+- [CK Tile distributions encoding for direct convolution](../../../../docs/direct_convolution/tile_distribution_encoding.md) - Description of tile distribution encodings relevant to direct convolutions.
 
 ## Basic CK Tile utilities
 
