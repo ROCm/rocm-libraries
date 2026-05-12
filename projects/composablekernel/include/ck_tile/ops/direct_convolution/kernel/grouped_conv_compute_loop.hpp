@@ -15,7 +15,7 @@ namespace direct_conv {
 // Shared compute loop for grouped convolution kernels (Fprop and Dgrad).
 //
 // This function implements the main device-side compute loop shared by all
-// kernel variants (4c, 8c, 16c). The only variant-specific behavior is
+// kernel variants (4c, 8c, 16c, and 32c). The only variant-specific behavior is
 // the MFMA intrinsic (abstracted via MfmaFn) and the inner loop width
 // (INNER_KW: cfg.kw for standard kernels, 1 for Toeplitz 8c where S is
 // embedded in the MFMA K dimension).
@@ -83,7 +83,7 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     //   out = input gradient  (C channels per group)
     // So the "input" channel count is k_per_group and the "output" channel
     // count is c_per_group — the reverse of Fprop.  The weight tensor is
-    // NOT swapped (always GKYXC), so the weight loader keeps the original
+    // not swapped (always GKYXC), so the weight loader keeps the original
     // c_per_group / k_per_group.
     constexpr bool is_dgrad = (cfg.direction == Direction::Dgrad);
     const int in_cpg  = is_dgrad ? k_per_group : c_per_group;
@@ -102,13 +102,21 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
 
     wl.read_from_lds(lds_buf);
 
-    // Note: py is NOT passed to InputLoader's DRAM descriptor because the
+    // Note on padding: 
+    // py is not passed to InputLoader's DRAM descriptor because the
     // kernel iterates over physical input rows (0..hi-1), not padded rows.
     // The py offset is handled by the compute loop's output flush logic
-    // (p_out = y + py - (kh-1)).  px IS needed because the tile window
+    // (p_out = y + py - (kh-1)).  
+    //
+    // px is needed because the tile window
     // spans block_q..block_q+BLOCK_W-1 horizontally and needs OOB checking
     // for positions in the padded border.
-    InputLoaderT il(bc, input_lds, in, hi, wi, px, 0, 1, 1, 1, 1, in_cpg);
+    //
+    // We must have unit stride and dilation for now.
+    constexpr int y_padding = 0;
+    constexpr int stride = 1;
+    constexpr int dilation = 1;
+    InputLoaderT il(bc, input_lds, in, hi, wi, px, y_padding, dilation, dilation, stride, stride, in_cpg);
     OutputWriterT ow(bc, output_lds, out, ho, wo, out_kpg);
 
     __syncthreads();
@@ -267,8 +275,7 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
 
     // --- Tail flush: output rows not flushed by the main/remainder loops ---
     // The __syncthreads() before each flush separates the previous iteration's
-    // LDS reads from this iteration's LDS writes (WAR hazard). 
-    // For the first iteration, it is harmless (previous sync already issued by the main/remainder loop).
+    // LDS reads from this iteration's LDS writes. 
     for(int p_out = hi - cfg.kh + 1 + py; p_out < ho; p_out++)
     {
         __syncthreads();
