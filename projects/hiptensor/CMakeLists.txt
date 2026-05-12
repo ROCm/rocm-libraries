@@ -233,7 +233,6 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/h
 # Define package dependencies for export
 set(PACKAGE_DEPENDS
     PACKAGE hip
-    PACKAGE composable_kernel
 )
 
 set(PACKAGE_STATIC_DEPENDS
