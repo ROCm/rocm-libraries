@@ -453,23 +453,31 @@ inline bool isCall(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_Call);
 }
 
-// Returns true for a return-style transfer of control. Currently flag-driven only;
-// later commits extend this to also recognise the ReturnTerminatorData modifier.
+// Returns true for a return-style transfer of control. Considers both the
+// IF_Return hardware flag and the ReturnTerminatorData modifier (the latter is
+// stamped by the converter on activation-style "setpc as return" instructions).
 inline bool isReturn(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_Return);
+    if (inst.is(InstFlag::IF_Return)) return true;
+    return inst.getModifier<ReturnTerminatorData>() != nullptr;
 }
 
 // Returns every intra-Function CFG successor label of \p inst, in source order.
 //
 // Resolution order:
-//   1. LabelData modifier (set by the converter for rocisa branches and by
+//   1. CallTargetData / ReturnTerminatorData modifiers yield {}: those are
+//      inter-Function transfers, modelled by CallGraphAnalysis rather than the
+//      local CFG.
+//   2. LabelData modifier (set by the converter for rocisa branches and by
 //      LongBranchLoweringPass for the s_setpc_b64 long-branch idiom).
-//   2. Indirect branches without metadata yield {} (target unknown statically).
-//   3. Legacy fallback: a LiteralString first src operand (raw .s direct branches).
+//   3. Indirect branches without metadata yield {} (target unknown statically).
+//   4. Legacy fallback: a LiteralString first src operand (raw .s direct branches).
 //
 // For non-branch instructions returns {}.
 inline std::vector<std::string> getBranchTargets(const StinkyInstruction& inst) {
     if (!isBranch(inst)) return {};
+
+    if (inst.getModifier<CallTargetData>() != nullptr) return {};
+    if (inst.getModifier<ReturnTerminatorData>() != nullptr) return {};
 
     if (const auto* label = inst.getModifier<LabelData>()) {
         return {label->label};
