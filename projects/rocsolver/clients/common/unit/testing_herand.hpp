@@ -107,6 +107,13 @@ void testing_herand(Arguments& argus)
     herand(uplo, n, A.data(), lda);
 
     // Verify filled entries and structure.
+    // Count zeros to check randomness: re and im zeros should each be < 1% of
+    // the n*(n+1)/2 independently-filled entries (lower/diag triangle).
+    // For herand the diagonal im is forced real (always 0 for complex), so only
+    // off-diagonal entries contribute to nzero_im.
+    int64_t nfilled = int64_t(n) * (n + 1) / 2;
+    int64_t nzero_re = 0, nzero_im = 0;
+
     for(rocblas_int j = 0; j < n; ++j)
     {
         for(rocblas_int i = 0; i < n; ++i)
@@ -118,18 +125,25 @@ void testing_herand(Arguments& argus)
             auto expect_in_range = [&](S re_, S im_, const char* tri) {
                 EXPECT_GT(re_, S(-1)) << tri << " re out of range at (" << i << "," << j << ")";
                 EXPECT_LT(re_, S( 1)) << tri << " re out of range at (" << i << "," << j << ")";
+                if(re_ == S(0))
+                    ++nzero_re;
                 if constexpr(rocblas_is_complex<T>)
                 {
                     EXPECT_GT(im_, S(-1)) << tri << " im out of range at (" << i << "," << j << ")";
                     EXPECT_LT(im_, S( 1)) << tri << " im out of range at (" << i << "," << j << ")";
+                    if(im_ == S(0))
+                        ++nzero_im;
                 }
             };
 
             if(i == j)
             {
                 // Diagonal must be real and in (-1, 1).
+                // im is forced to 0 for complex; count re zeros but not im zeros.
                 EXPECT_GT(re, S(-1)) << "diag re out of range at (" << i << "," << j << ")";
                 EXPECT_LT(re, S( 1)) << "diag re out of range at (" << i << "," << j << ")";
+                if(re == S(0))
+                    ++nzero_re;
                 if constexpr(rocblas_is_complex<T>)
                 {
                     EXPECT_EQ(im, S(0)) << "diag not real at (" << i << "," << j << ")";
@@ -176,6 +190,10 @@ void testing_herand(Arguments& argus)
             EXPECT_EQ(A[i + j * lda], flag) << "padding col modified at (" << i << "," << j << ")";
         }
     }
+
+    // If any, number of zeros should be << 1%.
+    EXPECT_LE(nzero_re, int64_t(0.01 * nfilled));
+    EXPECT_LE(nzero_im, int64_t(0.01 * nfilled));
 
     argus.validate_consumed();
 }
