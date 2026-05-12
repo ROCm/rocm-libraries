@@ -99,7 +99,7 @@ struct Config
             swz = "cyclicshift-swizzle";
 
         std::string vector_size_str = "_vec_" + std::to_string(vector_size);
-        std::string base = "tile_v2_grouped_32c_" + swz + "_waves_per_wg_" + std::to_string(waves_per_wg) + vector_size_str;
+        std::string base = "v2_grouped_32c_" + swz + "_waves_per_wg_" + std::to_string(waves_per_wg) + vector_size_str;
         if(epilogue == EpilogueType::RegistersToGlobalMemory)
             return base + "_skip_lds_epilogue";
         else
