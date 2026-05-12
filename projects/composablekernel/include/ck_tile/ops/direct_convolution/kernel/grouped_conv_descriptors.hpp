@@ -457,6 +457,32 @@ struct SharedDescriptors
                 ck_tile::number<1>{});
         }
 
+        // LDS read descriptor (Dgrad): per-warp 2D view
+        //   [GROUP_SIZE, GROUP_SIZE / WavesPerGroup].
+        //
+        // The LDS layout is [K_total][KH*KW][C]. For Dgrad, load_tile_transpose needs
+        // a 2D view where dim0 has stride KH_KW*GROUP_SIZE (K row stride, scattered
+        // access by the 4-lane transpose groups) and dim1 has stride 1 (C columns,
+        // contiguous access for the vectorized hardware read).
+        //
+        // WavesPerGroup: number of waves per conv group (1 for 16c, 2 for 32c).
+        // For 32c, each wave_half reads only half the C columns (16 of 32).
+        //
+        // The warp offset into LDS is handled externally by the caller
+        // (weight_read_dgrad) which computes a per-warp base pointer. This avoids
+        // mixing K-stride and C-stride factors in a single flat dimension.
+        template <int WavesPerGroup = 1>
+        static constexpr auto MakeLdsReadDescriptorDgrad()
+        {
+            return ck_tile::make_naive_tensor_descriptor(
+                ck_tile::make_tuple(ck_tile::number<TC::GROUP_SIZE>{},
+                                    ck_tile::number<TC::GROUP_SIZE / WavesPerGroup>{}),
+                ck_tile::make_tuple(ck_tile::number<TC::KH_KW * TC::GROUP_SIZE>{},
+                                    ck_tile::number<1>{}),
+                ck_tile::number<4>{},
+                ck_tile::number<1>{});
+        }
+
         // LDS read descriptor (Fprop): [block_c, kh*kw, GROUP_SIZE] row-major.
         static constexpr auto MakeLdsReadDescriptor()
         {

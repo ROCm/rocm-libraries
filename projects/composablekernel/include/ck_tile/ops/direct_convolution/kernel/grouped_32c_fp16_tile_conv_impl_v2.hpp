@@ -19,12 +19,10 @@
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_input_loader.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_output_writer.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_compute_loop.hpp"
-#include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
 #include "ck_tile/ops/direct_convolution/utils/kernel_variant.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
-#include "ck_tile/core/tensor/buffer_view.hpp"
 #include "ck_tile/core/tensor/tile_distribution.hpp"
 #include "ck_tile/core/tensor/load_tile.hpp"
 #include "ck_tile/core/numeric/math.hpp"
@@ -430,6 +428,36 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
                     ck_tile::sequence<2, 3>,
                     ck_tile::sequence<0, 1>>{});
         }
+
+        // Dgrad distribution: single-warp [32, 16] encoding.
+        // Each warp independently reads 32 K_out rows × 16 C columns
+        // from the per-warp base pointer.
+        //
+        // Output (post-transpose): [C=16, K_out=32]
+        //   X0 = <16> (C lanes), X1 = <4, 2, 4> (K_out = 4*2*4 = 32)
+        //     - X1[0] = 4: P-mapped via lane/16 (selects K_out quarter)
+        //     - X1[1] = 2: Y-mapped (2 ds_read calls per filter position)
+        //     - X1[2] = 4: Y-mapped (4 fp16 per ds_read, vectorized)
+        //   P merge{4,16}: factor 0 (lane/16) → X1[0], factor 1 (lane%16) → X0[0]
+        //   Y dims: X1 factor 1 (size 2) and X1 factor 2 (size 4)
+        //
+        // InputTileDistributionTraits derives the pre-transpose input encoding.
+        static constexpr auto MakeLdsReadTileDistributionDgrad()
+        {
+            using OutputEncode = ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<>,
+                ck_tile::tuple<ck_tile::sequence<16>,
+                               ck_tile::sequence<4, 2, 4>>,
+                ck_tile::tuple<ck_tile::sequence<2, 1>>,
+                ck_tile::tuple<ck_tile::sequence<0, 0>>,
+                ck_tile::sequence<2, 2>,
+                ck_tile::sequence<1, 2>>;
+
+            using InputEncode = typename ck_tile::InputTileDistributionTraits<
+                OutputEncode, _Float16>::TransposedDstrEncode;
+
+            return ck_tile::make_static_tile_distribution(InputEncode{});
+        }
     };
 
     // -----------------------------------------------------------------------
@@ -539,7 +567,8 @@ struct InputLoader32c : direct_conv::InputLoader<TileConstants<cfg>, cfg, ck_til
 // WeightLoader — shared DRAM→LDS, 32c-specific LDS→register read.
 //
 // The 32c kernel stores fp16x8_t weights[kh*kw] (one per filter position).
-// Dgrad uses TransposeLDSLayout<16, 32> with 2 ds_read calls per position.
+// Dgrad uses shared weight_read_dgrad with WavesPerGroup=2 and 2
+// load_tile_transpose reads per filter position (ds_read_b64_tr_b16).
 // Fprop reads fp16x8_t directly from LDS using the tile distribution.
 // ===================================================================
 template <Config cfg>
@@ -562,45 +591,10 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw>
     {
         if constexpr(cfg.direction == Direction::Dgrad)
         {
-            // Dgrad: transposed LDS reads via ds_read_b64_tr_b16.
-            const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
-            const int wave = static_cast<int>(threadIdx.x) / WAVE_SIZE;
-
-            auto weight_lds_fp16 = ck_tile::buffer_view<
-                ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
-                reinterpret_cast<_Float16*>(weight_lds),
-                static_cast<ck_tile::index_t>(TC::Weight::WEIGHT_LDS_SIZE_UINT4 *
-                                              (sizeof(uint4) / sizeof(_Float16)))};
-
-            // TransposeLDSLayout<16, 32>: M=16 output channels, K=32 input channels
-            // 2 reads needed (K_L = 32/4 = 8, 8/4 = 2 reads).
-            using TransposeLayout = TransposeLDSLayout<16, 32>;
-            const int wave_group = wave / 2;
-            const int wave_half = wave % 2;
-
-            const int tr_row_0 = TransposeLayout::row(lane, 0);
-            const int tr_row_1 = TransposeLayout::row(lane, 1);
-            const int tr_col = wave_half * 16 + TransposeLayout::col(lane);
-
-            // Weight LDS layout: [K_total][kh*kw][C_in]
-            // k_stride = kh * kw * GROUP_SIZE (stride between K_out rows)
-            const int k_stride = cfg.kh * cfg.kw * TC::GROUP_SIZE;
-            const int k_base = wave_group * TC::GROUP_SIZE;
-
-            for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
-            {
-                ck_tile::fp16x4_t r0 = weight_lds_fp16.template transpose_get<ck_tile::fp16x4_t>(
-                    (k_base + tr_row_0) * k_stride + khw * TC::GROUP_SIZE + tr_col, 0, true);
-
-                ck_tile::fp16x4_t r1 = weight_lds_fp16.template transpose_get<ck_tile::fp16x4_t>(
-                    (k_base + tr_row_1) * k_stride + khw * TC::GROUP_SIZE + tr_col, 0, true);
-
-                // Concatenate r0 and r1 into fp16x8_t
-                ck_tile::fp16x8_t w8;
-                w8[0] = r0[0]; w8[1] = r0[1]; w8[2] = r0[2]; w8[3] = r0[3];
-                w8[4] = r1[0]; w8[5] = r1[1]; w8[6] = r1[2]; w8[7] = r1[3];
-                this->weights[khw] = w8;
-            }
+            // Dgrad: transposed LDS reads via load_tile_transpose.
+            // WavesPerGroup=2: wave_group selects conv group, wave_half selects C half.
+            direct_conv::weight_read_dgrad<TC, cfg.kh, cfg.kw, direct_conv::WeightAccessor8<cfg.kh, cfg.kw>, 2>(
+                *this, weight_lds);
         }
         else
         {

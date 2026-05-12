@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/core/tensor/load_tile_transpose.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 
 namespace ck_tile {
@@ -30,6 +31,7 @@ namespace direct_conv {
 template <int KH, int KW>
 struct WeightAccessor
 {
+    using value_type = fp16x4_t;
     fp16x4_t weights[KH * KW];
 
     static constexpr auto desc_ = ck_tile::make_naive_tensor_descriptor_packed(
@@ -58,6 +60,7 @@ struct WeightAccessor
 template <int KH, int KW>
 struct WeightAccessor8
 {
+    using value_type = fp16x8_t;
     fp16x8_t weights[KH * KW];
 
     static constexpr auto desc_ = ck_tile::make_naive_tensor_descriptor_packed(
@@ -208,6 +211,107 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
                 }
             });
     }
+}
+
+// Shared Dgrad weight read function for grouped convolution kernels.
+//
+// Reads weights from LDS into registers using load_tile_transpose.
+// The distribution and descriptor are per-warp (single-warp encoding);
+// the warp offset into LDS is computed here to avoid mixing K-stride
+// and C-stride factors in a single flat dimension.
+//
+// The LDS layout is [K_total][KH*KW][C]. The per-warp descriptor views
+// a [16, 16] slice (16 K rows × 16 C cols) with strides [KH_KW*GROUP_SIZE, 1].
+// After transpose, each thread holds the MFMA B-operand for its K position.
+//
+// For 16c (fp16x4_t): one transpose read per filter position.
+// For 32c (fp16x8_t): two transpose reads per filter position, with the second
+// reading from K rows offset by 16 (covering K[16:31] within the group).
+//
+// TC must provide:
+//   TC::Weight::MakeLdsReadDescriptorDgrad()   — per-warp 2D [16, 16] descriptor
+//   TC::Weight::MakeLdsReadTileDistributionDgrad() — per-warp input distribution
+//   TC::GROUP_SIZE, TC::KH_KW
+//   TC::BLOCK_GROUPS — number of conv groups per workgroup
+//
+// WavesPerGroup: number of waves per conv group (1 for 16c, 2 for 32c).
+//   For 32c, wave_half selects which 16 C columns to read.
+//
+// WeightAccessorT must provide:
+//   value_type — fp16x4_t (16c) or fp16x8_t (32c)
+//   weights[]  — register array indexed by filter position
+template <typename TC, int KH, int KW, typename WeightAccessorT, int WavesPerGroup = 1>
+__device__ void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
+{
+    constexpr int K_STRIDE = KH * KW * TC::GROUP_SIZE; // stride per K row in fp16
+    constexpr int KH_KW = KH * KW;
+
+    // Compute per-warp base pointer.
+    const int warp_id = __builtin_amdgcn_readfirstlane(threadIdx.x / 64);
+
+    _Float16* warp_base;
+    if constexpr(WavesPerGroup == 1)
+    {
+        // 16c: each warp = one conv group.
+        // wave_group = warp_id, reads K[0:GROUP_SIZE-1] of this group.
+        warp_base = reinterpret_cast<_Float16*>(weight_lds)
+                  + warp_id * TC::GROUP_SIZE * K_STRIDE;
+    }
+    else
+    {
+        // 32c: 2 waves per group. wave_group selects group, wave_half selects C half.
+        const int wave_group = warp_id / WavesPerGroup;
+        const int wave_half = warp_id % WavesPerGroup;
+        // wave_half * 16 offsets into the C dimension (C[0:15] or C[16:31]).
+        warp_base = reinterpret_cast<_Float16*>(weight_lds)
+                  + wave_group * TC::GROUP_SIZE * K_STRIDE
+                  + wave_half * 16;
+    }
+
+    constexpr auto lds_desc = TC::Weight::template MakeLdsReadDescriptorDgrad<WavesPerGroup>();
+    auto lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+        warp_base, lds_desc);
+
+    using DgradDist = decltype(TC::Weight::MakeLdsReadTileDistributionDgrad());
+    constexpr DgradDist dgrad_dist = TC::Weight::MakeLdsReadTileDistributionDgrad();
+
+    // Window dimensions match the descriptor: [GROUP_SIZE, GROUP_SIZE] for 16c,
+    // [32, 16] for 32c (where each wave_half reads 32 K_out × 16 C).
+    using VecType = typename WeightAccessorT::value_type;
+    constexpr int WIN_DIM0 = std::is_same_v<VecType, ck_tile::fp16x4_t>
+                                 ? TC::GROUP_SIZE : 32;
+    constexpr int WIN_DIM1 = std::is_same_v<VecType, ck_tile::fp16x4_t>
+                                 ? TC::GROUP_SIZE : 16;
+
+    auto lds_window = ck_tile::make_tile_window(
+        lds_view,
+        ck_tile::make_tuple(ck_tile::number<WIN_DIM0>{},
+                            ck_tile::number<WIN_DIM1>{}),
+        {0, 0},
+        dgrad_dist);
+
+    // Derive the output (post-transpose) distribution from the input distribution.
+    using InputDstrEncode = typename DgradDist::DstrEncode;
+    using OutputDstrEncode = typename ck_tile::OutputTileDistributionTraits<
+        InputDstrEncode, _Float16>::TransposedDstrEncode;
+    auto out_tensor = ck_tile::make_static_distributed_tensor<_Float16>(
+        ck_tile::make_static_tile_distribution(OutputDstrEncode{}));
+
+    static_for<KH_KW>(
+        [&]<int khw>()
+        {
+            // Offset selects filter position khw within the [K][KH*KW][C] LDS layout.
+            // Each filter position is GROUP_SIZE fp16 elements apart.
+            constexpr int filter_offset = khw * TC::GROUP_SIZE;
+
+            ck_tile::load_tile_transpose_with_offset(
+                out_tensor, lds_window, filter_offset);
+
+            // For 16c: thread buffer has 4 fp16 -> fp16x4_t.
+            // For 32c: thread buffer has 8 fp16 -> fp16x8_t (2 ds_read calls handled by Y dim).
+            wa.weights[khw] = out_tensor.get_thread_buffer()
+                                  .template get_as<VecType>(ck_tile::number<0>{});
+        });
 }
 
 } // namespace direct_conv

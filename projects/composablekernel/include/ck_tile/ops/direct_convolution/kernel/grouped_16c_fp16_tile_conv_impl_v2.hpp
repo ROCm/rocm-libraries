@@ -7,12 +7,10 @@
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_input_loader.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_output_writer.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_compute_loop.hpp"
-#include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
 #include "ck_tile/ops/direct_convolution/utils/kernel_variant.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
-#include "ck_tile/core/tensor/buffer_view.hpp"
 #include "ck_tile/core/tensor/tile_distribution.hpp"
 #include "ck_tile/core/tensor/load_tile.hpp"
 #include "ck_tile/core/numeric/math.hpp"
@@ -425,6 +423,39 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
                     ck_tile::sequence<2, 3>,
                     ck_tile::sequence<0, 1>>{});
         }
+
+        // Dgrad: transposed LDS read via load_tile_transpose (per-warp).
+        //
+        // The output (post-transpose) distribution describes [K=16, C=16]
+        // for a single warp. The warp offset into LDS is handled externally
+        // by weight_read_dgrad, which adjusts the base pointer.
+        //
+        // BWarpDstrEncoding for mfma_f32_16x16x16f16:
+        //   X0=[16] (K, kBNLane), X1=[4, 4] (C, kABKLane * kABKPerLane)
+        //
+        // P0 (lane_id merge{4, 16}):
+        //   factor 0 (lane/16) → X1 factor 0 (kABKLane=4)
+        //   factor 1 (lane%16) → X0 factor 0 (kBNLane=16)
+        // Y → X1 factor 1 (kABKPerLane=4, vectorization)
+        //
+        // InputTileDistributionTraits derives the transposed input
+        // distribution on [16, 16] that load_tile_transpose requires.
+        static constexpr auto MakeLdsReadTileDistributionDgrad()
+        {
+            using OutputEncode = ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<>,
+                ck_tile::tuple<ck_tile::sequence<16>,
+                               ck_tile::sequence<4, 4>>,
+                ck_tile::tuple<ck_tile::sequence<2, 1>>,
+                ck_tile::tuple<ck_tile::sequence<0, 0>>,
+                ck_tile::sequence<2>,
+                ck_tile::sequence<1>>;
+
+            using InputEncode = typename ck_tile::InputTileDistributionTraits<
+                OutputEncode, _Float16>::TransposedDstrEncode;
+
+            return ck_tile::make_static_tile_distribution(InputEncode{});
+        }
     };
 
     // -----------------------------------------------------------------------
@@ -483,35 +514,9 @@ struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw>
     __device__ void read_from_lds(uint4* weight_lds)
     {
         if constexpr(cfg.direction == Direction::Dgrad)
-        {
-            // Dgrad: transposed LDS reads via ds_read_b64_tr_b16.
-            const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
-            const int wave = static_cast<int>(threadIdx.x) / WAVE_SIZE;
-
-            auto weight_lds_fp16 = ck_tile::buffer_view<
-                ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
-                reinterpret_cast<_Float16*>(weight_lds),
-                static_cast<ck_tile::index_t>(TC::Weight::WEIGHT_LDS_SIZE_UINT4 *
-                                              (sizeof(uint4) / sizeof(_Float16)))};
-
-            using TransposeLayout = TransposeLDSLayout<16, 16>;
-            const int tr_row = TransposeLayout::row(lane);
-            const int tr_col = TransposeLayout::col(lane);
-            int filter_local = wave * TC::GROUP_SIZE + tr_row;
-
-            const ck_tile::index_t weight_base =
-                filter_local * cfg.kh * cfg.kw * TC::GROUP_SIZE;
-
-            for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
-            {
-                this->weights[khw] = weight_lds_fp16.template transpose_get<ck_tile::fp16x4_t>(
-                    weight_base + khw * TC::GROUP_SIZE + tr_col, 0, true);
-            }
-        }
+            direct_conv::weight_read_dgrad<TC, cfg.kh, cfg.kw>(*this, weight_lds);
         else
-        {
             direct_conv::weight_read_fprop<TC>(*this, weight_lds);
-        }
     }
 };
 
