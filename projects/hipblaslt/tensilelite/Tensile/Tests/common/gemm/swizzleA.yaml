@@ -45,8 +45,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   2, 8,  4,1 ] # MT = 128x128
           - [16, 16, 16, 1,  1,   2, 16, 4,1 ] # MT = 128x256
@@ -138,8 +136,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   1, 8,  4,1 ] # MT = 64x128
           - [16, 16, 16, 1,  1,   1, 16, 4,1 ] # MT = 64x256
@@ -211,8 +207,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   1, 8,  4,1 ] # MT = 64x128
           - [16, 16, 16, 1,  1,   1, 16, 4,1 ] # MT = 64x256
@@ -284,8 +278,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,   1, 8,  4,1 ] # MT = 64x128
           - [16, 16, 32, 1,  1,   1, 16, 4,1 ] # MT = 64x256
@@ -358,8 +350,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 8, 1,  1,   4, 16, 4,1 ] # MT = 256x256
           - [16, 16, 8, 1,  1,   8, 8,  4,1 ] # MT = 512x128
@@ -432,8 +422,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 4, 1,  1,   2, 8,  4,1 ] # MT = 128x128
           - [16, 16, 4, 1,  1,   2, 16, 4,1 ] # MT = 128x256

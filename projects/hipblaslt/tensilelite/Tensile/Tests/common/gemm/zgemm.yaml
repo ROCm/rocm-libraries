@@ -77,8 +77,6 @@ BenchmarkProblems:
           ##- [ 3, 5 ]
           # - [ 2, 2 ]
           # - [ 8, 8 ]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         # - VectorWidth: [-1]
       BenchmarkForkParameters:
       JoinParameters:
@@ -138,8 +136,6 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -191,8 +187,6 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -244,8 +238,6 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -297,8 +289,6 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -350,8 +340,6 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -403,8 +391,6 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -456,8 +442,6 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -509,8 +493,6 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

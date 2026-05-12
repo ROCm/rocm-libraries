@@ -46,8 +46,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - ConvertAfterDS: [True]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   2, 2,  2,2 ] #16
@@ -128,8 +126,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - ConvertAfterDS: [True]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   2, 2,  2,2 ] #16
@@ -210,8 +206,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - ConvertAfterDS: [True]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   2, 2,  2,2 ] #16
@@ -292,8 +286,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - ConvertAfterDS: [True]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   2, 2,  2,2 ] #16
@@ -374,8 +366,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - ConvertAfterDS: [True]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   2, 2,  2,2 ] #16
@@ -456,8 +446,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - ConvertAfterDS: [True]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   2, 2,  2,2 ] #16
@@ -538,8 +526,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - ConvertAfterDS: [True]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   2, 2,  2,2 ] #16
@@ -620,8 +606,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - ConvertAfterDS: [True]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,   2, 2,  2,2 ] #16

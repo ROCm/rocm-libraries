@@ -42,8 +42,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4, 4, 2, 2 ]
@@ -109,8 +107,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4, 4, 2, 2 ]
@@ -173,8 +169,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4, 4, 2, 2 ]
@@ -237,8 +231,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4, 4, 2, 2 ]
@@ -301,8 +293,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           #          - [16, 16, 16, 1, 1, 8, 8, 2, 2 ]
@@ -367,8 +357,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           #          - [16, 16, 16, 1, 1, 8, 8, 2, 2 ]
@@ -433,8 +421,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           #          - [16, 16, 16, 1, 1, 8, 8, 2, 2 ]
@@ -499,8 +485,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           #          - [16, 16, 16, 1, 1, 8, 8, 2, 2 ]
@@ -565,8 +549,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4, 4, 2, 2 ]
@@ -630,8 +612,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4, 4, 2, 2 ]
@@ -695,8 +675,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4, 4, 2, 2 ]
@@ -760,8 +738,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4, 4, 2, 2 ]
@@ -825,8 +801,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 5, 3, 2, 2 ]
         - ExpandPointerSwap: [0]
@@ -874,8 +848,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
       - KernelLanguage: [Assembly]
       ForkParameters:
-      - BufferLoad: [0, 1]
-      - BufferStore: [0, 1]
       - 1LDSBuffer: [1] # Default Value: [0] # Range: [-1, 0, 1]
       - ClusterLocalRead: [1] # Default Value: [1] # Range: [0, 1]
       - DepthU: [128] # Default Value: [-1] # Range: [-1, 2, ... ,1023, 1024]
