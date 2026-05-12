@@ -8,7 +8,7 @@
 # workflow runs all families when triggered by schedule, ignoring inputs.
 # By using workflow_dispatch, TheRock respects our specified families.
 
-name: TheRock Multi-Arch CI Nightly
+name: TheRock Multi-Arch CI Nightly Trigger
 
 on:
   schedule:
@@ -19,16 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Multi-Arch CI with specific GPU families
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: benc-uk/workflow-dispatch@e2e5e9a103e331dad343f381a29e654aea3cf8fc # v1.2.4
         with:
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'therock-multi-arch-ci.yml',
-              ref: 'develop',
-              inputs: {
-                linux_amdgpu_families: 'gfx94X,gfx950',
-                windows_amdgpu_families: 'gfx1151'
-              }
-            })
+          workflow: therock-multi-arch-ci.yml
+          ref: develop
+          inputs: '{ "linux_amdgpu_families": "gfx94X,gfx950", "windows_amdgpu_families": "gfx1151" }'
