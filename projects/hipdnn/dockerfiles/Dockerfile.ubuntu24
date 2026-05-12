@@ -48,7 +48,6 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fL https://dvc.org/download/linux-deb/dvc-3.67.0 -o /tmp/dvc.deb && \
     apt-get update && apt-get install -y /tmp/dvc.deb && \
     rm /tmp/dvc.deb && \
-    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
@@ -280,16 +279,6 @@ RUN apt-get update && apt-get install -y \
     doxygen \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
-
-
-# Install DVC. The dvc.org/deb apt repo has been unreachable, so install the
-# official .deb package directly. It bundles all remote backends (incl. S3),
-# which is required for `dvc pull` from the rocm-libraries S3 remote.
-RUN curl -fL https://dvc.org/download/linux-deb/dvc-3.67.0 -o /tmp/dvc.deb && \
-    apt-get update && apt-get install -y /tmp/dvc.deb && \
-    rm /tmp/dvc.deb && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
 
 # Install flatc version 25.9.23
 RUN wget -q https://github.com/google/flatbuffers/releases/download/v25.9.23/Linux.flatc.binary.g++-13.zip -O /tmp/flatc.zip \
