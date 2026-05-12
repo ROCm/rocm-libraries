@@ -29,32 +29,31 @@
 
 using ::testing::TestWithParam;
 using ::testing::ValuesIn;
-using namespace std;
 
 // each size_range vector is a {M, N, lda}
 
 // case when M == 0 also executes the bad arguments test
 
 // for checkin_lapack tests
-const vector<vector<int>> matrix_size_range = {
+const std::vector<std::vector<int>> matrix_size_range = {
     // quick return
     {0, 10,  1},
     {10, 0, 10},
     // invalid
     {-1, 10,  1},
     {10, -1, 10},
-    {10, 10,  5},
+    {10, 10,  5},  // lda < m, invalid
     // normal (valid) samples
     {12, 20, 12},
     {20, 15, 20},
-    {35, 35, 50},
+    {35, 35, 50},  // lda > m (tests padding)
 };
 
 // for daily_lapack tests
-const vector<vector<int>> large_matrix_size_range
+const std::vector<std::vector<int>> large_matrix_size_range
     = {{192, 192, 192}, {640, 300, 700}, {1024, 2000, 1024}, {2547, 2547, 2550}};
 
-Arguments gerand_setup_arguments(vector<int> matrix_size)
+Arguments gerand_setup_arguments(std::vector<int> matrix_size)
 {
     Arguments arg;
 
@@ -67,10 +66,12 @@ Arguments gerand_setup_arguments(vector<int> matrix_size)
     return arg;
 }
 
-class GERAND : public ::TestWithParam<vector<int>>
+class GERAND : public ::TestWithParam<std::vector<int>>
 {
 protected:
-    void TearDown() override {}
+    void TearDown() override
+    {
+    }
 
     template <typename T>
     void run_tests()
@@ -79,7 +80,7 @@ protected:
 
         if(arg.peek<rocblas_int>("m") == 0)
         {
-            gerand_checkBadArgs<T>();
+            testing_gerand_bad_arg<T>();
         }
 
         testing_gerand<T>(arg);

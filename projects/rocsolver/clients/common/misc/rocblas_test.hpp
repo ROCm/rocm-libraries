@@ -100,6 +100,22 @@
 
 #define EXPECT_ROCBLAS_STATUS ASSERT_EQ
 
+// Checks that statement throws an exception of exception_class, e.g.,
+// rocblas_status, and checks its value, e.g., rocblas_status_invalid_size.
+#define EXPECT_THROW_VALUE(statement, exception_class, value) \
+    EXPECT_THROW({                          \
+        try                                 \
+        {                                   \
+            statement;                      \
+        }                                   \
+        catch(exception_class const& ex)    \
+        {                                   \
+            EXPECT_EQ(ex, value);           \
+            throw;                          \
+        }                                   \
+    }, exception_class)
+
+
 #else // ROCSOLVER_CLIENTS_TEST
 
 inline void rocblas_expect_status(rocblas_status status, rocblas_status expect)

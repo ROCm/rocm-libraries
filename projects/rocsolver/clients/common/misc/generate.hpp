@@ -63,7 +63,7 @@ void gerand(rocblas_int m, rocblas_int n, T* A, rocblas_int lda)
 
     if(m < 0 || n < 0 || lda < m)
         throw rocblas_status_invalid_size;
-    if(!A)
+    if(m && n && !A)
         throw rocblas_status_invalid_pointer;
 
     for(rocblas_int j = 0; j < n; ++j)
@@ -93,7 +93,7 @@ void herand(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda)
 
     if(n < 0 || lda < n)
         throw rocblas_status_invalid_size;
-    if(!A)
+    if(n && !A)
         throw rocblas_status_invalid_pointer;
 
     if(uplo == rocblas_fill_lower)
@@ -150,7 +150,7 @@ void syrand(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda)
 
     if(n < 0 || lda < n)
         throw rocblas_status_invalid_size;
-    if(!A)
+    if(n && !A)
         throw rocblas_status_invalid_pointer;
 
     if(uplo == rocblas_fill_lower)
@@ -214,7 +214,7 @@ void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int
 
     if(n < 0 || kl < 0 || ku < 0 || ldab < kl + ku + 1)
         throw rocblas_status_invalid_size;
-    if(!Aband)
+    if(n && !Aband)
         throw rocblas_status_invalid_pointer;
 
     // Index of main diagonal.

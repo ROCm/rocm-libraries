@@ -28,6 +28,7 @@
 #pragma once
 
 #include "common/misc/generate.hpp"
+#include "common/misc/rocblas_test.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 
 #include <gtest/gtest.h>
@@ -36,38 +37,36 @@
 #include <limits>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Bad-argument tests: gerand should throw rocblas_status_invalid_size when
-// m < 0, n < 0, or lda < m, and rocblas_status_invalid_pointer when A is null.
-// ---------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+// Bad-argument tests: gerand should throw rocblas_status_invalid_pointer when
+// A is null, but not throw for quick return.
+//------------------------------------------------------------------------------
 template <typename T>
-void gerand_checkBadArgs()
+void testing_gerand_bad_arg()
 {
     const rocblas_int m = 4;
     const rocblas_int n = 4;
     const rocblas_int lda = 4;
     std::vector<T> A(lda * n);
 
-    // m < 0
-    EXPECT_THROW(gerand(-1, n, A.data(), lda), rocblas_status);
+    // pointers
+    EXPECT_THROW_VALUE(gerand(m, n, (T*)nullptr, lda),
+                       rocblas_status,
+                       rocblas_status_invalid_pointer);
 
-    // n < 0
-    EXPECT_THROW(gerand(m, -1, A.data(), lda), rocblas_status);
+    // quick return with invalid pointers
+    EXPECT_NO_THROW(gerand(0, n, (T*)nullptr, lda));
 
-    // lda < m
-    EXPECT_THROW(gerand(m, n, A.data(), m - 1), rocblas_status);
-
-    // null pointer
-    EXPECT_THROW(gerand(m, n, (T*)nullptr, lda), rocblas_status);
+    EXPECT_NO_THROW(gerand(m, 0, (T*)nullptr, lda));
 }
 
-// ---------------------------------------------------------------------------
+//------------------------------------------------------------------------------
 // Correctness test: verify all entries of A lie in (-1, 1) for real types,
 // and that both real and imaginary parts lie in (-1, 1) for complex types.
 // Also verify the leading-dimension stride: entries A[i + j*lda] for
 // i in [0, m) and j in [0, n) must be filled, while the padding rows
-// A[m .. lda-1 + j*lda] are untouched (remain zero).
-// ---------------------------------------------------------------------------
+// and cols are untouched.
+//------------------------------------------------------------------------------
 template <typename T>
 void testing_gerand(Arguments& argus)
 {
@@ -75,21 +74,29 @@ void testing_gerand(Arguments& argus)
 
     rocblas_int m = argus.get<rocblas_int>("m");
     rocblas_int n = argus.get<rocblas_int>("n", m);
-    rocblas_int lda = argus.get<rocblas_int>("lda", m);
+    rocblas_int pad = 2;
+    rocblas_int lda = argus.get<rocblas_int>("lda", m + pad);
+    rocblas_int n_padded = n + pad;
 
-    // skip invalid sizes (those are exercised in bad-arg tests)
+    // check invalid sizes
     if(m < 0 || n < 0 || lda < m)
+    {
+        EXPECT_THROW_VALUE(gerand(m, n, (T*)nullptr, lda),
+                           rocblas_status,
+                           rocblas_status_invalid_size);
         return;
+    }
 
-    // zero-initialize so padding rows are detectable
-    std::vector<T> A(static_cast<size_t>(lda) * n, T(0));
+    // memory allocations
+    // Initialize entries to flag to detect that values are overwritten and
+    // padding rows & cols are untouched.
+    T const flag = -1234;
+    std::vector<T> A(static_cast<size_t>(lda) * n_padded, flag);
 
     gerand(m, n, A.data(), lda);
 
-    // quick return: nothing to check when m == 0 or n == 0
-    if(m == 0 || n == 0)
-        return;
-
+    // validate results for rocsolver-test
+    int64_t nzero_re = 0, nzero_im = 0;
     for(rocblas_int j = 0; j < n; ++j)
     {
         for(rocblas_int i = 0; i < m; ++i)
@@ -100,20 +107,40 @@ void testing_gerand(Arguments& argus)
 
             EXPECT_GT(re, S(-1)) << "re out of range at (" << i << "," << j << ")";
             EXPECT_LT(re, S( 1)) << "re out of range at (" << i << "," << j << ")";
+            if(re == 0)
+                ++nzero_re;
 
             if constexpr(rocblas_is_complex<T>)
             {
                 EXPECT_GT(im, S(-1)) << "im out of range at (" << i << "," << j << ")";
                 EXPECT_LT(im, S( 1)) << "im out of range at (" << i << "," << j << ")";
+                if(im == 0)
+                    ++nzero_im;
             }
         }
 
         // padding rows (lda > m) must be untouched
         for(rocblas_int i = m; i < lda; ++i)
         {
-            EXPECT_EQ(A[i + j * lda], T(0)) << "padding modified at (" << i << "," << j << ")";
+            EXPECT_EQ(A[i + j * lda], flag) << "padding modified at (" << i << "," << j << ")";
         }
     }
 
+    // padding cols (j >= n) must be untouched
+    for(rocblas_int j = n; j < n_padded; ++j)
+    {
+        for(rocblas_int i = 0; i < lda; ++i)
+        {
+            EXPECT_EQ(A[i + j * lda], flag) << "padding modified at (" << i << "," << j << ")";
+        }
+    }
+
+    // If any, number of zeros should be << 1%.
+    EXPECT_LE(nzero_re, int64_t(0.01*m*n));
+    EXPECT_LE(nzero_im, int64_t(0.01*m*n));
+
+    // no results for rocsolver-bench
+
+    // ensure all arguments were consumed
     argus.validate_consumed();
 }
