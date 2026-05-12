@@ -27,58 +27,47 @@
 
 #include "common/unit/testing_gerand.hpp"
 
-using ::testing::Combine;
 using ::testing::TestWithParam;
-using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
-// tuple: {M, N, lda}
-using gerand_tuple = std::tuple<vector<int>, int>;
+// each size_range vector is a {M, N, lda}
 
-// each size_range vector is {M, lda}; N is the second element of the tuple.
-
-// case when M == 0 also executes the bad-arguments test
+// case when M == 0 also executes the bad arguments test
 
 // for checkin_lapack tests
-const vector<vector<int>> gerand_size_range = {
+const vector<vector<int>> matrix_size_range = {
     // quick return
-    {0,  1},
+    {0, 10,  1},
+    {10, 0, 10},
+    // invalid
+    {-1, 10,  1},
+    {10, -1, 10},
+    {10, 10,  5},
     // normal (valid) samples
-    {1,  1},
-    {10, 10},
-    {12, 15},  // lda > m (tests padding)
-    {20, 20},
-    {35, 50},  // lda > m (tests padding)
+    {12, 20, 12},
+    {20, 15, 20},
+    {35, 35, 50},
 };
 
 // for daily_lapack tests
-const vector<vector<int>> large_gerand_size_range = {
-    {512,  512},
-    {1024, 1024},
-    {2000, 2048},
-};
+const vector<vector<int>> large_matrix_size_range
+    = {{192, 192, 192}, {640, 300, 700}, {1024, 2000, 1024}, {2547, 2547, 2550}};
 
-const vector<int> n_range       = {0, 1, 15, 20};
-const vector<int> large_n_range = {512, 1024, 2000};
-
-Arguments gerand_setup_arguments(gerand_tuple tup)
+Arguments gerand_setup_arguments(vector<int> matrix_size)
 {
-    vector<int> size = std::get<0>(tup);
-    int n = std::get<1>(tup);
-
     Arguments arg;
 
-    arg.set<rocblas_int>("m",   size[0]);
-    arg.set<rocblas_int>("lda", size[1]);
-    arg.set<rocblas_int>("n",   n);
+    arg.set<rocblas_int>("m",   matrix_size[0]);
+    arg.set<rocblas_int>("n",   matrix_size[1]);
+    arg.set<rocblas_int>("lda", matrix_size[2]);
 
     arg.timing = 0;
 
     return arg;
 }
 
-class GERAND : public ::TestWithParam<gerand_tuple>
+class GERAND : public ::TestWithParam<vector<int>>
 {
 protected:
     void TearDown() override {}
@@ -86,7 +75,7 @@ protected:
     template <typename T>
     void run_tests()
     {
-        Arguments arg = gerand_setup_arguments(GetParam());
+        Arguments arg = gerand_setup_arguments(this->GetParam());
 
         if(arg.peek<rocblas_int>("m") == 0)
         {
@@ -121,8 +110,8 @@ TEST_P(GERAND, __double_complex)
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GERAND,
-                         Combine(ValuesIn(large_gerand_size_range), ValuesIn(large_n_range)));
+                         ValuesIn(large_matrix_size_range));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GERAND,
-                         Combine(ValuesIn(gerand_size_range), ValuesIn(n_range)));
+                         ValuesIn(matrix_size_range));
