@@ -244,6 +244,22 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
         rocisa::BranchInstruction* branchInst =
             dynamic_cast<rocisa::BranchInstruction*>(rocisaInst);
         assert(branchInst != nullptr && "This should be a rocisa Branch.");
+
+        // SSetPCB64 records its long-branch target in a dedicated longBranchLabel
+        // field (populated by the SLongBranch* helpers in rocisa
+        // extension.hpp); the base BranchInstruction::labelName is always
+        // empty for SSetPCB64. When neither field carries a label the
+        // instruction is a generic indirect set-PC: leave LabelData unset so
+        // getBranchTargets()'s isIndirectBranch fallback returns {} and the
+        // CFG builder treats it as an opaque indirect jump (matching the
+        // hardware semantics from Commit 3).
+        if (auto* setpc = dynamic_cast<rocisa::SSetPCB64*>(rocisaInst)) {
+            if (!setpc->longBranchLabel.empty()) {
+                inst->addModifier<LabelData>(LabelData{setpc->longBranchLabel});
+            }
+            return {nullptr, nullptr};
+        }
+
         inst->addModifier<LabelData>(LabelData{branchInst->labelName});
         return {nullptr, nullptr};
     }
