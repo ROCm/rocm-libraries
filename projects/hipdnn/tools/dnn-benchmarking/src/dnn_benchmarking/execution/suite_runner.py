@@ -21,12 +21,10 @@ from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
 from ..execution.timing import Timer
 from ..metrics import (
-    GpuSmiProbe,
     RusageProbe,
     compute_flops,
     compute_io_bytes,
     derive_throughputs,
-    host_memory_snapshot,
 )
 from ..metrics._diagnostic import warn_once
 from ..reporting.reporter import Reporter
@@ -444,8 +442,17 @@ def _run_single_provider_engine(
 
             if metrics_basic:
                 if rusage_probe is not None and rusage_probe.delta is not None:
-                    result.cpu_user_time_ms = rusage_probe.delta.user_time_ms
-                    result.cpu_kernel_time_ms = rusage_probe.delta.kernel_time_ms
+                    # Per-iter microseconds is the interpretable unit:
+                    # the loop total is dominated by Python dispatch
+                    # cost, and per-iter lets users compare directly
+                    # against the kernel mean (also reported per-iter).
+                    iters = max(config.benchmark_iters, 1)
+                    result.cpu_user_time_per_iter_us = (
+                        rusage_probe.delta.user_time_ms * 1000.0 / iters
+                    )
+                    result.cpu_kernel_time_per_iter_us = (
+                        rusage_probe.delta.kernel_time_ms * 1000.0 / iters
+                    )
 
                 # Analytical totals were computed once at the graph level;
                 # propagate them onto every engine's result so JSON
@@ -464,18 +471,6 @@ def _run_single_provider_engine(
                 )
                 result.derived_tflops_per_s = tflops
                 result.derived_gbytes_per_s = gbytes
-
-                try:
-                    host_mem = host_memory_snapshot()
-                    result.host_rss_mb = host_mem.get("host_rss_mb")
-                    result.host_ram_available_mb = host_mem.get("host_ram_available_mb")
-                except Exception as e:
-                    warn_once("host", f"host_memory_snapshot failed: {e}")
-
-                try:
-                    result.gpu_smi_snapshot = GpuSmiProbe().snapshot()
-                except Exception as e:
-                    warn_once("gpu_smi", f"snapshot failed: {e}")
 
             if ref_provider is not None:
                 result.correctness = _check_correctness(

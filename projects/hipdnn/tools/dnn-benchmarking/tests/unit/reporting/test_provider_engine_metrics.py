@@ -47,14 +47,21 @@ class TestProviderEngineResultLegacyShape:
             "analytical_io_bytes",
             "derived_tflops_per_s",
             "derived_gbytes_per_s",
-            "cpu_user_time_ms",
-            "cpu_kernel_time_ms",
-            "host_rss_mb",
-            "host_ram_available_mb",
-            "gpu_smi_snapshot",
+            "cpu_user_time_per_iter_us",
+            "cpu_kernel_time_per_iter_us",
             "extra_metrics",
         ):
             assert key not in d
+        # Fields removed from per-engine in the suite-scope cleanup must
+        # never appear, even by accident (no setattr leak).
+        for removed in (
+            "host_rss_mb",
+            "host_ram_available_mb",
+            "gpu_smi_snapshot",
+            "cpu_user_time_ms",
+            "cpu_kernel_time_ms",
+        ):
+            assert removed not in d
 
     def test_partial_flag_emitted_only_when_true(self):
         pe = ProviderEngineResult(
@@ -95,11 +102,8 @@ class TestProviderEngineResultFullShape:
             analytical_io_bytes=10**6,
             derived_tflops_per_s=2.0,
             derived_gbytes_per_s=2.0,
-            cpu_user_time_ms=50.0,
-            cpu_kernel_time_ms=5.0,
-            host_rss_mb=256.0,
-            host_ram_available_mb=16384.0,
-            gpu_smi_snapshot={"vram_used_mb": 1024.0, "power_w": 250.0},
+            cpu_user_time_per_iter_us=40.0,
+            cpu_kernel_time_per_iter_us=2.5,
         )
         d = pe.to_dict()
         assert d["workspace_bytes"] == 4096
@@ -107,11 +111,8 @@ class TestProviderEngineResultFullShape:
         assert d["analytical_io_bytes"] == 10**6
         assert d["derived_tflops_per_s"] == 2.0
         assert d["derived_gbytes_per_s"] == 2.0
-        assert d["cpu_user_time_ms"] == 50.0
-        assert d["cpu_kernel_time_ms"] == 5.0
-        assert d["host_rss_mb"] == 256.0
-        assert d["host_ram_available_mb"] == 16384.0
-        assert d["gpu_smi_snapshot"]["vram_used_mb"] == 1024.0
+        assert d["cpu_user_time_per_iter_us"] == 40.0
+        assert d["cpu_kernel_time_per_iter_us"] == 2.5
 
     def test_extra_metrics_passthrough_for_phase23(self):
         # Phase 1 never populates this; the schema must still round-trip
@@ -190,3 +191,26 @@ class TestSuiteMetadataMachineFields:
         assert d["gpu_hbm_gb"] == 192.0
         assert d["gpu_pcie_link"] == "gen4 x16"
         assert d["amdgpu_driver_version"] == "6.14.5"
+
+    def test_footprint_fields_in_to_dict(self):
+        # Process RSS / VRAM live on SuiteMetadata (not per-engine)
+        # because they're flat across the suite.
+        meta = SuiteMetadata(
+            timestamp="2026-05-11T00:00:00Z",
+            hostname="test-host",
+            total_graphs=1,
+            total_combinations=1,
+            pass_combinations=1,
+            fail_combinations=0,
+            skip_combinations=0,
+            error_combinations=0,
+            host_rss_mb=843.3,
+            host_ram_available_mb=2177515.0,
+            vram_used_mb=4096.0,
+            vram_total_mb=196608.0,
+        )
+        d = meta.to_dict()
+        assert d["host_rss_mb"] == 843.3
+        assert d["host_ram_available_mb"] == 2177515.0
+        assert d["vram_used_mb"] == 4096.0
+        assert d["vram_total_mb"] == 196608.0

@@ -522,6 +522,42 @@ class Reporter:
         self._print(f"  Skipped:      {metadata.skip_combinations}")
         self._print(f"  Errors:       {metadata.error_combinations}")
 
+        # Suite-end footprint — process RSS and VRAM allocated at the
+        # moment the metadata was built. These are flat across the suite
+        # (steady-state library + buffer footprint), which is exactly
+        # why they belong here and not on every per-engine result.
+        footprint_present = any(
+            v is not None
+            for v in (
+                metadata.host_rss_mb,
+                metadata.host_ram_available_mb,
+                metadata.vram_used_mb,
+            )
+        )
+        if footprint_present:
+            self._print("")
+            self._print("Suite Footprint:")
+            if metadata.host_rss_mb is not None:
+                avail = metadata.host_ram_available_mb
+                avail_str = (
+                    f"  (host avail {self._fmt_mib(avail)})"
+                    if avail is not None
+                    else ""
+                )
+                self._print(
+                    f"  Host RSS:     {self._fmt_mib(metadata.host_rss_mb)}{avail_str}"
+                )
+            if metadata.vram_used_mb is not None:
+                if metadata.vram_total_mb:
+                    self._print(
+                        f"  VRAM used:    {self._fmt_mib(metadata.vram_used_mb)}"
+                        f" / {self._fmt_mib(metadata.vram_total_mb)}"
+                    )
+                else:
+                    self._print(
+                        f"  VRAM used:    {self._fmt_mib(metadata.vram_used_mb)}"
+                    )
+
     def print_suite_footer(self) -> None:
         """Print suite footer."""
         self._print_line("=")
@@ -600,6 +636,13 @@ class Reporter:
             self._print("Kernel Timing: Not available")
             self._print("")
 
+    @staticmethod
+    def _fmt_mib(mib: float) -> str:
+        """Render a MiB quantity as MiB or GiB depending on magnitude."""
+        if mib >= 1024:
+            return f"{mib / 1024:.2f} GiB"
+        return f"{mib:.1f} MiB"
+
     def _print_pe_metrics(self, pe: ProviderEngineResult) -> None:
         """Render the always-on metrics block in verbose mode.
 
@@ -615,18 +658,30 @@ class Reporter:
                 pe.analytical_io_bytes,
                 pe.derived_tflops_per_s,
                 pe.derived_gbytes_per_s,
-                pe.cpu_user_time_ms,
-                pe.host_rss_mb,
-                pe.gpu_smi_snapshot,
+                pe.cpu_user_time_per_iter_us,
+                pe.cpu_kernel_time_per_iter_us,
             )
         )
         if not any_present:
             return
 
+        # Pull the unrounded kernel mean used to derive throughput/BW so
+        # the printed numbers are reproducible from a single source of
+        # truth — without it, the user can't multiply the rounded mean
+        # back through the FLOPs total to recover the printed TFLOPs.
+        kernel_mean_ms = (
+            pe.gpu_kernel_stats.mean_ms if pe.gpu_kernel_stats is not None else None
+        )
+        derivation_suffix = (
+            f"  (kernel mean {kernel_mean_ms:.4f} ms)"
+            if kernel_mean_ms is not None
+            else ""
+        )
+
         self._print("Derived Metrics:")
         if pe.workspace_bytes is not None:
             self._print(
-                f"  Workspace:            {pe.workspace_bytes / 1024 / 1024:.2f} MiB"
+                f"  Workspace:            {self._fmt_mib(pe.workspace_bytes / 1024 / 1024)}"
             )
         if pe.analytical_flops is not None:
             partial = " (partial)" if pe.analytical_flops_partial else ""
@@ -634,38 +689,32 @@ class Reporter:
         if pe.derived_tflops_per_s is not None:
             self._print(
                 f"  Throughput:           {pe.derived_tflops_per_s:.3f} TFLOP/s"
+                f"{derivation_suffix}"
             )
         if pe.analytical_io_bytes is not None:
             self._print(
-                f"  Analytical I/O:       {pe.analytical_io_bytes / 1024 / 1024:.2f} MiB"
+                f"  Analytical I/O:       {self._fmt_mib(pe.analytical_io_bytes / 1024 / 1024)}"
             )
         if pe.derived_gbytes_per_s is not None:
-            self._print(f"  Bandwidth:            {pe.derived_gbytes_per_s:.2f} GB/s")
-        if pe.cpu_user_time_ms is not None or pe.cpu_kernel_time_ms is not None:
-            user = pe.cpu_user_time_ms if pe.cpu_user_time_ms is not None else 0.0
-            kern = pe.cpu_kernel_time_ms if pe.cpu_kernel_time_ms is not None else 0.0
-            self._print(f"  CPU (user/kern):      {user:.1f} ms / {kern:.1f} ms")
-        if pe.host_rss_mb is not None:
-            avail = pe.host_ram_available_mb
-            avail_str = f"  (host avail {avail:.0f} MiB)" if avail is not None else ""
-            self._print(f"  Host RSS:             {pe.host_rss_mb:.1f} MiB{avail_str}")
-        if pe.gpu_smi_snapshot is not None:
-            snap = pe.gpu_smi_snapshot
-            parts = []
-            vram = snap.get("vram_used_mb")
-            vram_total = snap.get("vram_total_mb")
-            if vram is not None and vram_total:
-                parts.append(f"vram {vram:.0f}/{vram_total:.0f} MiB")
-            elif vram is not None:
-                parts.append(f"vram {vram:.0f} MiB")
-            if snap.get("power_w") is not None:
-                parts.append(f"{snap['power_w']:.0f} W")
-            if snap.get("sclk_mhz") is not None:
-                parts.append(f"sclk {snap['sclk_mhz']:.0f} MHz")
-            if snap.get("temp_edge_c") is not None:
-                parts.append(f"{snap['temp_edge_c']:.0f}°C")
-            if parts:
-                self._print(f"  GPU snapshot:         {', '.join(parts)}")
+            self._print(
+                f"  Bandwidth:            {pe.derived_gbytes_per_s:.2f} GB/s"
+                f"{derivation_suffix}"
+            )
+        if (
+            pe.cpu_user_time_per_iter_us is not None
+            or pe.cpu_kernel_time_per_iter_us is not None
+        ):
+            user = (
+                pe.cpu_user_time_per_iter_us
+                if pe.cpu_user_time_per_iter_us is not None
+                else 0.0
+            )
+            kern = (
+                pe.cpu_kernel_time_per_iter_us
+                if pe.cpu_kernel_time_per_iter_us is not None
+                else 0.0
+            )
+            self._print(f"  CPU per iter (u/k):   {user:.1f} µs / {kern:.1f} µs")
         self._print("")
 
     def _print_pe_correctness(

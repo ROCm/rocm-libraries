@@ -116,18 +116,22 @@ class ProviderEngineResult:
             and the GPU kernel mean time.
         derived_gbytes_per_s: Bandwidth derived from analytical_io_bytes
             and the GPU kernel mean time.
-        cpu_user_time_ms: User-space CPU time consumed during the
-            benchmark loop (rusage delta).
-        cpu_kernel_time_ms: Kernel-space CPU time consumed during the
-            benchmark loop (rusage delta).
-        host_rss_mb: Resident-set size of the benchmark process at end
-            of the loop, in MiB.
-        host_ram_available_mb: Host RAM available system-wide at end of
-            loop, in MiB.
-        gpu_smi_snapshot: One-shot amdsmi snapshot taken after the
-            benchmark loop (vram, power, clocks, temps, utilisation).
+        cpu_user_time_per_iter_us: User-space CPU time per benchmark
+            iteration in microseconds (rusage delta over the loop,
+            divided by ``benchmark_iters``). Mostly Python dispatch +
+            sync overhead.
+        cpu_kernel_time_per_iter_us: Kernel-space CPU time per
+            benchmark iteration in microseconds. Usually near zero;
+            useful only as a spike diagnostic (heavy syscalls / page
+            faults during the loop).
         extra_metrics: Reserved for Phase 2/3 sources (rocprofv3 PMC,
             traces, perf, roofline). Always None in Phase 1.
+
+    Note:
+        Process RSS, host RAM availability, and the amdsmi GPU snapshot
+        are *not* per-engine — they're flat across a suite (RSS) or
+        misleading post-loop snapshots (power/clocks/temps lag the
+        workload). They live on :class:`SuiteMetadata` instead.
     """
 
     _VALID_STATUSES = {"success", "error", "skipped"}
@@ -149,11 +153,8 @@ class ProviderEngineResult:
     analytical_io_bytes: Optional[int] = None
     derived_tflops_per_s: Optional[float] = None
     derived_gbytes_per_s: Optional[float] = None
-    cpu_user_time_ms: Optional[float] = None
-    cpu_kernel_time_ms: Optional[float] = None
-    host_rss_mb: Optional[float] = None
-    host_ram_available_mb: Optional[float] = None
-    gpu_smi_snapshot: Optional[Dict[str, Any]] = None
+    cpu_user_time_per_iter_us: Optional[float] = None
+    cpu_kernel_time_per_iter_us: Optional[float] = None
     # Reserved for Phase 2/3
     extra_metrics: Optional[Dict[str, Any]] = None
 
@@ -202,16 +203,10 @@ class ProviderEngineResult:
                 d["derived_tflops_per_s"] = self.derived_tflops_per_s
             if self.derived_gbytes_per_s is not None:
                 d["derived_gbytes_per_s"] = self.derived_gbytes_per_s
-            if self.cpu_user_time_ms is not None:
-                d["cpu_user_time_ms"] = self.cpu_user_time_ms
-            if self.cpu_kernel_time_ms is not None:
-                d["cpu_kernel_time_ms"] = self.cpu_kernel_time_ms
-            if self.host_rss_mb is not None:
-                d["host_rss_mb"] = self.host_rss_mb
-            if self.host_ram_available_mb is not None:
-                d["host_ram_available_mb"] = self.host_ram_available_mb
-            if self.gpu_smi_snapshot is not None:
-                d["gpu_smi_snapshot"] = self.gpu_smi_snapshot
+            if self.cpu_user_time_per_iter_us is not None:
+                d["cpu_user_time_per_iter_us"] = self.cpu_user_time_per_iter_us
+            if self.cpu_kernel_time_per_iter_us is not None:
+                d["cpu_kernel_time_per_iter_us"] = self.cpu_kernel_time_per_iter_us
             if self.extra_metrics is not None:
                 d["extra_metrics"] = self.extra_metrics
         elif self.status == "error":
@@ -331,6 +326,15 @@ class SuiteMetadata:
         gpu_hbm_gb: Total GPU HBM in GiB.
         gpu_pcie_link: PCIe link speed/width string (e.g. "gen4 x16").
         amdgpu_driver_version: amdgpu driver version string.
+        host_rss_mb: Process RSS in MiB sampled once at suite end. Flat
+            across the suite — purely a steady-state footprint figure
+            (Python interpreter + torch + ROCm + hipDNN + buffers).
+        host_ram_available_mb: Host RAM available system-wide at suite
+            end, in MiB. Capacity hint, not a workload metric.
+        vram_used_mb: GPU VRAM currently allocated to this process at
+            suite end, via amdsmi. Reflects steady-state allocation, not
+            per-kernel peak.
+        vram_total_mb: Total VRAM on the GPU at suite end, via amdsmi.
     """
 
     timestamp: str
@@ -355,6 +359,10 @@ class SuiteMetadata:
     gpu_hbm_gb: Optional[float] = None
     gpu_pcie_link: Optional[str] = None
     amdgpu_driver_version: Optional[str] = None
+    host_rss_mb: Optional[float] = None
+    host_ram_available_mb: Optional[float] = None
+    vram_used_mb: Optional[float] = None
+    vram_total_mb: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -381,6 +389,10 @@ class SuiteMetadata:
             "gpu_hbm_gb": self.gpu_hbm_gb,
             "gpu_pcie_link": self.gpu_pcie_link,
             "amdgpu_driver_version": self.amdgpu_driver_version,
+            "host_rss_mb": self.host_rss_mb,
+            "host_ram_available_mb": self.host_ram_available_mb,
+            "vram_used_mb": self.vram_used_mb,
+            "vram_total_mb": self.vram_total_mb,
         }
 
 
@@ -409,6 +421,32 @@ class SuiteResult:
             total_fail += c.failed
             total_skip += c.skipped
             total_error += c.errored
+
+        # Suite-end host/VRAM snapshot. Process RSS and VRAM are flat
+        # across the suite once libraries are loaded; sampling once here
+        # keeps the (graph, engine) results free of redundant noise.
+        # Failures fall back to None — never block metadata construction.
+        host_rss_mb: Optional[float] = None
+        host_ram_available_mb: Optional[float] = None
+        vram_used_mb: Optional[float] = None
+        vram_total_mb: Optional[float] = None
+        try:
+            from ..metrics.host import host_memory_snapshot
+
+            mem = host_memory_snapshot()
+            host_rss_mb = mem.get("host_rss_mb")
+            host_ram_available_mb = mem.get("host_ram_available_mb")
+        except Exception:
+            pass
+        try:
+            from ..metrics.gpu_smi import GpuSmiProbe
+
+            snap = GpuSmiProbe().snapshot()
+            vram_used_mb = snap.get("vram_used_mb")
+            vram_total_mb = snap.get("vram_total_mb")
+        except Exception:
+            pass
+
         metadata = SuiteMetadata(
             timestamp=datetime.now(timezone.utc).isoformat(),
             hostname=socket.gethostname(),
@@ -432,6 +470,10 @@ class SuiteResult:
             gpu_hbm_gb=env_info.get("gpu_hbm_gb"),
             gpu_pcie_link=env_info.get("gpu_pcie_link"),
             amdgpu_driver_version=env_info.get("amdgpu_driver_version"),
+            host_rss_mb=host_rss_mb,
+            host_ram_available_mb=host_ram_available_mb,
+            vram_used_mb=vram_used_mb,
+            vram_total_mb=vram_total_mb,
         )
         return cls(metadata=metadata, graphs=graph_results)
 

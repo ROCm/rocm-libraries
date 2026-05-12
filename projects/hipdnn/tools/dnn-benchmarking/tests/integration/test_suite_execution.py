@@ -209,8 +209,11 @@ class TestSuiteRunnerIntegration:
             # Conv graph has compute nodes → analytical_flops > 0.
             assert r.analytical_flops is not None and r.analytical_flops > 0
             assert r.analytical_io_bytes is not None and r.analytical_io_bytes > 0
-            # rusage probe populated user CPU time (kernel may be 0).
-            assert r.cpu_user_time_ms is not None and r.cpu_user_time_ms >= 0
+            # rusage probe populated user CPU time per iter (kernel may be 0).
+            assert (
+                r.cpu_user_time_per_iter_us is not None
+                and r.cpu_user_time_per_iter_us >= 0
+            )
             # Derived throughputs follow when kernel timing is available.
             if r.gpu_kernel_stats is not None:
                 assert r.derived_tflops_per_s is not None
@@ -258,9 +261,8 @@ class TestSuiteRunnerIntegration:
             assert r.analytical_flops is None
             assert r.analytical_io_bytes is None
             assert r.derived_tflops_per_s is None
-            assert r.cpu_user_time_ms is None
-            assert r.host_rss_mb is None
-            assert r.gpu_smi_snapshot is None
+            assert r.cpu_user_time_per_iter_us is None
+            assert r.cpu_kernel_time_per_iter_us is None
 
 
 @pytest.mark.gpu
