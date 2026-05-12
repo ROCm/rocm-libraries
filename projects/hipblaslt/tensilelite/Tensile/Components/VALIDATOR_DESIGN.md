@@ -212,6 +212,18 @@ in code at the cited site.
 
 ### 4.1 The default schedule is the canonical reference
 
+> **NOTE 2026-05-12 — architecture under revision.** The user has
+> rejected the shadow-as-reference contract this section describes.
+> The "default graph" today is the SIA3 shadow capture
+> (`_last_default_capture`), which is not assembled into runnable code
+> and never executes. See `2LZD_INVESTIGATION.md §6` for the decision
+> and the live approach set ({A, D, H}). Whichever approach lands,
+> this section's "default schedule is canonical" framing will need
+> revision: under A the canonical reference becomes a real non-CMS
+> kernel build; under D the comparison contract is dropped in favor
+> of a slot-table check; under H both sides are real CMS builds with
+> no canonical/non-canonical distinction.
+
 SIA3 is treated as authoritatively correct. `compare_graphs`
 (`CMSValidator.py:2233`) computes `missing_keys = ref_keys - subj_keys`
 and reports edges in the default graph that are missing from the CMS

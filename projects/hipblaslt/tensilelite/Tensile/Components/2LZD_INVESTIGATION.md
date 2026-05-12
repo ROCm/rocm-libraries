@@ -679,6 +679,11 @@ collision. Higher than C-alone because H requires
 
 ## §4 — Recommendation
 
+**[SUPERSEDED 2026-05-12 — see §6.]** The user has rejected the shadow-vs-CMS
+comparison contract entirely; Approach C (shadow tag-cleanup) is no longer the
+recommended near-term landing. Live approach set is now {A, D, H} — see §6.
+The text below is preserved for historical context only.
+
 The choice depends on which contract the user wants to enforce
 (this is the load-bearing question in §5 below). Conditional
 recommendations:
@@ -742,7 +747,9 @@ mechanics. They should be left in place by every approach above.
 
 ## §5 — Open questions for the user
 
-1. **What contract does the validator EXIST to enforce?** Three
+1. **What contract does the validator EXIST to enforce?**
+   **RESOLVED 2026-05-12 — see §6: shadow comparison rejected.
+   Implementation choice (A/D/H) remains open.** Three
    candidates from the bead description:
    - (a) "CMS preserves what a real non-CMS Tensile build would emit
      for this problem"
@@ -799,6 +806,146 @@ mechanics. They should be left in place by every approach above.
      `build_idmap` factory used by `_loopBody` (`:4488`). If the
      two factories ever drift, the NGL/NLL bodies' tagging will
      diverge from ML-1/ML's. File a bead to track factory unification.
+
+---
+
+## §6 — Decision recorded (2026-05-12)
+
+**User decision (verbatim, 2026-05-12):**
+
+> "We should not be comparing against the shadow. The shadow is a kernel
+> that cannot be emitted and does not get run. Bake this decision into
+> the relevant .md files. Whatever issues arise from this will have to
+> be solved, but this is the actual correct path."
+
+### Implication
+
+The shadow capture (`_last_default_capture`, populated under
+`self.states._captureDefaultSchedule`) is **rejected as the validator's
+comparison reference**. The shadow is a synthetic re-assembly of what the
+default scheduler *would have produced* with the CMS-mutated `kernel` dict
+(see §1 (A) for the upstream flag-flip mechanism). It is not assembled into
+runnable code and never executes on hardware. Comparing against it is
+comparing against a fiction.
+
+**Approach C (fix the shadow's category-tagging artifacts (B)/(B-2)) is no
+longer the recommended near-term landing.** Cleaning up the shadow's
+double-tagging is wasted work if the shadow itself is going away. C remains
+documented above for historical reference, but should not be implemented.
+
+### Live approach set: {A, D, H} from §3
+
+The user's framing — "a kernel that cannot be emitted and does not get
+run" — narrows §3 to approaches whose reference side is either (i) a real
+emittable+runnable kernel build, or (ii) something other than a graph
+comparison entirely:
+
+- **Approach A — true non-CMS reference build.** A second isolated kernel
+  build with `UseCustomMainLoopSchedule=0`, captured via a non-shadow path
+  and used as `ref`. The reference IS a real kernel that gets emitted and
+  could be run. PRELOOP_CAPTURE_PHASE1.md's design-intent objection (see
+  §3 Approach A) — that schedules mutating `UsePLRPack` and friends would
+  surface structural prologue divergence on every CMS build — must be
+  resolved by the comparator. Per oram.1's pipelining-only model
+  (`PRELOOP_CAPTURE_PHASE1.md §1`), the dataflow IS equivalent across the
+  flag flip; the body-label-sensitivity in `compare_graphs` (oram.1) is
+  what stops A from working today.
+- **Approach D — drop the comparison contract.** Restructure
+  `compare_graphs` to validate against the declared per-tile schedule's
+  slot table rather than any kernel-derived reference. No second kernel
+  build, no shadow, no cross-graph comparison. The "what does the
+  validator validate" question collapses to "the CMS macro emits exactly
+  the slots the schedule declared," which is checkable from the schedule
+  registry alone.
+- **Approach H — `cms_from_default`-driven same-direction synthesis.**
+  Build TWO real CMS kernels: one from the registered CMS schedule, one
+  from a default-style YAML routed through
+  `Tensile/Components/CustomSchedule/cms_from_default.py`'s
+  `default_schedule_to_cms`. Both sides are emitted and runnable; both go
+  through the CMS macro path so prologue routing matches by construction.
+  Sidesteps PRELOOP_CAPTURE_PHASE1's objection AND oram.1's body-label
+  blocker (identical body shape on both sides).
+
+**Re-ranking under the user's framing.** A and H both satisfy the "real
+emittable kernel" criterion; D satisfies the "no shadow" criterion by
+removing comparison entirely. H is the cheapest of the three to pilot
+because both sides remain inside the CMS macro path (no need to build a
+second non-CMS-shaped capture pipeline). A is conceptually closest to a
+naive user's mental model ("CMS preserves what default would emit") but
+inherits the largest comparator-design surface (oram.1's
+body-label-sensitivity becomes critical-path). D is the most radical and
+the most principled but has the largest blast radius (~800-1000 LoC per
+§3).
+
+**The implementation choice between A, D, and H remains open.** The user
+has decided the principle ("no shadow comparison"), not the
+implementation.
+
+### Cascading consequences
+
+- **Auto-activation in `KernelWriter.py:4750-4756`**
+  (`if kernel.get("UseCustomMainLoopSchedule"): self.states._captureDefaultSchedule = True`)
+  needs revisiting. Under any path in {A, D, H} the shadow capture may
+  not need to run at all on the assert path — the auto-activation gates
+  shadow synthesis on every CMS kernel build. If the shadow is no longer
+  consumed by `compare_graphs`, the activation site is either obsolete
+  (D), conditionally needed (A — only if the second build's capture path
+  reuses any shadow plumbing), or fully obsolete (H — both sides are
+  real CMS builds with their own captures).
+- **The `_captureDefaultSchedule` flag-check sites** at `KernelWriter.py`
+  lines 3766, 4418, 4450, 4544, 4571, 4980, 5080, 5138, 5296 (verified
+  this commit) gate per-call shadow tagging/snapshot work. Status under
+  each approach:
+  - Under D: deletable (no shadow capture is consumed anywhere).
+  - Under H: likely obsolete (both sides are real CMS builds — neither
+    runs the SIA3 default emit that these sites annotate).
+  - Under A: implementation-only-needed-if the second build reuses any
+    shadow plumbing; in a clean A implementation the shadow path is
+    replaced by a real default kernel build, so these sites are also
+    obsolete.
+- **`PRELOOP_CAPTURE_PHASE1.md §"Phase 2 decisions" Decision 4(b)**
+  (test architecture for the "whole-kernel UsePLRPack CMS test")
+  currently passes only because of `cap_with_cms.prologue is
+  cap_with_default.prologue` (`Tests/unit/test_prologue_capture.py:342`):
+  the CMS-side capture inherits the default-side prologue verbatim
+  rather than building its own. Per `PRELOOP_CAPTURE_PHASE1.md §3`, this
+  is the shadow-shared-prologue artifact that masks
+  `compare_graphs`'s body-label-sensitivity. The shadow rejection
+  invalidates this test architecture — without a shadow, "inherit the
+  default's prologue" no longer makes sense as a setup. The test must be
+  reworked under whichever of {A, D, H} the user picks.
+- **oram.1's body_label-sensitivity blocker** (PRELOOP_CAPTURE_PHASE1.md
+  §"Phase 3 blocker") becomes critical-path for any cross-build
+  comparison. Under A and H, both sides have real bodies whose
+  `loop_index` values land in identity tuples per `ScheduleCapture.py`
+  (`identity_for(body_label)` baking `BODY_LABEL_TO_LOOP_INDEX[...]` into
+  the identity); pipelined producers will drift across body boundaries
+  and `compare_graphs` will fire spurious failures (see
+  PRELOOP_CAPTURE_PHASE1.md §2.4). Under D, oram.1 is moot — no
+  cross-graph comparison happens, so the body-label issue cannot
+  surface. **oram.1 is no longer "nice to have for Decision 4(b)"; it
+  is a prerequisite for A or H.**
+- **Cause-(B) and cause-(B-2) tagging artifacts** (§1 (B)/(B-2)) become
+  irrelevant under D (no shadow → no shadow tagging → nothing to
+  double-tag). Under A or H they remain relevant insofar as the
+  cross-build comparison still has to handle category-tagging
+  consistently between two real builds; the specific artifacts (B)/(B-2)
+  catalog (Pack-leaf double-tagging in the shadow's prefetch_pack_a/b
+  walk; LR/LW A/B-suffix divergence) are shadow-specific and disappear
+  with the shadow, but the comparator's category-tag consistency
+  requirements continue to apply across whatever new reference source
+  replaces the shadow.
+
+### Cross-links
+
+- `PRELOOP_CAPTURE_PHASE1.md §6` (Interaction with rocm-libraries-2lzd):
+  updated this commit to reflect the shadow rejection.
+- `PRELOOP_CAPTURE_PHASE1.md §7` (new section, this commit): updated
+  oram.1 framing — body-label-sensitivity is critical-path, not optional.
+- `PRELOOP_CAPTURE_PHASE1.md §"Phase 2 decisions" Decision 4(b)'`
+  (added this commit): restated test intent in shadow-free terms.
+- Bead `rocm-libraries-2lzd` comment recording this decision.
+- Bead `rocm-libraries-oram.1` priority bumped to P0.
 
 ---
 

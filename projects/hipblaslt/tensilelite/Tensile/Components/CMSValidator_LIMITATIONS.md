@@ -49,6 +49,11 @@
 
 ### CDNA 4 (gfx950)
 - Full graph-native validation via `compare_graphs` against the default schedule.
+  - **NOTE 2026-05-12.** The "default schedule" reference here is the SIA3
+    shadow capture, which `2LZD_INVESTIGATION.md §6` rejects as the
+    validator's comparison reference (the shadow is not assembled into
+    runnable code). Architecture is being revised; live approach set is
+    {A, D, H} per `2LZD_INVESTIGATION.md §3, §6`.
 - `cumulative_issue_cycles` provides cycle-exact MFMA timing per CDNA 4 ISA section 7.6.
 - 4x4 MFMA TF32 emulation pack chain is captured as graph nodes (CVT0 → 4x4 MFMAPack → CVT1 → MFMA).
 

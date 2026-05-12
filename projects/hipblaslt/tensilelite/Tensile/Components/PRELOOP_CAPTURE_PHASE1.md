@@ -419,6 +419,36 @@ User decisions recorded 2026-05-11.
    correctly absorb prologue-flag differences when the whole kernel
    is considered (test b).
 
+   **4(b)' — supersedes 4(b) per the 2lzd shadow-decision (2026-05-12).**
+   The original 4(b) test architecture relied on the shadow capture
+   being the default-side reference (per `_captureDefaultSchedule` plus
+   the inherited-prologue plumbing observed at
+   `Tests/unit/test_prologue_capture.py:342`:
+   `assert cap_with_cms.prologue is cap_with_default.prologue`). With
+   `2LZD_INVESTIGATION.md §6` rejecting shadow-as-reference, that
+   architecture is invalidated — there is no shadow-side prologue for
+   the CMS side to inherit, and the inherited-prologue trick masked
+   exactly the body-label-sensitivity issue documented in §"Phase 3
+   blocker" §3 below.
+
+   **Restated test intent in shadow-free terms.** Build the CMS kernel
+   normally; build TWO real non-CMS kernels (one with `UsePLRPack=True`,
+   one with `UsePLRPack=False`); compare CMS-vs-each. BOTH comparisons
+   should pass IF the validator's cross-body comparison handles
+   `UsePLRPack` pipelining correctly. Today's `compare_graphs` does
+   NOT handle that (per §2 below — `loop_index` in the identity tuple
+   makes pipelined producers fail to match across body boundaries),
+   which is why oram.1's body_label-sensitivity blocker becomes
+   critical-path for this restated test.
+
+   The CMS-vs-non-CMS comparison shape is the live question under
+   `2LZD_INVESTIGATION.md §6`'s Approach A; under Approach H both
+   sides become real CMS builds (one synthesized via
+   `cms_from_default`) and the body-shape match is by construction;
+   under Approach D no comparison happens at all and 4(b)' becomes
+   moot. Implementation choice is open. Cross-link:
+   `2LZD_INVESTIGATION.md §6`, `rocm-libraries-oram.1`.
+
 5. **Default for absent prologue → optional.** PGR=0 kernels emit no
    prologue; in those cases `prologue: Optional[LoopBodyCapture]` is
    `None`. Option A's typing already supports this. Update
@@ -984,38 +1014,91 @@ CMS-vs-default validation.
 
 ### §6 — Interaction with `rocm-libraries-2lzd`
 
-The body-label-sensitivity issue is separate from but interacts
-with 2lzd. 2lzd is about the shadow capture's reference graph
-being a fiction (recording the same physical instruction twice
-under two category names because the kernel-dict has been
-mutated by CMS). The body-label-sensitivity issue is about how
-`compare_graphs` keys its comparison, regardless of whether the
-reference is faithful.
+**UPDATED 2026-05-12 (2lzd decision).** 2lzd has decided the
+shadow capture is rejected as the validator's reference (see
+`2LZD_INVESTIGATION.md §6`: "We should not be comparing against
+the shadow. The shadow is a kernel that cannot be emitted and
+does not get run."). The joint-resolution discussion that
+previously enumerated contracts (a), (b), and (c) for 2lzd
+collapses: contract (b)'s "hold `UsePLRPack` constant on both
+sides via shadow inheritance" is no longer viable because the
+shadow itself is going away. The live 2lzd direction is one of
+{Approach A, Approach D, Approach H} from `2LZD_INVESTIGATION.md
+§3` — implementation choice still open as of 2026-05-12.
 
-If 2lzd is fixed by adopting contract (a) and rebuilding
-references against `UsePLRPack=False` (the default-side natural
-emit), then the body-label-sensitivity becomes the next-most-
-proximate cause of false positives — fixing 2lzd uncovers this
-issue. If 2lzd is fixed by adopting contract (b) and forcing
-`UsePLRPack` to be held constant on both sides (the existing
-`build_cms_four_part_capture(prologue=default_capture.prologue,
-...)` plumbing), the body-label-sensitivity stays masked but
-also stays unfixed for the case where future schedules drift
-producers across body boundaries.
+**What this means for the body-label-sensitivity blocker:**
+
+- Under 2lzd Approach A (real non-CMS reference build), the
+  body-label-sensitivity becomes the **immediate** false-positive
+  source on every cross-build comparison. Pipelined producers will
+  drift across body boundaries (PRO ↔ ML iter i ↔ ML iter i+1)
+  under `UsePLRPack` flips; today's identity construction at
+  `ScheduleCapture.py:507-536` bakes `loop_index` into identity, so
+  drifted producers fail to match. **Fixing oram.1 is a
+  prerequisite for A.**
+- Under 2lzd Approach D (drop comparison entirely; validate
+  CMS-emit against the schedule's slot table), oram.1 becomes
+  **moot** — no cross-graph comparison happens, so identity
+  construction never runs across two captures. D is the only
+  approach that obsoletes oram.1 outright.
+- Under 2lzd Approach H (`cms_from_default`-driven synthesis;
+  both sides are real CMS builds), the body-label issue
+  **sidesteps itself by construction**. Both sides emit through
+  the CMS macro path, so the prologue routing and body shape
+  match. Producers don't drift across body boundaries because
+  there are no flag-driven prologue-routing differences between
+  the two captures. H is the cheapest joint resolution that
+  doesn't require fixing oram.1.
 
 The cross-body-tagging design (cause-(B)/(B-2) in 2lzd's memo)
-is also coupled: if the fix to (B)/(B-2) is to NOT double-tag
-the same physical leaf under two category names (e.g., emit
-each pack only once with one canonical category), then the
-prologue's pack chain becomes singularly tagged in PRO body,
-and §2.4's body-label drift becomes the primary failure mode.
+is now historical context only — those artifacts were specific to
+the shadow's idmap walks and disappear with the shadow. The
+sub-bead's catalog in §4 above remains relevant as the
+implementation surface for any A-style or H-style fix that
+encounters body-shape mismatches between two real captures.
 
-This memo's §4 Approach C is also the candidate that interacts
-most directly with 2lzd's cause (B) classification: a cross-body
-pipeline-aware fallback would naturally absorb both the pack
-double-tagging artifact AND the body-label drift. The sub-bead
-should explicitly evaluate Approach C against 2lzd's cause (B)
-in case a single fix handles both.
+### §7 — Updated context post-2lzd-decision (2026-05-12)
+
+The 2lzd shadow rejection (`2LZD_INVESTIGATION.md §6`) elevates
+the body-label-sensitivity blocker from a downstream concern
+("this would matter if Decision 4(b) were to be exercised under
+contract (a)") to a **critical-path prerequisite** for any
+cross-build comparison the validator might still want to perform.
+Specifically:
+
+- Under any of the live 2lzd approaches that require comparing
+  two real captures (Approach A, Approach H), the
+  body-label-sensitivity in `compare_graphs` (this memo §2) is
+  the proximate cause of false positives that today's existing
+  shadow-shared-prologue trick (`Tests/unit/test_prologue_capture.py:342`,
+  `cap_with_cms.prologue is cap_with_default.prologue`) was
+  masking. Removing the shadow removes the mask.
+- **Approach H is especially attractive post-decision.** Both
+  sides are CMS builds with identical body shape, so the
+  body-label issue does not surface — the validator never has to
+  match a producer in PRO body against a producer in ML iter i body.
+  This sidesteps the §4 catalog of approaches (A through E) for
+  oram.1 entirely: H implementations need zero changes to
+  `compare_graphs`. If 2lzd lands H, oram.1 may close as
+  "obsoleted by H" rather than requiring its own implementation
+  cycle.
+- **Approach D obsoletes oram.1 outright.** No comparison
+  happens, so identity construction across two captures is moot.
+  Same close-as-obsoleted disposition.
+- **Approach A is the only live 2lzd direction that requires
+  oram.1 to be solved on its own merits.** A's reference is a
+  real non-CMS kernel build, which has a structurally different
+  prologue from the CMS kernel by construction (the
+  `UsePLRPack`-driven prologue Pack chain present in the CMS
+  kernel and absent in the default). Without an oram.1 fix, A
+  cannot land.
+
+The live 2lzd approach set is {A, D, H}. D would obsolete oram.1
+entirely (no comparison happens, no body_label problem). H would
+sidestep it (identical body shapes on both sides). A would
+require oram.1 to be fixed first. **The user's choice on 2lzd
+implementation determines whether oram.1's §4 approach catalog
+needs to be implemented or can be abandoned.**
 
 ### Sub-bead reference
 
