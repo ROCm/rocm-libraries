@@ -1,12 +1,14 @@
-# CK Tile Distribution Encoding: A Complete Guide
+# CK Tile Distribution Encoding - Direct convolution
 
-## 1. What Problem Does It Solve?
+## 1. Introduction
 
 A GPU kernel launches a grid of threads. Each thread must know:
 1. **Which element(s) of a tile it is responsible for** (its "slice" of the work)
 2. **Where those elements live in memory** (coordinates in the tensor)
 
 `tile_distribution_encoding` is a pure compile-time type that encodes this mapping. It answers: *given a thread ID decomposed into (warp_id, lane_id), and a per-thread element index Y, what are the tensor coordinates?*
+
+This document contains a self-contained description of the tile distribution encoding in the extent that it is relevant for direct convolutions. 
 
 ---
 
@@ -24,11 +26,24 @@ lane_id   ──┼── P ──→ ┤
 
 - **P dimensions** (NDimP): hardware partition IDs. Typically `P[0] = warp_id`, `P[1] = lane_id`. Each thread has a *unique* combination of P values.
 - **Y dimensions** (NDimY): loop counters within a single thread. A thread iterates over all Y combinations, loading/storing multiple elements.
-- **R dimensions** (NDimR): replication. Multiple threads share the *same* R index — useful for multi-buffering or broadcast. Usually empty.
+- **R dimensions** (NDimR): replication. Multiple threads share the *same* R index — useful for multi-buffering (e.g. LDS double buffer) or broadcast. Usually empty.
 - **H dimensions** (hidden, per X): the factored representation of each tensor dimension X[i].
 - **X dimensions** (NDimX): the bottom-level tensor indices (rows, columns, channel groups, etc.).
 
-The key insight: **each X[i] dimension is decomposed into a product of H factors**. Some H factors are owned by P (determined by thread ID), others are owned by Y (iterated per thread), and the rest are trivially size-1.
+The key principle: **each X[i] dimension is decomposed into a product of H factors**. Some H factors are owned by P (determined by thread ID), others are owned by Y (iterated per thread), and the rest are trivially size-1.
+
+The tile distribution is characterized by the template parameters that make it compile-time constant and allow the compiler to optimize the data access
+
+```cpp
+tile_distribution_encoding<
+    RsLengths,       // sequence<...>
+    HsLengthss,      // tuple<sequence<...>, ...>
+    Ps2RHssMajor,    // tuple<sequence<...>, ...>
+    Ps2RHssMinor,    // tuple<sequence<...>, ...>
+    Ys2RHsMajor,     // sequence<...>
+    Ys2RHsMinor      // sequence<...>
+>
+```
 
 ---
 
@@ -73,6 +88,8 @@ Note: the number factors can be different for each `i`. It is determined by `HsL
 
 ## 4. Template Parameters In Depth
 
+Let's consider again the `tile_distribution_encoding` template parameters
+
 ```cpp
 tile_distribution_encoding<
     RsLengths,       // sequence<...>
@@ -86,7 +103,8 @@ tile_distribution_encoding<
 
 ### 4.1 `RsLengths` — Replication Dimensions
 
-`sequence<r0, r1, ...>` — lengths of R dimensions. Usually `sequence<>` (empty) for most kernels. When non-empty, multiple threads share the same H/X coordinates but differ in R; useful for multi-buffered LDS where different warps operate on different LDS banks.
+`sequence<r0, r1, ...>` — lengths of R dimensions. Usually `sequence<>` (empty) for most kernels. When non-empty, multiple threads share the same H/X coordinates but differ in R. 
+NOn-trivial replication is useful for multi-buffered LDS where different warps operate on different LDS banks.
 
 ### 4.2 `HsLengthss` — Hidden Factor Lengths per X Dimension
 
