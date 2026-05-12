@@ -130,6 +130,9 @@ GITHUB_WORKFLOWS_CI_PATTERNS = [
 
 
 def is_path_workflow_file_related_to_ci(path: str) -> bool:
+    # TheRock hash version file changes should trigger full CI
+    if path == ".github/therock-hash-version":
+        return True
     return any(
         fnmatch.fnmatch(path, ".github/workflows/" + pattern)
         for pattern in GITHUB_WORKFLOWS_CI_PATTERNS

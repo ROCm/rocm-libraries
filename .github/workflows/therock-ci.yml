@@ -1,3 +1,11 @@
+# TheRock CI Workflow
+#
+# Testing TheRock updates:
+#   1. Update .github/therock-hash-version with the new TheRock commit hash
+#   2. The workflows will automatically fetch this hash from the develop branch
+#   3. To test on a PR branch, temporarily hardcode the ref in the checkout step
+#      (remember to revert before merging)
+
 name: TheRock CI
 
 on:
