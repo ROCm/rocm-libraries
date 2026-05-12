@@ -17583,7 +17583,14 @@ class KernelWriterAssembly(KernelWriter):
       if (not unrolledMajor or mxKSplitting) and tmpSgprWaveOffset != None:
         mod.add(SSubU32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
         mod.add(SCMovB32(sgpr(tmpSgpr.idx), 0, "set to 0 for waves that no enough data to load"))
-      mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, sizeShifter, isMXS, isSparseTrack))
+      if dtype.is6bitFloat() and tdmDescIdx == 1 and not isMXS:
+        # F6: 0.75 bytes/element — convert tail-K element count to bytes (elements * 3 / 4).
+        # F6 currently dense-only; isSparseTrack is False here, so omitted.
+        mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(2), sgpr(tmpSgpr.idx), "F6 tail: / 4"))
+        mod.add(SMulI32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), 3, "F6 tail: * 3 = bytes"))
+        mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, 0, isMXS))
+      else:
+        mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, sizeShifter, isMXS, isSparseTrack))
     return mod
 
   def resetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:
