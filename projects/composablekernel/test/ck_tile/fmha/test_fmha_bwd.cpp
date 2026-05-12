@@ -1016,25 +1016,25 @@ TEST_P(MultiBatchPadding, DataTypeConfig)
 class SinkGradGroupMode : public TestWithParam<FmhaBwdTestParam>
 {
 };
-INSTANTIATE_TEST_SUITE_P(
-    TestCkTileFmhaBwd,
-    SinkGradGroupMode,
-    Combine(Values(mode_enum::group),                // group mode required to hit OOB
-            Values(std::tuple{72, -1},               // hdim covered by repro command
-                   std::tuple{64, -1},
-                   std::tuple{128, -1}),
-            Values(std::tuple{true, true}),          // perm matching repro
-            Values("n"),                             // bias=n matching repro
-            Values(false),                           // use_dbias
-            Values(0.0f),                            // no dropout
-            Values(std::tuple{0, 0, false}),         // seed/offset/prefs
-            Values(std::tuple{2, 2, -1, 516, 253, "0"},   // exact repro config
-                   std::tuple{2, 2, -1, 516, 253, "1"},   // + causal top-left
-                   std::tuple{2, 2, -1, 516, 253, "2"},   // + causal bottom-right
-                   std::tuple{3, 4, 2, 259, -1, "0"},     // larger batch, square
-                   std::tuple{4, 2, -1, 200, 180, "0"}),  // batch=4 stress
-            Values(false) // deterministic
-            ));
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
+                         SinkGradGroupMode,
+                         Combine(Values(mode_enum::group),  // group mode required to hit OOB
+                                 Values(std::tuple{72, -1}, // hdim covered by repro command
+                                        std::tuple{64, -1},
+                                        std::tuple{128, -1}),
+                                 Values(std::tuple{true, true}),  // perm matching repro
+                                 Values("n"),                     // bias=n matching repro
+                                 Values(false),                   // use_dbias
+                                 Values(0.0f),                    // no dropout
+                                 Values(std::tuple{0, 0, false}), // seed/offset/prefs
+                                 Values(std::tuple{2, 2, -1, 516, 253, "0"}, // exact repro config
+                                        std::tuple{2, 2, -1, 516, 253, "1"}, // + causal top-left
+                                        std::tuple{
+                                            2, 2, -1, 516, 253, "2"},      // + causal bottom-right
+                                        std::tuple{3, 4, 2, 259, -1, "0"}, // larger batch, square
+                                        std::tuple{4, 2, -1, 200, 180, "0"}), // batch=4 stress
+                                 Values(false)                                // deterministic
+                                 ));
 TEST_P(SinkGradGroupMode, DataTypeConfig)
 {
     auto [mode, hdims, perm, bias_str, use_dbias, p_drop, drop_misc, dims_mask, det] = GetParam();
@@ -1064,7 +1064,7 @@ TEST_P(SinkGradGroupMode, DataTypeConfig)
         drop_offset,
         drop_prefs,
         mask_str,
-        true,  // sink_grad: critical to trigger sink_host alloc/access path
+        true, // sink_grad: critical to trigger sink_host alloc/access path
         det,
         init_method,
         static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
