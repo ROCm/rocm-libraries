@@ -47,7 +47,7 @@ struct DirectTileConvForward16CFp16Kernel
 
     std::string GetName() const
     {
-        return "direct_tile_conv_16c_fp16_fwd_" + V::configs[ConfigIdx].GetName();
+        return "direct_tile_conv_fp16_fwd_" + V::configs[ConfigIdx].GetName();
     }
 
     std::string GetTypeString() const { return GetName(); }
