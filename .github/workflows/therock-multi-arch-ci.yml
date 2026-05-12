@@ -15,8 +15,6 @@
 name: TheRock Multi-Arch CI
 
 on:
-  schedule:
-    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -60,8 +58,8 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@645a35ca59d15254e73348fde32ff31d63eb60b4 # 2026-05-06
     with:
       build_variant: "release"
-      # Limit to gfx1151 and gfx94X-dcgpu for rocm-libraries CI
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx1151,gfx94X-dcgpu' }}
+      # Limit GPU families for rocm-libraries CI
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
