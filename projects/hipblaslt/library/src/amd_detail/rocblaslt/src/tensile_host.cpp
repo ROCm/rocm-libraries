@@ -89,22 +89,26 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          const void* const*     batch_A,
                                                          int64_t                ld_a,
                                                          int64_t                batch_stride_a,
+                                                         int64_t                batch_offset_a,
                                                          hipDataType            b_type,
                                                          const void*            B,
                                                          const void* const*     batch_B,
                                                          int64_t                ld_b,
                                                          int64_t                batch_stride_b,
+                                                         int64_t                batch_offset_b,
                                                          const void*            beta,
                                                          hipDataType            c_type,
                                                          const void*            C,
                                                          const void* const*     batch_C,
                                                          int64_t                ld_c,
                                                          int64_t                batch_stride_c,
+                                                         int64_t                batch_offset_c,
                                                          hipDataType            d_type,
                                                          void*                  D,
                                                          void* const*           batch_D,
                                                          int64_t                ld_d,
                                                          int64_t                batch_stride_d,
+                                                         int64_t                batch_offset_d,
                                                          void*                  E,
                                                          void* const*           batch_E,
                                                          int64_t                ld_e,
@@ -152,12 +156,14 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , row_stride_a(1)
     , col_stride_a(ld_a)
     , batch_stride_a(batch_stride_a)
+    , batch_offset_a(batch_offset_a)
     , b_type(b_type)
     , B(B)
     , batch_B(batch_B)
     , row_stride_b(1)
     , col_stride_b(ld_b)
     , batch_stride_b(batch_stride_b)
+    , batch_offset_b(batch_offset_b)
     , beta(beta)
     , c_type(c_type)
     , C(C)
@@ -165,12 +171,14 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , row_stride_c(1)
     , col_stride_c(ld_c)
     , batch_stride_c(batch_stride_c)
+    , batch_offset_c(batch_offset_c)
     , d_type(d_type)
     , D(D)
     , batch_D(batch_D)
     , row_stride_d(1)
     , col_stride_d(ld_d)
     , batch_stride_d(batch_stride_d)
+    , batch_offset_d(batch_offset_d)
     , E(E)
     , batch_E(batch_E)
     , row_stride_e(1)

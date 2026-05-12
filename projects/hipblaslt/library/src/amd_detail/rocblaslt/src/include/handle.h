@@ -152,6 +152,7 @@ struct _rocblaslt_matrix_layout
     hipDataType      type;
     int32_t          batch_count  = 1;
     int64_t          batch_stride = 0;
+    int64_t          batch_offset = 0;
     hipblasLtOrder_t order        = HIPBLASLT_ORDER_COL;
     // Batch Mode
     hipblasLtBatchMode_t batch_mode = HIPBLASLT_BATCH_MODE_STRIDED;    
