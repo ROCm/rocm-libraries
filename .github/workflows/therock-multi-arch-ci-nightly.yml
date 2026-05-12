@@ -11,9 +11,6 @@
 name: TheRock Multi-Arch CI Nightly Trigger
 
 on:
-  push:
-    branches:
-      - users/geomin12/specific-projs # TEMPORARY: remove before merging
   schedule:
     - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
 
@@ -22,7 +19,7 @@ permissions:
   contents: read
 
 jobs:
-  trigger:
+  multi-arch-ci-nightly-trigger:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Multi-Arch CI with specific GPU families
