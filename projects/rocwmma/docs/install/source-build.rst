@@ -24,7 +24,7 @@ Prerequisites
 rocWMMA requires the following prerequisites:
 
 *  A ROCm-enabled platform, using ROCm version 6.4 or later.
-   For more information, see :doc:`ROCm installation <rocm-install-on-linux:index>`.
+   For more information, see :doc:`ROCm installation <rocm:install/rocm>`.
 *  :doc:`rocBLAS <rocblas:index>` version 4.3.0 for ROCm version 6.3 or later. (Optional: only required if rocWMMA is configured
    to use rocBLAS for validation. See below for more information.)
 
@@ -32,7 +32,7 @@ Building and installing rocWMMA from source
 =============================================
 
 It isn't necessary to build rocWMMA from source because it's ready to use after installing
-the prebuilt packages, as described above.
+the prebuilt packages, as described in :doc:`./installation`.
 To build rocWMMA from source, follow the instructions in this section.
 
 System requirements
@@ -64,6 +64,7 @@ rocWMMA is supported on the following GPUs.
 
 Dependencies
 -------------------------------------------
+
 rocWMMA is designed to have minimal external dependencies so it's lightweight and portable.
 The following dependencies are required:
 
