@@ -24,9 +24,12 @@ add_executable(
     TestHipKernelPluginPublic.cpp
     engines/TestHipKernelEngine.cpp
     engines/plans/Batchnorm/TestBatchnormPlanBuilder.cpp
+    engines/plans/Batchnorm/TestBatchnormFwdTrainingActivPlanBuilder.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferencePlan.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/Batchnorm/TestBatchnormFwdTrainingPlan.cpp
+    engines/plans/Batchnorm/TestBatchnormFwdTrainingActivPlan.cpp
+    engines/plans/Batchnorm/TestBatchnormBwdPlan.cpp
     engines/plans/Batchnorm/TestBatchnormCommon.cpp
     engines/plans/Batchnorm/TestBatchnormApplicabilityChecks.cpp
     engines/plans/Layernorm/TestLayernormPlanBuilder.cpp

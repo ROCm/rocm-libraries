@@ -81,6 +81,38 @@ TEST(TestBatchnormValidator, ValidFwdTraining)
     EXPECT_NO_THROW(validator.checkFwdTrainingTensorConfigSupported(attr));
 }
 
+TEST(TestBatchnormValidator, ValidBwd)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormBackwardAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkBwdTensorConfigSupported(attr));
+}
+
+TEST(TestBatchnormValidator, ValidInferenceActivationBackward)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+
+    const auto& bnInfNode = graph.getNode(0);
+    const auto& actNode = graph.getNode(1);
+    const auto& bnBwdNode = graph.getNode(2);
+
+    const auto& bnInfAttr = *bnInfNode.attributes_as_BatchnormInferenceAttributes();
+    const auto& actAttr = *actNode.attributes_as_PointwiseAttributes();
+    const auto& bnBwdAttr = *bnBwdNode.attributes_as_BatchnormBackwardAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(
+        validator.checkBwdActivationTensorConfigSupported(bnInfAttr, actAttr, bnBwdAttr));
+}
+
 TEST(TestBatchnormValidator, MismatchShapes)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();

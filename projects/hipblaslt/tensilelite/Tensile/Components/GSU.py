@@ -21,7 +21,7 @@
 ################################################################################
 
 from rocisa import countInstruction
-from rocisa.code import Module, Label, RegSet
+from rocisa.code import Module, Label, RegSet, ValueSet
 from rocisa.container import ContinuousRegister, SMEMModifiers, vgpr, sgpr, replaceHolder
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, SBranch, \
     SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, SCmpGtI32, \
@@ -31,7 +31,7 @@ from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, 
     SCmpEQU64
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
-from ..Common import ceilDivide, log2, print2
+from ..Common import ceilDivide, log2, print2, INDEX_CHARS
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -65,8 +65,22 @@ class GSU(Component):
 
         # multiply by stride, optimizing if unit stride
         if writer.isConstUnitStride(stride):
-            module.add(SMovB32(dst=sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx)), src=m, \
-                comment="incr%s (unrollIdx)"%(tc) ))
+            if tc == "A":
+                abinfo = writer.states.a
+            elif tc == "B":
+                abinfo = writer.states.b
+            elif tc == "MXSA":
+                abinfo = writer.states.mxsa
+            elif tc == "MXSB":
+                abinfo = writer.states.mxsb
+            else:
+                abinfo = None
+            if abinfo != None and abinfo.useConstSgprGlobalReadIncs:
+                # useConstSgprGlobalReadIncs case, define value set for GlobalReadIncs here instead of initializing sgpr
+                module.add(ValueSet("GlobalReadIncs%s"%tc, m))
+            else:
+                module.add(SMovB32(dst=sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx)), src=m, \
+                    comment="incr%s (unrollIdx)"%(tc) ))
         else:
             module.add(SMulI32(dst=sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx)), \
                 src0=m, src1=stride, \
@@ -198,7 +212,6 @@ class GSUOff(GSU):
         module = Module("GSU Off graIncrements")
 
         tc = tP["tensorChar"]
-        tcGR = tc if tc == "Metadata" else (tc + "GR")
         dimIdx = kernel["ProblemType"]["IndicesSummation"][loopIdx] # dimension index
         loopChar = writer.states.indexChars[dimIdx]
         stride = writer.strideRef(tc, dimIdx)
@@ -344,8 +357,10 @@ class GSUOn(GSU):
         module = Module("GSU On computeLoadSrd")
 
         tc = tP["tensorChar"]
+        isgfx950 = kernel["ISA"][:2] == (9, 5)
+        isgfx950mx = isgfx950 and ("MXS" in tc)
         depthU = kernel["DepthU"]
-        depthUDiv = kernel["DepthU"]
+        depthUDiv = kernel["_DepthU%s"%tc] if isgfx950mx else kernel["_DepthU"]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
             depthUDiv = kernel["DepthU"] * kernel["MatrixInstM"]
@@ -397,6 +412,7 @@ class GSUOn(GSU):
         module = Module("GSU On graIncrements")
 
         tc = tP["tensorChar"]
+        tIdx: int = tP["idx"]
         dimIdx = kernel["ProblemType"]["IndicesSummation"][loopIdx] # dimension index
         loopChar = writer.states.indexChars[dimIdx]
         stride = writer.strideRef(tc, dimIdx)
@@ -427,8 +443,12 @@ class GSUOn(GSU):
                     src=sgpr(tmpSgpr+1)))
         else:
             with writer.allocTmpSgpr(2) as tmpSgprInfo:
+                incr = sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
                 tmpSgpr = tmpSgprInfo.idx
                 gsuSgpr = tmpSgpr + 1
+                # GlobalReadIncs doubles as scratch for the intermediate duBpe value;
+                # final SCSelectB32/SMulI32 writes the result back to the same register.
+                incSgpr = incr
 
                 tcGR = tc if tc == "Metadata" else (tc + "GR")
 
@@ -442,7 +462,12 @@ class GSUOn(GSU):
                 du = kernel["_DepthU%s"%tc]
                 duBpe = int(du * tP["bpeGR"]) * mi_dim
                 module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
-                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
+
+                if 'MXS' in tc:
+                    module.add(SMulI32(dst=incSgpr, src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
+                else:
+                    module.add(SMovB32(dst=incSgpr, src=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
+                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=incSgpr, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
 
                 m = sgpr(gsuSgpr)
@@ -450,11 +475,10 @@ class GSUOn(GSU):
                 if isMirrorIdx:
                     m.setMinus(True)
 
-                incr = sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
                 duBpe = int(du * tP["bpeGR"]) * mi_dim
                 # multiply by stride, optimizing if unit stride
                 if writer.isConstUnitStride(stride):
-                    module.add(SCSelectB32(dst=incr, src0=duBpe, src1=m, comment="incr%s (unrollIdx)"%(tc)))
+                    module.add(SCSelectB32(dst=incr, src0=incSgpr, src1=m, comment="incr%s (unrollIdx)"%(tc)))
                 else:
                     module.add(SCMovB32(dst=m, src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
                     module.add(SMulI32(dst=incr, src0=m, src1=stride, comment="incr%s unrollIdx)"%(tc) ))
@@ -915,7 +939,7 @@ class GSUOn(GSU):
                     # are likely to be low-performing so likely not worth optimizing.
                     print("WARNING: half requires at least two elements per batch")
                     self.overflowedResources = 3
-            # elif kernel["ProblemType"]["DataType"].is8bitFloat():
+            # elif kernel["ProblemType"]["MacDataTypeA"].is8bitFloat():
             #    if numElementsPerBatch > 1:
             #        numElementsPerBatch = int(numElementsPerBatch/4)*4
 

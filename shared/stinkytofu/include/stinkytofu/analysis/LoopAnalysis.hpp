@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/AnalysisManager.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 
@@ -29,15 +30,7 @@ namespace stinkytofu {
 /// Analysis pass that detects natural loops in the CFG.
 /// Wraps detectLoops().
 struct LoopAnalysis {
-    static inline AnalysisKey Key;
-
-    static AnalysisKey* ID() {
-        return &Key;
-    }
-
-    static const char* name() {
-        return "LoopAnalysis";
-    }
+    STINKYTOFU_ANALYSIS_KEY("LoopAnalysis")
 
     using Result = std::vector<Loop>;
 

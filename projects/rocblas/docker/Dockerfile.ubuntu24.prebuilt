@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y \
     libopenblas-dev \
     libgtest-dev \
     libzstd-dev \
+    doxygen \
     clang-format-18 \
     clang-tidy-20 \
     llvm-20 \
@@ -61,16 +62,26 @@ RUN for tool in /usr/bin/llvm*-20; do \
 # Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
 #
 # Example build command for default tarball build using the ASIC and Git tag specified in the dockerfile:
-# docker build -f Dockerfile.ubuntu24 -t rocblas:prebuilt .
-# This will download and install prebuilt binaries using therock-dist-linux-<THEROCK_ASIC>-dcgpu-<THEROCK_GIT_TAG>.tar.gz
+# docker build -f Dockerfile.ubuntu24.prebuilt -t rocblas:prebuilt .
+# This will download and install prebuilt binaries using therock-dist-linux-<THEROCK_ASIC><suffix>-<THEROCK_GIT_TAG>.tar.gz
 #
 # Example build command when specifying a different ASIC and Git tag:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.13.0a20260401 -t rocblas:prebuilt .
+# docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.13.0a20260401 -t rocblas:prebuilt .
 # This will download and install prebuilt binaries using the ASIC and Git tag you specified (note the tag format consists of <version>.0a<date>).
+#
+# To automatically download the latest available build for the given ASIC, set THEROCK_GIT_TAG=latest (the default):
+# docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_GIT_TAG=latest -t rocblas:prebuilt .
+# This queries THEROCK_URL_BASE for the most recent tarball for the ASIC. ADHOCBUILD tarballs are excluded.
+# The tarball suffix (-dcgpu, -dgpu, -all, or none) is derived automatically from THEROCK_ASIC.
+# Override THEROCK_PREBUILT_ID to select a non-default suffix (e.g. --build-arg THEROCK_PREBUILT_ID=gfx110X-dgpu).
 # The prebuilt tar.gz is downloaded from the nightly builds in: https://rocm.nightlies.amd.com/tarball/
 #
-# It is also possible to manually specify THEROCK_PREBUILT_ID or THEROCK_TARBALL, and change THEROCK_URL_BASE, if you need more flexibility:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_TARBALL=therock-dist-linux-gfx950-dcgpu-7.12.0.tar.gz --build-arg THEROCK_URL_BASE=https://repo.amd.com/rocm/tarball/ -t rocblas:prebuilt .
+# To provide the full download URL directly (bypasses all auto-detection):
+# docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_TARBALL_URL=https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx950-dcgpu-7.12.0.tar.gz -t rocblas:prebuilt .
+#
+# To use a local tarball from the build context (file:/// prefix or any non-http path):
+# docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_TARBALL_URL=file:///therock-dist-linux-gfx94X-dcgpu-7.12.0.tar.gz -t rocblas:prebuilt .
+# docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_TARBALL_URL=tarballs/therock-dist-linux-gfx94X-dcgpu-7.12.0.tar.gz -t rocblas:prebuilt .
 #
 # Options for THEROCK_URL_BASE are (may not be available externally from AMD):
 # - Stable releases: https://repo.amd.com/rocm/tarball/
@@ -83,22 +94,108 @@ RUN for tool in /usr/bin/llvm*-20; do \
 FROM base AS install_therock_prebuilt
 
 ARG THEROCK_ASIC=gfx94X
-ARG THEROCK_GIT_TAG=7.13.0a20260407
-ARG THEROCK_PREBUILT_ID=$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG
-ARG THEROCK_TARBALL=therock-dist-linux-$THEROCK_PREBUILT_ID.tar.gz
+ARG THEROCK_GIT_TAG=latest
+ARG THEROCK_PREBUILT_ID=
 ARG THEROCK_URL_BASE=https://rocm.nightlies.amd.com/tarball/
+ARG THEROCK_TARBALL_URL=
 
 RUN mkdir -p /opt/rocm
 WORKDIR /tmp
 
-RUN wget --progress=dot:giga $THEROCK_URL_BASE$THEROCK_TARBALL
-RUN tar -xf $THEROCK_TARBALL -C /opt/rocm --strip-components=1
+RUN --mount=type=bind,source=.,target=/build-context \
+    LOCAL_PATH=""; \
+    if [ -n "$THEROCK_TARBALL_URL" ]; then \
+        case "$THEROCK_TARBALL_URL" in \
+            http://*|https://*) \
+                echo "Using provided tarball URL: ${THEROCK_TARBALL_URL}"; \
+                TARBALL=$(basename "$THEROCK_TARBALL_URL"); \
+                DOWNLOAD_URL="$THEROCK_TARBALL_URL"; \
+                ;; \
+            file:///*) \
+                LOCAL_PATH="${THEROCK_TARBALL_URL#file://}"; \
+                echo "Using local tarball: /build-context${LOCAL_PATH}"; \
+                TARBALL=$(basename "$LOCAL_PATH"); \
+                ;; \
+            *) \
+                _p="${THEROCK_TARBALL_URL#./}"; \
+                LOCAL_PATH="/${_p#/}"; \
+                echo "Using local tarball: /build-context${LOCAL_PATH}"; \
+                TARBALL=$(basename "$LOCAL_PATH"); \
+                ;; \
+        esac; \
+    else \
+        if [ -n "$THEROCK_PREBUILT_ID" ]; then \
+            PREFIX="$THEROCK_PREBUILT_ID"; \
+        else \
+            case "$THEROCK_ASIC" in \
+                gfx90X|gfx94X|gfx950) SUFFIX="-dcgpu" ;; \
+                gfx101X|gfx103X)      SUFFIX="-dgpu"  ;; \
+                gfx110X|gfx120X)      SUFFIX="-all"   ;; \
+                *)                    SUFFIX=""        ;; \
+            esac; \
+            PREFIX="${THEROCK_ASIC}${SUFFIX}"; \
+        fi; \
+        if [ "$THEROCK_GIT_TAG" = "latest" ]; then \
+            echo "Fetching directory listing from ${THEROCK_URL_BASE} ..."; \
+            LISTING=$(wget -qO- "$THEROCK_URL_BASE"); \
+            if [ $? -ne 0 ] || [ -z "$LISTING" ]; then \
+                echo "Error: failed to fetch listing from ${THEROCK_URL_BASE}" >&2; \
+                echo "The URL may require authentication or may not be publicly accessible." >&2; \
+                echo "Use THEROCK_TARBALL_URL to provide the full download URL directly, or" >&2; \
+                echo "use one of the public URLs for THEROCK_URL_BASE:" >&2; \
+                echo "  Nightly builds:   https://rocm.nightlies.amd.com/tarball/" >&2; \
+                echo "  Stable releases:  https://repo.amd.com/rocm/tarball/" >&2; \
+                echo "  Prereleases (QA): https://rocm.prereleases.amd.com/tarball/" >&2; \
+                echo "  Dev builds:       https://rocm.devreleases.amd.com/tarball/" >&2; \
+                exit 1; \
+            fi; \
+            echo "Resolving latest tarball for prefix '${PREFIX}' from ${THEROCK_URL_BASE} ..."; \
+            TARBALL=$(echo "$LISTING" \
+                | grep -oE "therock-dist-linux-${PREFIX}-[0-9][^\"<>[:space:]]+[.]tar[.]gz" \
+                | grep -v ADHOCBUILD \
+                | sort -V | tail -1); \
+            if [ -z "$TARBALL" ]; then \
+                echo "No match for prefix '${PREFIX}', falling back to ASIC name '${THEROCK_ASIC}' in therock-dist-linux-* names ..."; \
+                TARBALL=$(echo "$LISTING" \
+                    | grep -oE "therock-dist-linux-[^\"<>[:space:]]*${THEROCK_ASIC}[^\"<>[:space:]]*[.]tar[.]gz" \
+                    | grep -v ADHOCBUILD \
+                    | sort -V | tail -1); \
+            fi; \
+            if [ -z "$TARBALL" ]; then \
+                echo "No match in therock-dist-linux-* names, falling back to any .tar.gz containing '${THEROCK_ASIC}' ..."; \
+                TARBALL=$(echo "$LISTING" \
+                    | grep -oE "[^\"<>[:space:]]*${THEROCK_ASIC}[^\"<>[:space:]]*[.]tar[.]gz" \
+                    | grep -v ADHOCBUILD \
+                    | sort -V | tail -1); \
+            fi; \
+            if [ -z "$TARBALL" ]; then \
+                echo "Error: no tarball found for ASIC '${THEROCK_ASIC}' at ${THEROCK_URL_BASE}" >&2; \
+                exit 1; \
+            fi; \
+            echo "Resolved latest tarball: $TARBALL"; \
+        else \
+            TARBALL="therock-dist-linux-${PREFIX}-${THEROCK_GIT_TAG}.tar.gz"; \
+        fi; \
+        DOWNLOAD_URL="${THEROCK_URL_BASE}${TARBALL}"; \
+    fi && \
+    if [ -n "$LOCAL_PATH" ]; then \
+        cp "/build-context${LOCAL_PATH}" . || { \
+            echo "Error: file not found in build context: ${LOCAL_PATH}" >&2; \
+            echo "The tarball must be inside the Docker build context (the last argument to docker build)." >&2; \
+            echo "If the tarball is outside the current directory, use a temporary build context:" >&2; \
+            echo "  CTX=\$(mktemp -d) && cp /path/to/tarball.tar.gz \"\$CTX/\"" >&2; \
+            echo "  docker build -f \$(pwd)/Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_TARBALL_URL=tarball.tar.gz -t <tag> \"\$CTX\"" >&2; \
+            exit 1; }; \
+    else \
+        wget --progress=dot:giga "$DOWNLOAD_URL"; \
+    fi && \
+    tar -xf "$TARBALL" -C /opt/rocm --strip-components=1
 
 # ============================================================================
-# rocblas development environment with prebuilt ROCm
+# rocBLAS development environment with prebuilt ROCm
 #
 # Build with:
-#   docker build -f Dockerfile.ubuntu24 -t rocblas:prebuilt .
+#   docker build -f Dockerfile.ubuntu24.prebuilt -t rocblas:prebuilt .
 # ============================================================================
 FROM base AS prebuilt
 
@@ -106,6 +203,6 @@ COPY --from=install_therock_prebuilt /opt/rocm /opt/rocm
 
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
 ENV CMAKE_GENERATOR="Ninja"
-ENV LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/rocm/lib"
 
 WORKDIR /workspace

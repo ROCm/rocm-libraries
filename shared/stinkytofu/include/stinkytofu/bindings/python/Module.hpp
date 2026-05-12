@@ -22,11 +22,13 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
 
@@ -91,7 +93,7 @@ namespace stinkytofu {
  *   std::string asm = module->emitAssembly();
  * @endcode
  */
-class StinkyAsmModule {
+class STINKYTOFU_EXPORT StinkyAsmModule {
    public:
     /**
      * @brief Options for the StinkyAsmModule
@@ -147,6 +149,13 @@ class StinkyAsmModule {
      * @brief Run optimization pipeline on the module
      */
     void runOptimizationPipeline();
+
+    /**
+     * @brief Read uint64 metadata from the underlying Function by key.
+     * @param key Metadata key
+     * @return Metadata value if key exists
+     */
+    std::optional<uint64_t> getMetaDataU64(const std::string& key) const;
 
     /**
      * @brief Get the underlying Function

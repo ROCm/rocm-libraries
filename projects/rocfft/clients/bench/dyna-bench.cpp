@@ -123,6 +123,12 @@ rocfft_plan make_plan(ROCFFT_LIB libhandle, const fft_params& params)
         = (decltype(&rocfft_plan_create))rocfft_lib_symbol(libhandle, "rocfft_plan_create");
 
     procfft_setup();
+    auto cm_istride = params.istride;
+    auto cm_ostride = params.ostride;
+    auto cm_length  = params.length;
+    std::reverse(cm_istride.begin(), cm_istride.end());
+    std::reverse(cm_ostride.begin(), cm_ostride.end());
+    std::reverse(cm_length.begin(), cm_length.end());
 
     rocfft_plan_description desc = NULL;
     LIB_V_THROW(procfft_plan_description_create(&desc), "rocfft_plan_description_create failed");
@@ -132,11 +138,11 @@ rocfft_plan make_plan(ROCFFT_LIB libhandle, const fft_params& params)
                                                  rocfft_array_type_from_fftparams(params.otype),
                                                  params.ioffset.data(),
                                                  params.ooffset.data(),
-                                                 params.istride.size(),
-                                                 params.istride.data(),
+                                                 cm_istride.size(),
+                                                 cm_istride.data(),
                                                  params.idist,
-                                                 params.ostride.size(),
-                                                 params.ostride.data(),
+                                                 cm_ostride.size(),
+                                                 cm_ostride.data(),
                                                  params.odist),
         "rocfft_plan_description_data_layout failed");
     rocfft_plan plan = NULL;
@@ -145,8 +151,8 @@ rocfft_plan make_plan(ROCFFT_LIB libhandle, const fft_params& params)
                                     rocfft_result_placement_from_fftparams(params.placement),
                                     rocfft_transform_type_from_fftparams(params.transform_type),
                                     rocfft_precision_from_fftparams(params.precision),
-                                    params.length.size(),
-                                    params.length.data(),
+                                    cm_length.size(),
+                                    cm_length.data(),
                                     params.nbatch,
                                     desc),
                 "rocfft_plan_create failed");
