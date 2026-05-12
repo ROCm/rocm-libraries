@@ -141,16 +141,27 @@ class TestTritonLDS:
 
 
 class TestTritonWSParams:
-    """Tests for Triton work-stealing parameter selection."""
+    """Tests for Triton work-stealing parameter selection.
+
+    select_triton_ws_params returns counters_per_xcd that scales INVERSELY
+    with tile count. Few tiles -> many counters (each XCD spreads the work-
+    stealing capability across the scarce work). Many tiles -> a single
+    counter per XCD suffices because there's plenty of work to claim.
+
+    Implementation thresholds (tiles -> counters): <=512: 8, <=1536: 4,
+    <=2048: 2, else: 1.
+    """
 
     def test_few_tiles(self):
+        # 256x256 with 128x128 tiles -> 4 tiles -> high counters_per_xcd
         result = origami.select_triton_ws_params(256, 256, 128, 128)
-        assert result.counters_per_xcd == 1
+        assert result.counters_per_xcd == 8
         assert result.workgroup_mapping > 0
 
     def test_many_tiles(self):
+        # 16384x16384 with 128x128 tiles -> 16384 tiles -> 1 counter
         result = origami.select_triton_ws_params(16384, 16384, 128, 128)
-        assert result.counters_per_xcd > 1
+        assert result.counters_per_xcd == 1
         assert result.workgroup_mapping > 0
 
     def test_struct_fields(self):
