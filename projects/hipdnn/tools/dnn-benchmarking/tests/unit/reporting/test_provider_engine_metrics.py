@@ -49,6 +49,7 @@ class TestProviderEngineResultLegacyShape:
             "derived_gbytes_per_s",
             "cpu_user_time_per_iter_us",
             "cpu_kernel_time_per_iter_us",
+            "vram_used_mb",
             "extra_metrics",
         ):
             assert key not in d
@@ -104,6 +105,7 @@ class TestProviderEngineResultFullShape:
             derived_gbytes_per_s=2.0,
             cpu_user_time_per_iter_us=40.0,
             cpu_kernel_time_per_iter_us=2.5,
+            vram_used_mb=4096.0,
         )
         d = pe.to_dict()
         assert d["workspace_bytes"] == 4096
@@ -113,6 +115,7 @@ class TestProviderEngineResultFullShape:
         assert d["derived_gbytes_per_s"] == 2.0
         assert d["cpu_user_time_per_iter_us"] == 40.0
         assert d["cpu_kernel_time_per_iter_us"] == 2.5
+        assert d["vram_used_mb"] == 4096.0
 
     def test_extra_metrics_passthrough_for_phase23(self):
         # Phase 1 never populates this; the schema must still round-trip

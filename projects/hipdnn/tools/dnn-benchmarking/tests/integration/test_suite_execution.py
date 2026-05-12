@@ -220,6 +220,10 @@ class TestSuiteRunnerIntegration:
                 assert r.derived_tflops_per_s >= 0
                 assert r.derived_gbytes_per_s is not None
                 assert r.derived_gbytes_per_s >= 0
+            # VRAM is populated when amdsmi is available; allow None on
+            # hosts without amdsmi installed (graceful degrade).
+            if r.vram_used_mb is not None:
+                assert r.vram_used_mb >= 0
 
     def test_metrics_tier_off_suppresses_basic_fields(
         self, hipdnn, conv_graph: Dict[str, Any]
@@ -263,6 +267,7 @@ class TestSuiteRunnerIntegration:
             assert r.derived_tflops_per_s is None
             assert r.cpu_user_time_per_iter_us is None
             assert r.cpu_kernel_time_per_iter_us is None
+            assert r.vram_used_mb is None
 
 
 @pytest.mark.gpu

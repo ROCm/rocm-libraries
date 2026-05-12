@@ -21,6 +21,7 @@ from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
 from ..execution.timing import Timer
 from ..metrics import (
+    GpuSmiProbe,
     RusageProbe,
     compute_flops,
     compute_io_bytes,
@@ -471,6 +472,16 @@ def _run_single_provider_engine(
                 )
                 result.derived_tflops_per_s = tflops
                 result.derived_gbytes_per_s = gbytes
+
+                # VRAM is sampled here (still inside the BufferManager
+                # context, so workspace + I/O buffers are still
+                # allocated). This is the only amdsmi field we expose
+                # per-engine — see ProviderEngineResult docstring.
+                try:
+                    snap = GpuSmiProbe().snapshot()
+                    result.vram_used_mb = snap.get("vram_used_mb")
+                except Exception as e:
+                    warn_once("gpu_smi", f"vram snapshot failed: {e}")
 
             if ref_provider is not None:
                 result.correctness = _check_correctness(

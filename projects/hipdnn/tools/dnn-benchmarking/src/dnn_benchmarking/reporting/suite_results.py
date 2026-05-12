@@ -124,14 +124,24 @@ class ProviderEngineResult:
             benchmark iteration in microseconds. Usually near zero;
             useful only as a spike diagnostic (heavy syscalls / page
             faults during the loop).
+        vram_used_mb: Total process-wide GPU VRAM allocated at the
+            end of this engine's benchmark loop, sampled via amdsmi.
+            Workspace + I/O buffers + any allocator cache. Distinct
+            from ``workspace_bytes`` which is only the engine's
+            scratchpad request. Note this is process-wide and may
+            include cached allocations from previous engines on the
+            same graph.
         extra_metrics: Reserved for Phase 2/3 sources (rocprofv3 PMC,
             traces, perf, roofline). Always None in Phase 1.
 
     Note:
-        Process RSS, host RAM availability, and the amdsmi GPU snapshot
-        are *not* per-engine — they're flat across a suite (RSS) or
+        Process RSS, host RAM availability, and the volatile parts of
+        an amdsmi snapshot (power/clocks/temps/utilisation) are *not*
+        per-engine — they're either flat across a suite (RSS) or
         misleading post-loop snapshots (power/clocks/temps lag the
-        workload). They live on :class:`SuiteMetadata` instead.
+        workload). They live on :class:`SuiteMetadata` instead. VRAM
+        is the exception: it's stable during the loop and varies
+        meaningfully across engines, so it lives here.
     """
 
     _VALID_STATUSES = {"success", "error", "skipped"}
@@ -155,6 +165,7 @@ class ProviderEngineResult:
     derived_gbytes_per_s: Optional[float] = None
     cpu_user_time_per_iter_us: Optional[float] = None
     cpu_kernel_time_per_iter_us: Optional[float] = None
+    vram_used_mb: Optional[float] = None
     # Reserved for Phase 2/3
     extra_metrics: Optional[Dict[str, Any]] = None
 
@@ -207,6 +218,8 @@ class ProviderEngineResult:
                 d["cpu_user_time_per_iter_us"] = self.cpu_user_time_per_iter_us
             if self.cpu_kernel_time_per_iter_us is not None:
                 d["cpu_kernel_time_per_iter_us"] = self.cpu_kernel_time_per_iter_us
+            if self.vram_used_mb is not None:
+                d["vram_used_mb"] = self.vram_used_mb
             if self.extra_metrics is not None:
                 d["extra_metrics"] = self.extra_metrics
         elif self.status == "error":

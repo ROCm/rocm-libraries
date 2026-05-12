@@ -660,6 +660,7 @@ class Reporter:
                 pe.derived_gbytes_per_s,
                 pe.cpu_user_time_per_iter_us,
                 pe.cpu_kernel_time_per_iter_us,
+                pe.vram_used_mb,
             )
         )
         if not any_present:
@@ -715,6 +716,8 @@ class Reporter:
                 else 0.0
             )
             self._print(f"  CPU per iter (u/k):   {user:.1f} µs / {kern:.1f} µs")
+        if pe.vram_used_mb is not None:
+            self._print(f"  VRAM used:            {self._fmt_mib(pe.vram_used_mb)}")
         self._print("")
 
     def _print_pe_correctness(
