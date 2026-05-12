@@ -3554,7 +3554,7 @@ class KernelWriterAssembly(KernelWriter):
       module.addModuleAsFlatItems(self.initKRingShift(kernel))
 
     # both UseSgprForGRO and DTVA/B are enabled
-    if ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]) and kernel["_UseSgprForGRO"] and kernel["MatrixInstK"] <= 16 and (not self.states.asmCaps["HasWMMA_V4"] or kernel["LoopIters"] != 1):
+    if ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]) and kernel["_UseSgprForGRO"] and (not self.states.asmCaps["HasWMMA_V4"] or kernel["LoopIters"] != 1):
       if tP["tlu"]:
         sizeOfaPart = kernel["LocalReadVectorWidth%s"%tc]
         numOfVW = tP["nrp"]//sizeOfaPart
