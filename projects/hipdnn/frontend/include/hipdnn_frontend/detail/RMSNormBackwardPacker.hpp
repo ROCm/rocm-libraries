@@ -40,12 +40,11 @@ inline Error createRMSNormBackwardOperation(
                                              attributes.get_scale(),
                                              tensorDescs,
                                              "rmsnormbackward SCALE_EXT"));
-    HIPDNN_CHECK_ERROR(
-        ensureAndSetOptionalTensorRef(opDesc.get(),
-                                      HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT,
-                                      attributes.get_inv_rms(),
-                                      tensorDescs,
-                                      "rmsnormbackward INV_RMS_EXT"));
+    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
+                                             HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT,
+                                             attributes.get_inv_rms(),
+                                             tensorDescs,
+                                             "rmsnormbackward INV_RMS_EXT"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
                                              HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT,
                                              attributes.get_dx(),
@@ -66,7 +65,7 @@ inline Error createRMSNormBackwardOperation(
     // Set rmsnormbackward parameters
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT,
+                                                 HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT,
                                                  attributes.compute_data_type,
                                                  "rmsnormbackward compute data type"));
 

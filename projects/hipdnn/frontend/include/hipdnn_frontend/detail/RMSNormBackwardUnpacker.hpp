@@ -42,20 +42,17 @@ namespace hipdnn_frontend::detail
                                                HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_SCALE_EXT,
                                                tensorMap,
                                                scaleTensor,
-                                               "rmsnorm backward SCALE tensor"));
+                                               "rmsnormbackward SCALE_EXT tensor"));
     attributes.set_scale(scaleTensor);
 
-    // Unpack optional inv_rms tensor
+    // Unpack inv_rms tensor
     std::shared_ptr<graph::TensorAttributes> invRmsTensor;
-    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT,
-                                            tensorMap,
-                                            invRmsTensor,
-                                            "rmsnorm backward INV_RMS tensor"));
-    if(invRmsTensor)
-    {
-        attributes.set_inv_rms(invRmsTensor);
-    }
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
+                                               HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT,
+                                               tensorMap,
+                                               invRmsTensor,
+                                               "rmsnormbackward INV_RMS_EXT tensor"));
+    attributes.set_inv_rms(invRmsTensor);
 
     // Unpack dx tensor
     std::shared_ptr<graph::TensorAttributes> dxTensor;
@@ -63,7 +60,7 @@ namespace hipdnn_frontend::detail
                                                HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT,
                                                tensorMap,
                                                dxTensor,
-                                               "rmsnorm backward DX tensor"));
+                                               "rmsnormbackward DX_EXT tensor"));
     attributes.set_dx(dxTensor);
 
     // Unpack dscale tensor
@@ -72,16 +69,16 @@ namespace hipdnn_frontend::detail
                                                HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DSCALE_EXT,
                                                tensorMap,
                                                dscaleTensor,
-                                               "rmsnorm backward DSCALE tensor"));
+                                               "rmsnormbackward DSCALE_EXT tensor"));
     attributes.set_dscale(dscaleTensor);
 
-    // Unpack optional dbias tensor
+    // Unpack dbias tensor
     std::shared_ptr<graph::TensorAttributes> dbiasTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
                                             HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DBIAS_EXT,
                                             tensorMap,
                                             dbiasTensor,
-                                            "rmsnorm backward DBIAS tensor"));
+                                            "rmsnormbackward DBIAS_EXT tensor"));
     if(dbiasTensor)
     {
         attributes.set_dbias(dbiasTensor);
@@ -89,7 +86,7 @@ namespace hipdnn_frontend::detail
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(
-        opDesc, HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT, "rmsnormbackward compute data type");
+        opDesc, HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, "rmsnormbackward compute data type");
     if(dtErr.is_bad())
     {
         return dtErr;

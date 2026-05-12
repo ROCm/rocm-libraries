@@ -1162,7 +1162,7 @@ typedef enum
     /** @brief Scale tensor for rmsnorm backward */
     HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_SCALE_EXT = 3502,
 
-    /** @brief Inverse RMS tensor for rmsnorm backward (optional) */
+    /** @brief Inverse RMS tensor for rmsnorm backward */
     HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT = 3503,
 
     /** @brief Gradient output tensor (dx) for rmsnorm backward */
@@ -1175,7 +1175,7 @@ typedef enum
     HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DBIAS_EXT = 3506,
 
     /** @brief Compute data type for rmsnorm backward */
-    HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT = 3507,
+    HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT = 3507,
 
     /** @} */
 

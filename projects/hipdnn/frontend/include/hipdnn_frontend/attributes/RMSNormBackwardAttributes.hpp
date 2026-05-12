@@ -30,8 +30,6 @@ namespace hipdnn_frontend::graph
  * - DY: Gradient of the loss with respect to the output (upstream gradient)
  * - X: Original input tensor from forward pass
  * - Scale: Per-channel scale (gamma) tensor
- *
- * **Optional inputs (from forward pass):**
  * - Inv_rms: Saved inverse RMS from forward pass
  *
  * **Outputs:**

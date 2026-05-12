@@ -80,7 +80,7 @@ public:
         setRMSNormBackwardParams();
         auto computeType = HIPDNN_DATA_FLOAT;
         getDescriptor()->setAttribute(
-            HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+            HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     }
 
     void makeFinalized() const
@@ -227,6 +227,32 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, FinalizeFailsWithoutScaleTensor)
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_invRmsDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DSCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dscaleDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DBIAS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dbiasDesc);
+    setRMSNormBackwardParams();
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestRMSNormBackwardOperationDescriptor, FinalizeFailsWithoutInvRmsTensor)
+{
+    auto desc = getDescriptor();
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_scaleDesc);
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
     desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DSCALE_EXT,
@@ -439,7 +465,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetComputeDataType)
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+        HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
@@ -451,7 +477,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, SetComputeDataTypeWrongElementCou
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+            HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -513,12 +539,12 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeComputeType)
     setRequiredAttributes();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
-        HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT,
                                        HIPDNN_TYPE_DATA_TYPE,
                                        1,
                                        &elementCount,
@@ -678,7 +704,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, GetAttributeComputeTypeQueryRetur
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT,
                                        HIPDNN_TYPE_DATA_TYPE,
                                        0,
                                        &elementCount,
@@ -782,7 +808,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, BuildNodeProducesCorrectNodeT)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(
-        HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -808,7 +834,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, BuildNodeWithHalfComputeType)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
-        HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -940,7 +966,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, BuildNodePreservesName)
                        opName.c_str());
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(
-        HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();

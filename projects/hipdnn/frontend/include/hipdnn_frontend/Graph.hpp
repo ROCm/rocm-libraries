@@ -2286,8 +2286,8 @@ public:
      * @param dy Upstream gradient (loss gradient w.r.t. output, same shape as x)
      * @param x Original input from forward pass
      * @param scale Per-channel scale (gamma)
-     * @param attributes Configuration; optionally set saved inv_rms from
-     *        the forward pass via set_inv_rms(), and opt into dbias
+     * @param inv_rms Saved inv_rms from the forward pass
+     * @param attributes Configuration; optionally include dbias
      *        computation via set_compute_dbias(true)
      * @return Array of 3 output tensors:
      *         - [0] dx: Gradient w.r.t. input (same shape as x)
@@ -2302,6 +2302,7 @@ public:
         rmsnorm_backward(std::shared_ptr<TensorAttributes> dy,
                          std::shared_ptr<TensorAttributes> x,
                          std::shared_ptr<TensorAttributes> scale,
+                         std::shared_ptr<TensorAttributes> inv_rms,
                          RMSNormBackwardAttributes attributes)
     // NOLINTEND(readability-identifier-naming)
     {
@@ -2323,6 +2324,7 @@ public:
         attributes.set_dy(std::move(dy));
         attributes.set_x(std::move(x));
         attributes.set_scale(std::move(scale));
+        attributes.set_inv_rms(std::move(inv_rms));
         attributes.set_dx(dx);
         attributes.set_dscale(dscale);
 

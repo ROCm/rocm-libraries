@@ -158,9 +158,9 @@ TEST_F(TestRMSNormBackwardOperationFromNode, NodeFactoryDelegatesCorrectly)
     EXPECT_EQ(desc->getDyDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DY_UID);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_X_UID);
     EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_SCALE_UID);
+    EXPECT_EQ(desc->getInvRmsDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID);
     EXPECT_EQ(desc->getDxDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DX_UID);
     EXPECT_EQ(desc->getDscaleDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DSCALE_UID);
-    EXPECT_EQ(desc->getInvRmsDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID);
     EXPECT_EQ(desc->getDbiasDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DBIAS_UID);
 }
 
@@ -183,12 +183,12 @@ TEST_F(TestRMSNormBackwardOperationFromNode, SetsTensorReferences)
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_X_UID);
     ASSERT_NE(desc->getScaleDesc(), nullptr);
     EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_SCALE_UID);
+    ASSERT_NE(desc->getInvRmsDesc(), nullptr);
+    EXPECT_EQ(desc->getInvRmsDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID);
     ASSERT_NE(desc->getDxDesc(), nullptr);
     EXPECT_EQ(desc->getDxDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DX_UID);
     ASSERT_NE(desc->getDscaleDesc(), nullptr);
     EXPECT_EQ(desc->getDscaleDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DSCALE_UID);
-    ASSERT_NE(desc->getInvRmsDesc(), nullptr);
-    EXPECT_EQ(desc->getInvRmsDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID);
     ASSERT_NE(desc->getDbiasDesc(), nullptr);
     EXPECT_EQ(desc->getDbiasDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DBIAS_UID);
 }
@@ -201,9 +201,9 @@ TEST_F(TestRMSNormBackwardOperationFromNode, TensorReferencesMatchTensorMap)
     EXPECT_EQ(desc->getDyDesc(), _tensorMap[K_RMSNORMBACKWARD_TENSOR_DY_UID]);
     EXPECT_EQ(desc->getXDesc(), _tensorMap[K_RMSNORMBACKWARD_TENSOR_X_UID]);
     EXPECT_EQ(desc->getScaleDesc(), _tensorMap[K_RMSNORMBACKWARD_TENSOR_SCALE_UID]);
+    EXPECT_EQ(desc->getInvRmsDesc(), _tensorMap[K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID]);
     EXPECT_EQ(desc->getDxDesc(), _tensorMap[K_RMSNORMBACKWARD_TENSOR_DX_UID]);
     EXPECT_EQ(desc->getDscaleDesc(), _tensorMap[K_RMSNORMBACKWARD_TENSOR_DSCALE_UID]);
-    EXPECT_EQ(desc->getInvRmsDesc(), _tensorMap[K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID]);
     EXPECT_EQ(desc->getDbiasDesc(), _tensorMap[K_RMSNORMBACKWARD_TENSOR_DBIAS_UID]);
 }
 
@@ -230,6 +230,12 @@ TEST_F(TestRMSNormBackwardOperationFromNode, SetsTensorReferencesWithFullValues)
     EXPECT_EQ(desc->getScaleDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
     EXPECT_EQ(desc->getScaleDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
 
+    ASSERT_NE(desc->getInvRmsDesc(), nullptr);
+    EXPECT_EQ(desc->getInvRmsDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID);
+    EXPECT_EQ(desc->getInvRmsDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getInvRmsDesc()->getData().dims, (std::vector<int64_t>{1, 1, 1, 1}));
+    EXPECT_EQ(desc->getInvRmsDesc()->getData().strides, (std::vector<int64_t>{1, 1, 1, 1}));
+
     ASSERT_NE(desc->getDxDesc(), nullptr);
     EXPECT_EQ(desc->getDxDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DX_UID);
     EXPECT_EQ(desc->getDxDesc()->getData().data_type, DataType::FLOAT);
@@ -241,12 +247,6 @@ TEST_F(TestRMSNormBackwardOperationFromNode, SetsTensorReferencesWithFullValues)
     EXPECT_EQ(desc->getDscaleDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getDscaleDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
     EXPECT_EQ(desc->getDscaleDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
-
-    ASSERT_NE(desc->getInvRmsDesc(), nullptr);
-    EXPECT_EQ(desc->getInvRmsDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID);
-    EXPECT_EQ(desc->getInvRmsDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getInvRmsDesc()->getData().dims, (std::vector<int64_t>{1, 1, 1, 1}));
-    EXPECT_EQ(desc->getInvRmsDesc()->getData().strides, (std::vector<int64_t>{1, 1, 1, 1}));
 
     ASSERT_NE(desc->getDbiasDesc(), nullptr);
     EXPECT_EQ(desc->getDbiasDesc()->getData().uid, K_RMSNORMBACKWARD_TENSOR_DBIAS_UID);
@@ -282,6 +282,15 @@ TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingScaleTensor)
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
+TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingInvRmsTensor)
+{
+    _tensorMap.erase(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID);
+    auto node = createStandardNode();
+
+    ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
+}
+
 TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingDxTensor)
 {
     _tensorMap.erase(K_RMSNORMBACKWARD_TENSOR_DX_UID);
@@ -303,7 +312,6 @@ TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingDscaleTensor)
 TEST_F(TestRMSNormBackwardOperationFromNode, SucceedsWithOnlyRequiredTensors)
 {
     auto attrs = createStandardRMSNormBackwardAttrs();
-    attrs.inv_rms_tensor_uid = flatbuffers::nullopt;
     attrs.dbias_tensor_uid = flatbuffers::nullopt;
 
     NodeT node;
@@ -318,20 +326,11 @@ TEST_F(TestRMSNormBackwardOperationFromNode, SucceedsWithOnlyRequiredTensors)
     EXPECT_NE(desc->getDyDesc(), nullptr);
     EXPECT_NE(desc->getXDesc(), nullptr);
     EXPECT_NE(desc->getScaleDesc(), nullptr);
+    EXPECT_NE(desc->getInvRmsDesc(), nullptr);
     EXPECT_NE(desc->getDxDesc(), nullptr);
     EXPECT_NE(desc->getDscaleDesc(), nullptr);
     // Optional tensor getters are null
-    EXPECT_EQ(desc->getInvRmsDesc(), nullptr);
     EXPECT_EQ(desc->getDbiasDesc(), nullptr);
-}
-
-TEST_F(TestRMSNormBackwardOperationFromNode, FailsWhenOptionalInvRmsUidSetButTensorMissing)
-{
-    _tensorMap.erase(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
 TEST_F(TestRMSNormBackwardOperationFromNode, FailsWhenOptionalDbiasUidSetButTensorMissing)
@@ -388,7 +387,7 @@ TEST_F(TestRMSNormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify compute type
     hipdnnDataType_t computeType = {};
     int64_t dtCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT,
+    desc->getAttribute(HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT,
                        HIPDNN_TYPE_DATA_TYPE,
                        1,
                        &dtCount,
@@ -443,6 +442,22 @@ TEST_F(TestRMSNormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
                            {1, 64, 32, 32},
                            {65536, 1024, 32, 1});
 
+    // Verify inv_rms tensor
+    hipdnn_backend::ScopedDescriptor invRmsScoped;
+    int64_t invRmsCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &invRmsCount,
+                       static_cast<void*>(invRmsScoped.getPtr()));
+    ASSERT_EQ(invRmsCount, 1);
+    ASSERT_NE(invRmsScoped.get(), nullptr);
+    verifyTensorDescriptor(invRmsScoped.get(),
+                           K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
+                           HIPDNN_DATA_FLOAT,
+                           {1, 1, 1, 1},
+                           {1, 1, 1, 1});
+
     // Verify dx tensor
     hipdnn_backend::ScopedDescriptor dxScoped;
     int64_t dxCount = 0;
@@ -474,22 +489,6 @@ TEST_F(TestRMSNormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
                            HIPDNN_DATA_FLOAT,
                            {1, 64, 32, 32},
                            {65536, 1024, 32, 1});
-
-    // Verify inv_rms tensor (optional)
-    hipdnn_backend::ScopedDescriptor invRmsScoped;
-    int64_t invRmsCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &invRmsCount,
-                       static_cast<void*>(invRmsScoped.getPtr()));
-    ASSERT_EQ(invRmsCount, 1);
-    ASSERT_NE(invRmsScoped.get(), nullptr);
-    verifyTensorDescriptor(invRmsScoped.get(),
-                           K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
-                           HIPDNN_DATA_FLOAT,
-                           {1, 1, 1, 1},
-                           {1, 1, 1, 1});
 
     // Verify dbias tensor (optional)
     hipdnn_backend::ScopedDescriptor dbiasScoped;

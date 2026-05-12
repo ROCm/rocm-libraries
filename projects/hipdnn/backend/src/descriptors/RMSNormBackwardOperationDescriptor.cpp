@@ -23,6 +23,10 @@ void RMSNormBackwardOperationDescriptor::finalize()
         _scaleDesc,
         HIPDNN_STATUS_BAD_PARAM,
         "RMSNormBackwardOperationDescriptor::finalize() failed: SCALE_EXT tensor not set");
+    THROW_IF_NULL(
+        _invRmsDesc,
+        HIPDNN_STATUS_BAD_PARAM,
+        "RMSNormBackwardOperationDescriptor::finalize() failed: INV_RMS_EXT tensor not set");
     THROW_IF_NULL(_dxDesc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "RMSNormBackwardOperationDescriptor::finalize() failed: DX_EXT tensor not set");
@@ -78,12 +82,12 @@ void RMSNormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeName
                             "RMSNormBackwardOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT:
-        setOptionalTensorDescriptor(_invRmsDesc,
-                                    _data.inv_rms_tensor_uid,
-                                    attributeType,
-                                    elementCount,
-                                    arrayOfElements,
-                                    "RMSNormBackwardOperationDescriptor::setAttribute()");
+        setTensorDescriptor(_invRmsDesc,
+                            _data.inv_rms_tensor_uid,
+                            attributeType,
+                            elementCount,
+                            arrayOfElements,
+                            "RMSNormBackwardOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT:
         setTensorDescriptor(_dxDesc,
@@ -109,7 +113,7 @@ void RMSNormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeName
                                     arrayOfElements,
                                     "RMSNormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT:
+    case HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -171,12 +175,12 @@ void RMSNormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeName
                             "RMSNormBackwardOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT:
-        getOptionalTensorDescriptor(_invRmsDesc,
-                                    attributeType,
-                                    requestedElementCount,
-                                    elementCount,
-                                    arrayOfElements,
-                                    "RMSNormBackwardOperationDescriptor::getAttribute()");
+        getTensorDescriptor(_invRmsDesc,
+                            attributeType,
+                            requestedElementCount,
+                            elementCount,
+                            arrayOfElements,
+                            "RMSNormBackwardOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT:
         getTensorDescriptor(_dxDesc,
@@ -202,7 +206,7 @@ void RMSNormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeName
                                     arrayOfElements,
                                     "RMSNormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT:
+    case HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -240,13 +244,8 @@ void RMSNormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeName
 std::vector<std::shared_ptr<TensorDescriptor>>
     RMSNormBackwardOperationDescriptor::getTensorDescriptors() const
 {
-    std::vector<std::shared_ptr<TensorDescriptor>> result = {_dyDesc, _xDesc, _scaleDesc};
-    if(_invRmsDesc)
-    {
-        result.push_back(_invRmsDesc);
-    }
-    result.push_back(_dxDesc);
-    result.push_back(_dscaleDesc);
+    std::vector<std::shared_ptr<TensorDescriptor>> result
+        = {_dyDesc, _xDesc, _scaleDesc, _invRmsDesc, _dxDesc, _dscaleDesc};
     if(_dbiasDesc)
     {
         result.push_back(_dbiasDesc);
@@ -277,8 +276,7 @@ std::string RMSNormBackwardOperationDescriptor::toString() const
     str += ", dy_uid=" + std::to_string(_data.dy_tensor_uid);
     str += ", x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", scale_uid=" + std::to_string(_data.scale_tensor_uid);
-    str += ", inv_rms_uid="
-           + (_data.inv_rms_tensor_uid ? std::to_string(*_data.inv_rms_tensor_uid) : "nullopt");
+    str += ", inv_rms_uid=" + std::to_string(_data.inv_rms_tensor_uid);
     str += ", dx_uid=" + std::to_string(_data.dx_tensor_uid);
     str += ", dscale_uid=" + std::to_string(_data.dscale_tensor_uid);
     str += ", dbias_uid="
@@ -309,12 +307,9 @@ std::shared_ptr<RMSNormBackwardOperationDescriptor> RMSNormBackwardOperationDesc
         tensorMap, attrs->x_tensor_uid, "RMSNormBackwardOperationDescriptor::fromNode: X");
     desc->_scaleDesc = findTensorInMap(
         tensorMap, attrs->scale_tensor_uid, "RMSNormBackwardOperationDescriptor::fromNode: Scale");
-    if(attrs->inv_rms_tensor_uid)
-    {
-        desc->_invRmsDesc = findTensorInMap(tensorMap,
-                                            *attrs->inv_rms_tensor_uid,
-                                            "RMSNormBackwardOperationDescriptor::fromNode: InvRms");
-    }
+    desc->_invRmsDesc = findTensorInMap(tensorMap,
+                                        attrs->inv_rms_tensor_uid,
+                                        "RMSNormBackwardOperationDescriptor::fromNode: InvRms");
     desc->_dxDesc = findTensorInMap(
         tensorMap, attrs->dx_tensor_uid, "RMSNormBackwardOperationDescriptor::fromNode: Dx");
     desc->_dscaleDesc = findTensorInMap(tensorMap,
