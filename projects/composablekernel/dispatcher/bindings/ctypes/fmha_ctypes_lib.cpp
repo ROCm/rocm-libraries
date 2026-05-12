@@ -265,10 +265,10 @@ int fmha_dispatcher_run_fwd(const void* q_host,
             args.stride_k       = hdim_q;
             args.stride_v       = hdim_v;
             args.stride_o       = hdim_v;
-            args.nhead_stride_q = seqlen_q * hdim_q;
-            args.nhead_stride_k = seqlen_k * hdim_q;
-            args.nhead_stride_v = seqlen_k * hdim_v;
-            args.nhead_stride_o = seqlen_q * hdim_v;
+            args.nhead_stride_q = static_cast<int64_t>(seqlen_q) * hdim_q;
+            args.nhead_stride_k = static_cast<int64_t>(seqlen_k) * hdim_q;
+            args.nhead_stride_v = static_cast<int64_t>(seqlen_k) * hdim_v;
+            args.nhead_stride_o = static_cast<int64_t>(seqlen_q) * hdim_v;
         }
         else
         {
@@ -294,10 +294,10 @@ int fmha_dispatcher_run_fwd(const void* q_host,
         args.stride_k       = hdim_q;
         args.stride_v       = hdim_v;
         args.stride_o       = hdim_v;
-        args.nhead_stride_q = seqlen_q * hdim_q;
-        args.nhead_stride_k = seqlen_k * hdim_q;
-        args.nhead_stride_v = seqlen_k * hdim_v;
-        args.nhead_stride_o = seqlen_q * hdim_v;
+        args.nhead_stride_q = static_cast<int64_t>(seqlen_q) * hdim_q;
+        args.nhead_stride_k = static_cast<int64_t>(seqlen_k) * hdim_q;
+        args.nhead_stride_v = static_cast<int64_t>(seqlen_k) * hdim_v;
+        args.nhead_stride_o = static_cast<int64_t>(seqlen_q) * hdim_v;
         args.batch_stride_q = static_cast<int64_t>(nhead_q) * seqlen_q * hdim_q;
         args.batch_stride_k = static_cast<int64_t>(nhead_k) * seqlen_k * hdim_q;
         args.batch_stride_v = static_cast<int64_t>(nhead_k) * seqlen_k * hdim_v;

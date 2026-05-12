@@ -128,25 +128,32 @@ def _run_kernel_isolated(
 
     Survives GPU faults — if the subprocess crashes, returns an error instead of killing main.
     """
+    import json as _json
     import subprocess as sp
 
-    # Write a small runner script that the subprocess will execute
+    # Write a small runner script that the subprocess will execute.
+    # Use json.dumps for string values to safely escape quotes/backslashes in paths.
+    _lib = _json.dumps(str(lib_path))
+    _arch = _json.dumps(str(arch))
+    _pydir = _json.dumps(str(_DISPATCHER_ROOT / "python"))
+    _ddir = _json.dumps(str(data_dir))
     script = f'''
 import sys, os, numpy as np
 os.environ["HIP_VISIBLE_DEVICES"] = "{gpu_id}"
-sys.path.insert(0, "{_DISPATCHER_ROOT / "python"}")
+sys.path.insert(0, {_pydir})
 from fmha_utils import FmhaRunner, FmhaProblem
 
-runner = FmhaRunner.from_library("{lib_path}", "{arch}")
-Q = np.load("{data_dir}/Q.npy")
-K = np.load("{data_dir}/K.npy")
-V = np.load("{data_dir}/V.npy")
+runner = FmhaRunner.from_library({_lib}, {_arch})
+_d = {_ddir}
+Q = np.load(os.path.join(_d, "Q.npy"))
+K = np.load(os.path.join(_d, "K.npy"))
+V = np.load(os.path.join(_d, "V.npy"))
 prob = FmhaProblem(batch={prob.batch}, nhead_q={prob.nhead_q}, nhead_k={prob.nhead_k},
                    seqlen_q={prob.seqlen_q}, seqlen_k={prob.seqlen_k},
                    hdim_q={prob.hdim_q}, hdim_v={prob.hdim_v})
 result = runner.run(Q, K, V, prob, **{run_kwargs!r})
 if result.success:
-    np.save("{data_dir}/O.npy", result.output)
+    np.save(os.path.join(_d, "O.npy"), result.output)
     print(f"TIME={{result.time_ms}}")
 else:
     print("FAIL")
