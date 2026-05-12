@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -246,7 +246,7 @@ struct vec_wrapper
 };
 
 template<class V>
-__host__ __device__ vec_wrapper(V) -> vec_wrapper<V>;
+vec_wrapper(V) -> vec_wrapper<V>;
 
 /// \brief Returns the maximum of its arguments.
 /// \note This function must be the choice in `__host__ __device__` and preferably on

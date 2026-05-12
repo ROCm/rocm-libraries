@@ -165,7 +165,7 @@ struct generate_threefry
         while(index < vec_n)
         {
             const auto             v = engine.next_leap(stride);
-            cpp_utils::vec_wrapper vs(v);
+            cpp_utils::vec_wrapper<std::remove_cv_t<decltype(v)>> vs(v);
             for(unsigned int s = 0; s < output_per_thread; s++)
             {
                 for(unsigned int i = 0; i < input_width; i++)
