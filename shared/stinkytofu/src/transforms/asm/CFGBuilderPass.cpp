@@ -193,15 +193,25 @@ class CFGBuilderPassImpl : public Pass {
                     }
                 }
 
-                // Check if prevBB should fall through to current bb
-                // This happens when prevBB has no terminator or has a conditional branch
+                // Check if prevBB should fall through to current bb. This holds
+                // when prevBB has no terminator, or its terminator is a
+                // conditional branch (control may fall through when the
+                // condition is false), or its terminator is a call (control
+                // returns to the instruction after the call site).
+                //
+                // Unconditional branches and returns do not fall through. For
+                // calls we still emit a fall-through edge inside the local CFG
+                // even though the call's target lives in another Function;
+                // CallGraphAnalysis is responsible for the inter-Function
+                // call/return edges.
                 bool shouldFallThrough = true;
                 if (prevTerm) {
                     StinkyInstruction* prevTermInst = cast<StinkyInstruction>(prevTerm);
-                    if (isBranch(*prevTermInst)) {
-                        // Unconditional branches don't fall through
-                        // Conditional branches do fall through (when condition is false)
-                        shouldFallThrough = isConditionalBranch(*prevTermInst);
+                    if (isReturn(*prevTermInst)) {
+                        shouldFallThrough = false;
+                    } else if (isBranch(*prevTermInst)) {
+                        shouldFallThrough =
+                            isConditionalBranch(*prevTermInst) || isCall(*prevTermInst);
                     }
                 }
 
