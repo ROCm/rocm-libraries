@@ -8,13 +8,13 @@
 #
 # Where:
 # - test_name_regex   : is a regular expression to match against the fully qualified name of the currently running test (TestSuiteName.TestName).
-# - arch_regex        : is a regular expression that may contain kewords, which will be matched against the gfx id of the current device (eg. gfx942).
+# - arch_regex        : is a regular expression that may contain keywords, which will be matched against the gfx id of the current device (eg. gfx942).
 #                       Please see the section below for a full description of keywords.
 # - size_filter_expr  : is an expression that allows you to filter out ranges of sizes using operators (eg. <, >, ==, *).
 #                       You can also use basic arithmetic operators (+, -, *, /, <<, >>).
 #                       You can specify multiple size filter expressions and separate them with commas.
 #                       Please see the section below for a full description.
-# - build_type        : is a comman-delimited list of build types that will be used to restrict the scope of the current line.
+# - build_type        : is a comma-delimited list of build types that will be used to restrict the scope of the current line.
 #                       For example, you can restrict the effect of the current line to only asan or valgrind builds (or cause it to
 #                       be applied to all builds). See the section below for details.
 # - skip_msg          : is a message to print to stdout when the test is skipped. Note: if environment variable HIPCUB_EXTRA_TC_INFO == 1,
@@ -24,7 +24,7 @@
 # --------
 # Keywords
 # --------
-# Keywords are predifined regex snippets that match a number of related architectures. They must be specified within angle brackets.
+# Keywords are predefined regex snippets that match a number of related architectures. They must be specified within angle brackets.
 # You can embed them in the arch_regex.
 # For example, to specify that the given test(s) should be disabled on all mi300 architectures and on gfx1100, you could use this
 # arch_regex: /<mi300-family>|gfx1100/
@@ -122,10 +122,9 @@
 # ---------------
 # Add rules here:
 #----------------
-
-# Test Regex                               :  Arch Regex                           : Sizes              : Build Types    : Skip Message
-/HipcubDeviceRadixSort\/.*/                :  /<apus>/                             : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
-/HipcubDeviceRadixSortLargeInput.*/        :  /<apus>/                             : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
+# Test Regex                               : Arch Regex                            : Sizes              : Build Types    : Skip Message
+/HipcubDeviceRadixSort\/.*/                : /<apus>/                              : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceRadixSortLargeInput.*/        : /<apus>/                              : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
 
 /HipcubDeviceMergeSort\/.*/                : /<apus>/                              : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
 

@@ -53,13 +53,22 @@
 
 #include "common_test_header.hpp"
 
+// -- Compile-time checks for built types --
+
+// Valgrind
+// Checking if we're running Valgrind require two step:
+// - checking if the main header is included (done here), and
+// - calling the RUNNING_ON_VALGRIND macro at runtime
+//   (done in TestController::is_running_valgrind).
 #if __has_include(<valgrind/valgrind.h>)
     #include <valgrind/valgrind.h>
-    #define IS_VALGRIND_BUILD 1
+    #define HAS_VALGRIND_H 1
 #else
-    #define IS_VALGRIND_BUILD 0
+    #define HAS_VALGRIND_H 0
 #endif
 
+// ASAN
+// Rely on defines/features for this detection.
 #if defined(__SANITIZE_ADDRESS__)
     #define IS_ASAN_BUILD 1
 #elif defined(__has_feature)
@@ -71,6 +80,8 @@
     #define IS_ASAN_BUILD 0
 #endif
 
+// Nvidia platform
+// HIP requires this define on CUDA platforms.
 #if defined(__HIP_PLATFORM_NVIDIA__)
 #define IS_NVIDIA_PLATFORM 1
 #else
@@ -90,16 +101,17 @@ namespace test_controller
 // The main implementation feature are:
 // - Locates and parses a test control file (a text file). For details
 //   on the syntax of this file, please see hipcub/test/control.txt.
-// - Processes arithmetic operators (eg. >, <) or expressions read from
-//   the control file and uses them to filter input sizss.
-// - Translates architecture keywords used in the control file intor
+// - Processes relational (eg. >, <) operators and evaluates arithmetic
+//   expressions for size-based filtering.
+// - Translates architecture keywords used in the control file into
 //   regexes that are matched against the gfx id of the device currently
 //   in use. Please see the control file comments for more on these keywords.
+// - Provides build type detection (eg. ASAN / Valgrind, OS).
 class TestController
 {
 public:
     // This function should be used to retrieve the instance.
-    // There is not public constructor.
+    // Since this is a singleton class, there is no public constructor.
     inline static TestController& get_instance()
     {
         return TestController::get_or_create_instance();
@@ -250,20 +262,6 @@ private:
 
         Token(std::string op) : op(op), val(0), is_val(false)
         {}
-
-        std::string to_str()
-        {
-            if (is_val)
-            {
-                std::stringstream ss;
-                ss << val;
-                return ss.str();
-            }
-            else
-            {
-                return op;
-            }
-        }
     };
 
     // These are filled in by cmake.
@@ -573,6 +571,8 @@ private:
         return qualified_name;
     }
 
+	// Each control line includes a part that allows you to specify the build types that this rule should be applied to.
+	// This function checks if the current build is one of those types.
     bool is_build_type_considered(const ControlInfo& info) const
     {
         return std::any_of(info.build_type_test_fns.begin(), info.build_type_test_fns.end(),
@@ -695,7 +695,7 @@ private:
                 remaining = match.suffix();
             }
 
-            // Left paranethesis: just push directly onto the operator stack.
+            // Left parenthesis: just push directly onto the operator stack.
             else if (std::regex_search(remaining, match, left_paren_regex))
             {
                 op_stack.emplace(match[1].str());
@@ -1044,6 +1044,7 @@ private:
                 // Parse and simplify the size expression.
                 std::vector<Token> postfix_tokens = this->parse_size_expr(size_expr);
                 size_t size = this->reduce_postfix_tokens(postfix_tokens);
+                // Maps operators to functions that implement them.
                 // Note: Treat empty operator as ==
                 const std::unordered_map<std::string, std::function<bool(size_t)>> str_to_filter({
                         {"",   [size](const size_t test_size) {return test_size == size;}},
@@ -1070,9 +1071,10 @@ private:
         }
 
         // -- Process the build_type_part --
-        
+
+		// Maps build types to functions that check if they match the type of the currently running build.
         const std::unordered_map<std::string, std::function<bool()>> str_to_build_type({
-                {"*", []() { return true; }},
+                {"*",        []() { return true; }},
                 {"asan",     TestController::is_running_asan},
                 {"valgrind", TestController::is_running_valgrind},
                 {"nvidia",   TestController::is_nvidia_platform},
@@ -1165,7 +1167,7 @@ private:
     inline static bool is_running_valgrind()
     {
         bool result = false;
-#if IS_VALGRIND_BUILD
+#if HAS_VALGRIND_H
         result = RUNNING_ON_VALGRIND;
 #endif
         return result;
