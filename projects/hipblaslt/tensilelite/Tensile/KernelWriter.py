@@ -2904,21 +2904,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not forceNoTileCode and self.states.staggerUCode:
         module.add(self.declareStaggerParms(kernel))
         # Calculate stagger A(MXSA)
-        if not tdmA:
-          module.add(self.calculateStagger(kernel, tensorParametersA))
+        module.add(self.calculateStagger(kernel, tensorParametersA))
         if kernel["ProblemType"]["MXBlockA"]:
-          if not tdmA:
-            module.add(self.calculateStagger(kernel, tensorParametersA["MX"]))
+          module.add(self.calculateStagger(kernel, tensorParametersA["MX"]))
         if kernel["ProblemType"]["MXBlockB"]:
-          if not tdmB:
-            module.add(self.calculateStagger(kernel, tensorParametersB["MX"]))
+          module.add(self.calculateStagger(kernel, tensorParametersB["MX"]))
         # Calculate stagger Metadata
         if not tdmMetadata and kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
           module.add(self.calculateStagger(kernel,tPM))
         # Calculate stagger B(MXSB)
-        if not tdmB:
-          module.add(self.calculateStagger(kernel, tensorParametersB))
-
+        module.add(self.calculateStagger(kernel, tensorParametersB))
       # LRO and LWA as assigned
       # init lds read pointers before each unrolled loop
       module.addComment0("local read addresses: init pointers a")
@@ -9678,10 +9673,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def tdmApplyStreamKOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
-  def tdmIncrementAB(self, kernel, tP) -> Module:
+  def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:
     assert False, "Should be overrided"
 
-  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB) -> Module:
+  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0) -> Module:
     assert False, "Should be overrided"
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
