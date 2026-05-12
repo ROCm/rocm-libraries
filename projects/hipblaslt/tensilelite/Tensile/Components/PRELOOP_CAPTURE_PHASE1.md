@@ -1100,6 +1100,22 @@ require oram.1 to be fixed first. **The user's choice on 2lzd
 implementation determines whether oram.1's §4 approach catalog
 needs to be implemented or can be abandoned.**
 
+**Merge note (2026-05-12).** Per the user's Q5 decision (see
+`2LZD_INVESTIGATION.md §6.2`), oram.1 is now formally a sub-bead of
+the 2lzd meta-investigation. The meta-bead consolidates 2lzd, the
+z012 family, and oram.1 under a single Approach-A implementation
+umbrella — all three are facets of "make compare_graphs do the right
+thing when comparing two real builds of the same YAML." Approach A
+has been picked (not D or H), so oram.1 must be solved on its own
+merits as called out above; the merge formalizes that coupling
+without changing the technical work this section describes.
+
+The §4 approach catalog for body-label-tolerance remains the
+implementation surface for oram.1; it is not absorbed into the
+meta-bead's scope. The meta-bead tracks joint resolution (Approach-A
+cannot land without oram.1 plus z012); each sub-bead retains its own
+implementation work.
+
 ### Sub-bead reference
 
 A child bead has been filed under `rocm-libraries-oram` to

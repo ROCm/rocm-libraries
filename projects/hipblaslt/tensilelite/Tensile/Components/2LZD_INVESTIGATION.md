@@ -765,7 +765,9 @@ mechanics. They should be left in place by every approach above.
    with (a). All three are coherent contracts; the user needs to
    pick.
 
-2. **Is the per-tile schedule's right to mutate `kernel` flags
+2. **RESOLVED 2026-05-12: implementation-detail reading.** User input is the YAML; Tensilelite is free to mutate kernel state on either side. The comparison is YAML-to-YAML, not post-mutation-kernel-to-pre-mutation-kernel. UsePLRPack-divergence and similar prologue-shape divergences are expected and will be addressed by oram.1's body-label-tolerance work, not avoided by Approach A's setup.
+
+   **Is the per-tile schedule's right to mutate `kernel` flags
    considered part of the schedule's API surface, or an
    implementation detail of CMS?** If the former, A (true default
    build) intrinsically can't validate the post-mutation kernel
@@ -773,7 +775,9 @@ mechanics. They should be left in place by every approach above.
    If the latter, A is well-defined. This affects whether contract
    (a) is even tractable.
 
-3. **How much build-time cost is tolerable on the assert path?**
+3. **RESOLVED 2026-05-12: build-time is not a current concern.** Correctness first. Build-time optimization (caching the reference kernel, gating to test/CI, etc.) is deferred until correctness lands.
+
+   **How much build-time cost is tolerable on the assert path?**
    Approach A doubles per-build cost; Approach E triples. Approach
    C is free at runtime; H is ~2x. If build-time is a hard
    constraint, only C, D, and H (with H gated to test/CI) survive.
@@ -783,7 +787,9 @@ mechanics. They should be left in place by every approach above.
    reality" check?** If yes, Approach C (with B-2) is sufficient and
    the current architecture stays. If no, one of A/D/G/H is required.
 
-5. **Should 2lzd and the Z012 family be merged?** Z012's §6 + the
+5. **RESOLVED 2026-05-12: merge into one larger investigation, INCLUDING oram.1 (preloop body-label work).** All three beads (2lzd, z012-family, oram.1) are facets of "make compare_graphs do the right thing when comparing two real builds of the same YAML." File a meta-bead that supersedes them; keep the existing beads open as sub-beads of the meta.
+
+   **Should 2lzd and the Z012 family be merged?** Z012's §6 + the
    "category-tagging-strategy divergence (multiple families)"
    investigation document the same root pattern that 2lzd's (B)
    and (B-2) are concrete instances of. Approach C cannot be
@@ -975,6 +981,37 @@ consequences beyond the principle-level ones below):
   (added this commit): restated test intent in shadow-free terms.
 - Bead `rocm-libraries-2lzd` comment recording this decision.
 - Bead `rocm-libraries-oram.1` priority bumped to P0.
+
+### §6.2 — Q2/Q3/Q5 follow-up decisions (2026-05-12)
+
+User decisions on the §5 open questions, recorded post-Approach-A pick:
+
+- **Q2 → implementation-detail reading.** Validation comparison is
+  YAML-in, two builds out (one with `UseCustomMainLoopSchedule=1`, one
+  with `=0`). Whatever Tensilelite mutates internally on either side
+  is accepted as part of "what that build does." Specifically,
+  `UsePLRPack=False` on the non-CMS side (per `dispatch.py:546`) and
+  `UsePLRPack=True` on the CMS side (per the per-tile schedule, e.g.
+  `_128x128x32_TF32.py:120`) is an EXPECTED divergence — the prologue
+  shapes will differ, and oram.1's body-label-tolerance work is
+  what makes that comparison succeed.
+
+- **Q3 → build-time deferred.** ~2x build-time on the assert path is
+  acceptable in the near-term. Caching, test/CI-only gating, and
+  process-pool isolation are all reserved for after correctness lands.
+
+- **Q5 → merge into one meta-investigation.** 2lzd, the z012 family
+  (`Z012_ALTERNATIVE_FIXES_INVESTIGATION.md` + `EXAMPLE_YAML_DEFECT_INVESTIGATION.md`),
+  AND oram.1 are merged under a new meta-bead. Sub-bead structure:
+  - 2lzd remains the umbrella for the Approach-A implementation.
+  - z012 (category-tagging-strategy divergence) becomes a sub-bead.
+  - oram.1 (compare_graphs body-label-sensitivity) becomes a sub-bead.
+  - The meta-bead tracks the joint resolution (no Approach-A
+    implementation can land without addressing both z012 and oram.1).
+
+The meta-bead is filed as `rocm-libraries-71hw` with the
+parent/child wiring set up via `br dep add` (2lzd and oram.1 are
+sub-beads of the meta).
 
 ---
 
