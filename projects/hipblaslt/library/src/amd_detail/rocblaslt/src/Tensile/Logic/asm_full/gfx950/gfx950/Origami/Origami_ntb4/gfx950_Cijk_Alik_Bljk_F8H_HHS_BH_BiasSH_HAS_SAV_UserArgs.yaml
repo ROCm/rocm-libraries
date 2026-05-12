@@ -2,7 +2,7 @@
 - gfx950
 - gfx950
 - [Device 75a0]
-- Activation: 1
+- Activation: True
   ActivationComputeDataType: 0
   ActivationFuncCall: false
   ActivationNoGuard: false
@@ -10,7 +10,7 @@
   AllowNoFreeDims: false
   AssignedDerivedParameters: true
   Batched: true
-  BetaOnlyUseBias: 0
+  BetaOnlyUseBias: False
   BiasDataTypeList: [0, 4]
   BiasSrc: D
   ComplexConjugateA: false
