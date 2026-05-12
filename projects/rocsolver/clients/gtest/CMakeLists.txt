@@ -138,6 +138,8 @@ set(rocrefact_test_source
 set(rocunit_test_source
   # gemm
   unit/gemm_gtest.cpp
+  # generate helpers
+  unit/gerand_gtest.cpp
 )
 
 set(others_test_source
