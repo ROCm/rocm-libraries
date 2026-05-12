@@ -4952,6 +4952,13 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "LoopIters need to greater than 0")
       return
 
+    # In Solution.py, reject SIA3 + PLR>0 + PGR2 when DepthU is too small for                                                                                                                                    
+    # the prefetch scheduling to avoid VGPR WAR hazards  
+    if state["ScheduleIterAlg"] == 3 and state["PrefetchLocalRead"] > 0 \
+       and state["PrefetchGlobalRead"] == 2 and state["LoopIters"] <= 1:
+      reject(state, printRejectionReason, "ScheduleIterAlg=3 with PrefetchLocalRead and PrefetchGlobalRead=2 requires LoopIters > 1")
+      return
+
     # Since we use PLR >= LoopIters for allocating numberOfIters vgprBuffer for a while
     # we need to support both PLR >= LoopIters and CLR parameter for solutions in rocBLAS
     if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["_ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"]:
