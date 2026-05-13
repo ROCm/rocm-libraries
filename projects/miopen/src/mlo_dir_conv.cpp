@@ -204,14 +204,7 @@ static auto GetBwdWrW2DSolvers()
 {
     return miopen::solver::SolverContainer<miopen::solver::conv::ConvAsmBwdWrW1x1,
                                            miopen::solver::conv::ConvAsmBwdWrW3x3,
-                                           miopen::solver::conv::ConvOclBwdWrW2<1>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<2>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<4>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<8>,
-                                           miopen::solver::conv::ConvOclBwdWrW2<16>,
-                                           miopen::solver::conv::ConvOclBwdWrW2NonTunable,
                                            miopen::solver::conv::ConvOclBwdWrW53,
-                                           miopen::solver::conv::ConvOclBwdWrW1x1,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw>{};
