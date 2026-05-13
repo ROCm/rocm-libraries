@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
-//#include "print_matrix.hpp"
 
 #include <cmath>
 #include <complex>
@@ -115,6 +114,8 @@ void testing_hbrand(Arguments& argus)
     int64_t nfilled  = 0;
     int64_t nzero_re = 0, nzero_im = 0;
 
+    // Lambda to check that re_ is in (-1, 1) and if complex im_ is in (-1, 1).
+    // Also counts number of entries and zero entries.
     auto expect_in_range = [&](S re_, S im_, const char* loc) {
         EXPECT_GT(re_, S(-1)) << loc << " re out of range";
         EXPECT_LT(re_, S( 1)) << loc << " re out of range";

@@ -246,7 +246,7 @@ void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int
 
                 // Within the requested ku bandwidth, copy conj of lower band
                 // to upper band, A{j, j+k} = conj( A{j+k, j} ).
-                if(k < ku)
+                if(k <= ku)
                 {
                     Aband[idiag - k + (j + k) * ldab] = sconj(Aband[idiag + k + j * ldab]);
                 }
@@ -262,29 +262,30 @@ void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int
 
                 // Within the requested kl bandwidth, copy conj of upper band
                 // to lower band, A{j, j+k} = conj( A{j+k, j} ).
-                if(k < kl)
+                if(k <= kl)
                 {
                     Aband[idiag + k + j * ldab] = sconj(Aband[idiag - k + (j + k) * ldab]);
                 }
             }
         }
-    }
 
-    // Mark entries outside the band structure as nan,
-    // to ensure we don't use them.
-    for(rocblas_int j = 0; j < ku; ++j)
-    {
-        for(rocblas_int k = 0; k < ku - j; ++k)
+        // Mark entries outside the band as nan, to ensure we don't use them.
+        // Upper band
+        if (j < ku)
         {
-            Aband[k + j * ldab] = nan;
+            for(rocblas_int k = 0; k < ku - j; ++k)
+            {
+                Aband[k + j * ldab] = nan;
+            }
         }
-    }
-    // For lower band, work from right-most column (n-1) to left.
-    for(rocblas_int j = 0; j < kl; ++j)
-    {
-        for(rocblas_int k = j; k < kl; ++k)
+
+        // Lower band
+        if (j > n - 1 - kl)
         {
-            Aband[idiag + 1 + k + (n - 1 - j) * ldab] = nan;
+            for(rocblas_int k = n - 1 - j; k < kl; ++k)
+            {
+                Aband[idiag + 1 + k + j * ldab] = nan;
+            }
         }
     }
 }
