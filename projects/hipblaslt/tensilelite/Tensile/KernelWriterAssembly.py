@@ -13210,6 +13210,8 @@ class KernelWriterAssembly(KernelWriter):
     self.sgprPool.checkIn(tmpspgr1)
     self.sgprPool.checkIn(tmpspgr2)
 
+    module.add(self.shiftSrd("TD"))
+
     return module
 
   def globalWriteWorkGroupInit(self, kernel):
