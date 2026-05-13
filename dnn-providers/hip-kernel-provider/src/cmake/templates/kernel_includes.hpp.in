@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-@HEADER_DECLARATIONS @
+@HEADER_DECLARATIONS@
 
     namespace hip_plugin
 {

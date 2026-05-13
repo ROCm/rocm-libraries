@@ -24,7 +24,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormUtilities.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/ApplicabilityChecks.cpp
-    ${HIP_KERNEL_ENGINE_GENERATED_SOURCES}
+    
 )
 
 target_include_directories(hip_kernel_provider_impl PUBLIC
@@ -32,5 +32,3 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
 )
 
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_HIP_KERNEL=1)
-
-set_source_files_properties(${HIP_KERNEL_ENGINE_GENERATED_SOURCES} TARGET_DIRECTORY hip_kernel_provider_impl PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")

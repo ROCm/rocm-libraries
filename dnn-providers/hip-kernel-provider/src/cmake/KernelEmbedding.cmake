@@ -23,10 +23,6 @@ function(add_kernels_for_embedding)
     foreach(KERNEL_FILE IN LISTS ARGV)
         set_property(GLOBAL APPEND PROPERTY KERNELEMBEDDING_KERNEL_FILES ${KERNEL_FILE})
     endforeach()
-    
-    
-    # for debugging purposes
-    get_property(_KERNELEMBEDDING_KERNEL_FILES_OLD GLOBAL PROPERTY KERNELEMBEDDING_KERNEL_FILES)
 endfunction()
 
 # Function to embed kernel sources as C++ strings at configure time
@@ -41,7 +37,6 @@ function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OU
     set(HEADER_FILENAMES "")
 
     foreach(KERNEL_FILE ${KERNEL_FILES})
-        message(STATUS "Reading ${KERNEL_FILE}")
         file(READ ${KERNEL_FILE} KERNEL_CONTENT)
         get_filename_component(KERNEL_NAME ${KERNEL_FILE} NAME_WE)
         get_filename_component(KERNEL_FILENAME ${KERNEL_FILE} NAME)
@@ -79,32 +74,29 @@ function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OU
 
     # Generate kernel source files
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/templates/kernel_sources.hpp.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/templates/kernel_sources.hpp.in
         ${OUTPUT_SRCS_HPP}
         @ONLY
     )
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/templates/kernel_sources.cpp.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/templates/kernel_sources.cpp.in
         ${OUTPUT_SRCS_CPP}
         @ONLY
     )
 
     # Generate kernel include files
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/templates/kernel_includes.hpp.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/templates/kernel_includes.hpp.in
         ${OUTPUT_INCS_HPP}
         @ONLY
     )
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/templates/kernel_includes.cpp.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/templates/kernel_includes.cpp.in
         ${OUTPUT_INCS_CPP}
         @ONLY
     )
-endfunction()
 
-# Set output variable for generated kernel source files
-set(HIP_KERNEL_ENGINE_GENERATED_SOURCES
-    ${CMAKE_CURRENT_BINARY_DIR}/kernel_sources.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/kernel_includes.cpp
-    PARENT_SCOPE
-)
+    # set_source_files_properties(${OUTPUT_INCS_CPP} PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
+    # set_source_files_properties(${OUTPUT_SRCS_CPP} PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
+
+   endfunction()

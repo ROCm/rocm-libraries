@@ -6,7 +6,7 @@
 
 #include <string_view>
 
-@KERNEL_DECLARATIONS @
+@KERNEL_DECLARATIONS@
 
     namespace hip_plugin
 {

@@ -8,7 +8,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <unordered_map>
 
-@KERNEL_DEFINITIONS @
+@KERNEL_DEFINITIONS@
 
     namespace hip_plugin
 {
@@ -17,7 +17,7 @@
     {
         static const std::unordered_map<std::string_view, std::string_view> s_kernelMap
         {
-            @KERNEL_MAP_ENTRIES @
+            @KERNEL_MAP_ENTRIES@
         };
         return s_kernelMap;
     }
