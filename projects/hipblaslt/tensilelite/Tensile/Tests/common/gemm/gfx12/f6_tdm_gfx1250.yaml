@@ -90,3 +90,5 @@ BenchmarkProblems:
           - Exact: [128, 126, 1, 272] # N-edge + tail
           - Exact: [126, 126, 1, 256] # M+N edge
           - Exact: [126, 126, 1, 272] # M+N edge + tail
+          - Exact: [128, 128, 4, 256] # batch=4
+          - Exact: [126, 128, 2, 272] # batch=2 + M-edge + tail

@@ -87,6 +87,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 272] # tail
           - Exact: [126, 128, 1, 272] # M-edge + tail
           - Exact: [126, 126, 1, 272] # M+N edge + tail
+          - Exact: [128, 128, 2, 256] # batch=2
 
   #######################################
   # TN - A=F6, B=F4, BF16 output
@@ -150,3 +151,4 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 272] # tail
           - Exact: [128, 126, 1, 272] # N-edge + tail
           - Exact: [126, 126, 1, 272] # M+N edge + tail
+          - Exact: [128, 128, 2, 256] # batch=2
