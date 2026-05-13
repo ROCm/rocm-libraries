@@ -951,8 +951,6 @@ def make_128x96_bf16_pgr1_wg4x1():
         lrB=ReadGranularity(mn=1, k=1),
         grA=grA,
         grB=grB,
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=1,
     )
 
