@@ -55,7 +55,7 @@ from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
 from Tensile.Common.Architectures import isaToGfx, gfxToVariants
-from Tensile.Common.GlobalParameters import globalParameters, startTime
+from Tensile.Common.GlobalParameters import globalParameters, startTime, defaultBenchmarkCommonParameters
 from Tensile.Common.TimingInstrumentation import timing_context
 
 
@@ -137,11 +137,11 @@ def _getCustomKernelSolutionObj(
     """Creates the Solution object for a custom kernel"""
     sol = getCustomKernelConfig(kernelName, internalSupportParams, directory)
 
-    mi = sol["MatrixInstruction"]
+    mi = sol.get('MatrixInstruction', [])
     isa = next(iter(isaInfoMap.keys()))
     wavefrontSize = sol["WavefrontSize"]
     ptype = sol["ProblemType"]
-    workgroup = sol.get("WorkGroup", None)
+    workgroup = sol.get("WorkGroup", next((d["WorkGroup"][0] for d in defaultBenchmarkCommonParameters if "WorkGroup" in d), None))
 
     if len(mi) == 9:
         miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap)

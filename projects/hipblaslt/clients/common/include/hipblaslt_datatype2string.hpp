@@ -65,14 +65,43 @@ typedef enum class _hipblaslt_scaling_format
     Scalar                  = 1,
     Vector                  = 2,
     Block_32_UE8M0          = 3,
+    Block_16_UE8M0          = 4,
+    Block_32_UE4M3          = 5,
+    Block_16_UE4M3          = 6,
+    Block_32_UE5M3          = 7,
+    Block_16_UE5M3          = 8,
     Block_32_UE8M0_32_8_EXT = 1001,
 } hipblaslt_scaling_format;
+
+inline hipDataType scaleDataType(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_16_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return HIP_R_8F_UE8M0;
+    case hipblaslt_scaling_format::Block_32_UE4M3:
+    case hipblaslt_scaling_format::Block_16_UE4M3:
+        return HIP_R_8F_E4M3;
+    case hipblaslt_scaling_format::Block_32_UE5M3:
+    case hipblaslt_scaling_format::Block_16_UE5M3:
+        return static_cast<hipDataType>(HIP_R_8F_E5M3_EXT);
+    default:
+        return HIP_R_8F_UE8M0;
+    }
+}
 
 inline bool isBlockScaling(hipblaslt_scaling_format s)
 {
     switch(s)
     {
     case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_16_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE4M3:
+    case hipblaslt_scaling_format::Block_16_UE4M3:
+    case hipblaslt_scaling_format::Block_32_UE5M3:
+    case hipblaslt_scaling_format::Block_16_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
         return true;
     default:
@@ -85,8 +114,14 @@ inline int blockSize(hipblaslt_scaling_format s)
     switch(s)
     {
     case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE4M3:
+    case hipblaslt_scaling_format::Block_32_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
         return 32;
+    case hipblaslt_scaling_format::Block_16_UE8M0:
+    case hipblaslt_scaling_format::Block_16_UE4M3:
+    case hipblaslt_scaling_format::Block_16_UE5M3:
+        return 16;
     default:
         return 1;
     }

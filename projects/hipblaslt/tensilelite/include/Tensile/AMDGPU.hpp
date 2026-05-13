@@ -76,7 +76,10 @@ namespace TensileLite
             gfx1152 = 1152,
             gfx1153 = 1153,
             gfx1200 = 1200,
-            gfx1201 = 1201
+            gfx1201 = 1201,
+            gfx1250 = 1250,
+            gfx1300 = 1300,
+            gfx1310 = 1310
         };
 
         static Processor toProcessor(std::string archName)
@@ -173,6 +176,18 @@ namespace TensileLite
             {
                 return Processor::gfx1201;
             }
+            else if(archName.find("gfx1250") != std::string::npos)
+            {
+                return Processor::gfx1250;
+            }
+            else if(archName.find("gfx1300") != std::string::npos)
+            {
+                return Processor::gfx1300;
+            }
+            else if(archName.find("gfx1310") != std::string::npos)
+            {
+                return Processor::gfx1310;
+            }
             return static_cast<Processor>(0);
         }
 
@@ -226,6 +241,12 @@ namespace TensileLite
                 return "gfx1200";
             case AMDGPU::Processor::gfx1201:
                 return "gfx1201";
+            case AMDGPU::Processor::gfx1250:
+                return "gfx1250";
+            case AMDGPU::Processor::gfx1300:
+                return "gfx1300";
+            case AMDGPU::Processor::gfx1310:
+                return "gfx1310";
             case AMDGPU::Processor::gfx000:
                 return "gfx000";
             }

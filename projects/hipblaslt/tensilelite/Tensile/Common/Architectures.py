@@ -67,6 +67,9 @@ architectureMap = {
     "gfx1153": "gfx1153",
     "gfx1200": "gfx1200",
     "gfx1201": "gfx1201",
+    "gfx1250": "gfx1250",
+    "gfx1300": "gfx1300",
+    "gfx1310": "gfx1310",
 }
 
 gfxVariantMap = {
@@ -99,6 +102,9 @@ SUPPORTED_ISA = [
     IsaVersion(11, 5, 3),
     IsaVersion(12, 0, 0),
     IsaVersion(12, 0, 1),
+    IsaVersion(12, 5, 0),
+    IsaVersion(13, 0, 0),
+    IsaVersion(13, 1, 0),
 ]
 
 SUPPORTED_ARCH_DEVICE_IDS = {

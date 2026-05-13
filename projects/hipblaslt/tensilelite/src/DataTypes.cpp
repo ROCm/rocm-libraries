@@ -73,12 +73,28 @@ namespace rocisa
             return "F8B8N";
         case rocisa::DataType::BFloat8Float8_fnuz:
             return "B8F8N";
+#ifdef TENSILE_USE_FP6
+        case rocisa::DataType::Float6:
+            return "F6";
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+        case rocisa::DataType::BFloat6:
+            return "B6";
+#endif // #ifdef TENSILE_USE_BF6
+#ifdef TENSILE_USE_FP4
+        case rocisa::DataType::Float4:
+            return "F4";
+#endif // #ifdef TENSILE_USE_FP4
+        case rocisa::DataType::E8:
+            return "E8";
+        case rocisa::DataType::E5M3:
+            return "E5M3";
         case rocisa::DataType::Count:;
         }
         return "Invalid";
     }
 
-    size_t GetElementSize(rocisa::DataType d)
+    float GetElementSize(rocisa::DataType d)
     {
         switch(d)
         {
@@ -120,6 +136,22 @@ namespace rocisa
             return TensileLite::TypeInfo<Float8BFloat8_fnuz>::ElementSize;
         case rocisa::DataType::BFloat8Float8_fnuz:
             return TensileLite::TypeInfo<BFloat8Float8_fnuz>::ElementSize;
+#ifdef TENSILE_USE_FP6
+        case rocisa::DataType::Float6:
+            return TensileLite::TypeInfo<TensileLite::Float6x16>::ElementSize;
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+        case rocisa::DataType::BFloat6:
+            return TensileLite::TypeInfo<TensileLite::BFloat6x16>::ElementSize;
+#endif // #ifdef TENSILE_USE_BF6
+#ifdef TENSILE_USE_FP4
+        case rocisa::DataType::Float4:
+            return TensileLite::TypeInfo<TensileLite::Float4x2>::ElementSize;
+#endif // #ifdef TENSILE_USE_FP4
+        case rocisa::DataType::E8:
+            return TensileLite::TypeInfo<TensileLite::E8>::ElementSize;
+        case rocisa::DataType::E5M3:
+            return TensileLite::TypeInfo<TensileLite::E5M3>::ElementSize;
         case rocisa::DataType::Count:;
         }
         return 1;
@@ -210,7 +242,6 @@ namespace TensileLite
 
         info.packing     = T_Info::Packing;
         info.elementSize = T_Info::ElementSize;
-        info.segmentSize = T_Info::SegmentSize;
 
         info.isComplex  = T_Info::IsComplex;
         info.isIntegral = T_Info::IsIntegral;
@@ -239,6 +270,17 @@ namespace TensileLite
         registerTypeInfo<BFloat8Float8>();
         registerTypeInfo<Float8BFloat8_fnuz>();
         registerTypeInfo<BFloat8Float8_fnuz>();
+#ifdef TENSILE_USE_FP6
+        registerTypeInfo<Float6x16>();
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+        registerTypeInfo<BFloat6x16>();
+#endif // #ifdef TENSILE_USE_BF6
+#ifdef TENSILE_USE_FP4
+        registerTypeInfo<Float4x2>();
+#endif // #ifdef TENSILE_USE_FP4
+        registerTypeInfo<E8>();
+        registerTypeInfo<E5M3>();
     }
 
     void DataTypeInfo::registerAllTypeInfoOnce()

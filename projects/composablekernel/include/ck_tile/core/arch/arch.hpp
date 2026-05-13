@@ -1384,6 +1384,10 @@ struct gfx125_t
 struct gfx13_t
 {
 };
+
+struct gfx1310_t
+{
+};
 struct gfx_invalid_t
 {
 };

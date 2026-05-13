@@ -17,12 +17,18 @@ set(SUPPORTED_ARCHITECTURES
     "gfx1153"
     "gfx1200"
     "gfx1201"
+    "gfx1250"
+    "gfx1300"
+    "gfx1310"
     "gfx908:xnack+"
     "gfx908:xnack-"
     "gfx90a:xnack+"
     "gfx90a:xnack-"
     "gfx942:xnack+"
-    "gfx950:xnack+"    
+    "gfx950:xnack+"
+    "gfx1250:xnack+"
+    "gfx1300:xnack+"
+    "gfx1310:xnack+"
 )
 
 # Base architectures - used when "all" is specified for GPU_TARGETS
@@ -41,7 +47,11 @@ if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
         "gfx908:xnack+"
         "gfx90a:xnack+"
         "gfx942:xnack+"
-        "gfx950:xnack+")
+        "gfx950:xnack+"
+        "gfx1250:xnack+"
+        "gfx1300:xnack+"
+        "gfx1310:xnack+"
+    )
 else()
     # For non address sanitizer builds, "all" is non-xnack architectures.
     set(BASE_ARCHITECTURES
@@ -57,7 +67,11 @@ else()
         "gfx1152"
         "gfx1153"
         "gfx1200"
-        "gfx1201")
+        "gfx1201"
+        "gfx1250"
+        "gfx1300"
+        "gfx1310"
+    )
 endif()
 
 # Validate that all BASE_ARCHITECTURES are in the SUPPORTED_ARCHITECTURES list

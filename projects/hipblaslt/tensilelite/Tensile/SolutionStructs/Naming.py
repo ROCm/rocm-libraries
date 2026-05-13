@@ -132,7 +132,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     components.append(f'{getParameterNameAbbreviation("MacroTile")}{state["MacroTile0"]}x{state["MacroTile1"]}x{state["DepthU"]}')
 
   if "MatrixInstM" in state:
-    components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{state["MatrixInstM"]}x{state["MatrixInstN"]}x{state["MatrixInstB"]}')
+    components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{state["MatrixInstM"]}x{state["MatrixInstN"]}x{state["MatrixInstK"]}x{state["MatrixInstB"]}')
     requiredParametersTemp.add("MIWaveTile")
   else:
     requiredParametersTemp.add("ThreadTile")

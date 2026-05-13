@@ -177,8 +177,9 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             MIBShape0 = kernel["MatrixInstM"] * kernel["MatrixInstBM"]
             MIBShape1 = kernel["MatrixInstN"] * kernel["MatrixInstBN"]
 
-            matrixInstM = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstM"]
-            matrixInstN = kernel["MatrixInstN"] * kernel["MatrixInstBN"] if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstN"]
+            matrixInstT = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+            matrixInstM = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else matrixInstT
+            matrixInstN = kernel["MatrixInstN"] * kernel["MatrixInstBN"] if (kernel["MatrixInstN"] == 4) else matrixInstT
 
             module = Module("ComputeStoreVgprsMFMA")
 
@@ -190,7 +191,13 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             module.add(VMulLOU32(dst=vgpr(tid1), src0=hex(MIBShape1), src1=vgpr(tmpVgpr0), comment="wave coordination offset 1"))
 
             # coord 1 : thread part
-            module.add(vectorStaticRemainder(dummy, tmpVgpr0, "Serial", matrixInstN, tmpVgpr1Res, tmpSgprInfo))
+            if writer.states.asmCaps["HasWMMA_V4"]:
+                # v_and_b32 v13, 31, v[/*v22*/vgprSerial]
+                # v_lshrrev_b32 v13, 1, v13                // 0xd = Serial / 2
+                module.add(vectorStaticRemainder(dummy, tmpVgpr0, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))
+                module.add(vectorStaticDivide(tmpVgpr0, tmpVgpr0, 2, tmpVgpr1Res))
+            else:
+                module.add(vectorStaticRemainder(dummy, tmpVgpr0, "Serial", matrixInstN, tmpVgpr1Res, tmpSgprInfo))
             module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid1), src0=vgpr(tmpVgpr0), src1=vgpr(tid1), shiftHex=log2(kernel["VectorWidthB"]), comment="coordination 1 = vwB *(wave_id1 + tid1)"))
 
             # coord 1 : offset part
@@ -211,8 +218,11 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             module.add(VMulLOU32(dst=vgpr(tmpVgpr0), src0=hex(MIBShape0), src1=vgpr(tmpVgpr0), comment="wave coordination offset 0"))
 
             # coord 0 : thread part
-            module.add(vectorStaticRemainder(dummy, tid0, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))
-            module.add(vectorStaticDivide(tid0, tid0, matrixInstN, tmpVgpr1Res))
+            if writer.states.asmCaps["HasWMMA_V4"]:
+                module.add(vectorStaticRemainder(dummy, tid0, "Serial", 2, tmpVgpr1Res, tmpSgprInfo))
+            else:
+                module.add(vectorStaticRemainder(dummy, tid0, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))
+                module.add(vectorStaticDivide(tid0, tid0, matrixInstN, tmpVgpr1Res))
             module.add(vectorStaticMultiply(vgpr(tid0), vgpr(tid0), kernel["MIOutputVectorWidth"], tmpSgprInfo, "thread0 * continuous_output"))
             module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid0), src0=vgpr(tmpVgpr0), src1=vgpr(tid0), shiftHex=log2(kernel["VectorWidthA"]), comment="coordination 0 = vwA *(wave_id0 + tid0)"))
 
@@ -297,11 +307,11 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
             MIBShape0 = kernel["MatrixInstM"] * kernel["MatrixInstBM"]
             MIBShape1 = kernel["MatrixInstN"] * kernel["MatrixInstBN"]
 
-            matrixInstM = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstM"]
-            matrixInstN = kernel["MatrixInstN"] * kernel["MatrixInstBN"] if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstN"]
+            matrixInstT = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+            matrixInstM = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else matrixInstT
+            matrixInstN = kernel["MatrixInstN"] * kernel["MatrixInstBN"] if (kernel["MatrixInstN"] == 4) else matrixInstT
 
             module = Module("ComputeStoreVgprsMFMASwap")
-
 
             # coord 1 : wave part
             module.add(vectorStaticDivide(wave_id, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res))
@@ -311,8 +321,11 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
             module.add(VMulLOU32(dst=vgpr(tmpVgpr0), src0=hex(MIBShape1), src1=vgpr(tmpVgpr0), comment="wave coordination offset 1"))
 
             # coord 1 : thread part
-            module.add(vectorStaticRemainder(dummy, tid1, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))
-            module.add(vectorStaticDivide(tid1, tid1, matrixInstM, tmpVgpr1Res))
+            if writer.states.asmCaps["HasWMMA_V4"]:
+                module.add(vectorStaticRemainder(dummy, tid1, "Serial", 2, tmpVgpr1Res, tmpSgprInfo))
+            else:
+                module.add(vectorStaticRemainder(dummy, tid1, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))
+                module.add(vectorStaticDivide(tid1, tid1, matrixInstM, tmpVgpr1Res))
             module.add(vectorStaticMultiply(vgpr(tid1), vgpr(tid1), kernel["MIOutputVectorWidth"], tmpSgprInfo, "thread0 * continuous_output"))
             module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid1), src0=vgpr(tmpVgpr0), src1=vgpr(tid1), shiftHex=log2(kernel["VectorWidthB"]), comment="coordination 1 = vwB *(wave_id1 + tid1)"))
 
@@ -334,7 +347,11 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
             module.add(VMulLOU32(dst=vgpr(tid0), src0=hex(MIBShape0), src1=vgpr(tid0), comment="wave coordination offset 0"))
 
             # coord 0 : thread part
-            module.add(vectorStaticRemainder(dummy, tmpVgpr0, "Serial", matrixInstM, tmpVgpr1Res, tmpSgprInfo))
+            if writer.states.asmCaps["HasWMMA_V4"]:
+                module.add(vectorStaticRemainder(dummy, tmpVgpr0, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))
+                module.add(vectorStaticDivide(tmpVgpr0, tmpVgpr0, 2, tmpVgpr1Res))
+            else:
+                module.add(vectorStaticRemainder(dummy, tmpVgpr0, "Serial", matrixInstM, tmpVgpr1Res, tmpSgprInfo))
             module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid0), src0=vgpr(tmpVgpr0), src1=vgpr(tid0), shiftHex=log2(kernel["VectorWidthA"]), comment="coordination 0 = vwA * (wave_id0 + tid0)"))
 
             wg0="WorkGroup0"

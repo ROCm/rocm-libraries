@@ -584,6 +584,8 @@ namespace TensileLite
         gemm.m_tensors[ContractionProblemGemm::TENSOR::METADATA]   = TensorDescriptor("metadata");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::AMAXD]      = TensorDescriptor("amaxD");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED] = TensorDescriptor("compressed");
+        gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSA]       = TensorDescriptor("mx-a");
+        gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSB]       = TensorDescriptor("mx-b");
         return gemm;
     }
 
@@ -682,6 +684,34 @@ namespace TensileLite
         consistencyCheck();
         normalize();
         calcArithmeticIntensity();
+    }
+
+    void ContractionProblemGemm::setMXScaleA(rocisa::DataType mxTypeA, int mxBlockA, std::vector<size_t> saStride)
+    {
+        m_mxBlockA = mxBlockA;
+        m_mxTypeA = mxTypeA;
+
+        if (mxBlockA)
+        {
+            std::vector<size_t> saSizes = m_tensors[ContractionProblemGemm::TENSOR::A].sizes();
+            saSizes[m_boundIndices[0].a] = (saSizes[m_boundIndices[0].a] + mxBlockA - 1) / mxBlockA;
+            TensorDescriptor mxsa("mx-a", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
+            m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
+        }
+    }
+
+    void ContractionProblemGemm::setMXScaleB(rocisa::DataType mxTypeB, int mxBlockB, std::vector<size_t> sbStride)
+    {
+        m_mxBlockB = mxBlockB;
+        m_mxTypeB = mxTypeB;
+
+        if (mxBlockB)
+        {
+            std::vector<size_t> sbSizes = m_tensors[ContractionProblemGemm::TENSOR::B].sizes();
+            sbSizes[m_boundIndices[0].b] = (sbSizes[m_boundIndices[0].b] + mxBlockB - 1) / mxBlockB;
+            TensorDescriptor mxsb("mx-b", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
+            m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
+        }
     }
 
     size_t ContractionProblemGemm::toAPos(size_t idx) const
@@ -969,14 +999,12 @@ namespace TensileLite
                     compressed_sizes[0] /= 2;
                     compressed_strides[1] = compressed_sizes[0];
                     metadata_sizes[0]     = compressed_sizes[0] / 4;
-                    metadata_strides[1]   = metadata_sizes[0];
                 }
                 else
                 {
                     compressed_sizes[1] /= 2;
                     metadata_sizes[1]   = compressed_sizes[0];
                     metadata_sizes[0]   = compressed_sizes[1] / 4;
-                    metadata_strides[1] = metadata_sizes[0];
                 }
             }
             else
@@ -986,16 +1014,19 @@ namespace TensileLite
                     compressed_sizes[1] /= 2;
                     metadata_sizes[0]   = compressed_sizes[1] / 4;
                     metadata_sizes[1]   = compressed_sizes[0];
-                    metadata_strides[1] = metadata_sizes[0];
                 }
                 else
                 {
                     compressed_sizes[0] /= 2;
                     compressed_strides[1] = compressed_sizes[0];
                     metadata_sizes[0]     = compressed_sizes[0] / 4;
-                    metadata_strides[1]   = metadata_sizes[0];
                 }
             }
+            if(m_metadataLayout)
+            {
+                std::swap(metadata_sizes[0], metadata_sizes[1]);
+            }
+            metadata_strides[1]   = metadata_sizes[0];
 
             for(int i = 2; i < compressed_sizes.size(); i++)
             {
@@ -1186,7 +1217,9 @@ namespace TensileLite
             cSize *= 2; // Include read C and write D in gbytes
         }
         double gbyte
-            = (aSize * a().elementBytes() + bSize * b().elementBytes() + cSize * c().elementBytes())
+            = (multiplyElementSize(aSize, a().elementBytes()) +
+               multiplyElementSize(bSize, b().elementBytes()) +
+               multiplyElementSize(cSize, c().elementBytes()))
               * 1e-9;
 
         m_arithmeticIntensity = gflop / gbyte;
@@ -1397,7 +1430,8 @@ namespace TensileLite
         rocisa::DataType               typeD,
         rocisa::DataType               typeAlpha,
         rocisa::DataType               typeBeta,
-        rocisa::DataType               typeComputeInput,
+        rocisa::DataType               typeComputeInputA,
+        rocisa::DataType               typeComputeInputB,
         rocisa::DataType               typeCompute,
         double                         alpha,
         double                         beta,
@@ -1515,7 +1549,8 @@ namespace TensileLite
 													nop,
                                                     maxWorkspaceBytes};
 
-        problem.setComputeInputType(typeComputeInput);
+        problem.setComputeInputTypeA(typeComputeInputA);
+        problem.setComputeInputTypeB(typeComputeInputB);
         problem.setAlphaType(typeAlpha);
         problem.setBetaType(typeBeta);
 
@@ -1612,7 +1647,9 @@ namespace TensileLite
                                          void*                _ws,
                                          void*                _Synchronizer,
                                          unsigned char const* _metadata,
-                                         void const*          _compressed)
+                                         void const*          _compressed,
+                                         void const*          _mxsa,
+                                         void const*          _mxsb)
         : a(_a)
         , b(_b)
         , c(_c)
@@ -1633,6 +1670,8 @@ namespace TensileLite
         , Synchronizer(_Synchronizer)
         , metadata(_metadata)
         , compressed(_compressed)
+        , mxsa(_mxsa)
+        , mxsb(_mxsb)
     {
     }
 
