@@ -152,16 +152,18 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
 // we need for the workspace-size-limit knob:
 //
 //   1. miopenConvolution*GetWorkSpaceSize
-//        Returns the workspace size MIOpen would request at execute time for
-//        this problem. Despite the name, in the default Fast/Hybrid Find mode
-//        the implementation calls GetSolutions(maxSolutionCount=1) and returns
-//        the workspace of the single fastest solver MIOpen would pick — NOT a
-//        maximum across the applicable solver set (see
-//        projects/miopen/src/convolution.cpp:387). Only when Fast/Hybrid Find
-//        fails to return a solution does it fall through to a std::max over
-//        algorithm classes. We use it here as `range.max` because plan
-//        execution sizes its workspace by calling the same API, so by
-//        construction the value matches what MIOpen will actually request.
+//        Per its header doc, this returns "the minimum size of the workspace
+//        that must be provided to miopenFindConvolutionForwardAlgorithm() in
+//        order for the latter to find the best candidate" — i.e. the workspace
+//        of the single fastest solver MIOpen would pick, not a maximum across
+//        the applicable solver set. In default Fast/Hybrid Find mode the
+//        implementation calls GetSolutions(maxSolutionCount=1) and returns
+//        that solver's workspace (projects/miopen/src/convolution.cpp:387);
+//        only when Fast/Hybrid Find fails to return a solution does it fall
+//        through to a std::max over algorithm classes. We use it here as
+//        `range.max` because plan execution sizes its workspace by calling
+//        the same API, so by construction the value matches what MIOpen will
+//        actually request.
 //
 //   2. miopenConvolution*GetSolutionCount / *GetSolution
 //        Return a subset of applicable solutions sourced from find-db (if a
