@@ -60,7 +60,7 @@ This includes hipCUB, rocPRIM, and rocThrust.
 
      * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
-   * ``<llvm_target>`` (starting with ``gfx``) is used if you are installating
+   * ``<llvm_target>`` (starting with ``gfx``) is used if you are installing
      for a single AMD GPU architecture. Omit this to install for all
      architectures at the cost of disk space.
 
