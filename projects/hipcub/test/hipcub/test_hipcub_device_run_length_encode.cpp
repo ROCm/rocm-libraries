@@ -422,3 +422,229 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
         HIP_CHECK(hipStreamDestroy(stream));
     }
 }
+
+struct counting_to_rl_transform_op_t
+{
+    unsigned int run_length;
+
+    HIPCUB_HOST_DEVICE
+    counting_to_rl_transform_op_t(unsigned int m_run_length)
+        : run_length(m_run_length)
+    {}
+
+    HIPCUB_HOST_DEVICE
+    size_t operator()(const size_t idx) const
+    {
+        return idx / static_cast<size_t>(run_length);
+    }
+};
+
+template<bool non_trivial_runs = false,
+         class InputIterator,
+         class UniqueOrOffsetsOutputIterator,
+         class CountsOutputIterator,
+         class RunsCountOutputIterator>
+void invoke_run_length_encode(void*                         temporary_storage,
+                              size_t&                       storage_size,
+                              InputIterator                 input,
+                              UniqueOrOffsetsOutputIterator unique_or_offsets_output,
+                              CountsOutputIterator          counts_output,
+                              RunsCountOutputIterator       runs_count_output,
+                              size_t                        size,
+                              hipStream_t                   stream = 0)
+{
+    if constexpr(non_trivial_runs)
+    {
+        HIP_CHECK(hipcub::DeviceRunLengthEncode::NonTrivialRuns(
+            temporary_storage,
+            storage_size,
+            input,
+            unique_or_offsets_output, /*offsets_output*/
+            counts_output,
+            runs_count_output,
+            size,
+            stream));
+    }
+    else
+    {
+        HIP_CHECK(hipcub::DeviceRunLengthEncode::Encode(temporary_storage,
+                                                        storage_size,
+                                                        input,
+                                                        unique_or_offsets_output, /*unique_output*/
+                                                        counts_output,
+                                                        runs_count_output,
+                                                        size,
+                                                        stream));
+    }
+}
+
+template<bool non_trivial_runs = false, bool use_graphs = false>
+void large_sizes_rle_test()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using key_type        = size_t;
+    using count_type      = size_t;
+    using offset_type     = size_t;
+    using iota_iterator_t = test_utils::counting_iterator<offset_type>;
+
+    const bool debug_synchronous = false;
+
+    hipStream_t stream = 0; // default
+    if constexpr(use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+        std::default_random_engine gen(seed_value);
+
+        for(size_t size : test_utils::get_large_sizes(42))
+        {
+            std::uniform_int_distribution<unsigned int> run_length_distribution(
+                2,
+                std::numeric_limits<unsigned int>::max());
+
+            const unsigned int                  run_length = run_length_distribution(gen);
+            const counting_to_rl_transform_op_t counting_to_rl_transform_op{run_length};
+            SCOPED_TRACE(testing::Message() << "with run_length = " << run_length);
+
+            const count_type              runs_count = test_utils::ceiling_div(size, run_length);
+            const std::vector<count_type> runs_count_expected{runs_count};
+            SCOPED_TRACE(testing::Message() << "with runs_count = " << runs_count);
+
+            size = runs_count * static_cast<count_type>(run_length);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate input like: 0, 0, ..., 0, 1, 1, ..., 1, ...
+            // where each number is repeated run_length times
+            auto d_input
+                = test_utils::transform_iterator<iota_iterator_t, counting_to_rl_transform_op_t>(
+                    iota_iterator_t{0},
+                    counting_to_rl_transform_op);
+
+            offset_type* d_unique_or_offsets_output;
+            count_type*  d_counts_output;
+            count_type*  d_runs_count_output;
+
+            HIP_CHECK_MEMORY(test_common_utils::hipMallocHelper(&d_unique_or_offsets_output,
+                                                                runs_count * sizeof(offset_type)));
+            HIP_CHECK_MEMORY(test_common_utils::hipMallocHelper(&d_counts_output,
+                                                                runs_count * sizeof(count_type)));
+            HIP_CHECK_MEMORY(
+                test_common_utils::hipMallocHelper(&d_runs_count_output, sizeof(count_type)));
+
+            size_t temporary_storage_bytes;
+            invoke_run_length_encode<non_trivial_runs>(nullptr,
+                                                       temporary_storage_bytes,
+                                                       d_input,
+                                                       d_unique_or_offsets_output,
+                                                       d_counts_output,
+                                                       d_runs_count_output,
+                                                       size,
+                                                       stream);
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            void* d_temporary_storage;
+            HIP_CHECK(
+                test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+            test_utils::GraphHelper gHelper;
+            if constexpr(use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            invoke_run_length_encode<non_trivial_runs>(d_temporary_storage,
+                                                       temporary_storage_bytes,
+                                                       d_input,
+                                                       d_unique_or_offsets_output,
+                                                       d_counts_output,
+                                                       d_runs_count_output,
+                                                       size,
+                                                       stream);
+
+            if constexpr(use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+
+            std::vector<offset_type> unique_or_offsets_output(runs_count);
+            std::vector<count_type>  counts_output(runs_count);
+            count_type               runs_count_output;
+
+            HIP_CHECK(hipMemcpy(&runs_count_output,
+                                d_runs_count_output,
+                                sizeof(count_type),
+                                hipMemcpyDeviceToHost));
+            HIP_CHECK(hipFree(d_runs_count_output));
+
+            if(runs_count > 0)
+            {
+                HIP_CHECK(hipMemcpy(unique_or_offsets_output.data(),
+                                    d_unique_or_offsets_output,
+                                    runs_count * sizeof(offset_type),
+                                    hipMemcpyDeviceToHost));
+                HIP_CHECK(hipMemcpy(counts_output.data(),
+                                    d_counts_output,
+                                    runs_count * sizeof(count_type),
+                                    hipMemcpyDeviceToHost));
+
+                HIP_CHECK(hipFree(d_unique_or_offsets_output));
+                HIP_CHECK(hipFree(d_counts_output));
+            }
+
+            if constexpr(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
+
+            // Validating results
+
+            SCOPED_TRACE(testing::Message() << "runs_count_output");
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(runs_count_output, runs_count));
+
+            for(offset_type i = 0; i < runs_count; i++)
+            {
+                const offset_type unique_or_offset_expected = non_trivial_runs ? i * run_length : i;
+
+                SCOPED_TRACE(testing::Message() << "unique_or_offsets_output[" << i << "]");
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_eq(unique_or_offsets_output[i], unique_or_offset_expected));
+                SCOPED_TRACE(testing::Message() << "counts_output[" << i << "]");
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_eq(counts_output[i], size_t{run_length}));
+            }
+
+            if constexpr(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
+        }
+    }
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
+}
+
+TEST(RocprimDeviceRunLengthEncode, LargeSizesEncode)
+{
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeSizesEncode test under Valgrind";
+#endif // HAS_VALGRIND_H
+
+    large_sizes_rle_test<>();
+}
