@@ -106,7 +106,8 @@ inline auto param_checkstride()
                         const double run_prob
                             = test_prob * (param.is_planar() ? complex_planar_prob_factor : 1.0)
                               * (param.is_interleaved() ? complex_interleaved_prob_factor : 1.0)
-                              * (param.is_real() ? real_prob_factor : 1.0);
+                              * (param.is_real() ? real_prob_factor : 1.0)
+                              * (callback ? callback_prob_factor : 1.0);
 
                         if(roll > run_prob)
                         {
