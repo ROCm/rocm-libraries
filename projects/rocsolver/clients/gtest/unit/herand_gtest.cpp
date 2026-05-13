@@ -44,15 +44,15 @@ const vector<char> uplo_range = {'L', 'U', 'F'};
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
     // quick return
-    {0,  1},
+    {0, 1},
     // invalid
     {-1, 1},
-    {10, 5},   // lda < n
+    {10, 5}, // lda < n
     // normal (valid) samples
-    {1,  1},
+    {1, 1},
     {10, 10},
     {20, 20},
-    {35, 50},  // lda > n (tests padding)
+    {35, 50}, // lda > n (tests padding)
 };
 
 // for daily_lapack tests
@@ -62,11 +62,11 @@ const vector<vector<int>> large_matrix_size_range
 Arguments herand_setup_arguments(herand_tuple tup)
 {
     vector<int> matrix_size = std::get<0>(tup);
-    char        uplo        = std::get<1>(tup);
+    char uplo = std::get<1>(tup);
 
     Arguments arg;
 
-    arg.set<rocblas_int>("n",   matrix_size[0]);
+    arg.set<rocblas_int>("n", matrix_size[0]);
     arg.set<rocblas_int>("lda", matrix_size[1]);
     arg.set<char>("uplo", uplo);
 

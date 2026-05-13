@@ -37,16 +37,16 @@ using ::testing::ValuesIn;
 // for checkin_lapack tests
 const std::vector<std::vector<int>> matrix_size_range = {
     // quick return
-    {0, 10,  1},
+    {0, 10, 1},
     {10, 0, 10},
     // invalid
-    {-1, 10,  1},
+    {-1, 10, 1},
     {10, -1, 10},
-    {10, 10,  5},  // lda < m, invalid
+    {10, 10, 5}, // lda < m, invalid
     // normal (valid) samples
     {12, 20, 12},
     {20, 15, 20},
-    {35, 35, 50},  // lda > m (tests padding)
+    {35, 35, 50}, // lda > m (tests padding)
 };
 
 // for daily_lapack tests
@@ -57,8 +57,8 @@ Arguments gerand_setup_arguments(std::vector<int> matrix_size)
 {
     Arguments arg;
 
-    arg.set<rocblas_int>("m",   matrix_size[0]);
-    arg.set<rocblas_int>("n",   matrix_size[1]);
+    arg.set<rocblas_int>("m", matrix_size[0]);
+    arg.set<rocblas_int>("n", matrix_size[1]);
     arg.set<rocblas_int>("lda", matrix_size[2]);
 
     arg.timing = 0;
@@ -69,9 +69,7 @@ Arguments gerand_setup_arguments(std::vector<int> matrix_size)
 class GERAND : public ::TestWithParam<std::vector<int>>
 {
 protected:
-    void TearDown() override
-    {
-    }
+    void TearDown() override {}
 
     template <typename T>
     void run_tests()
@@ -109,10 +107,6 @@ TEST_P(GERAND, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack,
-                         GERAND,
-                         ValuesIn(large_matrix_size_range));
+INSTANTIATE_TEST_SUITE_P(daily_lapack, GERAND, ValuesIn(large_matrix_size_range));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                         GERAND,
-                         ValuesIn(matrix_size_range));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, GERAND, ValuesIn(matrix_size_range));

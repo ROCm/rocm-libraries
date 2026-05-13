@@ -38,39 +38,39 @@ using namespace std;
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
     // quick return
-    {0,  2, 2,  5},
+    {0, 2, 2, 5},
     // invalid
-    {-1, 2, 2,  5},
-    {10, 2, 2,  4},  // ldab < kl+ku+1
+    {-1, 2, 2, 5},
+    {10, 2, 2, 4}, // ldab < kl+ku+1
     // kl == ku (fully symmetric)
-    {10, 0, 0,  1},  // diagonal only
-    {10, 2, 2,  5},
-    {20, 3, 3,  7},
+    {10, 0, 0, 1}, // diagonal only
+    {10, 2, 2, 5},
+    {20, 3, 3, 7},
     // kl > ku
-    {10, 3, 1,  5},
-    {20, 4, 2,  7},
+    {10, 3, 1, 5},
+    {20, 4, 2, 7},
     // kl < ku
-    {10, 1, 3,  5},
-    {20, 2, 4,  7},
+    {10, 1, 3, 5},
+    {20, 2, 4, 7},
     // ldab > kl+ku+1 (extra padding rows)
-    {15, 2, 2,  8},
+    {15, 2, 2, 8},
 };
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range = {
-    {512,   5,  5,  11},
-    {1024,  10, 10, 21},
-    {2000,  8,  3,  12},
-    {2000,  3,  8,  12},
+    {512, 5, 5, 11},
+    {1024, 10, 10, 21},
+    {2000, 8, 3, 12},
+    {2000, 3, 8, 12},
 };
 
 Arguments hbrand_setup_arguments(vector<int> sz)
 {
     Arguments arg;
 
-    arg.set<rocblas_int>("n",    sz[0]);
-    arg.set<rocblas_int>("kl",   sz[1]);
-    arg.set<rocblas_int>("ku",   sz[2]);
+    arg.set<rocblas_int>("n", sz[0]);
+    arg.set<rocblas_int>("kl", sz[1]);
+    arg.set<rocblas_int>("ku", sz[2]);
     arg.set<rocblas_int>("ldab", sz[3]);
 
     arg.timing = 0;
@@ -119,10 +119,6 @@ TEST_P(HBRAND, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack,
-                         HBRAND,
-                         ValuesIn(large_matrix_size_range));
+INSTANTIATE_TEST_SUITE_P(daily_lapack, HBRAND, ValuesIn(large_matrix_size_range));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                         HBRAND,
-                         ValuesIn(matrix_size_range));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, HBRAND, ValuesIn(matrix_size_range));

@@ -46,14 +46,13 @@
 template <typename T>
 void testing_hbrand_bad_arg()
 {
-    const rocblas_int n    = 4;
-    const rocblas_int kl   = 2;
-    const rocblas_int ku   = 2;
+    const rocblas_int n = 4;
+    const rocblas_int kl = 2;
+    const rocblas_int ku = 2;
     const rocblas_int ldab = kl + ku + 1;
 
     // pointers
-    EXPECT_THROW_VALUE(hbrand(n, kl, ku, (T*)nullptr, ldab),
-                       rocblas_status,
+    EXPECT_THROW_VALUE(hbrand(n, kl, ku, (T*)nullptr, ldab), rocblas_status,
                        rocblas_status_invalid_pointer);
 
     // quick return with invalid pointers
@@ -82,10 +81,10 @@ void testing_hbrand(Arguments& argus)
     using S = decltype(std::real(T{}));
 
     // get arguments
-    rocblas_int n    = argus.get<rocblas_int>("n");
-    rocblas_int kl   = argus.get<rocblas_int>("kl");
-    rocblas_int ku   = argus.get<rocblas_int>("ku");
-    rocblas_int pad  = 2;
+    rocblas_int n = argus.get<rocblas_int>("n");
+    rocblas_int kl = argus.get<rocblas_int>("kl");
+    rocblas_int ku = argus.get<rocblas_int>("ku");
+    rocblas_int pad = 2;
     rocblas_int ldab = argus.get<rocblas_int>("ldab", kl + ku + 1 + pad);
     rocblas_int n_padded = n + pad;
 
@@ -96,8 +95,7 @@ void testing_hbrand(Arguments& argus)
     // check invalid sizes
     if(n < 0 || kl < 0 || ku < 0 || ldab < kl + ku + 1)
     {
-        EXPECT_THROW_VALUE(hbrand(n, kl, ku, (T*)nullptr, ldab),
-                           rocblas_status,
+        EXPECT_THROW_VALUE(hbrand(n, kl, ku, (T*)nullptr, ldab), rocblas_status,
                            rocblas_status_invalid_size);
 
         if(argus.timing)
@@ -128,21 +126,20 @@ void testing_hbrand(Arguments& argus)
     // the n*(n+1)/2 independently-filled entries (lower/diag triangle).
     // For herand the diagonal im is forced real (always 0 for complex), so only
     // off-diagonal entries contribute to nzero_im.
-    int64_t nfilled  = 0;
+    int64_t nfilled = 0;
     int64_t nzero_re = 0, nzero_im = 0;
 
     // Lambda to check that re and im are in range (-1, 1) and count zero entries.
-    auto expect_in_range = [&](S re_, S im_, const char* loc)
-    {
+    auto expect_in_range = [&](S re_, S im_, const char* loc) {
         EXPECT_GT(re_, S(-1)) << loc << " re out of range";
-        EXPECT_LT(re_, S( 1)) << loc << " re out of range";
+        EXPECT_LT(re_, S(1)) << loc << " re out of range";
         ++nfilled;
         if(re_ == S(0))
             ++nzero_re;
         if constexpr(rocblas_is_complex<T>)
         {
             EXPECT_GT(im_, S(-1)) << loc << " im out of range";
-            EXPECT_LT(im_, S( 1)) << loc << " im out of range";
+            EXPECT_LT(im_, S(1)) << loc << " im out of range";
             if(im_ == S(0))
                 ++nzero_im;
         }
@@ -157,7 +154,7 @@ void testing_hbrand(Arguments& argus)
             S im = std::imag(val);
 
             EXPECT_GT(re, S(-1)) << "diag re out of range at j=" << j;
-            EXPECT_LT(re, S( 1)) << "diag re out of range at j=" << j;
+            EXPECT_LT(re, S(1)) << "diag re out of range at j=" << j;
             ++nfilled;
             if(re == S(0))
                 ++nzero_re;
@@ -187,9 +184,9 @@ void testing_hbrand(Arguments& argus)
             // Lower band is the source; verify it as randomly filled.
             for(rocblas_int k = 1; k <= nsub; ++k)
             {
-                T   val = Aband[idiag + k + j * ldab];
-                S   re  = std::real(val);
-                S   im  = std::imag(val);
+                T val = Aband[idiag + k + j * ldab];
+                S re = std::real(val);
+                S im = std::imag(val);
                 expect_in_range(re, im, "lower band");
             }
 
@@ -207,9 +204,9 @@ void testing_hbrand(Arguments& argus)
             // Upper band is the source; verify it as randomly filled.
             for(rocblas_int k = 1; k <= nsup; ++k)
             {
-                T   val = Aband[idiag - k + (j + k) * ldab];
-                S   re  = std::real(val);
-                S   im  = std::imag(val);
+                T val = Aband[idiag - k + (j + k) * ldab];
+                S re = std::real(val);
+                S im = std::imag(val);
                 expect_in_range(re, im, "upper band");
             }
 
@@ -242,7 +239,7 @@ void testing_hbrand(Arguments& argus)
             for(rocblas_int k = j_from_end; k < kl; ++k)
             {
                 EXPECT_TRUE(std::isnan(std::real(Aband[idiag + 1 + k + j * ldab])))
-                    << "lower out-of-band not nan at subdiag k+1=" << k+1 << " col j=" << j;
+                    << "lower out-of-band not nan at subdiag k+1=" << k + 1 << " col j=" << j;
             }
         }
     }
@@ -252,7 +249,8 @@ void testing_hbrand(Arguments& argus)
     {
         for(rocblas_int i = 0; i < ldab; ++i)
         {
-            EXPECT_EQ(Aband[i + j * ldab], flag) << "padding col modified at (" << i << "," << j << ")";
+            EXPECT_EQ(Aband[i + j * ldab], flag)
+                << "padding col modified at (" << i << "," << j << ")";
         }
     }
 

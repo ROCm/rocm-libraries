@@ -51,8 +51,7 @@ void testing_gerand_bad_arg()
     const rocblas_int lda = 4;
 
     // pointers
-    EXPECT_THROW_VALUE(gerand(m, n, (T*)nullptr, lda),
-                       rocblas_status,
+    EXPECT_THROW_VALUE(gerand(m, n, (T*)nullptr, lda), rocblas_status,
                        rocblas_status_invalid_pointer);
 
     // quick return with invalid pointers
@@ -88,8 +87,7 @@ void testing_gerand(Arguments& argus)
     // check invalid sizes
     if(m < 0 || n < 0 || lda < m)
     {
-        EXPECT_THROW_VALUE(gerand(m, n, (T*)nullptr, lda),
-                           rocblas_status,
+        EXPECT_THROW_VALUE(gerand(m, n, (T*)nullptr, lda), rocblas_status,
                            rocblas_status_invalid_size);
 
         if(argus.timing)
@@ -121,16 +119,15 @@ void testing_gerand(Arguments& argus)
     int64_t nzero_re = 0, nzero_im = 0;
 
     // Lambda to check that re and im are in range (-1, 1) and count zero entries.
-    auto expect_in_range = [&](S re_, S im_, rocblas_int i_, rocblas_int j_, const char* loc)
-    {
+    auto expect_in_range = [&](S re_, S im_, rocblas_int i_, rocblas_int j_, const char* loc) {
         EXPECT_GT(re_, S(-1)) << loc << " re out of range at (" << i_ << "," << j_ << ")";
-        EXPECT_LT(re_, S( 1)) << loc << " re out of range at (" << i_ << "," << j_ << ")";
+        EXPECT_LT(re_, S(1)) << loc << " re out of range at (" << i_ << "," << j_ << ")";
         if(re_ == S(0))
             ++nzero_re;
         if constexpr(rocblas_is_complex<T>)
         {
             EXPECT_GT(im_, S(-1)) << loc << " im out of range at (" << i_ << "," << j_ << ")";
-            EXPECT_LT(im_, S( 1)) << loc << " im out of range at (" << i_ << "," << j_ << ")";
+            EXPECT_LT(im_, S(1)) << loc << " im out of range at (" << i_ << "," << j_ << ")";
             if(im_ == S(0))
                 ++nzero_im;
         }

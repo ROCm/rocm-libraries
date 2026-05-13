@@ -271,7 +271,7 @@ void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int
 
         // Mark entries outside the band as nan, to ensure we don't use them.
         // Upper band
-        if (j < ku)
+        if(j < ku)
         {
             for(rocblas_int k = 0; k < ku - j; ++k)
             {
@@ -280,7 +280,7 @@ void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int
         }
 
         // Lower band
-        if (j > n - 1 - kl)
+        if(j > n - 1 - kl)
         {
             for(rocblas_int k = n - 1 - j; k < kl; ++k)
             {
