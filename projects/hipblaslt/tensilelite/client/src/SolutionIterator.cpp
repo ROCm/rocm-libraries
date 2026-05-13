@@ -101,6 +101,7 @@ namespace TensileLite
                         m_reporter->log(LogLevel::Verbose, msg.str());
                 }
 
+                recordNonFatalError();
                 return false;
             }
 
@@ -122,6 +123,7 @@ namespace TensileLite
                         m_reporter->log(LogLevel::Verbose, msg.str());
                 }
 
+                recordNonFatalError();
                 return false;
             }
 
@@ -158,6 +160,11 @@ namespace TensileLite
             }
 
             return true;
+        }
+
+        void SolutionIterator::recordNonFatalError()
+        {
+            m_encounteredNonFatalError = true;
         }
 
         static origami::Formocast::ProblemInfo getProblemInfo(ContractionSolution&    solution,
