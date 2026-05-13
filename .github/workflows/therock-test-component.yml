@@ -69,11 +69,17 @@ jobs:
       # Fetch TheRock commit hash from rocm-libraries develop branch.
       # This ensures all PRs use the same TheRock version without requiring rebases.
       # For testing instructions, see the top of therock-ci.yml.
-      - name: Get TheRock version from develop
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Fetch TheRock version file from develop
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-libraries
+          ref: develop
+          sparse-checkout: .github/therock-hash-version
+          path: _therock_version
+
+      - name: Set TheRock version
         run: |
-          THEROCK_REF=$(gh api repos/ROCm/rocm-libraries/contents/.github/therock-hash-version?ref=develop -H "Accept: application/vnd.github.raw" | tr -d '[:space:]')
+          THEROCK_REF=$(cat _therock_version/.github/therock-hash-version | tr -d '[:space:]')
           echo "THEROCK_REF=$THEROCK_REF" >> $GITHUB_ENV
 
       - name: Checkout Repository
