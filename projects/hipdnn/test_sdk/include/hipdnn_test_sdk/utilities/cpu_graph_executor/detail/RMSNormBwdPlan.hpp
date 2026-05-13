@@ -7,9 +7,9 @@
 #include <optional>
 #include <variant>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
@@ -141,7 +141,7 @@ public:
             return false;
         }
 
-        const auto* nodeAttributes = node.attributes_as_RMSNormBwdAttributes();
+        const auto* nodeAttributes = node.attributes_as_RMSNormBackwardAttributes();
         if(nodeAttributes == nullptr)
         {
             return false;
@@ -176,10 +176,10 @@ public:
         buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                       const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
     {
-        const auto* nodeAttributes = node.attributes_as_RMSNormBwdAttributes();
+        const auto* nodeAttributes = node.attributes_as_RMSNormBackwardAttributes();
         if(nodeAttributes == nullptr)
         {
-            throw std::runtime_error("Node attributes are not of type RMSNormBwdAttributes");
+            throw std::runtime_error("Node attributes are not of type RMSNormBackwardAttributes");
         }
 
         const auto& tensorMap = graph.getTensorMap();

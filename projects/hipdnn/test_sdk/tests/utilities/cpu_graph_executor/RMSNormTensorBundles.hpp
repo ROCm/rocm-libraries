@@ -62,12 +62,12 @@ struct RMSNormBwdTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBu
         : hipdnn_test_sdk::utilities::GraphTensorBundle(tensorMap)
     {
         const auto& attributes
-            = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormBwdAttributes>();
+            = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes>();
 
         randomizeTensor(attributes.dy_tensor_uid(), 0.0f, 1.0f, seed);
         randomizeTensor(attributes.x_tensor_uid(), 0.0f, 1.0f, seed);
         randomizeTensor(attributes.scale_tensor_uid(), 0.0f, 1.0f, seed);
-        randomizeTensor(attributes.inv_rms_tensor_uid().value(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.inv_rms_tensor_uid(), 0.0f, 1.0f, seed);
     }
 };
 

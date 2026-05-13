@@ -22,7 +22,6 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
-namespace rmsnorm = hipdnn_test_sdk::utilities::rmsnorm;
 
 TEST(TestRMSNormBwdPlanBuilder, PlanConstruction)
 {
@@ -111,8 +110,7 @@ TEST(TestRMSNormBwdPlan, ExecutePlan)
     RMSNormBwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
 
     const auto& attributes
-        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormBwdAttributes>();
-    attributes.set_compute_dbias(true);
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
     RMSNormBwdParams params(*tensorMap.at(attributes.dy_tensor_uid()),
@@ -120,8 +118,7 @@ TEST(TestRMSNormBwdPlan, ExecutePlan)
                             *tensorMap.at(attributes.scale_tensor_uid()),
                             *tensorMap.at(attributes.inv_rms_tensor_uid()),
                             *tensorMap.at(attributes.dx_tensor_uid()),
-                            *tensorMap.at(attributes.dscale_tensor_uid()),
-                            *tensorMap.at(attributes.dbias_tensor_uid()));
+                            *tensorMap.at(attributes.dscale_tensor_uid()));
 
     const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
@@ -141,17 +138,13 @@ TEST(TestRMSNormBwdPlan, ExecutePlan)
     auto shallowDScaleTensor = createShallowTensor<float>(
         params.dscaleTensor,
         directTensorBundle.tensors[attributes.dscale_tensor_uid()]->rawHostData());
-    auto shallowDBiasTensor = createShallowTensor<float>(
-        params.dbiasTensor.value(),
-        directTensorBundle.tensors[attributes.dbias_tensor_uid().value()]->rawHostData());
 
     CpuFpReferenceRMSNorm::backward<float, float, float, float, float>(*shallowDyTensor,
                                                                        *shallowXTensor,
                                                                        *shallowScaleTensor,
                                                                        *shallowInvRmsTensor,
                                                                        *shallowDxTensor,
-                                                                       *shallowDScaleTensor,
-                                                                       *shallowDBiasTensor);
+                                                                       *shallowDScaleTensor);
 
     RMSNormBwdPlan<float, float, float, float, float> bwdPlan(std::move(params));
     bwdPlan.execute(variantPack);
@@ -165,7 +158,4 @@ TEST(TestRMSNormBwdPlan, ExecutePlan)
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.dscale_tensor_uid()].get(),
         *planTensorBundle.tensors[attributes.dscale_tensor_uid()].get()));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(
-        *directTensorBundle.tensors[attributes.dbias_tensor_uid().value()].get(),
-        *planTensorBundle.tensors[attributes.dbias_tensor_uid().value()].get()));
 }

@@ -16,7 +16,7 @@ namespace hipdnn_test_sdk::detail
 struct RMSNormBwdSignatureKey
 {
     const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType
-        = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBwdAttributes;
+        = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes;
 
     hipdnn_flatbuffers_sdk::data_objects::DataType dyDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType xDataType;
@@ -44,10 +44,11 @@ struct RMSNormBwdSignatureKey
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
-        const auto* nodeAttributes = node.attributes_as_RMSNormBwdAttributes();
+        const auto* nodeAttributes = node.attributes_as_RMSNormBackwardAttributes();
         if(nodeAttributes == nullptr)
         {
-            throw std::runtime_error("Node attributes could not be cast to RMSNormBwdAttributes");
+            throw std::runtime_error(
+                "Node attributes could not be cast to RMSNormBackwardAttributes");
         }
 
         auto dyTensorAttr = tensorMap.at(nodeAttributes->dy_tensor_uid());

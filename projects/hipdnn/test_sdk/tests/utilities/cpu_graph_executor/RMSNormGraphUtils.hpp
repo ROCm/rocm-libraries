@@ -248,10 +248,11 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     auto invRmsTensor
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(invRmsAttr));
 
-    hipdnn_frontend::graph::RMSNormBwdAttributes rmsnormBwdAttrs;
+    hipdnn_frontend::graph::RMSNormBackwardAttributes rmsnormBwdAttrs;
     rmsnormBwdAttrs.set_name("rmsnorm_bwd");
     rmsnormBwdAttrs.set_compute_data_type(
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
+    rmsnormBwdAttrs.set_compute_dbias(true);
 
     auto outputTensorsAttr
         = graph->rmsnorm_backward(dyTensor, xTensor, scaleTensor, invRmsTensor, rmsnormBwdAttrs);
