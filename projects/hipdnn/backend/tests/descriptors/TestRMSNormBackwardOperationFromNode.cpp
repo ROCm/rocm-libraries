@@ -108,11 +108,32 @@ protected:
         return attrs;
     }
 
+    static hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributesT
+        createRequiredOnlyRMSNormBackwardAttrs()
+    {
+        hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributesT attrs;
+        attrs.dy_tensor_uid = K_RMSNORMBACKWARD_TENSOR_DY_UID;
+        attrs.x_tensor_uid = K_RMSNORMBACKWARD_TENSOR_X_UID;
+        attrs.scale_tensor_uid = K_RMSNORMBACKWARD_TENSOR_SCALE_UID;
+        attrs.inv_rms_tensor_uid = K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID;
+        attrs.dx_tensor_uid = K_RMSNORMBACKWARD_TENSOR_DX_UID;
+        attrs.dscale_tensor_uid = K_RMSNORMBACKWARD_TENSOR_DSCALE_UID;
+        return attrs;
+    }
+
     static NodeT createStandardNode(DataType computeType = DataType::FLOAT)
     {
         NodeT node;
         node.compute_data_type = computeType;
         node.attributes.Set(createStandardRMSNormBackwardAttrs());
+        return node;
+    }
+
+    static NodeT createRequiredOnlyNode(DataType computeType = DataType::FLOAT)
+    {
+        NodeT node;
+        node.compute_data_type = computeType;
+        node.attributes.Set(createRequiredOnlyRMSNormBackwardAttrs());
         return node;
     }
 };
@@ -254,6 +275,32 @@ TEST_F(TestRMSNormBackwardOperationFromNode, SetsTensorReferencesWithFullValues)
     EXPECT_EQ(desc->getDbiasDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
     EXPECT_EQ(desc->getDbiasDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
 }
+
+// =============================================================================
+// Parameterized: missing required tensor
+// =============================================================================
+
+class TestRMSNormBackwardMissingRequiredTensor : public TestRMSNormBackwardOperationFromNode,
+                                                 public ::testing::WithParamInterface<int64_t>
+{
+};
+
+TEST_P(TestRMSNormBackwardMissingRequiredTensor, FailsWithMissingRequiredTensor)
+{
+    _tensorMap.erase(GetParam());
+    auto node = createRequiredOnlyNode();
+    ASSERT_THROW_HIPDNN_STATUS(RMSNormBackwardOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
+}
+
+INSTANTIATE_TEST_SUITE_P(AllRequiredTensors,
+                         TestRMSNormBackwardMissingRequiredTensor,
+                         ::testing::Values(K_RMSNORMBACKWARD_TENSOR_DY_UID,
+                                           K_RMSNORMBACKWARD_TENSOR_X_UID,
+                                           K_RMSNORMBACKWARD_TENSOR_SCALE_UID,
+                                           K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID,
+                                           K_RMSNORMBACKWARD_TENSOR_DX_UID,
+                                           K_RMSNORMBACKWARD_TENSOR_DSCALE_UID));
 
 TEST_F(TestRMSNormBackwardOperationFromNode, FailsWithMissingDyTensor)
 {

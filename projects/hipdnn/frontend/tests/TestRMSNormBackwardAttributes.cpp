@@ -138,6 +138,18 @@ TEST(TestRMSNormBackwardAttributes, SetComputeDbias)
     EXPECT_FALSE(attrs.get_compute_dbias());
 }
 
+TEST(TestRMSNormBackwardAttributes, Hasbias)
+{
+    RMSNormBackwardAttributes attrs;
+    EXPECT_FALSE(attrs.get_compute_dbias());
+
+    attrs.has_dbias(true);
+    EXPECT_TRUE(attrs.get_compute_dbias());
+
+    attrs.has_dbias(false);
+    EXPECT_FALSE(attrs.get_compute_dbias());
+}
+
 TEST(TestRMSNormBackwardAttributes, SetDyMove)
 {
     RMSNormBackwardAttributes attrs;

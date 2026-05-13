@@ -181,6 +181,12 @@ public:
         return *this;
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    RMSNormBackwardAttributes& has_dbias(bool value)
+    {
+        return set_compute_dbias(value);
+    }
+
 private:
     // NOLINTNEXTLINE(readability-identifier-naming)
     bool compute_dbias = false;

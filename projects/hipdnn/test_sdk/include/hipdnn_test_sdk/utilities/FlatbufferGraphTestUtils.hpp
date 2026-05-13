@@ -1697,7 +1697,7 @@ inline flatbuffers::FlatBufferBuilder
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
     // inv_rms stat shape is [N, 1, 1, 1, ...] when scale is [1, C, H, W ..]
-    const std::vector<int64_t> statDims = {2, 1, 1, 1};
+    const std::vector<int64_t> statDims = {dims[0], 1, 1, 1};
     const std::vector<int64_t> statStrides = hipdnn_data_sdk::utilities::generateStrides(
         statDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 

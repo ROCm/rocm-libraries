@@ -50,6 +50,10 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "RMSNormBackwardNode missing scale (input) for pre-validation");
 
+        HIPDNN_RETURN_IF_FALSE(attributes.get_inv_rms(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "RMSNormBackwardNode missing inv_rms (input) for pre-validation");
+
         HIPDNN_RETURN_IF_FALSE(attributes.get_dx(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "RMSNormBackwardNode missing dx (output) for pre-validation");
@@ -63,6 +67,7 @@ public:
         auto scaleTensor = attributes.get_scale();
         auto dxTensor = attributes.get_dx();
         auto dscaleTensor = attributes.get_dscale();
+        auto invRmsTensor = attributes.get_inv_rms();
 
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(xTensor, 2, "Input tensor (x)"));
         HIPDNN_CHECK_ERROR(
@@ -81,11 +86,23 @@ public:
         HIPDNN_CHECK_ERROR(
             detail::validateScaleNormalizedShape(scaleTensor, xTensor, "Scale tensor"));
         HIPDNN_CHECK_ERROR(detail::validateTensorShapesMatchIfSet(
-            scaleTensor, dscaleTensor, "Input tensor (x)", "Gradient output tensor (dx)"));
+            scaleTensor, dscaleTensor, "Input tensor (scale)", "Gradient output tensor (dscale)"));
+
+        // Bias must have the same shape as scale (scale already validated above).
+        auto dbiasTensor = attributes.get_dbias();
+        if(dbiasTensor)
+        {
+            HIPDNN_CHECK_ERROR(
+                detail::validateTensorShapesMatchIfSet(scaleTensor,
+                                                       dbiasTensor,
+                                                       "Input tensor (scale)",
+                                                       "Gradient output tensor (dbias)"));
+        }
 
         // Validate invrms shape
+        // NOLINTNEXTLINE(readability-suspicious-call-argument)
         HIPDNN_CHECK_ERROR(detail::validateNormStatsShapeIfSet(
-            attributes.get_inv_rms(), xTensor, scaleTensor, "Inverse RMS tensor"));
+            invRmsTensor, xTensor, scaleTensor, "Inverse RMS tensor"));
         return {};
     }
 
