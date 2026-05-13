@@ -51,12 +51,12 @@ void testing_hbrand_bad_arg()
     const rocblas_int ku   = 2;
     const rocblas_int ldab = kl + ku + 1;
 
-    // null pointer with n > 0
+    // pointers
     EXPECT_THROW_VALUE(hbrand(n, kl, ku, (T*)nullptr, ldab),
                        rocblas_status,
                        rocblas_status_invalid_pointer);
 
-    // quick return: n == 0 with null pointer should not throw
+    // quick return with invalid pointers
     EXPECT_NO_THROW(hbrand(0, kl, ku, (T*)nullptr, ldab));
 }
 
@@ -81,10 +81,17 @@ void testing_hbrand(Arguments& argus)
 {
     using S = decltype(std::real(T{}));
 
+    // get arguments
     rocblas_int n    = argus.get<rocblas_int>("n");
     rocblas_int kl   = argus.get<rocblas_int>("kl");
     rocblas_int ku   = argus.get<rocblas_int>("ku");
-    rocblas_int ldab = argus.get<rocblas_int>("ldab", kl + ku + 1);
+    rocblas_int pad  = 2;
+    rocblas_int ldab = argus.get<rocblas_int>("ldab", kl + ku + 1 + pad);
+    rocblas_int n_padded = n + pad;
+
+    // determine sizes
+    size_t size_Aband = size_t(ldab) * n_padded;
+    double cpu_time_used = 0;
 
     // check invalid sizes
     if(n < 0 || kl < 0 || ku < 0 || ldab < kl + ku + 1)
@@ -92,31 +99,41 @@ void testing_hbrand(Arguments& argus)
         EXPECT_THROW_VALUE(hbrand(n, kl, ku, (T*)nullptr, ldab),
                            rocblas_status,
                            rocblas_status_invalid_size);
+
+        if(argus.timing)
+            rocsolver_bench_inform(inform_invalid_size);
+
         return;
     }
 
-    // Allocate Aband[ldab x n] initialized to a sentinel.
-    // hbrand will overwrite the valid band entries and set out-of-band entries
-    // to nan, so we use a sentinel that is neither nan nor in (-1,1) to detect
-    // any entry that hbrand leaves untouched.
-    T const sentinel = T(-1234);
-    std::vector<T> Aband(static_cast<size_t>(ldab) * n, sentinel);
+    // no memory size query
 
+    // memory allocations
+    // Initialize entries to flag to detect which entries were written.
+    T const flag = T(-1234);
+    std::vector<T> Aband(size_Aband, flag);
+
+    // check computations
+    // collect CPU performance data
+    // CPU-only, no GPU performance data to collect
+    cpu_time_used = get_time_us_no_sync();
     hbrand(n, kl, ku, Aband.data(), ldab);
+    cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
     // Main diagonal row index in band storage.
     rocblas_int idiag = ku;
 
-    // Count independently-filled entries for the zero-count check.
-    // These are: n diagonal entries + off-diagonal entries in the "source" band
-    // (whichever of lower/upper has more bandwidth, i.e. max(kl,ku) diagonals,
-    // but only n - k entries on the k-th diagonal).
+    // validate results for rocsolver-test
+    // Count zeros to check randomness: re and im zeros should each be < 1% of
+    // the n*(n+1)/2 independently-filled entries (lower/diag triangle).
+    // For herand the diagonal im is forced real (always 0 for complex), so only
+    // off-diagonal entries contribute to nzero_im.
     int64_t nfilled  = 0;
     int64_t nzero_re = 0, nzero_im = 0;
 
-    // Lambda to check that re_ is in (-1, 1) and if complex im_ is in (-1, 1).
-    // Also counts number of entries and zero entries.
-    auto expect_in_range = [&](S re_, S im_, const char* loc) {
+    // Lambda to check that re and im are in range (-1, 1) and count zero entries.
+    auto expect_in_range = [&](S re_, S im_, const char* loc)
+    {
         EXPECT_GT(re_, S(-1)) << loc << " re out of range";
         EXPECT_LT(re_, S( 1)) << loc << " re out of range";
         ++nfilled;
@@ -135,9 +152,9 @@ void testing_hbrand(Arguments& argus)
     {
         // --- diagonal entry: must be real and in (-1, 1) ---
         {
-            T   val = Aband[idiag + j * ldab];
-            S   re  = std::real(val);
-            S   im  = std::imag(val);
+            T val = Aband[idiag + j * ldab];
+            S re = std::real(val);
+            S im = std::imag(val);
 
             EXPECT_GT(re, S(-1)) << "diag re out of range at j=" << j;
             EXPECT_LT(re, S( 1)) << "diag re out of range at j=" << j;
@@ -230,11 +247,31 @@ void testing_hbrand(Arguments& argus)
         }
     }
 
+    // padding cols (j >= n) must be untouched
+    for(rocblas_int j = n; j < n_padded; ++j)
+    {
+        for(rocblas_int i = 0; i < ldab; ++i)
+        {
+            EXPECT_EQ(Aband[i + j * ldab], flag) << "padding col modified at (" << i << "," << j << ")";
+        }
+    }
+
     // If any, number of zeros should be << 1%.
     EXPECT_LE(nzero_re, int64_t(0.01 * nfilled));
     EXPECT_LE(nzero_im, int64_t(0.01 * nfilled));
 
-    // no results for rocsolver-bench
+    // output results for rocsolver-bench
+    if(argus.timing)
+    {
+        rocsolver_bench_header("Arguments:");
+        rocsolver_bench_output("n", "kl", "ku", "ldab");
+        rocsolver_bench_output(n, kl, ku, ldab);
+
+        rocsolver_bench_header("Results:");
+        rocsolver_bench_output("cpu_time_us");
+        rocsolver_bench_output(cpu_time_used);
+        rocsolver_bench_endl();
+    }
 
     // ensure all arguments were consumed
     argus.validate_consumed();
