@@ -37,9 +37,8 @@ class CpuFpReferenceRMSNorm
         if(reductionStart == rank)
         {
             // Validator should have rejected this; defensive guard for direct callers.
-            throw std::runtime_error(
-                "RMSNorm forward: scale has no trailing dims matching input — no "
-                "normalized axes can be derived.");
+            throw std::runtime_error("RMSNorm: scale has no trailing dims matching input — no "
+                                     "normalized axes can be derived.");
         }
 
         // Leading dims: [0, reductionStart) — batch + leading dims preserved through
