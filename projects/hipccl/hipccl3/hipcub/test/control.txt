@@ -34,14 +34,15 @@
 #
 # This allows you to quickly disable whole families of architectures without having to individually specify each one.
 # Here are some example keywords and the architectures they match:
-# - all           : all architectures
-# - apus          : gfx1103, gfx1150, gfx1151, gfx1152
-# - navi2x-family : gfx1030, gfx1031, gfx1032
-# - navi3x-family : gfx1100, gfx1101, gfx1102
-# - navi4x-family : gfx1200, gfx1201
-# - mi100-family  : gfx908
-# - mi200-family  : gfx90a
-# - mi300-family  : gfx942, gfx950
+# - <all>           : all architectures
+# - <apus>          : gfx1103, gfx1150, gfx1151, gfx1152
+# - <navi2x-family> : gfx1030, gfx1031, gfx1032
+# - <navi3x-family> : gfx1100, gfx1101, gfx1102
+# - <navi4x-family> : gfx1200, gfx1201
+# - <mi100-family>  : gfx908
+# - <mi200-family>  : gfx90a
+# - <mi300-family>  : gfx942, gfx950
+# - <nvidia>        : Nvidia devices
 #
 # For a full list of keywords and their regex equivalents, please see the definition of the keywords unordered map at the bottom of
 # the test/hipcub/test_utils_controller.hpp.in file.
@@ -100,7 +101,9 @@
 # -------
 # Caveats
 # -------
-# - regexes are sensitive to spaces, so those should be omitted unless you want to match them.
+# - After modifying this file, please rebuild target copy_control_file_changes to ensure that it gets copied into the correct location.
+#
+# - Regexes are sensitive to spaces, so those should be omitted unless you want to match them.
 #   For example, /(gfx1100|gfx1101) | gfx1200/ will not match "gfx1100" or "gfx1200" but will match "gfx1100 " or " gfx1200".
 #   To match all three architectures, you should omit the spaces: /(gfx1100|gfx1101)|gfx1200/
 #
@@ -122,15 +125,10 @@
 # ---------------
 # Add rules here:
 #----------------
-# Test Regex                               : Arch Regex                            : Sizes              : Build Types    : Skip Message
-/HipcubDeviceRadixSort\/.*/                : /<apus>/                              : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
-/HipcubDeviceRadixSortLargeInput.*/        : /<apus>/                              : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
-
-/HipcubDeviceMergeSort\/.*/                : /<apus>/                              : >= (1 << 32)       : *              : "Skipping sizes over 2^32 on APUs"
-
-/HipcubIteratorTests\/\d+\.TestTex.+/      : /<mi300-family>|navi4x-family|<apus>/ : *                  : *              : "Test not run on gfx94x, gfx95x, or gfx120x as texture cache API is not supported."
-
-/HipcubCachingDeviceAllocatorTests\.Test1/ : /all/                                 : *                  : valgrind, asan : "Skipping timing-sensitive test under Valgrind and ASAN."
-
-/HipcubDeviceSelectLargeIndicesTest\/HipcubDeviceSelectLargeIndicesTests\.LargeIndicesSelectOp\/\d+/    : /<all>/ : * : nvidia : "Test disabled for large sizes until support is present in CUB."
-
+# Test Regex                               : Arch Regex                            : Sizes           : Build Types    : Skip Message
+/HipcubDeviceRadixSort\/.*/                : /<apus>/                              : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceRadixSortLargeInput.*/        : /<apus>/                              : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceMergeSort\/.*/                : /<apus>/                              : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubIteratorTests\/\d+\.TestTex.+/      : /<mi300-family>|navi4x-family|<apus>/ : *               : *              : "Test not run on gfx94x, gfx95x, or gfx120x as texture cache API is not supported."
+/HipcubCachingDeviceAllocatorTests\.Test1/ : /<all>/                               : *               : valgrind, asan : "Skipping timing-sensitive test under Valgrind and ASAN."
+/HipcubDeviceSelectLargeIndicesTest\/.*/   : /<nvidia>/                            : *               : *              : "Test disabled for large sizes until support is present in CUB."
