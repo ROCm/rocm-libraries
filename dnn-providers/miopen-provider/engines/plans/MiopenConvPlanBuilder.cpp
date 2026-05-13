@@ -174,12 +174,11 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
 //        field, which is reliable for the entries that ARE returned but only
 //        covers the heuristic / find-db subset, NOT the full solver set.
 //
-// There is no miopenConvolution*GetMinWorkSpaceSize. The only way to obtain a
-// true minimum across the full solver set would be to run miopenFind*Algorithm,
-// which requires real device buffers (input, output, workspace) — and the
-// plugin policy is to allocate no device memory for sizing queries. We
-// therefore accept the heuristic-subset minimum from GetSolution as our best
-// non-allocating signal:
+// There is no miopenConvolution*GetMinWorkSpaceSize. A true minimum would
+// require running miopenFind*Algorithm, but Find needs real device buffers
+// and launches GPU kernels — neither is available or affordable at engine-
+// selection time. We accept the heuristic-subset minimum from GetSolution
+// as our best query-only signal:
 //
 //   * `range.max` comes from GetWorkSpaceSize. Matches what execution will
 //     request; not a true maximum across all solvers (see above).
