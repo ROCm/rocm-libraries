@@ -117,6 +117,7 @@
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/ResampleFwdNode.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
@@ -2815,6 +2816,31 @@ public:
      * @see hipdnn_frontend::graph::ConvFpropAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> resample_fwd(std::shared_ptr<TensorAttributes> x,
+                                                   ResampleFwdAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("ResampleFwd_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ResampleFwdNode>(std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_fprop(std::shared_ptr<TensorAttributes> x,
                                                  std::shared_ptr<TensorAttributes> w,
                                                  ConvFpropAttributes attributes)
@@ -2863,6 +2889,12 @@ public:
      * @param attributes Convolution parameters: padding, stride, dilation
      *        (must match forward pass)
      * @return dx: Gradient w.r.t. input (same shape as forward input)
+     *
+     * @note If `dx` dimensions are not provided, the channel count is
+     *       inferred assuming `groups = 1`. For grouped convolutions,
+     *       set dimensions on the returned `dx` tensor before graph
+     *       validation/finalization to avoid an incorrect channel count
+     *       on the inferred input-gradient tensor.
      *
      * @see hipdnn_frontend::graph::ConvDgradAttributes
      */
@@ -2915,6 +2947,12 @@ public:
      * @param attributes Convolution parameters: padding, stride, dilation
      *        (must match forward pass)
      * @return dw: Gradient w.r.t. filter weights (same shape as forward weights)
+     *
+     * @note If `dw` dimensions are not provided, the channel count is
+     *       inferred assuming `groups = 1`. For grouped convolutions,
+     *       set dimensions on the returned `dw` tensor before graph
+     *       validation/finalization to avoid an incorrect channel count
+     *       on the inferred weight tensor.
      *
      * @see hipdnn_frontend::graph::ConvWgradAttributes
      */
