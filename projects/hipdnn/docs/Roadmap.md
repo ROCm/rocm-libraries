@@ -3,7 +3,7 @@
 This document outlines the development roadmap for hipDNN, a comprehensive graph-based deep learning library for AMD GPUs. For current operation support details, refer to the [Operation Support documentation](./OperationSupport.md).
 
 > [!NOTE]
-> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements. The hipDNN team will endevor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
+> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements. The hipDNN team will endeavor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
 >
 > ✅ = Done
 >
@@ -51,7 +51,6 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - **PyTorch integration for opt-in hipDNN backend** ⏳
 
 ### SDPA
-- **SDPA frontend API & backend descriptors** ✅
 - First-wave SDPA forward kernels callable end-to-end through the graph API ⏳
 - Overridable tensor shapes (required for variable sequence lengths) ⏳
 - Note: backward-pass production quality and SDPA feature-flag gating tracked in later quarters
@@ -65,15 +64,15 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - **Client auto-tuning API** ⏳
 - Build N alternative execution plans for a single graph ⏳
 - Sampling run that ranks plans by wall-time and selects a winner ⏳
-- Export auto-tuning result to a config file for re-use across runs ⏳
+- Export auto-tuning result to a config file for reuse across runs ⏳
 
 ### Benchmarking & performance testing
-- **Benchmarking & performance python tools** ⏳
+- **Benchmarking & performance Python tools** ⏳
 - Installable as wheels
-- Set-up CICD for the project
+- Set up CICD for the project
 
 ### Support matrix
-- Integration tests emit structured pass/fail per op × dtype × engine × architecture ✅
+- Integration tests emit structured pass/fail per op × datatype × engine × architecture ✅
 - Generation step produces a human-readable support matrix from those results ✅
 - Matrix published as a regular CI artifact ⏳
 
@@ -100,7 +99,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### Normalization
 - Expanded LayerNorm & RMSNorm kernel coverage in the HIP kernel provider
-- Expanded layout & data-type coverage for batchnorm
+- Expanded layout & datatype coverage for batchnorm
 
 ### Core
 - Add **hipRTC & caching support** to plugin SDK (Empowers plugin developers, and standardizes caching of artifacts)
@@ -120,7 +119,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Additional JIT graph support for operations
 - Improve general operational support for operations:
   - Additional layout support
-  - Additional data-type support
+  - Additional datatype support
 
 ### More framework integrations
 - Currently discussing timelines for various framework integrations. Roadmap will be updated as they are defined.
