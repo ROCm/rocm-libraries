@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include "../../experimental/builder/test/utils/conv_algorithm_type_utils.hpp"
+#include "common.hpp"
 #include "grouped_convolution_signatures.hpp"
 #include "ck_tile/ref/naive_grouped_conv_bwd_data_gpu.hpp"
 

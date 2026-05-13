@@ -57,7 +57,10 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
         hipMemcpy(&ref.data()[0], reference.output, output_bytes_num, hipMemcpyDeviceToHost));
     HIP_CHECK_ERROR(
         hipMemcpy(&out.data()[0], outputs.output, output_bytes_num, hipMemcpyDeviceToHost));
-    ck_tile::check_err(out, ref, "Error: Incorrect results!");
+        
+    constexpr double rtol = ck::profiler::get_rtol<DataType>();
+    constexpr double atol = ck::profiler::get_atol<DataType>();
+    ck_tile::check_err(out, ref, "Error: Incorrect results!", rtol, atol);
 }
 
 /// @brief `run_grouped_conv_forward_tile_algs()` run all grouped conv fwd instances.

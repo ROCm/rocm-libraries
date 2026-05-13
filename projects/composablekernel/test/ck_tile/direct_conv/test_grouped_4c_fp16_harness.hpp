@@ -130,7 +130,9 @@ class DirectConvGrouped4cFp16TestHarness : public ::testing::Test
         d_out.FromDevice(h_result.data());
         d_ref_out.FromDevice(h_ref.data());
 
-        // TODO: Fix the tolerance. BF16 should have more or less the same tolerance as FP16.
+        // BF16 needs wider tolerance because MFMA multiplies at BF16 precision
+        // (7-bit mantissa) while the GPU reference promotes to fp32 first.
+        // Tolerance values match profiler/common.hpp get_rtol/get_atol<ck::bhalf_t>.
         constexpr double rtol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
         constexpr double atol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
         return check_err(h_result, h_ref, "Error: Fprop incorrect results!", rtol, atol);
@@ -232,7 +234,9 @@ class DirectConvGrouped4cFp16TestHarness : public ::testing::Test
         d_in_grad.FromDevice(h_result.data());
         d_ref_in_grad.FromDevice(h_ref.data());
 
-        // TODO: Fix the tolerance. BF16 should have more or less the same tolerance as FP16.
+        // BF16 needs wider tolerance because MFMA multiplies at BF16 precision
+        // (7-bit mantissa) while the GPU reference promotes to fp32 first.
+        // Tolerance values match profiler/common.hpp get_rtol/get_atol<ck::bhalf_t>.
         constexpr double rtol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
         constexpr double atol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
         return check_err(h_result, h_ref, "Error: Dgrad incorrect results!", rtol, atol);
