@@ -1697,7 +1697,7 @@ inline flatbuffers::FlatBufferBuilder
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
     // inv_rms stat shape is [N, 1, 1, 1, ...] when scale is [1, C, H, W ..]
-    const std::vector<int64_t> statDims = {2, 1, 1, 1};
+    const std::vector<int64_t> statDims = {dims[0], 1, 1, 1};
     const std::vector<int64_t> statStrides = hipdnn_data_sdk::utilities::generateStrides(
         statDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
@@ -1731,18 +1731,17 @@ inline flatbuffers::FlatBufferBuilder
         &derivedStrides,
         &derivedDims));
 
+    // inv_rms (inverse RMS from forward pass)
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "inv_rms",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &statStrides,
+        &statDims));
+
     if(hasOptionalAttributes)
     {
-        // inv_rms (inverse RMS from forward pass)
-        tensorAttributes.push_back(
-            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-                builder,
-                6,
-                "inv_rms",
-                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                &statStrides,
-                &statDims));
-
         // dbias (gradient of bias)
         tensorAttributes.push_back(
             hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -1760,8 +1759,7 @@ inline flatbuffers::FlatBufferBuilder
             1, // dy uid
             2, // x uid
             3, // scale uid
-            hasOptionalAttributes ? flatbuffers::Optional<int64_t>(6)
-                                  : flatbuffers::nullopt, // inv_rms uid
+            6, // inv_rms uid
             4, // dx uid
             5, // dscale uid
             hasOptionalAttributes ? flatbuffers::Optional<int64_t>(7)
