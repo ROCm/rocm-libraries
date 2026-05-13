@@ -27,13 +27,14 @@
 
 #pragma once
 
+#include "common/misc/client_util.hpp"
 #include "common/misc/clientcommon.hpp"
 #include "common/misc/generate.hpp"
-#include "common/misc/rocblas_test.hpp"
+#include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
+#include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 //#include "print_matrix.hpp"
-
-#include <gtest/gtest.h>
 
 #include <complex>
 #include <vector>
@@ -89,8 +90,6 @@ void testing_herand(Arguments& argus)
     char        uploC = argus.get<char>("uplo");
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
-    //printf( "n %d, lda %d, uploC '%c', uplo %d (%c)\n",
-    //        n, lda, uploC, uplo, rocblas2char_fill(uplo) );
 
     // check invalid sizes
     if(n < 0 || lda < n)
@@ -199,6 +198,9 @@ void testing_herand(Arguments& argus)
     EXPECT_LE(nzero_re, int64_t(0.01 * nfilled));
     EXPECT_LE(nzero_im, int64_t(0.01 * nfilled));
 
+    // no results for rocsolver-bench
+
+    // ensure all arguments were consumed
     argus.validate_consumed();
 }
 

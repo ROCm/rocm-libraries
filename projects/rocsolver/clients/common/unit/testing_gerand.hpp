@@ -27,12 +27,14 @@
 
 #pragma once
 
+#include "common/misc/client_util.hpp"
+#include "common/misc/clientcommon.hpp"
 #include "common/misc/generate.hpp"
-#include "common/misc/rocblas_test.hpp"
+#include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
+#include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 //#include "print_matrix.hpp"
-
-#include <gtest/gtest.h>
 
 #include <complex>
 #include <limits>

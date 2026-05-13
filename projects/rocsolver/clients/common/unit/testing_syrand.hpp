@@ -27,13 +27,14 @@
 
 #pragma once
 
+#include "common/misc/client_util.hpp"
 #include "common/misc/clientcommon.hpp"
 #include "common/misc/generate.hpp"
-#include "common/misc/rocblas_test.hpp"
+#include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
+#include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 //#include "print_matrix.hpp"
-
-#include <gtest/gtest.h>
 
 #include <complex>
 #include <vector>
@@ -74,7 +75,7 @@ void testing_syrand_bad_arg()
 //     and padding are untouched (== flag).
 //   - For uplo == upper: only upper triangle is written; lower (excl. diag)
 //     and padding are untouched (== flag).
-//   - For uplo == full: upper triangle equals (non-conjugated) transpose of
+//   - For uplo == full: upper triangle equals transpose of
 //     lower, i.e., A[i,j] == A[j,i] for i < j; padding untouched.
 //------------------------------------------------------------------------------
 template <typename T>
@@ -154,7 +155,7 @@ void testing_syrand(Arguments& argus)
                 }
                 else if(uplo == rocblas_fill_full)
                 {
-                    // Upper must equal (non-conjugate) transpose of lower: A[i,j] == A[j,i].
+                    // Upper must equal transpose of lower: A[i,j] == A[j,i].
                     EXPECT_EQ(val, A[j + i * lda])
                         << "upper not transpose of lower at (" << i << "," << j << ")";
                 }
@@ -185,6 +186,9 @@ void testing_syrand(Arguments& argus)
     EXPECT_LE(nzero_re, int64_t(0.01 * nfilled));
     EXPECT_LE(nzero_im, int64_t(0.01 * nfilled));
 
+    // no results for rocsolver-bench
+
+    // ensure all arguments were consumed
     argus.validate_consumed();
 }
 
