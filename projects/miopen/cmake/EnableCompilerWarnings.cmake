@@ -39,7 +39,8 @@ set(__cxx_compile_options
     # -Wconversion            # ~1000+ implicit narrowing/sign conversions to fix
     # -Wdouble-promotion      # implicit float-to-double promotions
     # Suppress specific warnings -- working to remove these by fixing the code
-    -Wno-c++11-narrowing        # ~40 instances: narrowing in brace init (batchnorm, ck_impl, addkernels)
+    # ~40 instances: narrowing in brace init (batchnorm, ck_impl, addkernels)
+    -Wno-c++11-narrowing
     -Wno-sign-compare           # ~1000+ instances: signed/unsigned comparisons throughout codebase
     -Wno-deprecated-declarations # 2 deprecated MIOpen APIs still have callers
 )

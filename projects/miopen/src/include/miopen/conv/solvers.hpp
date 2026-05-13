@@ -4681,12 +4681,18 @@ struct ConvWinogradNHWCTransposingTunableSolver
 
 struct TransposedConvBinWinograd3x3U final : ConvWinogradNHWCTransposingSolver<ConvBinWinograd3x3U>
 {
-    const std::string& SolverDbId() const override { return GetSolverDbId<TransposedConvBinWinograd3x3U>(); }
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<TransposedConvBinWinograd3x3U>();
+    }
 };
 
 struct TransposedConvBinWinogradRxS final : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxS>
 {
-    const std::string& SolverDbId() const override { return GetSolverDbId<TransposedConvBinWinogradRxS>(); }
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<TransposedConvBinWinogradRxS>();
+    }
 };
 
 struct TransposedConvBinWinogradRxSf2x3g1 final

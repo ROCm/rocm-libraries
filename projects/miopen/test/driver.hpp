@@ -389,16 +389,18 @@ struct test_driver
     generate_tensor_t<std::vector<int>, G>
     get_bn_spatial_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
-        return lazy_generate_tensor(
-            [=, this] { return get_bn_spatial_inputs(batch_factor); }, {4, 64, 28, 28}, tensor_elem_gen);
+        return lazy_generate_tensor([=, this] { return get_bn_spatial_inputs(batch_factor); },
+                                    {4, 64, 28, 28},
+                                    tensor_elem_gen);
     }
 
     template <class G = tensor_elem_gen_integer>
     generate_tensor_t<std::vector<int>, G>
     get_bn_peract_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
-        return lazy_generate_tensor(
-            [=, this] { return get_bn_peract_inputs(batch_factor); }, {16, 32, 8, 8}, tensor_elem_gen);
+        return lazy_generate_tensor([=, this] { return get_bn_peract_inputs(batch_factor); },
+                                    {16, 32, 8, 8},
+                                    tensor_elem_gen);
     }
 
     template <class G = tensor_elem_gen_integer>
@@ -515,7 +517,9 @@ struct test_driver
     template <class T>
     generate_data_t<std::vector<T>> generate_multi_data(std::vector<std::vector<T>> multi_dims)
     {
-        return {[=, this]() -> std::vector<T> { return generate_data(multi_dims.at(dataset_id))(T{}); }};
+        return {[=, this]() -> std::vector<T> {
+            return generate_data(multi_dims.at(dataset_id))(T{});
+        }};
     }
 
     template <class T>
@@ -614,10 +618,10 @@ struct test_driver
     auto verify_reporter()
     {
         return [=, this](bool pass,
-                   std::vector<double> error,
-                   const auto& out_cpu,
-                   const auto& out_gpu,
-                   auto fail) {
+                         std::vector<double> error,
+                         const auto& out_cpu,
+                         const auto& out_gpu,
+                         auto fail) {
             if(not pass or verbose)
             {
                 if(not error.empty() or not pass)

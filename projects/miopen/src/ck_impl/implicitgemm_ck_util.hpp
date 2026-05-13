@@ -670,7 +670,8 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
 }
 
 template <typename DataType, typename OutElemOp>
-OutElemOp GetOutElementOp([[maybe_unused]] const miopen::fusion::ActivationOpInvokeParam& activationOp)
+OutElemOp
+GetOutElementOp([[maybe_unused]] const miopen::fusion::ActivationOpInvokeParam& activationOp)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto activationMode = activationOp.activMode;
@@ -876,12 +877,13 @@ template <bool ZeroOutputs,
           typename Input1TposeOp,
           typename Input2TposeOp,
           typename OutputTposeOp>
-ConvSolution InitInvokerFactoryNCHW([[maybe_unused]] const ExecutionContext& ctx,
-                                    [[maybe_unused]] const miopen::conv::ProblemDescription& problem,
-                                    [[maybe_unused]] const std::string& kernel_id,
-                                    [[maybe_unused]] const Input1TposeOp& input1_op,
-                                    [[maybe_unused]] const Input2TposeOp& input2_op,
-                                    [[maybe_unused]] const OutputTposeOp& output_op)
+ConvSolution
+InitInvokerFactoryNCHW([[maybe_unused]] const ExecutionContext& ctx,
+                       [[maybe_unused]] const miopen::conv::ProblemDescription& problem,
+                       [[maybe_unused]] const std::string& kernel_id,
+                       [[maybe_unused]] const Input1TposeOp& input1_op,
+                       [[maybe_unused]] const Input2TposeOp& input2_op,
+                       [[maybe_unused]] const OutputTposeOp& output_op)
 {
     assert(problem.IsLayoutDefault());
 
@@ -1271,11 +1273,11 @@ ConvSolution InitInvokerFactoryWrwNCHW(const ExecutionContext& ctx,
 }
 
 template <typename InvokerFactoryMakerNCHW, typename InvokerFactoryMakerNHWC>
-ConvSolution
-MakeSolutionGroupConvImplicitGemmXdlops([[maybe_unused]] const miopen::conv::ProblemDescription& problem,
-                                        [[maybe_unused]] InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
-                                        [[maybe_unused]] InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
-                                        [[maybe_unused]] const bool use_tf32 = false)
+ConvSolution MakeSolutionGroupConvImplicitGemmXdlops(
+    [[maybe_unused]] const miopen::conv::ProblemDescription& problem,
+    [[maybe_unused]] InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
+    [[maybe_unused]] InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
+    [[maybe_unused]] const bool use_tf32 = false)
 {
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
