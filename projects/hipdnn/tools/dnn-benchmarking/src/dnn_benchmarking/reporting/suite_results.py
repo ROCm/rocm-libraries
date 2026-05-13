@@ -157,7 +157,7 @@ class ProviderEngineResult:
     correctness: Optional[CorrectnessResult] = None
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None
-    # Phase 1 always-on metrics (None when collection failed or skipped)
+    # Always-on metrics (None when collection failed or skipped)
     workspace_bytes: Optional[int] = None
     analytical_flops: Optional[int] = None
     analytical_flops_partial: bool = False
@@ -185,7 +185,7 @@ class ProviderEngineResult:
         Correctness, when present, is always serialized regardless of status
         so that error/skip entries can carry their failure context.
 
-        Phase 1 metrics are emitted only inside the ``success`` branch
+        Always-on metrics are emitted only inside the ``success`` branch
         and only when non-None, so the JSON shape stays compact for
         runs where probes were unavailable.
         """
@@ -334,8 +334,6 @@ class SuiteMetadata:
         numa_nodes: Number of NUMA nodes on the host.
         total_ram_gb: Total host RAM in GiB.
         kernel_version: Linux kernel version.
-        container_runtime: Detected container runtime (docker, enroot,
-            kubernetes, podman, lxc) or None when run on bare metal.
         gpu_compute_units: Number of GPU compute units.
         gpu_hbm_gb: Total GPU HBM in GiB.
         gpu_pcie_link: PCIe link speed/width string (e.g. "gen4 x16").
@@ -368,7 +366,6 @@ class SuiteMetadata:
     numa_nodes: Optional[int] = None
     total_ram_gb: Optional[float] = None
     kernel_version: Optional[str] = None
-    container_runtime: Optional[str] = None
     gpu_compute_units: Optional[int] = None
     gpu_hbm_gb: Optional[float] = None
     gpu_pcie_link: Optional[str] = None
@@ -398,7 +395,6 @@ class SuiteMetadata:
             "numa_nodes": self.numa_nodes,
             "total_ram_gb": self.total_ram_gb,
             "kernel_version": self.kernel_version,
-            "container_runtime": self.container_runtime,
             "gpu_compute_units": self.gpu_compute_units,
             "gpu_hbm_gb": self.gpu_hbm_gb,
             "gpu_pcie_link": self.gpu_pcie_link,
@@ -479,7 +475,6 @@ class SuiteResult:
             numa_nodes=env_info.get("numa_nodes"),
             total_ram_gb=env_info.get("total_ram_gb"),
             kernel_version=env_info.get("kernel_version"),
-            container_runtime=env_info.get("container_runtime"),
             gpu_compute_units=env_info.get("gpu_compute_units"),
             gpu_hbm_gb=env_info.get("gpu_hbm_gb"),
             gpu_pcie_link=env_info.get("gpu_pcie_link"),

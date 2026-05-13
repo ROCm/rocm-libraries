@@ -433,10 +433,10 @@ class Reporter:
     ) -> None:
         """Print suite execution header.
 
-        Includes a one-line machine summary (CPU + GPU + ROCm + container
-        runtime) collected by ``metrics.machine_info`` so console
-        output matches the JSON metadata. Failures are silent —
-        ``machine_info`` already routes them through ``warn_once``.
+        Includes a one-line machine summary (CPU + GPU + ROCm) collected
+        by ``metrics.machine_info`` so console output matches the JSON
+        metadata. Failures are silent — ``machine_info`` already routes
+        them through ``warn_once``.
         """
         self._print_line("=")
         self._print(f"hipDNN Benchmark Suite: {total_graphs} graph(s)")
@@ -460,7 +460,6 @@ class Reporter:
         cpu = env.get("cpu_model") or "unknown CPU"
         gpu = env.get("gpu_model") or "unknown GPU"
         rocm = env.get("rocm_version") or "unknown ROCm"
-        container = env.get("container_runtime")
         cu = env.get("gpu_compute_units")
         hbm = env.get("gpu_hbm_gb")
         gpu_extras = []
@@ -471,10 +470,7 @@ class Reporter:
         gpu_label = gpu + (f" ({', '.join(gpu_extras)})" if gpu_extras else "")
         self._print(f"Host:    {cpu}")
         self._print(f"GPU:     {gpu_label}")
-        line = f"ROCm:    {rocm}"
-        if container:
-            line += f"   Container: {container}"
-        self._print(line)
+        self._print(f"ROCm:    {rocm}")
 
     def print_suite_graph_start(self, index: int, total: int, graph_name: str) -> None:
         """Print per-graph progress line at start (no trailing newline).

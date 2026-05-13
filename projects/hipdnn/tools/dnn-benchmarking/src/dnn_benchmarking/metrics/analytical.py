@@ -74,6 +74,12 @@ def _conv_flops(
     outputs = node.get("outputs", {}) or {}
     params = node.get("parameters", {}) or {}
 
+    # TODO: lift this string-keyed UID lookup into a structural pass
+    # over the parsed graph once a Graph/Node abstraction is available.
+    # Today every handler in this module reaches into the raw JSON and
+    # probes hipDNN-specific input/output names by string, which couples
+    # us to the exact key strings emitted by hipDNN's frontend.
+    #
     # Cannot use ``or`` chains here: hipDNN tensor UIDs start at 0 and
     # ``0 or fallback`` evaluates to fallback, masking the real UID.
     x_uid = inputs.get("x_tensor_uid")

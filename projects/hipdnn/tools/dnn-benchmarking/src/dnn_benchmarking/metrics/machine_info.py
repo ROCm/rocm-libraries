@@ -81,32 +81,6 @@ def _read_kernel_version() -> Optional[str]:
         return None
 
 
-def _detect_container_runtime() -> Optional[str]:
-    """Best-effort container runtime detection from /proc/1/cgroup and env.
-
-    Returns one of ``docker``, ``podman``, ``enroot``, ``kubernetes``,
-    ``lxc``, or ``None`` when nothing is matched.
-    """
-    if "ENROOT_PID" in os.environ or "ENROOT_ROOTFS" in os.environ:
-        return "enroot"
-    if "KUBERNETES_SERVICE_HOST" in os.environ:
-        return "kubernetes"
-    try:
-        cg = Path("/proc/1/cgroup").read_text()
-    except OSError:
-        return None
-    lower = cg.lower()
-    for needle, name in (
-        ("docker", "docker"),
-        ("podman", "podman"),
-        ("kubepods", "kubernetes"),
-        ("lxc", "lxc"),
-    ):
-        if needle in lower:
-            return name
-    return None
-
-
 def _safe_call(label: str, fn: Any) -> Any:
     """Run a probe helper and route any failure through ``warn_once``.
 
@@ -134,7 +108,6 @@ def collect_machine_info() -> Dict[str, Any]:
         "numa_nodes": _safe_call("numa_nodes", _read_numa_nodes),
         "total_ram_gb": _safe_call("total_ram_gb", _read_total_ram_gb),
         "kernel_version": _safe_call("kernel_version", _read_kernel_version),
-        "container_runtime": _safe_call("container_runtime", _detect_container_runtime),
         "gpu_compute_units": None,
         "gpu_hbm_gb": None,
         "gpu_pcie_link": None,

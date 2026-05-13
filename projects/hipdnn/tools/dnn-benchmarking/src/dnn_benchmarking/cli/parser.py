@@ -281,10 +281,10 @@ Tarball Input:
         action="store_true",
         default=False,
         help=(
-            "Required to use --pmc all. The unioned counter set crosses "
-            "the single-pass replay budget and can hang on small "
-            "workloads (Phase 1 testing observed a 4-min hang on a "
-            "0.4 s baseline)."
+            "Required to use --pmc all. The unioned counter set exceeds "
+            "the single-pass replay budget on most arches and rocprofv3 "
+            "falls back to multi-pass replay, which has been observed to "
+            "hang for minutes on sub-second workloads."
         ),
     )
     metrics_group.add_argument(

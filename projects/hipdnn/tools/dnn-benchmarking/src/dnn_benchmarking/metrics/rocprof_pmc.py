@@ -9,8 +9,8 @@ the resulting rocpd SQLite database into per-engine counter aggregates.
 Counter sets are hardcoded per-arch and are intentionally small enough
 to fit a single-pass replay on every supported arch. The ``"all"`` set
 unions every group and is gated by ``MetricsConfig.pmc_allow_multipass``
-because Phase 1 measurements showed multi-pass replay can hang on small
-workloads (4-min hang on a 0.4 s baseline).
+because rocprofv3's multi-pass replay has been observed to hang for
+minutes on sub-second workloads.
 
 We do not pre-validate counter availability because the
 ``rocprofv3-avail counters`` subcommand is missing in rocprofv3 1.2.2.
@@ -18,9 +18,11 @@ Instead we let rocprofv3 fail at run time and surface its stderr tail
 under ``extra_metrics["pmc"]["error_tail"]``. This is also more robust
 to per-build counter renames than a static validity check.
 
-The gfx90a counter names are educated guesses pending verification
-against a real gfx90a host (see TODO inline). Both the basic set on
-gfx942 and the fallback set are conservative and known-good.
+All three gfx90a sets are verified against
+``/opt/rocm/share/rocprofiler-sdk/basic_counters.xml`` and
+``derived_counters.xml`` plus a single-pass ``rocprofv3 --pmc`` run on
+a gfx90a host. The fallback set is conservative and known-good across
+every supported arch.
 """
 
 import sqlite3
@@ -52,9 +54,6 @@ PMC_SETS: Dict[str, Dict[str, List[str]]] = {
             "SQ_INSTS_VALU_MFMA_F32",
         ],
     },
-    # TODO: verify gfx90a MFMA counter names against a live host before
-    # promoting beyond fallback coverage. The basic + memory sets are
-    # the same as gfx942 and known portable; the flops set is omitted.
     "gfx90a": {
         "basic": [
             "GRBM_GUI_ACTIVE",
@@ -65,6 +64,13 @@ PMC_SETS: Dict[str, Dict[str, List[str]]] = {
         "memory": [
             "TCC_HIT_sum",
             "TCC_MISS_sum",
+            "TCP_TCC_READ_REQ_sum",
+            "TCC_EA_RDREQ_sum",
+        ],
+        "flops": [
+            "SQ_INSTS_VALU_MFMA_F16",
+            "SQ_INSTS_VALU_MFMA_BF16",
+            "SQ_INSTS_VALU_MFMA_F32",
         ],
     },
     "fallback": {

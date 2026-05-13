@@ -158,9 +158,10 @@ class MetricsConfig:
             PDF) is not exposed; users who want it can re-run
             rocprof-compute against the recorded db_path.
         pmc_allow_multipass: Required for ``--pmc all``. Without it,
-            ``all`` is rejected at config-build time because Phase 1
-            testing measured a 4-min hang on a 0.4 s baseline when the
-            rocprofv3 multi-pass replay budget was exceeded.
+            ``all`` is rejected at config-build time because the rocprofv3
+            multi-pass replay budget is easy to exceed and the resulting
+            multi-pass replay has been observed to hang for minutes on
+            sub-second workloads.
         profiling_output_dir: Root directory for profiling artefacts.
             ``None`` until the orchestrator resolves a default
             (``./profiling-output/<utc-timestamp>/``) at suite start.
@@ -206,9 +207,9 @@ class MetricsConfig:
                 f"Valid options: {sorted(valid_data_types)}"
             )
         # The 'all' PMC set unions every counter group; rocprofv3 falls
-        # back to multi-pass replay, which Phase 1 measurements showed
-        # could hang for minutes on what should be a sub-second run.
-        # Require the explicit opt-in so users discover the cost.
+        # back to multi-pass replay, which has been observed to hang for
+        # minutes on what should be a sub-second run. Require the explicit
+        # opt-in so users discover the cost.
         if self.pmc_set == "all" and not self.pmc_allow_multipass:
             raise ValueError(
                 "--pmc all requires --pmc-allow-multipass: rocprofv3 "

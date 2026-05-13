@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Tests for the Phase 1 metric fields on ProviderEngineResult.to_dict.
+"""Tests for the always-on metric fields on ProviderEngineResult.to_dict.
 
 The legacy success-path JSON shape must stay backward-compatible: new
 metric fields appear only when populated, never as null sentinels.
@@ -117,9 +117,10 @@ class TestProviderEngineResultFullShape:
         assert d["cpu_kernel_time_per_iter_us"] == 2.5
         assert d["vram_used_mb"] == 4096.0
 
-    def test_extra_metrics_passthrough_for_phase23(self):
-        # Phase 1 never populates this; the schema must still round-trip
-        # an arbitrary dict so Phase 2/3 land cleanly.
+    def test_extra_metrics_passthrough(self):
+        # Always-on collection never populates this; the schema must
+        # still round-trip an arbitrary dict so opt-in profiling
+        # payloads land cleanly.
         payload = {"pmc": {"GRBM_GUI_ACTIVE": 12345}}
         pe = ProviderEngineResult(
             provider="miopen",
@@ -177,7 +178,6 @@ class TestSuiteMetadataMachineFields:
             numa_nodes=2,
             total_ram_gb=1536.0,
             kernel_version="6.8.0-31-generic",
-            container_runtime="enroot",
             gpu_compute_units=304,
             gpu_hbm_gb=192.0,
             gpu_pcie_link="gen4 x16",
@@ -189,7 +189,6 @@ class TestSuiteMetadataMachineFields:
         assert d["numa_nodes"] == 2
         assert d["total_ram_gb"] == 1536.0
         assert d["kernel_version"] == "6.8.0-31-generic"
-        assert d["container_runtime"] == "enroot"
         assert d["gpu_compute_units"] == 304
         assert d["gpu_hbm_gb"] == 192.0
         assert d["gpu_pcie_link"] == "gen4 x16"

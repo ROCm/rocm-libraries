@@ -174,7 +174,7 @@ class TestSuiteRunnerIntegration:
     def test_basic_metrics_populated_by_default(
         self, hipdnn, conv_graph: Dict[str, Any]
     ) -> None:
-        """Default ``metrics-tier=basic`` populates the Phase 1 fields.
+        """Default ``metrics-tier=basic`` populates the always-on fields.
 
         Asserts shape only — values are platform-dependent so we just
         check that the always-on probes wired up correctly and the
@@ -260,7 +260,7 @@ class TestSuiteRunnerIntegration:
         for r in successes:
             # Legacy fields still populated even with metrics off.
             assert r.cpu_build_time_ms is not None
-            # Phase 1 fields stay None when tier=off.
+            # Always-on fields stay None when tier=off.
             assert r.workspace_bytes is None
             assert r.analytical_flops is None
             assert r.analytical_io_bytes is None

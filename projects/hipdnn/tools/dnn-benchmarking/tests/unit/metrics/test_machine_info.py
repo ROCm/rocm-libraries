@@ -38,34 +38,6 @@ class TestReadCpuModel:
             assert machine_info._read_cpu_model() is None
 
 
-class TestDetectContainerRuntime:
-    def test_enroot_via_env(self):
-        with patch.dict(os.environ, {"ENROOT_PID": "12345"}, clear=False):
-            assert machine_info._detect_container_runtime() == "enroot"
-
-    def test_kubernetes_via_env(self):
-        with patch.dict(
-            os.environ, {"KUBERNETES_SERVICE_HOST": "10.0.0.1"}, clear=False
-        ):
-            # Drop ENROOT vars so they don't dominate.
-            for key in ("ENROOT_PID", "ENROOT_ROOTFS"):
-                os.environ.pop(key, None)
-            assert machine_info._detect_container_runtime() == "kubernetes"
-
-    def test_docker_via_cgroup(self):
-        for key in ("ENROOT_PID", "ENROOT_ROOTFS", "KUBERNETES_SERVICE_HOST"):
-            with patch.dict(os.environ, {}, clear=False):
-                os.environ.pop(key, None)
-        with patch.object(Path, "read_text", return_value="0::/docker/abc123\n"):
-            assert machine_info._detect_container_runtime() == "docker"
-
-    def test_returns_none_when_cgroup_missing(self):
-        for key in ("ENROOT_PID", "ENROOT_ROOTFS", "KUBERNETES_SERVICE_HOST"):
-            os.environ.pop(key, None)
-        with patch.object(Path, "read_text", side_effect=OSError("missing")):
-            assert machine_info._detect_container_runtime() is None
-
-
 class TestCollectMachineInfo:
     def test_returns_all_keys(self):
         # Force amdsmi unavailable so static GPU fields stay None and
@@ -78,7 +50,6 @@ class TestCollectMachineInfo:
             "numa_nodes",
             "total_ram_gb",
             "kernel_version",
-            "container_runtime",
             "gpu_compute_units",
             "gpu_hbm_gb",
             "gpu_pcie_link",
