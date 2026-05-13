@@ -20,7 +20,6 @@ define_property(GLOBAL PROPERTY KERNELEMBEDDING_KERNEL_FILES)
 
 
 function(add_kernels_for_embedding)
-    message(STATUS "add_kernels_for_embedding receives ${ARGC} arguments")
     foreach(KERNEL_FILE IN LISTS ARGV)
         set_property(GLOBAL APPEND PROPERTY KERNELEMBEDDING_KERNEL_FILES ${KERNEL_FILE})
     endforeach()
@@ -28,7 +27,6 @@ function(add_kernels_for_embedding)
     
     # for debugging purposes
     get_property(_KERNELEMBEDDING_KERNEL_FILES_OLD GLOBAL PROPERTY KERNELEMBEDDING_KERNEL_FILES)
-    message(WARNING "KERNELEMBEDDING_KERNEL_FILES now is " "${_KERNELEMBEDDING_KERNEL_FILES_OLD}")
 endfunction()
 
 # Function to embed kernel sources as C++ strings at configure time
