@@ -174,11 +174,13 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
 //        field, which is reliable for the entries that ARE returned but only
 //        covers the heuristic / find-db subset, NOT the full solver set.
 //
-// There is no miopenConvolution*GetMinWorkSpaceSize. A true minimum would
-// require running miopenFind*Algorithm, but Find needs real device buffers
-// and launches GPU kernels — neither is available or affordable at engine-
-// selection time. We accept the heuristic-subset minimum from GetSolution
-// as our best query-only signal:
+// There is no public API for a true minimum across the applicable solver
+// set. miopenFind*Algorithm comes closest but still deduplicates by
+// algorithm class (ShrinkToFind10Results in convolutionocl.cpp:238) and
+// silently drops solvers exceeding the caller-provided workspace cap; it
+// also needs real device buffers and launches GPU kernels, so it isn't
+// affordable at engine-selection time anyway. We accept the heuristic-
+// subset minimum from GetSolution as our best query-only signal:
 //
 //   * `range.max` comes from GetWorkSpaceSize. Matches what execution will
 //     request; not a true maximum across all solvers (see above).
