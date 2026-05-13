@@ -2102,7 +2102,9 @@ class TestIntegration:
 
 # Tool to visualize the scheduling steps on a real kernel configuration. Run with --interactive to step through each phase.
 # Also calls the instruction scheduler to verify the emitted modules are valid input and to show the final instruction counts.
-
+# Example usage:
+#   PYTHONPATH=. python Tensile/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 320 --mt1 320 --du 64 --pgr 1 --wg 2x2 --partition-size 10x2
+#   PYTHONPATH=. python Tensile/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 256 --mt1 256 --du 256 --dtype fp4 --pgr 2 --wg 2x2 --partition-size 8x4
 if __name__ == "__main__":
     import sys
     import io
@@ -2117,10 +2119,8 @@ if __name__ == "__main__":
                         help="DepthU (default: 64 for bf16, 512 for fp4)")
     parser.add_argument("--dtype", choices=["bf16", "fp4"], default="bf16",
                         help="Data type (default: bf16)")
-    parser.add_argument("--partition-m", type=int, default=1,
-                        help="numPartitionsM (default: 1)")
-    parser.add_argument("--partition-n", type=int, default=1,
-                        help="numPartitionsN (default: 1)")
+    parser.add_argument("--partition-size", type=str, default="0x0",
+                        help="partitionSize as MxN in MFMA tiles (0 = full dim, default: 0x0)")
     parser.add_argument("--wg", type=str, default="2x2",
                         help="MIWaveGroup as MxN (default: 2x2)")
     parser.add_argument("--pgr", type=int, choices=[0, 1, 2], default=1,
@@ -2137,6 +2137,11 @@ if __name__ == "__main__":
     if len(wg_parts) != 2:
         parser.error(f"--wg must be MxN (e.g. 2x2), got: {args.wg}")
     waveGroup = (int(wg_parts[0]), int(wg_parts[1]))
+
+    ps_parts = args.partition_size.lower().split("x")
+    if len(ps_parts) != 2:
+        parser.error(f"--partition-size must be MxN (e.g. 10x2), got: {args.partition_size}")
+    partSizeM, partSizeN = int(ps_parts[0]), int(ps_parts[1])
 
     kernel = create_kernel(args.mt0, args.mt1, fp4=fp4, depthU=args.du,
                            miWaveGroup=list(waveGroup))
@@ -2158,8 +2163,8 @@ if __name__ == "__main__":
         lrB=ReadGranularity(mn=1, k=1),
         grA=grA,
         grB=grB,
-        numPartitionsM=args.partition_m,
-        numPartitionsN=args.partition_n,
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
         pgr=args.pgr,
     )
     if fp4:
@@ -2175,7 +2180,7 @@ if __name__ == "__main__":
 
     print(f"Config: MT={args.mt0}x{args.mt1}, DU={args.du}, dtype={args.dtype}, "
           f"WG={waveGroup[0]}x{waveGroup[1]}, "
-          f"partitions={args.partition_m}x{args.partition_n}, pgr={args.pgr}")
+          f"partitionSize={partSizeM}x{partSizeN}, pgr={args.pgr}")
     print(f"        numMFMATilesM={cfg.numMFMATilesM}, "
           f"numMFMATilesN={cfg.numMFMATilesN}, "
           f"numSubIterK={cfg.numSubIterK}, "
