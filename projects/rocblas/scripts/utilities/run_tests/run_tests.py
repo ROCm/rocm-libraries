@@ -42,6 +42,10 @@ Usage examples
 # Run two specific jobs:
     python3 run_tests.py --job L1_BLAS.dot --job L2_BLAS.gemv_batched
 
+# Skip tests matching a GTest pattern (repeatable):
+    python3 run_tests.py --exclude-pattern "*f32_c_LNN*"
+    python3 run_tests.py --exclude-pattern "*f32_c_LNN*" --exclude-pattern "*f64_c_LTN*"
+
 # List all valid job IDs:
     python3 run_tests.py --list-jobs
 
@@ -671,7 +675,8 @@ class JobRunner:
     def __init__(self, state: RunState, all_jobs: Dict[str, JobSpec],
                  state_path: str, state_lock: threading.Lock,
                  display: LiveDisplay, max_parallel: int,
-                 count_interval: int, skip_failed: bool = False) -> None:
+                 count_interval: int, skip_failed: bool = False,
+                 exclude_patterns: Optional[List[str]] = None) -> None:
         self._state = state
         self._all_jobs = all_jobs
         self._state_path = state_path
@@ -680,6 +685,7 @@ class JobRunner:
         self._semaphore = threading.Semaphore(max_parallel)
         self._count_interval = count_interval
         self._skip_failed = skip_failed
+        self._exclude_patterns: List[str] = exclude_patterns or []
         self._poll_stop = threading.Event()
 
     def run_all(self, jobs: List[JobSpec],
@@ -774,6 +780,8 @@ class JobRunner:
         # them into the cumulative exclusion set.  This ensures every restart
         # extends the set rather than replacing it.
         gtest_filter = spec.gtest_filter
+        if self._exclude_patterns:
+            gtest_filter = _build_exclusion_filter(gtest_filter, set(self._exclude_patterns)) or gtest_filter
         preamble_lines: List[str] = []
         new_passed_count = 0
         new_failed_count = 0
@@ -1009,6 +1017,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--skip-failed", action="store_true",
                    help="On partial resume, also skip previously failed tests "
                         "(re-run only tests that have not been attempted yet)")
+    p.add_argument("--exclude-pattern", action="append", dest="exclude_patterns",
+                   metavar="PATTERN",
+                   help="GTest pattern to exclude from every job's filter (repeatable). "
+                        "Appended to the negative section of each job's --gtest_filter. "
+                        "Example: --exclude-pattern '*f32_c_LNN*'")
     p.add_argument("--no-color", action="store_true",
                    help="Plain output, no ANSI escape codes")
     return p
@@ -1219,6 +1232,7 @@ def main() -> int:
         max_parallel=args.max_parallel,
         count_interval=args.count_interval,
         skip_failed=args.skip_failed,
+        exclude_patterns=args.exclude_patterns,
     )
 
     try:

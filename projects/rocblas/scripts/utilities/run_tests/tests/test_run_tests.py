@@ -17,6 +17,7 @@ from run_tests import (
     _parse_test_counts,
     _record_from_dict,
     build_all_groups,
+    build_arg_parser,
     recover_interrupted_jobs,
     JobRecord,
     JobSpec,
@@ -953,3 +954,89 @@ class TestTotalRefresh:
         rec.tests_passed_offset = 500
         _apply_total_update(rec, current_total=974)    # run 3: 500 excluded
         assert rec.tests_total == 974 + 500            # = 1474 (still consistent)
+
+
+# ---------------------------------------------------------------------------
+# --exclude-pattern  CLI option and filter injection
+# ---------------------------------------------------------------------------
+
+def _apply_exclude_patterns(original_filter: str,
+                             patterns: Sequence[str]) -> str:
+    """Replicate the JobRunner exclude_patterns injection logic."""
+    if not patterns:
+        return original_filter
+    return _build_exclusion_filter(original_filter, set(patterns)) or original_filter
+
+
+class TestExcludePattern:
+    """Tests for the --exclude-pattern CLI option and its effect on GTest filters."""
+
+    # -- CLI parsing -------------------------------------------------------
+
+    def test_no_exclude_pattern_defaults_to_none(self):
+        """When --exclude-pattern is absent, args.exclude_patterns is None."""
+        args = build_arg_parser().parse_args([])
+        assert args.exclude_patterns is None
+
+    def test_single_exclude_pattern_parsed(self):
+        """A single --exclude-pattern value is stored as a one-element list."""
+        args = build_arg_parser().parse_args(["--exclude-pattern", "*f32_c_LNN*"])
+        assert args.exclude_patterns == ["*f32_c_LNN*"]
+
+    def test_multiple_exclude_patterns_accumulated(self):
+        """Repeated --exclude-pattern flags accumulate into a list."""
+        args = build_arg_parser().parse_args([
+            "--exclude-pattern", "*f32_c_LNN*",
+            "--exclude-pattern", "*f64_c_LTN*",
+        ])
+        assert args.exclude_patterns == ["*f32_c_LNN*", "*f64_c_LTN*"]
+
+    # -- Filter injection --------------------------------------------------
+
+    def test_pattern_appended_to_filter_without_negative(self):
+        """A filter with no existing negative section gets one added."""
+        result = _apply_exclude_patterns("*trsv*quick*", ["*f32_c_LNN*"])
+        assert result == "*trsv*quick*-*f32_c_LNN*"
+
+    def test_pattern_appended_to_filter_with_existing_negative(self):
+        """Exclude pattern is colon-joined after the existing negative section."""
+        result = _apply_exclude_patterns("*trsv*quick*-*_ex*", ["*f32_c_LNN*"])
+        assert result.startswith("*trsv*quick*-")
+        negative = result.split("-", 1)[1]
+        assert "*_ex*" in negative
+        assert "*f32_c_LNN*" in negative
+
+    def test_multiple_patterns_all_appear_in_negative(self):
+        """All supplied exclude patterns appear in the filter's negative section."""
+        result = _apply_exclude_patterns(
+            "*trsv*quick*-*_ex*",
+            ["*f32_c_LNN*", "*f64_c_LTN*"],
+        )
+        negative = result.split("-", 1)[1]
+        assert "*f32_c_LNN*" in negative
+        assert "*f64_c_LTN*" in negative
+
+    def test_positive_section_unchanged(self):
+        """Exclude patterns must never alter the positive part of the filter."""
+        original = "*trsv_batched*quick*-*_ex*"
+        result = _apply_exclude_patterns(original, ["*f32_c_LNN*"])
+        positive = result.split("-", 1)[0]
+        assert positive == "*trsv_batched*quick*"
+
+    def test_no_patterns_returns_filter_unchanged(self):
+        """With an empty exclude list the original filter is returned as-is."""
+        original = "*trsv*quick*-*_ex*"
+        assert _apply_exclude_patterns(original, []) == original
+
+    def test_pattern_does_not_affect_excluded_tests_accumulation(self):
+        """Exclude patterns are separate from the per-test exclusion set used
+        for partial resume; _build_exclusion_filter with per-test names still
+        works correctly when patterns are also present."""
+        base = "*trsv*quick*-*f32_c_LNN*"   # already has exclude pattern applied
+        per_test = {"_/trsv.suite/test_alpha", "_/trsv.suite/test_beta"}
+        result = _build_exclusion_filter(base, per_test)
+        assert result is not None
+        negative = result.split("-", 1)[1]
+        assert "*f32_c_LNN*" in negative
+        assert "_/trsv.suite/test_alpha" in negative
+        assert "_/trsv.suite/test_beta" in negative
