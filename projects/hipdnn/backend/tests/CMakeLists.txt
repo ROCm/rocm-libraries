@@ -80,6 +80,9 @@ add_executable(
     descriptors/TestGraphDescriptorReduction.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestRMSNormOperationFromNode.cpp
+    descriptors/TestRMSNormBackwardOperationDescriptor.cpp
+    descriptors/TestRMSNormBackwardOperationFromNode.cpp
+    descriptors/TestGraphDescriptorRMSNormBackward.cpp
     descriptors/TestSdpaBwdOperationDescriptor.cpp
     descriptors/TestSdpaBwdOperationFromNode.cpp
     descriptors/TestSdpaFwdOperationDescriptor.cpp
