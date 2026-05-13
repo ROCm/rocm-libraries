@@ -472,21 +472,25 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                "dropout_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dbias_tensor_uid(), "dbias tensor not supported");
 
+    // --- Validate required tensors ---
+
     // Group mode (variable sequence lengths) requires a different kernarg
     // layout than the POC; deferred to the kernarg-layout abstraction.
     HIP_KERNEL_RETURN_FALSE_IF(
         getBatchMode(attrs) != BatchMode::BATCH,
         "group mode (seq_len_q_tensor_uid or seq_len_kv_tensor_uid set) is not supported");
 
-    // Validate required tensors
     const auto& tensorMap = opGraph.getTensorMap();
 
+    // Required input tensor UIDs
     const int64_t qUid = attrs.q_tensor_uid();
     const int64_t kUid = attrs.k_tensor_uid();
     const int64_t vUid = attrs.v_tensor_uid();
     const int64_t oUid = attrs.o_tensor_uid();
     const int64_t doUid = attrs.do_tensor_uid();
     const int64_t statsUid = attrs.stats_tensor_uid();
+
+    // Required output tensor UIDs
     const int64_t dqUid = attrs.dq_tensor_uid();
     const int64_t dkUid = attrs.dk_tensor_uid();
     const int64_t dvUid = attrs.dv_tensor_uid();
@@ -709,7 +713,7 @@ void SdpaBwdPlanBuilder::initializeExecutionSettings(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelSettings& /* executionSettings */) const
 {
-    throw std::logic_error("initializeExecutionSettings is not implemented for SdpaBwdPlanBuilder");
+    HIPDNN_PLUGIN_LOG_ERROR("SdpaBwdPlanBuilder::initializeExecutionSettings not implemented");
 }
 
 void SdpaBwdPlanBuilder::buildPlan(
@@ -728,12 +732,15 @@ void SdpaBwdPlanBuilder::buildPlan(
     }
     const std::string& deviceString = *deviceStringOpt;
 
-    // Extract SDPA backward attributes and tensor metadata from graph
+    // -------------------------------------------------------------------------
+    // 1. Extract SDPA backward attributes and tensor metadata from graph
+    // -------------------------------------------------------------------------
     auto& sdpaNode = opGraph.getNodeWrapper(0);
     auto& sdpaAttrs
         = sdpaNode.attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
     auto& tensorMap = opGraph.getTensorMap();
 
+    // Tensor UIDs
     const int64_t qUid = sdpaAttrs.q_tensor_uid();
     const int64_t kUid = sdpaAttrs.k_tensor_uid();
     const int64_t vUid = sdpaAttrs.v_tensor_uid();
@@ -744,6 +751,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     const int64_t dkUid = sdpaAttrs.dk_tensor_uid();
     const int64_t dvUid = sdpaAttrs.dv_tensor_uid();
 
+    // Tensor objects
     auto* qTensor = tensorMap.at(qUid);
     auto* kTensor = tensorMap.at(kUid);
     auto* vTensor = tensorMap.at(vUid);
@@ -768,51 +776,66 @@ void SdpaBwdPlanBuilder::buildPlan(
     // Dimensions from V: [B, H_kv, S_kv, D_v]
     auto headDimV = static_cast<unsigned int>(vTensor->dims()->Get(3));
 
+    // -------------------------------------------------------------------------
+    // 2. Extract strides (in elements) from tensor metadata
+    // -------------------------------------------------------------------------
+    // Q: [B, H_q, S_q, D_qk]
     auto* qStrides = qTensor->strides();
     auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
     auto qStrideHead = static_cast<unsigned int>(qStrides->Get(1));
     auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(2));
 
+    // K: [B, H_kv, S_kv, D_qk]
     auto* kStrides = kTensor->strides();
     auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
     auto kStrideHead = static_cast<unsigned int>(kStrides->Get(1));
     auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(2));
 
+    // V: [B, H_kv, S_kv, D_v]
     auto* vStrides = vTensor->strides();
     auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
     auto vStrideHead = static_cast<unsigned int>(vStrides->Get(1));
     auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(2));
 
+    // O: [B, H_q, S_q, D_v]
     auto* oStrides = oTensor->strides();
     auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
     auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
     auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
 
+    // dO: [B, H_q, S_q, D_v]
     auto* doStrides = doTensor->strides();
     auto doStrideBatch = static_cast<unsigned int>(doStrides->Get(0));
     auto doStrideHead = static_cast<unsigned int>(doStrides->Get(1));
     auto doStrideSeq = static_cast<unsigned int>(doStrides->Get(2));
 
+    // dQ: [B, H_q, S_q, D_qk]
     auto* dqStrides = dqTensor->strides();
     auto dqStrideBatch = static_cast<unsigned int>(dqStrides->Get(0));
     auto dqStrideHead = static_cast<unsigned int>(dqStrides->Get(1));
     auto dqStrideSeq = static_cast<unsigned int>(dqStrides->Get(2));
 
+    // dK: [B, H_kv, S_kv, D_qk]
     auto* dkStrides = dkTensor->strides();
     auto dkStrideBatch = static_cast<unsigned int>(dkStrides->Get(0));
     auto dkStrideHead = static_cast<unsigned int>(dkStrides->Get(1));
     auto dkStrideSeq = static_cast<unsigned int>(dkStrides->Get(2));
 
+    // dV: [B, H_kv, S_kv, D_v]
     auto* dvStrides = dvTensor->strides();
     auto dvStrideBatch = static_cast<unsigned int>(dvStrides->Get(0));
     auto dvStrideHead = static_cast<unsigned int>(dvStrides->Get(1));
     auto dvStrideSeq = static_cast<unsigned int>(dvStrides->Get(2));
 
+    // Stats (LSE): [B, H_q, S_q] — rank 3, FP32
     auto* statsStrides = statsTensor->strides();
     auto statsStrideBatch = static_cast<unsigned int>(statsStrides->Get(0));
     auto statsStrideHead = static_cast<unsigned int>(statsStrides->Get(1));
 
-    // Attention scale: default to 1/sqrt(D_qk) if not provided
+    // -------------------------------------------------------------------------
+    // 3. Attention scale
+    // -------------------------------------------------------------------------
+    // Default to 1/sqrt(D_qk) if not provided
     float attnScale = 1.0f / std::sqrt(static_cast<float>(headDimQk));
     auto scaleValue = sdpaAttrs.attn_scale_value();
     if(scaleValue.has_value())
@@ -820,6 +843,9 @@ void SdpaBwdPlanBuilder::buildPlan(
         attnScale = scaleValue.value();
     }
 
+    // -------------------------------------------------------------------------
+    // 4. Resolve dispatch parameters and select kernels per stage
+    // -------------------------------------------------------------------------
     // Resolve dispatch parameters from the graph. isApplicable already verified
     // the dtype is supported; the empty check here is a defensive guard that
     // mirrors the resolveStage pattern below.
@@ -927,6 +953,9 @@ void SdpaBwdPlanBuilder::buildPlan(
                                                                << dqConvertResolved->knlName);
     }
 
+    // -------------------------------------------------------------------------
+    // 5. Load kernel modules for resolved stages
+    // -------------------------------------------------------------------------
     auto odoKernel = loadKernelModule(odoResolved.coPath, odoResolved.knlName.c_str());
     if(!odoKernel)
     {
@@ -959,6 +988,9 @@ void SdpaBwdPlanBuilder::buildPlan(
         }
     }
 
+    // -------------------------------------------------------------------------
+    // 6. Build params and create plan
+    // -------------------------------------------------------------------------
     SdpaBwdParams params{};
     params.odoTiles = odoResolved.tiles;
     params.dqdkdvTiles = dqdkdvResolved.tiles;
