@@ -204,9 +204,6 @@ void testing_sddmm_batched_coo(const Arguments& arg)
 
     const I batch_count = batch_count_C;
 
-    // Allocate host memory and generate the sparsity pattern for the output
-    // sparse matrix C (shared across batches). Values will be set/computed per
-    // batch below.
     rocsparse_matrix_factory<C, I, I> matrix_factory(arg);
 
     host_vector<I> hcoo_row_ind_temp;
@@ -225,8 +222,9 @@ void testing_sddmm_batched_coo(const Arguments& arg)
     int64_t lda = (order_A == rocsparse_order_column) ? A_m : A_n;
     int64_t ldb = (order_B == rocsparse_order_column) ? B_m : B_n;
 
-    int64_t nnz_A_per_batch = static_cast<int64_t>(A_m) * A_n;
-    int64_t nnz_B_per_batch = static_cast<int64_t>(B_m) * B_n;
+    int64_t tiny_size       = 100;
+    int64_t nnz_A_per_batch = static_cast<int64_t>(A_m) * A_n + tiny_size;
+    int64_t nnz_B_per_batch = static_cast<int64_t>(B_m) * B_n + tiny_size;
 
     int64_t batch_stride_A = (batch_count_A > 1) ? nnz_A_per_batch : 0;
     int64_t batch_stride_B = (batch_count_B > 1) ? nnz_B_per_batch : 0;
@@ -249,10 +247,14 @@ void testing_sddmm_batched_coo(const Arguments& arg)
     // Output sparse matrix C. The COO row/column indices are replicated per
     // batch (so the sparsity pattern is the same for each batch, but the values
     // are independent per batch).
+    //
+    // hcoo_val_gold initially holds the random initial values of C; it is
+    // re-used as the on-host backup needed to restore the device values
+    // between the host-pointer-mode and device-pointer-mode SDDMM runs, and is
+    // only overwritten with the gold result after both runs.
     host_vector<I> hcoo_row_ind(batch_count_C * nnz_C);
     host_vector<I> hcoo_col_ind(batch_count_C * nnz_C);
-    host_vector<C> hcoo_val_1(batch_count_C * nnz_C);
-    host_vector<C> hcoo_val_2(batch_count_C * nnz_C);
+    host_vector<C> hcoo_val(batch_count_C * nnz_C);
     host_vector<C> hcoo_val_gold(batch_count_C * nnz_C);
 
     for(I i = 0; i < batch_count_C; ++i)
@@ -265,15 +267,13 @@ void testing_sddmm_batched_coo(const Arguments& arg)
     }
 
     rocsparse_init_1d_array<C>(
-        hcoo_val_1, batch_count_C * nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
-    hcoo_val_2    = hcoo_val_1;
-    hcoo_val_gold = hcoo_val_1;
+        hcoo_val, batch_count_C * nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+    hcoo_val_gold = hcoo_val;
 
     // Allocate device memory
     device_vector<I> dcoo_row_ind(hcoo_row_ind);
     device_vector<I> dcoo_col_ind(hcoo_col_ind);
-    device_vector<C> dcoo_val_1(hcoo_val_1);
-    device_vector<C> dcoo_val_2(hcoo_val_2);
+    device_vector<C> dcoo_val(hcoo_val);
     device_vector<A> dA(hA);
     device_vector<B> dB(hB);
     device_vector<T> dalpha(1);
@@ -286,15 +286,12 @@ void testing_sddmm_batched_coo(const Arguments& arg)
     rocsparse_local_dnmat mat_A(A_m, A_n, std::max(int64_t(1), lda), dA, atype, order_A);
     rocsparse_local_dnmat mat_B(B_m, B_n, std::max(int64_t(1), ldb), dB, btype, order_B);
 
-    rocsparse_local_spmat mat_C1(
-        M, N, nnz_C, dcoo_row_ind, dcoo_col_ind, dcoo_val_1, itype, base, ctype);
-    rocsparse_local_spmat mat_C2(
-        M, N, nnz_C, dcoo_row_ind, dcoo_col_ind, dcoo_val_2, itype, base, ctype);
+    rocsparse_local_spmat mat_C(
+        M, N, nnz_C, dcoo_row_ind, dcoo_col_ind, dcoo_val, itype, base, ctype);
 
     CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_set_strided_batch(mat_A, batch_count_A, batch_stride_A));
     CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_set_strided_batch(mat_B, batch_count_B, batch_stride_B));
-    CHECK_ROCSPARSE_ERROR(rocsparse_coo_set_strided_batch(mat_C1, batch_count_C, batch_stride_C));
-    CHECK_ROCSPARSE_ERROR(rocsparse_coo_set_strided_batch(mat_C2, batch_count_C, batch_stride_C));
+    CHECK_ROCSPARSE_ERROR(rocsparse_coo_set_strided_batch(mat_C, batch_count_C, batch_stride_C));
 
 #define PARAMS(alpha_, A_, B_, beta_, C_)                                                      \
     handle, trans_A, trans_B, alpha_, (const rocsparse_dnmat_descr&)A_,                        \
@@ -308,43 +305,44 @@ void testing_sddmm_batched_coo(const Arguments& arg)
     // Query SDDMM buffer
     size_t buffer_size;
     CHECK_ROCSPARSE_ERROR(
-        rocsparse_sddmm_buffer_size(PARAMS_BUFFER_SIZE(&halpha, mat_A, mat_B, &hbeta, mat_C1)));
+        rocsparse_sddmm_buffer_size(PARAMS_BUFFER_SIZE(&halpha, mat_A, mat_B, &hbeta, mat_C)));
 
     void* dbuffer = nullptr;
     CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, std::max(buffer_size, sizeof(I))));
 
-    CHECK_ROCSPARSE_ERROR(
-        rocsparse_sddmm_preprocess(PARAMS(&halpha, mat_A, mat_B, &hbeta, mat_C1)));
+    CHECK_ROCSPARSE_ERROR(rocsparse_sddmm_preprocess(PARAMS(&halpha, mat_A, mat_B, &hbeta, mat_C)));
 
     if(arg.unit_check)
     {
-        // Pointer mode host
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
         CHECK_ROCSPARSE_ERROR(
-            testing::rocsparse_sddmm(PARAMS(&halpha, mat_A, mat_B, &hbeta, mat_C1)));
+            testing::rocsparse_sddmm(PARAMS(&halpha, mat_A, mat_B, &hbeta, mat_C)));
 
         if(ROCSPARSE_REPRODUCIBILITY)
         {
-            rocsparse_reproducibility::save("P pointer mode host", dcoo_val_1);
+            rocsparse_reproducibility::save("P pointer mode host", dcoo_val);
         }
+
+        CHECK_HIP_ERROR(hipMemcpy(
+            hcoo_val, dcoo_val, sizeof(C) * batch_count_C * nnz_C, hipMemcpyDeviceToHost));
+
+        // Restore the initial sparse output values on the device for the next
+        // run. hcoo_val_gold still carries the initial values at this point.
+        CHECK_HIP_ERROR(hipMemcpy(
+            dcoo_val, hcoo_val_gold, sizeof(C) * batch_count_C * nnz_C, hipMemcpyHostToDevice));
 
         // Pointer mode device
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
-        CHECK_ROCSPARSE_ERROR(
-            testing::rocsparse_sddmm(PARAMS(dalpha, mat_A, mat_B, dbeta, mat_C2)));
+        CHECK_ROCSPARSE_ERROR(testing::rocsparse_sddmm(PARAMS(dalpha, mat_A, mat_B, dbeta, mat_C)));
 
         if(ROCSPARSE_REPRODUCIBILITY)
         {
-            rocsparse_reproducibility::save("P pointer mode device", dcoo_val_2);
+            rocsparse_reproducibility::save("P pointer mode device", dcoo_val);
         }
 
-        // Copy output to host
-        CHECK_HIP_ERROR(hipMemcpy(
-            hcoo_val_1, dcoo_val_1, sizeof(C) * batch_count_C * nnz_C, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(
-            hcoo_val_2, dcoo_val_2, sizeof(C) * batch_count_C * nnz_C, hipMemcpyDeviceToHost));
-
-        // CPU reference: run cooddmm per batch.
+        // CPU reference: run cooddmm per batch. hcoo_val_gold currently holds
+        // the initial COO values and is overwritten in place to become the
+        // gold result.
         for(I i = 0; i < batch_count; ++i)
         {
             rocsparse_host<T, I, I, A, B, C>::cooddmm(trans_A,
@@ -367,8 +365,14 @@ void testing_sddmm_batched_coo(const Arguments& arg)
                                                       base);
         }
 
-        hcoo_val_gold.near_check(hcoo_val_1);
-        hcoo_val_gold.near_check(hcoo_val_2);
+        // Check the host-pointer-mode result (still in hcoo_val from above).
+        hcoo_val_gold.near_check(hcoo_val);
+
+        // Pull the device-pointer-mode result back, overwriting hcoo_val, and
+        // check it.
+        CHECK_HIP_ERROR(hipMemcpy(
+            hcoo_val, dcoo_val, sizeof(C) * batch_count_C * nnz_C, hipMemcpyDeviceToHost));
+        hcoo_val_gold.near_check(hcoo_val);
     }
 
     if(arg.timing)
@@ -376,7 +380,7 @@ void testing_sddmm_batched_coo(const Arguments& arg)
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
         const double gpu_time_used = rocsparse_clients::run_benchmark(
-            arg, rocsparse_sddmm, PARAMS(&halpha, mat_A, mat_B, &hbeta, mat_C1));
+            arg, rocsparse_sddmm, PARAMS(&halpha, mat_A, mat_B, &hbeta, mat_C));
 
         double gflop_count = batch_count
                              * rocsparse_gflop_count<rocsparse_format_coo>::sddmm(
