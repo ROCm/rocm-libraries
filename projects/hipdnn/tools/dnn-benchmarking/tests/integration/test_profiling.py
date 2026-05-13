@@ -3,12 +3,11 @@
 
 """Integration tests for opt-in profiling sources.
 
-Each test is double-gated: a pytest marker (``rocprofv3`` / ``perf`` /
-``rocprof_compute``) for selection, plus an inline binary/host probe
-that skips when the precondition isn't met. This keeps unmarked runs
-green on the dev host (no perf, no GPU) while still allowing
-``pytest -m rocprofv3 tests/integration/`` to fire on a real gfx942
-host.
+Each test is double-gated: a pytest marker (``rocprofv3`` / ``perf``)
+for selection, plus an inline binary/host probe that skips when the
+precondition isn't met. This keeps unmarked runs green on the dev
+host (no perf, no GPU) while still allowing ``pytest -m rocprofv3
+tests/integration/`` to fire on a real GPU host.
 """
 
 import json
@@ -100,20 +99,6 @@ def _first_pe_extra(data: dict) -> dict:
 
 
 @pytest.mark.rocprofv3
-def test_pmc_basic_populates_counters(tmp_path):
-    _require_gpu()
-    _require_binary("rocprofv3")
-    data = _run_dnn_bench(["--pmc", "basic"], tmp_path)
-    extra = _first_pe_extra(data)
-    assert "pmc" in extra
-    pmc = extra["pmc"]
-    # Either we got real counters back, or rocprofv3 failed and recorded
-    # the tail — in both cases the slice exists; the rest of the test
-    # ensures at least one of the success keys is present.
-    assert any(k in pmc for k in ("counters", "error_tail", "skipped"))
-
-
-@pytest.mark.rocprofv3
 def test_emit_trace_pftrace_records_artifact(tmp_path):
     _require_gpu()
     _require_binary("rocprofv3")
@@ -138,15 +123,3 @@ def test_perf_records_user_cycles(tmp_path):
     if "skipped" not in perf:
         assert perf.get("cycles_user") is not None
         assert perf.get("ipc_user") is not None
-
-
-@pytest.mark.rocprof_compute
-def test_roofline_records_pdf_path(tmp_path):
-    _require_gpu()
-    _require_binary("rocprof-compute")
-    data = _run_dnn_bench(["--roofline"], tmp_path)
-    extra = _first_pe_extra(data)
-    assert "roofline" in extra
-    roof = extra["roofline"]
-    if "pdf_path" in roof:
-        assert Path(roof["pdf_path"]).exists()

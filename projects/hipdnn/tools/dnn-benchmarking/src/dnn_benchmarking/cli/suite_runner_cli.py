@@ -155,11 +155,7 @@ def run_suite_cli(
         metrics_config = MetricsConfig(
             tier=getattr(args, "metrics_tier", "basic"),
             emit_trace=getattr(args, "emit_trace", None),
-            pmc_set=getattr(args, "pmc", None),
             perf=getattr(args, "perf", False),
-            roofline=getattr(args, "roofline", False),
-            roofline_data_type=getattr(args, "roofline_data_type", "FP32"),
-            pmc_allow_multipass=getattr(args, "pmc_allow_multipass", False),
             profiling_output_dir=getattr(args, "profiling_output_dir", None),
         )
         config = SuiteConfig(

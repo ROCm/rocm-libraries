@@ -3,12 +3,12 @@
 
 """Re-exec orchestrator for opt-in profiling sources.
 
-When the user passes ``--pmc``, ``--emit-trace``, ``--perf``, or
-``--roofline``, the timed pass runs first to keep its numbers clean.
-After it succeeds, this orchestrator runs the workload again — once per
-requested source — under the corresponding external profiler (rocprofv3,
-perf, rocprof-compute). The results are merged into a single dict that
-populates ``ProviderEngineResult.extra_metrics``.
+When the user passes ``--emit-trace`` or ``--perf``, the timed pass
+runs first to keep its numbers clean. After it succeeds, this
+orchestrator runs the workload again — once per requested source —
+under the corresponding external profiler (rocprofv3 trace, perf).
+The results are merged into a single dict that populates
+``ProviderEngineResult.extra_metrics``.
 
 Architecture: the orchestrator builds a hidden re-exec argv that
 re-invokes ``python -m dnn_benchmarking`` with the
@@ -31,9 +31,7 @@ from typing import Any, Dict, List, Optional
 from ..config.benchmark_config import MetricsConfig
 from ._diagnostic import warn_once
 from . import perf as _perf_mod
-from . import rocprof_pmc as _pmc_mod
 from . import rocprof_trace as _trace_mod
-from . import roofline as _roofline_mod
 
 
 def resolve_output_dir(metrics_config: MetricsConfig) -> Path:
@@ -109,13 +107,13 @@ def run_profiling_passes(
     """Run every requested profiling source. Returns a merged dict.
 
     Source slices are merged at the top level so consumers can address
-    them via ``extra_metrics["pmc"]``, ``extra_metrics["trace"]`` etc.
+    them via ``extra_metrics["trace"]``, ``extra_metrics["perf"]`` etc.
 
     Args:
         graph_path: Graph file passed to the inner process.
         engine_id: Single engine ID for the inner process.
         seed: Reproducibility seed for fill_inputs_random; passed
-            through to the inner process so PMC counts are over the
+            through to the inner process so the profiler observes the
             same input distribution as the timed pass.
         warmup_iters: Inner warmup iteration count.
         benchmark_iters: Inner benchmark iteration count.
@@ -141,24 +139,6 @@ def run_profiling_passes(
     )
 
     aggregated: Dict[str, Any] = {}
-
-    if metrics_config.pmc_set is not None:
-        try:
-            aggregated.update(
-                _pmc_mod.run(
-                    inner_argv=inner_argv,
-                    out_dir=_subdir(
-                        out_dir,
-                        graph_path,
-                        engine_id,
-                        f"pmc_{metrics_config.pmc_set}",
-                    ),
-                    pmc_set=metrics_config.pmc_set,
-                )
-            )
-        except Exception as e:
-            warn_once("rocprof_pmc", f"unexpected error in PMC pass: {e}")
-            aggregated.setdefault("pmc", {})["unexpected_error"] = str(e)
 
     if metrics_config.emit_trace is not None:
         try:
@@ -189,18 +169,5 @@ def run_profiling_passes(
         except Exception as e:
             warn_once("perf", f"unexpected error in perf pass: {e}")
             aggregated.setdefault("perf", {})["unexpected_error"] = str(e)
-
-    if metrics_config.roofline:
-        try:
-            aggregated.update(
-                _roofline_mod.run(
-                    inner_argv=inner_argv,
-                    out_dir=_subdir(out_dir, graph_path, engine_id, "roofline"),
-                    data_type=metrics_config.roofline_data_type,
-                )
-            )
-        except Exception as e:
-            warn_once("roofline", f"unexpected error in roofline pass: {e}")
-            aggregated.setdefault("roofline", {})["unexpected_error"] = str(e)
 
     return aggregated

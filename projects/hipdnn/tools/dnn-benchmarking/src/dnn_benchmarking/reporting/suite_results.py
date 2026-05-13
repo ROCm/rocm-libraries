@@ -131,9 +131,8 @@ class ProviderEngineResult:
             scratchpad request. Note this is process-wide and may
             include cached allocations from previous engines on the
             same graph.
-        extra_metrics: Opt-in profiling payload from rocprofv3 PMC /
-            traces, perf, and rocprof-compute roofline. None when no
-            opt-in profiling flag was supplied.
+        extra_metrics: Opt-in profiling payload from rocprofv3 trace
+            and perf. None when no opt-in profiling flag was supplied.
 
     Note:
         Process RSS, host RAM availability, and the volatile parts of
@@ -167,7 +166,7 @@ class ProviderEngineResult:
     cpu_user_time_per_iter_us: Optional[float] = None
     cpu_kernel_time_per_iter_us: Optional[float] = None
     vram_used_mb: Optional[float] = None
-    # Opt-in profiling payload (rocprofv3 PMC / trace, perf, roofline).
+    # Opt-in profiling payload (rocprofv3 trace, perf).
     extra_metrics: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:

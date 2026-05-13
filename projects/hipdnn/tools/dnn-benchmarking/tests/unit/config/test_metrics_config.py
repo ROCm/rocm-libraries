@@ -29,22 +29,16 @@ class TestMetricsConfigDefaults:
         with pytest.raises(ValueError, match="Invalid emit_trace"):
             MetricsConfig(emit_trace="csv")  # type: ignore[arg-type]
 
-    def test_invalid_pmc_set_raises(self):
-        with pytest.raises(ValueError, match="Invalid pmc_set"):
-            MetricsConfig(pmc_set="bogus")  # type: ignore[arg-type]
-
 
 class TestOptInDetection:
     @pytest.mark.parametrize(
         "kwargs",
         [
             {"emit_trace": "pftrace"},
-            {"pmc_set": "basic"},
             {"perf": True},
-            {"roofline": True},
         ],
     )
-    def test_any_phase23_flag_marks_opt_in(self, kwargs):
+    def test_any_opt_in_flag_marks_opt_in(self, kwargs):
         cfg = MetricsConfig(**kwargs)
         assert cfg.opt_in_pass_requested is True
 
@@ -68,26 +62,3 @@ class TestProfilingFields:
         cfg = MetricsConfig(profiling_output_dir="/tmp/out")
         assert isinstance(cfg.profiling_output_dir, Path)
         assert cfg.profiling_output_dir == Path("/tmp/out")
-
-    def test_default_roofline_data_type_is_fp32(self):
-        cfg = MetricsConfig()
-        assert cfg.roofline_data_type == "FP32"
-
-    def test_invalid_roofline_data_type_raises(self):
-        with pytest.raises(ValueError, match="Invalid roofline_data_type"):
-            MetricsConfig(roofline_data_type="FP4")  # type: ignore[arg-type]
-
-    def test_pmc_all_without_multipass_flag_raises(self):
-        with pytest.raises(
-            ValueError, match="--pmc all requires --pmc-allow-multipass"
-        ):
-            MetricsConfig(pmc_set="all")
-
-    def test_pmc_all_with_multipass_flag_accepted(self):
-        cfg = MetricsConfig(pmc_set="all", pmc_allow_multipass=True)
-        assert cfg.pmc_set == "all"
-        assert cfg.opt_in_pass_requested is True
-
-    def test_pmc_basic_does_not_require_multipass(self):
-        cfg = MetricsConfig(pmc_set="basic")
-        assert cfg.pmc_set == "basic"

@@ -720,17 +720,14 @@ class Reporter:
     def _print_profiling_block(self, pe: ProviderEngineResult) -> None:
         """Render the opt-in profiling artefacts when extra_metrics is set.
 
-        Each line is conditional: a user who runs only --pmc sees one
-        line, only --emit-trace sees a different one, and so on. Long
-        counter lists fold to ``[N more, see JSON]`` so the console
-        block stays compact — full nested data is always in the JSON.
+        Each line is conditional: a user who runs only --emit-trace
+        sees one line, only --perf sees a different one. Full nested
+        data is always in the JSON.
         """
         extra = pe.extra_metrics
         if not extra:
             return
-        any_present = any(
-            isinstance(extra.get(k), dict) for k in ("trace", "pmc", "perf", "roofline")
-        )
+        any_present = any(isinstance(extra.get(k), dict) for k in ("trace", "perf"))
         if not any_present:
             return
         self._print("Profiling:")
@@ -743,27 +740,6 @@ class Reporter:
                 self._print(f"  Trace ({fmt}):         {path}")
             elif "skipped" in trace:
                 self._print(f"  Trace ({fmt}):         skipped — {trace['skipped']}")
-
-        pmc = extra.get("pmc")
-        if isinstance(pmc, dict):
-            arch = pmc.get("arch", "?")
-            pmc_set = pmc.get("set", "?")
-            counters = pmc.get("counters") or {}
-            if counters:
-                head = list(counters.items())[:3]
-                rendered = "  ".join(
-                    f"{name}={int(v.get('sum', 0)):,}" for name, v in head
-                )
-                more = len(counters) - len(head)
-                suffix = f"  [{more} more, see JSON]" if more > 0 else ""
-                self._print(f"  PMC ({pmc_set}, {arch}):  {rendered}{suffix}")
-            elif "skipped" in pmc:
-                self._print(f"  PMC ({pmc_set}, {arch}):  skipped — {pmc['skipped']}")
-            elif "error_tail" in pmc:
-                self._print(
-                    f"  PMC ({pmc_set}, {arch}):  rocprofv3 errored "
-                    f"(rc={pmc.get('returncode', '?')})"
-                )
 
         perf = extra.get("perf")
         if isinstance(perf, dict):
@@ -785,15 +761,6 @@ class Reporter:
                     bits.append(f"task_clock={tc:.1f}ms")
                 if bits:
                     self._print(f"  CPU (perf):           {'  '.join(bits)}")
-
-        roofline = extra.get("roofline")
-        if isinstance(roofline, dict):
-            dt = roofline.get("data_type", "?")
-            pdf = roofline.get("pdf_path")
-            if pdf:
-                self._print(f"  Roofline ({dt}):       {pdf}")
-            elif "skipped" in roofline:
-                self._print(f"  Roofline ({dt}):       skipped — {roofline['skipped']}")
         self._print("")
 
     def _print_pe_correctness(

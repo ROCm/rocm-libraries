@@ -484,7 +484,7 @@ def _run_single_provider_engine(
                     warn_once("gpu_smi", f"vram snapshot failed: {e}")
 
             # Opt-in profiling pass — runs *after* the timed pass and
-            # always-on probes, so PMC sampling / roofline replay can't
+            # always-on probes, so the profiler's overhead can't
             # pollute the headline numbers. The orchestrator handles
             # tool-missing / paranoid / parse failures internally and
             # never raises; we still wrap defensively because anything

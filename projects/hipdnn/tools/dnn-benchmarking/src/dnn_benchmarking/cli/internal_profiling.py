@@ -4,10 +4,10 @@
 """Hidden ``--internal-profiling-run`` sub-mode.
 
 This is the workload that the profiling orchestrator wraps under
-rocprofv3 / perf / rocprof-compute. We deliberately re-exec the whole
-process (rather than running another loop in-place) because the outer
-profiler expects a fresh process tree and a clean address space — that
-is how kernel-trace / PMC counters scope what they record.
+rocprofv3 / perf. We deliberately re-exec the whole process (rather
+than running another loop in-place) because the outer profiler
+expects a fresh process tree and a clean address space — that is how
+kernel-trace events scope what they record.
 
 Short-circuits relative to the full CLI:
   * No ``gpu_check`` — the parent already verified GPU availability.

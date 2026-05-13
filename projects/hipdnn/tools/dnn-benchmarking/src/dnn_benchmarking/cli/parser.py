@@ -264,30 +264,6 @@ Tarball Input:
         ),
     )
     metrics_group.add_argument(
-        "--pmc",
-        type=str,
-        choices=["basic", "memory", "flops", "all"],
-        default=None,
-        metavar="SET",
-        help=(
-            "Re-run benchmark under rocprofv3 with the named PMC counter "
-            "set. Per-kernel aggregates land in extra_metrics['pmc']. "
-            "'all' requires --pmc-allow-multipass. Adds ~1 extra workload "
-            "run (~30%% wallclock overhead)."
-        ),
-    )
-    metrics_group.add_argument(
-        "--pmc-allow-multipass",
-        action="store_true",
-        default=False,
-        help=(
-            "Required to use --pmc all. The unioned counter set exceeds "
-            "the single-pass replay budget on most arches and rocprofv3 "
-            "falls back to multi-pass replay, which has been observed to "
-            "hang for minutes on sub-second workloads."
-        ),
-    )
-    metrics_group.add_argument(
         "--perf",
         action="store_true",
         default=False,
@@ -299,35 +275,13 @@ Tarball Input:
         ),
     )
     metrics_group.add_argument(
-        "--roofline",
-        action="store_true",
-        default=False,
-        help=(
-            "Re-run under 'rocprof-compute profile --roof-only' for a "
-            "roofline plot. PDF + db paths land in "
-            "extra_metrics['roofline']. Adds ~3 extra workload runs."
-        ),
-    )
-    metrics_group.add_argument(
-        "--roofline-data-type",
-        type=str,
-        choices=["FP32", "FP16", "BF16", "FP64", "INT8"],
-        default="FP32",
-        metavar="DTYPE",
-        help=(
-            "Data type for the roofline plot (default: FP32). Passed "
-            "through to rocprof-compute --roofline-data-type."
-        ),
-    )
-    metrics_group.add_argument(
         "--profiling-output-dir",
         type=Path,
         default=None,
         metavar="DIR",
         help=(
-            "Root directory for profiling artefacts (rocpd dbs, "
-            "pftraces, perf CSVs, roofline PDFs). Default: "
-            "./profiling-output/<utc-timestamp>/."
+            "Root directory for profiling artefacts (pftraces, perf "
+            "CSVs). Default: ./profiling-output/<utc-timestamp>/."
         ),
     )
 
