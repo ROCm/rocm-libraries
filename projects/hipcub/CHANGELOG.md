@@ -10,6 +10,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added new `hipcub::WarpReduce` overloadings `hipcub::WarpReduce::Sum`, `hipcub::WarpReduce::Max` and `hipcub::WarpReduce::Min`.
 * Added fixed-size-segments variant for `hipcub::DeviceSegmentedReduce`.
 * Added support for large number of segments to `hipcub::DeviceSegmentedReduce::Reduce`'s fixed-size-segments variant.
+* Added support for large sizes to `hipcub::DeviceRunLengthEncode::Encode`.
 
 ### Changed
 
