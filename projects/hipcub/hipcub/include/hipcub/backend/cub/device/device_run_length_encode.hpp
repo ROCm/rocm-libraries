@@ -43,15 +43,17 @@ public:
     template<typename InputIteratorT,
              typename UniqueOutputIteratorT,
              typename LengthsOutputIteratorT,
-             typename NumRunsOutputIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t Encode(void*                  d_temp_storage,
-                                                     size_t&                temp_storage_bytes,
-                                                     InputIteratorT         d_in,
-                                                     UniqueOutputIteratorT  d_unique_out,
-                                                     LengthsOutputIteratorT d_counts_out,
-                                                     NumRunsOutputIteratorT d_num_runs_out,
-                                                     int                    num_items,
-                                                     hipStream_t            stream = 0)
+             typename NumRunsOutputIteratorT,
+             typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Encode(void*                  d_temp_storage,
+                             size_t&                temp_storage_bytes,
+                             InputIteratorT         d_in,
+                             UniqueOutputIteratorT  d_unique_out,
+                             LengthsOutputIteratorT d_counts_out,
+                             NumRunsOutputIteratorT d_num_runs_out,
+                             NumItemsT              num_items,
+                             hipStream_t            stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceRunLengthEncode::Encode(d_temp_storage,
                                                                            temp_storage_bytes,
