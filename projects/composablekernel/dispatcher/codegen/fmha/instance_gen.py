@@ -32,7 +32,7 @@ _DISPATCHER_ROOT = _THIS_DIR.parents[1]
 sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
 sys.path.insert(0, str(_THIS_DIR))
 
-from specs import (  # noqa: E402
+from validation import (  # noqa: E402
     ARCH_DTYPES,
     BIASES,
     BOOLS,

@@ -8,7 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "codegen"))
 
-from fmha.specs import validate_config, load_arch_specs
+from fmha.validation import validate_config, load_arch_specs
 
 SPECS = load_arch_specs()
 

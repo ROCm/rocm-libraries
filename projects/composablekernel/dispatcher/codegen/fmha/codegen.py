@@ -28,7 +28,7 @@ sys.path.insert(0, str(_CODEGEN_DIR))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from codegen_common import parallel_generate  # noqa: E402
-from specs import load_arch_specs, profile_allows, validate_config  # noqa: E402
+from validation import load_arch_specs, profile_allows, validate_config  # noqa: E402
 from symbol_map import (  # noqa: E402
     ARCH_PREPROC_MAP,
     ARCH_TAG_MAP,

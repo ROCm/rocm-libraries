@@ -13,8 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "codegen"))
 
-from fmha.specs import profile_allows  # noqa: E402
-from fmha.specs import validate_config  # noqa: E402
+from fmha.validation import profile_allows  # noqa: E402
+from fmha.validation import validate_config  # noqa: E402
 
 CODEGEN = ROOT / "codegen" / "fmha" / "codegen.py"
 
