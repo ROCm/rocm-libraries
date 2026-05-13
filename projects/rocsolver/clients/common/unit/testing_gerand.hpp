@@ -30,6 +30,7 @@
 #include "common/misc/generate.hpp"
 #include "common/misc/rocblas_test.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
+//#include "print_matrix.hpp"
 
 #include <gtest/gtest.h>
 
@@ -94,6 +95,7 @@ void testing_gerand(Arguments& argus)
     std::vector<T> A(static_cast<size_t>(lda) * n_padded, flag);
 
     gerand(m, n, A.data(), lda);
+    //print_matrix( "A", m, n, A.data(), lda );
 
     // validate results for rocsolver-test
     int64_t nzero_re = 0, nzero_im = 0;
@@ -144,3 +146,7 @@ void testing_gerand(Arguments& argus)
     // ensure all arguments were consumed
     argus.validate_consumed();
 }
+
+#define EXTERN_TESTING_GERAND(...) extern template void testing_gerand<__VA_ARGS__>(Arguments&);
+
+INSTANTIATE(EXTERN_TESTING_GERAND, FOREACH_SCALAR_TYPE, APPLY_STAMP)

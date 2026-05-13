@@ -31,6 +31,7 @@
 #include "common/misc/generate.hpp"
 #include "common/misc/rocblas_test.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
+//#include "print_matrix.hpp"
 
 #include <gtest/gtest.h>
 
@@ -104,6 +105,7 @@ void testing_syrand(Arguments& argus)
     std::vector<T> A(static_cast<size_t>(lda) * n_padded, flag);
 
     syrand(uplo, n, A.data(), lda);
+    //print_matrix( "A", n, n, A.data(), lda );
 
     // Verify filled entries and structure.
     // Count zeros to check randomness: re and im zeros should each be < 1% of
@@ -185,3 +187,7 @@ void testing_syrand(Arguments& argus)
 
     argus.validate_consumed();
 }
+
+#define EXTERN_TESTING_SYRAND(...) extern template void testing_syrand<__VA_ARGS__>(Arguments&);
+
+INSTANTIATE(EXTERN_TESTING_SYRAND, FOREACH_SCALAR_TYPE, APPLY_STAMP)

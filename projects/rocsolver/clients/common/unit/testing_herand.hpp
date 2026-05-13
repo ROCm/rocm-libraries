@@ -31,6 +31,7 @@
 #include "common/misc/generate.hpp"
 #include "common/misc/rocblas_test.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
+//#include "print_matrix.hpp"
 
 #include <gtest/gtest.h>
 
@@ -88,6 +89,8 @@ void testing_herand(Arguments& argus)
     char        uploC = argus.get<char>("uplo");
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
+    //printf( "n %d, lda %d, uploC '%c', uplo %d (%c)\n",
+    //        n, lda, uploC, uplo, rocblas2char_fill(uplo) );
 
     // check invalid sizes
     if(n < 0 || lda < n)
@@ -105,6 +108,7 @@ void testing_herand(Arguments& argus)
     std::vector<T> A(static_cast<size_t>(lda) * n_padded, flag);
 
     herand(uplo, n, A.data(), lda);
+    //print_matrix( "A", n, n, A.data(), lda );
 
     // Verify filled entries and structure.
     // Count zeros to check randomness: re and im zeros should each be < 1% of
@@ -197,3 +201,7 @@ void testing_herand(Arguments& argus)
 
     argus.validate_consumed();
 }
+
+#define EXTERN_TESTING_HERAND(...) extern template void testing_herand<__VA_ARGS__>(Arguments&);
+
+INSTANTIATE(EXTERN_TESTING_HERAND, FOREACH_SCALAR_TYPE, APPLY_STAMP)

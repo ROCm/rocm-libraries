@@ -123,6 +123,9 @@
 
 // unit
 #include "common/unit/testing_gemm.hpp"
+#include "common/unit/testing_gerand.hpp"
+#include "common/unit/testing_herand.hpp"
+#include "common/unit/testing_syrand.hpp"
 
 struct str_less
 {
@@ -352,6 +355,9 @@ class rocsolver_dispatcher
             {"gemm_64", testing_gemm<false, false, T, int64_t>},
             {"gemm_batched_64", testing_gemm<true, true, T, int64_t>},
             {"gemm_strided_batched_64", testing_gemm<false, true, T, int64_t>},
+            {"gerand", testing_gerand<T>},
+            {"herand", testing_herand<T>},
+            {"syrand", testing_syrand<T>},
         };
 
         // Grab function from the map and execute
