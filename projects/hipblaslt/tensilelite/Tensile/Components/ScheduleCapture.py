@@ -995,13 +995,61 @@ def split_for_plr(module):
     return [items[n // 2:], items[:n // 2]]
 
 
+def _shared_category_assignments(*, subiter,
+                                 GRIncA=None, GRIncB=None,
+                                 GRA=None, GRB=None,
+                                 LRA=None, LRB=None,
+                                 PackA=None, PackB=None):
+    """Yield (category_string, module) pairs for the categories that BOTH
+    public factories (build_idmap and build_id_to_category_per_iter) emit.
+
+    This is the SINGLE source of truth for the shared schema's category
+    naming and ordering. Each public factory normalizes its own input
+    shape to per-side per-subiter modules, then iterates these pairs to
+    populate its native output shape:
+
+      - build_idmap calls this once per loop iter `u` and writes
+        {category_string: module} into its idmap dict.
+      - build_id_to_category_per_iter calls this once with `subiter`
+        and writes {id(item): category_string} via flatitems().
+
+    Categories covered: GRIncA, GRIncB, GRA, GRB, LRA{subiter}, LRB{subiter},
+    PackA{subiter}, PackB{subiter}.
+
+    Per-factory categories NOT shared and NOT yielded here:
+      - build_idmap retains: LWA, LWB, LRSA, LRSB, LWSA, LWSB, LCC,
+        SYNC, SNOP (CMS-specific schedule pieces with no NLL counterpart).
+      - build_id_to_category_per_iter retains: generic 'GR' fallback,
+        'LW' fallback, LRMXSA{subiter}, LRMXSB{subiter}, LRMetadata{subiter}
+        (sparse-MX local-read sub-modules — build_idmap will gain kwargs
+        for these in a follow-up so the schema slot exists on both sides).
+    """
+    if GRIncA is not None:
+        yield "GRIncA", GRIncA
+    if GRIncB is not None:
+        yield "GRIncB", GRIncB
+    if GRA is not None:
+        yield "GRA", GRA
+    if GRB is not None:
+        yield "GRB", GRB
+    if LRA is not None:
+        yield f"LRA{subiter}", LRA
+    if LRB is not None:
+        yield f"LRB{subiter}", LRB
+    if PackA is not None:
+        yield f"PackA{subiter}", PackA
+    if PackB is not None:
+        yield f"PackB{subiter}", PackB
+
+
 def build_idmap(*, num_loop_iter,
                 LRCodeA, PackCodeA, LRCodeB, PackCodeB,
                 globalReadA, globalReadB,
                 globalReadIncACode, globalReadIncBCode,
                 localWriteA, localWriteB,
                 LRSwapA, LRSwapB, LWSwapA, LWSwapB,
-                loopCounterCode, syncCode, snopCode):
+                loopCounterCode, syncCode, snopCode,
+                LRCodeMXSA=None, LRCodeMXSB=None, LRCodeMetadata=None):
     """Build the canonical {category: source-module-or-list} dict.
 
     This is the SINGLE definition of which categories exist and what
@@ -1013,12 +1061,15 @@ def build_idmap(*, num_loop_iter,
         capture's tag map.
 
     Adding a new category means adding it here and only here.
+
+    Sparse-MX kwargs (LRCodeMXSA, LRCodeMXSB, LRCodeMetadata) are optional
+    per-iter lists analogous to LRCodeA/B. They default to None so existing
+    callers keep working; when provided they populate LRMXSA{u} / LRMXSB{u} /
+    LRMetadata{u} categories — the same naming build_id_to_category_per_iter
+    emits for the corresponding LocalReadDoMXSA/MXSB/Metadata sub-modules,
+    so future sparse-MX CMS code paths can compare both factories' outputs.
     """
     idmap = {
-        'GRIncA': globalReadIncACode,
-        'GRIncB': globalReadIncBCode,
-        'GRA':    globalReadA,
-        'GRB':    globalReadB,
         'LWA':    localWriteA,
         'LWB':    localWriteB,
         'LRSA':   LRSwapA,
@@ -1027,11 +1078,31 @@ def build_idmap(*, num_loop_iter,
         'LWSB':   LWSwapB,
         'LCC':    loopCounterCode,
     }
+    # Shared-schema categories (GRIncA/B, GRA/B) — emit once for the whole map.
+    # Per-iter shared categories (LRA{u}, LRB{u}, PackA{u}, PackB{u}) emitted
+    # per loop iter via the same helper.
+    for cat, mod in _shared_category_assignments(
+        subiter=0,  # unused for non-per-iter slots
+        GRIncA=globalReadIncACode, GRIncB=globalReadIncBCode,
+        GRA=globalReadA, GRB=globalReadB,
+    ):
+        idmap[cat] = mod
     for u in range(num_loop_iter):
-        idmap[f"LRA{u}"]   = LRCodeA[u]
-        idmap[f"LRB{u}"]   = LRCodeB[u]
-        idmap[f"PackA{u}"] = PackCodeA[u]
-        idmap[f"PackB{u}"] = PackCodeB[u]
+        for cat, mod in _shared_category_assignments(
+            subiter=u,
+            LRA=LRCodeA[u], LRB=LRCodeB[u],
+            PackA=PackCodeA[u], PackB=PackCodeB[u],
+        ):
+            idmap[cat] = mod
+        # Sparse-MX per-iter local-read slots — optional, default unpopulated.
+        # Aligned with build_id_to_category_per_iter's LRMXSA/B/Metadata
+        # category strings so cross-factory comparison is meaningful.
+        if LRCodeMXSA is not None and u < len(LRCodeMXSA):
+            idmap[f"LRMXSA{u}"] = LRCodeMXSA[u]
+        if LRCodeMXSB is not None and u < len(LRCodeMXSB):
+            idmap[f"LRMXSB{u}"] = LRCodeMXSB[u]
+        if LRCodeMetadata is not None and u < len(LRCodeMetadata):
+            idmap[f"LRMetadata{u}"] = LRCodeMetadata[u]
     idmap['SYNC'] = syncCode
     idmap['SNOP'] = snopCode
     return idmap
@@ -1156,24 +1227,51 @@ def build_id_to_category_per_iter(*, subiter, localReadCode, localWriteCode,
         for item in mod.flatitems():
             id_to_category.setdefault(id(item), category)
 
-    # Most-specific GR-related tags first so they win over the generic
-    # 'GR' fallback below. The globalReadIncCode and globalReadA/B leaves
-    # are SHARED with globalReadCode (perIterGlobalRead) leaves via
-    # SIA.py:732 (extends GR-load list with GR-inc list and distributes
-    # across iters); tagging them by id() here pre-empts the fallback.
-    if globalReadIncACode is not None:
-        tag_module(globalReadIncACode, "GRIncA")
-    if globalReadIncBCode is not None:
-        tag_module(globalReadIncBCode, "GRIncB")
-    if globalReadA is not None:
-        tag_module_setdefault(globalReadA, "GRA")
-    if globalReadB is not None:
-        tag_module_setdefault(globalReadB, "GRB")
+    # Resolve this factory's input shape (combined named-submodule view)
+    # down to per-side per-subiter modules, then route the SHARED schema
+    # categories through _shared_category_assignments() — the same helper
+    # build_idmap uses — so any future drift between the two factories
+    # surfaces as a schema change in one place rather than divergent string
+    # literals across two code paths.
+    #
+    # GRIncA/B and GRA/B use override-vs-setdefault semantics that differ
+    # from the per-iter LR/Pack ones (the GR-inc tags must WIN over later
+    # 'GR' fallback; the GR-load tags must NOT clobber a pre-existing
+    # GRIncA/B if the same leaf appears in both inputs). We therefore call
+    # the helper twice with different override semantics rather than fold
+    # both into one walk.
+    for cat, mod in _shared_category_assignments(
+        subiter=subiter,
+        GRIncA=globalReadIncACode, GRIncB=globalReadIncBCode,
+    ):
+        tag_module(mod, cat)
+    for cat, mod in _shared_category_assignments(
+        subiter=subiter,
+        GRA=globalReadA, GRB=globalReadB,
+    ):
+        tag_module_setdefault(mod, cat)
 
+    # LRA/LRB submodule walk — resolve named submodules to per-side modules
+    # for this subiter, then route through the shared helper.
     if localReadCode is not None:
+        # Collect per-iui sub-modules into one Module per side so the helper
+        # can iterate (helper expects one module per side per subiter).
+        for sub_name, side_kwarg in (
+            ("LocalReadDoA", "LRA"),
+            ("LocalReadDoB", "LRB"),
+        ):
+            for iui in range(inner_unroll_max):
+                sub = localReadCode.findNamedItem(f"{sub_name}_I{iui}")
+                if sub is None:
+                    continue
+                for cat, mod in _shared_category_assignments(
+                    subiter=subiter, **{side_kwarg: sub},
+                ):
+                    tag_module(mod, cat)
+
+        # Sparse-MX local-read sub-modules — NOT in the shared helper yet
+        # (build_idmap doesn't have these kwargs). Tagged here directly.
         for sub_name, cat_template in (
-            ("LocalReadDoA",        "LRA{}"),
-            ("LocalReadDoB",        "LRB{}"),
             ("LocalReadDoMXSA",     "LRMXSA{}"),
             ("LocalReadDoMXSB",     "LRMXSB{}"),
             ("LocalReadDoMetadata", "LRMetadata{}"),
@@ -1192,17 +1290,21 @@ def build_id_to_category_per_iter(*, subiter, localReadCode, localWriteCode,
         for item in localWriteCode.flatitems():
             id_to_category.setdefault(id(item), "LW")
 
+    # PackA/PackB submodule walk — same pattern: resolve to per-side modules,
+    # route through the shared helper.
     for pack_mod in (packCode, packPreCode):
         if pack_mod is None:
             continue
         for iui in range(inner_unroll_max):
-            for prefix, side in (("packA", "A"), ("packB", "B")):
-                sub = pack_mod.findNamedItem(f"{prefix}_I{iui}")
-                if sub is not None:
-                    tag_module(sub, f"Pack{side}{subiter}")
-                sub_pre = pack_mod.findNamedItem(f"{prefix}_I{iui} Pre")
-                if sub_pre is not None:
-                    tag_module(sub_pre, f"Pack{side}{subiter}")
+            for prefix, side_kwarg in (("packA", "PackA"), ("packB", "PackB")):
+                for suffix in ("", " Pre"):
+                    sub = pack_mod.findNamedItem(f"{prefix}_I{iui}{suffix}")
+                    if sub is None:
+                        continue
+                    for cat, mod in _shared_category_assignments(
+                        subiter=subiter, **{side_kwarg: sub},
+                    ):
+                        tag_module(mod, cat)
 
     return id_to_category
 
