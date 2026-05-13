@@ -51,6 +51,7 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
       GTest::gtest
       GTest::gtest_main
     )
+  # Ensure that test files can find the test_utils_controller.hpp generated header.
   target_include_directories("${TEST_TARGET}" PRIVATE "../../test/hipcub")
 
   if(USE_SYSTEM_LIB)
