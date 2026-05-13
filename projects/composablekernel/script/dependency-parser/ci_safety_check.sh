@@ -55,8 +55,6 @@ CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null ||
 # Comprehensive pattern for build/infrastructure files that require full build:
 # Scoped to composablekernel-specific paths only to avoid false positives from other projects
 # - CMake: CMakeLists.txt, *.cmake, *.cmake.in within projects/composablekernel/
-# - Docker: Dockerfile* within projects/composablekernel/
-# - CI/CD: Jenkinsfile, .github/ workflows for composablekernel
 # - Scripts: Only build-critical scripts (dependency-parser, cmake utilities)
 # - Compiler: .clang-format, .clang-tidy within projects/composablekernel/
 # - Python: setup.py, pyproject.toml within projects/composablekernel/
