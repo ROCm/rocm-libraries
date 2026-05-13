@@ -1478,7 +1478,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                 bool used_flat_desc = false;
                 if constexpr(NDimSpatial == 2 && !CTranspose && NumDTensor == 0)
                 {
-                    if(arg.num_group_ == 1 && !arg.flat_a_container_.empty())
+                    if(arg.num_group_ == 1 && arg.k_batch_ == 1 &&
+                       !arg.flat_a_container_.empty())
                     {
                         used_flat_desc          = true;
                         const index_t flat_idx  = gemm_set_id;
