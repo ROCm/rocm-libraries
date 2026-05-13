@@ -988,7 +988,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def _makeSubIterSchedule(self, kernel, tPA, tPB, localReadCode, iteration, pointerLWCode, pointerLRCode, waitCode, macIterCode, \
       waitLWCode = Module(), syncCode = Module(), packCode = Module(), packPreCode = Module(), prevIterCode = Module(), localReadCodeSecondHalf = Module(), NLLlast = False, \
-                   tailloopInNll = False, isNLLorNGLL=False, capture=None, capture_id_to_category=None):
+                   tailloopInNll = False, isNLLorNGLL=False, capture=None, capture_id_to_category=None,
+                   capture_id_to_source_module=None):
 
     iterCode = Module()
     if capture is not None:
@@ -2741,12 +2742,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         subiter=iteration,
         numMfmaPerIter=self.states.numMfmaPerIter,
         id_to_category=capture_id_to_category,
+        id_to_source_module=capture_id_to_source_module,
       )
 
     return iterCode
 
   def _captureSubIterToBuilder(self, iterCode, capture, subiter,
-                                 numMfmaPerIter, id_to_category):
+                                 numMfmaPerIter, id_to_category,
+                                 id_to_source_module=None):
     """Walk iterCode.flatitems() and append TaggedInstructions to capture.
 
     mfma_index assignment:
@@ -2829,9 +2832,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
         slot_kind = SLOT_KIND_MFMA
         mfma_index = subiter * numMfmaPerIter + local_mfma_idx
 
+      # Approach 2 (rocm-libraries-dfd8): look up the rocisa-derived
+      # source_module_id alongside the CMS category. None for items not
+      # in the inverted source-module map (typically MFMAs and SYNC/SNOP
+      # fallbacks — same shape as `category=None` falling through to the
+      # isinstance-based defaults above).
+      src_module_id = None
+      if id_to_source_module is not None:
+        src_module_id = id_to_source_module.get(id(item))
       capture.append(
         inst=item, category=category, subiter=subiter,
         slot_kind=slot_kind, mfma_index=mfma_index,
+        source_module_id=src_module_id,
       )
 
   def _appendCloseLoopLCCToBuilder(self, closeLoopModule, capture, kernel):
@@ -3910,8 +3922,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # sub-module walk). Same schema as build_idmap, so _captureSubIterToBuilder
       # consumes both uniformly.
       capture_id_to_cat = None
+      capture_id_to_src = None
       if capture is not None:
-        from Tensile.Components.ScheduleCapture import build_id_to_category_per_iter
+        from Tensile.Components.ScheduleCapture import (
+          build_id_to_category_per_iter,
+          invert_idmap_to_id_to_source_module,
+        )
         # Pull GR-inc sub-modules from globalReadIncrements so the helper can
         # tag GR-inc items as GRIncA/GRIncB (matching CMS's idMap), instead of
         # lumping them under generic 'GR' alongside actual buffer-loads. The
@@ -3934,10 +3950,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
           globalReadIncBCode=gri_b,
           inner_unroll_max=kernel["InnerUnroll"],
         )
+        # Approach 2 (rocm-libraries-dfd8): NLL/NGL parallel source-module
+        # inversion. We only invert the GR-inc named Modules — the other
+        # NLL/NGL inputs (localReads, pack*) are out-of-scope for
+        # Approach 2 per sub-condition Y (their Module construction is
+        # asymmetric across the CMS / non-CMS code paths). The same
+        # `invert_idmap_to_id_to_source_module` helper used by the
+        # _loopBody path emits "globalReadIncrementA" /
+        # "globalReadIncrementB" for these named Modules and skips
+        # everything else, so the resulting map only carries
+        # source_module_id for the GR-inc leaves — matching the
+        # in-scope coverage envelope.
+        capture_id_to_src = invert_idmap_to_id_to_source_module({
+          'GRIncA': gri_a,
+          'GRIncB': gri_b,
+        })
       subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], \
                       module, NLLlast=NLLlast, tailloopInNll=useTailloopInNll, isNLLorNGLL=True, capture=capture,
-                      capture_id_to_category=capture_id_to_cat)
+                      capture_id_to_category=capture_id_to_cat,
+                      capture_id_to_source_module=capture_id_to_src)
       module.add(subIterCode)
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       pack[packIdx] = Module()
@@ -4895,6 +4927,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self._capture_context.builder = LoopBodyCaptureBuilder()
           from Tensile.Components.ScheduleCapture import (
             build_idmap, invert_idmap_to_id_to_category,
+            invert_idmap_to_id_to_source_module,
           )
           # Build {id(item) -> category} from the same source modules SIA3
           # consumes on the non-CMS path. Identity is preserved because
@@ -4917,6 +4950,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
             snopCode=Module(),         # SNOP tagged via SNop isinstance fallback
           )
           capture_id_to_cat = invert_idmap_to_id_to_category(capture_idmap)
+          # Approach 2 (rocm-libraries-dfd8): parallel inversion to feed
+          # `TaggedInstruction.source_module_id`. Same idmap, mirrored
+          # walk; emits the closest-named-ancestor `Module.name` (e.g.
+          # "globalReadIncrementA") so the e293 SCC pattern's two cmps
+          # get distinct cross-build-stable identities.
+          capture_id_to_src = invert_idmap_to_id_to_source_module(capture_idmap)
           # Tag prefetch pack code leaves (consumed at iter 0 via
           # pack[packIdx=0]). On the non-CMS path the prefetch_pack_a/b
           # snapshots are populated only if the kernelBody prefetch
@@ -4938,6 +4977,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module, localReadsSecondHalf,
             capture=self._capture_context.builder,
             capture_id_to_category=capture_id_to_cat,
+            capture_id_to_source_module=capture_id_to_src,
           )
         else:
           subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
@@ -4967,6 +5007,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self._capture_context.builder = LoopBodyCaptureBuilder()
         from Tensile.Components.ScheduleCapture import (
           structural_clone, build_idmap, invert_idmap_to_id_to_category,
+          invert_idmap_to_id_to_source_module,
         )
         # Build the {id(item) -> category} map from the SAME source modules
         # CMS will consume in customMainLoopSchedule. Both paths route through
@@ -4997,6 +5038,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
           snopCode=Module(),         # SNOP tagged by SNop isinstance fallback
         )
         capture_id_to_cat = invert_idmap_to_id_to_category(capture_idmap)
+        # Approach 2 (rocm-libraries-dfd8): parallel inversion to feed
+        # `TaggedInstruction.source_module_id`. See the non-CMS site
+        # above for the rationale; this SHADOW path mirrors it so the
+        # cross-build identity stability invariant holds when both paths
+        # observe the same source modules.
+        capture_id_to_src = invert_idmap_to_id_to_source_module(capture_idmap)
         # Tag prefetch pack code leaves (consumed at iter 0 via pack[packIdx=0])
         # as PackA{plrIdx}/PackB{plrIdx}. Without this, prefetch's packCodeA/B
         # leaves land in UNKNOWN at categorize time because they never enter
@@ -5022,6 +5069,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module,
           capture=self._capture_context.builder,
           capture_id_to_category=capture_id_to_cat,
+          capture_id_to_source_module=capture_id_to_src,
         )
 
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
@@ -6361,6 +6409,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
               num_mfma_per_subiter=pending.num_mfma_per_subiter,
               default_capture=ctx.default,
               regset_stream=regset_stream,
+              # Approach 2 (rocm-libraries-dfd8): thread the parallel
+              # source-module map populated by the CMS dispatch.
+              source_module_by_origin_id=getattr(
+                  pending, "source_module_by_origin_id", None),
             )
             self._pending_cms_capture_inputs = None
           # CMS-side capture must use the same profile so both graphs

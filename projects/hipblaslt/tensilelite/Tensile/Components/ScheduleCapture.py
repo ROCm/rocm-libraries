@@ -422,6 +422,17 @@ class TaggedInstruction:
     category: str
     slot: SlotKey
     emission_ordinal: int = -1
+    # Approach 2 (rocm-libraries-dfd8): rocisa-derived source-module
+    # discriminator. Holds the closest-named-ancestor `Module.name` (or a
+    # `(name, idmap_position)` hybrid for unnamed) of the source Module
+    # this leaf was emitted into. Used as the second slot of `identity_for`
+    # and as the second key of the per-`(canonical_render, source_module_id)`
+    # emission_ordinal counter. None for synthetic captures and pre-Approach-2
+    # callers that do not thread a source module — those degrade to the
+    # post-hdem behavior (per-render counter, identity 2-tuple-equivalent).
+    # See `E293_R1_APPROACH_2_MEMO.md` §Q1 / §Q3 for the design rationale
+    # and §Q5 for the in-scope vs out-of-scope coverage envelope.
+    source_module_id: Optional[str] = None
 
     def render(self) -> str:
         """Render this instruction for a failure label.
@@ -498,7 +509,20 @@ class TaggedInstruction:
         `_identity_for` was removed in the nn0 follow-up, 2026-05-08).
         """
         inst = self.wrapped.rocisa_inst
+        # Approach 2 (rocm-libraries-dfd8): identity is now a 3-tuple
+        # `(canonical_render, source_module_id, emission_ordinal)`. The
+        # source_module_id is rocisa-derived (the closest-named-ancestor
+        # `Module.name` of the leaf in `build_idmap`'s output, e.g.
+        # `"globalReadIncrementA"` vs `"globalReadIncrementB"`). It
+        # disambiguates physically-distinct same-render emissions whose
+        # cross-build emission_ordinal assignment would otherwise be
+        # scheduler-dependent (the e293 SCC pattern). emission_ordinal
+        # is now per-`(canonical_render, source_module_id)` so within-
+        # source disambiguation (pack-MFMA twins, EMISSION_ORDINAL_DESIGN
+        # §3.2) continues to work. See E293_R1_APPROACH_2_MEMO.md for the
+        # full design and §Q5 for the in-scope coverage envelope.
         return (WrappedInstruction.canonical_str(inst),
+                self.source_module_id,
                 self.emission_ordinal)
 
 
@@ -752,12 +776,21 @@ def assign_emission_ordinals(instructions: list) -> None:
         instructions,
         key=lambda ti: (ti.slot.mfma_index, ti.slot.sequence),
     )
-    counter: Dict[str, int] = {}
+    # Approach 2 (rocm-libraries-dfd8): counter key narrowed from
+    # `canonical_render` to `(canonical_render, source_module_id)`. Two
+    # emissions of the same render from DIFFERENT source modules each
+    # restart at ordinal=0, so the cross-build identity collision driven
+    # by scheduler-dependent ordinal assignment (e293 SCC pattern) cannot
+    # occur. Within a single source module, the counter still increments
+    # monotonically, so within-source disambiguation (pack-MFMA twins,
+    # EMISSION_ORDINAL_DESIGN §3.2) is preserved.
+    counter: Dict[Tuple[str, Optional[str]], int] = {}
     for ti in sorted_tis:
         render = WrappedInstruction.canonical_str(ti.wrapped.rocisa_inst)
-        ord_idx = counter.get(render, 0)
+        key = (render, ti.source_module_id)
+        ord_idx = counter.get(key, 0)
         ti.emission_ordinal = ord_idx
-        counter[render] = ord_idx + 1
+        counter[key] = ord_idx + 1
 
 
 def make_position(body_label: str, stream_index: int) -> SchedulePosition:
@@ -818,7 +851,8 @@ class LoopBodyCaptureBuilder:
         self._instructions = []
         self._seq_counter = {}  # (slot_kind, mfma_index) -> next sequence
 
-    def append(self, inst, category, subiter, slot_kind=SLOT_KIND_MFMA, mfma_index=-1):
+    def append(self, inst, category, subiter, slot_kind=SLOT_KIND_MFMA,
+               mfma_index=-1, source_module_id=None):
         key = (slot_kind, mfma_index)
         seq = self._seq_counter.get(key, 0)
         self._seq_counter[key] = seq + 1
@@ -830,8 +864,17 @@ class LoopBodyCaptureBuilder:
         )
         # Wrap eagerly: WrappedInstruction is now mandatory on TaggedInstruction.
         # finalize() populates reads/writes via _populate_wrapper for survivors.
+        # `source_module_id` (Approach 2 / rocm-libraries-dfd8) carries the
+        # rocisa-derived source-Module discriminator from
+        # `invert_idmap_to_id_to_source_module`, threaded through both the
+        # default-side capture funnel (`_captureSubIterToBuilder`) and the
+        # CMS-side macro expander (`expand_cms_macro`). Defaults to None so
+        # synthetic test fixtures that bypass the production plumbing
+        # continue to work; the per-`(canonical_render, source_module_id)`
+        # ordinal counter handles None as a key value.
         self._instructions.append(TaggedInstruction(
             wrapped=WrappedInstruction(inst), category=category, slot=slot,
+            source_module_id=source_module_id,
         ))
 
     def finalize(self):
@@ -1060,6 +1103,52 @@ def invert_idmap_to_id_to_category(idmap):
                     f"categories {out[key]!r} and {cat!r}; idMap schema bug."
                 )
             out[key] = cat
+    return out
+
+
+def invert_idmap_to_id_to_source_module(idmap):
+    """Invert {category: module-or-list} to {id(instruction): source_module_id}.
+
+    The `source_module_id` is the source `Module.name` attribute
+    (rocisa-derived — set by the kernel-writer's `Module(...)`
+    constructor calls in `KernelWriterAssembly.py`). Only ENTRIES whose
+    top-level value is a Module with a NON-EMPTY name are emitted; all
+    other entries (plain-list values from `removeComments`, unnamed
+    Modules) are skipped. The unmapped leaves get `None` from the
+    consumer's `dict.get(id(item))` and degrade to the post-hdem
+    within-render counter behavior.
+
+    This skip-on-unnamed policy is the operative form of sub-condition Y
+    (Approach 2 §Q5 sharpening): the cross-build stability proof only
+    holds for source modules constructed via SHARED kernel-writer code
+    paths AND THOSE PATHS HAPPEN TO USE NAMED MODULE WRAPPERS (e.g.
+    `globalReadIncrementA/B` at `KernelWriterAssembly.py:9170/9178`).
+    LR/Pack `*AllIters[u]` Modules are constructed unnamed in
+    `KernelWriter.py:4175/4177` (`Module()` with no `name`) — the LR/Pack
+    paths are also asymmetric across the two
+    `UseCustomMainLoopSchedule` branches and not in scope for Approach
+    2's structural fix. Skipping them here keeps both default-side and
+    CMS-side captures consistent at `source_module_id=None` for those
+    leaves, so the post-hdem within-render counter behavior takes over
+    for LR/Pack as documented. See `E293_R1_APPROACH_2_MEMO.md` §Q5.
+
+    Used by Approach 2 (rocm-libraries-dfd8) to populate
+    `TaggedInstruction.source_module_id`.
+    """
+    out = {}
+    for cat, val in idmap.items():
+        if val is None:
+            continue
+        # Source-module name is the disambiguator; without a name, the
+        # entry is OUT-OF-SCOPE for Approach 2 — leave the leaves
+        # unmapped so the consumer's `.get(id(item))` returns None and
+        # the post-hdem (per-render-only) counter behavior applies.
+        mod_name = getattr(val, 'name', '') if hasattr(val, 'name') else ''
+        if not mod_name:
+            continue
+        items = val.flatitems() if hasattr(val, 'flatitems') else val
+        for item in items:
+            out[id(item)] = mod_name
     return out
 
 
@@ -2296,7 +2385,8 @@ def collect_regset_stream(writer):
 
 def expand_cms_macro(macro, id_value, useGR, usePLR, useGRInc, useLoop,
                      tag_by_origin_id, sync_class=None, snop_class=None,
-                     mfma_classes=(), name_to_idx=None):
+                     mfma_classes=(), name_to_idx=None,
+                     source_module_by_origin_id=None):
     """Walk a CMS MAINLOOP macro and produce a LoopBodyCapture for the given flags.
 
     Evaluates ValueIf/ValueElseIf/ValueEndif chains against the flag values and
@@ -2394,12 +2484,23 @@ def expand_cms_macro(macro, id_value, useGR, usePLR, useGRInc, useLoop,
             slot_kind = SLOT_KIND_MFMA
             mfma_index = current_mfma_idx
 
+        # Approach 2 (rocm-libraries-dfd8): look up the source_module_id
+        # from the parallel map populated by the CMS-side dispatch
+        # alongside `tag_by_origin_id`. None for items that have no
+        # source-module record (synthetic SWaitCnts deepcopied by
+        # nllvmcntHandling, MFMAs added directly to the macro, SNops);
+        # those degrade to the post-hdem within-render counter behavior
+        # which is unchanged by Approach 2.
+        src_id = None
+        if source_module_by_origin_id is not None:
+            src_id = source_module_by_origin_id.get(id(item))
         builder.append(
             inst=item,
             category=category,
             subiter=0,  # CMS macro is subiter-flattened; subiter is encoded in category (e.g. LRA0 vs LRA1)
             slot_kind=slot_kind,
             mfma_index=mfma_index,
+            source_module_id=src_id,
         )
 
     body = builder.finalize()
@@ -2461,13 +2562,21 @@ class CmsCaptureInputs:
     mfma_classes: tuple
     num_mfma_per_subiter: int = 0
     regset_stream: dict = field(default_factory=dict)
+    # Approach 2 (rocm-libraries-dfd8): parallel map of {id(item) ->
+    # source_module_id} populated by the CMS dispatch alongside
+    # `tag_by_origin_id`. Threaded into `expand_cms_macro` so the CMS-
+    # side TaggedInstructions get the same rocisa-derived source-Module
+    # discriminator as the default-side ones — closing cross-build
+    # identity divergence on the e293 SCC pattern.
+    source_module_by_origin_id: dict = field(default_factory=dict)
 
 
 def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
                                   sync_class, snop_class, mfma_classes,
                                   default_capture: 'FourPartCapture',
                                   num_mfma_per_subiter: int = 0,
-                                  regset_stream=None):
+                                  regset_stream=None,
+                                  source_module_by_origin_id=None):
     """Expand a CMS MAINLOOP macro four ways and assemble a FourPartCapture.
 
     main_loop[cp] expands with all flags=1 and \\ID=cp for each cp.
@@ -2504,6 +2613,7 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
             sync_class=sync_class, snop_class=snop_class,
             mfma_classes=mfma_classes,
             name_to_idx=regset_stream,
+            source_module_by_origin_id=source_module_by_origin_id,
         )
         main_loop[cp] = body
         main_loop_prev[cp] = clone_loop_body(body)
@@ -2516,6 +2626,7 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
             sync_class=sync_class, snop_class=snop_class,
             mfma_classes=mfma_classes,
             name_to_idx=regset_stream,
+            source_module_by_origin_id=source_module_by_origin_id,
         )
         n_gl_dict = {0: n_gl_body}
     else:
@@ -2529,6 +2640,7 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
             sync_class=sync_class, snop_class=snop_class,
             mfma_classes=mfma_classes,
             name_to_idx=regset_stream,
+            source_module_by_origin_id=source_module_by_origin_id,
         )
         n_ll_dict = {0: n_ll_body}
     else:

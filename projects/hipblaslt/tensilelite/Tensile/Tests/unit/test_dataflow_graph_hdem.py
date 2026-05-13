@@ -200,8 +200,9 @@ class TestCrossBodyPipeliningMatches:
             "Approach A: identity must be body-blind. "
             f"PRO ident={ident_pro!r}, ML ident={ident_ml!r}"
         )
-        # And the tuple shape is the new 2-tuple.
-        assert len(ident_pro) == 2
+        # And the tuple shape is the Approach 2 (rocm-libraries-dfd8)
+        # 3-tuple `(canonical_render, source_module_id, emission_ordinal)`.
+        assert len(ident_pro) == 3
 
 
 # =============================================================================

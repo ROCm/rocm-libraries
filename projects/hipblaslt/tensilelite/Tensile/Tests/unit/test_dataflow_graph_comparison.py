@@ -438,17 +438,21 @@ class TestRenderStringIdentity:
         register-naming variations.
 
         Per EMISSION_ORDINAL_DESIGN.md + ORAM1 (rocm-libraries-hdem)
-        Approach A, the identity tuple is now
-        `(canonical_render, emission_ordinal)` (body-blind — `loop_index`
-        was dropped from the leading slot to make `compare_graphs`
-        match cross-body pipelined dataflow). The historical class_tag
-        slot has been dropped.
+        Approach A, identity dropped `loop_index`; per Approach 2
+        (rocm-libraries-dfd8) identity gained a rocisa-derived
+        `source_module_id` slot to disambiguate cross-build same-render
+        emissions from distinct source Modules. The current shape is
+        `(canonical_render, source_module_id, emission_ordinal)`.
         """
         lr_tagged = make_lr(8, 4, 64, slot=0, category="LRA0")
         ident = lr_tagged.identity_for(BODY_LABEL_ML)
-        assert len(ident) == 2
-        assert isinstance(ident[0], str)    # canonical render-string
-        assert isinstance(ident[1], int)    # emission_ordinal
+        assert len(ident) == 3
+        assert isinstance(ident[0], str)              # canonical render-string
+        # source_module_id is None for synthetic test fixtures (no real
+        # source Module threaded through `make_lr`). Real captures derive
+        # it from the closest-named-ancestor Module in `build_idmap`.
+        assert ident[1] is None or isinstance(ident[1], str)
+        assert isinstance(ident[2], int)              # emission_ordinal
         # The render contains a vgpr reference and the LDS offset.
         # `make_lr` builds a real `rocisa.DSLoadB128`, which renders as
         # `ds_read_b128 v[8:11], v0 offset:64`.

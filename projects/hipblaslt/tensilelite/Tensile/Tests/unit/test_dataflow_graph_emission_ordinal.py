@@ -92,17 +92,25 @@ def _per_render_counts(capture, instructions=None):
 
 
 def _per_render_ordinal_map(capture, instructions=None):
-    """Return `{(canonical_render, emission_ordinal): TaggedInstruction}` for a capture.
+    """Return `{(canonical_render, source_module_id, emission_ordinal):
+    TaggedInstruction}` for a capture.
 
     `instructions` defaults to `capture.instructions` (raw); pass
     `data_flow_instructions(capture)` to consume the shared dataflow
     filter (rocm-libraries-d3zj).
+
+    Approach 2 (rocm-libraries-dfd8): the per-ordinal map keys on the
+    full 3-slot identity tuple now that the emission_ordinal counter is
+    per-`(canonical_render, source_module_id)`. Without
+    `source_module_id` in the key, two same-render emissions from
+    different source modules (each with ordinal=0 in their own
+    counter) would collide on the map and silently drop one.
     """
     out = {}
     iterable = capture.instructions if instructions is None else instructions
     for ti in iterable:
         render = WrappedInstruction.canonical_str(ti.wrapped.rocisa_inst)
-        out[(render, ti.emission_ordinal)] = ti
+        out[(render, ti.source_module_id, ti.emission_ordinal)] = ti
     return out
 
 
@@ -167,16 +175,20 @@ class TestZ012CollisionRegression:
             f"got {id_a!r} == {id_b!r}."
         )
         # And the only differing slot must be the ordinal — canonical_render
-        # is identical by construction. Identity tuple shape under
-        # rocm-libraries-hdem Approach A is `(canonical_render,
-        # emission_ordinal)` — `loop_index` was dropped from the leading
-        # slot to make identity body-blind (cross-body pipelining must
-        # collapse identities for `compare_graphs` to match the same
-        # logical dataflow that lands in different bodies on each side).
-        assert len(id_a) == 2
-        assert len(id_b) == 2
+        # and source_module_id are both identical by construction (synthetic
+        # TaggedInstructions without a threaded source_module_id default to
+        # None, so this test exercises the within-source disambiguation
+        # axis of identity). Identity tuple shape under
+        # rocm-libraries-dfd8 (Approach 2) is `(canonical_render,
+        # source_module_id, emission_ordinal)` — the source_module_id slot
+        # was added to disambiguate cross-build same-render emissions from
+        # DIFFERENT source modules; see TestSourceModuleIdDiscrimination
+        # below for the cross-source axis.
+        assert len(id_a) == 3
+        assert len(id_b) == 3
         assert id_a[0] == id_b[0]               # canonical_render
-        assert id_a[1] != id_b[1]               # emission_ordinal
+        assert id_a[1] == id_b[1]               # source_module_id (both None here)
+        assert id_a[2] != id_b[2]               # emission_ordinal
 
     def test_three_same_render_emissions_get_three_distinct_identities(self):
         """Generalize the on0t pattern: N physically distinct emissions
@@ -224,6 +236,131 @@ class TestZ012CollisionRegression:
         assign_emission_ordinals([ti_a, ti_b])
         assert ti_a.emission_ordinal == 0
         assert ti_b.emission_ordinal == 0
+
+
+# =============================================================================
+# Cycle 1 (Approach 2 / bead rocm-libraries-dfd8) — source_module_id
+# discrimination in identity.
+# =============================================================================
+# The on0t collision pattern (two same-render emissions in the same body get
+# distinct identities) is closed by `emission_ordinal`. But the
+# CROSS-BUILD identity stability of those ordinals depends on a non-trivial
+# scheduler-determinism assumption that fails when CMS and default schedule
+# the A-side and B-side cmps in different lex orders. Approach 2 closes
+# this by adding `source_module_id` (a rocisa-derived discriminator from
+# the source `Module.name` — e.g. `"globalReadIncrementA"` vs
+# `"globalReadIncrementB"`) as a third identity slot, and narrowing the
+# emission_ordinal counter to be per-`(canonical_render, source_module_id)`.
+#
+# This test pins the synthetic discrimination: two same-render emissions
+# from DIFFERENT source modules get distinct identities, AND each emission
+# gets ordinal=0 from its own per-source counter (not the global
+# per-render counter that would otherwise produce ordinal=0/1 with
+# scheduler-dependent assignment to physical instructions).
+
+
+class TestSourceModuleIdDiscrimination:
+    def test_two_same_render_different_source_module_get_distinct_identities(self):
+        """Two SCmpEQU32 emissions of `s_cmp_eq_u32 LoopCounterL,
+        StaggerUIter` from DIFFERENT source Modules
+        (`globalReadIncrementA` vs `globalReadIncrementB`) must produce
+        distinct identity tuples even when their canonical renders are
+        byte-identical.
+
+        Under Approach 2, the third identity slot
+        (`source_module_id`) carries the source Module's name, and the
+        emission_ordinal counter is per-`(canonical_render,
+        source_module_id)` — so each side starts at ordinal=0 and the
+        physical instruction-to-ordinal mapping is independent of
+        cross-build scheduler choice.
+        """
+        from rocisa.instruction import SCmpEQU32
+        from rocisa.container import sgpr
+
+        def _build_scmp(seq, source_module_id):
+            inst = SCmpEQU32(src0=sgpr("LoopCounterL"),
+                             src1=sgpr("StaggerUIter"))
+            return TaggedInstruction(
+                wrapped=WrappedInstruction(inst),
+                category="GRIncA" if source_module_id == "globalReadIncrementA" else "GRIncB",
+                slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                             mfma_index=0, sequence=seq),
+                source_module_id=source_module_id,
+            )
+
+        ti_a = _build_scmp(seq=0, source_module_id="globalReadIncrementA")
+        ti_b = _build_scmp(seq=1, source_module_id="globalReadIncrementB")
+
+        # Precondition: byte-identical canonical renders.
+        ra = WrappedInstruction.canonical_str(ti_a.wrapped.rocisa_inst)
+        rb = WrappedInstruction.canonical_str(ti_b.wrapped.rocisa_inst)
+        assert ra == rb
+
+        # Per-(render, source_module_id) ordinal assignment: each gets 0.
+        assign_emission_ordinals([ti_a, ti_b])
+        assert ti_a.emission_ordinal == 0, (
+            f"A-side cmp must be ordinal=0 within its own source module's "
+            f"counter (per-(render, source_module_id) keying); got "
+            f"{ti_a.emission_ordinal}"
+        )
+        assert ti_b.emission_ordinal == 0, (
+            f"B-side cmp must be ordinal=0 within its own source module's "
+            f"counter (per-(render, source_module_id) keying); got "
+            f"{ti_b.emission_ordinal}"
+        )
+
+        id_a = ti_a.identity_for(BODY_LABEL_ML)
+        id_b = ti_b.identity_for(BODY_LABEL_ML)
+        # Identity tuple shape under Approach 2 is
+        # (canonical_render, source_module_id, emission_ordinal).
+        assert len(id_a) == 3, (
+            f"identity tuple must have 3 slots under Approach 2; got "
+            f"len={len(id_a)} value={id_a!r}"
+        )
+        assert len(id_b) == 3
+        assert id_a[0] == id_b[0]   # canonical_render match
+        assert id_a[1] != id_b[1]   # source_module_id differs
+        assert id_a[2] == id_b[2]   # both emission_ordinal == 0
+        assert id_a != id_b, (
+            f"Two same-render different-source-module emissions must get "
+            f"distinct identities under Approach 2's source_module_id "
+            f"discriminator. got {id_a!r} == {id_b!r}."
+        )
+
+    def test_same_source_module_two_same_render_emissions_still_disambiguated(self):
+        """Within ONE source module, two same-render emissions still get
+        distinct identities via emission_ordinal. The Approach 2 third
+        slot does NOT regress the within-source disambiguation that
+        EMISSION_ORDINAL_DESIGN.md §3.2 makes load-bearing for the
+        pack-MFMA same-render-twice case.
+        """
+        from rocisa.instruction import SCmpEQU32
+        from rocisa.container import sgpr
+
+        def _build(seq):
+            inst = SCmpEQU32(src0=sgpr("LoopCounterL"),
+                             src1=sgpr("StaggerUIter"))
+            return TaggedInstruction(
+                wrapped=WrappedInstruction(inst),
+                category="GRIncA",
+                slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                             mfma_index=0, sequence=seq),
+                source_module_id="globalReadIncrementA",
+            )
+
+        ti_a = _build(seq=0)
+        ti_b = _build(seq=1)
+        assign_emission_ordinals([ti_a, ti_b])
+        # Same source_module_id, same render → ordinals 0 and 1.
+        assert ti_a.emission_ordinal == 0
+        assert ti_b.emission_ordinal == 1
+
+        id_a = ti_a.identity_for(BODY_LABEL_ML)
+        id_b = ti_b.identity_for(BODY_LABEL_ML)
+        assert id_a != id_b
+        assert id_a[0] == id_b[0]   # same render
+        assert id_a[1] == id_b[1]   # same source_module_id
+        assert id_a[2] != id_b[2]   # different ordinal
 
 
 # =============================================================================
@@ -727,4 +864,108 @@ def test_lcc_invariant_per_body_use_loop_predicate(
         f"{len(violations)} per-body LCC invariant violation(s) "
         f"(side, body, useLoop, expected (cmp,sub), actual (cmp,sub)): "
         f"{violations}"
+    )
+
+
+# =============================================================================
+# Cycle 2 (Approach 2 / bead rocm-libraries-dfd8) — real-kernel cross-build
+# stability of source_module_id on the e293 SCC pattern.
+# =============================================================================
+# The on0t / e293 SCC pattern: two `s_cmp_eq_u32 LoopCounterL,
+# StaggerUIter` emissions in the same body, one from `globalReadIncrementA`
+# and one from `globalReadIncrementB`. Pre-Approach-2, the
+# `(canonical_render, emission_ordinal)` identity tuple's ordinal was
+# scheduler-dependent across the CMS and non-CMS builds: which physical
+# instruction got ordinal=0 depended on the lex order of the slot keys
+# the scheduler picked, and that order asymmetrically swapped between
+# the two builds. Cross-build identity matching in `compare_graphs` then
+# paired the wrong physical instructions, surfacing 12 false-positive
+# OverriddenInputFailure(SCC) residuals across 3 fixtures.
+#
+# Approach 2 closes this by adding `source_module_id` (rocisa-derived
+# from the source `Module.name` — `"globalReadIncrementA"` vs
+# `"globalReadIncrementB"`) to identity AND narrowing the
+# `emission_ordinal` counter to be per-`(canonical_render,
+# source_module_id)`. The test below pins the cross-build stability:
+# for every cmp instance in the union of the CMS-side and non-CMS
+# captures, both sides resolve to the same identity tuple AND the
+# `source_module_id` slot is populated with the GRIncA/GRIncB
+# rocisa-derived name.
+
+
+def _scc_cmp_identities_in_body(body):
+    """Return list of `(identity, source_module_id)` for every
+    `s_cmp_eq_u32 LoopCounterL, StaggerUIter` instance in this body.
+    """
+    target_render = "s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter]"
+    out = []
+    for ti in body.instructions:
+        render = WrappedInstruction.canonical_str(ti.wrapped.rocisa_inst)
+        if render != target_render:
+            continue
+        out.append((ti.identity_for(BODY_LABEL_ML), ti.source_module_id))
+    return out
+
+
+def test_e293_scc_cross_build_identity_stable_via_source_module_id(
+    real_kernel_capture_pair_approach_a,
+):
+    """Cycle 2 RED (Approach 2 / bead rocm-libraries-dfd8): pin that the
+    e293 SCC pattern (`s_cmp_eq_u32 LoopCounterL, StaggerUIter` from
+    GRIncA vs GRIncB) gets cross-build-stable identities in the real
+    capture pipeline. For every cmp instance in the ML body of either
+    side, the identity tuple's `source_module_id` slot must be one of
+    the two GRIncA/GRIncB rocisa Module names, AND the CMS-side and
+    non-CMS-side identity sets for this render in this body must be
+    EQUAL (per-instance).
+
+    Pre-Approach-2: the cmp's `source_module_id` slot is None (the
+    capture pipeline does not derive a Module name yet) and the per-
+    instance identities collapse on emission_ordinal differently across
+    the two builds. The `assert source_module_id is not None` is the
+    explicit RED.
+    """
+    default_cap, cms_cap = real_kernel_capture_pair_approach_a
+    default_bodies = _captures_per_body(default_cap)
+    cms_bodies = _captures_per_body(cms_cap)
+    if BODY_LABEL_ML not in default_bodies or BODY_LABEL_ML not in cms_bodies:
+        pytest.skip("ML body absent from one of the captures")
+
+    default_cmps = _scc_cmp_identities_in_body(default_bodies[BODY_LABEL_ML])
+    cms_cmps = _scc_cmp_identities_in_body(cms_bodies[BODY_LABEL_ML])
+
+    # Each side must see exactly two cmp instances (one per side: GRIncA, GRIncB).
+    assert len(default_cmps) == 2, (
+        f"Expected 2 cmp instances in default ML body; got "
+        f"{len(default_cmps)}: {default_cmps!r}"
+    )
+    assert len(cms_cmps) == 2, (
+        f"Expected 2 cmp instances in CMS ML body; got "
+        f"{len(cms_cmps)}: {cms_cmps!r}"
+    )
+
+    # Every cmp instance must have a source_module_id derived from the
+    # source `Module.name`. Pre-Cycle-2 plumbing this is None — that is
+    # the explicit RED.
+    expected_names = {"globalReadIncrementA", "globalReadIncrementB"}
+    for side_name, cmps in (("default", default_cmps), ("cms", cms_cmps)):
+        # Check non-None first so sorting doesn't TypeError on None values
+        # (which would obscure the actual missing-plumbing diagnostic).
+        assert all(c[1] is not None for c in cmps), (
+            f"{side_name} side: at least one cmp has source_module_id=None "
+            f"(Approach 2 plumbing not threaded). cmps={cmps!r}"
+        )
+        ids = sorted(c[1] for c in cmps)
+        assert set(ids) == expected_names, (
+            f"{side_name} side: cmp source_module_ids must be exactly "
+            f"{expected_names!r}; got {ids!r}"
+        )
+
+    # The two sides must agree on the per-instance identity set: each
+    # physical cmp lands at the same identity in both builds.
+    default_identities = sorted(c[0] for c in default_cmps)
+    cms_identities = sorted(c[0] for c in cms_cmps)
+    assert default_identities == cms_identities, (
+        f"Cross-build identity drift on the e293 SCC pattern. "
+        f"default={default_identities!r} vs cms={cms_identities!r}"
     )

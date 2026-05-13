@@ -192,6 +192,33 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     # nllvmcntHandling are not in the map but the walker falls back to SYNC via
     # isinstance checks against sync_class.
     tag_by_origin_id: dict = {}
+    # Approach 2 (rocm-libraries-dfd8): parallel side-channel mapping each
+    # emitted Instruction's id() to its rocisa-derived `source_module_id`
+    # (the closest-named-ancestor `Module.name` of the source Module — e.g.
+    # "globalReadIncrementA" for SCC cmps emitted from the GRIncA bucket).
+    # Built from the ORIGINAL named source Modules (`writer.codes.*`)
+    # because `idMap` here holds removed-comments lists that have lost the
+    # enclosing Module wrapper and therefore the `.name` attribute. Leaf
+    # `id()` is preserved by `removeComments` (it filters TextBlocks and
+    # re-adds the surviving leaves to a fresh Module without cloning).
+    # The default-side path (KernelWriter.py:_loopBody) calls the same
+    # inversion against its own NAMED idmap, so both sides end up with
+    # matching `source_module_id` strings on the same leaves — which is
+    # what cross-build identity stability requires.
+    _src_idmap_for_inversion = {
+        'GRIncA': writer.codes.globalReadIncrements.findNamedItem("globalReadIncrementA")
+                    if hasattr(writer.codes, 'globalReadIncrements') and writer.codes.globalReadIncrements is not None
+                    else None,
+        'GRIncB': writer.codes.globalReadIncrements.findNamedItem("globalReadIncrementB")
+                    if hasattr(writer.codes, 'globalReadIncrements') and writer.codes.globalReadIncrements is not None
+                    else None,
+        'GRA':    writer.codes.globalReadA,
+        'GRB':    writer.codes.globalReadB,
+        'LWA':    writer.codes.localWriteA,
+        'LWB':    writer.codes.localWriteB,
+    }
+    source_module_by_origin_id: dict = scap.invert_idmap_to_id_to_source_module(
+        _src_idmap_for_inversion)
 
     InstStreams = {key: [stream, idMap[key]] for key, stream in opt1.optSchedule.items()}
 
@@ -337,6 +364,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         macro=macro,
         num_codepaths=numCodePath,
         tag_by_origin_id=tag_by_origin_id,
+        source_module_by_origin_id=source_module_by_origin_id,
         sync_class=SWaitCnt,
         snop_class=SNop,
         mfma_classes=mfma_classes,
