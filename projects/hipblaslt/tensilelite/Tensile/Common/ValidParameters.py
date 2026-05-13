@@ -26,6 +26,7 @@ import math
 from functools import lru_cache
 
 from .Architectures import SUPPORTED_ISA
+from .Types import IsaVersion
 
 ################################################################################
 # Enumerate Valid Solution Parameters
@@ -63,7 +64,7 @@ validMacroTileSides = [
     768,
 ]
 validMacroTiles = []
-validISA = [(0, 0, 0)]
+validISA = [IsaVersion(0, 0, 0)]
 validISA.extend(SUPPORTED_ISA)
 for i in validMacroTileSides:
     for j in validMacroTileSides:
@@ -327,7 +328,7 @@ validParameters = { # we need to make sure this matches develop
     # Scheduling algorithm to use for each iteration:
     # 0 = minimal/no scheduling.  Global Read and increments, followed by local reads,
     # followed by local writes, followed by MACs
-    "ScheduleIterAlg": [0, 1, 2, 3],
+    "ScheduleIterAlg": [0, 1, 2, 3, 4],
     # For MatrixInstruction and SIA3, number of GlobalReadInstruction between mfma
     # the purpose of this parameter is to control density of global read instruction scheduling
     # Scheduling global read back to back can have better memory efficiency
