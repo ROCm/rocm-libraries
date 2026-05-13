@@ -87,6 +87,7 @@ const std::vector<PassInfo> availablePasses = {
     {"RaiseVgprMsbPass", []() { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", []() { return createInsertVgprMsbPass(); }},
     {"LongBranchLoweringPass", []() { return createLongBranchLoweringPass(); }},
+    {"CFGBuilderPass", []() { return createCFGBuilderPass(); }},
 };
 
 /**
