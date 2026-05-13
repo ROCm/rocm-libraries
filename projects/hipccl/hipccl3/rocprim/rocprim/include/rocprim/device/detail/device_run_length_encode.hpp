@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_DETAIL_DEVICE_RUN_LENGTH_ENCODE_HPP_
 
 #include "device_partition.hpp"
+#include "device_scan_common.hpp"
 #include "lookback_scan_state.hpp"
 #include "ordered_block_id.hpp"
 
@@ -43,6 +44,50 @@ namespace detail
 namespace run_length_encode
 {
 
+template<typename LookBackScanState,
+         typename OffsetCountPairType,
+         typename CountsOutputIterator,
+         typename RunsCountOutputIterator,
+         typename BlockIdWrapper>
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
+    non_trivial_init_kernel(LookBackScanState          lookback_scan_state,
+                            const unsigned int         grid_size,
+                            const bool                 is_first_launch,
+                            OffsetCountPairType* const launches_aggregate,
+                            CountsOutputIterator       counts_output,
+                            RunsCountOutputIterator    runs_count_output,
+                            BlockIdWrapper             ordered_bid)
+{
+    const unsigned int flat_thread_id
+        = (::rocprim::detail::block_id<0>() /*block_id*/
+           * ::rocprim::detail::block_size<0>() /*block_size*/)
+          + ::rocprim::detail::block_thread_id<0>() /*block_thread_id*/;
+
+    if(launches_aggregate != nullptr && flat_thread_id == 0)
+    {
+        if(is_first_launch)
+        {
+            *launches_aggregate = OffsetCountPairType{0, 0};
+        }
+        else
+        {
+            const auto                                            prev_runs  = *runs_count_output;
+            typename std::remove_const<decltype(prev_runs)>::type last_count = 0;
+
+            if(prev_runs > 0)
+            {
+                last_count = counts_output[prev_runs - 1];
+            }
+            else
+            {
+                last_count = counts_output[0];
+            }
+            *launches_aggregate = OffsetCountPairType{prev_runs, last_count};
+        }
+    }
+    init_lookback_scan_state(lookback_scan_state, grid_size, ordered_bid, flat_thread_id);
+}
+
 template<typename OffsetType, typename CountType>
 using offset_count_pair_type_t = ::rocprim::tuple<OffsetType, CountType>;
 
@@ -63,12 +108,12 @@ struct load_helper
     template<typename InputIterator>
     ROCPRIM_DEVICE
     void load_input_values(InputIterator      block_input,
-                           const bool         is_last_block,
+                           const bool         is_global_last_block,
                            const unsigned int valid_in_last_block,
                            InputType (&input)[ItemsPerThread],
                            storage_type& storage)
     {
-        if(!is_last_block)
+        if(!is_global_last_block)
         {
             block_load_input{}.load(block_input, input, storage.input);
         }
@@ -92,12 +137,12 @@ struct discontinuity_helper
                               const InputType (&input)[ItemsPerThread],
                               unsigned int (&head_flags)[ItemsPerThread],
                               unsigned int (&tail_flags)[ItemsPerThread],
-                              const bool    is_first_block,
-                              const bool    is_last_block,
+                              const bool    is_global_first_block,
+                              const bool    is_global_last_block,
                               const size_t  valid_in_last_block,
                               storage_type& storage)
     {
-        if(is_last_block)
+        if(is_global_last_block)
         {
             // If it's the last block, the out-of-bound items should not be flagged.
             auto guarded_not_equal
@@ -106,7 +151,7 @@ struct discontinuity_helper
                     CompareFunction(),
                     valid_in_last_block);
 
-            if(is_first_block)
+            if(is_global_first_block)
             {
                 block_discontinuity_type{}.flag_heads_and_tails(head_flags,
                                                                 tail_flags,
@@ -132,7 +177,7 @@ struct discontinuity_helper
             constexpr unsigned int block_size      = BlockSize * ItemsPerThread;
             const InputType        block_successor = block_input[block_size];
 
-            if(is_first_block)
+            if(is_global_first_block)
             {
                 block_discontinuity_type{}.flag_heads_and_tails(head_flags,
                                                                 tail_flags,
@@ -255,6 +300,7 @@ struct scatter_helper
                  size_t                warp_num_runs_aggregate,
                  size_t                warp_num_runs_exclusive_in_block,
                  const size_t (&thread_num_runs_exclusive_in_warp)[ItemsPerThread],
+                 size_t                launches_aggregate_count,
                  offsets_storage_type& offsets_storage,
                  counts_storage_type&  counts_storage)
     {
@@ -268,7 +314,8 @@ struct scatter_helper
                 {
                     if(thread_num_runs_exclusive_in_warp[i] < warp_num_runs_aggregate)
                     {
-                        size_t item_offset = block_num_runs_exclusive_in_global
+                        size_t item_offset = launches_aggregate_count
+                                             + block_num_runs_exclusive_in_global
                                              + warp_num_runs_exclusive_in_block
                                              + thread_num_runs_exclusive_in_warp[i];
 
@@ -287,8 +334,8 @@ struct scatter_helper
         }
         else // Two-phase scatter
         {
-            using offset_type = unsigned int;
-            using count_type  = unsigned int;
+            using offset_type = size_t;
+            using count_type  = size_t;
 
             unsigned int lane_id = ::rocprim::detail::logical_lane_id<WarpSize>();
 
@@ -322,9 +369,9 @@ struct scatter_helper
             {
                 if((i * WarpSize) + lane_id < warp_num_runs_aggregate)
                 {
-                    size_t item_offset = block_num_runs_exclusive_in_global
-                                         + warp_num_runs_exclusive_in_block + (i * WarpSize)
-                                         + lane_id;
+                    size_t item_offset
+                        = launches_aggregate_count + block_num_runs_exclusive_in_global
+                          + warp_num_runs_exclusive_in_block + (i * WarpSize) + lane_id;
 
                     // Scatter offset
                     offsets_output[item_offset] = run_offsets[i];
@@ -350,20 +397,20 @@ struct scan_helper
     template<unsigned int ItemsPerThread, typename ScanOp>
     ROCPRIM_DEVICE
     void scan(OffsetCountPairType (&offsets_and_run_items)[ItemsPerThread],
-              OffsetCountPairType& block_aggregate,
-              OffsetCountPairType& warp_aggregate,
-              OffsetCountPairType& warp_exclusive_in_block,
-              OffsetCountPairType& thread_exclusive_in_warp,
-              ScanOp               scan_op,
+              OffsetCountPairType&       block_aggregate,
+              OffsetCountPairType&       warp_aggregate,
+              OffsetCountPairType&       warp_exclusive_in_block,
+              OffsetCountPairType&       thread_exclusive_in_warp,
+              OffsetCountPairType* const launches_aggregate,
+              const unsigned int         block_id,
+              ScanOp                     scan_op,
               warp_scan_storage_type (&warp_scan_storage)[WarpsNo],
               OffsetCountPairType* warp_aggregates_storage)
     {
         const unsigned int warp_id = ::rocprim::warp_id();
         const unsigned int lane_id = ::rocprim::detail::logical_lane_id<WarpSize>();
 
-        OffsetCountPairType init;
-        ::rocprim::get<0>(init) = 0;
-        ::rocprim::get<1>(init) = 0;
+        OffsetCountPairType init = OffsetCountPairType{0, 0};
 
         // [0]: number of non-trivial run starts in this and previous threads of the warp
         // [1]: number of items in the last non-trivial run of this and previous threads of the warp
@@ -373,6 +420,15 @@ struct scan_helper
         // [1]: number of items in the last non-trivial run of this thread
         OffsetCountPairType thread_aggregate
             = ::rocprim::thread_reduce<ItemsPerThread>(&offsets_and_run_items[0], scan_op);
+
+        if(launches_aggregate != nullptr && block_id + ::rocprim::detail::block_thread_id<0>() == 0)
+        {
+            // First thread of the first warp seeds the block_aggregate with the launches_aggregate
+            if(::rocprim::get<0>(thread_aggregate) == 0)
+            {
+                ::rocprim::get<1>(thread_aggregate) += ::rocprim::get<1>(*launches_aggregate);
+            }
+        }
 
         // Warp scan results for thread i:
         //  - thread_inclusive = scan_op(thread_aggregate_0, thread_aggregate_1, ...,
@@ -394,7 +450,6 @@ struct scan_helper
 
         ::rocprim::syncthreads();
 
-        warp_exclusive_in_block = init;
         warp_aggregate          = warp_aggregates_storage[warp_id];
 
         block_aggregate = warp_aggregates_storage[0];
@@ -497,35 +552,43 @@ public:
              typename CountsOutputIterator,
              typename LookbackScanState>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-    OffsetCountPairType process_block(const InputIterator   block_input,
-                                     OffsetsOutputIterator offsets_output,
-                                     CountsOutputIterator  counts_output,
-                                     LookbackScanState     scan_state,
-                                     const unsigned int    block_id,
-                                     const std::size_t     grid_size,
-                                     const std::size_t     size,
-                                     storage_type&        storage)
+    OffsetCountPairType process_block(const InputIterator          block_input,
+                                      OffsetsOutputIterator        offsets_output,
+                                      CountsOutputIterator         counts_output,
+                                      LookbackScanState            scan_state,
+                                      const unsigned int           block_id,
+                                      const std::size_t            grid_size,
+                                      const std::size_t            size,
+                                      const std::size_t            starting_block,
+                                      const std::size_t            total_number_of_blocks,
+                                      OffsetCountPairType* const   launches_aggregate,
+                                      storage_type&                storage)
     {
         static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-        const std::size_t             block_offset    = block_id * items_per_block;
+        const std::size_t             global_block_id     = starting_block + block_id;
+        const std::size_t             global_block_offset = global_block_id * items_per_block;
 
         // First and last blocks
         const bool is_first_block = block_id == 0;
         const bool is_last_block  = block_id == grid_size - 1;
 
+        // First and last global blocks
+        const bool is_global_first_block = global_block_id == 0;
+        const bool is_global_last_block  = global_block_id == total_number_of_blocks - 1;
+
         // Input items remaining in last block
-        const unsigned int valid_in_last_block
-            = static_cast<unsigned int>(size - ((grid_size - 1) * items_per_block));
+        const unsigned int valid_in_last_global_block
+            = static_cast<unsigned int>(size - ((total_number_of_blocks - 1) * items_per_block));
 
         const unsigned int flat_thread_id = ::rocprim::detail::block_thread_id<0>();
-        unsigned int       warp_id        = ::rocprim::warp_id();
+        const unsigned int warp_id        = ::rocprim::warp_id();
 
         InputType input[ItemsPerThread];
 
         // Load items.
         load_type{}.load_input_values(block_input,
-                                      is_last_block,
-                                      valid_in_last_block,
+                                      is_global_last_block,
+                                      valid_in_last_global_block,
                                       input,
                                       storage.load);
 
@@ -536,9 +599,9 @@ public:
                                                   input,
                                                   head_flags,
                                                   tail_flags,
-                                                  is_first_block,
-                                                  is_last_block,
-                                                  valid_in_last_block,
+                                                  is_global_first_block,
+                                                  is_global_last_block,
+                                                  valid_in_last_global_block,
                                                   storage.scan.flags);
 
         // Heads and tails are flagged, so we can identify which runs are non-trivial:
@@ -598,6 +661,8 @@ public:
                               warp_aggregate,
                               warp_exclusive_in_block,
                               thread_exclusive_in_warp,
+                              launches_aggregate,
+                              block_id,
                               scan_op,
                               storage.scan.warp_scan,
                               storage.scan.warp_aggregates.get());
@@ -661,7 +726,7 @@ public:
             for(unsigned int i = 0; i < ItemsPerThread; ++i)
             {
                 ::rocprim::get<0>(offsets_and_counts[i])
-                    = block_offset + (flat_thread_id * ItemsPerThread) + i; // offset of run
+                    = global_block_offset + (flat_thread_id * ItemsPerThread) + i; // offset of run
                 ::rocprim::get<1>(offsets_and_counts[i])
                     = ::rocprim::get<1>(offsets_and_run_items_output[i]); // length of run
                 thread_num_runs_exclusive_in_warp[i]
@@ -728,7 +793,7 @@ public:
             for(unsigned int i = 0; i < ItemsPerThread; ++i)
             {
                 ::rocprim::get<0>(offsets_and_counts[i])
-                    = block_offset + (flat_thread_id * ItemsPerThread) + i; // offset of run
+                    = global_block_offset + (flat_thread_id * ItemsPerThread) + i; // offset of run
                 ::rocprim::get<1>(offsets_and_counts[i])
                     = ::rocprim::get<1>(offsets_and_run_items_output[i]); // length of last run
                 thread_num_runs_exclusive_in_warp[i]
@@ -747,6 +812,9 @@ public:
             reduction = scan_state.get_complete_value(block_id);
         }
 
+        const size_t launches_aggregate_count
+            = (launches_aggregate != nullptr) ? rocprim::get<0>(*launches_aggregate) : 0;
+
         // Scatter
         warp_scatter_type{}.scatter(offsets_and_counts,
                                     offsets_output,
@@ -756,6 +824,7 @@ public:
                                     warp_num_runs_aggregate,
                                     warp_num_runs_exclusive_in_block,
                                     thread_num_runs_exclusive_in_warp,
+                                    launches_aggregate_count,
                                     storage.scatter.scatter_offsets[warp_id],
                                     storage.scatter.scatter_counts[warp_id]);
 
@@ -836,6 +905,9 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                             const LookbackScanState,
                             const size_t,
                             const size_t,
+                            const size_t,
+                            const size_t,
+                            OffsetCountPairType* const,
                             BlockIdWrapper)
         -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
 {
@@ -850,16 +922,19 @@ template<typename TargetConfig,
          typename RunsCountOutputIterator,
          typename LookbackScanState,
          typename BlockIdWrapper>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
-    non_trivial_kernel_impl(InputIterator                 input,
-                            const OffsetsOutputIterator   offsets_output,
-                            const CountsOutputIterator    counts_output,
-                            const RunsCountOutputIterator runs_count_output,
-                            const LookbackScanState       scan_state,
-                            const size_t                  grid_size,
-                            const size_t                  size,
-                            BlockIdWrapper                ordered_bid)
-        -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+auto non_trivial_kernel_impl(InputIterator                 input,
+                             const OffsetsOutputIterator   offsets_output,
+                             const CountsOutputIterator    counts_output,
+                             const RunsCountOutputIterator runs_count_output,
+                             const LookbackScanState       scan_state,
+                             const std::size_t             grid_size,
+                             const std::size_t             size,
+                             const std::size_t             starting_block,
+                             const std::size_t             total_number_of_blocks,
+                             OffsetCountPairType* const    launches_aggregate,
+                             BlockIdWrapper                ordered_bid)
+    -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
     static constexpr non_trivial_runs_config_params params     = TargetConfig::params;
     static constexpr unsigned int                   block_size = params.kernel_config.block_size;
@@ -869,8 +944,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     static constexpr unsigned int         items_per_block   = block_size * items_per_thread;
 
     using input_type  = ::rocprim::detail::value_type_t<InputIterator>;
-    using offset_type = unsigned int;
-    using count_type  = unsigned int;
+    using offset_type = size_t;
+    using count_type  = size_t;
 
     using block_processor = block_helper<input_type,
                                          offset_type,
@@ -891,25 +966,52 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     } storage;
 
     const size_t block_id = ordered_bid.get(rocprim::flat_tile_thread_id(), storage.ordered_bid_storage);
+    const size_t global_block_id = starting_block + block_id;
 
+    // We don't need to account for launch offset because that's handled on host
     const size_t        block_offset = block_id * items_per_block;
     const InputIterator block_input  = input + block_offset;
 
-    const size_t valid_in_last_block
-        = static_cast<size_t>(size - (size_t{grid_size - 1} * items_per_block));
+    const size_t valid_in_global_last_block
+        = static_cast<size_t>(size - (size_t{total_number_of_blocks - 1} * items_per_block));
 
-    if(block_id < grid_size - 1)
+    auto merge_op = [&](const OffsetCountPairType& lhs, const OffsetCountPairType& rhs) {
+        return OffsetCountPairType{rocprim::get<0>(lhs) + rocprim::get<0>(rhs),
+                                   rocprim::get<1>(rhs)};
+    };
+
+    if(global_block_id < total_number_of_blocks - 1)
     {
-        block_processor{}.process_block(block_input,
-                                        offsets_output,
-                                        counts_output,
-                                        scan_state,
-                                        block_id,
-                                        grid_size,
-                                        size,
-                                        storage.block_processor_storage.get());
+        OffsetCountPairType partial
+            = block_processor{}.process_block(block_input,
+                                              offsets_output,
+                                              counts_output,
+                                              scan_state,
+                                              block_id,
+                                              grid_size,
+                                              size,
+                                              starting_block,
+                                              total_number_of_blocks,
+                                              launches_aggregate,
+                                              storage.block_processor_storage.get());
+        if(block_id == grid_size - 1 && threadIdx.x == 0)
+        {
+            // launches_aggregate can only be non-nullptr here, so we can avoid guarding
+            partial = merge_op(*launches_aggregate, partial);
+
+            // Write partial results for later update of launches_aggregate
+            *runs_count_output = ::rocprim::get<0>(partial);
+            if(::rocprim::get<0>(partial) > 0)
+            {
+                counts_output[::rocprim::get<0>(partial) - 1] = ::rocprim::get<1>(partial);
+            }
+            else
+            {
+                counts_output[0] = ::rocprim::get<1>(partial);
+            }
+        }
     }
-    else if(valid_in_last_block > 0)
+    else if(valid_in_global_last_block > 0)
     {
         OffsetCountPairType total
             = block_processor{}.process_block(block_input,
@@ -919,11 +1021,19 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                               block_id,
                                               grid_size,
                                               size,
+                                              starting_block,
+                                              total_number_of_blocks,
+                                              launches_aggregate,
                                               storage.block_processor_storage.get());
         // First thread of last block sets the total number of non-trivial runs found and updates
         // the counts with the last run's length if necessary.
         if(threadIdx.x == 0)
         {
+            if(launches_aggregate != nullptr)
+            {
+                total = merge_op(*launches_aggregate, total);
+            }
+
             *runs_count_output = ::rocprim::get<0>(total);
 
             if(::rocprim::get<0>(total) > 0)
