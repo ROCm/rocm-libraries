@@ -85,6 +85,9 @@ add_executable(
     descriptors/TestSdpaFwdOperationDescriptor.cpp
     descriptors/TestSdpaFwdOperationFromNode.cpp
     descriptors/TestGraphDescriptorSdpaBwd.cpp
+    descriptors/TestResampleFwdOperationDescriptor.cpp
+    descriptors/TestResampleFwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorResampleFwd.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp
@@ -92,6 +95,7 @@ add_executable(
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
     TestEnginePluginResourceManager.cpp
+    TestExecutionPlanSerializationApi.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
     TestFlatbufferUtilities.cpp

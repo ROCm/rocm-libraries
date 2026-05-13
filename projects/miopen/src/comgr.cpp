@@ -566,10 +566,8 @@ void BuildOcl(const std::string& name,
         compiler::lc::ocl::AddCompilerOptions(optCompile);
         action.SetOptionList(optCompile);
 
-        const Dataset addedPch;
-        action.Do(AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS, inputs, addedPch);
         const Dataset linkedBc;
-        action.Do(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, addedPch, linkedBc);
+        action.Do(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, inputs, linkedBc);
 
         action.SetOptionList(optCompile);
         const Dataset relocatable;

@@ -112,7 +112,7 @@ TEST_P(IntegrationGpuBatchnormUnsupportedDataTypes, RejectsUnsupportedDataTypes)
 
     auto result = g.build(_handle);
 
-    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << "err_msg: " << result.err_msg;
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED) << "err_msg: " << result.err_msg;
 
     EXPECT_FALSE(result.err_msg.empty()) << "err_msg is empty";
 }

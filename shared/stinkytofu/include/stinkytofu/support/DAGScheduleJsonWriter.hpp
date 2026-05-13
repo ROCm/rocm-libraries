@@ -31,7 +31,7 @@
 
 namespace stinkytofu {
 
-class StinkyInstruction;
+struct StinkyInstruction;
 
 /// One-line, JSON-safe label for a DAG node (opcode / mnemonic + trimmed operands).
 STINKYTOFU_EXPORT std::string instructionJsonLabel(const StinkyInstruction& inst);

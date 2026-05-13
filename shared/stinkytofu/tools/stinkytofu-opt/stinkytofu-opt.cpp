@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Version.h"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -206,6 +207,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Input formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
@@ -243,6 +245,14 @@ int main(int argc, char** argv) {
         printAvailablePasses();
         return 0;
     }
+    if (firstArg == "--version") {
+        std::cout << "stinkytofu-opt " << STINKYTOFU_VERSION_MAJOR << "."
+                  << STINKYTOFU_VERSION_MINOR << "." << STINKYTOFU_VERSION_PATCH;
+        constexpr char tweak[] = STINKYTOFU_VERSION_TWEAK;
+        if (tweak[0] != '\0') std::cout << "-" << tweak;
+        std::cout << "\n";
+        return 0;
+    }
     if (firstArg == "--help") {
         std::cerr << "stinkytofu-opt - StinkyTofu IR optimizer\n\n";
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
@@ -255,6 +265,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Input formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
@@ -376,6 +387,9 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
+        if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
+            stinkytofu::PassManagerDebugConfig::addDebugOnly(argv[++i]);
+        }
         if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
         if (std::string(argv[i]) == "--from-label" && i + 1 < argc) fromLabel = argv[++i];
         if (std::string(argv[i]) == "--to-label" && i + 1 < argc) toLabel = argv[++i];

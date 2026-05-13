@@ -32,6 +32,6 @@ st.func @test() {
   v[16:19] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 8192, gds = false }, mod.memtoken = { tokens = [0] } }
   v[20:23] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 8224, gds = false }, mod.memtoken = { tokens = [0] } }
   "st.asm_directive"(".set", "symB")
-  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
-  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[16:23], v[20:23], v[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[16:23], v[20:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
 }
