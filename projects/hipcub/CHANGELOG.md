@@ -11,6 +11,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added fixed-size-segments variant for `hipcub::DeviceSegmentedReduce`.
 * Added support for large number of segments to `hipcub::DeviceSegmentedReduce::Reduce`'s fixed-size-segments variant.
 * Added support for large sizes to `hipcub::DeviceRunLengthEncode::Encode`.
+* Extended fixed-size-segments variant of `hipcub::DeviceSegmentedReduce` to support all operators (`Sum`, `Min/Max`, and `ArgMin/Max`).
 
 ### Changed
 
