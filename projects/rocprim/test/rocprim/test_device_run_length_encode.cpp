@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,10 +40,13 @@
 #include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_run_length_encode.hpp>
 #include <rocprim/device/device_run_length_encode_config.hpp>
+#include <rocprim/iterator/counting_iterator.hpp>
+#include <rocprim/iterator/transform_iterator.hpp>
 #include <rocprim/types.hpp>
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <random>
 #include <stdint.h>
 #include <vector>
@@ -263,7 +266,51 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
 
 }
 
-TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
+template<class Params>
+class RocprimDeviceRunLengthEncodeNTR : public ::testing::Test
+{
+public:
+    using params = Params;
+};
+
+using NTRParams = ::testing::Types<
+    // Tests with default configuration
+    params<int8_t, int8_t, 100, 2000>,
+    params<uint8_t, uint8_t, 100, 2000>,
+    params<int8_t, int8_t, 1000, 5000>,
+    params<uint8_t, uint8_t, 1000, 5000>,
+    params<int, unsigned int, 1000, 5000>,
+    params<unsigned int, size_t, 2048, 2048>,
+    params<unsigned int, unsigned int, 1000, 50000>,
+    params<unsigned long long, size_t, 1, 30>,
+    params<float, unsigned long long, 100, 400>,
+    params<float, int, 1, 10>,
+    params<double, int, 3, 5>,
+    params<double, int, 100, 2000>,
+    params<rocprim::half, int, 100, 2000>,
+    params<rocprim::bfloat16, int, 1000, 5000>,
+    // Tests for custom types
+    params<custom_int2, unsigned int, 20, 100>,
+    params<custom_double2, int, 10, 30000, true>,
+    params<unsigned long long, int, 100000, 100000>,
+    // Tests for supported config structs
+    params<unsigned int,
+           unsigned int,
+           200,
+           600,
+           false,
+           // RLE config
+           rocprim::run_length_encode_config<rocprim::reduce_by_key_config<128, 5>,
+                                             rocprim::select_config<64, 3>>,
+           // RLE non-trivial config
+           rocprim::run_length_encode_config<rocprim::reduce_by_key_config<256, 15>,
+                                             rocprim::select_config<256, 13>>>,
+    // Tests for when output's value_type is void
+    params<int, int, 1, 1, true>>;
+
+TYPED_TEST_SUITE(RocprimDeviceRunLengthEncodeNTR, NTRParams);
+
+TYPED_TEST(RocprimDeviceRunLengthEncodeNTR, NonTrivialRuns)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -420,4 +467,216 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
                 test_utils::assert_eq(counts_output, counts_expected, runs_count_expected));
         }
     }
+}
+
+struct counting_to_rl_transform_op_t
+{
+    unsigned int run_length;
+
+    ROCPRIM_HOST_DEVICE
+    counting_to_rl_transform_op_t(unsigned int m_run_length)
+        : run_length(m_run_length)
+    {}
+
+    ROCPRIM_HOST_DEVICE
+    size_t operator()(const size_t idx) const
+    {
+        return idx / static_cast<size_t>(run_length);
+    }
+};
+
+template<bool non_trivial_runs = false,
+         class InputIterator,
+         class UniqueOrOffsetsOutputIterator,
+         class CountsOutputIterator,
+         class RunsCountOutputIterator>
+void invoke_run_length_encode(void*                         temporary_storage,
+                              size_t&                       storage_size,
+                              InputIterator                 input,
+                              size_t                        size,
+                              UniqueOrOffsetsOutputIterator unique_or_offsets_output,
+                              CountsOutputIterator          counts_output,
+                              RunsCountOutputIterator       runs_count_output,
+                              hipStream_t                   stream            = 0,
+                              bool                          debug_synchronous = false)
+{
+    if constexpr(non_trivial_runs)
+    {
+        HIP_CHECK(
+            rocprim::run_length_encode_non_trivial_runs(temporary_storage,
+                                                        storage_size,
+                                                        input,
+                                                        size,
+                                                        unique_or_offsets_output, /*offsets_output*/
+                                                        counts_output,
+                                                        runs_count_output,
+                                                        stream,
+                                                        debug_synchronous));
+    }
+    else
+    {
+        HIP_CHECK(rocprim::run_length_encode(temporary_storage,
+                                             storage_size,
+                                             input,
+                                             size,
+                                             unique_or_offsets_output, /*unique_output*/
+                                             counts_output,
+                                             runs_count_output,
+                                             stream,
+                                             debug_synchronous));
+    }
+}
+
+template<bool non_trivial_runs = false, bool use_graphs = false>
+void large_sizes_rle_test()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using count_type  = size_t;
+    using offset_type = size_t;
+
+    const bool debug_synchronous = false;
+
+    hipStream_t stream = 0; // default
+    if constexpr(use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        const unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+        std::default_random_engine gen(seed_value);
+
+        for(size_t size : test_utils::get_large_sizes(42))
+        {
+            common::uniform_int_distribution<unsigned int> run_length_distribution(
+                2,
+                std::numeric_limits<unsigned int>::max());
+
+            const unsigned int                  run_length = run_length_distribution(gen);
+            const counting_to_rl_transform_op_t counting_to_rl_transform_op{run_length};
+            SCOPED_TRACE(testing::Message() << "with run_length = " << run_length);
+
+            const count_type runs_count = ::rocprim::detail::ceiling_div(size, run_length);
+            const std::vector<count_type> runs_count_expected{runs_count};
+            SCOPED_TRACE(testing::Message() << "with runs_count = " << runs_count);
+
+            size = runs_count * static_cast<count_type>(run_length);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate input like: 0, 0, ..., 0, 1, 1, ..., 1, ...
+            // where each number is repeated run_length times
+            auto d_input
+                = rocprim::make_transform_iterator(rocprim::make_counting_iterator(offset_type(0)),
+                                                   counting_to_rl_transform_op);
+            common::device_ptr<offset_type> d_unique_or_offsets_output(runs_count);
+            common::device_ptr<count_type>  d_counts_output(runs_count);
+            common::device_ptr<count_type>  d_runs_count_output(1);
+
+            size_t temporary_storage_bytes;
+            invoke_run_length_encode<non_trivial_runs>(nullptr,
+                                                       temporary_storage_bytes,
+                                                       d_input,
+                                                       size,
+                                                       d_unique_or_offsets_output.get(),
+                                                       d_counts_output.get(),
+                                                       d_runs_count_output.get(),
+                                                       stream,
+                                                       debug_synchronous);
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+
+            test_utils::GraphHelper gHelper;
+            if constexpr(use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            invoke_run_length_encode<non_trivial_runs>(d_temporary_storage.get(),
+                                                       temporary_storage_bytes,
+                                                       d_input,
+                                                       size,
+                                                       d_unique_or_offsets_output.get(),
+                                                       d_counts_output.get(),
+                                                       d_runs_count_output.get(),
+                                                       stream,
+                                                       debug_synchronous);
+
+            if constexpr(use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
+
+            std::vector<offset_type> unique_or_offsets_output;
+            std::vector<count_type>  counts_output;
+            const auto               runs_count_output = d_runs_count_output.load();
+
+            if(runs_count > 0)
+            {
+                unique_or_offsets_output = d_unique_or_offsets_output.load();
+                counts_output            = d_counts_output.load();
+            }
+
+            if constexpr(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
+
+            // Validating results
+
+            SCOPED_TRACE(testing::Message() << "runs_count_output");
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_eq(runs_count_output, runs_count_expected, 1));
+
+            for(offset_type i = 0; i < runs_count; i++)
+            {
+                const offset_type unique_or_offset_expected = non_trivial_runs ? i * run_length : i;
+
+                SCOPED_TRACE(testing::Message() << "unique_or_offsets_output[" << i << "]");
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_eq(unique_or_offsets_output[i], unique_or_offset_expected));
+                SCOPED_TRACE(testing::Message() << "counts_output[" << i << "]");
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_eq(counts_output[i], size_t{run_length}));
+            }
+
+            if constexpr(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
+        }
+    }
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
+}
+
+TEST(RocprimDeviceRunLengthEncode, LargeSizesEncode)
+{
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeSizesEncode test under Valgrind";
+#endif // HAS_VALGRIND_H
+
+    large_sizes_rle_test<>();
+}
+
+TEST(RocprimDeviceRunLengthEncodeNTR, LargeSizesNonTrivialRuns)
+{
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeSizesNonTrivialRuns test under Valgrind";
+#endif // HAS_VALGRIND_H
+    large_sizes_rle_test<true /*non_trivial_runs*/>();
 }
