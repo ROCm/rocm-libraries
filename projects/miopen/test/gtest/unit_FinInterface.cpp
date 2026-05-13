@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <string>
 #include <tuple>
@@ -216,19 +193,11 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvHipDirectFwd11x11",                               {8,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclDirectFwdGen",                                 {9,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclDirectFwd",                                    {11,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclDirectFwd1x1",                                 {13,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         {"ConvBinWinograd3x3U",                                 {14,    true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
         {"ConvBinWinogradRxS",                                  {15,    true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
         {"ConvAsmBwdWrW3x3",                                    {16,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsmBwdWrW1x1",                                    {17,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2<1>",                                   {18,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2<2>",                                   {19,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2<4>",                                   {20,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2<8>",                                   {21,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2<16>",                                  {22,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2NonTunable",                            {23,    false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclBwdWrW53",                                     {24,    false,  false,  "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW1x1",                                    {25,    false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvHipImplicitGemmV4R1Fwd",                          {26,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmV4R1WrW",                          {31,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"fft",                                                 {34,    false,  false,  "miopenConvolutionFwdAlgoFFT"}},

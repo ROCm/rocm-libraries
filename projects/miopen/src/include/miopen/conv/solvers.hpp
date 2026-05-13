@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -1719,24 +1696,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd final : ConvOclDirectFwdLegacyEx
                                   const LegacyPerformanceConfig&) const override;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd1x1 final : ConvOclDirectFwdLegacyExhaustiveSearch
-{
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclDirectFwd1x1>(); }
-
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&,
-                             const LegacyPerformanceConfig&) const override;
-
-    bool IsValidPerformanceConfig(const ExecutionContext&,
-                                  const miopen::conv::ProblemDescription&,
-                                  const LegacyPerformanceConfig&) const override
-    {
-        return true;
-    }
-};
-
 struct MIOPEN_INTERNALS_EXPORT ConvBinWinograd3x3U final : ConvSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<ConvBinWinograd3x3U>(); }
@@ -2315,152 +2274,9 @@ struct ConvAsmBwdWrW1x1 final : ConvTunableSolver<PerformanceConfigConvAsmBwdWrW
                              const PerformanceConfigConvAsmBwdWrW1x1&) const override;
 };
 
-/// N_BATCH_LOOPS - {1,2,4,8,16} Num batches processed in single workitem.
-///     Required workspace size depends on it. However there is a restriction in the internal
-///     Solver API that this shouldn't be so. Therefore the family of Solvers created.
-///     Each Solver in the family has constant value of this parameter.
-template <int N_BATCH_LOOPS>
-struct PerformanceConfigConvOclBwdWrw2
-    : PerfConfigBase<PerformanceConfigConvOclBwdWrw2<N_BATCH_LOOPS>>
-{
-    // Num waves involved a workgroup.
-    int n_waves = -1; // {1,2,4,8}
-    // Num values to read in a workitem (read_unit).
-    int read_size = -1; // [6..12]
-    // Num of output channels (top/bottom layer in forward/backward direction)
-    // that share the same input channel in single workgroup.
-    // Also represents number of output channels in single tile.
-    int n_out_channels_per_tile = -1; // {1,2,4,8}
-    // How many tiles of output channels are processed in a single workgroup?
-    // n_out_channels_in_lcl * n_out_channels_tiles = total number of
-    // output channels processed in single workgroup.
-    int n_out_channels_tiles = -1; // {1,2,4,8}
-    // Num of output rows processed in a single iteration of loop in a workitem
-    // (N_ALIGNED_OUT_SCAN_BLK).
-    int n_out_rows_in_lcl = -1; // [2..11]
-
-    PerformanceConfigConvOclBwdWrw2(int nw, int rs, int nocpt, int noct, int noril)
-        : n_waves(nw),
-          read_size(rs),
-          n_out_channels_per_tile(nocpt),
-          n_out_channels_tiles(noct),
-          n_out_rows_in_lcl(noril)
-    {
-    }
-    PerformanceConfigConvOclBwdWrw2() {}
-    PerformanceConfigConvOclBwdWrw2(bool) : PerformanceConfigConvOclBwdWrw2(1, 6, 1, 1, 2) {}
-    // spare_set is not used in this solver.
-
-    template <class Self, class F>
-    static void Visit(Self&& self, F f)
-    {
-        f(self.n_waves, "n_waves");
-        f(self.read_size, "read_size");
-        f(self.n_out_channels_per_tile, "n_out_channels_per_tile");
-        f(self.n_out_channels_tiles, "n_out_channels_tiles");
-        f(self.n_out_rows_in_lcl, "n_out_rows_in_lcl");
-    }
-
-    int GetNumWaves() const { return n_waves; }
-    int GetReadSize() const { return read_size; }
-    int GetNumOutChannelsPerTile() const { return n_out_channels_per_tile; }
-    int GetNumOutChannelTiles() const { return n_out_channels_tiles; }
-    int GetNumOutRowsPerIterPerWork() const { return n_out_rows_in_lcl; }
-
-    void HeuristicInit(const miopen::conv::ProblemDescription&);
-    bool IsValidValue() const;
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
-    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription&) const;
-    bool operator==(const PerformanceConfigConvOclBwdWrw2<N_BATCH_LOOPS>& other) const;
-};
-
-template <int N_BATCH_LOOPS>
-struct ConvOclBwdWrW2 final : ConvTunableSolver<PerformanceConfigConvOclBwdWrw2<N_BATCH_LOOPS>>
-{
-    const std::string& SolverDbId() const override
-    {
-        return this->template GetSolverDbId<ConvOclBwdWrW2<N_BATCH_LOOPS>>();
-    }
-
-    PerformanceConfigConvOclBwdWrw2<N_BATCH_LOOPS>
-    GetDefaultPerformanceConfig(const ExecutionContext&,
-                                const miopen::conv::ProblemDescription&) const override;
-    bool
-    IsValidPerformanceConfig(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&,
-                             const PerformanceConfigConvOclBwdWrw2<N_BATCH_LOOPS>&) const override;
-    PerformanceConfigConvOclBwdWrw2<N_BATCH_LOOPS>
-    Search(const ExecutionContext&,
-           const miopen::conv::ProblemDescription&,
-           const AnyInvokeParams& invoke_ctx) const override;
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    size_t GetWorkspaceSize(const ExecutionContext&,
-                            const miopen::conv::ProblemDescription&) const override;
-    bool MayNeedWorkspace() const override { return true; }
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&,
-                             const PerformanceConfigConvOclBwdWrw2<N_BATCH_LOOPS>&) const override;
-
-protected:
-    bool IsApplicableBase(const ExecutionContext&, const miopen::conv::ProblemDescription&) const;
-
-    friend struct ConvOclBwdWrW2NonTunable;
-};
-
-// To suppress misleading clang warnings
-#ifndef CONV_OCL_DIR2D_BWDWRW_2_CPP
-
-extern template struct PerformanceConfigConvOclBwdWrw2<1>;
-extern template struct PerformanceConfigConvOclBwdWrw2<2>;
-extern template struct PerformanceConfigConvOclBwdWrw2<4>;
-extern template struct PerformanceConfigConvOclBwdWrw2<8>;
-extern template struct PerformanceConfigConvOclBwdWrw2<16>;
-
-extern template struct ConvOclBwdWrW2<1>;
-extern template struct ConvOclBwdWrW2<2>;
-extern template struct ConvOclBwdWrW2<4>;
-extern template struct ConvOclBwdWrW2<8>;
-extern template struct ConvOclBwdWrW2<16>;
-
-#endif
-
-/// A separate solver from ConvOclBwdWrW2 to disable auto-tuning for certain configs.
-/// Basically, this is *hack* for non-group 3x3 and 1x1 cases.
-/// It is assumed that Solutions provided by the ConvOclBwdWrW2 solver
-/// would never beat 3x3 and 1x1 assembly WrW kernels, even after tuning.
-struct MIOPEN_INTERNALS_EXPORT ConvOclBwdWrW2NonTunable final : ConvSolver
-{
-    const std::string& SolverDbId() const override
-    {
-        return GetSolverDbId<ConvOclBwdWrW2NonTunable>();
-    }
-
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    size_t GetWorkspaceSize(const ExecutionContext&,
-                            const miopen::conv::ProblemDescription&) const override;
-    bool MayNeedWorkspace() const override { return true; }
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&) const override;
-};
-
 struct MIOPEN_INTERNALS_EXPORT ConvOclBwdWrW53 final : ConvSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclBwdWrW53>(); }
-
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    size_t GetWorkspaceSize(const ExecutionContext&,
-                            const miopen::conv::ProblemDescription&) const override;
-    bool MayNeedWorkspace() const override { return true; }
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&) const override;
-};
-
-struct MIOPEN_INTERNALS_EXPORT ConvOclBwdWrW1x1 final : ConvSolver
-{
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclBwdWrW1x1>(); }
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;

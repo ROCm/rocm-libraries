@@ -48,6 +48,9 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # HIP is required to build _rocisa (via hip::host).  Set the search prefix
     # so find_package works both in developer environments and in the temporary
     # build sandbox created by scikit-build-core / uv.
+    if(ROCM_PATH)
+        list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+    endif()
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
     find_package(hip REQUIRED)
 
@@ -99,14 +102,15 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
     )
 
-    # Optional inclusion of external shared/stinkytofu CMake project
-    set(STINKYTOFU_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
-    if(EXISTS "${STINKYTOFU_DIR}/CMakeLists.txt")
-        set(BUILD_SHARED_LIBS ON)
-        # Add the external directory; build output goes into a local binary dir 'stinkytofu'
-        add_subdirectory("${STINKYTOFU_DIR}" stinkytofu EXCLUDE_FROM_ALL)
-    else()
-        message(FATAL_ERROR "External directory not found: ${STINKYTOFU_DIR} (skipping)")
+    # Locate stinkytofu: prefer the monorepo sibling, fall back to installed package.
+    if(NOT TARGET stinkytofu)
+        set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+        if(IS_DIRECTORY "${_stinkytofu_sibling}")
+            set(STINKYTOFU_ENABLE_WERROR ON)
+            add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
+        else()
+            find_package(stinkytofu REQUIRED)
+        endif()
     endif()
 
     target_link_libraries(_rocisa PUBLIC roc::origami)
@@ -145,14 +149,21 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     )
     # _build_info.py is intentionally NOT in install() rules so it is absent
     # from wheels and pre-built packages, acting as the source-build sentinel.
+    # For editable/dev installs, pass -DROCISA_INCLUDE_BUILD_INFO=ON to include it.
+    option(ROCISA_INCLUDE_BUILD_INFO "Install _build_info.py for staleness detection" OFF)
+    if(ROCISA_INCLUDE_BUILD_INFO)
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py" DESTINATION rocisa)
+    endif()
 
     if(ROCISA_STANDALONE)
         # Install rules for scikit-build-core: place _rocisa.so, libstinkytofu.so,
         # and __init__.py into the rocisa/ package directory in the wheel.
         install(TARGETS _rocisa DESTINATION rocisa)
-        # Co-install libstinkytofu.so next to _rocisa.so so the dynamic linker
-        # can find it at runtime (wheel layout: both files sit in rocisa/).
+        # Co-install the stinkytofu shared library next to _rocisa.
         install(FILES $<TARGET_FILE:stinkytofu> DESTINATION rocisa)
+        if(NOT WIN32)
+            install(FILES $<TARGET_SONAME_FILE:stinkytofu> DESTINATION rocisa)
+        endif()
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
     endif()
 endif()

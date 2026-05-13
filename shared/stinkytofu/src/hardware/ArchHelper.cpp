@@ -67,6 +67,7 @@ const GfxArchID ArchHelper::getGfxArchID(uint32_t major, uint32_t minor, uint32_
         }
     }
     assert(false && "Unsupported GfxArchID");
+    return static_cast<GfxArchID>(0);
 }
 
 }  // namespace stinkytofu

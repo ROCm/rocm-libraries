@@ -34,7 +34,7 @@ extern "C" {
 
 /*! \ingroup precond_module
 *  \details
-*  \p rocsparse_csritilu0_buffer_size computes the size in bytes of the buffer that has to be allocated by the user.
+*  \p rocsparse_csritilu0_buffer_size computes the size in bytes of the buffer that must be allocated by the user.
 *  This buffer is then used in \ref rocsparse_csritilu0_preprocess, \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute()",
 *  \ref rocsparse_scsritilu0_compute_ex "rocsparse_Xcsritilu0_compute_ex()", and \ref rocsparse_scsritilu0_history "rocsparse_Xcsritilu0_history()".
 *
@@ -49,9 +49,9 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
-*  alg         algorithm to use, \ref rocsparse_itilu0_alg
+*  alg         algorithm to use, \ref rocsparse_itilu0_alg.
 *  @param[in]
 *  option      combination of enumeration values from \ref rocsparse_itilu0_option.
 *  @param[in]
@@ -76,7 +76,7 @@ extern "C" {
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_size \p m or \p nnz is invalid.
-*  \retval     rocsparse_status_invalid_value \p alg, \p base or datatype is invalid.
+*  \retval     rocsparse_status_invalid_value \p alg, \p base, or datatype is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p csr_row_ptr
 *              or \p csr_col_ind pointer is invalid.
 *  \retval     rocsparse_status_zero_pivot if nnz is zero.
@@ -97,7 +97,7 @@ rocsparse_status rocsparse_csritilu0_buffer_size(rocsparse_handle     handle,
 
 /*! \ingroup precond_module
 *  \details
-*  \p rocsparse_csritilu0_preprocess computes the information required to run \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute()",
+*  \p rocsparse_csritilu0_preprocess computes the information required to run \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute()"
 *  and \ref rocsparse_scsritilu0_compute_ex "rocsparse_Xcsritilu0_compute_ex()" and stores it in the buffer.
 *
 *  \note
@@ -111,9 +111,9 @@ rocsparse_status rocsparse_csritilu0_buffer_size(rocsparse_handle     handle,
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
-*  alg         algorithm to use, \ref rocsparse_itilu0_alg
+*  alg         algorithm to use, \ref rocsparse_itilu0_alg.
 *  @param[in]
 *  option      combination of enumeration values from \ref rocsparse_itilu0_option.
 *  @param[in]
@@ -131,7 +131,7 @@ rocsparse_status rocsparse_csritilu0_buffer_size(rocsparse_handle     handle,
 *  @param[in]
 *  idx_base    \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
 *  @param[in]
-*  datatype    Type of numerical values, \ref rocsparse_datatype.
+*  datatype    type of numerical values, \ref rocsparse_datatype.
 *  @param[in]
 *  buffer_size size of the storage buffer allocated by the user.
 *  @param[in]
@@ -139,12 +139,12 @@ rocsparse_status rocsparse_csritilu0_buffer_size(rocsparse_handle     handle,
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_value \p alg, \p base or datatype is invalid.
+*  \retval     rocsparse_status_invalid_value \p alg, \p base, or datatype is invalid.
 *  \retval     rocsparse_status_invalid_size \p m or \p nnz is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p csr_row_ptr
 *              or \p csr_col_ind pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
-*  \retval     rocsparse_status_zero_pivot if missing diagonal element is detected.
+*  \retval     rocsparse_status_zero_pivot if a missing diagonal element is detected.
 *
 */
 ROCSPARSE_EXPORT
@@ -162,7 +162,7 @@ rocsparse_status rocsparse_csritilu0_preprocess(rocsparse_handle     handle,
                                                 void*                buffer);
 
 /*! \ingroup precond_module
-*  \brief Iterative Incomplete LU factorization with 0 fill-ins and no pivoting using CSR
+*  \brief Iterative Incomplete LU factorization with 0 fill-ins and no pivoting using the CSR
 *  storage format.
 *
 *  \details
@@ -172,8 +172,8 @@ rocsparse_status rocsparse_csritilu0_preprocess(rocsparse_handle     handle,
 *    A \approx (L + Id)(D + U)
 *  \f]
 *
-*  We use the following notation for the equations below: diag is the diagonal part, lower is the strict lower triangular part and upper is the strict upper triangular part of a given matrix.
-*  Starting with \f$L_{0} = lower(\f$ \p ilu0 \f$)\f$, \f$U_{0} = upper(\f$ \p ilu0 \f$)\f$, the method iterates with
+*  The following notation applies for the equations below: diag is the diagonal part, lower is the strict lower triangular part, and upper is the strict upper triangular part of a given matrix.
+*  Starting with \f$L_{0} = lower(\f$ \p ilu0 \f$)\f$ and \f$U_{0} = upper(\f$ \p ilu0 \f$)\f$, the method iterates with
 *  \f[
 *  \begin{eqnarray}
 *     R_k &=& A - L_{k} U_{k},\\
@@ -189,17 +189,17 @@ rocsparse_status rocsparse_csritilu0_preprocess(rocsparse_handle     handle,
 *  with \f$\epsilon\f$ = \p tol. Note that the calculation of \f$R_k\f$ is performed with no fill-in.
 *
 *  Computing the above iterative incomplete LU factorization requires three steps to complete. First,
-*  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_csritilu0_buffer_size.
-*  Once this buffer size has been determined, the user allocates the buffer and passes it to
+*  determine the size of the required temporary storage buffer by calling \ref rocsparse_csritilu0_buffer_size.
+*  After this buffer size has been determined, allocate the buffer and pass it to
 *  \ref rocsparse_csritilu0_preprocess. This will perform analysis on the sparsity pattern of the matrix. Finally,
-*  the user calls \p rocsparse_scsritilu0_compute, \p rocsparse_dcsritilu0_compute, \p rocsparse_ccsritilu0_compute,
+*  call \p rocsparse_scsritilu0_compute, \p rocsparse_dcsritilu0_compute, \p rocsparse_ccsritilu0_compute,
 *  or \p rocsparse_zcsritilu0_compute to perform the actual factorization. The calculation
 *  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern
-*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls
+*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. After all calls
 *  to \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute()" are complete, the temporary buffer can be deallocated.
 *
 *  \p rocsparse_csritilu0 has a number of options that can be useful for examining the convergence history, easily printing debug
-*  information, and for using COO internal format.
+*  information, and using the COO internal format.
 *  <table>
 *  <caption id="csritilu0 options">Options</caption>
 *  <tr><th>Option                                              <th>Notes
@@ -222,7 +222,7 @@ rocsparse_status rocsparse_csritilu0_preprocess(rocsparse_handle     handle,
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  alg         algorithm to use, \ref rocsparse_itilu0_alg
 *  @param[in]
@@ -338,7 +338,7 @@ ROCSPARSE_EXPORT rocsparse_status
 /**@}*/
 
 /*! \ingroup precond_module
-*  \brief Iterative Incomplete LU factorization with 0 fill-ins and no pivoting using CSR
+*  \brief Iterative incomplete LU factorization with 0 fill-ins and no pivoting using the CSR
 *  storage format.
 *
 *  \details
@@ -349,7 +349,7 @@ ROCSPARSE_EXPORT rocsparse_status
 *  \f]
 *
 *
-*  We use the following notation for the equations below: diag is the diagonal part, lower is the strict lower triangular part and upper is the strict upper triangular part of a given matrix.
+*  The following notation applies for the equations below: diag is the diagonal part, lower is the strict lower triangular part, and upper is the strict upper triangular part of a given matrix.
 *  Starting with \f$L_{0} = lower(\f$ \p ilu0 \f$)\f$, \f$U_{0} = upper(\f$ \p ilu0 \f$)\f$, the method iterates with
 *  \f[
 *  \begin{eqnarray}
@@ -365,11 +365,11 @@ ROCSPARSE_EXPORT rocsparse_status
 *  \f]
 *  with \f$\epsilon\f$ = \p tol. Note that the calculation of \f$R_k\f$ is performed with no fill-in.
 *
-*  The parameter \p nfreeiter is used to control the frequence of the stopping criteria evaluation, thus potentially improving the performance of the algorithm with less norm calculation. Between each iteration of index \f$ k \f$, \p nfreeiter are performed without stopping criteria evaluation. Thus, if the convergence is obtained with \f$ k \f$ This means \f$ (k + 1)( \f$ \p nfreeiter \f$ ) + k \f$ iterations.
+*  The parameter \p nfreeiter is used to control the frequence of the stopping criteria evaluation, potentially improving the performance of the algorithm with less norm calculation. Between each iteration of index \f$ k \f$, \p nfreeiter are performed without stopping criteria evaluation. Therefore, if the convergence is obtained with \f$ k \f$, this means \f$ (k + 1)( \f$ \p nfreeiter \f$ ) + k \f$ iterations.
 *
-*  \p rocsparse_csritilu0 requires a user allocated temporary buffer. Its size is returned
+*  \p rocsparse_csritilu0 requires a user-allocated temporary buffer. Its size is returned
 *  by rocsparse_csritilu0_buffer_size(). Furthermore,
-*  analysis meta data is required. It can be obtained by rocsparse_csritlu0_preprocess().
+*  analysis metadata is required. It can be obtained by rocsparse_csritilu0_preprocess().
 *
 *  \note
 *  The sparse CSR matrix has to be sorted. This can be achieved by calling
@@ -382,15 +382,15 @@ ROCSPARSE_EXPORT rocsparse_status
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
-*  alg         algorithm to use, \ref rocsparse_itilu0_alg
+*  alg         algorithm to use, \ref rocsparse_itilu0_alg.
 *  @param[in]
 *  option      combination of enumeration values from \ref rocsparse_itilu0_option.
 *  @param[inout]
 *  nmaxiter     maximum number of iterations on input and number of iterations on output. If the output number of iterations is strictly less than the input maximum number of iterations, then the algorithm converged.
 *  @param[inout]
-*  nfreeiter    number of free iterations, i.e. the number of iterations the algorithm will perform without stopping criteria evaluations.
+*  nfreeiter    number of free iterations, that is, the number of iterations the algorithm will perform without stopping criteria evaluations.
 *  @param[in]
 *  tol tolerance to use for stopping criteria.
 *  @param[in]
@@ -550,9 +550,9 @@ rocsparse_status rocsparse_zcsritilu0_compute_ex(rocsparse_handle               
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
-*  alg         algorithm to use, \ref rocsparse_itilu0_alg
+*  alg         algorithm to use, \ref rocsparse_itilu0_alg.
 *  @param[out]
 *  niter       number of performed iterations.
 *  @param[out]

@@ -49,3 +49,8 @@ if _bi is not None:
             "  Rebuild:  cmake --build <build_dir> --target _rocisa"
         )
     del _bi, _so, _so_mtime, _stale, _roots, _build_dir, Path
+
+
+def hasStinkyTofuBackend() -> bool:
+    """Return True if rocisa was built with StinkyTofu backend support."""
+    return hasattr(_rocisa, "isSupportedByStinkyTofu")

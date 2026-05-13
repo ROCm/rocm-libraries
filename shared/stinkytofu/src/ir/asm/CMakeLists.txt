@@ -3,5 +3,6 @@
 
 target_sources(stinkytofu PRIVATE
     StinkyAsmIR.cpp
+    StinkyModifiers.cpp
     StinkySignature.cpp
 )
