@@ -428,6 +428,12 @@ std::string SignatureKernelDescriptor::toString() const {
     kStr += kdIndent + ".amdhsa_float_denorm_mode_32 3\n";
     kStr += kdIndent + ".amdhsa_float_denorm_mode_16_64 3\n";
 
+    if (totalInstructionBytes >= 0) {
+        uint64_t prefSize =
+            std::min(static_cast<uint64_t>(totalInstructionBytes) / 128, uint64_t(255));
+        kStr += kdIndent + ".amdhsa_inst_pref_size " + std::to_string(prefSize) + "\n";
+    }
+
     if (numSgprPreload > 0) {
         kStr += kdIndent + ".amdhsa_user_sgpr_count " + std::to_string(numSgprPreload + 2) + "\n";
         kStr += kdIndent + ".amdhsa_user_sgpr_kernarg_preload_length " +

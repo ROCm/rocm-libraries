@@ -45,6 +45,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
+    unit/asm/AccumulateInstructionSizePassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
     unit/asm/VirtualRegisterTest.cpp
     # Parser/Lexer Tests (added for critical testing gaps)
