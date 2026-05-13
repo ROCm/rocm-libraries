@@ -408,6 +408,12 @@ def _captures_per_body(four_part_capture):
         "in ML and ML-1 bodies. Per the strict per-body LCC invariant "
         "(2026-05-13), every loop body must have exactly 1 SCmpEQI32 + 1 "
         "SSubU32; the default side is missing both in ML and ML-1. "
+        "Capture-timing root cause: ctx.default_main = builder.finalize() "
+        "runs before closeLoop() in _loopBody. **Principled fix is "
+        "rocm-libraries-nyb5** (Approach A second non-CMS reference build) "
+        "— Build #2 captures the post-closeLoop state correctly so the LCC "
+        "is present. Local Option A (move finalize() after closeLoop()) is "
+        "not pursued; nyb5 supersedes it. "
         "Investigation memo: D3ZJ_SCMPEQI32_INVESTIGATION.md. "
         "Scheduler-control noise (SWaitCnt / SBarrier / SNop / SSetPrior) "
         "was eliminated by migrating this test to the shared "
@@ -464,7 +470,9 @@ def test_real_kernel_per_render_counts_match(real_kernel_capture_pair):
         "`test_real_kernel_per_render_counts_match` (also under d3zj). "
         "Residual cause is the LCC (SCmpEQI32 / SSubU32) per-body "
         "distribution divergence in ML / ML-1 — see "
-        "D3ZJ_SCMPEQI32_INVESTIGATION.md."
+        "D3ZJ_SCMPEQI32_INVESTIGATION.md. **Principled fix is "
+        "rocm-libraries-nyb5** (Approach A second non-CMS reference build); "
+        "this xfail flips automatically when nyb5 lands."
     ),
 )
 def test_real_kernel_per_ordinal_logical_instruction_matches(
@@ -537,4 +545,138 @@ def test_example_yaml_no_spurious_order_inverted_failures(
         f"Expected zero OrderInvertedFailures under the per-emission "
         f"ordinal identity scheme; got {len(order_inverted)}: "
         f"{[type(f).__name__ for f in order_inverted[:5]]}"
+    )
+
+
+# =============================================================================
+# Per-body LCC invariant (rocm-libraries-d3zj part 2)
+# =============================================================================
+# The narrowed invariant from `D3ZJ_NGL_NLL_LCC_INVESTIGATION.md` Q6:
+#
+#   > Every body whose `useLoop=1` flag is set in the CMS MAINLOOP macro
+#   > invocation has exactly one LCC pair (1 SSubU32 + 1 SCmpEQI32 on
+#   > `sgprLoopCounterL`); bodies invoked with `useLoop=0` have zero LCC ops.
+#
+# The existing per-(body, render) and per-ordinal tests above only assert
+# AGREEMENT between the default and CMS sides — they would silently pass
+# if both sides emitted 0 LCC in ML by accident. This test pins the
+# invariant EXPLICITLY per side so a "both wrong the same way" regression
+# is caught.
+#
+# Mapping from body label to the `useLoop` value of its corresponding
+# MAINLOOP invocation (per `KernelWriter.py:3134, 3137` and
+# `D3ZJ_NGL_NLL_LCC_INVESTIGATION.md` Q4):
+#
+#   - BODY_LABEL_ML       (ML)    → useLoop=1
+#                                   site 1 (kernel_cms.s:2196: `MAINLOOP 0`)
+#                                   uses macro default useLoop=1 — the only
+#                                   iterating body with a back-edge.
+#   - BODY_LABEL_ML_PREV  (ML-1)  → useLoop=1
+#                                   prev-codepath copy of the same iterating
+#                                   loop body; same default useLoop=1.
+#   - BODY_LABEL_NGL      (NGL)   → useLoop=0
+#                                   `KernelWriter.py:3135`
+#                                   (`MAINLOOP 0,0,1,1,0`) — NGLL tail.
+#   - BODY_LABEL_NLL      (NLL)   → useLoop=0
+#                                   `KernelWriter.py:3138`
+#                                   (`MAINLOOP 0,0,0,0,0`) — non-NGLL tail.
+#
+# If `_emitNoLoadLoopBodyCMSMacro` ever gains a useLoop=1 NGL/NLL path,
+# this map must be updated alongside that change — the inline citation
+# above is the drift hook.
+_BODY_LABEL_USE_LOOP = {
+    BODY_LABEL_ML: 1,
+    BODY_LABEL_ML_PREV: 1,
+    BODY_LABEL_NGL: 0,
+    BODY_LABEL_NLL: 0,
+}
+
+
+def _count_lcc_on_loop_counter_l(capture):
+    """Count `(scmp_eq_i32, ssub_u32)` instances whose canonical render
+    references `sgprLoopCounterL`.
+
+    Uses the rocisa class name as the structural filter (matching
+    `test_dataflow_graph_lcc.py`'s `lcc_nodes` walk) AND filters by the
+    presence of `sgprLoopCounterL` in the canonical render so we don't
+    accidentally pick up tail-loop reuse of the same instruction class on
+    `sgprSizesSum` / etc. Per `D3ZJ_NGL_NLL_LCC_INVESTIGATION.md` Q3, NGL/
+    NLL still touch `sgprLoopCounterL` for tail-edge masking (`s_and_b32`,
+    `s_cmov_b32`, `s_cmp_eq_u32`) but those are different rocisa classes
+    or different unsigned variants — the LCC pair is specifically
+    `SCmpEQI32` + `SSubU32` on the L counter.
+    """
+    cmp_count = 0
+    sub_count = 0
+    for ti in capture.instructions:
+        cls_name = type(ti.wrapped.rocisa_inst).__name__
+        if cls_name not in ("SCmpEQI32", "SSubU32"):
+            continue
+        render = WrappedInstruction.canonical_str(ti.wrapped.rocisa_inst)
+        if "sgprLoopCounterL" not in render:
+            continue
+        if cls_name == "SCmpEQI32":
+            cmp_count += 1
+        else:
+            sub_count += 1
+    return cmp_count, sub_count
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "rocm-libraries-d3zj: explicit per-body LCC-on-sgprLoopCounterL "
+        "invariant. Every body with `useLoop=1` in its CMS MAINLOOP "
+        "invocation must have exactly 1 SCmpEQI32 + 1 SSubU32 on "
+        "`sgprLoopCounterL`; bodies with `useLoop=0` must have zero. "
+        "Fails today on the default-side capture for ML and ML-1 "
+        "(useLoop=1) — both bodies have 0 LCC ops because the default-"
+        "side capture path runs `LoopBodyCaptureBuilder.finalize()` "
+        "BEFORE `closeLoop()` emits the LCC pair (capture-timing defect). "
+        "The principled fix is rocm-libraries-nyb5 (Approach A second "
+        "non-CMS reference build) which replaces the shadow capture with "
+        "a real second build that runs closeLoop before finalize. After "
+        "nyb5 lands, the default side will emit 1+1 in ML / ML-1 and "
+        "this test passes naturally — just delete the marker, no other "
+        "edits required. Citations: D3ZJ_NGL_NLL_LCC_INVESTIGATION.md "
+        "(narrowed invariant + body→useLoop map), "
+        "D3ZJ_SCMPEQI32_INVESTIGATION.md (capture-timing mechanism), "
+        "KernelWriter.py:3134-3138 (MAINLOOP useLoop args)."
+    ),
+)
+def test_lcc_invariant_per_body_use_loop_predicate(real_kernel_capture_pair):
+    """Memo Q6 (D3ZJ_NGL_NLL_LCC_INVESTIGATION.md): assert the
+    per-body LCC invariant on EACH side of the capture pair independently.
+
+    For each side (default, CMS) and each body present in that side's
+    capture, assert that the count of (SCmpEQI32, SSubU32) instructions
+    whose canonical render references `sgprLoopCounterL` matches the
+    body's `useLoop` flag from `_BODY_LABEL_USE_LOOP`:
+
+      - useLoop=1 body → exactly (1, 1)
+      - useLoop=0 body → exactly (0, 0)
+
+    Unlike `test_real_kernel_per_render_counts_match` (which only checks
+    that the two sides AGREE), this test would catch a regression where
+    both sides emit 0 LCC in ML by accident — the invariant is enforced
+    per side without cross-side reference.
+    """
+    default_cap, cms_cap = real_kernel_capture_pair
+    violations = []
+    for side_name, four_part in (("default", default_cap), ("cms", cms_cap)):
+        bodies = _captures_per_body(four_part)
+        for label, body in bodies.items():
+            expected_use_loop = _BODY_LABEL_USE_LOOP.get(label)
+            if expected_use_loop is None:
+                continue  # unknown body label — skip rather than guess
+            cmp_count, sub_count = _count_lcc_on_loop_counter_l(body)
+            expected_pair = (1, 1) if expected_use_loop == 1 else (0, 0)
+            actual_pair = (cmp_count, sub_count)
+            if actual_pair != expected_pair:
+                violations.append((side_name, label, expected_use_loop,
+                                   expected_pair, actual_pair))
+    assert not violations, (
+        f"{len(violations)} per-body LCC invariant violation(s) "
+        f"(side, body, useLoop, expected (cmp,sub), actual (cmp,sub)): "
+        f"{violations}"
     )
