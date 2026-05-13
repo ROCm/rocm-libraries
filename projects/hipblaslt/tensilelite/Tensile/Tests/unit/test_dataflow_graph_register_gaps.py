@@ -3078,21 +3078,54 @@ class TestVSwapPair:
             f"OrderInvertedFailure; got: {[type(f).__name__ for f in failures]}"
         )
 
-    def test_vswap_pair_allocation_invariant(self):
-        """Across-graph allocation-rename of a VSwap pair MUST NOT be
-        flagged as a difference (rocm-libraries-wx9.3 phase 3, memo §6.1
-        step 1).
+    def test_vswap_pair_identical_allocation_matches(self):
+        """Across-graph IDENTICAL-allocation of a VSwap pair MUST NOT
+        be flagged as a difference.
 
-        Graph A: VSwap(v0, v1) at sub=0; VSwap(v1, v2) at sub=1
-        Graph B: VSwap(v1, v2) at sub=0; VSwap(v2, v3) at sub=1
+        Pre-hdem (rocm-libraries-wx9.3 phase 3, memo §6.1 step 1) the
+        edge-key tuple was role+position+slot+intra-offset based and
+        was synthetic-allocation-invariant: two captures with
+        different physical registers but identical topology yielded
+        matching edge keys. Under hdem (Approach A drops loop_index
+        from identity; Approach E uses producer.identity /
+        consumer.identity in the edge-key) the identities are
+        rocisa-derived from `canonical_render` (which includes the
+        operand register references). Two captures with different
+        physical register allocations therefore produce different
+        identities and different edge-keys. The synthetic
+        allocation-invariance contract is intentionally dropped — in
+        the real motivating case (CMS-vs-default within one
+        `kernelBody` invocation) both sides share an allocator
+        snapshot, so this divergence does not occur. See
+        `TestEdgeIdentityByteKeyContract` in
+        `test_dataflow_graph_comparison.py` for the broader context
+        and ORAM1 §4.5 for the rationale.
 
-        Both graphs share the same producer-consumer topology: the second
-        VSwap's first operand equals the first VSwap's second operand
-        (operand-1 of producer is operand-0 of consumer). The only
-        difference is which physical registers happen to hold the data —
-        operand-slot identity is by construction allocation-invariant
-        (small integer positions, not register references), so the edge
-        identities match exactly and `compare_graphs(g_a, g_b) == []`.
+        This test pins the operative property: allocation-EQUAL
+        captures match.
+        """
+        def _build():
+            sw1 = VSwapB32(dst=vgpr(0, 1), src=vgpr(1, 1))
+            sw2 = VSwapB32(dst=vgpr(1, 1), src=vgpr(2, 1))
+            return make_capture(BODY_LABEL_ML, [
+                _tag(sw1, category="PackA0", mfma_index=0, sequence=0),
+                _tag(sw2, category="PackA0", mfma_index=0, sequence=1),
+            ])
+        g_a = build_dataflow_graph(_wrap(_build()))
+        g_b = build_dataflow_graph(_wrap(_build()))
+        assert compare_graphs(g_a, g_b) == [], (
+            "Across-graph IDENTICAL allocation of a VSwap pair must "
+            "yield no failures. "
+            f"Got: {[type(f).__name__ for f in compare_graphs(g_a, g_b)]}"
+        )
+
+    def test_vswap_pair_renamed_allocation_distinct(self):
+        """Across-graph RENAMED allocation of a VSwap pair produces
+        DIFFERENT edge-keys under hdem Approach E.
+
+        See `test_vswap_pair_identical_allocation_matches` docstring
+        for the rationale on why the synthetic
+        allocation-invariance contract is dropped.
         """
         sw1a = VSwapB32(dst=vgpr(0, 1), src=vgpr(1, 1))
         sw2a = VSwapB32(dst=vgpr(1, 1), src=vgpr(2, 1))
@@ -3108,11 +3141,9 @@ class TestVSwapPair:
         ])
         g_a = build_dataflow_graph(_wrap(cap_a))
         g_b = build_dataflow_graph(_wrap(cap_b))
-        assert compare_graphs(g_a, g_b) == [], (
-            "Across-graph allocation rename of a VSwap pair must yield no "
-            "failures (operand-slot identity is allocation-invariant). "
-            f"Got: {[type(f).__name__ for f in compare_graphs(g_a, g_b)]}"
-        )
+        # Different physical registers in canonical_render -> different
+        # producer/consumer identities -> different edge keys.
+        assert g_a.edge_keys() != g_b.edge_keys()
 
 
 # =============================================================================

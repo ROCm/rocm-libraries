@@ -227,70 +227,76 @@ def test_preloop_divergence_catches_useplrpack_change(isa_infrastructure):
             f"the prologue."
         )
 
-    # Build merged DataflowGraphs and assert compare_graphs flags the
-    # divergence. Failure shape: the UsePLRPack=1 graph has extra Pack
-    # producers (PACK class-tag) emitting edges that the UsePLRPack=0
-    # graph lacks. PACK is NOT in `_DATA_FLOW_KINDS = ("LR","LW","GR",
-    # "MFMA")` (CMSValidator.py:2716), so the entry-time
-    # identity-coverage gate does NOT raise — it only fires for the
-    # four data-flow kinds. Instead, the divergence surfaces during
-    # missing-edge diagnosis: comparing reference=with-Pack against
-    # subject=without-Pack walks reference's edges, finds Pack-edges
-    # whose producer node doesn't exist in subject, and raises
-    # CaptureConsistencyError from `diagnose_missing_edge` phase 0
-    # ("invoked with missing node — identity-coverage check at
-    # compare_graphs entry was bypassed"). That raise IS the structural
-    # divergence flag for this Pack-only divergence.
+    # Build merged DataflowGraphs and inspect the comparison.
     #
-    # Direction matters: comparing without-Pack as reference (no extra
-    # edges) against with-Pack as subject would NOT raise — the missing
-    # edges are extras in subject, not in reference. The bead's "report
-    # prologue structural difference" requirement is satisfied as long
-    # as ONE direction surfaces the divergence; we pin the
-    # with-as-reference direction since that's the direction
-    # production gating runs (treat the more-instrumented capture as
-    # ground truth, scrutinize the less-instrumented one).
+    # Pre-hdem framing: the UsePLRPack=1 graph had extra pack-MFMA
+    # producers in the PRO body whose body-keyed identity tuple
+    # (loop_index=-1) collided with NO with-Pack=0 identity, so the
+    # entry-time `_data_flow_ids` gate raised
+    # CaptureConsistencyError("data-flow node identity sets differ").
+    #
+    # Post-hdem framing (Approach A drops loop_index from identity;
+    # Approach E uses identity-based body-blind edge_keys; ORAM1 §6.1
+    # / §7.4): two pack-MFMAs with the same canonical_render and the
+    # same per-(body, render) ordinal collapse to ONE identity even
+    # when they live in different bodies. The UsePLRPack difference
+    # IS exactly such a collapse — the prefetch-pack chain is
+    # relocated from `pack[plrIdx]` (consumed during ML steady-state)
+    # to the prologue (consumed at the start of ML), but the
+    # underlying dataflow is identical. Under hdem this collapse is
+    # the DESIRED behavior — it is the motivating case the bead is
+    # designed to solve. `compare_graphs` returns no failures
+    # because the dataflow really is equivalent; the only difference
+    # is which capture-builder pinned the producer to which body
+    # label.
+    #
+    # The cross-body extra-write divergence pin (a TRULY extra
+    # producer with no body-collapsed counterpart) lives in
+    # `test_dataflow_graph_hdem.py::test_cross_body_extra_write_surfaces`
+    # — that test constructs a controlled scenario where the extra
+    # producer's identity does NOT collapse with anything in the
+    # subject graph, exercising the residual-detection path.
     g_with = build_dataflow_graph(cap_with)
     g_without = build_dataflow_graph(cap_without)
 
-    with pytest.raises(CaptureConsistencyError) as excinfo:
-        compare_graphs(g_with, g_without)
-    # The raise must mention the entry-time identity-set divergence
-    # path (i.e. the extra pack-MFMA producer surfaces as a node count
-    # mismatch in _data_flow_ids), not some other consistency failure.
-    # We pin the substring so the test fails informatively if a future
-    # refactor changes which check catches the divergence.
-    assert "data-flow node identity sets differ" in str(excinfo.value), (
-        f"compare_graphs raised CaptureConsistencyError but the message "
-        f"does not look like the entry-time identity-set divergence path: "
-        f"{excinfo.value!r}"
+    # Pin the body-collapse outcome explicitly: graphs must look
+    # equivalent at the dataflow layer. If a future regression
+    # re-introduces body sensitivity (e.g. someone re-adds
+    # loop_index to identity, or threads SchedulePosition back into
+    # edge_keys), this pin catches it as a regression.
+    failures = compare_graphs(g_with, g_without)
+    assert failures == [], (
+        "compare_graphs reported failures comparing UsePLRPack=1 vs "
+        "UsePLRPack=0 — under hdem A+E these captures' dataflow IS "
+        "equivalent (the prefetch-pack chain is relocated between PRO "
+        "and ML bodies but the produced/consumed bytes are identical), "
+        "and the comparator must treat them as matching. Failures: "
+        f"{[type(f).__name__ for f in failures[:5]]}"
     )
-    # And the divergence summary should mention an MFMA identity (under
-    # the new identity scheme pack-MFMAs are real `MFMAInstruction`
-    # rocisa class, so `_summary_by_class` reports them as 'MFMA' rather
-    # than the CMS-shaped 'PACK' tag).
-    assert "'MFMA'" in str(excinfo.value), (
-        f"identity-set CaptureConsistencyError does not mention an "
-        f"MFMA identity; the divergence is not the prologue Pack chain: "
-        f"{excinfo.value!r}"
+    # Sanity: graphs themselves have the same number of nodes/edges
+    # (the post-collapse signature). If they differ in raw counts a
+    # truly extra producer crept in that the body collapse did not
+    # absorb — investigate before trusting the empty-failures
+    # outcome.
+    assert len(g_with.nodes) == len(g_without.nodes), (
+        f"Node-count mismatch under body-collapse: with={len(g_with.nodes)}, "
+        f"without={len(g_without.nodes)}. The UsePLRPack difference "
+        f"should be a pure body relocation."
+    )
+    assert len(g_with.edges) == len(g_without.edges), (
+        f"Edge-count mismatch under body-collapse: with={len(g_with.edges)}, "
+        f"without={len(g_without.edges)}."
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "rocm-libraries-exfw: under 4up4's new identity scheme + F3's "
-        "leftover-pack-walk deletion, the CMS-side macro emits the full "
-        "plrIdx=3 prefetch-pack chain into its main_loop while the "
-        "default-side SIA3 shadow only consumes pack[packIdx] per-iter "
-        "and resets — 16 PackA3/PackB3 instructions (rocisa class "
-        "MFMAInstruction) appear in subject but not reference. The "
-        "principled fix is rocm-libraries-71hw Approach A (true non-CMS "
-        "reference build via UseCustomMainLoopSchedule=0) where pack "
-        "chain layout matches naturally between both sides. Until 71hw "
-        "lands, this test xfails. See EXFW_MFMA_DIVERGENCE_INVESTIGATION.md."
-    ),
-)
+# rocm-libraries-hdem: under Approach A (drop loop_index from identity)
+# + Approach E (identity-based body-blind edge_keys), the cross-body
+# pipelined plrIdx=3 prefetch-pack chain matches between the
+# CMS-and-default sides regardless of which body each pack producer
+# lands in. The test passes naturally — no xfail needed. The exfw
+# investigation framing (16 PackA3/PackB3 differences) was the
+# pre-hdem symptom of the body-keyed identity/edge collapse that
+# ORAM1 §1 enumerated; A+E removes the body-coupling at both layers.
 def test_whole_kernel_useplrpack_cms_matches_both_defaults(isa_infrastructure):
     """A CMS kernel using UsePLRPack must compare-equal against BOTH
     `UsePLRPack=True` default and `UsePLRPack=False` default at the

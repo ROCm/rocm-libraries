@@ -22,10 +22,18 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Per-emission ordinal identity regression tests (rocm-libraries-4up4).
+"""Per-emission ordinal identity regression tests (rocm-libraries-4up4 +
+rocm-libraries-hdem).
 
-Companion to `EMISSION_ORDINAL_DESIGN.md` §6.2. The identity tuple is
-now `(loop_index, canonical_render, emission_ordinal)`. This file pins:
+Companion to `EMISSION_ORDINAL_DESIGN.md` §6.2 and
+`ORAM1_PRINCIPLED_APPROACH_INVESTIGATION.md` §2 / §7. The identity tuple
+is `(canonical_render, emission_ordinal)` post-hdem (Approach A dropped
+`loop_index` from the leading slot to make identity body-blind).
+The per-(body, canonical_render) ordinal counter is preserved at capture
+time so two emissions in different bodies both start their own per-body
+counter at 0; cross-body collapse is the desired behavior for
+cross-body pipelining (the residual false-negative risk is caught by
+Approach E's byte-key edge-layer matching). This file pins:
 
 * The on0t collision pattern (two same-render emissions in the same body
   get distinct identities) — the test that lets on0t stay closed.
@@ -145,11 +153,17 @@ class TestZ012CollisionRegression:
             f"identities under the per-emission-ordinal scheme. "
             f"got {id_a!r} == {id_b!r}."
         )
-        # And the only differing slot must be the ordinal — loop_index
-        # and canonical_render are identical by construction.
-        assert id_a[0] == id_b[0]               # loop_index
-        assert id_a[1] == id_b[1]               # canonical_render
-        assert id_a[2] != id_b[2]               # emission_ordinal
+        # And the only differing slot must be the ordinal — canonical_render
+        # is identical by construction. Identity tuple shape under
+        # rocm-libraries-hdem Approach A is `(canonical_render,
+        # emission_ordinal)` — `loop_index` was dropped from the leading
+        # slot to make identity body-blind (cross-body pipelining must
+        # collapse identities for `compare_graphs` to match the same
+        # logical dataflow that lands in different bodies on each side).
+        assert len(id_a) == 2
+        assert len(id_b) == 2
+        assert id_a[0] == id_b[0]               # canonical_render
+        assert id_a[1] != id_b[1]               # emission_ordinal
 
     def test_three_same_render_emissions_get_three_distinct_identities(self):
         """Generalize the on0t pattern: N physically distinct emissions

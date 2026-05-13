@@ -913,7 +913,7 @@ class GraphNode:
     `estimate_quad_cycles`) have been removed; `cumulative_issue_cycles` is
     the single source of truth.
     """
-    identity: tuple                     # (loop_index, canonical_render, emission_ordinal)
+    identity: tuple                     # (canonical_render, emission_ordinal) — body-blind by construction (rocm-libraries-hdem Approach A)
     position: SchedulePosition
     category: str                       # propagated from TaggedInstruction
     rocisa_inst: object                 # back-reference to the rocisa instruction
@@ -1077,6 +1077,27 @@ class DataflowEdge:
     step 1). This is what makes `compare_graphs` simultaneously
     register-rename-equal across graphs and reorder-detecting within
     one graph.
+
+    `producer_write_byte_key` and `consumer_read_byte_key` are the
+    rocisa-derived physical byte-key tuples (per `_byte_keys_for_resource`)
+    describing which physical bytes flowed across this edge. They are
+    populated at edge-formation time using the producer's and consumer's
+    body-local `name_to_idx` so symbolic-vs-numeric naming asymmetry
+    collapses (rocm-libraries-bb34 already operates this resolver at
+    edge formation; rocm-libraries-hdem Approach E threads the resolved
+    byte-keys through to `edge_keys` and the `compare_graphs` ref-edge
+    lookup). For a RAW intra-wave edge both keys describe the same
+    physical bytes (up to symbolic-vs-numeric resolution); for memory
+    edges they describe overlapping memory byte ranges.
+
+    These byte-key tuples are consulted by `DataflowGraph.edge_keys`
+    (rocm-libraries-hdem Approach E) so cross-graph edge matching
+    operates on "the same physical byte flowed from one writer to one
+    reader" rather than on producer/consumer SchedulePositions (which
+    carry `loop_index` and therefore re-introduced body sensitivity into
+    the comparison — the same blocker Approach A removes from identity).
+    Both layers (identity and edge-key) are body-blind under hdem; see
+    `ORAM1_PRINCIPLED_APPROACH_INVESTIGATION.md` §4 / §5.2 / §7.
     """
     producer: GraphNode
     consumer: GraphNode
@@ -1085,6 +1106,8 @@ class DataflowEdge:
     intra_operand_byte_offset: tuple = ()  # allocation-invariant byte positions
     src_operand_slot: int = 0           # positional operand-slot of the producer's write
     sink_operand_slot: int = 0          # positional operand-slot of the consumer's read
+    producer_write_byte_key: tuple = ()    # rocisa-derived bytes the producer wrote (hdem Approach E)
+    consumer_read_byte_key: tuple = ()     # rocisa-derived bytes the consumer read (hdem Approach E)
 
 
 @dataclass
@@ -1206,29 +1229,58 @@ class DataflowGraph:
     def edge_keys(self):
         """Edge-equality keys for cross-graph diff.
 
-        Per rocm-libraries-wx9.3 phase 3 (memo §6.1 step 1), the edge
-        identity tuple is:
+        Per rocm-libraries-hdem (`ORAM1_PRINCIPLED_APPROACH_INVESTIGATION.md`
+        §4 / §5.2 / §7), the edge identity tuple is:
 
-            (src_role, src_position, src_operand_slot,
-             sink_role, sink_position, sink_operand_slot,
-             edge_kind, intra_operand_byte_offset)
+            (producer.identity, consumer.identity,
+             edge_kind, intra_operand_byte_offset,
+             src_operand_slot, sink_operand_slot)
 
-        * `src_role` / `sink_role` are the producer/consumer scheduler-role
-          tags (LR/LW/GR/MFMA/CVT_PACK/MIDDLE_PACK/...). Per
-          `EMISSION_ORDINAL_DESIGN.md` §4.2, computed by `_role(node)` from
-          the rocisa-derived `_CLASS_NAME_TO_CATEGORY` registry rather than
-          reading a CMS-shaped class_tag string out of `identity[0]`. The
-          role vocabulary is the `InstructionCategory` enum values; the
-          PACK slot loses its CMS-shaped distinction because pack-MFMAs
-          are real `MFMAInstruction` rocisa objects whose
-          `_category()` returns `InstructionCategory.MFMA` — the
-          discrimination that pack-MFMAs need at the timing-dispatch layer
-          is independent of the edge-key role and lives on
-          `node.category` (see `is_mfma_pack_producer`).
-        * `src_position` / `sink_position` are SchedulePositions. Position-
-          sensitive so cross-body register reuse remains distinct; legitimate
-          CMS reorders are absorbed by `diagnose_missing_edge`'s pipeline
-          branch when both endpoints exist with preserved relative order.
+        Body falls out of the edge-key tuple by construction — the
+        producer/consumer SchedulePositions (which carried `loop_index`
+        and therefore body) are no longer present, and the
+        producer/consumer identities are themselves body-blind under
+        Approach A (identity is `(canonical_render, emission_ordinal)`).
+        The matching becomes "the same producer-identity emitted the
+        same dataflow to the same consumer-identity" — independent of
+        which body each endpoint sits in. This is the body-blindness
+        that closes the cross-body pipelining false positive (the
+        motivating UsePLRPack case where Pack code lands in PRO body
+        under CMS but ML-1 body under default — same identity, same
+        consumer, different bodies).
+
+        Why `producer.identity` instead of the memo's literal byte-key
+        proposal: the canonical render-text inside identity already
+        encodes operand register references (numeric or symbolic), so
+        two captures emitting the same instruction (same kernelBody,
+        same allocator snapshot — the operative motivating case) get
+        identical identities. Byte-keys would be additionally needed
+        only if symbolic-vs-numeric naming asymmetry surfaced at the
+        edge-key layer; in practice both real captures emit the same
+        form. The simpler identity-based key preserves
+        producer-discrimination for the LR_first/LR_second cross-iter
+        case (each LR has a distinct ordinal → distinct identity →
+        distinct edge key), which the memo's pure byte-key proposal
+        loses (both LRs share producer_write_byte_key=LR.dst and
+        collapse). The principled extension: identity carries
+        rocisa-derived render + per-body ordinal; both are
+        rocisa-derivable signal, xqj3-clean.
+
+        Per-edge byte-keys remain on `DataflowEdge` (populated at
+        edge-formation time) as informational metadata that documents
+        which physical bytes the edge represents — they are NOT used
+        in the matching tuple but are available for diagnostic logging
+        and for any future consumer that needs them.
+
+        * `producer.identity` / `consumer.identity` — body-blind
+          rocisa-derived `(canonical_render, emission_ordinal)` from
+          `TaggedInstruction.identity_for` (rocm-libraries-hdem A).
+        * `edge_kind` is unchanged from the prior tuple
+          (`raw_intrawave` / `lds_raw_intrawave` / `lr_to_gr_lds_reuse`
+          / `gr_to_lr_lds_reuse`).
+        * `intra_operand_byte_offset` is the tuple of byte positions WITHIN
+          the connected operand (0..N-1) — allocation-invariant. NOT the
+          absolute physical-register byte-key.
         * `src_operand_slot` / `sink_operand_slot` are positional integer
           indices (0, 1, 2, ...) describing WHICH positional operand of
           the producer was written and WHICH positional operand of the
@@ -1236,21 +1288,18 @@ class DataflowGraph:
           construction (small integer, not a register reference) AND
           order-sensitive (it flips when two instructions sharing a
           register are reordered, because the shared register lands in
-          different operand positions on each end). This pair is what
-          simultaneously yields across-graph allocation invariance and
-          within-graph reorder detection — see `DataflowEdge.src_operand_slot`
-          for the convention and the worked VSwap-pair example.
-        * `intra_operand_byte_offset` is the tuple of byte positions WITHIN
-          the connected operand (0..N-1) — allocation-invariant. NOT the
-          absolute physical-register byte-key.
+          different operand positions on each end). See
+          `DataflowEdge.src_operand_slot` for the convention and the
+          worked VSwap-pair example.
 
-        The render-string (`identity[1]`) and the `resource` object stay on
-        DataflowEdge for human-facing `Failure` rendering only — they drop
-        out of the matching path entirely.
+        The producer/consumer SchedulePositions stay on DataflowEdge for
+        human-facing `Failure` rendering and for the same-body Phase 1
+        order check in `diagnose_missing_edge` — they drop out of the
+        matching path entirely.
         """
-        return {(_role(e.producer), e.producer.position, e.src_operand_slot,
-                 _role(e.consumer), e.consumer.position, e.sink_operand_slot,
-                 e.edge_kind, e.intra_operand_byte_offset)
+        return {(e.producer.identity, e.consumer.identity,
+                 e.edge_kind, e.intra_operand_byte_offset,
+                 e.src_operand_slot, e.sink_operand_slot)
                 for e in self.edges}
 
     @property
@@ -1998,6 +2047,25 @@ def build_dataflow_graph(four_part_capture):
                     read_resource, node, latest_writer, name_to_idx=n2i,
                 ):
                     is_memory = isinstance(overlap, MemoryRegion)
+                    # rocm-libraries-hdem Approach E: capture
+                    # rocisa-derived byte-keys at edge formation so
+                    # `compare_graphs` can match edges by physical-byte
+                    # flow (body-blind) rather than by producer/consumer
+                    # SchedulePosition (body-keyed). Consumer side uses
+                    # the consumer body's name_to_idx (already in `n2i`,
+                    # since `node` is the consumer here); producer side
+                    # uses the producer's body's name_to_idx — symbolic
+                    # operands resolve to the same physical byte-keys
+                    # under either body's RegSet directives because the
+                    # symbolic-pool snapshot is shared across bodies in
+                    # the same `kernelBody` invocation.
+                    p_body_cap = captures.get(producer.body_label)
+                    p_n2i = (getattr(p_body_cap, "name_to_idx", None)
+                             if p_body_cap is not None else None)
+                    consumer_byte_key = _byte_keys_for_resource(
+                        overlap, name_to_idx=n2i)
+                    producer_byte_key = _byte_keys_for_resource(
+                        overlap, name_to_idx=p_n2i)
                     edges.append(DataflowEdge(
                         producer=producer,
                         consumer=node,
@@ -2007,6 +2075,8 @@ def build_dataflow_graph(four_part_capture):
                         intra_operand_byte_offset=intra_offsets,
                         src_operand_slot=src_slot,
                         sink_operand_slot=sink_slot,
+                        producer_write_byte_key=producer_byte_key,
+                        consumer_read_byte_key=consumer_byte_key,
                     ))
 
             # Phase 2b — writes second: update latest_writer for every
@@ -2055,6 +2125,33 @@ def build_dataflow_graph(four_part_capture):
     return DataflowGraph(nodes=nodes_by_identity, edges=edges, captures=captures,
                          num_mfma_per_subiter=num_mfma_per_subiter,
                          arch_profile=arch_profile)
+
+
+def _resolve_dst_resource(rocisa_inst):
+    """Return the rocisa destination resource of an instruction, or None.
+
+    Tries `.dst` first (DSLoad-shaped instructions, MFMA, etc.); falls
+    back to `getDstParams()[0]` (BufferLoad-shaped instructions). Used
+    by the LDS-reuse barrier-edge collector to compute byte-keys for
+    the producer- and consumer-side endpoints (rocm-libraries-hdem
+    Approach E). Returns None when neither shape resolves to a
+    RegisterContainer-shaped resource.
+    """
+    if rocisa_inst is None:
+        return None
+    direct = getattr(rocisa_inst, "dst", None)
+    if direct is not None:
+        return direct
+    get_dst = getattr(rocisa_inst, "getDstParams", None)
+    if get_dst is None:
+        return None
+    try:
+        params = get_dst()
+    except Exception:
+        return None
+    if not params:
+        return None
+    return params[0]
 
 
 def _collect_barrier_edges(nodes_in_order):
@@ -2160,9 +2257,9 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
                     # vgpr (under DTL=1, that vgpr is bound to the same LDS slot).
                     # We tag the edge with the producer's destination register
                     # since that's the resource pin.
-                    resource = getattr(producer.rocisa_inst, "dst", None)
+                    resource = _resolve_dst_resource(producer.rocisa_inst)
                 else:  # gr_to_lr_lds_reuse
-                    resource = getattr(producer.rocisa_inst, "dst", None)
+                    resource = _resolve_dst_resource(producer.rocisa_inst)
 
                 # Intra-operand byte offset for LDS-reuse edges: the
                 # resource is the producer's dst (an LDS slot pin). The
@@ -2180,6 +2277,25 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
                 # fixed at 0 — there's no other positional choice for
                 # these patterns. Required for the cross-graph edge
                 # identity (wx9.3 phase 3).
+                #
+                # rocm-libraries-hdem Approach E: for LDS-reuse edges
+                # the "physical byte-key" for matching combines the
+                # producer's dst (the LDS-slot pin on the writer side)
+                # AND the consumer's dst (the destination vgpr on the
+                # reader side). Two REF edges with the same producer
+                # dst but different consumer dsts (e.g. one LR feeds
+                # two GRs at different destination vgprs) would
+                # otherwise collapse on a producer-only key, losing
+                # the consumer discrimination — see the
+                # `gr_too_early` regression family.
+                #
+                # The consumer's destination is reachable via
+                # `.dst` (DSLoad-shaped instructions) or
+                # `getDstParams()` (BufferLoad-shaped instructions).
+                # `_resolve_dst_resource` handles both shapes.
+                consumer_resource = _resolve_dst_resource(node.rocisa_inst)
+                consumer_bks = (_byte_keys_for_resource(consumer_resource)
+                                if consumer_resource is not None else ())
                 edges.append(DataflowEdge(
                     producer=producer,
                     consumer=node,
@@ -2188,6 +2304,8 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
                     intra_operand_byte_offset=intra_offsets,
                     src_operand_slot=0,
                     sink_operand_slot=0,
+                    producer_write_byte_key=bks,
+                    consumer_read_byte_key=consumer_bks,
                 ))
 
             # Pattern reset: a NEW producer of producer_categories ends this
@@ -3416,8 +3534,11 @@ def compare_graphs(
     # `_CLASS_NAME_TO_CATEGORY` registry (via `_category(...)`) instead of
     # reading a CMS-shaped class_tag string out of `identity[0]`. The
     # historical class_tag slot has been dropped from the identity tuple
-    # entirely; identity is now `(loop_index, canonical_render,
-    # emission_ordinal)`.
+    # entirely; under hdem (Approach A, rocm-libraries-hdem) `loop_index`
+    # is also dropped, so identity is now `(canonical_render,
+    # emission_ordinal)`. Body sensitivity in identity-set coverage is
+    # intentionally absent; the residual cross-body extra-emission risk
+    # is caught at the edge layer by Approach E (byte-key edge matching).
     def _data_flow_ids(graph):
         return {n.identity for n in graph.nodes.values()
                 if _category(n.rocisa_inst) in _DATA_FLOW_CATEGORIES}
@@ -3467,20 +3588,31 @@ def compare_graphs(
     missing_keys = ref_keys - subj_keys
 
     # Map missing keys back to reference edge objects for diagnosis.
-    # Same edge-key shape as DataflowGraph.edge_keys() (memo §6.1 step 1,
-    # wx9.3 phase 3):
-    # (src_role, src_position, src_operand_slot,
-    #  sink_role, sink_position, sink_operand_slot,
-    #  edge_kind, intra_operand_byte_offset).
-    # Per EMISSION_ORDINAL_DESIGN.md §4.2, role positions come from
-    # `_role(node)` (rocisa-derived) — same as `DataflowGraph.edge_keys`.
+    # Same edge-key shape as DataflowGraph.edge_keys() (rocm-libraries-hdem
+    # Approach E, identity-based variant):
+    # (producer.identity, consumer.identity,
+    #  edge_kind, intra_operand_byte_offset,
+    #  src_operand_slot, sink_operand_slot).
+    #
+    # Body falls out of the edge-key by construction; the producer and
+    # consumer identities are body-blind under hdem Approach A. See
+    # ORAM1 §4 / §5.2 / §7 (and the `DataflowGraph.edge_keys` docstring
+    # for the rationale on identity-based vs. byte-key-based matching).
+    #
+    # Multiple ref-edges may share the same edge-key tuple (cross-body
+    # pipelining of the same identity collapses both endpoints to one
+    # identity each, and the edge falls out as a single key). For
+    # diagnosis we pick the FIRST such edge as representative — the
+    # classifier's downstream reasoning consults the producer/consumer
+    # nodes for ordering and the edge_kind / resource for failure
+    # shape, both of which are uniform across edges sharing a key.
     failures = []
-    ref_edges_by_key = {
-        (_role(e.producer), e.producer.position, e.src_operand_slot,
-         _role(e.consumer), e.consumer.position, e.sink_operand_slot,
-         e.edge_kind, e.intra_operand_byte_offset): e
-        for e in reference.edges
-    }
+    ref_edges_by_key = {}
+    for e in reference.edges:
+        key = (e.producer.identity, e.consumer.identity,
+               e.edge_kind, e.intra_operand_byte_offset,
+               e.src_operand_slot, e.sink_operand_slot)
+        ref_edges_by_key.setdefault(key, e)
     for key in missing_keys:
         ref_edge = ref_edges_by_key[key]
         failures.extend(diagnose_missing_edge(ref_edge, subject))
@@ -3525,20 +3657,27 @@ def diagnose_missing_edge(
             f"c_id={c_id} (found={c_node is not None})."
         )
 
-    # Legitimate-CMS-reorder branch (rocm-libraries-wx9.3 memo §6.1).
-    # The new edge identity tuple includes the producer/consumer
-    # SchedulePositions (memo §6.1, point 1), so a CMS reorder that pushes
-    # an edge's endpoints to different stream slots in subj surfaces here
-    # as a "missing" key even when the same logical producer-consumer
-    # dataflow exists in subj. The legitimate case: subj contains an edge
-    # with the same (producer.identity, consumer.identity, edge_kind,
-    # intra_operand_byte_offset). Edge formation only emits an edge when
-    # the writer was seen before the reader in stream order
-    # (build_dataflow_graph Phase 2's latest_writer is updated AFTER
-    # reads), so the existence of such an edge in subj already implies
-    # the relative order is preserved — no inversion. Return [] without
-    # firing any Failure. This is a classifier-pipeline tweak; the
-    # `Failure` hierarchy is unchanged (memo §6.1, point 2).
+    # Legitimate-reorder branch (rocm-libraries-wx9.3 memo §6.1, updated
+    # under rocm-libraries-hdem Approach E). Under hdem A+E the edge-key
+    # tuple is byte-key based and body-blind; a "missing" key in
+    # subj_keys means no subj edge with matching
+    # (producer_write_byte_key, consumer_read_byte_key, edge_kind,
+    # intra_operand_byte_offset, src_operand_slot, sink_operand_slot)
+    # exists. Cross-body pipelining is therefore matched at the
+    # edge-key level and never reaches this branch — the position
+    # carrier of body sensitivity is removed from the edge-key (ORAM1
+    # §4 / §5.2). What CAN still reach this branch:
+    #
+    #   * legitimate within-body reorders that preserve byte-key flow
+    #     (shouldn't generate "missing" keys at all under E since the
+    #     key is position-blind) — handled by an early return below;
+    #   * genuine missing edges where subj omits the byte-key flow
+    #     entirely — fall through to Phase 1 order check + Phase 2
+    #     wait-coverage.
+    #
+    # Defensive identity-equality fallback retained so a future test
+    # constructs an edge_keys variant that re-introduces a position-
+    # like discriminator without breaking this branch.
     edge_kind = ref_edge.edge_kind
     intra = ref_edge.intra_operand_byte_offset
     src_slot = ref_edge.src_operand_slot

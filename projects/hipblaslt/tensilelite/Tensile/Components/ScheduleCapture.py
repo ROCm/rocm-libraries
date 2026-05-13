@@ -495,9 +495,11 @@ class TaggedInstruction:
     construct `TaggedInstruction` directly without going through `finalize`
     pick up the per-render-text counter via `make_capture` /
     `dataflow_fixtures` helpers, which call the same finalize-equivalent
-    logic). The per-emission ordinal is the third slot of `identity_for`'s
-    new tuple shape `(loop_index, canonical_render, emission_ordinal)` —
-    see `EMISSION_ORDINAL_DESIGN.md` for the architectural rationale.
+    logic). The per-emission ordinal is the second slot of `identity_for`'s
+    new tuple shape `(canonical_render, emission_ordinal)` — see
+    `EMISSION_ORDINAL_DESIGN.md` for the architectural rationale and
+    `ORAM1_PRINCIPLED_APPROACH_INVESTIGATION.md` (Approach A) for why
+    `loop_index` was dropped from the leading slot.
     """
     wrapped: "WrappedInstruction"
     category: str
@@ -520,11 +522,19 @@ class TaggedInstruction:
     def identity_for(self, body_label: str) -> tuple:
         """Build a content-based identity tuple for this tagged instruction.
 
-        Format: `(loop_index, canonical_render, emission_ordinal)`. See
-        `EMISSION_ORDINAL_DESIGN.md` for the architectural rationale.
+        Format: `(canonical_render, emission_ordinal)`. See
+        `EMISSION_ORDINAL_DESIGN.md` for the architectural rationale and
+        `ORAM1_PRINCIPLED_APPROACH_INVESTIGATION.md` §2 / §7 for the
+        rationale for dropping `loop_index` (Approach A): body is a
+        capture-time attribute (which builder appended this instruction)
+        and promoting it into the comparison-time identity caused
+        `compare_graphs` to false-positive on cross-body pipelining (the
+        motivating UsePLRPack case where Pack code lands in PRO body
+        under CMS but ML-1 body under default — the dataflow is
+        identical, only the body differs). Cross-body order is preserved
+        on the `position` axis (`SchedulePosition.loop_index`); identity
+        is now body-blind by design.
 
-        * `loop_index` derives from `body_label` via
-          `BODY_LABEL_TO_LOOP_INDEX`.
         * `canonical_render` is the normalized render-string (see
           `WrappedInstruction.canonical_str`); two instructions producing the
           same render-string represent the same GPU operation regardless of
@@ -537,7 +547,14 @@ class TaggedInstruction:
           on0t collision pattern (`s_cmp_eq_u32 LoopCounterL, StaggerUIter`
           emitted once for the GRIncA lowering and once for GRIncB; both
           previously collapsed under last-writer-wins in
-          `nodes_by_identity`).
+          `nodes_by_identity`). The ordinal counter remains
+          per-(body, canonical_render) at capture time even though body is
+          dropped from identity — see ORAM1 memo §6.1 for the rationale
+          (two emissions in different bodies both get ordinal 0 from
+          their own body's counter and therefore collapse to the same
+          identity, which is exactly what cross-body pipelining requires;
+          the residual false-negative risk from this collapse is caught
+          by Approach E's byte-key edge-layer matching).
 
         `class_tag` is intentionally absent: the disambiguator role is taken
         by `emission_ordinal`, and the historical filter / edge-key consumers
@@ -551,18 +568,20 @@ class TaggedInstruction:
         has a stable identity regardless of whether the schedulers happen to
         spell its inputs symbolically, numerically, or mixed.
 
+        `body_label` is accepted for backward-compatibility of callers; it
+        is no longer consulted to compose the tuple (Approach A drop).
+        Body context is still required upstream for the
+        per-(body, canonical_render) ordinal counter that this method
+        consumes via `self.emission_ordinal`.
+
         Tests that need to synthesize an identity tuple from a bare rocisa
         instance must construct a `TaggedInstruction` first (via
         `WrappedInstruction(inst)` plus the desired category) and then call
         this method. There is no free-function form (the parallel
         `_identity_for` was removed in the nn0 follow-up, 2026-05-08).
         """
-        from Tensile.Components.CMSValidator import (
-            BODY_LABEL_TO_LOOP_INDEX,
-        )
         inst = self.wrapped.rocisa_inst
-        loop_idx = BODY_LABEL_TO_LOOP_INDEX[body_label]
-        return (loop_idx, WrappedInstruction.canonical_str(inst),
+        return (WrappedInstruction.canonical_str(inst),
                 self.emission_ordinal)
 
 

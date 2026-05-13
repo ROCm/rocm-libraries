@@ -587,8 +587,9 @@ class TestStructuralProperties:
         g = build_dataflow_graph(_wrap(cap))
         pack_nodes = [n for n in g.nodes.values() if n.category == "PackA0"]
         assert len(pack_nodes) == 1
-        # Per EMISSION_ORDINAL_DESIGN.md §4.5 the identity tuple is now
-        # `(loop_index, canonical_render, emission_ordinal)` with no
+        # Per EMISSION_ORDINAL_DESIGN.md §4.5 + ORAM1
+        # (rocm-libraries-hdem) Approach A, the identity tuple is now
+        # `(canonical_render, emission_ordinal)` (body-blind) with no
         # class_tag slot. The Pack node's role discrimination lives on
         # `node.category` (the public display attribute).
         assert pack_nodes[0].category.startswith("Pack")

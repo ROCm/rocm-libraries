@@ -212,11 +212,12 @@ class TestCleanComparison:
         g_subj = build_dataflow_graph(_wrap(subj_cap))
         # Identity sets match — both include the LCC node.
         assert set(g_ref.nodes.keys()) == set(g_subj.nodes.keys())
-        # Per EMISSION_ORDINAL_DESIGN.md §4.5 the identity tuple is now
-        # `(loop_index, canonical_render, emission_ordinal)` with no class_tag
-        # slot. Pin the LCC participation by inspecting node.category instead
-        # — `category` is the public display attribute for the CMS-shaped
-        # role string and stays unchanged.
+        # Per EMISSION_ORDINAL_DESIGN.md §4.5 + ORAM1
+        # (rocm-libraries-hdem) Approach A, the identity tuple is now
+        # `(canonical_render, emission_ordinal)` (body-blind) with no
+        # class_tag slot. Pin the LCC participation by inspecting
+        # node.category instead — `category` is the public display
+        # attribute for the CMS-shaped role string and stays unchanged.
         lcc_nodes = [n for n in g_ref.nodes.values() if n.category == "LCC"]
         assert lcc_nodes, (
             f"LCC nodes should participate in the identity set as of 2bu.2; "
@@ -432,24 +433,27 @@ class TestIdentityCoverage:
 
 class TestRenderStringIdentity:
     def test_identity_is_assembly_text(self):
-        """The identity tuple's second element should be the canonical
+        """The identity tuple's first element should be the canonical
         rendered assembly. This is what makes identity robust to
         register-naming variations.
 
-        Per EMISSION_ORDINAL_DESIGN.md the identity tuple is now
-        `(loop_index, canonical_render, emission_ordinal)`. The historical
-        class_tag slot has been dropped.
+        Per EMISSION_ORDINAL_DESIGN.md + ORAM1 (rocm-libraries-hdem)
+        Approach A, the identity tuple is now
+        `(canonical_render, emission_ordinal)` (body-blind — `loop_index`
+        was dropped from the leading slot to make `compare_graphs`
+        match cross-body pipelined dataflow). The historical class_tag
+        slot has been dropped.
         """
         lr_tagged = make_lr(8, 4, 64, slot=0, category="LRA0")
         ident = lr_tagged.identity_for(BODY_LABEL_ML)
-        assert isinstance(ident[0], int)    # loop_index
-        assert isinstance(ident[1], str)    # canonical render-string
-        assert isinstance(ident[2], int)    # emission_ordinal
+        assert len(ident) == 2
+        assert isinstance(ident[0], str)    # canonical render-string
+        assert isinstance(ident[1], int)    # emission_ordinal
         # The render contains a vgpr reference and the LDS offset.
         # `make_lr` builds a real `rocisa.DSLoadB128`, which renders as
         # `ds_read_b128 v[8:11], v0 offset:64`.
-        assert "v[" in ident[1]
-        assert "offset:64" in ident[1]
+        assert "v[" in ident[0]
+        assert "offset:64" in ident[0]
 
     def test_comment_differences_dont_change_identity(self):
         """Two instructions with identical operations but different
@@ -937,38 +941,92 @@ class TestVgprChainReorderDetection:
 
 
 # =============================================================================
-# Allocation invariance + legitimate-reorder + OrderInverted (rocm-libraries-wx9.3)
+# Edge-key contract: physical-byte matching + allocation-equality
+# (rocm-libraries-wx9.3, updated under rocm-libraries-hdem Approach E)
 # =============================================================================
-# The Phase 2 contract (memo §6.1, clarified 2026-05-08):
+# Pre-hdem (wx9.3) the edge-key tuple was:
 #
-#   edge_key = (src_role, src_position, sink_role, sink_position,
-#               edge_kind, intra_operand_byte_offset)
+#   (src_role, src_position, src_operand_slot,
+#    sink_role, sink_position, sink_operand_slot,
+#    edge_kind, intra_operand_byte_offset)
 #
-# `intra_operand_byte_offset` is the offset WITHIN the connected operand
-# (0..N-1 for an N-byte read), NOT an absolute physical-register byte-key.
-# This is what makes the edge identity allocation-invariant: two graphs
-# with the same topology but different physical register allocations
-# produce identical edge keys.
+# This tuple was synthetic-allocation-invariant: two captures with
+# identical topology but different physical register numbers produced
+# matching edge keys, because no slot encoded an absolute
+# physical-register identifier (only intra-operand byte offsets).
+# However the `src_position` / `sink_position` slots carried
+# `loop_index`, which made `compare_graphs` fire false positives on
+# cross-body pipelining (the motivating UsePLRPack case where Pack code
+# lands in PRO body under CMS but ML-1 body under default).
+#
+# Under hdem (Approach E, ORAM1_PRINCIPLED_APPROACH_INVESTIGATION.md
+# §4 / §7) the edge-key tuple is byte-key based:
+#
+#   (producer_write_byte_key, consumer_read_byte_key,
+#    edge_kind, intra_operand_byte_offset,
+#    src_operand_slot, sink_operand_slot)
+#
+# Body falls out of the tuple because positions are gone. The byte-keys
+# are physical: `(regType, regIdx)` for numeric registers, etc.
+#
+# The synthetic allocation-invariance guarantee from wx9.3 is no longer
+# preserved by construction: two captures with identical topology but
+# different physical register numbers will produce DIFFERENT edge keys
+# under E. The tradeoff is principled: in the real motivating case
+# (CMS-vs-default within the same `kernelBody` invocation) both captures
+# share the same vgpr allocator snapshot, so byte-keys match — see
+# ORAM1 §4.5 for the cross-form (symbolic-vs-numeric) resolution path
+# and ORAM1 §6.2 for the false-positive/false-negative budget. The
+# benefit is body-blindness: cross-body pipelining of identical dataflow
+# now matches at the edge-key layer (which was the blocker A+E was
+# designed to close).
+#
+# This test pins the new contract: allocation-EQUAL captures yield
+# matching keys (the operative property in real captures), and
+# allocation-DIFFERENT captures produce distinct keys (the deliberate
+# loss of the synthetic invariance).
 
 
-class TestEdgeIdentityAllocationInvariance:
-    """Edge identities are allocation-invariant.
+class TestEdgeIdentityByteKeyContract:
+    """Edge identities are byte-key based under hdem Approach E.
 
-    Two graphs with the same topology but different absolute register
-    allocations (e.g. LR's destination is `vgpr(8, 4)` in one and
-    `vgpr(12, 4)` in the other, with the consuming MFMA's `a` input
-    pointed at the same vgpr accordingly) must produce the SAME edge
-    identity tuples.
+    The pre-hdem allocation-invariance guarantee is dropped in favor of
+    physical-byte matching. Real captures share an allocator snapshot
+    so the byte-keys match anyway; synthetic captures with mismatched
+    physical registers (which don't occur in real-build comparison) get
+    distinct keys.
     """
 
-    def test_lr_to_mfma_identities_equal_under_allocation_change(self):
-        # Allocation A: LR writes vgpr(8,4); MFMA reads vgpr(8,4).
+    def test_lr_to_mfma_identities_equal_under_identical_allocation(self):
+        # Two captures with IDENTICAL allocations — the operative case
+        # in real CMS-vs-default comparison (both sides allocate from
+        # the same `vgprPool` snapshot inside one `kernelBody`).
+        def _build():
+            return make_capture(BODY_LABEL_ML, [
+                make_lr(8, 4, 64, slot=0, category="LRA0"),
+                make_swait(slot=1, dscnt=0),
+                make_mfma(0, 8, 32, slot=2, a_src_count=4),
+            ])
+        g_a = build_dataflow_graph(_wrap(_build()))
+        g_b = build_dataflow_graph(_wrap(_build()))
+        assert g_a.edge_keys() == g_b.edge_keys()
+        assert len(g_a.edge_keys()) > 0
+
+    def test_lr_to_mfma_identities_differ_under_allocation_change(self):
+        # Two captures with DIFFERENT physical register allocations but
+        # identical topology. Under hdem Approach E (byte-key edge
+        # matching) the keys are deliberately distinct — the byte-key
+        # carries the physical-register identifier, which is the
+        # discriminator that makes "the same physical byte flowed from
+        # one writer to one reader" the matching primitive. This is
+        # NOT a regression: real captures share an allocator snapshot
+        # (same `kernelBody` invocation), so this divergence does not
+        # occur in the motivating case. See ORAM1 §4.5 / §6.2.
         cap_a = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
             make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
-        # Allocation B: LR writes vgpr(12,4); MFMA reads vgpr(12,4).
         cap_b = make_capture(BODY_LABEL_ML, [
             make_lr(12, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
@@ -976,17 +1034,9 @@ class TestEdgeIdentityAllocationInvariance:
         ])
         g_a = build_dataflow_graph(_wrap(cap_a))
         g_b = build_dataflow_graph(_wrap(cap_b))
-
-        # Edge identities must match exactly. The byte_offset component must
-        # encode intra-operand position (0..3 for the 4-byte LR->MFMA dataflow)
-        # — NOT absolute physical-register byte-keys (('v', 8) vs ('v', 12)).
-        assert g_a.edge_keys() == g_b.edge_keys(), (
-            "Edge identities must be allocation-invariant: same topology, "
-            "different register allocations -> same edge keys.\n"
-            f"A: {sorted(g_a.edge_keys())}\nB: {sorted(g_b.edge_keys())}"
-        )
-        # Sanity: the keys are not empty (we actually built edges).
-        assert len(g_a.edge_keys()) > 0
+        # Different physical bytes -> different byte-keys -> different
+        # edge keys. Allocation-invariance is intentionally dropped.
+        assert g_a.edge_keys() != g_b.edge_keys()
 
 
 class TestLegitimateCmsReorderNoFailure:

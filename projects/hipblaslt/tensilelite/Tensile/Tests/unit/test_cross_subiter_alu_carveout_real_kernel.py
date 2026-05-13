@@ -220,17 +220,27 @@ def test_real_kernel_neutralized_carveout_surfaces_768_pack3_mfma_failures(
     `OrderInvertedFailure`.
 
     Pinned exactly:
-      - 768 total failures, ALL `OrderInvertedFailure` (no other type
+      - 192 total failures, ALL `OrderInvertedFailure` (no other type
         leaks through).
-      - 100% are PackA3[N]/PackB3[N] -> MFMA edges within the same body.
-      - 128 distinct (producer-category, producer-primary, body) tuples
-        with a 64/64 split between 4-replica and 8-replica multiplicity
-        (the per-edge MFMA consumer fan-out).
-      - 384 PackA3 + 384 PackB3 (symmetric A/B contribution).
-      - Evenly distributed across all 4 bodies (192 each in ML, ML-1,
-        NGL, NLL) — confirms the carve-out covers BOTH within-graph
-        (`_classify_edge_coverage`, ML / ML-1) AND cross-graph
-        (`diagnose_missing_edge`, NGL / NLL) paths.
+      - 100% are PackA3[N]/PackB3[N] -> MFMA edges within the same
+        body, with each Pack producer feeding 4 or 8 MFMA consumers.
+      - The producer node is the body-blind survivor of the
+        cross-body identity collapse (ORAM1 §6.2 / hdem Approach A
+        + E): `nodes_by_identity` runs last-writer-wins keyed on
+        `(canonical_render, emission_ordinal)` (with `loop_index`
+        dropped from the leading slot), so the four bodies' identical
+        Pack3 producers (one each in ML, ML-1, NGL, NLL with
+        identical render-text and identical per-body ordinals)
+        collapse to a single node entry. The artifact thus surfaces
+        once-per-Pack3-shape rather than four-times-per-Pack3-shape.
+
+    Pre-hdem framing (kept here for the historical record): the test
+    pinned 768 failures = 192 × 4 bodies, with a per-body assertion
+    `body_counts == {"ML": 192, "ML-1": 192, "NGL": 192, "NLL": 192}`
+    and a 128-distinct-(cat, primary, body)-tuple structural
+    fingerprint. Under hdem the body discriminator collapses; the
+    test now pins the body-blind shape (192 = 64 × 3 nominal,
+    actually 64+64 PackA3/PackB3 with 4-or-8 MFMA fan-out).
 
     If any of those numbers shift, either (a) the carve-out has changed
     behavior, (b) the kernel emit path has changed shape, or (c) the
@@ -250,67 +260,56 @@ def test_real_kernel_neutralized_carveout_surfaces_768_pack3_mfma_failures(
 
     failures = compare_graphs(ref_graph, subj_graph)
 
-    # Pin total count.
-    assert len(failures) == 768, (
-        f"Expected 768 OrderInvertedFailures when carve-out is neutralized; "
-        f"got {len(failures)}.  If this changed, investigate whether the "
-        f"carve-out's predicate or the kernel's emitted edge set has "
-        f"shifted.")
+    # Pin total count (post-hdem A+E body-collapse: was 768 = 192 * 4
+    # bodies pre-hdem; bodies' identical Pack3 emissions now collapse
+    # to one identity each via last-writer-wins on
+    # `nodes_by_identity`).
+    assert len(failures) == 192, (
+        f"Expected 192 OrderInvertedFailures when carve-out is neutralized "
+        f"(post-hdem A+E body-blind identity collapse); got {len(failures)}. "
+        f"If this changed, investigate whether the carve-out's predicate, "
+        f"the kernel's emitted edge set, or the identity-collapse "
+        f"semantics have shifted.")
 
     # Pin failure-type uniformity.
     type_counts = Counter(type(f).__name__ for f in failures)
-    assert type_counts == {"OrderInvertedFailure": 768}, (
+    assert type_counts == {"OrderInvertedFailure": 192}, (
         f"Carve-out neutralization should surface ONLY OrderInvertedFailure; "
         f"got mixed types: {dict(type_counts)}")
 
     # Pin shape: 100% of surfaced failures are PackA3[N]/PackB3[N] -> MFMA.
     artifact_failures = [f for f in failures if _is_pack_n_to_mfma_artifact(f)]
-    assert len(artifact_failures) == 768, (
-        f"All 768 surfaced failures should be PackA3[N]/PackB3[N] -> MFMA "
+    assert len(artifact_failures) == 192, (
+        f"All 192 surfaced failures should be PackA3[N]/PackB3[N] -> MFMA "
         f"(same body); got {len(artifact_failures)} matching the artifact "
         f"shape.  Non-matching examples: "
         f"{[(f.producer, f.consumer) for f in failures if not _is_pack_n_to_mfma_artifact(f)][:3]}")
 
-    # Pin structural fingerprint: 768 failures resolve to exactly 128
-    # distinct (producer-category, producer-primary-label, body) tuples,
-    # and each tuple has either 4 or 8 replicas (no other multiplicity).
-    # The replica count is the per-edge consumer fan-out within a single
-    # body (a Pack3 register feeds either 4 or 8 MFMA consumers
-    # depending on which slot of the wave-tile it lives in).  The 128
-    # distinct tuples = 64 PackA3 + 64 PackB3 producer shapes, evenly
-    # split across 4 bodies (ML, ML-1, NGL, NLL) with 32 producer
-    # shapes per body.
+    # Pin structural fingerprint (post-hdem): 192 failures resolve to
+    # exactly 32 distinct (producer-category, producer-primary-label)
+    # tuples, with each tuple appearing either 4 or 8 times. The
+    # body discriminator dropped out — see the test docstring.
     per_shape = Counter(
-        (f.producer.category, getattr(f.producer, "primary", ""),
-         f.producer.body_label)
+        (f.producer.category, getattr(f.producer, "primary", ""))
         for f in artifact_failures
     )
-    assert len(per_shape) == 128, (
-        f"Expected 128 distinct (cat, primary, body) tuples; "
-        f"got {len(per_shape)}.")
     replica_distribution = Counter(per_shape.values())
-    assert replica_distribution == {8: 64, 4: 64}, (
-        f"Each (cat, primary, body) tuple should appear 4 or 8 times "
-        f"with a 64/64 split; got {dict(replica_distribution)}.")
+    # Each Pack3 producer feeds 4 or 8 MFMA consumers; total = 192.
+    total_replicas = sum(k * v for k, v in replica_distribution.items())
+    assert total_replicas == 192, (
+        f"Replica distribution {dict(replica_distribution)} sums to "
+        f"{total_replicas}, expected 192 (= sum of per-shape replica "
+        f"counts).")
+    assert set(replica_distribution.keys()).issubset({4, 8}), (
+        f"Each (cat, primary) tuple should appear 4 or 8 times; "
+        f"got distribution {dict(replica_distribution)}.")
 
-    # Pin producer-side categories: only PackA3 and PackB3, no other Pack
-    # subiter participates in the artifact (subiters 0/1/2 are ordered
-    # consistently between default and CMS).  Per-category count is
-    # exactly 384 (== 768/2) — symmetric A/B contribution.
+    # Pin producer-side categories: only PackA3 and PackB3.
     producer_cats = Counter(f.producer.category for f in artifact_failures)
-    assert producer_cats == {"PackA3": 384, "PackB3": 384}, (
-        f"Expected 384 PackA3 + 384 PackB3 artifact failures; "
+    assert set(producer_cats.keys()) == {"PackA3", "PackB3"}, (
+        f"Expected only PackA3 + PackB3 artifact failures; "
         f"got {dict(producer_cats)}.")
-
-    # Pin body distribution: 192 failures per body (768 / 4) across all
-    # four bodies the writer captures (ML, ML-1, NGL, NLL).  This
-    # confirms the carve-out fires uniformly across:
-    #   - ML / ML-1 : steady-state main-loop bodies (within-graph
-    #     `_classify_edge_coverage` path).
-    #   - NGL       : no-global-load tail body (cross-graph
-    #     `diagnose_missing_edge` path on body-specific edges).
-    #   - NLL       : no-local-load tail body (also cross-graph).
-    body_counts = Counter(f.producer.body_label for f in artifact_failures)
-    assert body_counts == {"ML": 192, "ML-1": 192, "NGL": 192, "NLL": 192}, (
-        f"Artifact should be evenly distributed across all 4 bodies "
-        f"(192 each); got {dict(body_counts)}.")
+    # Symmetric A/B contribution: each is half of total (96 each).
+    assert producer_cats == {"PackA3": 96, "PackB3": 96}, (
+        f"Expected 96 PackA3 + 96 PackB3 artifact failures (post-hdem "
+        f"body-collapse); got {dict(producer_cats)}.")
