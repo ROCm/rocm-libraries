@@ -13,6 +13,8 @@
 #include <string>
 #include <string_view>
 
+#include "common/PlatformUtils.hpp"
+#include "harness/DeviceArch.hpp"
 #include "harness/TestSettings.hpp"
 
 namespace hipdnn_integration_tests
@@ -102,6 +104,14 @@ public:
             instance._testSettings.emplace(*configPath);
         }
 
+        // Detect device 0's gfx arch once at startup. Used by [[test_skips]]
+        // todo: In future allow the test runner to use any specified device.
+        instance._currentArch = currentDeviceArchRaw();
+
+        // Detect platform once at startup (always succeeds; PlatformUtils.hpp
+        // refuses to compile on unsupported OSes).
+        instance._currentPlatform = currentPlatform();
+
         instance._initialized = true;
     }
 
@@ -188,6 +198,34 @@ public:
         return _testSettings->findToleranceOverride(testName);
     }
 
+    // Raw gcnArchName for device 0 detected at init time (e.g.
+    // "gfx942:sramecc+:xnack-"). Empty if detection failed.
+    const std::string& getCurrentArch() const
+    {
+        throwIfNotInitialized();
+        return _currentArch;
+    }
+
+    // Lowercase platform name detected at init time ("windows" or "linux").
+    const std::string& getCurrentPlatform() const
+    {
+        throwIfNotInitialized();
+        return _currentPlatform;
+    }
+
+    // Find a [[test_skips]] entry matching the given test name on the current
+    // device arch and platform. Returns the entry's reason, or std::nullopt
+    // if no config is loaded or no entry matches.
+    std::optional<std::string> findSkipForTest(std::string_view testName) const
+    {
+        throwIfNotInitialized();
+        if(!_testSettings.has_value())
+        {
+            return std::nullopt;
+        }
+        return _testSettings->findSkip(testName, _currentArch, _currentPlatform);
+    }
+
     // Get the reference executor type. Value is resolved once at init time:
     // CLI flag > HIPDNN_TEST_REFERENCE_EXECUTOR env var > CPU default.
     ReferenceExecutorType getReferenceExecutorType() const
@@ -211,6 +249,8 @@ private:
     std::optional<std::string> _engineName;
     std::optional<TestSettings> _testSettings;
     std::optional<ReferenceExecutorType> _referenceExecutorType;
+    std::string _currentArch;
+    std::string _currentPlatform;
     bool _failOnUnsupported = false;
     bool _skipGraphValidation = false;
     bool _initialized = false;

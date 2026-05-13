@@ -212,6 +212,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int minDsPerWmma_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
 
+    // --- DS burst limiter ---
+    static constexpr int kMaxConsecutiveDs = 4;
+    int consecutiveDsCount_ = 0;
+
     // Per VGPR index: remaining modeled latency until ds_load result is safe for WMMA src.
     std::map<int, int> wmmaRegisterLatencyCounters;
 
@@ -293,6 +297,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmmaByKind(int pickKind) {
         node = globalReadQueue.top();
         globalReadQueue.pop();
         globalReadCounter++;
+        consecutiveDsCount_ = 0;
     } else if (pickKind == 1) {
         DAGNode* best = nullptr;
         for (DAGNode* n : localReadQueue) {
@@ -310,13 +315,16 @@ DAGNode* CDNA5ReadyQueue::popNonWmmaByKind(int pickKind) {
         minDsPerWmma_ = (totalWmmaRemaining_ > 0)
                             ? (int)std::ceil((float)totalDsRemaining_ / totalWmmaRemaining_)
                             : 0;
+        consecutiveDsCount_++;
     } else if (pickKind == 2) {
         node = otherQueue.top();
         otherQueue.pop();
+        consecutiveDsCount_ = 0;
     } else {
         assert(pickKind == 3);
         node = valuQueue.top();
         valuQueue.pop();
+        consecutiveDsCount_ = 0;
     }
     updateWMMAStatus(node);
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
@@ -378,6 +386,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     wmmaIssuedCountThisRegion_++;
 
     dsInsertedSinceLastWmma_ = 0;
+    consecutiveDsCount_ = 0;
     totalWmmaRemaining_--;
     minDsPerWmma_ = (totalWmmaRemaining_ > 0)
                         ? (int)std::ceil((float)totalDsRemaining_ / totalWmmaRemaining_)
@@ -396,11 +405,13 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode** outNode, int* kindOu
     DAGNode* best = nullptr;
     int kind = -1;
 
+    bool dsBurstOk = consecutiveDsCount_ < kMaxConsecutiveDs;
+
     if (!globalReadQueue.empty() && (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
         best = globalReadQueue.top();
         kind = 0;
     }
-    if (!localReadQueue.empty()) {
+    if (!localReadQueue.empty() && dsBurstOk) {
         DAGNode* t = localReadQueue.top();
         if (!best || t->id < best->id) {
             best = t;
@@ -416,7 +427,10 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode** outNode, int* kindOu
     }
     if (!valuQueue.empty() && isValuPickable()) {
         DAGNode* t = valuQueue.top();
-        if (!best || t->id < best->id) {
+        // DS reads have higher priority than VALU: only pick VALU when no
+        // ds_load is available (or burst limit reached).
+        bool dsAvailable = !localReadQueue.empty() && dsBurstOk;
+        if (!dsAvailable && (!best || t->id < best->id)) {
             best = t;
             kind = 3;
         }
@@ -610,9 +624,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         bool programOrderOk = hasWMMAInRegion_ ||
                               (smallestPickable == nullptr || bestWMMA->id < smallestPickable->id);
 
-        // Soft DS hint: when ds_loads are available and under the milestone,
-        // prefer issuing them first to hide latency across WMMAs.
-        bool dsPreferLoad = !localReadQueue.empty() && dsInsertedSinceLastWmma_ < minDsPerWmma_;
+        // DS-first: prefer issuing ds_loads before WMMA when available and
+        // burst limit not reached.
+        bool dsPreferLoad = !localReadQueue.empty() && consecutiveDsCount_ < kMaxConsecutiveDs;
 
         const bool blockWmmaForLoopHeadBalance =
             deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
@@ -782,6 +796,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssueConfig.issuedCount = 0;
     totalDsRemaining_ = 0;
     totalWmmaRemaining_ = 0;
+    consecutiveDsCount_ = 0;
     hasWMMAInRegion_ = false;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
         auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
