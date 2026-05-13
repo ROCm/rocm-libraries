@@ -340,21 +340,18 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
 {
     // Configuration matching multiple MIOpen solvers with different workspace requirements.
-    // A plain 3x3 / dilation-1 conv collapses to zero-workspace solvers (e.g. ConvAsm3x3U,
-    // ConvMlirIgemmFwdXdlops) as the fastest pick on both gfx90a and gfx942, leaving
-    // range.min == range.max == 0. Dilation 2 excludes the asm-direct 3x3 solver and forces
-    // an ImplicitGEMM/Direct solver with workspace; verified on gfx90a and gfx942:
-    // range = {0, 675840}.
+    // Dilation 2 excludes ConvAsm3x3U (which would otherwise be the zero-workspace fastest
+    // pick) and forces an ImplicitGEMM/Direct solver with a non-zero workspace.
     std::vector<int64_t> xDims = {2, 32, 28, 28};
+    auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
     std::vector<int64_t> wDims = {64, 32, 3, 3};
+    auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
     std::vector<int64_t> yDims = {2, 64, 28, 28};
+    auto yStrides = hipdnn_data_sdk::utilities::generateStrides(yDims);
     std::vector<int64_t> convPrePadding = {2, 2};
     std::vector<int64_t> convPostPadding = {2, 2};
     std::vector<int64_t> convStrides = {1, 1};
     std::vector<int64_t> convDilation = {2, 2};
-    auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-    auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
-    auto yStrides = hipdnn_data_sdk::utilities::generateStrides(yDims);
 
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
                                                                        xStrides,
@@ -390,18 +387,17 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
 TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitBwd)
 {
     // Configuration matching multiple MIOpen solvers with different workspace requirements.
-    // See PlanExecutesWithMinWorkspaceLimitFwd above for the dilation-2 rationale.
-    // Verified on gfx90a and gfx942: range = {0, 675840}.
+    // See PlanExecutesWithMinWorkspaceLimitFwd for the dilation-2 rationale.
     std::vector<int64_t> dxDims = {2, 32, 28, 28};
+    auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(dxDims);
     std::vector<int64_t> wDims = {64, 32, 3, 3};
+    auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
     std::vector<int64_t> dyDims = {2, 64, 28, 28};
+    auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
     std::vector<int64_t> convPrePadding = {2, 2};
     std::vector<int64_t> convPostPadding = {2, 2};
     std::vector<int64_t> convStrides = {1, 1};
     std::vector<int64_t> convDilation = {2, 2};
-    auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(dxDims);
-    auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
-    auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
 
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(dxDims,
                                                                        dxStrides,
