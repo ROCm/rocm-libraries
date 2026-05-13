@@ -31,8 +31,10 @@
 #include <HipdnnDataType.h>
 #include <HipdnnDiagonalAlignment.h>
 #include <HipdnnNormFwdPhase.h>
+#include <HipdnnPaddingMode.h>
 #include <HipdnnPointwiseMode.h>
 #include <HipdnnReduceTensorOp.h>
+#include <HipdnnResampleMode.h>
 #include <hipdnn_data_sdk/types.hpp>
 
 #include <hipdnn_frontend/Error.hpp>
@@ -147,6 +149,31 @@ enum class ReductionMode
     MUL_NO_ZEROS = 9, ///< Product reduction excluding zeros
 };
 typedef ReductionMode ReductionMode_t; ///< @brief Type alias for ReductionMode
+
+/**
+ * @enum ResampleMode
+ * @brief Specifies the resample operation mode
+ */
+enum class ResampleMode
+{
+    NOT_SET = 0, ///< Resample mode not specified
+    MAXPOOL = 1, ///< Maximum pooling
+    AVGPOOL_EXCLUDE_PADDING = 2, ///< Average pooling (excludes padding from divisor)
+    AVGPOOL_INCLUDE_PADDING = 3 ///< Average pooling (includes padding in divisor)
+};
+typedef ResampleMode ResampleMode_t; ///< @brief Type alias for ResampleMode
+
+/**
+ * @enum PaddingMode
+ * @brief Specifies the padding mode for resample operations
+ */
+enum class PaddingMode
+{
+    NOT_SET = 0, ///< Padding mode not specified
+    NEG_INF_PAD = 1, ///< Pad with negative infinity
+    ZERO_PAD = 2 ///< Pad with zeros
+};
+typedef PaddingMode PaddingMode_t; ///< @brief Type alias for PaddingMode
 
 /**
  * @enum DataType
@@ -1340,6 +1367,78 @@ inline bool isBinaryPointwiseMode(PointwiseMode mode)
 inline bool isTernaryPointwiseMode(PointwiseMode mode)
 {
     return mode == PointwiseMode::BINARY_SELECT;
+}
+
+/**
+ * @brief Convert frontend ResampleMode to backend hipdnnResampleMode_t
+ */
+inline std::optional<hipdnnResampleMode_t> toBackendResampleMode(const ResampleMode& type)
+{
+    switch(type)
+    {
+    case ResampleMode::MAXPOOL:
+        return HIPDNN_RESAMPLE_MAXPOOL;
+    case ResampleMode::AVGPOOL_EXCLUDE_PADDING:
+        return HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING;
+    case ResampleMode::AVGPOOL_INCLUDE_PADDING:
+        return HIPDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnResampleMode_t to frontend ResampleMode
+ */
+inline std::pair<ResampleMode, Error> fromHipdnnResampleMode(hipdnnResampleMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_RESAMPLE_MAXPOOL:
+        return {ResampleMode::MAXPOOL, {}};
+    case HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING:
+        return {ResampleMode::AVGPOOL_EXCLUDE_PADDING, {}};
+    case HIPDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING:
+        return {ResampleMode::AVGPOOL_INCLUDE_PADDING, {}};
+    default:
+        return {ResampleMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnResampleMode_t value: " + std::to_string(static_cast<int>(mode))}};
+    }
+}
+
+/**
+ * @brief Convert frontend PaddingMode to backend hipdnnPaddingMode_t
+ */
+inline std::optional<hipdnnPaddingMode_t> toBackendPaddingMode(const PaddingMode& type)
+{
+    switch(type)
+    {
+    case PaddingMode::NEG_INF_PAD:
+        return HIPDNN_PADDING_NEG_INF_PAD;
+    case PaddingMode::ZERO_PAD:
+        return HIPDNN_PADDING_ZERO_PAD;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnPaddingMode_t to frontend PaddingMode
+ */
+inline std::pair<PaddingMode, Error> fromHipdnnPaddingMode(hipdnnPaddingMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_PADDING_NEG_INF_PAD:
+        return {PaddingMode::NEG_INF_PAD, {}};
+    case HIPDNN_PADDING_ZERO_PAD:
+        return {PaddingMode::ZERO_PAD, {}};
+    default:
+        return {PaddingMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnPaddingMode_t value: " + std::to_string(static_cast<int>(mode))}};
+    }
 }
 
 } // namespace hipdnn_frontend

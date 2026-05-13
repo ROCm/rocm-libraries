@@ -69,9 +69,6 @@ void ExecutionPlanDescriptor::finalize()
     auto handle = graph->getHandle();
     auto pluginResourceManager = handle->getPluginResourceManager();
     auto engineConfigPluginData = _engineConfig->getSerializedEngineConfig();
-    _serializedEngineConfig.assign(static_cast<const uint8_t*>(engineConfigPluginData.ptr),
-                                   static_cast<const uint8_t*>(engineConfigPluginData.ptr)
-                                       + engineConfigPluginData.size);
     _pluginResourceManager = pluginResourceManager;
     _engineId = engineId;
     _tensorUids = collectTensorUids(*graph);
@@ -358,17 +355,12 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "ExecutionPlanDescriptor::serializeBackendPlan() failed: resource manager is "
                   "null.");
-    THROW_IF_TRUE(_serializedEngineConfig.empty(),
-                  HIPDNN_STATUS_INTERNAL_ERROR,
-                  "ExecutionPlanDescriptor::serializeBackendPlan() failed: engine config is "
-                  "empty.");
 
     std::vector<uint8_t> pluginPayload;
     _pluginResourceManager->serializeExecutionContext(
         _engineId, _executionContext->get(), pluginPayload);
 
     flatbuffers::FlatBufferBuilder builder;
-    auto serializedEngineConfig = builder.CreateVector(_serializedEngineConfig);
     auto serializedPluginPayload = builder.CreateVector(pluginPayload);
     auto serializedTensorUids = builder.CreateVector(_tensorUids);
     auto executionPlan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
@@ -377,7 +369,6 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
         _engineId,
         _workspaceSize,
         serializedTensorUids,
-        serializedEngineConfig,
         serializedPluginPayload);
     builder.Finish(executionPlan);
 
@@ -425,13 +416,9 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
                 HIPDNN_STATUS_NOT_SUPPORTED,
                 "Serialized execution plan version is not supported.");
 
-    auto serializedEngineConfig = executionPlan->engine_config();
     auto serializedPluginPayload = executionPlan->plugin_payload();
     auto serializedTensorUids = executionPlan->tensor_uids();
 
-    THROW_IF_TRUE(serializedEngineConfig == nullptr || serializedEngineConfig->empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "Serialized execution plan contains an empty engine config.");
     THROW_IF_TRUE(serializedPluginPayload == nullptr || serializedPluginPayload->empty(),
                   HIPDNN_STATUS_BAD_PARAM,
                   "Serialized execution plan contains an empty plugin payload.");
@@ -445,18 +432,15 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
                 HIPDNN_STATUS_BAD_PARAM,
                 "Serialized execution plan contains an invalid workspace size.");
 
-    _serializedEngineConfig.assign(serializedEngineConfig->begin(), serializedEngineConfig->end());
     _tensorUids.assign(serializedTensorUids->begin(), serializedTensorUids->end());
     std::vector<uint8_t> pluginPayload(serializedPluginPayload->begin(),
                                        serializedPluginPayload->end());
 
-    const hipdnnPluginConstData_t engineConfigData{_serializedEngineConfig.data(),
-                                                   _serializedEngineConfig.size()};
     const hipdnnPluginConstData_t pluginPayloadData{pluginPayload.data(), pluginPayload.size()};
 
     _pluginResourceManager = pluginResourceManager;
     _executionContext = plugin::EnginePluginResourceManager::createExecutionContextFromSerialized(
-        _pluginResourceManager, _engineId, &engineConfigData, &pluginPayloadData);
+        _pluginResourceManager, _engineId, &pluginPayloadData);
 
     HipdnnBackendDescriptorImpl<ExecutionPlanDescriptor>::finalize();
 }
