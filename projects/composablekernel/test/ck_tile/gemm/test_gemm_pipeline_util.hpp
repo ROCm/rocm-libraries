@@ -121,15 +121,6 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompV4, Problem>
 };
 
 template <typename Problem>
-struct GemmPipelineTypeSelector<GemmPipelineType::CompV4Async, Problem>
-{
-    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompV4Async<Problem>;
-    using pipeline      = ck_tile::GemmPipelineAgBgCrCompV4Async<Problem>;
-
-    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompV4Async"; }
-};
-
-template <typename Problem>
 struct GemmPipelineTypeSelector<GemmPipelineType::CompV6, Problem>
 {
     using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompV6<Problem>;
@@ -419,7 +410,6 @@ class TestCkTileGemmPipeline : public ::testing::Test
         }
         // for TDM it used tdm_epilogue which don't support split-k
         if constexpr(PipelineType == GemmPipelineType::CompV4 ||
-                     PipelineType == GemmPipelineType::CompV4Async ||
                      PipelineType == GemmPipelineType::CompAsync ||
                      PipelineType == GemmPipelineType::CompAsyncEightWaves ||
                      PipelineType == GemmPipelineType::CompTDMV1 ||

@@ -17,12 +17,11 @@ using Intrawave = ck_tile::integral_constant<ck_tile::GemmPipelineScheduler,
 using Interwave = ck_tile::integral_constant<ck_tile::GemmPipelineScheduler,
                                              ck_tile::GemmPipelineScheduler::Interwave>;
 
-using Mem         = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::Mem>;
-using CompV3      = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV3>;
-using CompV4      = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV4>;
-using CompV4Async = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV4Async>;
-using CompV6      = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV6>;
-using CompAsync   = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsync>;
+using Mem       = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::Mem>;
+using CompV3    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV3>;
+using CompV4    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV4>;
+using CompV6    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV6>;
+using CompAsync = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsync>;
 using CompAsyncEightWaves =
     ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsyncEightWaves>;
 using CompTDMV1 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV1>;
@@ -372,31 +371,6 @@ using KernelTypesCompV4Wmma = ::testing::Types<
     std::tuple<    Col,     Row,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompV4>,
     std::tuple<    Col,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompV4>
 >;
-
-// CompV4Async: Async V4 pipeline with XOR shuffle for LDS bank conflict avoidance
-// Uses same block/warp tile configuration as CompAsync
-template <typename ALayout, typename BLayout, typename CLayout, typename InputType>
-using CompV4AsyncConfig = std::tuple<ALayout,
-                                     BLayout,
-                                     CLayout,
-                                     InputType, // AType
-                                     InputType, // BType
-                                     F32,       // AccType
-                                     F16,       // OutputType
-                                     I256,      // MBlockTileSize
-                                     I256,      // NBlockTileSize
-                                     I32,       // KBlockTileSize
-                                     I32,       // MWarpTileSize
-                                     I32,       // NWarpTileSize
-                                     I16,       // KWarpTileSize
-                                     Intrawave,
-                                     CompV4Async>;
-
-using KernelTypesCompV4Async = ::testing::Types<
-    CompV4AsyncConfig<Row, Col, Row, F16>,
-    CompV4AsyncConfig<Row, Col, Row, F8>
->;
-
 
 using KernelTypesPersistent = ::testing::Types<
     //         ALayout, BLayout, CLayout, ADataType, BDataType, AccDataType, CDataType, M_BlockSize, N_BlockSize, K_BlockSize, M_TileSize, M_TileSize, K_TileSize, Scheduler,  PipelineType,    Persistent

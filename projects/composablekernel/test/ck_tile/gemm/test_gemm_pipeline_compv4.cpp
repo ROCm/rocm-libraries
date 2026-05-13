@@ -22,11 +22,23 @@ class TestCkTileGemmPipelineCompV4
 
     static constexpr bool check_data_shape([[maybe_unused]] ck_tile::index_t M,
                                            [[maybe_unused]] ck_tile::index_t N,
-                                           [[maybe_unused]] ck_tile::index_t K,
+                                           ck_tile::index_t K,
                                            [[maybe_unused]] bool padM,
                                            [[maybe_unused]] bool padN,
-                                           [[maybe_unused]] bool padK)
+                                           bool padK)
     {
+        // The merged CompV4 pipeline routes Row,Col layouts through the async device path
+        // on gfx950. async_load_tile cannot mask out-of-bounds K elements, so padK with a
+        // K not divisible by K_Tile is unsupported there. Skip those shapes to match the
+        // original CompV4Async test's check_data_shape.
+        using Base = TestCkTileGemmPipeline<T, TestCkTileGemmPipelineCompV4<T>>;
+        if constexpr(std::is_same_v<typename Base::ALayout,
+                                    ck_tile::tensor_layout::gemm::RowMajor> &&
+                     std::is_same_v<typename Base::BLayout,
+                                    ck_tile::tensor_layout::gemm::ColumnMajor>)
+        {
+            return (!padK || (K % Base::K_Tile) == 0);
+        }
         return true;
     }
 };
