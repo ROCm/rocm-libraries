@@ -60,7 +60,7 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
-    SwizzleType swizzle_type = SwizzleType::None;
+    SwizzleType swizzle_type = SwizzleType::CyclicShift;
 
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
 
@@ -105,15 +105,15 @@ struct Config
 // Each group has 9 Dgrad + 9 Fprop configs:
 //   waves_per_wg = 16,8,7,6,5,4,3,2,1
 //
-// Group 0 (indices  0-17): No swizzle, direct DRAM epilogue
-// Group 1 (indices 18-35): No swizzle, LDS-staged epilogue
+// Group 0 (indices  0-17): Cyclic-shift swizzle, direct DRAM epilogue
+// Group 1 (indices 18-35): Cyclic-shift swizzle, LDS-staged epilogue
 // Group 2 (indices 36-53): XOR swizzle, direct DRAM epilogue
 // Group 3 (indices 54-71): XOR swizzle, LDS-staged epilogue
 template <DataType DT = DataType::fp16>
 struct KernelConfigurations
 {
 static constexpr Config<DT> configs[] = {
-    // ---- Group 0: No swizzle, direct DRAM epilogue (default) ----
+    // ---- Group 0: Cyclic-shift swizzle, direct DRAM epilogue (default) ----
     // Dgrad (indices 0-8)
     {.waves_per_wg = 16, .direction = Direction::Dgrad},
     {.waves_per_wg = 8, .direction = Direction::Dgrad},
@@ -134,7 +134,7 @@ static constexpr Config<DT> configs[] = {
     {.waves_per_wg = 3},
     {.waves_per_wg = 2},
     {.waves_per_wg = 1},
-    // ---- Group 1: No swizzle, LDS-staged epilogue ----
+    // ---- Group 1: Cyclic-shift swizzle, LDS-staged epilogue ----
     // Dgrad (indices 18-26)
     {.waves_per_wg = 16, .direction = Direction::Dgrad,
      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
@@ -282,6 +282,7 @@ static constexpr Config<DT> configs[] = {
      {.waves_per_wg = 8, .direction=Direction::Dgrad,
      .swizzle_type = SwizzleType::CyclicShift,
      .epilogue = EpilogueType::RegistersToGlobalMemory},
+     // ---- Group 4: Cyclic-shift swizzle, LDS-staged epilogue ----
      // Small vector load/store configs for padding cases (channels_per_group < 16)
      // where we can't use vectorized accesses without out-of-bounds.
      // Dgrad CyclicShift (indices 76-79)
@@ -312,8 +313,10 @@ static constexpr Config<DT> configs[] = {
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
      // No-swizzle fallback for padding (indices 84-85)
      {.waves_per_wg = 8, .direction = Direction::Dgrad,
+      .swizzle_type = SwizzleType::NoSwizzle,
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
      {.waves_per_wg = 8,
+      .swizzle_type = SwizzleType::NoSwizzle,
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
 };
 static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);

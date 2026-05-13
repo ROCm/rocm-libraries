@@ -74,8 +74,8 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
-    // Swizzle pattern - by default no explicit swizzle.
-    SwizzleType swizzle_type = SwizzleType::None;
+    // Swizzle pattern - by default cyclic-shift swizzle.
+    SwizzleType swizzle_type = SwizzleType::CyclicShift;
 
     // Epilogue type - by default skip LDS staging and write directly from registers to global memory.
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
@@ -125,8 +125,8 @@ struct Config
 //   waves_c64=2,waves_q4=8 / waves_c64=2,waves_q4=4 / waves_c64=2,waves_q4=2 /
 //   waves_c64=2,waves_q4=1 / waves_c64=1,waves_q4=1
 //
-// Group 0 (indices  0- 9): No swizzle, direct DRAM epilogue
-// Group 1 (indices 10-19): No swizzle, LDS-staged epilogue
+// Group 0 (indices  0- 9): Cyclic-shift swizzle, direct DRAM epilogue
+// Group 1 (indices 10-19): Cyclic-shift swizzle, LDS-staged epilogue
 // Group 2 (indices 20-29): XOR swizzle, direct DRAM epilogue
 // Group 3 (indices 30-39): XOR swizzle, LDS-staged epilogue
 template <DataType DT = DataType::fp16>
@@ -238,6 +238,7 @@ static constexpr Config<DT> configs[] = {
      {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
      .swizzle_type = SwizzleType::CyclicShift,
      .epilogue = EpilogueType::RegistersToGlobalMemory},
+     // ---- Group 4: Cyclic-shift swizzle, skip LDS-staged epilogue ----
      // Small vector load/store configs for padding cases (channels_per_group < 4)
      // where we can't use vectorized accesses without out-of-bounds.
      // The only relevant vector size are 1 and 1 since we need the number of both input and output channels

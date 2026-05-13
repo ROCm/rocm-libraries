@@ -65,7 +65,7 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
-    SwizzleType swizzle_type = SwizzleType::None;
+    SwizzleType swizzle_type = SwizzleType::CyclicShift;
 
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
 
@@ -113,8 +113,8 @@ struct Config
 // Each group has 8 Dgrad + 8 Fprop configs:
 //   waves_per_wg = 16,14,12,10,8,6,4,2  (must be even)
 //
-// Group 0 (indices  0-15): No swizzle, direct DRAM epilogue
-// Group 1 (indices 16-31): No swizzle, LDS-staged epilogue
+// Group 0 (indices  0-15): Cyclic-shift swizzle, direct DRAM epilogue
+// Group 1 (indices 16-31): Cyclic-shift swizzle, LDS-staged epilogue
 // Group 2 (indices 32-47): XOR swizzle, direct DRAM epilogue
 // Group 3 (indices 48-63): XOR swizzle, LDS-staged epilogue
 template <DataType DT = DataType::fp16>
@@ -122,7 +122,7 @@ struct KernelConfigurations
 {
 static constexpr Config<DT> configs[] = {
     // TODO: Prune the configurations: we need 2, 4, 8, 16 waves per workgroup.
-    // ---- Group 0: No swizzle, direct DRAM epilogue (default) ----
+    // ---- Group 0: Cyclic-shift swizzle, direct DRAM epilogue (default) ----
     // Dgrad (indices 0-7)
     {.waves_per_wg = 16, .direction = Direction::Dgrad},
     {.waves_per_wg = 14, .direction = Direction::Dgrad},
@@ -141,7 +141,7 @@ static constexpr Config<DT> configs[] = {
     {.waves_per_wg = 6},
     {.waves_per_wg = 4},
     {.waves_per_wg = 2},
-    // ---- Group 1: No swizzle, LDS-staged epilogue ----
+    // ---- Group 1: Cyclic-shift swizzle, LDS-staged epilogue ----
     // Dgrad (indices 16-23)
     {.waves_per_wg = 16, .direction = Direction::Dgrad,
      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
@@ -275,6 +275,7 @@ static constexpr Config<DT> configs[] = {
      {.waves_per_wg = 8, .direction=Direction::Dgrad,
      .swizzle_type = SwizzleType::CyclicShift,
      .epilogue = EpilogueType::RegistersToGlobalMemory},
+     // ---- Group 4: Cyclic-shift swizzle, LDS-staged epilogue ----
      // Small vector load/store configs for padding cases (channels_per_group < 32)
      // Dgrad CyclicShift (indices 68-72)
      {.waves_per_wg = 8, .direction = Direction::Dgrad,
