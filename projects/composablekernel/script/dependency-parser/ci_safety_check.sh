@@ -62,12 +62,8 @@ CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null ||
 # - Python: setup.py, pyproject.toml within projects/composablekernel/
 BUILD_INFRA_PATTERN="(projects/composablekernel/.*CMakeLists\.txt"
 BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/.*\.cmake$|projects/composablekernel/.*\.cmake\.in$"
-BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/.*Dockerfile"
-BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/Jenkinsfile"
-BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|\.github/.*composablekernel.*\.yml"
 BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/script/dependency-parser/"
 BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/script/cmake/"
-BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/\.clang-format|projects/composablekernel/\.clang-tidy"
 BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|projects/composablekernel/setup\.py|projects/composablekernel/pyproject\.toml)"
 
 if echo "$CHANGED_FILES" | grep -qE "${BUILD_INFRA_PATTERN}"; then
