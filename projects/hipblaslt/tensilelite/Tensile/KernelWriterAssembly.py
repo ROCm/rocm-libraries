@@ -5587,11 +5587,15 @@ class KernelWriterAssembly(KernelWriter):
         imod.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment="skip: even waves handle A"))
 
       imod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-                src1=sgpr(staggerTmp), comment=f"TDM addr += stagger offset"))
+                src1=sgpr(staggerTmp), comment=f"TDM addr += stagger offset (lo)"))
+      imod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
+                src1=sgpr(staggerTmp+1), comment=f"TDM addr += stagger offset (hi)"))
       imod.add(skipLabel)
     else:
       imod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-                src1=sgpr(staggerTmp), comment=f"TDM addr += stagger offset"))
+                src1=sgpr(staggerTmp), comment=f"TDM addr += stagger offset (lo)"))
+      imod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
+                src1=sgpr(staggerTmp+1), comment=f"TDM addr += stagger offset (hi)"))
 
   ##############################################################################
   # Remove stagger offset (before tail loop)
@@ -5684,11 +5688,15 @@ class KernelWriterAssembly(KernelWriter):
             imod.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment="skip: even waves handle A"))
 
           imod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-                    src1=sgpr(tmp), comment=f"TDM addr += removeStagger offset"))
+                    src1=sgpr(tmp), comment=f"TDM addr += removeStagger offset (lo)"))
+          imod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
+                    src1=sgpr(tmp+1), comment=f"TDM addr += removeStagger offset (hi)"))
           imod.add(skipLabel)
         else:
           imod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-                    src1=sgpr(tmp), comment=f"TDM addr += removeStagger offset"))
+                    src1=sgpr(tmp), comment=f"TDM addr += removeStagger offset (lo)"))
+          imod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
+                    src1=sgpr(tmp+1), comment=f"TDM addr += removeStagger offset (hi)"))
       else:
         imod.add(self.incrementSrd(tP, sgpr(tmp), sgpr(tmp+1)))
 
@@ -17712,21 +17720,26 @@ class KernelWriterAssembly(KernelWriter):
     incSgprName = f"GlobalReadIncs{tc}"
 
     if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
-      with self.allocTmpSgpr(1) as tmpSgprInfo:
-        incTmp = tmpSgprInfo.idx
+      with self.allocTmpSgpr(2) as tmpSgprInfo:
+        incTmpLo = tmpSgprInfo.idx
+        incTmpHi = tmpSgprInfo.idx + 1
 
         if prefetchIndex:
-          mod.add(SAddU32(dst=sgpr(incTmp), src0=self.loopCounter(kernel, self.states.unrollIdx), \
+          mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
                   src1=prefetchIndex, comment="remove pf(%u)"%prefetchIndex))
-          mod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=sgpr(incTmp), comment="Is this wrapIter? (pf)"))
+          mod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=sgpr(incTmpLo), comment="Is this wrapIter? (pf)"))
         else:
           mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
                     src1=sgpr("StaggerUIter"), comment="Is this the wrapIter?"))
-        mod.add(SCSelectB32(dst=sgpr(incTmp), src0=sgpr(f"WrapU{tc}"), src1=sgpr(incSgprName), \
-                comment="select WrapU or normal inc"))
+        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(f"WrapU{tc}+0"), src1=sgpr(incSgprName), \
+                comment="select WrapU or normal inc (lo)"))
+        mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(f"WrapU{tc}+1"), src1=0, \
+                comment="select WrapU or normal inc (hi)"))
 
         mod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-                src1=sgpr(incTmp), comment="TDM addr += inc (with wrap)"))
+                src1=sgpr(incTmpLo), comment="TDM addr += inc (with wrap, lo)"))
+        mod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
+                src1=sgpr(incTmpHi), comment="TDM addr += inc (with wrap, hi)"))
     else:
       mod.add(comp.incrementGlobalAddr(tdmGroup0, incSgprName))
 
@@ -17751,30 +17764,38 @@ class KernelWriterAssembly(KernelWriter):
 
     if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
       wavelen = kernel["WavefrontSize"]
-      with self.allocTmpSgpr(2) as tmpSgprInfo:
-        incTmp = tmpSgprInfo.idx
-        wrapTmp = tmpSgprInfo.idx + 1
+      with self.allocTmpSgpr(4) as tmpSgprInfo:
+        incTmpLo = tmpSgprInfo.idx
+        incTmpHi = tmpSgprInfo.idx + 1
+        wrapTmpLo = tmpSgprInfo.idx + 2
+        wrapTmpHi = tmpSgprInfo.idx + 3
 
         with self.allocTmpSgpr(1) as waveIdTmp:
           mod.add(VReadfirstlaneB32(dst=sgpr(waveIdTmp.idx), src=vgpr("Serial"), comment="get tId"))
           mod.add(SLShiftRightB32(dst=sgpr(waveIdTmp.idx), shiftHex=ceil(log2(wavelen)), \
                   src=sgpr(waveIdTmp.idx), comment="waveId"))
           mod.add(SBitcmp1B32(src0=sgpr(waveIdTmp.idx), src1=0, comment="check wave parity"))
-        mod.add(SCSelectB32(dst=sgpr(wrapTmp), src0=sgpr(f"WrapU{tcB}"), src1=sgpr(f"WrapU{tcA}"), \
-                comment="select WrapU based on wave parity"))
+        mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
+                comment="select WrapU based on wave parity (lo)"))
+        mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
+                comment="select WrapU based on wave parity (hi)"))
 
         if prefetchIndex:
-          mod.add(SAddU32(dst=sgpr(incTmp), src0=self.loopCounter(kernel, self.states.unrollIdx), \
+          mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
                   src1=prefetchIndex, comment="remove pf(%u)"%prefetchIndex))
-          mod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=sgpr(incTmp), comment="Is this wrapIter? (pf)"))
+          mod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=sgpr(incTmpLo), comment="Is this wrapIter? (pf)"))
         else:
           mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
                     src1=sgpr("StaggerUIter"), comment="Is this the wrapIter?"))
-        mod.add(SCSelectB32(dst=sgpr(incTmp), src0=sgpr(wrapTmp), src1=sgpr(incSgprName), \
-                comment="select WrapU or normal inc"))
+        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(wrapTmpLo), src1=sgpr(incSgprName), \
+                comment="select WrapU or normal inc (lo)"))
+        mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(wrapTmpHi), src1=0, \
+                comment="select WrapU or normal inc (hi)"))
 
         mod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-                src1=sgpr(incTmp), comment="TDM addr += inc (with wrap)"))
+                src1=sgpr(incTmpLo), comment="TDM addr += inc (with wrap, lo)"))
+        mod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
+                src1=sgpr(incTmpHi), comment="TDM addr += inc (with wrap, hi)"))
     else:
       mod.add(comp.incrementGlobalAddr(tdmGroup0, incSgprName))
 
