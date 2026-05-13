@@ -111,7 +111,7 @@ namespace TensileLite
 
             virtual int error() const override
             {
-                return 0;
+                return static_cast<int>(m_encounteredNonFatalError);
             }
 
             virtual bool                                 moreSolutionsInProblem() const = 0;
@@ -129,6 +129,8 @@ namespace TensileLite
                                        ContractionProblemGemm& problem,
                                        bool                    isReportValid=true);
             virtual bool checkSolution(ContractionSolution& solution);
+
+            virtual void recordNonFatalError() override;
 
             std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> m_library;
             std::shared_ptr<Hardware>                                      m_hardware;
