@@ -86,4 +86,44 @@ struct Mfma16x16x32_32c
     }
 };
 
+// =====================================================================
+// BF16 MFMA functors
+// =====================================================================
+
+// MFMA functor for 4-channel BF16 kernel (mfma_f32_4x4x4bf16_1k).
+// Same lane mapping as Mfma4x4x4 but with bf16 input.
+// Supported on gfx942 and gfx950.
+struct Mfma4x4x4_bf16
+{
+    using input_type = bf16x4_t;
+    __device__ fp32x4_t operator()(bf16x4_t weight, bf16x4_t input, fp32x4_t acc) const
+    {
+        return __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(weight, input, acc, 0, 0, 0);
+    }
+};
+
+// MFMA functor for 16-channel BF16 kernel (mfma_f32_16x16x16bf16_1k).
+// Same lane mapping as Mfma16x16x16 but with bf16 input.
+// Supported on gfx942 and gfx950.
+struct Mfma16x16x16_bf16
+{
+    using input_type = bf16x4_t;
+    __device__ fp32x4_t operator()(bf16x4_t weight, bf16x4_t input, fp32x4_t acc) const
+    {
+        return __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(weight, input, acc, 0, 0, 0);
+    }
+};
+
+// MFMA functor for 8c/32c BF16 kernel (mfma_f32_16x16x32_bf16).
+// Same lane mapping as Mfma16x16x32 / Mfma16x16x32_32c but with bf16 input.
+// Supported on gfx950 only.
+struct Mfma16x16x32_bf16
+{
+    using input_type = bf16x8_t;
+    __device__ fp32x4_t operator()(bf16x8_t weight, bf16x8_t input, fp32x4_t acc) const
+    {
+        return __builtin_amdgcn_mfma_f32_16x16x32_bf16(weight, input, acc, 0, 0, 0);
+    }
+};
+
 } // namespace ck_tile::direct_conv

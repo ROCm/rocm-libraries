@@ -27,7 +27,7 @@ namespace direct_conv {
 //   TC::Mfma::MakeAccTileDistribution()
 //   TC::TOTAL_SPATIAL, TC::BLOCK_W, TC::BLOCK_C8, TC::BLOCK_C4, TC::BLOCK_Q
 //   TC::INPUT_LDS_BUFFER_SIZE_C8, TC::INPUT_LDS_BUFFER_SIZE_FP16
-template <typename TC, auto cfg, typename InputType = ck_tile::fp16x4_t, bool Padded = true>
+template <typename TC, auto cfg, typename InputType = ck_tile::fp16x4_t, bool Padded = true, typename ElementType = _Float16>
 struct InputLoader
 {
     // Register type for MFMA input operand (matches read_from_lds parameter type).
@@ -36,7 +36,7 @@ struct InputLoader
     // Type aliases needed for temporary tile_window construction and MFMA reads.
     using InputDramWindowType = decltype(ck_tile::make_tile_window(
         ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
-            static_cast<const _Float16*>(nullptr),
+            static_cast<const ElementType*>(nullptr),
             TC::Input::MakeDramReadDescriptor(int{}, int{}, int{}, int{}, int{}, int{}, int{}, int{}, int{})),
         ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
                             ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
@@ -46,7 +46,7 @@ struct InputLoader
     static constexpr auto mfma_desc = TC::Input::MakeLdsReadDescriptor();
     static constexpr auto mfma_dist = TC::Mfma::MakeAccTileDistribution();
 
-    using MfmaBuf      = ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>;
+    using MfmaBuf      = ck_tile::buffer_view<ck_tile::address_space_enum::lds, ElementType, ck_tile::index_t, true>;
     using MfmaViewType = ck_tile::tensor_view<MfmaBuf, ck_tile::remove_cvref_t<decltype(mfma_desc)>>;
 
     using MfmaWindowType = decltype(ck_tile::make_tile_window(
@@ -60,7 +60,7 @@ struct InputLoader
     // Persistent members — scalar state only, no tile_window objects.
     __amdgpu_buffer_rsrc_t            input_rsrc;          // buffer resource for DRAM async loads
     ck_tile::index_t                  input_voffset;        // per-thread DRAM byte offset (advances per row)
-    CK_TILE_LDS_ADDR _Float16*        store_input_lds;      // per-thread LDS write destination (lane-0 address)
+    CK_TILE_LDS_ADDR ElementType*     store_input_lds;      // per-thread LDS write destination (lane-0 address)
     ck_tile::index_t                  row_stride_bytes;     // bytes per input row (for y-advance)
     ck_tile::index_t                  is_valid;             // per-thread pad-transform validity (constant across rows)
     bool                              load_active;          // whether this thread should issue buffer_load_lds
@@ -83,7 +83,7 @@ struct InputLoader
         int               sy_;                  // stride in height
         int               current_row_;         // current input row for padded fetch
         int               block_q_;             // spatial block offset
-        const _Float16*   input_base_padded_;   // base pointer for padded DRAM reads
+        const ElementType* input_base_padded_;  // base pointer for padded DRAM reads
     };
     struct EmptyState {};
     [[no_unique_address]] std::conditional_t<Padded, PaddedState, EmptyState> padded_state_;
@@ -91,7 +91,7 @@ struct InputLoader
     template <typename BlockCoords_>
     __device__ InputLoader(const BlockCoords_& bc,
                            uint4* input_lds,
-                           const _Float16* __restrict__ in,
+                           const ElementType* __restrict__ in,
                            int hi,
                            int wi,
                            int px,
@@ -127,7 +127,7 @@ struct InputLoader
         // and the Padded=false case without code duplication. ----
         auto init_unpadded = [&]() {
             const auto input_dram_desc = TC::Input::MakeDramReadDescriptor(hi, wi, bc.C, px, py, dx, dy, sx, sy);
-            const _Float16* input_base = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k;
+            const ElementType* input_base = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k;
             const auto input_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
                 input_base, input_dram_desc);
 
@@ -149,10 +149,10 @@ struct InputLoader
             auto elem_space_size = input_dram_desc.get_element_space_size();
             input_rsrc = ck_tile::make_builtin_buffer_resource(
                 input_base,
-                static_cast<uint32_t>(elem_space_size * sizeof(_Float16)));
+                static_cast<uint32_t>(elem_space_size * sizeof(ElementType)));
 
             // Per-thread DRAM byte offset.
-            input_voffset = static_cast<ck_tile::index_t>(dram_elem_offset * sizeof(_Float16));
+            input_voffset = static_cast<ck_tile::index_t>(dram_elem_offset * sizeof(ElementType));
 
             // LDS destination pointer.
             constexpr auto lds_store_desc = TC::Input::MakeLdsWriteDescriptor();
@@ -161,12 +161,12 @@ struct InputLoader
                                                          [ck_tile::number<0>{}].get_bottom_index();
             auto warp_lds_offset = ck_tile::make_tensor_coordinate(
                 lds_store_desc, warp_adaptor_bottom_idx).get_offset();
-            auto* lds_fp16_base = reinterpret_cast<CK_TILE_LDS_ADDR _Float16*>(
-                reinterpret_cast<uintptr_t>(reinterpret_cast<_Float16*>(&input_lds[0])));
-            store_input_lds = lds_fp16_base + warp_lds_offset;
+            auto* lds_elem_base = reinterpret_cast<CK_TILE_LDS_ADDR ElementType*>(
+                reinterpret_cast<uintptr_t>(reinterpret_cast<ElementType*>(&input_lds[0])));
+            store_input_lds = lds_elem_base + warp_lds_offset;
 
             // Row stride in bytes.
-            row_stride_bytes = static_cast<ck_tile::index_t>(wi * bc.C * sizeof(_Float16));
+            row_stride_bytes = static_cast<ck_tile::index_t>(wi * bc.C * sizeof(ElementType));
         };
 
         if constexpr(Padded)
@@ -225,7 +225,7 @@ struct InputLoader
         if (init_mfma_offsets)
         {
             auto mfma_buf_tmp = MfmaBuf{
-                reinterpret_cast<_Float16*>(input_lds_ptr),
+                reinterpret_cast<ElementType*>(input_lds_ptr),
                 static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_FP16)};
             auto mfma_view_tmp = MfmaViewType{mfma_buf_tmp, mfma_desc};
             auto mfma_window_tmp = ck_tile::make_tile_window(
@@ -297,10 +297,10 @@ struct InputLoader
 
     __device__ __forceinline__ void prefetch_tile_to_lds_unpadded(int lds_buffer_index)
     {
-        CK_TILE_LDS_ADDR _Float16* lds_dest =
+        CK_TILE_LDS_ADDR ElementType* lds_dest =
             store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
 
-        ck_tile::amd_async_buffer_load<_Float16, 8,
+        ck_tile::amd_async_buffer_load<ElementType, 8,
             ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
             lds_dest,
             input_rsrc,
@@ -340,7 +340,7 @@ struct InputLoader
 
         // Create LDS write window
         constexpr auto lds_write_desc = TC::Input::MakeLdsWriteDescriptor();
-        _Float16* lds_base = reinterpret_cast<_Float16*>(input_lds_ptr)
+        ElementType* lds_base = reinterpret_cast<ElementType*>(input_lds_ptr)
                              + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
         auto lds_write_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
             lds_base, lds_write_desc);
@@ -360,7 +360,7 @@ struct InputLoader
     // (no buffer_view overhead).
     __device__ __forceinline__ void read_from_lds(InputType& input_reg, int slice, int lds_buffer_index) const
     {
-        const _Float16* base = reinterpret_cast<const _Float16*>(input_lds_ptr)
+        const ElementType* base = reinterpret_cast<const ElementType*>(input_lds_ptr)
                                + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
         __builtin_memcpy(&input_reg, base + mfma_lds_offsets[slice], sizeof(input_reg));
     }

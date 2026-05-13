@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
+#include "ck_tile/ops/direct_convolution/utils/types.hpp"
 
 namespace ck_tile {
 namespace direct_conv {
@@ -19,14 +20,14 @@ namespace direct_conv {
 //   TC::Output::MakeDramWriteTileDistributionNarrow()
 //   TC::Output::MakeDramWriteDescriptorNarrow(ho, wo, C)
 //   TC::BLOCK_Q, TC::BLOCK_C4
-template <typename TC, bool Padded = true>
+template <typename TC, bool Padded = true, typename ElementType = _Float16>
 struct OutputWriter
 {
     // Type aliases for temporary tile_window construction.
     using OutputDramDesc =
         ck_tile::remove_cvref_t<decltype(TC::Output::MakeDramWriteDescriptorNarrow(int{}, int{}, int{}))>;
     using OutputDramBuf =
-        ck_tile::buffer_view<ck_tile::address_space_enum::global, _Float16, ck_tile::index_t, true>;
+        ck_tile::buffer_view<ck_tile::address_space_enum::global, ElementType, ck_tile::index_t, true>;
     using OutputDramView = ck_tile::tensor_view<OutputDramBuf, OutputDramDesc>;
     using OutputDramWindow = ck_tile::remove_cvref_t<decltype(ck_tile::make_tile_window(
         OutputDramView{},
@@ -38,7 +39,7 @@ struct OutputWriter
         TC::Output::MakeDramWriteTileDistributionNarrow()))>;
 
     // Persistent members — scalar state only.
-    _Float16*         output_base;         // base output pointer for this block
+    ElementType*      output_base;         // base output pointer for this block
     ck_tile::index_t  output_elem_offset;  // per-thread element offset (within-tile spatial+channel)
     ck_tile::index_t  row_stride_elems;    // elements per output row (wo * C)
     bool              store_valid;         // whether this thread's output position is in bounds
@@ -49,7 +50,7 @@ struct OutputWriter
     template <typename BlockCoords_>
     __device__ OutputWriter(const BlockCoords_& bc,
                             uint4*, // Unused, matches OutputWriterLds constructor signature.
-                            _Float16* __restrict__ out,
+                            ElementType* __restrict__ out,
                             int ho,
                             int wo,
                             int k_per_group = TC::GROUP_SIZE)
@@ -113,17 +114,16 @@ struct OutputWriter
         } // tmp_window goes out of scope
     }
 
-    // Convert fp32x4 accumulator to fp16x4 and write directly to global memory.
+    // Convert fp32x4 accumulator to element type and write directly to global memory.
     __device__ __forceinline__ void flush(fp32x4_t acc_val, int p_out)
     {
         if(!store_valid)
             return;
 
-        // 1. Convert fp32→fp16.
-        __half2 halves[2];
-        halves[0] = __float22half2_rn({acc_val[0], acc_val[1]});
-        halves[1] = __float22half2_rn({acc_val[2], acc_val[3]});
-        auto out_reg = *reinterpret_cast<const fp16x4_t*>(halves);
+        // 1. Convert fp32 -> element type (4 elements packed as 2 x 32-bit words).
+        uint32_t words[2];
+        words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[0], acc_val[1]);
+        words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[2], acc_val[3]);
 
         // 2. Direct store to DRAM: base + row offset + per-thread offset.
         ck_tile::index_t store_offset = output_elem_offset
@@ -132,12 +132,12 @@ struct OutputWriter
         if(k_valid_count_ == 4)
         {
             // Full 8B write: all 4 channels valid.
-            __builtin_memcpy(output_base + store_offset, &out_reg, sizeof(out_reg));
+            __builtin_memcpy(output_base + store_offset, words, sizeof(words));
         }
         else
         {
             // Partial write: only k_valid_count_ channels valid.
-            const _Float16* src = reinterpret_cast<const _Float16*>(&out_reg);
+            const ElementType* src = reinterpret_cast<const ElementType*>(words);
             for(int i = 0; i < k_valid_count_; i++)
             {
                 output_base[store_offset + i] = src[i];
@@ -173,13 +173,13 @@ struct OutputWriter
 //   TC::Output::STORE_Q
 //   TC::Weight::WEIGHT_LDS_SIZE_UINT4
 //   TC::BLOCK_Q, TC::BLOCK_C4, TC::BLOCK_C8
-template <typename TC, bool Padded = true>
+template <typename TC, bool Padded = true, typename ElementType = _Float16>
 struct OutputWriterLds
 {
     // Type aliases for the LDS write path (MFMA distribution).
     static constexpr auto OutputLdsDist = TC::Mfma::MakeAccTileDistribution();
 
-    using OutputLdsBuf = ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>;
+    using OutputLdsBuf = ck_tile::buffer_view<ck_tile::address_space_enum::lds, ElementType, ck_tile::index_t, true>;
 
     using OutputLdsWriteDesc   = ck_tile::remove_cvref_t<decltype(TC::Output::MakeLdsWriteDescriptor())>;
     using OutputLdsWriteView   = ck_tile::tensor_view<OutputLdsBuf, OutputLdsWriteDesc>;
@@ -200,17 +200,17 @@ struct OutputWriterLds
     using StoreDramDesc =
         ck_tile::remove_cvref_t<decltype(TC::Output::MakeDramWriteDescriptorWide(int{}, int{}))>;
     using StoreDramBuf =
-        ck_tile::buffer_view<ck_tile::address_space_enum::global, _Float16, ck_tile::index_t, true>;
+        ck_tile::buffer_view<ck_tile::address_space_enum::global, ElementType, ck_tile::index_t, true>;
     using StoreDramView = ck_tile::tensor_view<StoreDramBuf, StoreDramDesc>;
 
     // Persistent members — scalar state only.
-    _Float16*         output_base;           // base output pointer for this block
-    _Float16*         lds_base;              // LDS buffer base pointer
+    ElementType*      output_base;           // base output pointer for this block
+    ElementType*      lds_base;              // LDS buffer base pointer
     ck_tile::index_t  lds_write_offset;      // per-thread LDS write element offset (MFMA distribution)
-    ck_tile::index_t  lds_read_offset;       // precomputed swizzled LDS offset in fp16 elements
+    ck_tile::index_t  lds_read_offset;       // precomputed swizzled LDS offset in elements
     ck_tile::index_t  output_elem_offset;    // per-thread output DRAM element offset (C8-aligned)
     ck_tile::index_t  row_stride_elems;      // wo * C elements per output row
-    ck_tile::index_t  lds_buf_size;          // LDS buffer size in fp16 elements
+    ck_tile::index_t  lds_buf_size;          // LDS buffer size in elements
     bool              store_valid;           // whether this thread should store to DRAM
 
     // Number of valid channels in this thread's 8-element wide store vector (0-8).
@@ -220,17 +220,17 @@ struct OutputWriterLds
     template <typename BlockCoords_>
     __device__ OutputWriterLds(const BlockCoords_& bc,
                                uint4* output_lds,
-                               _Float16* __restrict__ out,
+                               ElementType* __restrict__ out,
                                int ho,
                                int wo,
                                int k_per_group = TC::GROUP_SIZE)
     {
         output_base = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
-        lds_base = reinterpret_cast<_Float16*>(output_lds);
+        lds_base = reinterpret_cast<ElementType*>(output_lds);
         row_stride_elems = wo * bc.K;
         lds_buf_size = static_cast<ck_tile::index_t>(
             ck_tile::max(TC::Weight::WEIGHT_LDS_SIZE_UINT4, TC::Output::OUTPUT_LDS_BUFFER_SIZE) *
-            (sizeof(uint4) / sizeof(_Float16)));
+            (sizeof(uint4) / sizeof(ElementType)));
 
         // LDS write offset (MFMA distribution → swizzled LDS layout).
         {
@@ -325,18 +325,17 @@ struct OutputWriterLds
         }
     }
 
-    // Convert fp32x4 accumulator to fp16x4 and write through LDS to global memory.
+    // Convert fp32x4 accumulator to element type and write through LDS to global memory.
     __device__ __forceinline__ void flush(fp32x4_t acc_val, int p_out)
     {
-        // 1. Convert fp32→fp16.
-        __half2 halves[2];
-        halves[0] = __float22half2_rn({acc_val[0], acc_val[1]});
-        halves[1] = __float22half2_rn({acc_val[2], acc_val[3]});
-        auto out_reg = *reinterpret_cast<const fp16x4_t*>(halves);
+        // 1. Convert fp32 -> element type (4 elements packed as 2 x 32-bit words).
+        uint32_t words[2];
+        words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[0], acc_val[1]);
+        words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[2], acc_val[3]);
 
         // 2. Store 8B to LDS via precomputed offset (MFMA swizzled layout).
         // All threads participate in the write.
-        __builtin_memcpy(lds_base + lds_write_offset, &out_reg, sizeof(out_reg));
+        __builtin_memcpy(lds_base + lds_write_offset, words, sizeof(words));
 
         // 3. Wait for ALL threads' LDS writes to complete.
         // __syncthreads() is required here (not just s_waitcnt lgkmcnt(0)) because
@@ -362,7 +361,7 @@ struct OutputWriterLds
             else
             {
                 // Partial write: only k_valid_in_vec_ of the 8 channels are valid.
-                const _Float16* src = reinterpret_cast<const _Float16*>(&lds_data);
+                const ElementType* src = reinterpret_cast<const ElementType*>(&lds_data);
                 for(int i = 0; i < k_valid_in_vec_; i++)
                 {
                     output_base[store_offset + i] = src[i];

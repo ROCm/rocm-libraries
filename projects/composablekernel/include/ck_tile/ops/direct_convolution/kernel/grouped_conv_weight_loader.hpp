@@ -28,17 +28,17 @@ namespace direct_conv {
 // WeightLoader structs, which populate the weights[] array from LDS
 // and inherit the get<R,S>() / get_transposed<R,S>() accessors.
 // -----------------------------------------------------------------------
-template <int KH, int KW>
+template <int KH, int KW, typename VecType = fp16x4_t>
 struct WeightAccessor
 {
-    using value_type = fp16x4_t;
-    fp16x4_t weights[KH * KW];
+    using value_type = VecType;
+    VecType weights[KH * KW];
 
     static constexpr auto desc_ = ck_tile::make_naive_tensor_descriptor_packed(
         ck_tile::make_tuple(ck_tile::number<KH>{}, ck_tile::number<KW>{}));
 
     template <int R, int S>
-    __device__ __forceinline__ fp16x4_t get() const
+    __device__ __forceinline__ VecType get() const
     {
         constexpr auto coord = ck_tile::make_tensor_coordinate(
             desc_, ck_tile::make_tuple(ck_tile::number<R>{}, ck_tile::number<S>{}));
@@ -46,40 +46,23 @@ struct WeightAccessor
     }
 
     template <int R, int S>
-    __device__ __forceinline__ fp16x4_t get_transposed() const
+    __device__ __forceinline__ VecType get_transposed() const
     {
         return get<KH - 1 - R, KW - 1 - S>();
     }
 };
 
 // -----------------------------------------------------------------------
-// WeightAccessor8 — register-resident filter weight buffer with fp16x8_t
-// (8 fp16 values) per filter position. Used by 32c kernel where the MFMA
-// B-operand is fp16x8_t (mfma_f32_16x16x32_f16).
+// WeightAccessor8 — register-resident filter weight buffer with 8-element
+// vector per filter position. Used by 8c (Toeplitz) and 32c kernels where
+// the MFMA B-operand is fp16x8_t/bf16x8_t (mfma_f32_16x16x32).
+//
+// Note: WeightAccessor8 is a convenience alias — WeightAccessor with an
+// 8-element VecType provides the same functionality. This alias is kept
+// for readability at call sites that distinguish 4-element vs 8-element.
 // -----------------------------------------------------------------------
-template <int KH, int KW>
-struct WeightAccessor8
-{
-    using value_type = fp16x8_t;
-    fp16x8_t weights[KH * KW];
-
-    static constexpr auto desc_ = ck_tile::make_naive_tensor_descriptor_packed(
-        ck_tile::make_tuple(ck_tile::number<KH>{}, ck_tile::number<KW>{}));
-
-    template <int R, int S>
-    __device__ __forceinline__ fp16x8_t get() const
-    {
-        constexpr auto coord = ck_tile::make_tensor_coordinate(
-            desc_, ck_tile::make_tuple(ck_tile::number<R>{}, ck_tile::number<S>{}));
-        return weights[coord.get_offset()];
-    }
-
-    template <int R, int S>
-    __device__ __forceinline__ fp16x8_t get_transposed() const
-    {
-        return get<KH - 1 - R, KW - 1 - S>();
-    }
-};
+template <int KH, int KW, typename VecType = fp16x8_t>
+using WeightAccessor8 = WeightAccessor<KH, KW, VecType>;
 
 // Shared weight load function for grouped convolution kernels.
 //
@@ -95,10 +78,10 @@ struct WeightAccessor8
 //
 // cfg must provide:
 //   cfg.kh, cfg.kw, cfg.block_size()
-template <typename TC, auto cfg, bool Padded, typename BlockCoords_>
+template <typename TC, auto cfg, bool Padded, typename BlockCoords_, typename ElementType = _Float16>
 __device__ void weight_load_to_lds(const BlockCoords_& bc,
                                    uint4* weight_lds,
-                                   const _Float16* __restrict__ wei,
+                                   const ElementType* __restrict__ wei,
                                    const int c_per_group,
                                    const int k_per_group)
 {
@@ -127,7 +110,7 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
                 TC::Weight::template MakeDramReadDescriptorPadded<cfg.vector_size>(k_per_group, c_per_group);
 
             // Offset wei to bc.block_group * k_per_group * KH_KW * c_per_group.
-            const _Float16* wei_block =
+            const ElementType* wei_block =
                 wei + static_cast<size_t>(bc.block_group) * k_per_group * cfg.kh * cfg.kw * c_per_group;
 
             auto weight_padded_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
@@ -141,7 +124,7 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
 
             constexpr auto weight_lds_desc = TC::Weight::MakeLdsWriteDescriptor();
             auto weight_lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-                reinterpret_cast<_Float16*>(weight_lds), weight_lds_desc);
+                reinterpret_cast<ElementType*>(weight_lds), weight_lds_desc);
 
             // LDS window needs the same distribution as the DRAM window so that
             // store_tile knows where each thread writes its register tile elements.
@@ -190,7 +173,7 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
 
         constexpr auto weight_lds_desc = TC::Weight::MakeLdsWriteDescriptor();
         auto weight_lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-            reinterpret_cast<_Float16*>(weight_lds), weight_lds_desc);
+            reinterpret_cast<ElementType*>(weight_lds), weight_lds_desc);
         auto weight_lds_window = ck_tile::make_tile_window(
             weight_lds_view,
             ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
@@ -240,7 +223,8 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
 // WeightAccessorT must provide:
 //   value_type — fp16x4_t (16c) or fp16x8_t (32c)
 //   weights[]  — register array indexed by filter position
-template <typename TC, int KH, int KW, typename WeightAccessorT, int WavesPerGroup = 1>
+template <typename TC, int KH, int KW, typename WeightAccessorT, int WavesPerGroup = 1,
+          typename ElementType = _Float16>
 __device__ void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
 {
     constexpr int K_STRIDE = KH * KW * TC::GROUP_SIZE; // stride per K row in fp16
@@ -249,12 +233,12 @@ __device__ void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
     // Compute per-warp base pointer.
     const int warp_id = __builtin_amdgcn_readfirstlane(threadIdx.x / 64);
 
-    _Float16* warp_base;
+    ElementType* warp_base;
     if constexpr(WavesPerGroup == 1)
     {
         // 16c: each warp = one conv group.
         // wave_group = warp_id, reads K[0:GROUP_SIZE-1] of this group.
-        warp_base = reinterpret_cast<_Float16*>(weight_lds)
+        warp_base = reinterpret_cast<ElementType*>(weight_lds)
                   + warp_id * TC::GROUP_SIZE * K_STRIDE;
     }
     else
@@ -263,7 +247,7 @@ __device__ void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
         const int wave_group = warp_id / WavesPerGroup;
         const int wave_half = warp_id % WavesPerGroup;
         // wave_half * 16 offsets into the C dimension (C[0:15] or C[16:31]).
-        warp_base = reinterpret_cast<_Float16*>(weight_lds)
+        warp_base = reinterpret_cast<ElementType*>(weight_lds)
                   + wave_group * TC::GROUP_SIZE * K_STRIDE
                   + wave_half * 16;
     }
@@ -277,10 +261,11 @@ __device__ void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
 
     // Window dimensions match the descriptor: [GROUP_SIZE, GROUP_SIZE] for 16c,
     // [32, 16] for 32c (where each wave_half reads 32 K_out × 16 C).
-    using VecType = typename WeightAccessorT::value_type;
-    constexpr int WIN_DIM0 = std::is_same_v<VecType, ck_tile::fp16x4_t>
+    using VecType = typename std::remove_reference_t<WeightAccessorT>::value_type;
+    // Distinguish 16c (4-element vec, 8 bytes) from 32c (8-element vec, 16 bytes).
+    constexpr int WIN_DIM0 = (sizeof(VecType) == 4 * sizeof(ElementType))
                                  ? TC::GROUP_SIZE : 32;
-    constexpr int WIN_DIM1 = std::is_same_v<VecType, ck_tile::fp16x4_t>
+    constexpr int WIN_DIM1 = (sizeof(VecType) == 4 * sizeof(ElementType))
                                  ? TC::GROUP_SIZE : 16;
 
     auto lds_window = ck_tile::make_tile_window(
@@ -293,8 +278,8 @@ __device__ void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
     // Derive the output (post-transpose) distribution from the input distribution.
     using InputDstrEncode = typename DgradDist::DstrEncode;
     using OutputDstrEncode = typename ck_tile::OutputTileDistributionTraits<
-        InputDstrEncode, _Float16>::TransposedDstrEncode;
-    auto out_tensor = ck_tile::make_static_distributed_tensor<_Float16>(
+        InputDstrEncode, ElementType>::TransposedDstrEncode;
+    auto out_tensor = ck_tile::make_static_distributed_tensor<ElementType>(
         ck_tile::make_static_tile_distribution(OutputDstrEncode{}));
 
     static_for<KH_KW>(

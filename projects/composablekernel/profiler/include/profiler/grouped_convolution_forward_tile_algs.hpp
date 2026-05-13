@@ -191,6 +191,7 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
 #ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_nhwgc_bf16_calls.inc"
 #endif // DISABLE_IMPLICIT_GEMM_INSTANCES
+#include "../../experimental/grouped_convolution_tile_instances/instances/forward_direct/grouped_convolution_forward_tile_nhwgc_bf16_calls.inc"
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP32_FWD)
     {

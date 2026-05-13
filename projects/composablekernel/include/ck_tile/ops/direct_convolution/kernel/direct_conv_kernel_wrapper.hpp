@@ -132,9 +132,9 @@ private:
         par.dilation_h = static_cast<int>(host_args.conv_filter_dilations_[0]);
         par.dilation_w = static_cast<int>(host_args.conv_filter_dilations_[1]);
         par.groups     = static_cast<int>(host_args.G_);
-        par.in_type    = DataType::fp16;
-        par.wei_type   = DataType::fp16;
-        par.out_type   = DataType::fp16;
+        par.in_type    = Derived::kDataType;
+        par.wei_type   = Derived::kDataType;
+        par.out_type   = Derived::kDataType;
         par.order      = TensorOrder::NHWC;
         return par;
     }

@@ -245,13 +245,14 @@ struct BlockCoords
 // fp16x4_t into the WeightAccessor using get_as<fp16x4_t>() which
 // provides a zero-copy reinterpret view over the thread buffer.
 // ======================================================================
-template <typename TC, int KH, int KW>
-__device__ void weight_read_fprop(WeightAccessor<KH, KW>& wa, uint4* weight_lds)
+template <typename TC, int KH, int KW, typename WeightAccessorT,
+          typename ElementType = _Float16>
+__device__ void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
 {
     constexpr auto weight_lds_read_desc = TC::Weight::MakeLdsReadDescriptor();
     auto weight_lds_view =
         ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-            reinterpret_cast<_Float16*>(weight_lds), weight_lds_read_desc);
+            reinterpret_cast<ElementType*>(weight_lds), weight_lds_read_desc);
 
     constexpr auto weight_lds_read_dist = TC::Weight::MakeLdsReadTileDistribution();
     auto weight_lds_read_window = ck_tile::make_tile_window(
@@ -264,10 +265,11 @@ __device__ void weight_read_fprop(WeightAccessor<KH, KW>& wa, uint4* weight_lds)
 
     const auto weight_tile = ck_tile::load_tile(weight_lds_read_window);
 
-    // get_as<fp16x4_t>() reinterprets the thread_buffer<_Float16, KH_KW*4>
-    // as thread_buffer<fp16x4_t, KH_KW> — a zero-copy view where each
-    // element is one fp16x4_t per filter position.
-    const auto& vec_buf = weight_tile.get_thread_buffer().template get_as<ck_tile::fp16x4_t>();
+    // get_as<VecType>() reinterprets the thread_buffer<ElementType, KH_KW*4>
+    // as thread_buffer<VecType, KH_KW> — a zero-copy view where each
+    // element is one VecType (e.g. fp16x4_t or bf16x4_t) per filter position.
+    using VecType = typename std::remove_reference_t<WeightAccessorT>::value_type;
+    const auto& vec_buf = weight_tile.get_thread_buffer().template get_as<VecType>();
     static_for<TC::KH_KW>(
         [&]<int khw>()
         {
@@ -276,15 +278,13 @@ __device__ void weight_read_fprop(WeightAccessor<KH, KW>& wa, uint4* weight_lds)
 }
 
 // ======================================================================
-// is_applicable_base — data-type, layout, and geometry checks shared
-// by all grouped-conv fp16 variants.  Each variant additionally checks
+// is_applicable_base — layout and geometry checks shared by all
+// grouped-conv variants.  Each variant additionally checks
 // channels_per_group() and c_tot alignment.
+// Data type checks are done by make_variant<DT>().
 // ======================================================================
 inline bool is_applicable_base(const Conv2dParams& par)
 {
-    if(par.in_type  != DataType::fp16)   return false;
-    if(par.wei_type != DataType::fp16)   return false;
-    if(par.out_type != DataType::fp16)   return false;
     if(par.order    != TensorOrder::NHWC) return false;
     if(par.direction != Direction::Fprop &&
        par.direction != Direction::Dgrad) return false;

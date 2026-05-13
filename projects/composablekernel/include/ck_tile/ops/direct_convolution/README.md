@@ -8,7 +8,7 @@ For the original README, see [`projects/miopen/src/hipconv/README.md`](../../../
 
 ## Supported configurations
 
-- **Data type**: fp16
+- **Data type**: fp16, bf16
 - **Layout**: NHWC input, KYXC weights, NHWK output
 - **Direction**: Fprop (Forward), Dgrad (Backward Data)
 - **Filter**: 3x3, stride 1, dilation 1
@@ -21,6 +21,13 @@ The kernel uses MFMA instructions with buffer-load-to-LDS for input staging to c
 
 CK Tile direct convolutions support `gfx942` and `gfx950` device architectures.
 
+| Variant | fp16 | bf16 |
+|---------|------|------|
+| 4c (MFMA 4x4x4) | gfx942, gfx950 | gfx942, gfx950 |
+| 8c (MFMA 16x16x32) | gfx950 | gfx950 |
+| 16c (MFMA 16x16x16) | gfx942, gfx950 | gfx942, gfx950 |
+| 32c (MFMA 16x16x32) | gfx950 | gfx950 |
+
 ## Project structure
 
 Here's a rough project structure
@@ -28,13 +35,13 @@ Here's a rough project structure
 ```
 kernel/                                  — kernel implementations
   grouped_4c_fp16_hip_conv_impl.hpp      — 4-channel grouped fp16 kernel (MFMA 4x4x4 batch-16) using pure HIP.
-  grouped_4c_fp16_tile_conv_impl_v3.hpp  — 4-channel grouped fp16 kernel (MFMA 4x4x4 batch-16) using CK Tile abstractions.
+  grouped_4c_tile_conv_impl_v3.hpp  — 4-channel grouped fp16/bf16 kernel (MFMA 4x4x4 batch-16) using CK Tile abstractions.
   grouped_8c_fp16_hip_conv_impl.hpp      — 8-channel grouped fp16 kernel (MFMA 16x16x32 for Toeplitz matrix and S-loop fusion) using pure HIP.
-  grouped_8c_fp16_tile_conv_impl_v2.hpp  — 8-channel grouped fp16 kernel (MFMA 16x16x32 for Toeplitz matrix and S-loop fusion) using CK Tile abstractions.
+  grouped_8c_tile_conv_impl_v2.hpp  — 8-channel grouped fp16/bf16 kernel (MFMA 16x16x32 for Toeplitz matrix and S-loop fusion) using CK Tile abstractions.
   grouped_16c_fp16_hip_conv_impl.hpp     — 16-channel grouped fp16 kernel (MFMA 16x16x16) using pure HIP.
-  grouped_16c_fp16_tile_conv_impl_v2.hpp — 16-channel grouped fp16 kernel (MFMA 16x16x16) using CK Tile abstractions.
+  grouped_16c_tile_conv_impl_v2.hpp — 16-channel grouped fp16/bf16 kernel (MFMA 16x16x16) using CK Tile abstractions.
   grouped_32c_fp16_hip_conv_impl.hpp     — 32-channel grouped fp16 kernel (MFMA 16x16x32) using pure HIP.
-  grouped_32c_fp16_tile_conv_impl_v2.hpp — 32-channel grouped fp16 kernel (MFMA 16x16x32) using CK Tile abstractions.
+  grouped_32c_tile_conv_impl_v2.hpp — 32-channel grouped fp16/bf16 kernel (MFMA 16x16x32) using CK Tile abstractions.
 utils/                                   — utilities for kernel implementations
   conv_params.hpp                        — Conv2dParams, SizeView, Direction/DataType enums
   types.hpp                              — fp16/bf16/fp32/fp8 type aliases and mapping

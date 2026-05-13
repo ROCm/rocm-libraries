@@ -18,9 +18,9 @@ constexpr auto v2 = ck_tile::direct_conv::Version::v2;
 struct TileConv8cV2KernelTraits
 {
     template <int ConfigIdx>
-    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward8CFp16Kernel<ConfigIdx, v2>;
+    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward8CKernel<ConfigIdx, v2>;
     template <int ConfigIdx>
-    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData8CFp16Kernel<ConfigIdx, v2>;
+    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData8CKernel<ConfigIdx, v2>;
 };
 
 class DirectConvGrouped8cFp16TileConvV2Test

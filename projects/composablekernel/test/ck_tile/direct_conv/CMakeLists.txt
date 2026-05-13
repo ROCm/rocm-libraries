@@ -136,12 +136,53 @@ if(GPU_TARGETS MATCHES "gfx950")
         )
     endif()
 
+    # BF16 CK Tile direct convolution integration tests
+    add_gtest_executable(test_direct_conv_grouped_4c_bf16_tile_conv test_grouped_4c_bf16_tile_conv.cpp)
+    if(TARGET test_direct_conv_grouped_4c_bf16_tile_conv)
+        target_compile_options(test_direct_conv_grouped_4c_bf16_tile_conv PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
+    add_gtest_executable(test_direct_conv_grouped_8c_bf16_tile_conv test_grouped_8c_bf16_tile_conv.cpp)
+    if(TARGET test_direct_conv_grouped_8c_bf16_tile_conv)
+        target_compile_options(test_direct_conv_grouped_8c_bf16_tile_conv PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
+    add_gtest_executable(test_direct_conv_grouped_16c_bf16_tile_conv test_grouped_16c_bf16_tile_conv.cpp)
+    if(TARGET test_direct_conv_grouped_16c_bf16_tile_conv)
+        target_compile_options(test_direct_conv_grouped_16c_bf16_tile_conv PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
+    add_gtest_executable(test_direct_conv_grouped_32c_bf16_tile_conv test_grouped_32c_bf16_tile_conv.cpp)
+    if(TARGET test_direct_conv_grouped_32c_bf16_tile_conv)
+        target_compile_options(test_direct_conv_grouped_32c_bf16_tile_conv PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
     # Umbrella target: build and run all gfx950 integration tests CK Tile direct convs.
     set(CK_TILE_DIRECT_CONV_INTEGRATION_TEST_TARGETS
         test_direct_conv_grouped_4c_fp16_tile_conv
         test_direct_conv_grouped_16c_fp16_tile_conv
         test_direct_conv_grouped_8c_fp16_tile_conv
         test_direct_conv_grouped_32c_fp16_tile_conv
+        test_direct_conv_grouped_4c_bf16_tile_conv
+        test_direct_conv_grouped_8c_bf16_tile_conv
+        test_direct_conv_grouped_16c_bf16_tile_conv
+        test_direct_conv_grouped_32c_bf16_tile_conv
         test_direct_conv_mfma
         test_direct_conv_lds_bank_conflicts
         test_direct_conv_input_loader

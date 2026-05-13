@@ -7,10 +7,10 @@
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_kernel_wrapper.hpp"
 
 // CK Tile conv impl headers
-#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl_v3.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_8c_fp16_tile_conv_impl_v2.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_fp16_tile_conv_impl_v2.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_32c_fp16_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_tile_conv_impl_v3.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_8c_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_32c_tile_conv_impl_v2.hpp"
 
 // HIP conv impl headers
 #include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_hip_conv_impl.hpp"
@@ -24,52 +24,52 @@ namespace ck_tile::direct_conv {
 // Variant accessor structs — TileConv
 // ============================================================================
 
-template <Version V>
+template <Version V, DataType DT = DataType::fp16>
 struct TileConvVariant4c;
 
-template <>
-struct TileConvVariant4c<Version::v3>
+template <DataType DT>
+struct TileConvVariant4c<Version::v3, DT>
 {
-    static constexpr auto& configs         = grouped_4c_tile::v3::configs;
-    static constexpr auto  get_launch_params = &grouped_4c_tile::v3::get_launch_params;
-    static constexpr auto  launch           = &grouped_4c_tile::v3::launch;
-    static constexpr auto  make_variant     = &grouped_4c_tile::v3::make_variant;
+    static constexpr auto& configs         = grouped_4c_tile::v3::KernelConfigurations<DT>::configs;
+    static constexpr auto  get_launch_params = &grouped_4c_tile::v3::get_launch_params<DT>;
+    static constexpr auto  launch           = &grouped_4c_tile::v3::launch<DT>;
+    static constexpr auto  make_variant     = &grouped_4c_tile::v3::make_variant<DT>;
 };
 
-template <Version V>
+template <Version V, DataType DT = DataType::fp16>
 struct TileConvVariant8c;
 
-template <>
-struct TileConvVariant8c<Version::v2>
+template <DataType DT>
+struct TileConvVariant8c<Version::v2, DT>
 {
-    static constexpr auto& configs         = grouped_8c_tile::v2::configs;
-    static constexpr auto  get_launch_params = &grouped_8c_tile::v2::get_launch_params;
-    static constexpr auto  launch           = &grouped_8c_tile::v2::launch;
-    static constexpr auto  make_variant     = &grouped_8c_tile::v2::make_variant;
+    static constexpr auto& configs         = grouped_8c_tile::v2::KernelConfigurations<DT>::configs;
+    static constexpr auto  get_launch_params = &grouped_8c_tile::v2::get_launch_params<DT>;
+    static constexpr auto  launch           = &grouped_8c_tile::v2::launch<DT>;
+    static constexpr auto  make_variant     = &grouped_8c_tile::v2::make_variant<DT>;
 };
 
-template <Version V>
+template <Version V, DataType DT = DataType::fp16>
 struct TileConvVariant16c;
 
-template <>
-struct TileConvVariant16c<Version::v2>
+template <DataType DT>
+struct TileConvVariant16c<Version::v2, DT>
 {
-    static constexpr auto& configs         = grouped_16c_tile::v2::configs;
-    static constexpr auto  get_launch_params = &grouped_16c_tile::v2::get_launch_params;
-    static constexpr auto  launch           = &grouped_16c_tile::v2::launch;
-    static constexpr auto  make_variant     = &grouped_16c_tile::v2::make_variant;
+    static constexpr auto& configs         = grouped_16c_tile::v2::KernelConfigurations<DT>::configs;
+    static constexpr auto  get_launch_params = &grouped_16c_tile::v2::get_launch_params<DT>;
+    static constexpr auto  launch           = &grouped_16c_tile::v2::launch<DT>;
+    static constexpr auto  make_variant     = &grouped_16c_tile::v2::make_variant<DT>;
 };
 
-template <Version V>
+template <Version V, DataType DT = DataType::fp16>
 struct TileConvVariant32c;
 
-template <>
-struct TileConvVariant32c<Version::v2>
+template <DataType DT>
+struct TileConvVariant32c<Version::v2, DT>
 {
-    static constexpr auto& configs         = grouped_32c_tile::v2::configs;
-    static constexpr auto  get_launch_params = &grouped_32c_tile::v2::get_launch_params;
-    static constexpr auto  launch           = &grouped_32c_tile::v2::launch;
-    static constexpr auto  make_variant     = &grouped_32c_tile::v2::make_variant;
+    static constexpr auto& configs         = grouped_32c_tile::v2::KernelConfigurations<DT>::configs;
+    static constexpr auto  get_launch_params = &grouped_32c_tile::v2::get_launch_params<DT>;
+    static constexpr auto  launch           = &grouped_32c_tile::v2::launch<DT>;
+    static constexpr auto  make_variant     = &grouped_32c_tile::v2::make_variant<DT>;
 };
 
 // ============================================================================
@@ -113,79 +113,135 @@ struct HipConvVariant32c
 // ============================================================================
 
 // 4c TileConv
-template <int ConfigIdx, Version Ver = Version::v3>
-struct DirectTileConvForward4CFp16Kernel
-    : DirectConvKernel<DirectTileConvForward4CFp16Kernel<ConfigIdx, Ver>, ConfigIdx>
+template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
+struct DirectTileConvForward4CKernel
+    : DirectConvKernel<DirectTileConvForward4CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
 {
-    using V = TileConvVariant4c<Ver>;
+    using V = TileConvVariant4c<Ver, DT>;
     static constexpr bool kIsFprop = true;
-    static std::string GetNamePrefix() { return "direct_tile_conv_fp16_fwd_"; }
+    static constexpr DataType kDataType = DT;
+    static std::string GetNamePrefix()
+    {
+        if constexpr(DT == DataType::bf16)
+            return "direct_tile_conv_bf16_fwd_";
+        else
+            return "direct_tile_conv_fp16_fwd_";
+    }
 };
 
-template <int ConfigIdx, Version Ver = Version::v3>
-struct DirectTileConvBwdData4CFp16Kernel
-    : DirectConvKernel<DirectTileConvBwdData4CFp16Kernel<ConfigIdx, Ver>, ConfigIdx>
+template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
+struct DirectTileConvBwdData4CKernel
+    : DirectConvKernel<DirectTileConvBwdData4CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
 {
-    using V = TileConvVariant4c<Ver>;
+    using V = TileConvVariant4c<Ver, DT>;
     static constexpr bool kIsFprop = false;
-    static std::string GetNamePrefix() { return "direct_tile_conv_fp16_bwd_data_"; }
+    static constexpr DataType kDataType = DT;
+    static std::string GetNamePrefix()
+    {
+        if constexpr(DT == DataType::bf16)
+            return "direct_tile_conv_bf16_bwd_data_";
+        else
+            return "direct_tile_conv_fp16_bwd_data_";
+    }
 };
 
 // 8c TileConv
-template <int ConfigIdx, Version Ver = Version::v2>
-struct DirectTileConvForward8CFp16Kernel
-    : DirectConvKernel<DirectTileConvForward8CFp16Kernel<ConfigIdx, Ver>, ConfigIdx>
+template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
+struct DirectTileConvForward8CKernel
+    : DirectConvKernel<DirectTileConvForward8CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
 {
-    using V = TileConvVariant8c<Ver>;
+    using V = TileConvVariant8c<Ver, DT>;
     static constexpr bool kIsFprop = true;
-    static std::string GetNamePrefix() { return "direct_tile_conv_fp16_fwd_"; }
+    static constexpr DataType kDataType = DT;
+    static std::string GetNamePrefix()
+    {
+        if constexpr(DT == DataType::bf16)
+            return "direct_tile_conv_bf16_fwd_";
+        else
+            return "direct_tile_conv_fp16_fwd_";
+    }
 };
 
-template <int ConfigIdx, Version Ver = Version::v2>
-struct DirectTileConvBwdData8CFp16Kernel
-    : DirectConvKernel<DirectTileConvBwdData8CFp16Kernel<ConfigIdx, Ver>, ConfigIdx>
+template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
+struct DirectTileConvBwdData8CKernel
+    : DirectConvKernel<DirectTileConvBwdData8CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
 {
-    using V = TileConvVariant8c<Ver>;
+    using V = TileConvVariant8c<Ver, DT>;
     static constexpr bool kIsFprop = false;
-    static std::string GetNamePrefix() { return "direct_tile_conv_fp16_bwd_data_"; }
+    static constexpr DataType kDataType = DT;
+    static std::string GetNamePrefix()
+    {
+        if constexpr(DT == DataType::bf16)
+            return "direct_tile_conv_bf16_bwd_data_";
+        else
+            return "direct_tile_conv_fp16_bwd_data_";
+    }
 };
 
 // 16c TileConv
-template <int ConfigIdx, Version Ver = Version::v2>
-struct DirectTileConvForward16CFp16Kernel
-    : DirectConvKernel<DirectTileConvForward16CFp16Kernel<ConfigIdx, Ver>, ConfigIdx>
+template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
+struct DirectTileConvForward16CKernel
+    : DirectConvKernel<DirectTileConvForward16CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
 {
-    using V = TileConvVariant16c<Ver>;
+    using V = TileConvVariant16c<Ver, DT>;
     static constexpr bool kIsFprop = true;
-    static std::string GetNamePrefix() { return "direct_tile_conv_fp16_fwd_"; }
+    static constexpr DataType kDataType = DT;
+    static std::string GetNamePrefix()
+    {
+        if constexpr(DT == DataType::bf16)
+            return "direct_tile_conv_bf16_fwd_";
+        else
+            return "direct_tile_conv_fp16_fwd_";
+    }
 };
 
-template <int ConfigIdx, Version Ver = Version::v2>
-struct DirectTileConvBwdData16CFp16Kernel
-    : DirectConvKernel<DirectTileConvBwdData16CFp16Kernel<ConfigIdx, Ver>, ConfigIdx>
+template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
+struct DirectTileConvBwdData16CKernel
+    : DirectConvKernel<DirectTileConvBwdData16CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
 {
-    using V = TileConvVariant16c<Ver>;
+    using V = TileConvVariant16c<Ver, DT>;
     static constexpr bool kIsFprop = false;
-    static std::string GetNamePrefix() { return "direct_tile_conv_fp16_bwd_data_"; }
+    static constexpr DataType kDataType = DT;
+    static std::string GetNamePrefix()
+    {
+        if constexpr(DT == DataType::bf16)
+            return "direct_tile_conv_bf16_bwd_data_";
+        else
+            return "direct_tile_conv_fp16_bwd_data_";
+    }
 };
 
 // 32c TileConv
-template <int ConfigIdx, Version Ver = Version::v2>
-struct DirectTileConvForward32CFp16Kernel
-    : DirectConvKernel<DirectTileConvForward32CFp16Kernel<ConfigIdx, Ver>, ConfigIdx>
+template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
+struct DirectTileConvForward32CKernel
+    : DirectConvKernel<DirectTileConvForward32CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
 {
-    using V = TileConvVariant32c<Ver>;
+    using V = TileConvVariant32c<Ver, DT>;
     static constexpr bool kIsFprop = true;
-    static std::string GetNamePrefix() { return "direct_tile_conv_fp16_fwd_"; }
+    static constexpr DataType kDataType = DT;
+    static std::string GetNamePrefix()
+    {
+        if constexpr(DT == DataType::bf16)
+            return "direct_tile_conv_bf16_fwd_";
+        else
+            return "direct_tile_conv_fp16_fwd_";
+    }
 };
 
-template <int ConfigIdx, Version Ver = Version::v2>
-struct DirectTileConvBwdData32CFp16Kernel
-    : DirectConvKernel<DirectTileConvBwdData32CFp16Kernel<ConfigIdx, Ver>, ConfigIdx>
+template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
+struct DirectTileConvBwdData32CKernel
+    : DirectConvKernel<DirectTileConvBwdData32CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
 {
-    using V = TileConvVariant32c<Ver>;
+    using V = TileConvVariant32c<Ver, DT>;
     static constexpr bool kIsFprop = false;
-    static std::string GetNamePrefix() { return "direct_tile_conv_fp16_bwd_data_"; }
+    static constexpr DataType kDataType = DT;
+    static std::string GetNamePrefix()
+    {
+        if constexpr(DT == DataType::bf16)
+            return "direct_tile_conv_bf16_bwd_data_";
+        else
+            return "direct_tile_conv_fp16_bwd_data_";
+    }
 };
 
 // ============================================================================
@@ -199,6 +255,7 @@ struct DirectHipConvForward4CFp16Kernel
 {
     using V = HipConvVariant4c;
     static constexpr bool kIsFprop = true;
+    static constexpr DataType kDataType = DataType::fp16;
     static std::string GetNamePrefix() { return "direct_hip_conv_fp16_fwd_"; }
 };
 
@@ -208,6 +265,7 @@ struct DirectHipConvBwdData4CFp16Kernel
 {
     using V = HipConvVariant4c;
     static constexpr bool kIsFprop = false;
+    static constexpr DataType kDataType = DataType::fp16;
     static std::string GetNamePrefix() { return "direct_hip_conv_fp16_bwd_data_"; }
 };
 
@@ -218,6 +276,7 @@ struct DirectHipConvForward8CFp16Kernel
 {
     using V = HipConvVariant8c;
     static constexpr bool kIsFprop = true;
+    static constexpr DataType kDataType = DataType::fp16;
     static std::string GetNamePrefix() { return "direct_hip_conv_fp16_fwd_"; }
 };
 
@@ -227,6 +286,7 @@ struct DirectHipConvBwdData8CFp16Kernel
 {
     using V = HipConvVariant8c;
     static constexpr bool kIsFprop = false;
+    static constexpr DataType kDataType = DataType::fp16;
     static std::string GetNamePrefix() { return "direct_hip_conv_fp16_bwd_data_"; }
 };
 
@@ -237,6 +297,7 @@ struct DirectHipConvForward16CFp16Kernel
 {
     using V = HipConvVariant16c;
     static constexpr bool kIsFprop = true;
+    static constexpr DataType kDataType = DataType::fp16;
     static std::string GetNamePrefix() { return "direct_hip_conv_fp16_fwd_"; }
 };
 
@@ -246,6 +307,7 @@ struct DirectHipConvBwdData16CFp16Kernel
 {
     using V = HipConvVariant16c;
     static constexpr bool kIsFprop = false;
+    static constexpr DataType kDataType = DataType::fp16;
     static std::string GetNamePrefix() { return "direct_hip_conv_fp16_bwd_data_"; }
 };
 
@@ -256,6 +318,7 @@ struct DirectHipConvForward32CFp16Kernel
 {
     using V = HipConvVariant32c;
     static constexpr bool kIsFprop = true;
+    static constexpr DataType kDataType = DataType::fp16;
     static std::string GetNamePrefix() { return "direct_hip_conv_fp16_fwd_"; }
 };
 
@@ -265,6 +328,7 @@ struct DirectHipConvBwdData32CFp16Kernel
 {
     using V = HipConvVariant32c;
     static constexpr bool kIsFprop = false;
+    static constexpr DataType kDataType = DataType::fp16;
     static std::string GetNamePrefix() { return "direct_hip_conv_fp16_bwd_data_"; }
 };
 

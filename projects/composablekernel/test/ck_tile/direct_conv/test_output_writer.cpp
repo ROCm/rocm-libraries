@@ -20,10 +20,10 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl_v3.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_tile_conv_impl_v3.hpp"
 #include "ck_tile/ops/direct_convolution/utils/types.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_8c_fp16_tile_conv_impl_v2.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_fp16_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_8c_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_tile_conv_impl_v2.hpp"
 #pragma clang diagnostic pop
 
 #include <hip/hip_fp16.h>
@@ -37,8 +37,8 @@ using namespace grouped_4c_tile::v3;
 // ============================================================================
 // Config indices
 //
-// configs[9]  — Fprop, no swizzle, direct DRAM (OutputWriter)
-// configs[49] — Fprop, CyclicShift, vector_size=1, direct DRAM (OutputWriter)
+// KernelConfigurations<>::configs[9]  — Fprop, no swizzle, direct DRAM (OutputWriter)
+// KernelConfigurations<>::configs[49] — Fprop, CyclicShift, vector_size=1, direct DRAM (OutputWriter)
 // ============================================================================
 static constexpr int CFG_DIRECT   = 9;
 static constexpr int CFG_VEC8     = 43;
@@ -61,8 +61,8 @@ __global__ void test_output_write_kernel(_Float16* __restrict__ out,
                                           int c_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    using TC = TileConstants<configs[CfgIdx]>;
-    constexpr auto cfg = configs[CfgIdx];
+    using TC = TileConstants<KernelConfigurations<>::configs[CfgIdx]>;
+    constexpr auto cfg = KernelConfigurations<>::configs[CfgIdx];
 
     // When c_per_group is 0 (default), use GROUP_SIZE for backward compatibility.
     const int cpg = (c_per_group > 0) ? c_per_group : cfg.group_size();
@@ -102,8 +102,8 @@ protected:
     template <int CfgIdx>
     void run_and_verify(int k_per_group, int c_per_group = 0)
     {
-        using TC = TileConstants<configs[CfgIdx]>;
-        constexpr auto cfg = configs[CfgIdx];
+        using TC = TileConstants<KernelConfigurations<>::configs[CfgIdx]>;
+        constexpr auto cfg = KernelConfigurations<>::configs[CfgIdx];
         constexpr int BLOCK_SIZE = cfg.block_size();
         constexpr int BLOCK_Q = TC::BLOCK_Q;
         constexpr int BLOCK_GROUPS = cfg.block_groups();
@@ -288,8 +288,8 @@ __global__ void test_output_write_kernel_16c(_Float16* __restrict__ out,
                                               int c_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    using TC = ns_16c::TileConstants<ns_16c::configs[CfgIdx]>;
-    constexpr auto cfg = ns_16c::configs[CfgIdx];
+    using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
+    constexpr auto cfg = ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx];
 
     const int cpg = (c_per_group > 0) ? c_per_group : cfg.group_size();
     ck_tile::direct_conv::BlockCoords<cfg> bc(groups, cpg, k_per_group);
@@ -317,8 +317,8 @@ protected:
     template <int CfgIdx>
     void run_and_verify(int k_per_group, int c_per_group = 0)
     {
-        using TC = ns_16c::TileConstants<ns_16c::configs[CfgIdx]>;
-        constexpr auto cfg = ns_16c::configs[CfgIdx];
+        using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
+        constexpr auto cfg = ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx];
         constexpr int BLOCK_SIZE = cfg.block_size();
         constexpr int BLOCK_Q = TC::BLOCK_Q;
         constexpr int BLOCK_GROUPS = cfg.block_groups();
@@ -444,8 +444,8 @@ __global__ void test_output_write_kernel_8c(_Float16* __restrict__ out,
                                              int c_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    using TC = ns_8c::TileConstants<ns_8c::configs[CfgIdx]>;
-    constexpr auto cfg = ns_8c::configs[CfgIdx];
+    using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
+    constexpr auto cfg = ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx];
 
     const int cpg = (c_per_group > 0) ? c_per_group : cfg.group_size();
     ck_tile::direct_conv::BlockCoords<cfg> bc(groups, cpg, k_per_group);
@@ -473,8 +473,8 @@ protected:
     template <int CfgIdx>
     void run_and_verify(int k_per_group, int c_per_group = 0)
     {
-        using TC = ns_8c::TileConstants<ns_8c::configs[CfgIdx]>;
-        constexpr auto cfg = ns_8c::configs[CfgIdx];
+        using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
+        constexpr auto cfg = ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx];
         constexpr int BLOCK_SIZE = cfg.block_size();
         constexpr int BLOCK_Q = TC::BLOCK_Q;
         constexpr int BLOCK_GROUPS = cfg.block_groups();

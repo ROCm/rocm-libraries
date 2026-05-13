@@ -29,8 +29,10 @@ constexpr int WAVE_SIZE = 64;
 constexpr int BLOCK_Q = 16;
 
 // Kernel configuration parameters.
+template <DataType DT = DataType::fp16>
 struct Config
 {
+    static constexpr DataType data_type = DT;
     // Number of wave per workgroup.
     // Each wave computes BLOCK_Q=16 columns and waves_per_wg * 16 input channels.
     int waves_per_wg;
@@ -107,7 +109,10 @@ struct Config
 // Group 1 (indices 18-35): No swizzle, LDS-staged epilogue
 // Group 2 (indices 36-53): XOR swizzle, direct DRAM epilogue
 // Group 3 (indices 54-71): XOR swizzle, LDS-staged epilogue
-constexpr Config configs[] = {
+template <DataType DT = DataType::fp16>
+struct KernelConfigurations
+{
+static constexpr Config<DT> configs[] = {
     // ---- Group 0: No swizzle, direct DRAM epilogue (default) ----
     // Dgrad (indices 0-8)
     {.waves_per_wg = 16, .direction = Direction::Dgrad},
@@ -311,10 +316,11 @@ constexpr Config configs[] = {
      {.waves_per_wg = 8,
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
 };
+static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
+}; // KernelConfigurations
 
-constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
-
-inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
+template <DataType DT = DataType::fp16>
+inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
 {
     if(par.direction != cfg.direction)
         return false;
@@ -337,9 +343,10 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
     return true;
 }
 
+template <DataType DT = DataType::fp16>
 inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
 {
-    return get_launch_params_impl(configs[config_idx], par);
+    return get_launch_params_impl(KernelConfigurations<DT>::configs[config_idx], par);
 }
 
 // -----------------------------------------------------------------------
@@ -349,7 +356,7 @@ inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
 //   Weight::MakeLdsReadTileDistribution (Fprop weight read from LDS)
 //   Output::MakeDramWriteTileDistributionNarrow
 // -----------------------------------------------------------------------
-template <Config cfg>
+template <auto cfg>
 struct TileConstants : direct_conv::TileConstantsBase<cfg>
 {
     using Base = direct_conv::TileConstantsBase<cfg>;
@@ -452,7 +459,7 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
                 ck_tile::sequence<1>>;
 
             using InputEncode = typename ck_tile::InputTileDistributionTraits<
-                OutputEncode, _Float16>::TransposedDstrEncode;
+                OutputEncode, ToType<cfg.data_type>>::TransposedDstrEncode;
 
             return ck_tile::make_static_tile_distribution(InputEncode{});
         }
@@ -487,111 +494,122 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
 };
 
 // Workgroup-level coordinates derived from blockIdx.
-template <Config cfg>
+template <auto cfg>
 using BlockCoords = direct_conv::BlockCoords<cfg>;
 
 // InputLoader — DRAM→LDS async load, double-buffered, MFMA reads.
-template <Config cfg, bool Padded = true>
-using InputLoader = direct_conv::InputLoader<TileConstants<cfg>, cfg, ck_tile::fp16x4_t, Padded>;
+template <auto cfg, bool Padded = true>
+using InputLoader = direct_conv::InputLoader<TileConstants<cfg>, cfg,
+    typename std::conditional_t<cfg.data_type == DataType::bf16, ck_tile::bf16x4_t, ck_tile::fp16x4_t>,
+    Padded, ToType<cfg.data_type>>;
 
 // WeightLoader — async weight loads to LDS, then register reads.
-template <Config cfg>
-struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw>
+template <auto cfg>
+struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw,
+    std::conditional_t<cfg.data_type == DataType::bf16, bf16x4_t, fp16x4_t>>
 {
     using TC = TileConstants<cfg>;
+    using ElementType = ToType<cfg.data_type>;
 
     template <bool Padded_ = true, typename BlockCoords_>
     __device__ static void load_to_lds(const BlockCoords_& bc,
                                        uint4* weight_lds,
-                                       const _Float16* __restrict__ wei,
+                                       const ElementType* __restrict__ wei,
                                        int c_per_group,
                                        int k_per_group)
     {
-        direct_conv::weight_load_to_lds<TC, cfg, Padded_>(bc, weight_lds, wei, c_per_group, k_per_group);
+        direct_conv::weight_load_to_lds<TC, cfg, Padded_, BlockCoords_, ElementType>(
+            bc, weight_lds, wei, c_per_group, k_per_group);
     }
 
     // Read weights from LDS into registers (this->weights[]).
     __device__ void read_from_lds(uint4* weight_lds)
     {
         if constexpr(cfg.direction == Direction::Dgrad)
-            direct_conv::weight_read_dgrad<TC, cfg.kh, cfg.kw>(*this, weight_lds);
+            direct_conv::weight_read_dgrad<TC, cfg.kh, cfg.kw,
+                decltype(*this), 1, ElementType>(*this, weight_lds);
         else
-            direct_conv::weight_read_fprop<TC>(*this, weight_lds);
+            direct_conv::weight_read_fprop<TC, cfg.kh, cfg.kw,
+                decltype(*this), ElementType>(*this, weight_lds);
     }
 };
 
 // OutputWriter — direct DRAM writes (RegistersToGlobalMemory epilogue).
-template <Config cfg, bool Padded = true>
-using OutputWriter = direct_conv::OutputWriter<TileConstants<cfg>, Padded>;
+template <auto cfg, bool Padded = true>
+using OutputWriter = direct_conv::OutputWriter<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;
 
 // OutputWriterLds — LDS-staged writes (RegistersToLdsToGlobalMemory).
-template <Config cfg, bool Padded = true>
-using OutputWriterLds = direct_conv::OutputWriterLds<TileConstants<cfg>, Padded>;
+template <auto cfg, bool Padded = true>
+using OutputWriterLds = direct_conv::OutputWriterLds<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;
 
 // Main device function.
-template <Config cfg, bool Padded = true>
-__device__ void ck_tile_conv2d_grouped_16c_fp16_nhwc_impl(const _Float16* __restrict__ in,
-                                                            const _Float16* __restrict__ wei,
-                                                            double alpha,
-                                                            double beta,
-                                                            _Float16* __restrict__ out,
-                                                            int N,
-                                                            int groups,
-                                                            int c_per_group,
-                                                            int k_per_group,
-                                                            int hi,
-                                                            int wi,
-                                                            int ho,
-                                                            int wo,
-                                                            int fy,
-                                                            int fx,
-                                                            int sy,
-                                                            int sx,
-                                                            int dy,
-                                                            int dx,
-                                                            int py,
-                                                            int px)
+template <auto cfg, bool Padded = true>
+__device__ void ck_tile_conv2d_grouped_16c_nhwc_impl(const ToType<cfg.data_type>* __restrict__ in,
+                                                     const ToType<cfg.data_type>* __restrict__ wei,
+                                                     double alpha,
+                                                     double beta,
+                                                     ToType<cfg.data_type>* __restrict__ out,
+                                                     int N,
+                                                     int groups,
+                                                     int c_per_group,
+                                                     int k_per_group,
+                                                     int hi,
+                                                     int wi,
+                                                     int ho,
+                                                     int wo,
+                                                     int fy,
+                                                     int fx,
+                                                     int sy,
+                                                     int sx,
+                                                     int dy,
+                                                     int dx,
+                                                     int py,
+                                                     int px)
 {
     constexpr bool use_lds_epilogue = (cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory);
     using TC = TileConstants<cfg>;
+    using ElementType = ToType<cfg.data_type>;
+    using MfmaFn = std::conditional_t<cfg.data_type == DataType::bf16,
+        Mfma16x16x16_bf16, Mfma16x16x16>;
     using OutputWriterType = std::conditional_t<use_lds_epilogue,
         OutputWriterLds<cfg, Padded>, OutputWriter<cfg, Padded>>;
 
     direct_conv::grouped_conv_compute_loop<
-        TC, cfg, Padded, Mfma16x16x16,
-        BlockCoords<cfg>, InputLoader<cfg, Padded>, WeightLoader<cfg>, OutputWriterType>(
+        TC, cfg, Padded, MfmaFn,
+        BlockCoords<cfg>, InputLoader<cfg, Padded>, WeightLoader<cfg>, OutputWriterType,
+        cfg.kw, ElementType>(
         in, wei, out, N, groups, c_per_group, k_per_group, hi, wi, ho, wo, py, px);
 }
 
-template <Config cfg, bool Padded = true>
-__global__ void ck_tile_conv2d_grouped_16c_fp16_nhwc(const _Float16* __restrict__ in,
-                                                       const _Float16* __restrict__ wei,
-                                                       double alpha,
-                                                       double beta,
-                                                       _Float16* __restrict__ out,
-                                                       int N,
-                                                       int groups,
-                                                       int c_per_group,
-                                                       int k_per_group,
-                                                       int hi,
-                                                       int wi,
-                                                       int ho,
-                                                       int wo,
-                                                       int fy,
-                                                       int fx,
-                                                       int sy,
-                                                       int sx,
-                                                       int dy,
-                                                       int dx,
-                                                       int py,
-                                                       int px)
+template <auto cfg, bool Padded = true>
+__global__ void ck_tile_conv2d_grouped_16c_nhwc(const ToType<cfg.data_type>* __restrict__ in,
+                                                const ToType<cfg.data_type>* __restrict__ wei,
+                                                double alpha,
+                                                double beta,
+                                                ToType<cfg.data_type>* __restrict__ out,
+                                                int N,
+                                                int groups,
+                                                int c_per_group,
+                                                int k_per_group,
+                                                int hi,
+                                                int wi,
+                                                int ho,
+                                                int wo,
+                                                int fy,
+                                                int fx,
+                                                int sy,
+                                                int sx,
+                                                int dy,
+                                                int dx,
+                                                int py,
+                                                int px)
 {
-    ck_tile_conv2d_grouped_16c_fp16_nhwc_impl<cfg, Padded>(in, wei, alpha, beta, out,
+    ck_tile_conv2d_grouped_16c_nhwc_impl<cfg, Padded>(in, wei, alpha, beta, out,
                                                      N, groups, c_per_group, k_per_group,
                                                      hi, wi, ho, wo, fy, fx, sy, sx, dy, dx, py, px);
 }
 
-template <size_t... Is>
+template <DataType DT = DataType::fp16, size_t... Is>
 void launch_dispatch(int config_idx,
                      std::index_sequence<Is...>,
                      const LaunchParams& lp,
@@ -601,19 +619,21 @@ void launch_dispatch(int config_idx,
                      void* out,
                      hipStream_t stream)
 {
-    const bool needs_padding = par.channels_per_group() != configs[0].group_size() ||
-                               par.filters_per_group() != configs[0].group_size();
+    using ElementType = ToType<DT>;
+    using KC = KernelConfigurations<DT>;
+    const bool needs_padding = par.channels_per_group() != KC::configs[0].group_size() ||
+                               par.filters_per_group() != KC::configs[0].group_size();
 
     auto kernel_launch = [&]<size_t I, bool P>()
     {
-        auto view = SizeView<configs[I].direction>(par);
-        ck_tile_conv2d_grouped_16c_fp16_nhwc<configs[I], P>
+        auto view = SizeView<KC::configs[I].direction>(par);
+        ck_tile_conv2d_grouped_16c_nhwc<KC::configs[I], P>
             <<<lp.grid, lp.block_size, lp.dynamic_shared_bytes, stream>>>(
-                static_cast<const _Float16*>(in),
-                static_cast<const _Float16*>(wei),
+                static_cast<const ElementType*>(in),
+                static_cast<const ElementType*>(wei),
                 1.0,
                 0.0,
-                static_cast<_Float16*>(out),
+                static_cast<ElementType*>(out),
                 par.n,
                 par.groups,
                 par.channels_per_group(),
@@ -645,6 +665,7 @@ void launch_dispatch(int config_idx,
            ...);
 }
 
+template <DataType DT = DataType::fp16>
 inline void launch(int config_idx,
                    const LaunchParams& lp,
                    const Conv2dParams& par,
@@ -654,8 +675,9 @@ inline void launch(int config_idx,
                    void* /*workspace*/,
                    hipStream_t stream)
 {
-    launch_dispatch(
-        config_idx, std::make_index_sequence<NUM_CONFIGS>{}, lp, par, in, wei, out, stream);
+    launch_dispatch<DT>(
+        config_idx, std::make_index_sequence<KernelConfigurations<DT>::NUM_CONFIGS>{},
+        lp, par, in, wei, out, stream);
 }
 
 static bool channels_can_be_padded(const Conv2dParams& par)
@@ -666,6 +688,7 @@ static bool channels_can_be_padded(const Conv2dParams& par)
     return c <= 16 && k <= 16 && (c > 8 || k > 8);
 }
 
+template <DataType DT = DataType::fp16>
 constexpr KernelVariant make_variant()
 {
     return {
@@ -674,16 +697,18 @@ constexpr KernelVariant make_variant()
         {
             if(!is_applicable_base(par))
                 return false;
+            if(par.in_type != DT || par.wei_type != DT || par.out_type != DT)
+                return false;
             if(!channels_can_be_padded(par))
                 return false;
             return true;
         },
         .config_is_compatible = [](const Conv2dParams& par, int idx)
-        { return is_valid_config(par, configs[idx]); },
-        .get_launch_params  = &get_launch_params,
-        .launch             = &launch,
+        { return is_valid_config<DT>(par, KernelConfigurations<DT>::configs[idx]); },
+        .get_launch_params  = &get_launch_params<DT>,
+        .launch             = &launch<DT>,
         .get_workspace_size = [](int, const Conv2dParams&) -> size_t { return 0; },
-        .num_configs        = NUM_CONFIGS,
+        .num_configs        = KernelConfigurations<DT>::NUM_CONFIGS,
     };
 }
 

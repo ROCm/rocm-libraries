@@ -20,10 +20,10 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl_v3.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_tile_conv_impl_v3.hpp"
 #include "ck_tile/ops/direct_convolution/utils/types.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_8c_fp16_tile_conv_impl_v2.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_fp16_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_8c_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_tile_conv_impl_v2.hpp"
 #pragma clang diagnostic pop
 
 #include <hip/hip_fp16.h>
@@ -36,9 +36,9 @@ using namespace grouped_4c_tile::v3;
 // ============================================================================
 // Config indices used by the tests
 //
-// configs[9]  — Fprop, vector_size=8 (default, full GROUP_SIZE)  → unpadded
-// configs[46] — Fprop, CyclicShift, vector_size=2               → c%2==0
-// configs[47] — Fprop, CyclicShift, vector_size=1               → any c
+// KernelConfigurations<>::configs[9]  — Fprop, vector_size=8 (default, full GROUP_SIZE)  → unpadded
+// KernelConfigurations<>::configs[46] — Fprop, CyclicShift, vector_size=2               → c%2==0
+// KernelConfigurations<>::configs[47] — Fprop, CyclicShift, vector_size=1               → any c
 // ============================================================================
 static constexpr int CFG_UNPADDED = 9;
 static constexpr int CFG_VEC2    = 46;
@@ -55,8 +55,8 @@ __global__ void test_weight_load_kernel(const _Float16* __restrict__ wei,
                                         int c_per_group,
                                         int k_per_group)
 {
-    using TC = TileConstants<configs[CfgIdx]>;
-    constexpr auto cfg = configs[CfgIdx];
+    using TC = TileConstants<KernelConfigurations<>::configs[CfgIdx]>;
+    constexpr auto cfg = KernelConfigurations<>::configs[CfgIdx];
 
     ck_tile::direct_conv::BlockCoords<cfg> bc(groups);
 
@@ -84,12 +84,12 @@ __global__ void test_weight_load_kernel(const _Float16* __restrict__ wei,
 class WeightLoaderTest : public ::testing::Test
 {
 protected:
-    static constexpr int KH = configs[CFG_VEC1].kh;
-    static constexpr int KW = configs[CFG_VEC1].kw;
+    static constexpr int KH = KernelConfigurations<>::configs[CFG_VEC1].kh;
+    static constexpr int KW = KernelConfigurations<>::configs[CFG_VEC1].kw;
     static constexpr int GROUP_SIZE = 4; // fixed for 4c kernel
 
     // All padded configs share the same block_groups (waves_c64=2 → 32 groups).
-    static constexpr int BLOCK_GROUPS = configs[CFG_VEC1].block_groups();
+    static constexpr int BLOCK_GROUPS = KernelConfigurations<>::configs[CFG_VEC1].block_groups();
 
     static std::vector<_Float16> make_weight_tensor(int groups,
                                                     int k_per_group,
@@ -117,14 +117,14 @@ protected:
     template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int k_per_group)
     {
-        using TC = TileConstants<configs[CfgIdx]>;
+        using TC = TileConstants<KernelConfigurations<>::configs[CfgIdx]>;
         constexpr int LDS_FP16 = TC::Weight::WEIGHT_LDS_SIZE_UINT4 * 8;
-        constexpr int BLOCK_SIZE = configs[CfgIdx].block_size();
+        constexpr int BLOCK_SIZE = KernelConfigurations<>::configs[CfgIdx].block_size();
 
         // Use the config-specific block_groups, not the fixture constant.
         // Config 9 (unpadded) has waves_c64=1 → block_groups()=16,
         // while configs 47-49 have waves_c64=2 → block_groups()=32.
-        constexpr int groups = configs[CfgIdx].block_groups();
+        constexpr int groups = KernelConfigurations<>::configs[CfgIdx].block_groups();
         auto wei_host = make_weight_tensor(groups, k_per_group, c_per_group);
 
         _Float16* d_wei     = nullptr;
@@ -209,7 +209,7 @@ protected:
     static Conv2dParams make_params(int c_per_group, int k_per_group = 4)
     {
         // groups must be a multiple of block_groups() for any of the padded configs.
-        const int groups = configs[CFG_VEC1].block_groups();
+        const int groups = KernelConfigurations<>::configs[CFG_VEC1].block_groups();
         // Spatial dims must be >= block_q() for the largest waves_q4 config.
         // configs 47-49 have waves_q4=8 → block_q()=32, so use q=w=32.
         Conv2dParams p;
@@ -221,8 +221,8 @@ protected:
         p.w         = 32;
         p.q         = 32;
         p.groups    = groups;
-        p.kh        = configs[CFG_VEC1].kh;
-        p.kw        = configs[CFG_VEC1].kw;
+        p.kh        = KernelConfigurations<>::configs[CFG_VEC1].kh;
+        p.kw        = KernelConfigurations<>::configs[CFG_VEC1].kw;
         return p;
     }
 };
@@ -231,36 +231,36 @@ protected:
 TEST_F(ValidConfigTest, C4_valid_all)
 {
     auto p = make_params(4);
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC2]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_UNPADDED]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC1]));
 }
 
 // c==3: not divisible by 2 or 4 → only vec1 valid.
 TEST_F(ValidConfigTest, C3_only_vec1)
 {
     auto p = make_params(3);
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC1]));
 }
 
 // c==2: divisible by 2 → vec2 and vec1 valid, vec4 invalid.
 TEST_F(ValidConfigTest, C2_vec2_and_vec1)
 {
     auto p = make_params(2);
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC2]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_UNPADDED]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC1]));
 }
 
 // c==1: only vec1 valid.
 TEST_F(ValidConfigTest, C1_only_vec1)
 {
     auto p = make_params(1);
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC1]));
 }
 
 // Wrong direction: all Fprop configs reject Dgrad params.
@@ -268,42 +268,42 @@ TEST_F(ValidConfigTest, WrongDirection_rejected)
 {
     auto p = make_params(4);
     p.direction = Direction::Dgrad;
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_UNPADDED]));
 }
 
 // groups not a multiple of block_groups(): all configs reject.
 TEST_F(ValidConfigTest, NonAlignedGroups_rejected)
 {
     auto p = make_params(4);
-    p.groups = configs[CFG_VEC1].block_groups() + 1; // not a multiple
+    p.groups = KernelConfigurations<>::configs[CFG_VEC1].block_groups() + 1; // not a multiple
     p.c_tot  = p.groups * 4;
     p.k_tot  = p.groups * 4;
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC1]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC1]));
 }
 
 // C != K: vector_size must divide both c_per_group and k_per_group.
 TEST_F(ValidConfigTest, C3_K2_only_vec1)
 {
     auto p = make_params(3, 2);
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC1]));
 }
 
 TEST_F(ValidConfigTest, C2_K4_vec2_and_vec1)
 {
     auto p = make_params(2, 4);
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC2]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_UNPADDED]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC1]));
 }
 
 TEST_F(ValidConfigTest, C1_K3_only_vec1)
 {
     auto p = make_params(1, 3);
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, KernelConfigurations<>::configs[CFG_VEC1]));
 }
 
 // =============================================================================
@@ -327,8 +327,8 @@ __global__ void test_weight_load_kernel_16c(const _Float16* __restrict__ wei,
                                             int c_per_group,
                                             int k_per_group)
 {
-    using TC = ns_16c::TileConstants<ns_16c::configs[CfgIdx]>;
-    constexpr auto cfg = ns_16c::configs[CfgIdx];
+    using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
+    constexpr auto cfg = ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx];
 
     ck_tile::direct_conv::BlockCoords<cfg> bc(groups);
 
@@ -353,8 +353,8 @@ __global__ void test_weight_load_kernel_16c(const _Float16* __restrict__ wei,
 class WeightLoader16cTest : public ::testing::Test
 {
 protected:
-    static constexpr int KH = ns_16c::configs[CFG_16C_VEC1].kh;
-    static constexpr int KW = ns_16c::configs[CFG_16C_VEC1].kw;
+    static constexpr int KH = ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CFG_16C_VEC1].kh;
+    static constexpr int KW = ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CFG_16C_VEC1].kw;
     static constexpr int GROUP_SIZE = 16;
 
     static std::vector<_Float16> make_weight_tensor(int groups, int k_per_group, int c_per_group)
@@ -380,10 +380,10 @@ protected:
     template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int k_per_group)
     {
-        using TC = ns_16c::TileConstants<ns_16c::configs[CfgIdx]>;
+        using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
         constexpr int LDS_FP16 = TC::Weight::WEIGHT_LDS_SIZE_UINT4 * 8;
-        constexpr int BLOCK_SIZE = ns_16c::configs[CfgIdx].block_size();
-        constexpr int groups = ns_16c::configs[CfgIdx].block_groups();
+        constexpr int BLOCK_SIZE = ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx].block_size();
+        constexpr int groups = ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx].block_groups();
 
         auto wei_host = make_weight_tensor(groups, k_per_group, c_per_group);
 
@@ -470,8 +470,8 @@ __global__ void test_weight_load_kernel_8c(const _Float16* __restrict__ wei,
                                            int c_per_group,
                                            int k_per_group)
 {
-    using TC = ns_8c::TileConstants<ns_8c::configs[CfgIdx]>;
-    constexpr auto cfg = ns_8c::configs[CfgIdx];
+    using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
+    constexpr auto cfg = ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx];
 
     ck_tile::direct_conv::BlockCoords<cfg> bc(groups);
 
@@ -496,8 +496,8 @@ __global__ void test_weight_load_kernel_8c(const _Float16* __restrict__ wei,
 class WeightLoader8cTest : public ::testing::Test
 {
 protected:
-    static constexpr int KH = ns_8c::configs[CFG_8C_VEC1].kh;
-    static constexpr int KW = ns_8c::configs[CFG_8C_VEC1].kw;
+    static constexpr int KH = ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CFG_8C_VEC1].kh;
+    static constexpr int KW = ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CFG_8C_VEC1].kw;
     static constexpr int GROUP_SIZE = 8;
 
     static std::vector<_Float16> make_weight_tensor(int groups, int k_per_group, int c_per_group)
@@ -523,10 +523,10 @@ protected:
     template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int k_per_group)
     {
-        using TC = ns_8c::TileConstants<ns_8c::configs[CfgIdx]>;
+        using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
         constexpr int LDS_FP16 = TC::Weight::WEIGHT_LDS_SIZE_UINT4 * 8;
-        constexpr int BLOCK_SIZE = ns_8c::configs[CfgIdx].block_size();
-        constexpr int groups = ns_8c::configs[CfgIdx].block_groups();
+        constexpr int BLOCK_SIZE = ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx].block_size();
+        constexpr int groups = ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx].block_groups();
 
         auto wei_host = make_weight_tensor(groups, k_per_group, c_per_group);
 

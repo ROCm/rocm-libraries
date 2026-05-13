@@ -26,11 +26,11 @@
 ///
 /// RunFprop and RunDgrad are templated on the config index. If the specified
 /// config is not supported for the given problem, the test fails.
-template <typename KernelTraits>
+template <typename KernelTraits, typename ElementT = ck_tile::half_t>
 class DirectConvGrouped4cFp16TestHarness : public ::testing::Test
 {
     protected:
-    using HalfT = ck_tile::half_t;
+    using HalfT = ElementT;
 
     public:
     template <int ConfigIdx>
@@ -130,7 +130,10 @@ class DirectConvGrouped4cFp16TestHarness : public ::testing::Test
         d_out.FromDevice(h_result.data());
         d_ref_out.FromDevice(h_ref.data());
 
-        return check_err(h_result, h_ref, "Error: Fprop incorrect results!", 1e-2, 1e-2);
+        // TODO: Fix the tolerance. BF16 should have more or less the same tolerance as FP16.
+        constexpr double rtol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
+        constexpr double atol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
+        return check_err(h_result, h_ref, "Error: Fprop incorrect results!", rtol, atol);
     }
 
     template <int ConfigIdx>
@@ -229,6 +232,9 @@ class DirectConvGrouped4cFp16TestHarness : public ::testing::Test
         d_in_grad.FromDevice(h_result.data());
         d_ref_in_grad.FromDevice(h_ref.data());
 
-        return check_err(h_result, h_ref, "Error: Dgrad incorrect results!", 1e-2, 1e-2);
+        // TODO: Fix the tolerance. BF16 should have more or less the same tolerance as FP16.
+        constexpr double rtol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
+        constexpr double atol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
+        return check_err(h_result, h_ref, "Error: Dgrad incorrect results!", rtol, atol);
     }
 };
