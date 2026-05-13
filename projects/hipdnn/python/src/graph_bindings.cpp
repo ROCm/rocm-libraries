@@ -68,7 +68,16 @@ void graph_bindings(nb::module_& m)
                     throw std::runtime_error("Failed to get behavior notes for engine: "
                                              + err.get_message());
                 }
-                return notes;
+                std::vector<BehaviorNote> knownNotes;
+                knownNotes.reserve(notes.size());
+                for(auto note : notes)
+                {
+                    if(isKnownBehaviorNote(note))
+                    {
+                        knownNotes.push_back(note);
+                    }
+                }
+                return knownNotes;
             },
             nb::arg("engine_id"),
             "Get behavior notes for an engine applicable to the built operation graph.")

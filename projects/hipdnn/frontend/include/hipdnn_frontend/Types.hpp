@@ -237,11 +237,11 @@ typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
  */
 enum class BehaviorNote : int32_t
 {
-    RUNTIME_COMPILATION = 0,
-    REQUIRES_LAYOUT_TRANSFORM = 1,
-    SUPPORTS_GRAPH_CAPTURE = 2,
-    EXTERNAL_LIBRARY_DEPENDENCY = 3,
-    SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 4
+    RUNTIME_COMPILATION = 0, ///< Engine may compile kernels or other code at runtime.
+    REQUIRES_LAYOUT_TRANSFORM = 1, ///< Engine may require internal tensor layout transforms.
+    SUPPORTS_GRAPH_CAPTURE = 2, ///< Engine supports execution during stream graph capture.
+    EXTERNAL_LIBRARY_DEPENDENCY = 3, ///< Engine depends on a library outside core hipDNN.
+    SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 4 ///< Engine supports execution plan serialization.
 };
 typedef BehaviorNote BehaviorNote_t; ///< @brief Type alias for BehaviorNote
 
@@ -891,6 +891,22 @@ inline BehaviorNote fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
         return BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
     default:
         return static_cast<BehaviorNote>(note);
+    }
+}
+
+/// @brief Return true if a behavior note is known to this frontend version.
+inline bool isKnownBehaviorNote(const BehaviorNote& note)
+{
+    switch(note)
+    {
+    case BehaviorNote::RUNTIME_COMPILATION:
+    case BehaviorNote::REQUIRES_LAYOUT_TRANSFORM:
+    case BehaviorNote::SUPPORTS_GRAPH_CAPTURE:
+    case BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY:
+    case BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return true;
+    default:
+        return false;
     }
 }
 

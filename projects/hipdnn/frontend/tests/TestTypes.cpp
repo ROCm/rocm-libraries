@@ -32,6 +32,18 @@ TEST(TestTypes, BehaviorNoteFromBackend)
     EXPECT_EQ(fromHipdnnBehaviorNote(UNKNOWN_NOTE), static_cast<BehaviorNote>(UNKNOWN_NOTE));
 }
 
+TEST(TestTypes, IsKnownBehaviorNote)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::RUNTIME_COMPILATION));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::REQUIRES_LAYOUT_TRANSFORM));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::SUPPORTS_GRAPH_CAPTURE));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION));
+    EXPECT_FALSE(isKnownBehaviorNote(static_cast<BehaviorNote>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT)));
+}
+
 TEST(TestTypes, BehaviorNoteToString)
 {
     using namespace hipdnn_frontend;

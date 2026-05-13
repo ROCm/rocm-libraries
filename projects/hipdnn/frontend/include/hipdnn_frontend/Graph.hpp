@@ -1035,7 +1035,7 @@ public:
      * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR on failure
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error get_behavior_notes_for_engine(int64_t engineId, std::vector<BehaviorNote>& notes)
+    Error get_behavior_notes_for_engine(int64_t engineId, std::vector<BehaviorNote>& notes) const
     {
         notes.clear();
 
@@ -1072,6 +1072,7 @@ public:
             return {ErrorCode::OK, ""};
         }
 
+        const auto expectedNoteCount = noteCount;
         std::vector<hipdnnBackendBehaviorNote_t> backendNotes(static_cast<size_t>(noteCount));
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             detail::hipdnnBackend()->backendGetAttribute(engineDesc.get(),
@@ -1081,6 +1082,13 @@ public:
                                                          &noteCount,
                                                          backendNotes.data()),
             "Failed to get behavior notes from engine descriptor.");
+
+        if(noteCount != expectedNoteCount)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Backend returned a behavior note count of " + std::to_string(noteCount)
+                        + " after reporting " + std::to_string(expectedNoteCount) + "."};
+        }
 
         notes.reserve(backendNotes.size());
         for(auto note : backendNotes)
