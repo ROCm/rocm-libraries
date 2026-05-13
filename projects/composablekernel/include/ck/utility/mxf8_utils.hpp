@@ -4,7 +4,7 @@
 #include "ck/utility/numeric_limits.hpp"
 #include "ck/utility/mxfp_utils.hpp"
 
-#if CK_MX_ARCH_950 || CK_MX_ARCH_125
+#if CK_MX_ARCH_950 || CK_MX_ARCH_125 || CK_MX_ARCH_13
 #define CK_MX_FP8_CVT_FAST_PATH 1
 #else
 #define CK_MX_FP8_CVT_FAST_PATH 0
@@ -660,7 +660,7 @@ static __device__ fp8x8_storage_t cast_to_f8_from_bf16_scaled(bhalf8_t v,
     return ret.v8f8x1;
 }
 
-#elif CK_MX_ARCH_125
+#elif CK_MX_ARCH_125 || CK_MX_ARCH_13
 
 // fp8 -> float 8
 template <ck_fp8_interpretation_t interpret, typename Ts, int Opsel>
@@ -688,7 +688,7 @@ static __device__ float8_t cast_to_f32_from_f8_scaled(Ts scale, fp8x8_storage_t 
     }
 }
 
-// gfx1250 only have packed 8 scale conversion and pk4I8 scale factor
+// gfx1250 and gfx13 have packed 8 scale conversion and pk4I8 scale factor
 template <ck_fp8_interpretation_t interpret>
 static __device__ float_t cast_to_f32_from_f8_scaled(float scale, fp8_storage_t v)
 {
@@ -751,7 +751,7 @@ static __device__ fp8x8_storage_t cast_to_f8_from_f32_scaled(float8_t v,
     return ret.v8f8x1;
 }
 
-// gfx1250 only have packed 8 scale conversion and pk4I8 scale factor
+// gfx1250 and gfx13 have packed 8 scale conversion and pk4I8 scale factor
 template <ck_fp8_interpretation_t interpret, bool stochastic_rounding>
 static __device__ fp8_storage_t cast_to_f8_from_f32_scaled(float v, unsigned int rng, float scale)
 {
@@ -806,7 +806,7 @@ static __device__ half8_t cast_to_f16_from_f8_scaled(Ts scale, fp8x8_storage_t v
     }
 }
 
-// gfx1250 only have packed 8 scale conversion and pk4I8 scale factor
+// gfx1250 and gfx13 have packed 8 scale conversion and pk4I8 scale factor
 template <ck_fp8_interpretation_t interpret>
 static __device__ half_t cast_to_f16_from_f8_scaled(float scale, fp8_storage_t v)
 {
@@ -988,7 +988,7 @@ static __device__ bhalf8_t cast_to_bf16_from_f8_scaled(Ts scale, fp8x8_storage_t
     }
 }
 
-// gfx1250 only have packed 8 scale conversion and pk4I8 scale factor
+// gfx1250 and gfx13 have packed 8 scale conversion and pk4I8 scale factor
 template <ck_fp8_interpretation_t interpret>
 static __device__ bhalf_t cast_to_bf16_from_f8_scaled(float scale, fp8_storage_t v)
 {
@@ -1011,7 +1011,7 @@ static __device__ bhalf2_t cast_to_bf16_from_f8_scaled(float scale, fp8x2_storag
     out.v8x1 = cast_to_bf16_from_f8_scaled<interpret>(scale, v8);
     return out.v2x4[0];
 }
-#endif // CK_MX_ARCH_125
+#endif // CK_MX_ARCH_125 || CK_MX_ARCH_13
 
 #endif // CK_MX_FP8_CVT_FAST_PATH
 
@@ -1031,7 +1031,7 @@ __host__ __device__ static inline fp8_storage_t cvt_float_to_fp8_scaled(const fl
     uint32_t rng = 0;
     if constexpr(stochastic_rounding)
     {
-#if CK_MX_FP8_CVT_FAST_PATH // GFX950, GFX1250
+#if CK_MX_FP8_CVT_FAST_PATH
         // use HW clock for stochastic input multiply by incremented thread id
         rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
                                         (get_thread_global_1d_id() + 1));
@@ -1076,7 +1076,7 @@ __host__ __device__ static inline fp8x2_storage_t cvt_float_to_fp8_scaled(const 
     uint32_t rng = 0;
     if constexpr(stochastic_rounding)
     {
-#if CK_MX_FP8_CVT_FAST_PATH // GFX950, GFX1250
+#if CK_MX_FP8_CVT_FAST_PATH
         // use HW clock for stochastic input multiply by incremented thread id
         rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
                                         (get_thread_global_1d_id() + 1));

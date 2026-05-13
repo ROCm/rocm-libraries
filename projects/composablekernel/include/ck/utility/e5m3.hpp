@@ -35,7 +35,7 @@ struct e5m3_scale_t
     }
     __host__ __device__ explicit e5m3_scale_t(float scale)
     {
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx13__)
         union
         {
             float fval;
@@ -59,7 +59,7 @@ struct e5m3_scale_t
 
     __host__ __device__ explicit operator float() const
     {
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx13__)
         union
         {
             unsigned int i32val;

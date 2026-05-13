@@ -46,7 +46,7 @@ __global__ void test_packed_scaled_convert(T* p_mat, uint32_t* p_scale)
         return;
     }
 
-#if CK_MX_ARCH_125
+#if CK_MX_ARCH_125 || CK_MX_ARCH_13
     using T8        = typename ck::vector_type<T, 8>::type;
     ck::index_t lid = __lane_id();
     // scale_sel = 1, 3, 5, 6 will use p_scale values in lane[16:31]
@@ -142,7 +142,7 @@ __global__ void test_packed_scaled_block16_convert(T* p_mat, uint32_t* p_scale)
     {
         return;
     }
-#if CK_MX_ARCH_125
+#if CK_MX_ARCH_125 || CK_MX_ARCH_13
     using T8        = typename ck::vector_type<T, 8>::type;
     ck::index_t lid = __lane_id();
     uint32_t scale  = p_scale[lid];

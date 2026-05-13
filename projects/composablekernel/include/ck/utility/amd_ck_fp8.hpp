@@ -352,7 +352,7 @@ static __device__ _Float16 cast_to_f16_from_f8(fp8_storage_t v)
         return __builtin_amdgcn_cvt_f16_bf8(val.i16val, 0);
     }
 }
-#endif
+#endif // defined(__gfx13__)
 #endif
 
 } // namespace fp8_impl
@@ -445,10 +445,12 @@ struct bf8_ocp_t
     __host__ explicit operator _Float16() const
 #endif
     {
-#if defined(__gfx950__) || defined(__gfx12__)
-        return static_cast<_Float16>(fp8_impl::cast_to_f32_from_f8<default_interpret>(this->data));
-#elif defined(__gfx13__)
+#if CK_OCP_FP8_CVT_FAST_PATH
+#if defined(__gfx13__)
         return fp8_impl::cast_to_f16_from_f8<default_interpret>(this->data);
+#else
+        return static_cast<_Float16>(fp8_impl::cast_to_f32_from_f8<default_interpret>(this->data));
+#endif
 #else
         return fp8_impl::cast_from_f8<_Float16, wm, we, false>(
             this->data); // XXX: clip==false must be consistent with operator float
@@ -1253,7 +1255,7 @@ static __device__ fp8_storage_t cast_to_f8_from_f16(_Float16 v, unsigned int rng
 
     return i8data;
 }
-#endif
+#endif // defined(__gfx13__)
 
 template <ck_fp8_interpretation_t interpret, bool saturate, bool stochastic_rounding = false>
 static __device__ fp8x2_storage_t cast_to_f8_from_f32(float2_t v, unsigned int rng = 0)
@@ -1332,6 +1334,72 @@ static __device__ fp8x2_storage_t cast_to_f8_from_f32(float2_t v, unsigned int r
         return fp8x2_storage_t{val0.i8val[0], val0.i8val[1]};
     }
 }
+
+#if defined(__gfx13__)
+template <ck_fp8_interpretation_t interpret, bool saturate, bool stochastic_rounding = false>
+static __device__ fp8x2_storage_t cast_to_f8_from_f16(half2_t v, unsigned int rng = 0)
+{
+    if constexpr(stochastic_rounding)
+    {
+        return fp8x2_storage_t{
+            cast_to_f8_from_f16<interpret, saturate, stochastic_rounding>(v[0], rng),
+            cast_to_f8_from_f16<interpret, saturate, stochastic_rounding>(v[1], rng)};
+    }
+
+    union
+    {
+        shortx2_t i16_vec;
+        half2_t vhalf;
+    } val{.vhalf = v};
+
+    if constexpr(saturate)
+    {
+        if((val.i16_vec[0] & 0x7C00) != 0x7C00)
+        {
+            if constexpr(interpret == ck_fp8_interpretation_t::CK_E4M3_FNUZ)
+            {
+                val.vhalf[0] = __builtin_amdgcn_fmed3h(val.vhalf[0], 240.0, -240.0);
+            }
+            else if constexpr(interpret == ck_fp8_interpretation_t::CK_E4M3_OCP)
+            {
+                val.vhalf[0] = __builtin_amdgcn_fmed3h(val.vhalf[0], 448.0, -448.0);
+            }
+            else
+            {
+                val.vhalf[0] = __builtin_amdgcn_fmed3h(val.vhalf[0], 57344.0, -57344.0);
+            }
+        }
+        if((val.i16_vec[1] & 0x7C00) != 0x7C00)
+        {
+            if constexpr(interpret == ck_fp8_interpretation_t::CK_E4M3_FNUZ)
+            {
+                val.vhalf[1] = __builtin_amdgcn_fmed3h(val.vhalf[1], 240.0, -240.0);
+            }
+            else if constexpr(interpret == ck_fp8_interpretation_t::CK_E4M3_OCP)
+            {
+                val.vhalf[1] = __builtin_amdgcn_fmed3h(val.vhalf[1], 448.0, -448.0);
+            }
+            else
+            {
+                val.vhalf[1] = __builtin_amdgcn_fmed3h(val.vhalf[1], 57344.0, -57344.0);
+            }
+        }
+    }
+
+    union
+    {
+        short vi16;
+        fp8x2_storage_t v2f8;
+    } out{};
+
+    out.vi16 = (interpret == ck_fp8_interpretation_t::CK_E4M3_FNUZ ||
+                interpret == ck_fp8_interpretation_t::CK_E4M3_OCP)
+                   ? __builtin_amdgcn_cvt_pk_fp8_f16(val.vhalf)
+                   : __builtin_amdgcn_cvt_pk_bf8_f16(val.vhalf);
+
+    return out.v2f8;
+}
+#endif // defined(__gfx13__)
 #endif // CK_FP8_CVT_FAST_PATH
 
 // The conversion function is from rocblas
@@ -1620,7 +1688,7 @@ __host__ __device__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
     uint32_t rng = 0;
     if constexpr(stochastic_rounding)
     {
-#if defined(__gfx950__) || defined(__gfx125__)
+#if defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
         // use HW clock for stochastic input multiply by incremented thread id
         rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
                                         (get_thread_global_1d_id() + 1));
@@ -1631,7 +1699,7 @@ __host__ __device__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
 #else
         rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&f), f);
 #endif // #ifndef CK_CODE_GEN_RTC
-#endif // #if defined(__gfx950__)
+#endif // defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
     }
     return cast_to_f8_from_f32<interp, sat == ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
         f, rng);
@@ -1646,7 +1714,7 @@ __host__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
     uint32_t rng = 0;
     if constexpr(stochastic_rounding)
     {
-#if defined(__gfx950__) || defined(__gfx125__)
+#if defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
         // use HW clock for stochastic input multiply by incremented thread id
         rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
                                         (get_thread_global_1d_id() + 1));
@@ -1657,7 +1725,7 @@ __host__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
 #else
         rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&f), f);
 #endif // #ifndef CK_CODE_GEN_RTC
-#endif // #if defined(__gfx950__)
+#endif // defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
     }
 
     if constexpr(interp == ck_fp8_interpretation_t::CK_E4M3_FNUZ)
@@ -1723,7 +1791,7 @@ __device__ static inline fp8x2_storage_t cvt_float_to_fp8(const float2_t f)
     uint32_t rng = 0;
     if constexpr(stochastic_rounding)
     {
-#if defined(__gfx950__) || defined(__gfx125__)
+#if defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
         // use HW clock for stochastic input multiply by incremented thread id
         rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
                                         (get_thread_global_1d_id() + 1));
@@ -1734,7 +1802,7 @@ __device__ static inline fp8x2_storage_t cvt_float_to_fp8(const float2_t f)
 #else
         rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&f), f[0]);
 #endif // #ifndef CK_CODE_GEN_RTC
-#endif // #if defined(__gfx950__)
+#endif // defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
     }
     return cast_to_f8_from_f32<interp, sat == ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
         f, rng);
@@ -1774,7 +1842,7 @@ __host__ static inline fp8_storage_t cvt_half_t_to_fp8(const _Float16 x)
         uint32_t rng = 0;
         if constexpr(stochastic_rounding)
         {
-#if defined(__gfx950__) || defined(__gfx125__)
+#if defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
             // use HW clock for stochastic input multiply by incremented thread id
             rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
                                             (get_thread_global_1d_id() + 1));
@@ -1785,7 +1853,7 @@ __host__ static inline fp8_storage_t cvt_half_t_to_fp8(const _Float16 x)
 #else
             rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&x), x);
 #endif // #ifndef CK_CODE_GEN_RTC
-#endif // #if defined(__gfx950__)
+#endif // defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
         }
 #if defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
         return cast_to_f8_from_f16<interp,
@@ -1795,7 +1863,7 @@ __host__ static inline fp8_storage_t cvt_half_t_to_fp8(const _Float16 x)
         ignore = rng;
         return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
             static_cast<float>(x));
-#endif // defined(__gfx950__)
+#endif // defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
     }
 }
 
@@ -1822,7 +1890,7 @@ __host__ static inline fp8x2_storage_t cvt_half_t_to_fp8(const half2_t x)
         uint32_t rng = 0;
         if constexpr(stochastic_rounding)
         {
-#if defined(__gfx950__) || defined(__gfx125__)
+#if defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
             // use HW clock for stochastic input multiply by incremented thread id
             rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
                                             (get_thread_global_1d_id() + 1));
@@ -1833,9 +1901,9 @@ __host__ static inline fp8x2_storage_t cvt_half_t_to_fp8(const half2_t x)
 #else
             rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&x), x[0]);
 #endif // #ifndef CK_CODE_GEN_RTC
-#endif // #if defined(__gfx950__)
+#endif // defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
         }
-#if defined(__gfx950__) || defined(__gfx125__)
+#if defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
         return cast_to_f8_from_f16<interp,
                                    sat == ck_saturation_t::CK_SATFINITE,
                                    stochastic_rounding>(x, rng);
@@ -1843,7 +1911,7 @@ __host__ static inline fp8x2_storage_t cvt_half_t_to_fp8(const half2_t x)
         ignore = rng;
         return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
             float2_t{static_cast<float>(x[0]), static_cast<float>(x[1])});
-#endif // defined(__gfx950__)
+#endif // defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
     }
 }
 
@@ -1943,7 +2011,9 @@ __host__ static inline fp8x2_storage_t cvt_bhalf_t_to_fp8(const bf16x2_t x)
     }
 #endif // CK_WORKAROUND_BF16_TO_FP8_CONVERSION
 }
-#else
+
+#else // (__clang_major__ < 21) where there is no gfx13 support
+
 /**
  * \brief convert bhalf_t to @p fp8_storage_t
  *
@@ -1979,7 +2049,7 @@ __host__ static inline fp8_storage_t cvt_bhalf_t_to_fp8(const bhalf_t x)
 #else
             rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&x), static_cast<float>(x));
 #endif // #ifndef CK_CODE_GEN_RTC
-#endif // #if defined(__gfx950__)
+#endif // defined(__gfx950__) || defined(__gfx125__)
         }
 #if defined(__gfx950__)
         return cast_to_f8_from_bf16<interp,
@@ -2036,7 +2106,7 @@ __host__ static inline fp8x2_storage_t cvt_bhalf_t_to_fp8(const bhalf2_t x)
             rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&x),
                                                static_cast<float>(x[0]));
 #endif // #ifndef CK_CODE_GEN_RTC
-#endif // #if defined(__gfx950__)
+#endif // defined(__gfx950__) || defined(__gfx125__)
         }
 #if defined(__gfx950__)
         return cast_to_f8_from_bf16<interp,
