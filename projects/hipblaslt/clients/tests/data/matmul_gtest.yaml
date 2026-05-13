@@ -9,6 +9,19 @@ Definitions:
     - { alpha:  0, beta:  3 }
     - { alpha:  1, beta:  3 }
     - { alpha:  1, beta:  1 }
+  
+  - &complex_alpha_beta_range
+    - { alpha: 1, alphai: 0, beta: 0, betai: 0 } # Standard
+    - { alpha: 0, alphai: 0, beta: 1, betai: 0 } # Pure C (Alpha Zero)
+    - { alpha: 0, alphai: 1, beta: 0, betai: 0 } # Imaginary Alpha
+    - { alpha: 1, alphai: 0, beta: 0, betai: 1 } # Imaginary Beta
+    - { alpha: 0, alphai: 2, beta: 0, betai: 0 } # Optimization Trap (Real=0)
+    - { alpha: 1, alphai: 1, beta: 1, betai: -1 } # Cancellation/Signs
+    - { alpha: 2, alphai: 3, beta: 4, betai: 5 } # General
+ 
+  - &complex_alpha_beta_range_small
+    - { alpha: 1, alphai: 0, beta: 0, betai: 1 } # Imaginary Beta
+    - { alpha: 2, alphai: 3, beta: 4, betai: 5 } # General
 
   - &alpha_beta_range_small
     - { alpha: 2, alphai: 2, beta: -1.0, betai: 2.0 }
@@ -18,6 +31,20 @@ Definitions:
     - { transA: N, transB: T }
     - { transA: T, transB: N }
     - { transA: T, transB: T }
+
+  - &complex_transA_transB_range
+    - { transA: N, transB: N }
+    - { transA: N, transB: T }
+    - { transA: T, transB: N }
+    - { transA: T, transB: T }
+    - { transA: C, transB: N }
+    - { transA: N, transB: C }
+    - { transA: C, transB: C }
+
+  - &complex_transA_transB_range_small
+    - { transA: T, transB: C }
+    - { transA: C, transB: N }
+    - { transA: C, transB: C }
 
   - &deepbench_alpha_beta_range
     - { alpha: 1, beta: 0 }
@@ -303,6 +330,15 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
 
+- name: matmul_medium_complex
+  category: pre_checkin
+  function:
+    - matmul: *complex_precisions
+  matrix_size: *medium_matrix_size_range
+  transA_transB: *complex_transA_transB_range
+  alpha_beta: *complex_alpha_beta_range
+  gpu_arch: '9(42|50)'
+
 - name: matmul_batch_medium
   category: pre_checkin
   function:
@@ -312,6 +348,17 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
   batch_count: 10
+
+- name: matmul_batch_medium_complex
+  category: pre_checkin
+  function:
+    - matmul: *complex_precisions
+  matrix_size: *medium_matrix_size_range
+  transA_transB: *complex_transA_transB_range
+  alpha_beta: *complex_alpha_beta_range
+  batch_count: 10
+  gpu_arch: '9(42|50)'
+
 
 - name: matmul_medium_HMM
   category: HMM
@@ -474,6 +521,16 @@ Tests:
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
 
+- name: matmul_16_complex
+  category: pre_checkin
+  function:
+    matmul: *complex_precisions
+  M: 16
+  K: 16
+  alpha_beta: *complex_alpha_beta_range
+  transA_transB: *complex_transA_transB_range
+  gpu_arch: '9(42|50)'
+
 - name: matmul_24
   category: pre_checkin
   function:
@@ -504,6 +561,17 @@ Tests:
   K: 32
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
+
+- name: matmul_32_8_128_complex
+  category: nightly
+  function:
+    matmul: *complex_precisions
+  M: [8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128]
+  N: 32
+  K: 32
+  alpha_beta: *complex_alpha_beta_range
+  transA_transB: *complex_transA_transB_range
+  gpu_arch: '9(42|50)'
 
 - name: matmul_48_8_128
   category: nightly
@@ -544,7 +612,6 @@ Tests:
   K: 64
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
-
 
 - name: matmul_96
   category: pre_checkin
@@ -1821,7 +1888,7 @@ Tests:
   gradient: 1
   activation_type: gelu
   unit_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
 
 - name: matmul_drelu_fp16
   category: pre_checkin
@@ -1837,7 +1904,7 @@ Tests:
   gradient: 1
   activation_type: relu
   unit_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
 
 - name: matmul_dgelu_bias
   category: pre_checkin
@@ -1856,9 +1923,62 @@ Tests:
   bias_type: f32_r
   unit_check: 0
   norm_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
 
-- name: matmul_drelu_bias
+- name: matmul_dgelu_bias_bf16
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  gradient: 1
+  activation_type: gelu
+  bias_vector: 1
+  bias_type: f32_r
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_drelu_bf16
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  gradient: 1
+  activation_type: relu
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_dgelu_bf16
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  gradient: 1
+  activation_type: gelu
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_drelu_bias_fp16
   category: pre_checkin
   function:
     matmul: *hpa_half_precision
@@ -1875,7 +1995,26 @@ Tests:
   bias_type: f32_r
   unit_check: 0
   norm_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
+
+- name: matmul_drelu_bias_bf16
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  gradient: 1
+  activation_type: relu
+  bias_vector: 1
+  bias_type: f32_r
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
 
 - name: matmul_bgradb_f8_bf8_fnuz_dst_fp32
   category: pre_checkin
@@ -1911,8 +2050,24 @@ Tests:
   bias_type: f32_r
   bias_source: a
   unit_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
-  # norm_check: 1
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
+
+- name: matmul_bgrada_bf16
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  gradient: 1
+  bias_vector: 1
+  bias_type: f32_r
+  bias_source: a
+  unit_check: 1
+  gpu_arch: '1250'
 
 - name: matmul_bias_gelu_aux_fp32
   category: pre_checkin
@@ -2037,6 +2192,24 @@ Tests:
   unit_check: 1
   gpu_arch: '942'
 
+- name: matmul_bgradb_bf16_NT
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA: N
+  transB: T
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  gradient: 1
+  bias_vector: 1
+  bias_type: [bf16_r, f32_r]
+  bias_source: b
+  unit_check: 1
+  gpu_arch: '1250'
+
 - name: matmul_bgradb_f16
   category: pre_checkin
   function:
@@ -2052,7 +2225,7 @@ Tests:
   bias_type: [f16_r, f32_r]
   bias_source: b
   unit_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
 
 - name: matmul_bgradb_16_f32d_NT
   category: pre_checkin
@@ -2370,6 +2543,23 @@ Tests:
   alpha: 1
   beta: 2.0
   unit_check: 1
+  gpu_arch: '9(42|50)'
+
+- name: matmul_extapi_algo_method_tuning_gsu_gemm_only_1250
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M:  128,   N:  128,    K:  65536 }
+  transA_transB: *transA_transB_range
+  algo_method: [2]
+  use_ext: [1]
+  use_ext_setproblem: [0]
+  gsu_vector: [[0], [1], [4], [7]]
+  alpha: 1
+  beta: 2.0
+  unit_check: 1
+  gpu_arch: '1250'
 
 - name: matmul_extapi_algo_method_tuning_wgm
   category: pre_checkin
@@ -2624,6 +2814,62 @@ Tests:
   alpha: 1.0
   beta: 0.0
   gpu_arch: '9(0a|42)'
+
+
+- name: matmul_96_complex
+  category: pre_checkin
+  function:
+    matmul: *complex_precisions
+  M: 96
+  N: 96
+  K: 96
+  alpha_beta: *complex_alpha_beta_range_small
+  transA_transB: *complex_transA_transB_range_small
+  gpu_arch: '9(42|50)'
+
+- name: matmul_256_8_16_complex
+  category: pre_checkin
+  function:
+    matmul: *complex_precisions
+  M: 256
+  N: 8
+  K: 16
+  alpha_beta: *complex_alpha_beta_range_small
+  transA_transB: *complex_transA_transB_range_small
+  gpu_arch: '9(42|50)'
+
+- name: matmul_2001_5431_3004_complex
+  category: pre_checkin
+  function:
+    matmul: *complex_precisions
+  M: 2001
+  N: 5431
+  K: 3004
+  alpha_beta: *complex_alpha_beta_range_small
+  transA_transB: *complex_transA_transB_range_small
+  gpu_arch: '9(42|50)'
+
+- name: matmul_1093_141_7011_complex
+  category: pre_checkin
+  function:
+    matmul: *complex_precisions
+  M: 1093
+  N: 141
+  K: 7011
+  alpha_beta: *complex_alpha_beta_range_small
+  transA_transB: *complex_transA_transB_range_small
+  gpu_arch: '9(42|50)'
+
+- name: matmul_4097_2187_2653_complex
+  category: pre_checkin
+  function:
+    matmul: *complex_precisions
+  M: 4096
+  N: 2187
+  K: 2653
+  alpha_beta: *complex_alpha_beta_range_small
+  transA_transB: *complex_transA_transB_range_small
+  gpu_arch: '9(42|50)'
 
 - name: matmul_one_bf16_fp32dst_precision_gfx90a
   category: quick
