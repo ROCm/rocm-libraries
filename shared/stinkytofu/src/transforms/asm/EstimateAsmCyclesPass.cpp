@@ -943,12 +943,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             // Update total cycles
             if (!isLabel(*inst)) {
                 // inst->dump(std::cout, false, "AsmCycles "+std::to_string(cycles - totalCycles));
-                if (auto* c = inst->getModifier<CommentData>()) {
-                    c->comment = "<This is " + std::to_string(cycles) + "-cycle>";
-                } else {
-                    inst->addModifier<CommentData>(
-                        CommentData{"<This is " + std::to_string(cycles) + "-cycle>"});
-                }
+                appendComment(inst, "<This is " + std::to_string(cycles) + "-cycle>");
             }
             // std::cout << "cycles: " << cycles - totalCycles << std::endl;
             totalCycles = cycles;
