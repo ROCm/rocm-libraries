@@ -1,7 +1,3 @@
-# if(NOT ENABLE_HIP_KERNEL_ENGINE)
-#     return()
-# endif()
-
 # Embed kernels for this engine
 add_subdirectory(kernels)
 
@@ -24,7 +20,6 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormUtilities.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/ApplicabilityChecks.cpp
-    
 )
 
 target_include_directories(hip_kernel_provider_impl PUBLIC
