@@ -6,10 +6,11 @@
 
 #include <string_view>
 
-@KERNEL_DECLARATIONS@
+@KERNEL_DECLARATIONS @
 
-namespace hip_plugin {
+    namespace hip_plugin
+{
 
-std::string_view getKernelSrc(const char* name);
+    std::string_view getKernelSrc(const char* name);
 
 } // namespace hip_plugin

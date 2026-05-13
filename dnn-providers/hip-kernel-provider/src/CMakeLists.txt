@@ -19,6 +19,17 @@ if(ENABLE_HIP_KERNEL_ENGINE)
     add_subdirectory(engines/hip_kernel_engine)
 endif()
 
+# Add to the hip_kernel_provider_impl target the inlined kernels
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(KernelEmbedding)
+# Generate embedded kernel sources and includes at configure time
+embed_kernel_sources(
+    ${CMAKE_CURRENT_BINARY_DIR}/kernel_sources.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/kernel_sources.hpp
+    ${CMAKE_CURRENT_BINARY_DIR}/kernel_includes.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/kernel_includes.hpp
+)
+
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../include

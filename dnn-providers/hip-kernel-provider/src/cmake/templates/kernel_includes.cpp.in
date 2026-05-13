@@ -1,0 +1,50 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// Auto-generated kernel includes - DO NOT EDIT
+#include "kernel_includes.hpp"
+#include <cstddef>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <unordered_map>
+
+@HEADER_DEFINITIONS @
+
+    namespace hip_plugin
+{
+
+    static const std::unordered_map<std::string_view, std::string_view>& getKernelIncludes()
+    {
+        static const std::unordered_map<std::string_view, std::string_view> s_data
+        {
+            @HEADER_MAP_ENTRIES @
+        };
+        return s_data;
+    }
+
+    std::string_view getKernelInc(const char* name)
+    {
+        const auto& map = getKernelIncludes();
+        auto it = map.find(name);
+        if(it == map.end())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                std::string("Failed to load kernel include: ") + name);
+        }
+        return it->second;
+    }
+
+    void getKernelIncList(std::vector<std::string_view> & includeTexts,
+                          std::vector<const char*> & includeNames)
+    {
+        static const std::vector<const char*> s_allIncludes = { @HEADER_FILENAMES @ };
+
+        for(const char* filename : s_allIncludes)
+        {
+            includeTexts.push_back(getKernelInc(filename));
+            includeNames.push_back(filename);
+        }
+    }
+
+} // namespace hip_plugin

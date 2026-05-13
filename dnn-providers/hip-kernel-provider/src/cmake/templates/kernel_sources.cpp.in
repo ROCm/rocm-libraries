@@ -1,0 +1,38 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// Auto-generated kernel sources - DO NOT EDIT
+#include "kernel_sources.hpp"
+#include <cstddef>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <unordered_map>
+
+@KERNEL_DEFINITIONS @
+
+    namespace hip_plugin
+{
+
+    static const std::unordered_map<std::string_view, std::string_view>& getKernelMap()
+    {
+        static const std::unordered_map<std::string_view, std::string_view> s_kernelMap
+        {
+            @KERNEL_MAP_ENTRIES @
+        };
+        return s_kernelMap;
+    }
+
+    std::string_view getKernelSrc(const char* name)
+    {
+        const auto& map = getKernelMap();
+        auto it = map.find(name);
+        if(it == map.end())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                std::string("Failed to load kernel source: ") + name);
+        }
+        return it->second;
+    }
+
+} // namespace hip_plugin
