@@ -74,20 +74,33 @@ from Tensile.Components.ScheduleCapture import (
 # `LoopBodyCapture`.
 # =============================================================================
 
-def _per_render_counts(capture):
-    """Return `{canonical_render: count}` for one LoopBodyCapture's nodes."""
+def _per_render_counts(capture, instructions=None):
+    """Return `{canonical_render: count}` for one LoopBodyCapture's nodes.
+
+    `instructions` defaults to `capture.instructions` (raw); pass
+    `data_flow_instructions(capture)` to consume the shared dataflow
+    filter (rocm-libraries-d3zj). Synthetic captures that contain no
+    scheduler-control instructions get the same answer either way.
+    """
     from collections import Counter
     counts = Counter()
-    for ti in capture.instructions:
+    iterable = capture.instructions if instructions is None else instructions
+    for ti in iterable:
         render = WrappedInstruction.canonical_str(ti.wrapped.rocisa_inst)
         counts[render] += 1
     return dict(counts)
 
 
-def _per_render_ordinal_map(capture):
-    """Return `{(canonical_render, emission_ordinal): TaggedInstruction}` for a capture."""
+def _per_render_ordinal_map(capture, instructions=None):
+    """Return `{(canonical_render, emission_ordinal): TaggedInstruction}` for a capture.
+
+    `instructions` defaults to `capture.instructions` (raw); pass
+    `data_flow_instructions(capture)` to consume the shared dataflow
+    filter (rocm-libraries-d3zj).
+    """
     out = {}
-    for ti in capture.instructions:
+    iterable = capture.instructions if instructions is None else instructions
+    for ti in iterable:
         render = WrappedInstruction.canonical_str(ti.wrapped.rocisa_inst)
         out[(render, ti.emission_ordinal)] = ti
     return out
@@ -390,21 +403,31 @@ def _captures_per_body(four_part_capture):
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "rocm-libraries-d3zj: scheduler-control instruction count divergence "
-        "(SWaitCnt / SBarrier / SNop expected to differ per user direction "
-        "2026-05-12; SCmpEQI32 loop-counter divergence may be real). "
-        "Note: the original 'pre-existing default-side double-capture' "
-        "framing in this xfail reason is stale — F3 (rocm-libraries-vybd, "
-        "commit 03ca4ef0d30) closed the double-capture by deleting the "
-        "leftover-pack walk; the residual divergence here is scheduler-"
-        "control category mismatch, tracked under d3zj. The fix is updating "
-        "the per-render assertion to exclude SWaitCnt/SBarrier/SNop "
-        "categories; until then strict=True will surface any change."
+        "rocm-libraries-d3zj: residual SCmpEQI32 / SSubU32 (loop-counter "
+        "code, LCC) divergence between CMS-side and default-side captures "
+        "in ML and ML-1 bodies. Per the strict per-body LCC invariant "
+        "(2026-05-13), every loop body must have exactly 1 SCmpEQI32 + 1 "
+        "SSubU32; the default side is missing both in ML and ML-1. "
+        "Investigation memo: D3ZJ_SCMPEQI32_INVESTIGATION.md. "
+        "Scheduler-control noise (SWaitCnt / SBarrier / SNop / SSetPrior) "
+        "was eliminated by migrating this test to the shared "
+        "`data_flow_instructions` helper (rocm-libraries-d3zj). "
+        "strict=True will surface any change."
     ),
 )
 def test_real_kernel_per_render_counts_match(real_kernel_capture_pair):
     """Memo §6.2 #1: for every (body, canonical_render) in either real
-    build's captures, both builds emit the same count."""
+    build's captures, both builds emit the same count.
+
+    Iterates the shared `data_flow_instructions(body)` helper from
+    `CMSValidator` so this test consumes the same scheduler-control
+    exclusion abstraction as `build_dataflow_graph` Phase 1
+    (rocm-libraries-d3zj). SWaitCnt / SBarrier / SNop / SSetPrior are
+    not user-program semantics; comparing them across CMS and default
+    captures would assert against scheduler choice.
+    """
+    from Tensile.Components.CMSValidator import data_flow_instructions
+
     default_cap, cms_cap = real_kernel_capture_pair
     default_bodies = _captures_per_body(default_cap)
     cms_bodies = _captures_per_body(cms_cap)
@@ -414,8 +437,14 @@ def test_real_kernel_per_render_counts_match(real_kernel_capture_pair):
     )
     mismatches = []
     for label in sorted(default_bodies):
-        default_counts = _per_render_counts(default_bodies[label])
-        cms_counts = _per_render_counts(cms_bodies[label])
+        default_counts = _per_render_counts(
+            default_bodies[label],
+            instructions=data_flow_instructions(default_bodies[label]),
+        )
+        cms_counts = _per_render_counts(
+            cms_bodies[label],
+            instructions=data_flow_instructions(cms_bodies[label]),
+        )
         all_renders = set(default_counts) | set(cms_counts)
         for r in all_renders:
             if default_counts.get(r, 0) != cms_counts.get(r, 0):
@@ -433,9 +462,9 @@ def test_real_kernel_per_render_counts_match(real_kernel_capture_pair):
     reason=(
         "rocm-libraries-d3zj: depends on the per-render-count invariant in "
         "`test_real_kernel_per_render_counts_match` (also under d3zj). "
-        "Note: the original 'default-side double-capture' framing is stale — "
-        "F3 fixed that. Residual cause is scheduler-control instruction "
-        "category mismatch (SWaitCnt / SBarrier / SNop / SCmpEQI32)."
+        "Residual cause is the LCC (SCmpEQI32 / SSubU32) per-body "
+        "distribution divergence in ML / ML-1 — see "
+        "D3ZJ_SCMPEQI32_INVESTIGATION.md."
     ),
 )
 def test_real_kernel_per_ordinal_logical_instruction_matches(
@@ -443,7 +472,14 @@ def test_real_kernel_per_ordinal_logical_instruction_matches(
 ):
     """Memo §6.2 #2: for every (body, canonical_render, ordinal) tuple
     appearing in either real build, both builds resolve to a
-    TaggedInstruction whose underlying rocisa class name matches."""
+    TaggedInstruction whose underlying rocisa class name matches.
+
+    Iterates the shared `data_flow_instructions(body)` helper from
+    `CMSValidator` (rocm-libraries-d3zj); see the docstring on
+    `test_real_kernel_per_render_counts_match` above for the rationale.
+    """
+    from Tensile.Components.CMSValidator import data_flow_instructions
+
     default_cap, cms_cap = real_kernel_capture_pair
     default_bodies = _captures_per_body(default_cap)
     cms_bodies = _captures_per_body(cms_cap)
@@ -451,8 +487,14 @@ def test_real_kernel_per_ordinal_logical_instruction_matches(
     for label in sorted(set(default_bodies) | set(cms_bodies)):
         if label not in default_bodies or label not in cms_bodies:
             continue
-        d_map = _per_render_ordinal_map(default_bodies[label])
-        c_map = _per_render_ordinal_map(cms_bodies[label])
+        d_map = _per_render_ordinal_map(
+            default_bodies[label],
+            instructions=data_flow_instructions(default_bodies[label]),
+        )
+        c_map = _per_render_ordinal_map(
+            cms_bodies[label],
+            instructions=data_flow_instructions(cms_bodies[label]),
+        )
         all_keys = set(d_map) | set(c_map)
         for key in all_keys:
             ti_d = d_map.get(key)

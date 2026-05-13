@@ -1590,6 +1590,38 @@ _DATA_FLOW_CATEGORIES = frozenset({
 })
 
 
+def data_flow_instructions(body):
+    """Yield every TaggedInstruction in `body` whose rocisa-derived
+    category is NOT in `_NO_DATAFLOW_IDENTITY_CATEGORIES`.
+
+    This is the SINGLE source of truth for "which raw-capture
+    instructions participate in dataflow comparison." Both the dataflow
+    graph builder (Phase 1 node construction in `build_dataflow_graph`)
+    and the per-render / per-ordinal determinism tests
+    (`test_real_kernel_per_render_counts_match` /
+    `test_real_kernel_per_ordinal_logical_instruction_matches` in
+    `Tests/unit/test_dataflow_graph_emission_ordinal.py`, rocm-libraries-
+    d3zj) consume this helper so they share the same exclusion
+    abstraction. Eliminates the parallel-knowledge code smell where the
+    d3zj tests previously bypassed `_NO_DATAFLOW_IDENTITY_CATEGORIES` by
+    iterating raw `body.instructions`.
+
+    Excluded categories (scheduler-control): SWAIT, SBARRIER, SNOP,
+    SSETPRIO. These are emitted by scheduler choice, not user-program
+    semantics; per the docstring on `_NO_DATAFLOW_IDENTITY_CATEGORIES`,
+    they would create spurious identity collisions across captures that
+    picked different wait/nop placement.
+
+    LCC instructions (SSubU32 + SCmpEQI32) are NOT excluded — they ride
+    user-program semantics (loop counter code) and contribute to
+    cross-body cycle counting via `cumulative_issue_cycles`. See
+    `LCC_AUDIT.md` and the comment at the Phase 1 call site.
+    """
+    for ti in body.instructions:
+        if _category(ti.wrapped.rocisa_inst) not in _NO_DATAFLOW_IDENTITY_CATEGORIES:
+            yield ti
+
+
 def _role(node) -> str:
     """Return a node's rocisa-derived scheduler-role tag.
 
@@ -1944,6 +1976,14 @@ def build_dataflow_graph(four_part_capture):
         # docstrings.
         stream_idx_by_id = assign_stream_indices_for_body(body.instructions)
 
+        # Pre-compute the dataflow-participating subset via the shared
+        # `data_flow_instructions` helper (the single source of truth for
+        # the scheduler-control exclusion shared with the d3zj tests in
+        # `test_dataflow_graph_emission_ordinal.py`). Membership is keyed
+        # by `id()` so the inner loop can dispatch in O(1) without
+        # re-deriving the predicate inline.
+        dataflow_ti_ids = {id(ti) for ti in data_flow_instructions(body)}
+
         for tagged_inst in body.instructions:
             inst = tagged_inst.wrapped.rocisa_inst
             try:
@@ -1976,7 +2016,10 @@ def build_dataflow_graph(four_part_capture):
             # per-instruction issue cycles contribute to
             # `cumulative_issue_cycles` walks; cross-body cycle counting
             # depends on it.
-            if _category(inst) not in _NO_DATAFLOW_IDENTITY_CATEGORIES:
+            # Membership is determined by `data_flow_instructions(body)`
+            # (the shared helper) so this site stays in sync with the
+            # d3zj per-render / per-ordinal determinism tests.
+            if id(tagged_inst) in dataflow_ti_ids:
                 nodes_by_identity[node.identity] = node
 
         # Stash per-body GraphNodes on the LoopBodyCapture for the helpers.
