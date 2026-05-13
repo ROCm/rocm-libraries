@@ -27,7 +27,7 @@ from rocisa.enum import CacheScope
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, SBranch, \
     SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, SCmpGtI32, \
     SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, SCmpEQI32, SEndpgm, \
-    SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SBarrier, \
+    SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SWaitXCnt, SBarrier, \
     SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec, \
     SCmpEQU64, BufferStoreB32, VMovB64, FlatAtomicDecU32
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
@@ -1485,6 +1485,10 @@ class GSUOn(GSU):
             # Save EXEC and set only lane 0 active
             module.add(SMovExec(dst=sgpr(tmpSgpr, numSgpr), src=EXEC(), comment="save EXEC"))
             module.add(SMovExec(dst=EXEC(), src=1, comment="only lane 0 active"))
+            # Arches that mark RequiresXCntForVolatileVMEM (e.g. gfx1250) need
+            # an explicit XNACK-replay drain before a volatile/atomic VMEM op.
+            if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
+                module.add(SWaitXCnt(xcnt=0, comment="drain in-flight VMEM before flat atomic"))
             module.add(FlatAtomicDecU32(dst=vgpr(dstVgpr), addr=vgpr(addrVgpr, 2), data=vgpr(dataVgpr)))
             module.add(SWaitCnt(vlcnt=0, comment="wait for atomic"))
             module.add(SMovExec(dst=EXEC(), src=sgpr(tmpSgpr, numSgpr), comment="restore EXEC"))
