@@ -394,19 +394,22 @@ int main(int argc, char* argv[])
             {
                 // 2GB vram limit, approx 1 minute GPU time with short tests.
                 vramgb_limit   = 2;
-                test_prob      = 0;
                 emulation_prob = 0.005;
+                test_prob      = 0;
+                unittest_prob  = 0;
             }
             if(nidx(emulationtype) == nidx("regression"))
             {
                 vramgb_limit   = 16;
                 emulation_prob = 1;
                 test_prob      = 0.01;
+                unittest_prob  = 0.01;
             }
             if(nidx(emulationtype) == nidx("extended"))
             {
                 emulation_prob = 1;
                 test_prob      = 0.02;
+                unittest_prob  = 0.02;
             }
         });
 
