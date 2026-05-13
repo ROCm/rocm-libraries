@@ -75,9 +75,9 @@ After building, run the test suites:
 
 ## Kernel Embedding System
 
-Kernel source files (`.cpp`, `.hpp`, `.h`) under `kernels/` are embedded as C++ string literals at CMake configure time. This allows runtime compilation via HIPRTC while keeping kernel sources as regular C++ files (with syntax highlighting, IDE support, etc.).
+Kernel source files (`.cpp`, `.hpp`, `.h`) under `engines/` are embedded as C++ string literals at CMake configure time. *Use the CMake function `add_kernels_for_embedding` in any engine you define that implements HIP kernels.* This allows runtime compilation via HIPRTC while keeping kernel sources as regular C++ files (with syntax highlighting, IDE support, etc.).
 
-The embedding is handled by the `embed_kernel_sources()` CMake function in `kernels/CMakeLists.txt`.
+The embedding is handled by the `embed_kernel_sources()` CMake function in `src/cmake/KernelEmbedding.cmake`.
 
 ## Contributing
 

@@ -96,7 +96,4 @@ function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OU
         @ONLY
     )
 
-    # set_source_files_properties(${OUTPUT_INCS_CPP} PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
-    # set_source_files_properties(${OUTPUT_SRCS_CPP} PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
-
    endfunction()
