@@ -551,6 +551,48 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.enable_capture_default_schedule()
     self._capture_skip_internal_validate = True
 
+  def enable_capture_non_cms_build(self):
+    """Enable Approach-A non-CMS reference capture (rocm-libraries-nyb5).
+
+    Switches on a parallel capture path that observes the *natural* non-CMS
+    emit on a build with ``UseCustomMainLoopSchedule=0``. This is distinct
+    from ``enable_capture_default_schedule`` (the legacy SHADOW path,
+    owned by ``rocm-libraries-czby``):
+
+      - ``_captureDefaultSchedule`` runs SHADOW captures on a CMS build:
+        a synthetic re-assembly via ``_noLoadLoopBodyDefault`` and
+        ``_makeSubIterSchedule`` against the CMS-mutated ``kernel`` dict.
+        The shadow finalizes BEFORE ``closeLoop`` runs (see
+        ``KernelWriter.py:4591``), missing the loop-counter code (LCC).
+
+      - ``_captureNonCmsBuild`` runs on a true non-CMS build, where the
+        non-CMS branches of ``_loopBody`` (line 4446) and ``noLoadLoop``
+        (the natural ``noLoadLoopBody`` call at line 3791) emit real
+        runnable instructions. The capture observes those emissions and
+        finalizes AFTER ``closeLoop`` so LCC lands in the captured ML/ML-1
+        bodies. This closes the d3zj defect as a side effect.
+
+    Both flags can coexist on the same writer in principle, but the
+    intended usage is one writer per build (Q5 — second writer instance,
+    fully isolated), as orchestrated by
+    ``Tensile.Components.CustomSchedule.approach_a.build_non_cms_reference``.
+
+    Implementation: monkey-patch ``setupNewTile`` once with a wrapper
+    that sets the flag on ``self.states`` immediately after the
+    underlying method returns. Idempotent.
+    """
+    if getattr(self, "_capture_non_cms_build_enabled", False):
+      return
+    self._capture_non_cms_build_enabled = True
+    original_setupNewTile = self.setupNewTile
+
+    def _setupNewTile_with_non_cms_flag(*args, **kwargs):
+      result = original_setupNewTile(*args, **kwargs)
+      self.states._captureNonCmsBuild = True
+      return result
+
+    self.setupNewTile = _setupNewTile_with_non_cms_flag
+
   ##############################################################################
   # Init
   ##############################################################################
@@ -2792,6 +2834,56 @@ class KernelWriter(metaclass=abc.ABCMeta):
         slot_kind=slot_kind, mfma_index=mfma_index,
       )
 
+  def _appendCloseLoopLCCToBuilder(self, closeLoopModule, capture, kernel):
+    """Walk a closeLoop Module and append loop-counter code to ``capture``.
+
+    On the non-CMS reference build (rocm-libraries-nyb5, Approach A),
+    closeLoop emits SSubU32 + SCmpEQI32 (the loop-counter code, LCC) at
+    the END of the loop body, after all subiter scheduling has run.
+    Without this hook, the SHADOW capture pipeline (which finalizes
+    BEFORE closeLoop runs at ``KernelWriter.py:4633``) would leave LCC
+    out of the captured body — exactly the d3zj defect.
+
+    Slot assignment: LCC sits between the last subiter's MFMAs and the
+    end of the body. We tag with ``slot_kind=SLOT_KIND_MFMA``,
+    ``mfma_index=last_subiter_last_mfma + 1`` so it sorts strictly
+    after all MFMAs in canonical-render order. ``subiter`` is the
+    final subiter index (LoopIters - 1).
+
+    Other instructions in closeLoop (branches, labels, comments) are
+    NOT appended — only SSubU32 and SCmpEQI32 (the LCC pair). Branches
+    are scheduler-control; the dataflow validator excludes them via
+    ``data_flow_instructions`` regardless.
+    """
+    from rocisa.code import TextBlock
+    from rocisa.instruction import SSubU32, SCmpEQI32
+    from Tensile.Components.ScheduleCapture import SLOT_KIND_MFMA
+
+    # Compute the slot position. LoopIters * numMfmaPerIter is the
+    # absolute mfma_index just past the last MFMA of the last subiter;
+    # use that for both LCC instructions to keep them adjacent in
+    # canonical sort order.
+    loop_iters = kernel.get("LoopIters")
+    num_mfma_per_iter = getattr(self.states, "numMfmaPerIter", 0) or 0
+    if loop_iters is None or loop_iters < 1:
+      # Without a loop-iters value, fall back to a high mfma_index so
+      # LCC still sorts after typical MFMA streams. Real kernels always
+      # have LoopIters>=1; this path is defensive only.
+      lcc_subiter = 0
+      lcc_mfma_index = max(num_mfma_per_iter, 0)
+    else:
+      lcc_subiter = loop_iters - 1
+      lcc_mfma_index = loop_iters * max(num_mfma_per_iter, 1)
+
+    for item in closeLoopModule.flatitems():
+      if isinstance(item, TextBlock):
+        continue
+      if isinstance(item, (SSubU32, SCmpEQI32)):
+        capture.append(
+            inst=item, category="LCC", subiter=lcc_subiter,
+            slot_kind=SLOT_KIND_MFMA, mfma_index=lcc_mfma_index,
+        )
+
   ##############################################################################
   # returns list of modules or text
   ##############################################################################
@@ -3999,9 +4091,39 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         self._capture_context.default_n_ll = finalized
 
-    # generate no Load Loop Body code
-    module.add(self.noLoadLoopBody(kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=NLLindex, \
-                                   NLLnum=NLLnum, useTailloopInNll=useTailloopInNll, remainPgr=remainPgr))
+    # rocm-libraries-nyb5 (Approach A): observe the natural non-CMS
+    # noLoadLoopBody emit when `_captureNonCmsBuild` is set. On the
+    # non-CMS path the dispatcher at line 3146 routes to
+    # `_noLoadLoopBodyDefault`, which already accepts `capture=`. Build
+    # a fresh LoopBodyCaptureBuilder per NGL/NLL invocation, drive the
+    # default body with capture=builder, finalize, stash on
+    # _capture_context — exactly mirroring the SHADOW path's
+    # default_n_gl/default_n_ll lifecycle (lines ~3854-3880) but on
+    # naturally-emitted code.
+    nlnoncms_capture = (
+      getattr(self.states, "_captureNonCmsBuild", False)
+      and not kernel["UseCustomMainLoopSchedule"]
+      and not isOptNLL
+    )
+    if nlnoncms_capture:
+      from Tensile.Components.ScheduleCapture import LoopBodyCaptureBuilder
+      noncms_nl_capture = LoopBodyCaptureBuilder()
+      module.add(self._noLoadLoopBodyDefault(
+          kernel, tensorParametersA, tensorParametersB, pack, packPre,
+          isOptNLL, isNGLL, NLLfirst, NLLlast,
+          NLLindex=NLLindex, NLLnum=NLLnum,
+          useTailloopInNll=useTailloopInNll, remainPgr=remainPgr,
+          capture=noncms_nl_capture,
+      ))
+      finalized_nl = noncms_nl_capture.finalize()
+      if isNGLL:
+        self._capture_context.default_n_gl = finalized_nl
+      else:
+        self._capture_context.default_n_ll = finalized_nl
+    else:
+      # generate no Load Loop Body code
+      module.add(self.noLoadLoopBody(kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=NLLindex, \
+                                     NLLnum=NLLnum, useTailloopInNll=useTailloopInNll, remainPgr=remainPgr))
 
     if self.do["executeToLoopEnd"] and isOptNLL:
       module.add(self.functionEnd(kernel, addLabel=False))
@@ -4756,8 +4878,70 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # after removing the global variable it is always false...
       # if self.states.numItersPLR:
       if not kernel["UseCustomMainLoopSchedule"]:
-        subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
-                      u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], module, localReadsSecondHalf)
+        # rocm-libraries-nyb5 (Approach A): observe the natural non-CMS
+        # _makeSubIterSchedule emit when `_captureNonCmsBuild` is set.
+        # The flag is enabled via `enable_capture_non_cms_build()` and
+        # gates a parallel capture path that is INDEPENDENT of the
+        # legacy SHADOW path's `_captureDefaultSchedule` flag (the
+        # SHADOW machinery is owned by `rocm-libraries-czby` and stays
+        # untouched in this bead). The non-CMS build is a real
+        # emittable+runnable kernel; capture observes its emission so
+        # the validator can compare CMS-side captures against a true
+        # default-scheduled reference (per `2LZD_INVESTIGATION.md §6`).
+        capture_non_cms = getattr(self.states, "_captureNonCmsBuild", False)
+        if capture_non_cms:
+          if self._capture_context.builder is None:
+            from Tensile.Components.ScheduleCapture import LoopBodyCaptureBuilder
+            self._capture_context.builder = LoopBodyCaptureBuilder()
+          from Tensile.Components.ScheduleCapture import (
+            build_idmap, invert_idmap_to_id_to_category,
+          )
+          # Build {id(item) -> category} from the same source modules SIA3
+          # consumes on the non-CMS path. Identity is preserved because
+          # SIA3 reads from these objects directly (no clone needed — the
+          # non-CMS path runs the schedule for real, not as a shadow).
+          capture_idmap = build_idmap(
+            num_loop_iter=len(LRCodeAAllIters),
+            LRCodeA=LRCodeAAllIters, PackCodeA=PackCodeAAllIters,
+            LRCodeB=LRCodeBAllIters, PackCodeB=PackCodeBAllIters,
+            globalReadA=self.codes.globalReadA,
+            globalReadB=self.codes.globalReadB,
+            globalReadIncACode=globalReadIncACode,
+            globalReadIncBCode=globalReadIncBCode,
+            localWriteA=self.codes.localWriteA,
+            localWriteB=self.codes.localWriteB,
+            LRSwapA=LRSwapAAllIters, LRSwapB=LRSwapBAllIters,
+            LWSwapA=LWSwapAAllIters, LWSwapB=LWSwapBAllIters,
+            loopCounterCode=Module(),  # LCC harvested post-closeLoop
+            syncCode=Module(),         # SYNC tagged via SWaitCnt isinstance fallback
+            snopCode=Module(),         # SNOP tagged via SNop isinstance fallback
+          )
+          capture_id_to_cat = invert_idmap_to_id_to_category(capture_idmap)
+          # Tag prefetch pack code leaves (consumed at iter 0 via
+          # pack[packIdx=0]). On the non-CMS path the prefetch_pack_a/b
+          # snapshots are populated only if the kernelBody prefetch
+          # block decided to (gated on UseCustomMainLoopSchedule today).
+          # For the non-CMS reference, the prefetch's pack leaves enter
+          # `pack[plrIdx]` directly and therefore land in PackA{u}/PackB{u}
+          # via the per-iter map above; this loop is a defensive no-op
+          # when the snapshots are empty.
+          for _plrIdx, _prefetch_mod in enumerate(self._capture_context.prefetch_pack_a):
+            for _leaf in _prefetch_mod.flatitems():
+              capture_id_to_cat.setdefault(id(_leaf), f"PackA{_plrIdx}")
+          for _plrIdx, _prefetch_mod in enumerate(self._capture_context.prefetch_pack_b):
+            for _leaf in _prefetch_mod.flatitems():
+              capture_id_to_cat.setdefault(id(_leaf), f"PackB{_plrIdx}")
+          subIterCode = self._makeSubIterSchedule(
+            kernel, tensorParametersA, tensorParametersB, localReads,
+            u, pointerLWCode, pointerLRCode, waitCode, macIterCode,
+            waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx],
+            module, localReadsSecondHalf,
+            capture=self._capture_context.builder,
+            capture_id_to_category=capture_id_to_cat,
+          )
+        else:
+          subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
+                        u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], module, localReadsSecondHalf)
         module.add(subIterCode) # add scheduled "other", local reads, local writes
       elif getattr(self.states, "_captureDefaultSchedule", False):
         # Phase 4 of plans/then-let-s-work-on-jaunty-reddy.md: drive shadow
@@ -4924,7 +5108,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
     oddLabel = (lc == 0 and loopCopies == 2)
     if not skipClose and not kernel["UseCustomMainLoopSchedule"]:
         if not initCIter:
-          module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop, oddLabel=oddLabel, nta=nta, ntb=ntb))
+          closeLoopMod = self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop, oddLabel=oddLabel, nta=nta, ntb=ntb)
+          module.add(closeLoopMod)
+          # rocm-libraries-nyb5 (Approach A): harvest the loop-counter code
+          # (LCC: SSubU32 + SCmpEQI32) emitted by closeLoop into the
+          # non-CMS-reference capture builder, then finalize as
+          # `default_main`. This is the structural fix for d3zj — the
+          # SHADOW capture's `default_main` was finalized at line ~4633
+          # BEFORE closeLoop ran, so its ML/ML-1 bodies were missing both
+          # LCC instructions (see `D3ZJ_SCMPEQI32_INVESTIGATION.md §3.4`).
+          # The non-CMS reference build naturally emits closeLoop here and
+          # finalizes after, so LCC lands in the captured body.
+          if getattr(self.states, "_captureNonCmsBuild", False):
+            builder = self._capture_context.builder
+            if builder is not None:
+              self._appendCloseLoopLCCToBuilder(closeLoopMod, builder, kernel)
+              self._capture_context.default_main = builder.finalize()
+              self._capture_context.builder = None
         elif loopCopies >= 2:
           # initC(lc=0) + multi-copy (EPS loopCopies=2 / HalfPLR loopCopies=3)
           # initC(lc=0) -> (lc=1) -> (lc=0 in EPS / lc=2 in HalfPLR) -> ...
@@ -6205,6 +6405,70 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # ctx.default and ctx.cms are intentionally preserved (consumer-facing).
         # With auto-activation, ~2.7 MB per CMS kernel × 10k+ kernels in a
         # tuning run would be a 27 GB peak leak otherwise.
+        self._capture_context.reset()
+
+    # rocm-libraries-nyb5 (Approach A): parallel assembly site for the
+    # non-CMS reference build. When `_captureNonCmsBuild` is set, the
+    # _loopBody non-CMS branch has populated `ctx.default_main` (after
+    # closeLoop, with LCC); the noLoadLoop non-CMS branch has populated
+    # `ctx.default_n_gl` / `ctx.default_n_ll`. Assemble the
+    # `FourPartCapture` here and stash on `ctx.default` so callers
+    # (notably `Tensile.Components.CustomSchedule.approach_a.
+    # build_non_cms_reference`) can read it via the existing
+    # `_last_default_capture` shim. We deliberately do NOT run
+    # compare_graphs here — Approach A's whole point is that the
+    # comparison is driven OUTSIDE the build, by the validator
+    # consuming Build #1 (CMS) and Build #2 (this) captures.
+    if getattr(self.states, "_captureNonCmsBuild", False):
+      from Tensile.Components.ScheduleCapture import (
+        FourPartCapture, clone_loop_body, collect_regset_stream,
+      )
+      from Tensile.Components.CMSValidator import ArchProfile
+      assert loopCopies == 1, (
+        f"Non-CMS reference capture (rocm-libraries-nyb5) requires "
+        f"loopCopies==1; got loopCopies={loopCopies}. Capture "
+        f"machinery needs per-lc support before lifting this "
+        f"restriction."
+      )
+      try:
+        ctx = self._capture_context
+        main = ctx.default_main
+        n_gl_dict = {0: ctx.default_n_gl} if ctx.default_n_gl is not None else {}
+        n_ll_dict = {0: ctx.default_n_ll} if ctx.default_n_ll is not None else {}
+        if main is not None:
+          num_mfma = sum(1 for ti in main.instructions if ti.category == "MFMA")
+          isa_tuple = tuple(kernel["ISA"]) if "ISA" in kernel else None
+          arch_profile = ArchProfile.for_isa(isa_tuple)
+          # Same RegSet harvest as the legacy assembly site so symbolic
+          # operands resolve to consistent numeric byte-keys across
+          # both builds (the load-bearing invariant for compare_graphs
+          # in build_dataflow_graph Phase 2; rocm-libraries-bb34).
+          regset_stream = collect_regset_stream(self)
+          if regset_stream:
+            main.name_to_idx = dict(regset_stream)
+            if ctx.default_n_gl is not None:
+              ctx.default_n_gl.name_to_idx = dict(regset_stream)
+            if ctx.default_n_ll is not None:
+              ctx.default_n_ll.name_to_idx = dict(regset_stream)
+            if ctx.prologue is not None:
+              ctx.prologue.name_to_idx = dict(regset_stream)
+          ctx.default = FourPartCapture(
+            main_loop={0: main},
+            main_loop_prev={0: clone_loop_body(main)},
+            n_gl=n_gl_dict,
+            n_ll=n_ll_dict,
+            num_mfma=num_mfma,
+            num_codepaths=1,
+            source="non-cms-reference",
+            num_mfma_per_subiter=self.states.numMfmaPerIter,
+            arch_profile=arch_profile,
+            prologue=ctx.prologue,
+          )
+      finally:
+        # Same per-kernel reset discipline as the legacy assembly site.
+        # `ctx.default` is preserved (consumer-facing); scratch state
+        # cleared so a subsequent build on the same writer (rare but
+        # not forbidden) starts clean.
         self._capture_context.reset()
 
     if self.states.actualSummationLoops>1 and self.states.staggerUCode:
