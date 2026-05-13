@@ -21,15 +21,15 @@
 # SOFTWARE.
 #
 ################################################################################
-"""Standalone tests for ``ir_adaptor.register.RegisterPool``.
+"""Standalone tests for ``rocisa_stinkytofu_adaptor.register.RegisterPool``.
 
 Run from any working directory:
 
-    python3 shared/stinkytofu/python_module/tests/test_ir_adaptor_register.py
+    python3 shared/rocisa_stinkytofu_adaptor/tests/test_register.py
 
 Or with pytest if available:
 
-    pytest shared/stinkytofu/python_module/tests/test_ir_adaptor_register.py
+    pytest shared/rocisa_stinkytofu_adaptor/tests/test_register.py
 
 The tests assert behaviors that Tensile's KernelWriter implicitly depends on
 (AMDGPU ABI, byte-for-byte parity with rocisa's allocator, etc.). Treat any
@@ -47,19 +47,21 @@ from contextlib import redirect_stdout
 
 # ---------------------------------------------------------------------------
 # Self-contained sys.path bootstrap so the test runs without any install /
-# editable-mode setup. ir_adaptor lives at:
-#     shared/stinkytofu/python_module/ir_adaptor/
+# editable-mode setup. The ``rocisa_stinkytofu_adaptor`` Python package
+# lives at:
+#     shared/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/
 # This file lives at:
-#     shared/stinkytofu/python_module/tests/test_ir_adaptor_register.py
-# So python_module is one level up.
+#     shared/rocisa_stinkytofu_adaptor/tests/test_register.py
+# So the package's parent directory (where ``import
+# rocisa_stinkytofu_adaptor`` resolves) is one level up.
 # ---------------------------------------------------------------------------
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_PY_MODULE = os.path.normpath(os.path.join(_HERE, ".."))
-if _PY_MODULE not in sys.path:
-    sys.path.insert(0, _PY_MODULE)
+_PKG_PARENT = os.path.normpath(os.path.join(_HERE, ".."))
+if _PKG_PARENT not in sys.path:
+    sys.path.insert(0, _PKG_PARENT)
 
-from ir_adaptor.enum import RegisterType  # noqa: E402
-from ir_adaptor.register import RegisterPool  # noqa: E402
+from rocisa_stinkytofu_adaptor.enum import RegisterType  # noqa: E402
+from rocisa_stinkytofu_adaptor.register import RegisterPool  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

@@ -21,15 +21,15 @@
 # SOFTWARE.
 #
 ################################################################################
-"""Standalone tests for ``ir_adaptor.functions.ArgumentLoader``.
+"""Standalone tests for ``rocisa_stinkytofu_adaptor.functions.ArgumentLoader``.
 
 Run from any working directory:
 
-    python3 shared/stinkytofu/python_module/tests/test_ir_adaptor_argument_loader.py
+    python3 shared/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
 
 Or with pytest if available:
 
-    pytest shared/stinkytofu/python_module/tests/test_ir_adaptor_argument_loader.py
+    pytest shared/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
 
 These tests pin down the offset-bookkeeping contract that Tensile's
 KernelWriterAssembly relies on (``self.argLoader.getOffset()`` is read
@@ -45,18 +45,20 @@ import unittest
 
 # ---------------------------------------------------------------------------
 # Self-contained sys.path bootstrap so the test runs without any install /
-# editable-mode setup. ir_adaptor lives at:
-#     shared/stinkytofu/python_module/ir_adaptor/
+# editable-mode setup. The ``rocisa_stinkytofu_adaptor`` Python package
+# lives at:
+#     shared/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/
 # This file lives at:
-#     shared/stinkytofu/python_module/tests/test_ir_adaptor_argument_loader.py
-# So python_module is one level up.
+#     shared/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
+# So the package's parent directory (where ``import
+# rocisa_stinkytofu_adaptor`` resolves) is one level up.
 # ---------------------------------------------------------------------------
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_PY_MODULE = os.path.normpath(os.path.join(_HERE, ".."))
-if _PY_MODULE not in sys.path:
-    sys.path.insert(0, _PY_MODULE)
+_PKG_PARENT = os.path.normpath(os.path.join(_HERE, ".."))
+if _PKG_PARENT not in sys.path:
+    sys.path.insert(0, _PKG_PARENT)
 
-from ir_adaptor.functions import ArgumentLoader  # noqa: E402
+from rocisa_stinkytofu_adaptor.functions import ArgumentLoader  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

@@ -47,7 +47,7 @@ What it does (real):
     - ``RegisterPool.Register`` — ``(status, tag)`` value object;
       ``tag`` is a debug hint, not a unique key.
     - 33-test suite at
-      ``shared/stinkytofu/python_module/tests/test_ir_adaptor_register.py``.
+      ``shared/rocisa_stinkytofu_adaptor/tests/test_register.py``.
 
 Not yet done:
     - ``initTmps`` returns ``None``; the C++ implementation builds a

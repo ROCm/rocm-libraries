@@ -32,8 +32,8 @@ What it does (real):
       ``loadKernArg`` / ``loadAllKernArg`` advance ``kernArgOffset``
       byte-for-byte the same way ``functions/argument.cpp`` does, but
       return ``None`` instead of an emitted ``SLoadB*`` ``Item`` —
-      real emission is unblocked when ``ir_adaptor.instruction``
-      graduates from dummies.
+      real emission is unblocked when
+      ``rocisa_stinkytofu_adaptor.instruction`` graduates from dummies.
 
 Not yet done (dummy):
     - Branch helpers: ``BranchIfZero``, ``BranchIfNotZero``
@@ -73,7 +73,7 @@ class ArgumentLoader:
     but return ``None`` instead of a real ``SLoadB{32,64,128,256,512}``
     ``Item`` / ``Module``. Tensile feeds the return through
     ``module.add(...)`` which dummy-swallows ``None`` for now; emission
-    becomes real once ``ir_adaptor.instruction`` is real.
+    becomes real once ``rocisa_stinkytofu_adaptor.instruction`` is real.
 
     Keep parity with ``functions/argument.hpp`` if you ever touch this.
     """
@@ -102,7 +102,7 @@ class ArgumentLoader:
         the offset (used to skip unused parms). Real emission would
         produce an ``SLoadB{32,64,128,256,512}`` (writeSgpr=True) or a
         ``TextBlock("Move offset by N\\n")`` (writeSgpr=False); both
-        deferred until ``ir_adaptor.instruction`` is real.
+        deferred until ``rocisa_stinkytofu_adaptor.instruction`` is real.
         """
         if sgprOffset is None:
             self._kernArgOffset += int(dword) * 4

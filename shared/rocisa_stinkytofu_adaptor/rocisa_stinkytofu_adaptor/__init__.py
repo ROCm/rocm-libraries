@@ -19,15 +19,22 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
-"""logicalIR adaptor package — the Tensilelite ``rocisa`` shim.
+"""``rocisa_stinkytofu_adaptor`` — Tensilelite ``rocisa`` shim on top of stinkytofu.
 
 What this file is:
     Top-level package that mimics ``projects/hipblaslt/tensilelite/
     rocisa/rocisa`` (the nanobind C++ bindings) so KernelWriter callers
     can keep using ``from rocisa import ...`` unchanged. Activated only
-    when ``ROCISA_BACKEND=logical`` (see
+    when ``ROCISA_BACKEND=stinkytofu`` (see
     ``projects/hipblaslt/tensilelite/rocisa/rocisa/__init__.py``);
     reserved for ``gfx1250`` today.
+
+    Lives at ``shared/rocisa_stinkytofu_adaptor/`` as a sibling of
+    ``shared/stinkytofu/`` — intentionally outside the stinkytofu source
+    tree because this is a *consumer* of stinkytofu's Python binding,
+    not part of stinkytofu itself. Transient: planned to be deleted /
+    drastically shrunk once gfx1250 KernelWriter is rewritten against a
+    real stinkytofu service API.
 
 What it does (real):
     - ``IsaInfo`` — asm/arch/reg/bug caps holder; picklable.

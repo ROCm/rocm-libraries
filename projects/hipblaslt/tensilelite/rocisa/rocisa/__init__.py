@@ -81,22 +81,28 @@ def _import_rocisa():
 # ---------------------------------------------------------------------------
 # Backend dispatch
 # ---------------------------------------------------------------------------
-# ``ROCISA_BACKEND=logical`` redirects ``import rocisa`` to the ir_adaptor
-# shim. Anything else (or unset) keeps the original nanobind bindings in
-# ``_rocisa``.
+# ``ROCISA_BACKEND=stinkytofu`` redirects ``import rocisa`` to the
+# ``rocisa_stinkytofu_adaptor`` shim (a rocisa-shaped facade backed by the
+# stinkytofu Python binding ``_stinkytofu.so``). Anything else (or unset)
+# keeps the original nanobind bindings in ``_rocisa``.
 
 _BACKEND = os.environ.get("ROCISA_BACKEND", "").strip().lower()
 
-def _load_logical_adapter() -> bool:
-    """Try to install the stinkytofu/IR adapter as the ``rocisa`` module.
+_ADAPTER_PKG = "rocisa_stinkytofu_adaptor"
+
+
+def _load_stinkytofu_adapter() -> bool:
+    """Try to install the rocisa_stinkytofu_adaptor as the ``rocisa`` module.
 
     Returns True iff we successfully rewired sys.modules; on any failure
     we fall back to the nanobind bindings silently (the caller decides
     whether that is acceptable).
     """
 
-    # Locate ``<repo_root>/shared/stinkytofu/python_module`` by walking up
-    # from this file until we hit an ancestor containing ``shared/stinkytofu``.
+    # Locate ``<repo_root>/shared/rocisa_stinkytofu_adaptor`` by walking up
+    # from this file until we hit an ancestor containing it. The adapter
+    # is a sibling of ``shared/stinkytofu/`` on purpose — it is a *consumer*
+    # of the stinkytofu Python binding, not part of stinkytofu itself.
     repo_root = None
     cur = os.path.dirname(os.path.abspath(__file__))
     while True:
@@ -104,34 +110,34 @@ def _load_logical_adapter() -> bool:
         if parent == cur:  # reached filesystem root
             break
         if os.path.basename(cur) == "projects":
-            # ``cur`` is the ``projects`` directory itself; the repo
-            # root is its parent, and must contain ``shared/stinkytofu``.
             candidate = parent
-            if os.path.isdir(os.path.join(candidate, "shared", "stinkytofu")):
+            if os.path.isdir(os.path.join(candidate, "shared", _ADAPTER_PKG)):
                 repo_root = candidate
                 break
         cur = parent
     if repo_root is None:
         return False
-    adapter_parent = os.path.join(repo_root, "shared", "stinkytofu", "python_module")
+    adapter_parent = os.path.join(repo_root, "shared", _ADAPTER_PKG)
 
-    if not os.path.isdir(os.path.join(adapter_parent, "ir_adaptor")):
+    if not os.path.isdir(os.path.join(adapter_parent, _ADAPTER_PKG)):
         return False
 
     if adapter_parent not in sys.path:
         sys.path.insert(0, adapter_parent)
 
     try:
-        import ir_adaptor as _adapter  # noqa: F401  (the adapter package)
+        import rocisa_stinkytofu_adaptor as _adapter  # noqa: F401
     except Exception:
         return False
 
-    # Install the adapter as ``rocisa`` and re-export each ``ir_adaptor.*``
-    # submodule under ``rocisa.*`` in ``sys.modules``.
+    # Install the adapter as ``rocisa`` and re-export each
+    # ``rocisa_stinkytofu_adaptor.*`` submodule under ``rocisa.*`` in
+    # ``sys.modules``.
     sys.modules["rocisa"] = _adapter
+    _prefix = f"{_ADAPTER_PKG}."
     for _name, _obj in vars(_adapter).items():
-        if isinstance(_obj, types.ModuleType) and _obj.__name__.startswith("ir_adaptor."):
-            short = _obj.__name__.split(".", 1)[1]
+        if isinstance(_obj, types.ModuleType) and _obj.__name__.startswith(_prefix):
+            short = _obj.__name__[len(_prefix):]
             sys.modules[f"rocisa.{short}"] = _obj
 
     return True
@@ -156,8 +162,8 @@ def _find_stale_sources(so_path, source_roots, build_dir):
     return stale
 
 
-if _BACKEND == "logical" and _load_logical_adapter():
-    # Logical adapter active; wiring done inside _load_logical_adapter.
+if _BACKEND == "stinkytofu" and _load_stinkytofu_adapter():
+    # stinkytofu adapter active; wiring done inside _load_stinkytofu_adapter.
     pass
 else:
     # Default path: original nanobind bindings (Windows-safe import).

@@ -43,7 +43,7 @@ Not yet done:
 
 Refreshing a snapshot:
     Run a normal Tensile build with the nanobind backend (no
-    ``ROCISA_BACKEND=logical``) plus temporary ``print(...)`` calls in
+    ``ROCISA_BACKEND=stinkytofu``) plus temporary ``print(...)`` calls in
     ``Tensile/Common/Capabilities.makeIsaInfoMap``. Copy the four dicts
     into a matching ``_GFX*`` block below. Each ISA must declare all
     four of ``asmCaps``, ``archCaps``, ``regCaps``, ``asmBugs``.
@@ -258,10 +258,11 @@ def getCaps(key: IsaKey) -> Tuple[Dict, Dict, Dict, Dict]:
         asm, arch_, reg, bugs = _REGISTRY[key]
     except KeyError:
         raise KeyError(
-            f"caps.getCaps: no static snapshot for ISA {key}; the logicalIR "
-            f"adaptor only has snapshots for {sorted(_REGISTRY)} today. "
-            "Capture one (see caps.py docstring) or run with the nanobind "
-            "backend by unsetting ROCISA_BACKEND."
+            f"caps.getCaps: no static snapshot for ISA {key}; the "
+            f"rocisa_stinkytofu_adaptor only has snapshots for "
+            f"{sorted(_REGISTRY)} today. Capture one (see caps.py "
+            "docstring) or run with the nanobind backend by unsetting "
+            "ROCISA_BACKEND."
         ) from None
 
     return (dict(asm), dict(arch_), dict(reg), dict(bugs))

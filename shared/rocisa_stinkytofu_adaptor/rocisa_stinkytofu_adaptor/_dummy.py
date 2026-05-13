@@ -19,11 +19,12 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
-"""Factory helpers for building rocisa-shaped dummies in ir_adaptor.
+"""Factory helpers for building rocisa-shaped dummies in the adaptor.
 
 What this file is:
-    Factories used by every ``ir_adaptor.*`` shim to produce class /
-    function / enum stand-ins matching the nanobind binding surface.
+    Factories used by every ``rocisa_stinkytofu_adaptor.*`` shim to
+    produce class / function / enum stand-ins matching the nanobind
+    binding surface.
 
 What it does (real):
     - ``make_dummy_class`` — class shim; metaclass handles class-level
