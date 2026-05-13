@@ -132,9 +132,6 @@ class IRParser {
         return diagnostics;
     }
 
-    /// Print all diagnostics to stderr.
-    void printDiagnostics() const;
-
     /// Parse all functions in the input.
     std::vector<std::unique_ptr<ParsedFunction>> parseAllFunctions();
 
@@ -300,12 +297,6 @@ std::unique_ptr<ParsedFunction> IRParser::parse() {
     func->funcName = "";
     func->blocks.push_back(std::move(block));
     return func;
-}
-
-void IRParser::printDiagnostics() const {
-    for (const auto& diag : diagnostics) {
-        std::cerr << diag.format() << "\n";
-    }
 }
 
 std::unique_ptr<ParsedInstruction> IRParser::parseInstruction() {
@@ -844,6 +835,7 @@ std::optional<std::string> IRParser::parseAttributeValue() {
                     return std::nullopt;
                 }
                 consume();
+                result += ", ";
             }
             first = false;
 
@@ -876,8 +868,17 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
     // v[10], v[14:17], s[0], acc[0:15], BARRIER[0], SCC[0], DS_WRITE[0]
     // Literals: HexLiteral -> LiteralString (spelling preserved); decimal int / float -> numeric
     // literals.
+    // QuotedString: used by st.asm_directive operands (e.g. ".set", "symbol").
 
     TokenKind kind = peek().kind;
+
+    // Handle quoted string literals (e.g. directive operands)
+    if (kind == TokenKind::QuotedString) {
+        const Token& tok = consume();
+        std::string s(tok.text);
+        if (s.size() >= 2 && s.front() == '"' && s.back() == '"') s = s.substr(1, s.size() - 2);
+        return StinkyRegister(s);
+    }
 
     // Handle integer literals
     if (kind == TokenKind::IntegerLiteral) {
@@ -926,6 +927,9 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
         return StinkyRegister(regTypeStr);
     } else if (regTypeStr == "BufferLimit") {
         return StinkyRegister(regTypeStr);
+    } else if (regTypeStr == "off") {
+        // MUBUF "off" keyword: vaddr field with no address register.
+        return StinkyRegister("off");
     }
 
     // Handle "v10" / "s5" / "acc12" etc.: identifier = regType + digits (no space)

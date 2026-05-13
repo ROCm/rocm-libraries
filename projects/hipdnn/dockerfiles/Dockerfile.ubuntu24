@@ -42,6 +42,15 @@ RUN apt-get update && apt-get install -y \
     gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Install DVC. The dvc.org/deb apt repo has been unreachable, so install the
+# official .deb package directly. It bundles all remote backends (incl. S3),
+# which is required for `dvc pull` from the rocm-libraries S3 remote.
+# The only apt dependency (git) is already installed above, so use dpkg
+# directly — no apt-get update or list cleanup needed.
+RUN curl -fL https://dvc.org/download/linux-deb/dvc-3.67.0 -o /tmp/dvc.deb && \
+    dpkg -i /tmp/dvc.deb && \
+    rm /tmp/dvc.deb
+
 # ============================================================================
 # Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
 #

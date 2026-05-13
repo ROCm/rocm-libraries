@@ -146,6 +146,11 @@ std::vector<StinkyInstruction*> lowerRocisaWaitAlu(rocisa::Instruction& inst,
     return {stinkyInst};
 }
 
+std::vector<StinkyInstruction*> lowerRocisaSchedulingFence(rocisa::Instruction& /*inst*/,
+                                                           AsmIRBuilder& irBuilder) {
+    return {irBuilder.createFence()};
+}
+
 };  // anonymous namespace
 
 // Include all Rocisa hardware mapping tables

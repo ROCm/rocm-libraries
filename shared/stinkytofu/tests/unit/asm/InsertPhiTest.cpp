@@ -330,7 +330,7 @@ TEST_F(InsertPhiTest, ChainOfDiamonds) {
 
 TEST_F(InsertPhiTest, DeadRegister_SemiPrunedSSA) {
     Function func("dead_reg");
-    DeadRegCfg cfg = buildDeadRegCfg(func, arch);
+    (void)buildDeadRegCfg(func, arch);
 
     insertPhiInstructions(func, false);
 

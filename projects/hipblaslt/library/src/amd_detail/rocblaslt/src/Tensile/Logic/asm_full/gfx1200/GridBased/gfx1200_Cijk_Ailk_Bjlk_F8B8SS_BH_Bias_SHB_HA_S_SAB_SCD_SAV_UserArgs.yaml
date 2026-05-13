@@ -1,7 +1,7 @@
 - {MinimumRequiredVersion: 5.0.0}
 - gfx1200
 - gfx1200
-- [Device 73f0]
+- [Device 7580]
 - Activation: true
   ActivationComputeDataType: 0
   ActivationNoGuard: false

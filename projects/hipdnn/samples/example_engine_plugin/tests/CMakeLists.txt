@@ -7,6 +7,7 @@ FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
     GIT_TAG v1.14.0
+    SYSTEM
 )
 # Prevent GoogleTest from overriding our compiler/linker options on Windows
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -14,17 +15,17 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# Suppress warnings in GoogleTest targets (GoogleTest uses #if instead of #ifdef for
-# GTEST_LINKED_AS_SHARED_LIBRARY which triggers -Wundef warnings)
+# Disable clang-tidy on GoogleTest targets (clang-tidy reports naming/style issues
+# in third-party code when building the gtest/gmock libraries themselves)
 set(_gtest_targets gtest gtest_main gmock gmock_main)
 foreach(_target ${_gtest_targets})
     if(TARGET ${_target})
-        target_compile_options(${_target} PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang>:-Wno-undef>)
+        set_target_properties(${_target} PROPERTIES CXX_CLANG_TIDY "")
     endif()
 endforeach()
 
 add_executable(
-    example_provider_tests
+    hipdnn_example_provider_unit_tests
     TestExampleProviderContainer.cpp
     TestReluPlanBuilder.cpp
     TestReluPlan.cpp
@@ -34,7 +35,7 @@ add_executable(
 )
 
 target_link_libraries(
-    example_provider_tests
+    hipdnn_example_provider_unit_tests
     PRIVATE
         GTest::gtest
         GTest::gtest_main
@@ -44,11 +45,11 @@ target_link_libraries(
 )
 
 target_include_directories(
-    example_provider_tests
+    hipdnn_example_provider_unit_tests
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
 
 include(GoogleTest)
-gtest_discover_tests(example_provider_tests DISCOVERY_MODE PRE_TEST)
+gtest_discover_tests(hipdnn_example_provider_unit_tests DISCOVERY_MODE PRE_TEST)

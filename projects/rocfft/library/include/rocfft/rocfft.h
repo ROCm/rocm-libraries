@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -279,6 +279,7 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_scale_factor(
  *  Offset, stride, and distance for either input or output provided
  *  here is ignored if a field is set for the corresponding input or
  *  output.
+ *  @note Non-zero offsets are not supported yet.
  * 
  *  @param[in, out] description description handle
  *  @param[in] in_array_type array type of input buffer
@@ -554,8 +555,10 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *
  *  Callback function pointers/data are given as arrays, with one
  *  function/data pointer per brick in the input field of the plan.
- *  A plan with no input field specified is considered to have one
- *  brick.
+ *  Load callbacks require at least one brick in the input field to
+ *  be assigned to the current device used at plan creation. A plan
+ *  with no input field specified is considered to have one brick on
+ *  the current device used at plan creation.
  *
  *  All functions in the array must perform the same logical
  *  operation.  That is, any function in the array must be
@@ -588,7 +591,8 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  @param[in] info execution info handle
  *  @param[in] cb_functions callback function pointers
  *  @param[in] cb_data callback function data, passed to the function pointer when it is called
- *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use */
+ *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use 
+ * */
 ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execution_info info,
                                                                     void** cb_functions,
                                                                     void** cb_data,
@@ -601,8 +605,10 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *
  *  Callback function pointers/data are given as arrays, with one
  *  function/data pointer per brick in the output field of the plan.
- *  A plan with no output field specified is considered to have one
- *  brick.
+ *  Store callbacks require at least one brick in the output field to
+ *  be assigned to the current device used at plan creation. A plan
+ *  with no output field specified is considered to have one brick on
+ *  the current device used at plan creation.
  *
  *  All functions in the array must perform the same logical
  *  operation.  That is, any function in the array must be
