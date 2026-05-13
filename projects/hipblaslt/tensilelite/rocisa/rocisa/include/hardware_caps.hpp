@@ -126,6 +126,7 @@ inline std::map<std::string, int>
     rv["HasScalarStore"]
         = tryAssembler(isaVersion, assemblerPath, "s_store_dword s79, s[70:71], s77", isDebug)
           || tryAssembler(isaVersion, assemblerPath, "s_store_b32 s79, s[70:71], s77", isDebug);
+    rv["HasSAtomic"] = tryAssembler(isaVersion, assemblerPath, "s_atomic_dec s11, s[0:1]", isDebug);
     rv["HasMFMA_explictB"] = tryAssembler(
         isaVersion, assemblerPath, "v_mfma_f32_32x32x1_2b_f32 a[0:31], v0, v1, a[0:31]", isDebug);
     rv["HasMFMA"] = tryAssembler(isaVersion,
