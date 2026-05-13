@@ -80,19 +80,8 @@
     #define IS_ASAN_BUILD 0
 #endif
 
-// Nvidia platform
-// HIP requires this define on CUDA platforms.
-#if defined(__HIP_PLATFORM_NVIDIA__)
-#define IS_NVIDIA_PLATFORM 1
-#else
-#define IS_NVIDIA_PLATFORM 0
-#endif
-
 namespace test_controller
 {
-
-// This class uses HIP hardware queries.
-#if defined(HIPCUB_ROCPRIM_API)
 
 // TestController is a singleton that can be used to check if a
 // test case or test size is disabled on a given architecture.
@@ -107,6 +96,23 @@ namespace test_controller
 //   regexes that are matched against the gfx id of the device currently
 //   in use. Please see the control file comments for more on these keywords.
 // - Provides build type detection (eg. ASAN / Valgrind, OS).
+//
+// ** How to write a test that uses TestController: **
+// 1. Create a test fixture class for your test. Make that test fixture inherit from ControlledTest.
+//   - ControlledTest inherits from GTest's ::testing::Test, so it inherits all of the regular functionality
+//	 - of a normal test fixture.
+//   - Inheriting from ControlledTest ensures that the main test disablement check is performed automatically before
+//	   each test in the suite. Tests will be skipped if they are completely (i.e. for all sizes) disabled.
+// 2. Call a maco to filter the input sizes your test uses.
+//	 - If your test uses a single input size, call:
+//     CHECK_SIZE_ENABLEMENT(size);
+//     This will cause the test to be skipped if the size matches any of the rules in the control file.
+//   - If your test iterates through a vector of sizes, use CHECK_SIZE_FILTERS(sizes) to filter out any sizes
+//     that have been disabled by rules in the control file.
+//     This macro both modified the sizes vector in place, and also returns the filtered vector,
+//     so it can be used directly in a loop. For example:
+//     for (auto size : CHECK_SIZE_FILTERS(sizes))
+//        <do your test work using size>
 class TestController
 {
 public:
@@ -317,15 +323,18 @@ private:
     // Checks if the HIPCUB_EXTRA_TC_INFO exists and is set to 1. If so,
     // individual skipped sizes will be appended to msgs in the filtering functions.
     // This can be useful for debugging when adding new size constraints.
-    inline bool should_print_skipped_sizes() const
+    inline bool should_print_extra_info() const
     {
-        const char* val_str = test_common_utils::__get_env("HIPCUB_EXTRA_TC_INFO");
-        return (val_str && std::strlen(val_str) == 1 && val_str[0] == '1');
+        char* val_str = test_common_utils::__get_env("HIPCUB_EXTRA_TC_INFO");
+        const bool result = (val_str && std::strlen(val_str) == 1 && val_str[0] == '1');
+        test_common_utils::clean_env(val_str);
+        return result;
     }
 
     // Returns the gfx id of the device that's currently in use.
     inline static std::string get_arch()
     {
+#ifdef __HIP_PLATFORM_AMD__
         // Make sure we get the device ID from ctest, in case we're running tests in
         // parallel on multiple devices.
         const int device_id = test_common_utils::obtain_device_from_ctest();
@@ -339,7 +348,10 @@ private:
                                       arch_name + length,
                                       [](const char& val) { return val == ':' || val == '\0'; });
         *arch_end = '\0';
-        return std::string(arch_name);
+		return std::string(arch_name);
+#else
+		return "nvidia";
+#endif
     }
 
     // Uses OS-specific mechanisms to get the path to the currently running test binary.
@@ -523,7 +535,7 @@ private:
                 ss << cur_msg << std::endl;
             }
             
-            if (this->should_print_skipped_sizes())
+            if (this->should_print_extra_info())
             {
                 const size_t num_skipped_sizes = num_unfiltered_sizes - sizes.size();
                 ss << "Skipping " << num_skipped_sizes << " size(s) based on matches on test control file lines described below." << std::endl;
@@ -571,8 +583,8 @@ private:
         return qualified_name;
     }
 
-	// Each control line includes a part that allows you to specify the build types that this rule should be applied to.
-	// This function checks if the current build is one of those types.
+    // Each control line includes a part that allows you to specify the build types that this rule should be applied to.
+    // This function checks if the current build is one of those types.
     bool is_build_type_considered(const ControlInfo& info) const
     {
         return std::any_of(info.build_type_test_fns.begin(), info.build_type_test_fns.end(),
@@ -610,7 +622,7 @@ private:
         {
             std::stringstream ss;
             ss << info.skip_msg;
-            if (this->should_print_skipped_sizes())
+            if (this->should_print_extra_info())
             {
                 ss << std::endl;
                 ss << "Test is marked as disabled for all sizes on test control file line " << info.line_num << ".";
@@ -839,7 +851,12 @@ private:
     // Expects consecutive matches for each of parts_regexes, optionally followed by a delimiter (unless delimiter is std::nullopt) and the another set of matches, etc.
     std::vector<std::vector<std::string>> regex_split(const std::string line, const size_t line_num, const std::vector<std::regex>& parts_regexes, const std::optional<std::regex> delim_regex=std::nullopt)
     {
+		const std::vector<std::string> part_descriptions = {"test name regex", "arch regex", "sizes", "build types", "skip message"};
         std::vector<std::vector<std::string>> results;
+
+		const auto print_parse_error = [&part_descriptions, &line_num](const size_t part_index, const std::string& remaining) {
+			std::cerr << "Error matching regex on control file line " << line_num << ", in " << part_descriptions[part_index] << " part of rule, beginning at: \"" << remaining << "\"" << std::endl;
+		};
         
         std::string remaining = line;
         bool done = false;
@@ -856,7 +873,7 @@ private:
                 {
                     if (match.size() != 2)
                     {
-                        std::cerr << "Error matching regex on control file line " << line_num << " beginning at: " << remaining << std::endl;
+                        print_parse_error(i, remaining);
                         return results;
                     }
                     groups.push_back(match[1].str());
@@ -870,8 +887,8 @@ private:
             }
             if (no_match)
             {
-                std::cerr << "Error matching regex on control file line " << line_num << " beginning at: " << remaining << std::endl;
-                    return results;
+                print_parse_error(i, remaining);
+                return results;
             }
             else
             {
@@ -926,14 +943,14 @@ private:
         }
         is_ignored = false;
 
-        std::regex test_part_regex(R"(^\s*\/(.+?)\/\s*:)");
-        std::regex arch_part_regex(R"(^\s*\/(.+?)\/\s*:)");
-        std::regex size_part_regex(R"(^\s*(.+?)\s*:)");
-        std::regex build_type_part_regex(R"(^\s*(.+?)\s*:)");
-        std::regex skip_msg_part_regex(R"(^\s*\"(.*)\"\s*$)");
+        const std::regex test_part_regex(R"(^\s*\/(.+?)\/\s*:)");
+        const std::regex arch_part_regex(R"(^\s*\/(.+?)\/\s*:)");
+        const std::regex size_part_regex(R"(^\s*(.+?)\s*:)");
+        const std::regex build_type_part_regex(R"(^\s*(.+?)\s*:)");
+        const std::regex skip_msg_part_regex(R"(^\s*\"(.*)\"\s*$)");
 
-        std::vector<std::regex> parts_regexes = {test_part_regex, arch_part_regex, size_part_regex, build_type_part_regex, skip_msg_part_regex};
-        std::vector<std::vector<std::string>> parts_vec = this->regex_split(line, line_num, parts_regexes);
+        const std::vector<std::regex> parts_regexes = {test_part_regex, arch_part_regex, size_part_regex, build_type_part_regex, skip_msg_part_regex};
+        const std::vector<std::vector<std::string>> parts_vec = this->regex_split(line, line_num, parts_regexes);
         if (parts_vec.size() != 1)
             return false;
         const std::vector<std::string>& parts = parts_vec[0];
@@ -941,11 +958,9 @@ private:
         constexpr size_t expected_num_parts = 5;
         if (parts.size() != expected_num_parts)
         {
-            std::cerr << "Error parsing line - it is not in the expected format." << std::endl
-                      << "Please check the format of line indicated below." << std::endl;
+            std::cerr << "Error parsing line " << line_num << " of test control file. It is not in the expected format." << std::endl;
             return false;
         }
-        
         
         // We can grab the test name regex directly from the match, since no further processing is required.
         info.test_regex = std::regex(parts[0]);
@@ -978,7 +993,7 @@ private:
             auto kwd_it = this->keywords.find(cur_kwd);
             if (kwd_it == this->keywords.end())
             {
-                std::cerr << "Error: unrecognized keyword: \"" << cur_kwd << "\"" << std::endl;
+                std::cerr << "Error: unrecognized keyword in arch regex: \"" << cur_kwd << "\"" << std::endl;
                 return false;
             }
             else
@@ -1042,8 +1057,8 @@ private:
             else
             {
                 // Parse and simplify the size expression.
-                std::vector<Token> postfix_tokens = this->parse_size_expr(size_expr);
-                size_t size = this->reduce_postfix_tokens(postfix_tokens);
+                const std::vector<Token> postfix_tokens = this->parse_size_expr(size_expr);
+                const size_t size = this->reduce_postfix_tokens(postfix_tokens);
                 // Maps operators to functions that implement them.
                 // Note: Treat empty operator as ==
                 const std::unordered_map<std::string, std::function<bool(size_t)>> str_to_filter({
@@ -1072,21 +1087,20 @@ private:
 
         // -- Process the build_type_part --
 
-		// Maps build types to functions that check if they match the type of the currently running build.
+        // Maps build types to functions that check if they match the type of the currently running build.
         const std::unordered_map<std::string, std::function<bool()>> str_to_build_type({
                 {"*",        []() { return true; }},
                 {"asan",     TestController::is_running_asan},
                 {"valgrind", TestController::is_running_valgrind},
-                {"nvidia",   TestController::is_nvidia_platform},
                 {"windows",  TestController::is_windows},
-                {"nvidia",   TestController::is_linux},
+                {"linux",    TestController::is_linux},
             });
 
-        const std::regex build_type_regex = std::regex(R"(^\s*(asan|valgrind|nvidia|windows|linux|\*)\s*)");
+        const std::regex build_type_regex = std::regex(R"(^\s*(asan|valgrind|windows|linux|\*)\s*)");
         const std::regex build_type_delim_regex = std::regex(R"(\s*\,\s*)");
 
-        std::vector<std::regex> build_type_parts_regexes = {build_type_regex};
-        std::vector<std::vector<std::string>> build_type_parts = this->regex_split(build_type_part, line_num, build_type_parts_regexes, build_type_delim_regex);
+        const std::vector<std::regex> build_type_parts_regexes = {build_type_regex};
+        const std::vector<std::vector<std::string>> build_type_parts = this->regex_split(build_type_part, line_num, build_type_parts_regexes, build_type_delim_regex);
         
         for (std::vector<std::string> groups : build_type_parts)
         {
@@ -1151,7 +1165,8 @@ private:
             return;
         }
 
-        std::cout << "Using test control file at: " << control_path << std::endl;
+		if (this->should_print_extra_info())
+			std::cout << "Using test control file at: " << control_path << std::endl;
         
         std::ifstream control_file(control_path.c_str());
         if (!control_file)
@@ -1178,11 +1193,6 @@ private:
         return static_cast<bool>(IS_ASAN_BUILD);
     }
 
-    inline static bool is_nvidia_platform()
-    {
-        return static_cast<bool>(IS_NVIDIA_PLATFORM);
-    }
-
     inline static bool is_windows()
     {
 #ifdef _WIN32
@@ -1205,6 +1215,7 @@ private:
     // Note: these should be enclosed in parenthesis to ensure correctness.
     const std::unordered_map<std::string, std::string> keywords = {
         {"all",           "(gfx[0-9a-f]+)"},
+		{"nvidia",        "(nvidia)"}, // see TestController::get_arch
         {"apus",          "(gfx1103|gfx1150|gfx1151|gfx1152)"},
         {"navi2x-family", "(gfx1030|gfx1031|gfx1032)"},
         {"navi3x-family", "(gfx1100|gfx1101|gfx1102)"},
@@ -1214,73 +1225,6 @@ private:
         {"mi300-family",  "(gfx942|gfx950)"}
     };
 };
-
-#else
-// If not running on __HIP_PLATFORM_AMD__, accessing platform-specific
-// device properties will lead to build errors.
-// Skip test control in this senario for now.
-class TestController
-{
-public:
-    inline static TestController& get_instance()
-    {
-        static TestController instance;
-        return instance;
-    }
-
-    inline static TestController& get_instance(const std::string& text)
-    {
-        static TestController instance;
-        return instance;
-    }
-
-    inline bool check_test_enablement(std::string& msg) const
-    {
-        return true;
-    }
-
-    inline bool check_test_enablement() const
-    {
-        return true;
-    }
-
-    template<class T>
-    inline bool check_size_enablement(const T size, std::string& msg) const
-    {
-        return true;
-    }
-
-    template<class T>
-    inline bool check_size_enablement(const T size) const
-    {
-        return true;
-    }
-
-    template<class T>
-    inline std::vector<T> filter_sizes(std::vector<T>& sizes, std:;string& msg) const
-    {
-        return sizes;
-    }
-
-    template<class T>
-    inline std::vector<T> filter_sizes(std::vector<T>& sizes) const
-    {
-        return sizes;
-    }
-
-    TestController(const TestController&) = delete;
-    TestController& operator=(const TestController&) = delete;
-
-    ~TestController()
-    {
-    }
-
-private:
-    TestController()
-    {
-    }
-}
-#endif // defined(HIPCUB_ROCPRIM_API)
 
 // -- Macros to use in unit tests --
 // Use macros here, even though they're ugle, since it's the only way to call
