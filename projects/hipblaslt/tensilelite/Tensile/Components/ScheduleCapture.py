@@ -999,6 +999,7 @@ def _shared_category_assignments(*, subiter,
                                  GRIncA=None, GRIncB=None,
                                  GRA=None, GRB=None,
                                  LRA=None, LRB=None,
+                                 LRMXSA=None, LRMXSB=None, LRMetadata=None,
                                  PackA=None, PackB=None):
     """Yield (category_string, module) pairs for the categories that BOTH
     public factories (build_idmap and build_id_to_category_per_iter) emit.
@@ -1014,15 +1015,18 @@ def _shared_category_assignments(*, subiter,
         and writes {id(item): category_string} via flatitems().
 
     Categories covered: GRIncA, GRIncB, GRA, GRB, LRA{subiter}, LRB{subiter},
+    LRMXSA{subiter}, LRMXSB{subiter}, LRMetadata{subiter},
     PackA{subiter}, PackB{subiter}.
+
+    Sparse-MX slots (LRMXSA / LRMXSB / LRMetadata) are emitted right after
+    the matching dense LR slots so the per-iter local-read schema reads as
+    a contiguous block (LRA, LRB, LRMXSA, LRMXSB, LRMetadata) before Pack.
 
     Per-factory categories NOT shared and NOT yielded here:
       - build_idmap retains: LWA, LWB, LRSA, LRSB, LWSA, LWSB, LCC,
         SYNC, SNOP (CMS-specific schedule pieces with no NLL counterpart).
       - build_id_to_category_per_iter retains: generic 'GR' fallback,
-        'LW' fallback, LRMXSA{subiter}, LRMXSB{subiter}, LRMetadata{subiter}
-        (sparse-MX local-read sub-modules — build_idmap will gain kwargs
-        for these in a follow-up so the schema slot exists on both sides).
+        'LW' fallback.
     """
     if GRIncA is not None:
         yield "GRIncA", GRIncA
@@ -1036,6 +1040,12 @@ def _shared_category_assignments(*, subiter,
         yield f"LRA{subiter}", LRA
     if LRB is not None:
         yield f"LRB{subiter}", LRB
+    if LRMXSA is not None:
+        yield f"LRMXSA{subiter}", LRMXSA
+    if LRMXSB is not None:
+        yield f"LRMXSB{subiter}", LRMXSB
+    if LRMetadata is not None:
+        yield f"LRMetadata{subiter}", LRMetadata
     if PackA is not None:
         yield f"PackA{subiter}", PackA
     if PackB is not None:
@@ -1088,21 +1098,21 @@ def build_idmap(*, num_loop_iter,
     ):
         idmap[cat] = mod
     for u in range(num_loop_iter):
+        # Sparse-MX per-iter local-read slots — optional, default unpopulated.
+        # Resolve to a per-iter module (or None) here so the helper sees a
+        # uniform per-side shape; the helper owns the LRMXSA{u}/LRMXSB{u}/
+        # LRMetadata{u} naming, keeping it byte-identical with the names
+        # build_id_to_category_per_iter emits for the same leaves.
+        mxsa_mod = LRCodeMXSA[u] if (LRCodeMXSA is not None and u < len(LRCodeMXSA)) else None
+        mxsb_mod = LRCodeMXSB[u] if (LRCodeMXSB is not None and u < len(LRCodeMXSB)) else None
+        meta_mod = LRCodeMetadata[u] if (LRCodeMetadata is not None and u < len(LRCodeMetadata)) else None
         for cat, mod in _shared_category_assignments(
             subiter=u,
             LRA=LRCodeA[u], LRB=LRCodeB[u],
+            LRMXSA=mxsa_mod, LRMXSB=mxsb_mod, LRMetadata=meta_mod,
             PackA=PackCodeA[u], PackB=PackCodeB[u],
         ):
             idmap[cat] = mod
-        # Sparse-MX per-iter local-read slots — optional, default unpopulated.
-        # Aligned with build_id_to_category_per_iter's LRMXSA/B/Metadata
-        # category strings so cross-factory comparison is meaningful.
-        if LRCodeMXSA is not None and u < len(LRCodeMXSA):
-            idmap[f"LRMXSA{u}"] = LRCodeMXSA[u]
-        if LRCodeMXSB is not None and u < len(LRCodeMXSB):
-            idmap[f"LRMXSB{u}"] = LRCodeMXSB[u]
-        if LRCodeMetadata is not None and u < len(LRCodeMetadata):
-            idmap[f"LRMetadata{u}"] = LRCodeMetadata[u]
     idmap['SYNC'] = syncCode
     idmap['SNOP'] = snopCode
     return idmap
@@ -1251,14 +1261,19 @@ def build_id_to_category_per_iter(*, subiter, localReadCode, localWriteCode,
     ):
         tag_module_setdefault(mod, cat)
 
-    # LRA/LRB submodule walk — resolve named submodules to per-side modules
-    # for this subiter, then route through the shared helper.
+    # Local-read sub-module walk — dense (LRA/LRB) and sparse-MX
+    # (LRMXSA/LRMXSB/LRMetadata) share the same per-iui sub-module shape, so
+    # one walk handles all five. The sub-module-name -> helper-kwarg mapping
+    # is the only piece local to this factory's input shape; the category
+    # strings themselves come from _shared_category_assignments() so any
+    # future drift between the two factories surfaces in one place.
     if localReadCode is not None:
-        # Collect per-iui sub-modules into one Module per side so the helper
-        # can iterate (helper expects one module per side per subiter).
         for sub_name, side_kwarg in (
-            ("LocalReadDoA", "LRA"),
-            ("LocalReadDoB", "LRB"),
+            ("LocalReadDoA",        "LRA"),
+            ("LocalReadDoB",        "LRB"),
+            ("LocalReadDoMXSA",     "LRMXSA"),
+            ("LocalReadDoMXSB",     "LRMXSB"),
+            ("LocalReadDoMetadata", "LRMetadata"),
         ):
             for iui in range(inner_unroll_max):
                 sub = localReadCode.findNamedItem(f"{sub_name}_I{iui}")
@@ -1268,19 +1283,6 @@ def build_id_to_category_per_iter(*, subiter, localReadCode, localWriteCode,
                     subiter=subiter, **{side_kwarg: sub},
                 ):
                     tag_module(mod, cat)
-
-        # Sparse-MX local-read sub-modules — NOT in the shared helper yet
-        # (build_idmap doesn't have these kwargs). Tagged here directly.
-        for sub_name, cat_template in (
-            ("LocalReadDoMXSA",     "LRMXSA{}"),
-            ("LocalReadDoMXSB",     "LRMXSB{}"),
-            ("LocalReadDoMetadata", "LRMetadata{}"),
-        ):
-            cat = cat_template.format(subiter)
-            for iui in range(inner_unroll_max):
-                sub = localReadCode.findNamedItem(f"{sub_name}_I{iui}")
-                if sub is not None:
-                    tag_module(sub, cat)
 
     if globalReadCode is not None:
         for item in globalReadCode.flatitems():
