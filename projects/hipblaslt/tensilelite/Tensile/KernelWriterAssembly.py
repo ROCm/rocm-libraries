@@ -13042,13 +13042,19 @@ class KernelWriterAssembly(KernelWriter):
                 for x in range(2, i - 1):
                   strideC = "Size%s"%(INDEX_CHARS[x])
                   module.add(SMulI32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr(strideC)))
-                if(i == 2 and (mat == "C" or mat == "D")):
-                  if(kernel["GlobalSplitU"] != 0):
+                if(i == 2 and (mat == "C" or mat == "D")):                 
+                  if (kernel["StreamK"] == 0):
                     module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
                     module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
                   if kernel["ProblemType"]["SupportUserArgs"]:
                     module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-                    module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))   
+                    module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))  
+                    # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
+                    # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be dereferenced as workspace pointer
+                    # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be dereferenced as pointer array    
+                    if (kernel["StreamK"] > 0):
+                      module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))  
+                    module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))                 
                   if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
                     module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))               
                     module.add(multipleBufferChecks)    
@@ -13062,7 +13068,7 @@ class KernelWriterAssembly(KernelWriter):
             else:
               strideC = "Stride%s%s"%(mat, self.states.indexChars[i])
               if(i == 2 and (mat == "C" or mat == "D")):
-                if(kernel["GlobalSplitU"] != 0):
+                if(kernel["StreamK"] == 0):
                   module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
                   if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
                     module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
@@ -13070,8 +13076,15 @@ class KernelWriterAssembly(KernelWriter):
                     module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
                 if kernel["ProblemType"]["SupportUserArgs"]:
                   module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-                  module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName())) 
-                                
+                  module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
+                  # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
+                  # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be dereferenced as workspace pointer
+                  # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be dereferenced as pointer array                   
+                  if (kernel["StreamK"] > 0):
+                    module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+                    module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))
+                  else:
+                    module.add(SBranch(labelName=generalBatchedGemmLoad.getLabelName()))                                
                 if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
                   module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
                   module.add(multipleBufferChecks)
@@ -13402,7 +13415,13 @@ class KernelWriterAssembly(KernelWriter):
     GeneralBatchedGemmSrdInitiation = Label(label="GeneralBatchedGemmSrdInitiation"+ch, comment="Handling General Batched GEMM SRD initialization")
     GeneralBatchedGemmSrdInitiation_End = Label(label="GeneralBatchedGemmSrdInitiation"+ch+"_End", comment="End of handling General Batched GEMM SRD initialization")
     ArgTypeCheckLabel = Label(label="ArgTypeCheck"+ch, comment="Check if ArgType is for General Batched GEMM for "+ch)
-    if(((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) and kernel["GlobalSplitU"] != 0):
+    RegularSrdInitialization = Label(label="RegularSrdInitialization"+ch, comment="Regular SRD initialization for non-General Batched GEMM for "+ch)
+    # Special handling for "MultipleBuffer" and "MultipleBufferSingleKernel" for General Batched GEMM
+    # ArgType == 3 (General Batched GEMM) but GSU == 1, then SrdC/D will be initialized to right batch matrix address from pointer array (AddressC/D)
+    # ArgType == 3 (General Batched GEMM) but GSU > 1, then SrdC/D will be initialized with workspace.
+    # "MultipleBuffer" means both SrdC and SrdD are workspace pointers
+    # "MultipleBufferSingleKernel" means only SrdD will be workspace pointer while SrdC will be initialized to right batch matrix address from pointer array (AddressC)      
+    if(((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) and kernel["StreamK"] == 0):
       with self.allocTmpSgpr(1) as tmpSgprGSU:
         module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
         module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
@@ -13413,7 +13432,16 @@ class KernelWriterAssembly(KernelWriter):
         module.add(ArgTypeCheckLabel)
     if kernel["ProblemType"]["SupportUserArgs"]:
       module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-      module.add(SCBranchSCC1(labelName=GeneralBatchedGemmSrdInitiation.getLabelName()))
+      module.add(SCBranchSCC0(labelName=RegularSrdInitialization.getLabelName()))
+      # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
+      # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be initialized to workspace pointer (AddressC/D)
+      # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be initialized to batch matrix address from pointer array (AddressC/D)
+      if kernel["StreamK"] > 0:
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
+      else:
+        module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="General Batched GEMM, Srd initialized to 0"))
+    module.add(RegularSrdInitialization)      
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" ))
     module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName()))
     module.add(GeneralBatchedGemmSrdInitiation)
