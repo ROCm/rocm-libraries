@@ -184,14 +184,74 @@ class TestTritonHierarchicalSplit:
         assert hasattr(result, "global_tiles")
 
 
+def _make_sk_problem(m, n, k, batch=1, c_dtype=None):
+    p = origami.problem_t()
+    p.size = origami.dim3_t(m, n, k)
+    p.batch = batch
+    p.a_dtype = origami.data_type_t.Half
+    p.b_dtype = origami.data_type_t.Half
+    p.c_dtype = c_dtype if c_dtype is not None else origami.data_type_t.Half
+    p.d_dtype = p.c_dtype
+    return p
+
+
+def _make_sk_config(bm, bn, bk):
+    c = origami.config_t()
+    c.mt = origami.dim3_t(bm, bn, bk)
+    c.mi = origami.dim3_t(16, 16, 16)
+    c.occupancy = 1
+    c.target = origami.target_t.triton
+    return c
+
+
 class TestTritonSKGrid:
-    """Tests for Triton StreamK grid computation."""
+    """Tests for Triton StreamK grid computation.
+
+    The Triton StreamK heuristic now uses the shared streamk fractional-grid
+    and k-split helpers (no logic duplication with streamk::grid_k_split_aware)
+    plus a Triton-only "small last partial wave -> prev_pow2(n_cu)" fix.
+    """
 
     def test_data_parallel_case(self):
-        # Enough tiles to cover all CUs without StreamK
-        result = origami.compute_triton_sk_grid(16384, 16384, 4096, 128, 128, 64, 304, 16)
+        # Enough tiles to cover all CUs without StreamK.
+        problem = _make_sk_problem(16384, 16384, 4096)
+        config = _make_sk_config(128, 128, 64)
+        result = origami.compute_triton_sk_grid(problem, config, HARDWARE["gfx950"])
         assert result > 0
 
     def test_small_problem(self):
-        result = origami.compute_triton_sk_grid(256, 256, 256, 128, 128, 64, 304, 16)
+        problem = _make_sk_problem(256, 256, 256)
+        config = _make_sk_config(128, 128, 64)
+        result = origami.compute_triton_sk_grid(problem, config, HARDWARE["gfx950"])
+        assert result > 0
+
+    def test_batched_problem_uses_batch_dimension(self):
+        """Batched problems should produce a different grid than B=1.
+
+        Previously the Triton helper silently dropped the batch dimension when
+        counting tiles; with the unified `(problem, config, hardware)` API it
+        goes through `streamk::compute_number_of_output_tiles` which is
+        batch-aware.
+        """
+        config = _make_sk_config(128, 128, 64)
+        single = origami.compute_triton_sk_grid(
+            _make_sk_problem(2048, 2048, 1024, batch=1), config, HARDWARE["gfx950"]
+        )
+        batched = origami.compute_triton_sk_grid(
+            _make_sk_problem(2048, 2048, 1024, batch=8), config, HARDWARE["gfx950"]
+        )
+        assert single > 0
+        assert batched > 0
+        assert batched != single
+
+    def test_subbyte_c_dtype_does_not_zero_divide(self):
+        """F4 output dtype must not collapse the per-tile workspace to zero.
+
+        Previously per-elem bytes were `out_dtype_bits / 8` which truncated
+        sub-byte dtypes to 0 and disabled the workspace gate. The unified path
+        derives bytes via ceil_div(bits, 8) on the C dtype.
+        """
+        problem = _make_sk_problem(8192, 8192, 1024, c_dtype=origami.data_type_t.Float4)
+        config = _make_sk_config(128, 128, 64)
+        result = origami.compute_triton_sk_grid(problem, config, HARDWARE["gfx950"])
         assert result > 0

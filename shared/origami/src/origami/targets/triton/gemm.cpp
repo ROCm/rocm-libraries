@@ -6,7 +6,9 @@
 #include <vector>
 
 #include "origami/math.hpp"
+#include "origami/streamk.hpp"
 #include "origami/targets/triton/gemm.hpp"
+#include "origami/types.hpp"
 
 namespace origami {
 
@@ -53,57 +55,66 @@ triton_hierarchical_split_t compute_triton_hierarchical_split(
 }
 
 // Compute Triton-specific StreamK grid size.
-// Full Tensile-style fractional split + K-dimension splitting + last-wave fix.
-size_t compute_triton_sk_grid(size_t m, size_t n, size_t k,
-                              size_t block_m, size_t block_n, size_t block_k,
-                              size_t n_cu, size_t out_dtype_bits) {
-  const size_t tiles_m = math::safe_ceil_div(m, block_m);
-  const size_t tiles_n = math::safe_ceil_div(n, block_n);
-  const size_t tiles   = tiles_m * tiles_n;
-  const size_t k_iters = std::max(math::safe_ceil_div(k, block_k), static_cast<size_t>(1));
+//
+// Reuses the shared streamk fractional-grid and k-split helpers (no logic
+// duplication with streamk::grid_k_split_aware), and adds the Triton-only
+// "last partial wave -> prev_pow2(n_cu)" compensation that was empirically
+// tuned on MI300X.
+//
+// Differences from the previous primitive-arg signature:
+//   - Tile count is batch-aware via streamk::compute_number_of_output_tiles
+//     (fixes a latent under-count for batched problems).
+//   - Per-tile workspace bytes are derived sub-byte-safely from the C dtype
+//     (fixes a latent zero-divide for F4/F6 outputs).
+//   - Falls back to config.workspace_size_per_elem_c when the caller has
+//     populated it (matches Tensile semantics in streamk::grid_k_split_aware).
+size_t compute_triton_sk_grid(const problem_t&  problem,
+                              const config_t&   config,
+                              const hardware_t& hardware) {
+  const size_t n_cu = hardware.N_CU;
+  if (n_cu == 0) return 0;
+
+  const size_t tiles = streamk::compute_number_of_output_tiles(
+      config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
+  if (tiles == 0) return 0;
+
+  const size_t k_iters =
+      std::max(math::safe_ceil_div(problem.size.k, config.mt.k), static_cast<size_t>(1));
+
+  // Per-tile workspace bytes. Prefer a caller-supplied value; otherwise derive
+  // sub-byte-safely from problem.c_dtype.
+  size_t tile_ws = 0;
+  if (config.workspace_size_per_elem_c > 0) {
+    tile_ws = config.mt.m * config.mt.n * config.workspace_size_per_elem_c;
+  } else {
+    const size_t bits_c = static_cast<size_t>(datatype_to_bits(problem.c_dtype));
+    tile_ws =
+        math::safe_ceil_div(config.mt.m * config.mt.n * bits_c, static_cast<size_t>(8));
+  }
+
+  static constexpr size_t kMaxWorkspace = 128ull * 1024 * 1024;
 
   size_t sk_grid = tiles;
-
-  constexpr size_t kMaxWorkspace = 128 * 1024 * 1024;
-  const size_t bytes_per_elem = out_dtype_bits / 8;
-  const size_t tile_ws = block_m * block_n * bytes_per_elem;
-
-  // Fractional denominators to try, in priority order
-  constexpr double kFracs[] = {0.0, 0.5, 0.125, 0.2, 0.25, 1.0 / 3.0};
-  constexpr int kSplitFactors[] = {8, 6, 4, 3, 2, 1};
-
   if (tiles > n_cu) {
-    double min_even = static_cast<double>(tiles) / n_cu;
-    for (double frac : kFracs) {
-      size_t cand = static_cast<size_t>(tiles / (min_even + frac) + 0.5);
-      if (cand == 0) continue;
-      if (tiles % cand != 0 && tile_ws * cand > kMaxWorkspace)
-        continue;
-      if (cand <= n_cu) {
-        sk_grid = cand;
-        break;
-      }
+    static const std::vector<double> kFracs = {0.0, 0.5, 0.125, 0.2, 0.25, 1.0 / 3.0};
+    if (size_t cand = streamk::pick_fractional_grid(tiles, n_cu, tile_ws, kMaxWorkspace, kFracs)) {
+      sk_grid = cand;
     }
   } else if (tiles < n_cu) {
-    for (int factor : kSplitFactors) {
-      size_t split = tiles * factor;
-      size_t iters_per = k_iters / factor;
-      if (split <= n_cu && iters_per >= 8) {
-        sk_grid = split;
-        break;
-      }
+    static const std::vector<size_t> kSplitFactors = {8, 6, 4, 3, 2, 1};
+    if (size_t split = streamk::pick_k_split(tiles, n_cu, k_iters, kSplitFactors, /*min_iters_per_cu=*/8)) {
+      sk_grid = split;
     }
   }
 
-  if (tiles % sk_grid != 0)
-    sk_grid = tiles;
+  if (sk_grid == 0 || tiles % sk_grid != 0) sk_grid = tiles;
 
-  // Last-wave compensation: when only a small partial wave (< 128 tiles)
-  // would land on the trailing CUs, fall back to the largest power-of-two
-  // grid <= n_cu so the workload distributes more evenly. No-op when n_cu
-  // is already a power of two.
+  // Triton-only last-wave compensation: when only a small partial wave
+  // (< 128 tiles) would land on the trailing CUs, fall back to the largest
+  // power-of-two grid <= n_cu so the workload distributes more evenly.
+  // No-op when n_cu is already a power of two.
   if (tiles >= n_cu) {
-    size_t remainder = tiles % n_cu;
+    const size_t remainder = tiles % n_cu;
     if (remainder > 0 && remainder < 128) {
       sk_grid = math::prev_pow2(n_cu);
     }

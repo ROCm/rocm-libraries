@@ -382,7 +382,10 @@ NB_MODULE(origami, m) {
         "Compute hierarchical local/global tile split for Triton");
   m.def("compute_triton_sk_grid",
         &origami::compute_triton_sk_grid,
-        "Compute Triton-specific StreamK grid size");
+        nanobind::arg("problem"),
+        nanobind::arg("config"),
+        nanobind::arg("hardware"),
+        "Compute Triton-specific StreamK grid size from (problem, config, hardware)");
   m.def("get_triton_default_tile_ranges",
         &origami::get_triton_default_tile_ranges,
         nanobind::arg("hardware"),

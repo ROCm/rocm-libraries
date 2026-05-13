@@ -46,6 +46,56 @@ namespace streamk {
 size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch);
 
 /**
+ * @brief Sweep fractional denominators to find an SK grid that fits in workspace.
+ *
+ * Shared helper for the "more tiles than CUs" branch of StreamK grid selection.
+ * For each fraction `f` in @p tile_fractions, compute the candidate grid
+ * `round(tiles / (tiles/cu_count + f))` and return the first candidate that
+ *   - is non-zero,
+ * - fits within the workspace budget when it does not divide @p tiles evenly
+ *     (`tile_size * candidate <= workspace_limit`), and
+ *   - is `<= cu_count`.
+ *
+ * Workspace check is skipped when @p workspace_limit is 0.
+ *
+ * @param tiles            Total number of output tiles.
+ * @param cu_count         Maximum CU count (or virtual CU count) to fit under.
+ * @param tile_size        Per-tile workspace cost in bytes (e.g. mt.m * mt.n * bytes_per_elem_c).
+ * @param workspace_limit  Maximum allowed workspace in bytes (0 = unlimited).
+ * @param tile_fractions   Fractional denominators to sweep, in priority order.
+ *                         Conventional default is {0.0, 0.5, 0.125, 0.2, 0.25, 1.0/3.0}.
+ * @return size_t The chosen sk_grid, or 0 if no candidate satisfies the constraints.
+ */
+size_t pick_fractional_grid(size_t tiles,
+                            size_t cu_count,
+                            size_t tile_size,
+                            size_t workspace_limit,
+                            const std::vector<double>& tile_fractions);
+
+/**
+ * @brief Pick a K-split factor when there are fewer tiles than CUs.
+ *
+ * Shared helper for the "fewer tiles than CUs" branch of StreamK grid selection.
+ * For each integer factor `f` in @p k_split_factors (high-to-low), pick the
+ * first that satisfies:
+ *   - `tiles * f <= cu_count`, and
+ *   - `iters_per_tile / f >= min_iters_per_cu`.
+ *
+ * @param tiles             Number of output tiles.
+ * @param cu_count          CU count to spread across.
+ * @param iters_per_tile    Number of K iterations per tile.
+ * @param k_split_factors   Candidate split factors, high-to-low.
+ *                          Conventional default is {16, 12, 8, 6, 4, 3, 2, 1}.
+ * @param min_iters_per_cu  Lower bound on iterations per CU (default 8).
+ * @return size_t `tiles * f` for the first satisfying `f`, or 0 if none.
+ */
+size_t pick_k_split(size_t tiles,
+                    size_t cu_count,
+                    size_t iters_per_tile,
+                    const std::vector<size_t>& k_split_factors,
+                    int min_iters_per_cu = 8);
+
+/**
  * @brief Select the best reduction strategy for StreamK.
  *
  * @param problem Problem description (M, N, K, etc.)

@@ -56,19 +56,23 @@ triton_hierarchical_split_t compute_triton_hierarchical_split(
 /**
  * @brief Compute Triton-specific StreamK grid size.
  *
- * @param m Problem M dimension
- * @param n Problem N dimension
- * @param k Problem K dimension
- * @param block_m Tile M dimension
- * @param block_n Tile N dimension
- * @param block_k Tile K dimension
- * @param n_cu Total CU count
- * @param out_dtype_bits Bits per output element
+ * Uses the shared streamk::pick_fractional_grid / streamk::pick_k_split
+ * helpers for the heuristic core (no logic duplication with
+ * streamk::grid_k_split_aware) and adds the Triton-only "last partial wave
+ * -> prev_pow2(n_cu)" compensation.
+ *
+ * Tile count is batch-aware (uses streamk::compute_number_of_output_tiles).
+ * Per-tile workspace bytes are derived sub-byte-safely from the C dtype, or
+ * from `config.workspace_size_per_elem_c` when set (matches Tensile semantics).
+ *
+ * @param problem  Problem description (size, batch, dtypes).
+ * @param config   Kernel configuration (uses `mt`, optionally `workspace_size_per_elem_c`).
+ * @param hardware Hardware description (uses `N_CU`).
  * @return size_t StreamK grid size.
  */
-size_t compute_triton_sk_grid(size_t m, size_t n, size_t k,
-                              size_t block_m, size_t block_n, size_t block_k,
-                              size_t n_cu, size_t out_dtype_bits);
+size_t compute_triton_sk_grid(const problem_t&  problem,
+                              const config_t&   config,
+                              const hardware_t& hardware);
 
 /**
  * @brief Architecture-specific tile search ranges for Triton config generation.

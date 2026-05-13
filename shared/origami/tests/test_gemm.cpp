@@ -28,6 +28,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include "common.hpp"
+#include "origami/targets/triton/gemm.hpp"
 
 using Catch::Approx;
 
@@ -1057,6 +1058,157 @@ TEST_CASE("GEMM: estimate_lds_bytes sub-byte dtypes", "[gemm]") {
   // 128*64 elements * 4 bits / 8 = 4096 bytes per tile; 2 tiles = 8192.
   const size_t expected = 1 * (4096 + 4096);
   REQUIRE(origami::estimate_lds_bytes(problem, config) == expected);
+}
+
+TEST_CASE("StreamK: pick_fractional_grid", "[streamk]") {
+  // Reproduces the inner loop that both Tensile (grid_k_split_aware) and
+  // Triton (compute_triton_sk_grid) use when tiles > cu_count. Verifies that
+  // the shared helper returns the first fractional candidate that fits the
+  // workspace budget and is <= cu_count.
+  const std::vector<double> kFracs = {0.0, 0.5, 0.125, 0.2, 0.25, 1.0 / 3.0};
+
+  // tiles >> cu_count, no workspace pressure -> first fraction (0.0) wins,
+  // i.e. round(tiles / (tiles/cu_count)) == cu_count.
+  REQUIRE(origami::streamk::pick_fractional_grid(
+              /*tiles=*/16384, /*cu_count=*/256, /*tile_size=*/0,
+              /*workspace_limit=*/0, kFracs) == 256);
+
+  // Workspace gate: when tile_size * cand exceeds the limit AND cand does not
+  // divide tiles evenly, that fraction is skipped.
+  const size_t big_tile  = 128ull * 1024 * 1024;  // 128 MiB per tile (absurd)
+  const size_t tight_lim = 1ull * 1024 * 1024;
+  REQUIRE(origami::streamk::pick_fractional_grid(
+              /*tiles=*/300, /*cu_count=*/256, big_tile, tight_lim, kFracs) ==
+          0);
+
+  // Empty inputs -> 0.
+  REQUIRE(origami::streamk::pick_fractional_grid(0, 256, 0, 0, kFracs) == 0);
+  REQUIRE(origami::streamk::pick_fractional_grid(1024, 0, 0, 0, kFracs) == 0);
+}
+
+TEST_CASE("StreamK: pick_k_split", "[streamk]") {
+  // tiles < cu_count branch. Returns tiles*factor for the largest factor
+  // that fits both cu_count and the iters_per_cu floor.
+  const std::vector<size_t> kFactors = {16, 12, 8, 6, 4, 3, 2, 1};
+
+  // tiles=32, plenty of K iters -> 32*8 fits cu_count, factor 8 wins.
+  REQUIRE(origami::streamk::pick_k_split(
+              /*tiles=*/32, /*cu_count=*/256, /*iters_per_tile=*/256,
+              kFactors, /*min_iters_per_cu=*/8) == 32 * 8);
+
+  // tiles=32, but only 8 K iters -> can't split (8/8=1 < 8 floor).
+  // Falls back to factor=1 trivially (32*1=32 fits, 8/1=8 >= 8).
+  REQUIRE(origami::streamk::pick_k_split(32, 256, 8, kFactors, 8) == 32);
+
+  // No factor satisfies -> returns 0.
+  REQUIRE(origami::streamk::pick_k_split(
+              /*tiles=*/300, /*cu_count=*/256, /*iters_per_tile=*/4,
+              kFactors, /*min_iters_per_cu=*/8) == 0);
+
+  // Empty inputs.
+  REQUIRE(origami::streamk::pick_k_split(0, 256, 256, kFactors, 8) == 0);
+  REQUIRE(origami::streamk::pick_k_split(32, 0, 256, kFactors, 8) == 0);
+}
+
+TEST_CASE("Triton: compute_triton_sk_grid - basic + last-wave", "[triton]") {
+  // Basic sanity: data-parallel-sized problem returns a positive grid.
+  auto hardware = make_hardware(950);
+
+  origami::problem_t problem;
+  problem.size    = {16384, 16384, 4096};
+  problem.batch   = 1;
+  problem.a_dtype = origami::data_type_t::Half;
+  problem.b_dtype = origami::data_type_t::Half;
+  problem.c_dtype = origami::data_type_t::Half;
+  problem.d_dtype = origami::data_type_t::Half;
+
+  origami::config_t config;
+  config.mt     = {128, 128, 64};
+  config.mi     = {16, 16, 16};
+  config.target = origami::target_t::triton;
+
+  REQUIRE(origami::compute_triton_sk_grid(problem, config, hardware) > 0);
+
+  // Last-wave compensation: when tiles > n_cu and the remainder is < 128
+  // tiles, the helper falls back to prev_pow2(n_cu). gfx950 N_CU = 256 is
+  // already a power of two, so this branch is a no-op there. Construct a
+  // problem that lands in the last-wave window on a non-pow2 CU count.
+  auto hw_nonpow2 = hardware;
+  hw_nonpow2.N_CU = 304;
+  // 256x256 tile, problem ~ 304 tiles total, remainder 0 vs 304 first.
+  // Choose tiles = 305 so remainder = 1 (< 128) -> sk_grid = prev_pow2(304) = 256.
+  origami::problem_t p_lw;
+  p_lw.size    = {305 * 128, 128, 1024};
+  p_lw.batch   = 1;
+  p_lw.a_dtype = origami::data_type_t::Half;
+  p_lw.b_dtype = origami::data_type_t::Half;
+  p_lw.c_dtype = origami::data_type_t::Half;
+
+  origami::config_t c_lw = config;
+  c_lw.mt                = {128, 128, 64};
+
+  const size_t grid_lw = origami::compute_triton_sk_grid(p_lw, c_lw, hw_nonpow2);
+  REQUIRE(grid_lw == origami::math::prev_pow2(304));
+}
+
+TEST_CASE("Triton: compute_triton_sk_grid - batch-aware tile count", "[triton]") {
+  // A batched problem must produce a different grid than the same per-batch
+  // shape with batch=1, because the unified path now goes through
+  // streamk::compute_number_of_output_tiles (batch-aware). Previously the
+  // primitive-arg helper silently dropped the batch dimension.
+  //
+  // Pick per-batch dims that yield few tiles (so the batched and unbatched
+  // versions land in distinct regimes against the gfx950 N_CU=256). With
+  // mt = 128x128x64 and a 2048x128 per-batch slice, tiles_per_batch = 16.
+  //   batch=1 -> 16 tiles  -> sk_grid = 16
+  //   batch=8 -> 128 tiles -> sk_grid = 128
+  // Identical results would prove the batch dimension is being silently
+  // dropped (the previous primitive-arg behavior).
+  auto hardware = make_hardware(950);
+
+  origami::problem_t base;
+  base.size    = {2048, 128, 1024};
+  base.a_dtype = origami::data_type_t::Half;
+  base.b_dtype = origami::data_type_t::Half;
+  base.c_dtype = origami::data_type_t::Half;
+
+  origami::config_t config;
+  config.mt     = {128, 128, 64};
+  config.mi     = {16, 16, 16};
+  config.target = origami::target_t::triton;
+
+  origami::problem_t single = base;
+  single.batch              = 1;
+  origami::problem_t batched = base;
+  batched.batch              = 8;
+
+  const size_t g_single  = origami::compute_triton_sk_grid(single, config, hardware);
+  const size_t g_batched = origami::compute_triton_sk_grid(batched, config, hardware);
+  REQUIRE(g_single > 0);
+  REQUIRE(g_batched > 0);
+  REQUIRE(g_batched != g_single);
+}
+
+TEST_CASE("Triton: compute_triton_sk_grid - sub-byte C dtype", "[triton]") {
+  // F4 output dtype must not collapse the per-tile workspace to zero. The
+  // previous primitive-arg helper used out_dtype_bits / 8, which truncated
+  // 4-bit dtypes to 0 bytes per element and disabled the workspace gate
+  // entirely.
+  auto hardware = make_hardware(950);
+
+  origami::problem_t problem;
+  problem.size    = {8192, 8192, 1024};
+  problem.batch   = 1;
+  problem.a_dtype = origami::data_type_t::Float4;
+  problem.b_dtype = origami::data_type_t::Float4;
+  problem.c_dtype = origami::data_type_t::Float4;
+
+  origami::config_t config;
+  config.mt     = {128, 128, 64};
+  config.mi     = {16, 16, 16};
+  config.target = origami::target_t::triton;
+
+  REQUIRE(origami::compute_triton_sk_grid(problem, config, hardware) > 0);
 }
 
 TEST_CASE("GEMM: estimate_l2_hit and estimate_mall_hit unit test", "[gemm]") {

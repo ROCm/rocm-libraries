@@ -15,6 +15,40 @@ size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t
   return m_tiles * n_tiles * batch;
 }
 
+size_t pick_fractional_grid(size_t tiles,
+                            size_t cu_count,
+                            size_t tile_size,
+                            size_t workspace_limit,
+                            const std::vector<double>& tile_fractions) {
+  if (tiles == 0 || cu_count == 0) return 0;
+  const double min_even = static_cast<double>(tiles) / static_cast<double>(cu_count);
+  for (double frac : tile_fractions) {
+    const size_t cand = static_cast<size_t>((static_cast<double>(tiles) / (min_even + frac)) + 0.5);
+    if (cand == 0) continue;
+    const bool divides_evenly = (tiles % cand == 0);
+    if (!divides_evenly && workspace_limit > 0 && tile_size * cand > workspace_limit) continue;
+    if (cand <= cu_count) return cand;
+  }
+  return 0;
+}
+
+size_t pick_k_split(size_t tiles,
+                    size_t cu_count,
+                    size_t iters_per_tile,
+                    const std::vector<size_t>& k_split_factors,
+                    int min_iters_per_cu) {
+  if (tiles == 0 || cu_count == 0) return 0;
+  for (size_t factor : k_split_factors) {
+    if (factor == 0) continue;
+    const size_t split_grid  = tiles * factor;
+    const size_t iters_per_cu = iters_per_tile / factor;
+    if (split_grid <= cu_count && iters_per_cu >= static_cast<size_t>(min_iters_per_cu)) {
+      return split_grid;
+    }
+  }
+  return 0;
+}
+
 /**
  * @brief Returns number of k-iterations.
  *
