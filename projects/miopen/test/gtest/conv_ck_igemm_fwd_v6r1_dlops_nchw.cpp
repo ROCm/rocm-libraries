@@ -73,13 +73,13 @@ auto GetTestCases()
 
 using TestCase = decltype(GetTestCases())::value_type;
 
-class GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_FP32
+class GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_OLD_FP32
     : public FloatTestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_FP16 : public HalfTestCase<std::vector<TestCase>>
+class GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_OLD_FP16 : public HalfTestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -94,11 +94,11 @@ bool IsTestSupportedForDevice()
 } // namespace conv_ck_igemm_fwd_v6r1_dlops_nchw
 using namespace conv_ck_igemm_fwd_v6r1_dlops_nchw;
 
-TEST_P(GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_FP32, FloatTest)
+TEST_P(GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_OLD_FP32, FloatTest)
 {
     if(IsTestSupportedForDevice())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_FP32>(
+        invoke_with_params<conv2d_driver, GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_OLD_FP32>(
             default_check);
     }
     else
@@ -107,11 +107,11 @@ TEST_P(GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_FP32, FloatTest)
     }
 };
 
-TEST_P(GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_FP16, HalfTest)
+TEST_P(GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_OLD_FP16, HalfTest)
 {
     if(IsTestSupportedForDevice())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_FP16>(
+        invoke_with_params<conv2d_driver, GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_OLD_FP16>(
             default_check);
     }
     else
@@ -121,9 +121,9 @@ TEST_P(GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_FP16, HalfTest)
 };
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_FP32,
+                         GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_OLD_FP32,
                          testing::Values(GetTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_FP16,
+                         GPU_Conv2d_conv_ck_igemm_fwd_v6r1_dlops_nchw_OLD_FP16,
                          testing::Values(GetTestCases()));

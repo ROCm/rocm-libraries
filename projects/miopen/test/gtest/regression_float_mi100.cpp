@@ -56,7 +56,7 @@ auto GetTestCases()
 
 using TestCase = decltype(GetTestCases())::value_type;
 
-class GPU_Conv2d_regression_mi100_FP32 : public FloatTestCase<std::vector<TestCase>>
+class GPU_Conv2d_regression_mi100_OLD_FP32 : public FloatTestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -71,11 +71,11 @@ bool IsTestSupportedForDevice()
 } // namespace regression_float_mi100
 using namespace regression_float_mi100;
 
-TEST_P(GPU_Conv2d_regression_mi100_FP32, FloatTest)
+TEST_P(GPU_Conv2d_regression_mi100_OLD_FP32, FloatTest)
 {
     if(IsTestSupportedForDevice())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2d_regression_mi100_FP32>(default_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2d_regression_mi100_OLD_FP32>(default_check);
     }
     else
     {
@@ -83,4 +83,4 @@ TEST_P(GPU_Conv2d_regression_mi100_FP32, FloatTest)
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2d_regression_mi100_FP32, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2d_regression_mi100_OLD_FP32, testing::Values(GetTestCases()));

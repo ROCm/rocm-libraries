@@ -42,7 +42,7 @@ void GetArgs(const std::string& param, std::vector<std::string>& tokens)
         tokens.push_back(*begin++);
 }
 
-class GPU_Conv2d_BFP16 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_Conv2d_OLD_BFP16 : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -53,7 +53,7 @@ void Run2dDriver(miopenDataType_t prec)
     std::vector<std::string> params;
     switch(prec)
     {
-    case miopenBFloat16: params = GPU_Conv2d_BFP16::GetParam(); break;
+    case miopenBFloat16: params = GPU_Conv2d_OLD_BFP16::GetParam(); break;
     case miopenFloat:
     case miopenHalf:
     case miopenInt8:
@@ -66,7 +66,7 @@ void Run2dDriver(miopenDataType_t prec)
                   "miopenDouble, miopenFloat8_fnuz, miopenBFloat8_fnuz "
                   "data type not supported by conv_igemm_dynamic_xdlops_nhwc_bf16 test";
 
-    default: params = GPU_Conv2d_BFP16::GetParam();
+    default: params = GPU_Conv2d_OLD_BFP16::GetParam();
     }
 
     ScopedEnvironment<std::string> find_mode_env1(MIOPEN_FIND_MODE, "normal");
@@ -187,7 +187,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 } // namespace conv_igemm_dynamic_xdlops_nhwc_bf16
 using namespace conv_igemm_dynamic_xdlops_nhwc_bf16;
 
-TEST_P(GPU_Conv2d_BFP16, Bf16Test_conv_igemm_dynamic_xdlops_nhwc_bf16)
+TEST_P(GPU_Conv2d_OLD_BFP16, Bf16Test_conv_igemm_dynamic_xdlops_nhwc_bf16)
 {
     const auto& handle = get_handle();
     if(IsTestSupportedForDevice(handle))
@@ -200,4 +200,4 @@ TEST_P(GPU_Conv2d_BFP16, Bf16Test_conv_igemm_dynamic_xdlops_nhwc_bf16)
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_BFP16, testing::Values(GetTestCases("--bfloat16")));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_OLD_BFP16, testing::Values(GetTestCases("--bfloat16")));

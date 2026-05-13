@@ -82,31 +82,31 @@ bool IsTestSupportedForDevice()
 
 } // namespace
 
-class GPU_Conv2dSingleAsmBwdWrw_FP32 : public FloatTestCase<std::vector<RegrTestCase>>
+class GPU_Conv2dSingleAsmBwdWrw_OLD_FP32 : public FloatTestCase<std::vector<RegrTestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_Conv2dTuningAsmBwdWrw_FP32 : public FloatTestCase<std::vector<TestCase>>
+class GPU_Conv2dTuningAsmBwdWrw_OLD_FP32 : public FloatTestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_Conv2dTuningAsmBwdWrw_FP16 : public HalfTestCase<std::vector<TestCase>>
+class GPU_Conv2dTuningAsmBwdWrw_OLD_FP16 : public HalfTestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_Conv2dTuningAsmBwdWrw_BFP16 : public Bf16TestCase<std::vector<TestCase>>
+class GPU_Conv2dTuningAsmBwdWrw_OLD_BFP16 : public Bf16TestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-TEST_P(GPU_Conv2dTuningAsmBwdWrw_FP32, FloatTest_smoke_solver_convasmbwdwrw)
+TEST_P(GPU_Conv2dTuningAsmBwdWrw_OLD_FP32, FloatTest_smoke_solver_convasmbwdwrw)
 {
     if(IsTestSupportedForDevice() && !SkipTest())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2dTuningAsmBwdWrw_FP32>(tuning_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2dTuningAsmBwdWrw_OLD_FP32>(tuning_check);
     }
     else
     {
@@ -114,11 +114,11 @@ TEST_P(GPU_Conv2dTuningAsmBwdWrw_FP32, FloatTest_smoke_solver_convasmbwdwrw)
     }
 };
 
-TEST_P(GPU_Conv2dSingleAsmBwdWrw_FP32, FloatTest_smoke_solver_convasmbwdwrw)
+TEST_P(GPU_Conv2dSingleAsmBwdWrw_OLD_FP32, FloatTest_smoke_solver_convasmbwdwrw)
 {
     if(IsTestSupportedForDevice() && !SkipTest())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2dSingleAsmBwdWrw_FP32>(compiler_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2dSingleAsmBwdWrw_OLD_FP32>(compiler_check);
     }
     else
     {
@@ -126,11 +126,11 @@ TEST_P(GPU_Conv2dSingleAsmBwdWrw_FP32, FloatTest_smoke_solver_convasmbwdwrw)
     }
 };
 
-TEST_P(GPU_Conv2dTuningAsmBwdWrw_FP16, HalfTest_smoke_solver_convasmbwdwrw)
+TEST_P(GPU_Conv2dTuningAsmBwdWrw_OLD_FP16, HalfTest_smoke_solver_convasmbwdwrw)
 {
     if(IsTestSupportedForDevice() && !SkipTest())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2dTuningAsmBwdWrw_FP16>(tuning_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2dTuningAsmBwdWrw_OLD_FP16>(tuning_check);
     }
     else
     {
@@ -138,11 +138,11 @@ TEST_P(GPU_Conv2dTuningAsmBwdWrw_FP16, HalfTest_smoke_solver_convasmbwdwrw)
     }
 };
 
-TEST_P(GPU_Conv2dTuningAsmBwdWrw_BFP16, Bf16Test_smoke_solver_convasmbwdwrw)
+TEST_P(GPU_Conv2dTuningAsmBwdWrw_OLD_BFP16, Bf16Test_smoke_solver_convasmbwdwrw)
 {
     if(IsTestSupportedForDevice() && !SkipTest())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2dTuningAsmBwdWrw_BFP16>(tuning_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2dTuningAsmBwdWrw_OLD_BFP16>(tuning_check);
     }
     else
     {
@@ -151,8 +151,8 @@ TEST_P(GPU_Conv2dTuningAsmBwdWrw_BFP16, Bf16Test_smoke_solver_convasmbwdwrw)
 };
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv2dSingleAsmBwdWrw_FP32,
+                         GPU_Conv2dSingleAsmBwdWrw_OLD_FP32,
                          testing::Values(GetTestCompilerRegressionCases()));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuningAsmBwdWrw_FP32, testing::Values(GetTestCases()));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuningAsmBwdWrw_FP16, testing::Values(GetTestCases()));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuningAsmBwdWrw_BFP16, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuningAsmBwdWrw_OLD_FP32, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuningAsmBwdWrw_OLD_FP16, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuningAsmBwdWrw_OLD_BFP16, testing::Values(GetTestCases()));

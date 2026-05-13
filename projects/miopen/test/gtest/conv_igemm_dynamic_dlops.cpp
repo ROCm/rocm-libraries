@@ -153,16 +153,16 @@ bool IsTestSupportedForDevice()
 
 } // namespace
 
-class GPU_Conv2dDefaultIGemmDynamicDLops_FP16 : public HalfTestCase<std::vector<TestCase>>
+class GPU_Conv2dDefaultIGemmDynamicDLops_OLD_FP16 : public HalfTestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-TEST_P(GPU_Conv2dDefaultIGemmDynamicDLops_FP16, HalfTest_conv_igemm_dynamic_dlops)
+TEST_P(GPU_Conv2dDefaultIGemmDynamicDLops_OLD_FP16, HalfTest_conv_igemm_dynamic_dlops)
 {
     if(IsTestSupportedForDevice() && !SkipTest())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2dDefaultIGemmDynamicDLops_FP16>(default_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2dDefaultIGemmDynamicDLops_OLD_FP16>(default_check);
     }
     else
     {
@@ -171,5 +171,5 @@ TEST_P(GPU_Conv2dDefaultIGemmDynamicDLops_FP16, HalfTest_conv_igemm_dynamic_dlop
 };
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv2dDefaultIGemmDynamicDLops_FP16,
+                         GPU_Conv2dDefaultIGemmDynamicDLops_OLD_FP16,
                          testing::Values(GetTestCases()));

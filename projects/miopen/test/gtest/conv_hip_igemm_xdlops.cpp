@@ -43,7 +43,7 @@ void GetArgs(const std::string& param, std::vector<std::string>& tokens)
         tokens.push_back(*begin++);
 }
 
-class GPU_ConvHipIgemmXdlops_I8 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_ConvHipIgemmXdlops_OLD_I8 : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -53,7 +53,7 @@ void Run2dDriver(miopenDataType_t prec)
     std::vector<std::string> params;
     switch(prec)
     {
-    case miopenInt8: params = GPU_ConvHipIgemmXdlops_I8::GetParam(); break;
+    case miopenInt8: params = GPU_ConvHipIgemmXdlops_OLD_I8::GetParam(); break;
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenHalf:
@@ -67,7 +67,7 @@ void Run2dDriver(miopenDataType_t prec)
                   "type not supported by "
                   "test_conv_hip_igemm_xdlops test";
 
-    default: params = GPU_ConvHipIgemmXdlops_I8::GetParam();
+    default: params = GPU_ConvHipIgemmXdlops_OLD_I8::GetParam();
     }
 
     for(const auto& test_value : params)
@@ -138,7 +138,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 } // namespace conv_hip_igemm_xdlops
 using namespace conv_hip_igemm_xdlops;
 
-TEST_P(GPU_ConvHipIgemmXdlops_I8, Int8Test)
+TEST_P(GPU_ConvHipIgemmXdlops_OLD_I8, Int8Test)
 {
 #if MIOPEN_BACKEND_OPENCL
 
@@ -161,4 +161,4 @@ TEST_P(GPU_ConvHipIgemmXdlops_I8, Int8Test)
 #endif
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_ConvHipIgemmXdlops_I8, testing::Values(GetTestCases("--int8")));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_ConvHipIgemmXdlops_OLD_I8, testing::Values(GetTestCases("--int8")));

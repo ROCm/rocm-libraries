@@ -65,12 +65,12 @@ void GetArgs(const TestCase& param, std::vector<std::string>& tokens)
         tokens.push_back(*begin++);
 }
 
-class GPU_ConvImplicitGemm_FP16 : public testing::TestWithParam<std::vector<TestCase>>
+class GPU_ConvImplicitGemm_OLD_FP16 : public testing::TestWithParam<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_ConvImplicitGemm_BFP16 : public testing::TestWithParam<std::vector<TestCase>>
+class GPU_ConvImplicitGemm_OLD_BFP16 : public testing::TestWithParam<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -81,8 +81,8 @@ void Run2dDriver(miopenDataType_t prec)
 
     switch(prec)
     {
-    case miopenHalf: params = GPU_ConvImplicitGemm_FP16::GetParam(); break;
-    case miopenBFloat16: params = GPU_ConvImplicitGemm_BFP16::GetParam(); break;
+    case miopenHalf: params = GPU_ConvImplicitGemm_OLD_FP16::GetParam(); break;
+    case miopenBFloat16: params = GPU_ConvImplicitGemm_OLD_BFP16::GetParam(); break;
     case miopenFloat:
     case miopenInt8:
     case miopenInt32:
@@ -251,7 +251,7 @@ std::vector<TestCase> GetTestCases(const std::string& precision)
 
 using namespace test_conv_for_implicit_gemm;
 
-TEST_P(GPU_ConvImplicitGemm_BFP16, Test_conv_for_implicit_gemm_bf16)
+TEST_P(GPU_ConvImplicitGemm_OLD_BFP16, Test_conv_for_implicit_gemm_bf16)
 {
     const auto& handle = get_handle();
     if(IsTestSupportedForDevice(handle) && !SkipTest())
@@ -264,7 +264,7 @@ TEST_P(GPU_ConvImplicitGemm_BFP16, Test_conv_for_implicit_gemm_bf16)
     }
 };
 
-TEST_P(GPU_ConvImplicitGemm_FP16, Test_conv_for_implicit_gemm_half)
+TEST_P(GPU_ConvImplicitGemm_OLD_FP16, Test_conv_for_implicit_gemm_half)
 {
     const auto& handle = get_handle();
     if(IsTestSupportedForDevice(handle) && !SkipTest())
@@ -279,9 +279,9 @@ TEST_P(GPU_ConvImplicitGemm_FP16, Test_conv_for_implicit_gemm_half)
 
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                             GPU_ConvImplicitGemm_BFP16,
+                             GPU_ConvImplicitGemm_OLD_BFP16,
                              testing::Values(GetTestCases("--bfloat16")));
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                             GPU_ConvImplicitGemm_FP16,
+                             GPU_ConvImplicitGemm_OLD_FP16,
                              testing::Values(GetTestCases("--half")));

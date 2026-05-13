@@ -80,7 +80,7 @@ auto GetTestCases()
 
 using TestCase = decltype(GetTestCases())::value_type;
 
-class GPU_Conv2d_DeepBench_FP32 : public FloatTestCase<std::vector<TestCase>>
+class GPU_Conv2d_DeepBench_OLD_FP32 : public FloatTestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -94,11 +94,11 @@ bool IsTestSupportedForDevice()
 } // namespace deepbench_conv
 using namespace deepbench_conv;
 
-TEST_P(GPU_Conv2d_DeepBench_FP32, FloatTest_deepbench_conv)
+TEST_P(GPU_Conv2d_DeepBench_OLD_FP32, FloatTest_deepbench_conv)
 {
     if(IsTestSupportedForDevice())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2d_DeepBench_FP32>(default_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2d_DeepBench_OLD_FP32>(default_check);
     }
     else
     {
@@ -106,4 +106,4 @@ TEST_P(GPU_Conv2d_DeepBench_FP32, FloatTest_deepbench_conv)
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_DeepBench_FP32, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_DeepBench_OLD_FP32, testing::Values(GetTestCases()));

@@ -82,16 +82,16 @@ bool IsTestSupportedForDevice()
 
 } // namespace
 
-class GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32 : public FloatTestCase<std::vector<TestCase>>
+class GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_OLD_FP32 : public FloatTestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-TEST_P(GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32, FloatTest_conv_igemm_mlir_xdlops_bwd_wrw)
+TEST_P(GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_OLD_FP32, FloatTest_conv_igemm_mlir_xdlops_bwd_wrw)
 {
     if(IsTestSupportedForDevice())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32>(db_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_OLD_FP32>(db_check);
     }
     else
     {
@@ -101,5 +101,5 @@ TEST_P(GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32, FloatTest_conv_igemm_mlir_xdlop
 
 // Half for FWD, BWD, WRW
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32,
+                         GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_OLD_FP32,
                          testing::Values(GetTestCases()));

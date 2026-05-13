@@ -33,7 +33,7 @@
 #include "get_handle.hpp"
 #include "nonpack_conv3d_fwd.hpp"
 
-struct GPU_ConvNonpackFwdSolverTest3D_FP16 : ConvNonpackFwdSolverTest3D<half_float::half>
+struct GPU_ConvNonpackFwdSolverTest3D_OLD_FP16 : ConvNonpackFwdSolverTest3D<half_float::half>
 {
 };
 
@@ -82,7 +82,7 @@ void SolverFwd(const miopen::TensorDescriptor& inputDesc,
     handle.Finish();
 }
 
-TEST_P(GPU_ConvNonpackFwdSolverTest3D_FP16, CKNonPackConvFwd3D)
+TEST_P(GPU_ConvNonpackFwdSolverTest3D_OLD_FP16, CKNonPackConvFwd3D)
 {
     SolverFwd<miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops>(
         input.desc,
@@ -102,7 +102,7 @@ TEST_P(GPU_ConvNonpackFwdSolverTest3D_FP16, CKNonPackConvFwd3D)
 // solver.
 
 INSTANTIATE_TEST_SUITE_P(FullConvFwdDefault,
-                         GPU_ConvNonpackFwdSolverTest3D_FP16,
+                         GPU_ConvNonpackFwdSolverTest3D_OLD_FP16,
                          testing::Combine(testing::Values(miopenConvolutionFwdAlgoImplicitGEMM),
                                           testing::ValuesIn(ConvTestConfigs<NonPackTestCase>()),
                                           testing::ValuesIn({1.0}), // alpha
@@ -110,7 +110,7 @@ INSTANTIATE_TEST_SUITE_P(FullConvFwdDefault,
                                           testing::Values(miopenTensorNDHWC)));
 
 INSTANTIATE_TEST_SUITE_P(FullConvFwdScalar,
-                         GPU_ConvNonpackFwdSolverTest3D_FP16,
+                         GPU_ConvNonpackFwdSolverTest3D_OLD_FP16,
                          testing::Combine(testing::Values(miopenConvolutionFwdAlgoImplicitGEMM),
                                           testing::ValuesIn(ConvTestConfigs<NonPackTestCase>()),
                                           testing::ValuesIn({2.0}), // alpha
@@ -118,7 +118,7 @@ INSTANTIATE_TEST_SUITE_P(FullConvFwdScalar,
                                           testing::Values(miopenTensorNDHWC)));
 
 INSTANTIATE_TEST_SUITE_P(FullConvFwdBilinear,
-                         GPU_ConvNonpackFwdSolverTest3D_FP16,
+                         GPU_ConvNonpackFwdSolverTest3D_OLD_FP16,
                          testing::Combine(testing::Values(miopenConvolutionFwdAlgoImplicitGEMM),
                                           testing::ValuesIn(ConvTestConfigs<NonPackTestCase>()),
                                           testing::ValuesIn({2.0}), // alpha

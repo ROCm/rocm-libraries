@@ -64,17 +64,17 @@ bool IsTestSupportedForDevice()
 
 } // namespace
 
-class GPU_Conv2dTuningDynamicFwdDlops_FP16 : public HalfTestCase<std::vector<TestCase>>
+class GPU_Conv2dTuningDynamicFwdDlops_OLD_FP16 : public HalfTestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-TEST_P(GPU_Conv2dTuningDynamicFwdDlops_FP16,
+TEST_P(GPU_Conv2dTuningDynamicFwdDlops_OLD_FP16,
        HalfTest_smoke_solver_ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC)
 {
     if(IsTestSupportedForDevice() && !SkipTest())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2dTuningDynamicFwdDlops_FP16>(tuning_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2dTuningDynamicFwdDlops_OLD_FP16>(tuning_check);
     }
     else
     {
@@ -83,5 +83,5 @@ TEST_P(GPU_Conv2dTuningDynamicFwdDlops_FP16,
 };
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv2dTuningDynamicFwdDlops_FP16,
+                         GPU_Conv2dTuningDynamicFwdDlops_OLD_FP16,
                          testing::Values(GetTestCases()));

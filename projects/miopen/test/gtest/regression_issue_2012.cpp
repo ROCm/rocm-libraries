@@ -61,7 +61,7 @@ std::vector<std::string> GetTestCases(const std::string& float_arg)
 
 using TestCase = decltype(GetTestCases(std::string{}))::value_type;
 
-class GPU_regression_issue_2012_FP32 : public testing::TestWithParam<std::vector<TestCase>>
+class GPU_regression_issue_2012_OLD_FP32 : public testing::TestWithParam<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -82,7 +82,7 @@ void Run2dDriver()
 
     ScopedEnvironment<std::string> find_mode_env4(MIOPEN_FIND_MODE, "normal");
 
-    std::vector<std::string> params = GPU_regression_issue_2012_FP32::GetParam();
+    std::vector<std::string> params = GPU_regression_issue_2012_OLD_FP32::GetParam();
 
     for(const auto& test_value : params)
     {
@@ -102,8 +102,8 @@ void Run2dDriver()
 } // namespace regression_issue_2012
 using namespace regression_issue_2012;
 
-TEST_P(GPU_regression_issue_2012_FP32, FloatTest_regression_issue_2012) { Run2dDriver(); };
+TEST_P(GPU_regression_issue_2012_OLD_FP32, FloatTest_regression_issue_2012) { Run2dDriver(); };
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_regression_issue_2012_FP32,
+                         GPU_regression_issue_2012_OLD_FP32,
                          testing::Values(GetTestCases("--float")));

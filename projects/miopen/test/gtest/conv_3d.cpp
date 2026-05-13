@@ -68,7 +68,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 
 using TestCase = decltype(GetTestCases(std::string{}))::value_type;
 
-class GPU_conv3d_FP32 : public testing::TestWithParam<std::vector<TestCase>>
+class GPU_conv3d_OLD_FP32 : public testing::TestWithParam<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -88,7 +88,7 @@ void Run2dDriver()
         GTEST_SKIP();
     }
 
-    std::vector<std::string> params = GPU_conv3d_FP32::GetParam();
+    std::vector<std::string> params = GPU_conv3d_OLD_FP32::GetParam();
 
     for(const auto& test_value : params)
     {
@@ -109,6 +109,6 @@ void Run2dDriver()
 } // namespace conv_3d
 using namespace conv_3d;
 
-TEST_P(GPU_conv3d_FP32, FloatTest_conv_3d) { Run2dDriver(); };
+TEST_P(GPU_conv3d_OLD_FP32, FloatTest_conv_3d) { Run2dDriver(); };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_conv3d_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_conv3d_OLD_FP32, testing::Values(GetTestCases("--float")));

@@ -42,13 +42,13 @@ void GetArgs(const std::string& param, std::vector<std::string>& tokens)
         tokens.push_back(*begin++);
 }
 
-class GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP32
+class GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_OLD_FP32
     : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP16
+class GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_OLD_FP16
     : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
@@ -61,10 +61,10 @@ void Run2dDriver(miopenDataType_t prec)
     switch(prec)
     {
     case miopenFloat:
-        params = GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP32::GetParam();
+        params = GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_OLD_FP32::GetParam();
         break;
     case miopenHalf:
-        params = GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP16::GetParam();
+        params = GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_OLD_FP16::GetParam();
         break;
     case miopenInt8:
     case miopenBFloat16:
@@ -271,7 +271,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 
 using namespace conv_igemm_dynamic_xdlops_nhwc_nchw;
 
-TEST_P(GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP32,
+TEST_P(GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_OLD_FP32,
        FloatTest_conv_igemm_dynamic_xdlops_nhwc_nchw)
 {
     const auto& handle = get_handle();
@@ -285,7 +285,7 @@ TEST_P(GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP32,
     }
 };
 
-TEST_P(GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP16,
+TEST_P(GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_OLD_FP16,
        HalfTest_conv_igemm_dynamic_xdlops_nhwc_nchw)
 {
     const auto& handle = get_handle();
@@ -300,9 +300,9 @@ TEST_P(GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP16,
 };
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP32,
+                         GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_OLD_FP32,
                          testing::Values(GetTestCases("--float")));
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP16,
+                         GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_OLD_FP16,
                          testing::Values(GetTestCases("--half")));

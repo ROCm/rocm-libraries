@@ -68,16 +68,16 @@ bool IsTestSupportedForDevice()
 
 } // namespace
 
-class GPU_Conv2dTuning_BFP16 : public Bf16TestCase<std::vector<TestCase>>
+class GPU_Conv2dTuning_OLD_BFP16 : public Bf16TestCase<std::vector<TestCase>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-TEST_P(GPU_Conv2dTuning_BFP16, Bf16Test_smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16)
+TEST_P(GPU_Conv2dTuning_OLD_BFP16, Bf16Test_smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16)
 {
     if(IsTestSupportedForDevice() && !SkipTest())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2dTuning_BFP16>(tuning_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2dTuning_OLD_BFP16>(tuning_check);
     }
     else
     {
@@ -85,4 +85,4 @@ TEST_P(GPU_Conv2dTuning_BFP16, Bf16Test_smoke_solver_ConvAsmImplicitGemmGTCDynam
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuning_BFP16, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuning_OLD_BFP16, testing::Values(GetTestCases()));

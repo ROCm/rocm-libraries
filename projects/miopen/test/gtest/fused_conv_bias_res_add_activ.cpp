@@ -165,7 +165,7 @@ protected:
     miopenActivationDescriptor_t activ_desc;
 };
 
-struct GPU_ConvFwdBiasResAddActiv_FP16 : ConvFwdBiasResAddFixture<half_float::half>
+struct GPU_ConvFwdBiasResAddActiv_OLD_FP16 : ConvFwdBiasResAddFixture<half_float::half>
 {
 };
 
@@ -174,7 +174,7 @@ struct GPU_ConvFwdBiasResAddActiv_FP16 : ConvFwdBiasResAddFixture<half_float::ha
 
 using namespace conv_bias_act_res_add_fwd;
 
-TEST_P(GPU_ConvFwdBiasResAddActiv_FP16, ConvFusedAPI)
+TEST_P(GPU_ConvFwdBiasResAddActiv_OLD_FP16, ConvFusedAPI)
 {
     if(TestIsApplicable())
     {
@@ -206,7 +206,7 @@ TEST_P(GPU_ConvFwdBiasResAddActiv_FP16, ConvFusedAPI)
 }
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_ConvFwdBiasResAddActiv_FP16,
+                         GPU_ConvFwdBiasResAddActiv_OLD_FP16,
                          testing::Combine(testing::Values(miopenConvolutionFwdAlgoImplicitGEMM),
                                           testing::ValuesIn(ConvTestConfigs()),
                                           testing::ValuesIn({1.0f, 2.0f}), // alpha1
