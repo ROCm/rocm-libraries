@@ -2273,6 +2273,7 @@ class Solution(collections.abc.Mapping):
 
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
 
+    state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
     # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
     isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()

@@ -733,14 +733,20 @@ namespace TensileLite
 
         if(sizeMapping.expertSchedulingMode > 0)
         {
-            int32_t esmSupported = 0;
+            AMDGPU const* amdgpu = dynamic_cast<AMDGPU const*>(hardware);
+            if(amdgpu
+               && (amdgpu->processor == AMDGPU::Processor::gfx1200
+                   || amdgpu->processor == AMDGPU::Processor::gfx1201))
+            {
+                int32_t esmRuntimeSupported = 0;
 #if HIP_VERSION >= 70353390
-            int deviceId = 0;
-            HIP_CHECK_EXC(hipGetDevice(&deviceId));
-            HIP_CHECK_EXC(hipDeviceGetAttribute(
-                &esmSupported, hipDeviceAttributeExpertSchedMode, deviceId));
+                int deviceId = 0;
+                HIP_CHECK_EXC(hipGetDevice(&deviceId));
+                HIP_CHECK_EXC(hipDeviceGetAttribute(
+                    &esmRuntimeSupported, hipDeviceAttributeExpertSchedMode, deviceId));
 #endif
-            args.template append<int32_t>("ESMsupportedWorkaround", esmSupported);
+                args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
+            }
         }
 
         // Additional check for General Batched GEMM until GSU and StreamK are supported

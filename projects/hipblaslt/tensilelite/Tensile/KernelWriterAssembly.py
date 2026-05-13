@@ -1929,9 +1929,9 @@ class KernelWriterAssembly(KernelWriter):
           kernelArgs.add(self.argLoader.loadKernArg("AddressScale%s"%name, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=2))
         sgprOffset += (self.states.rpga * self.states.bpr)
 
-    if kernel["ExpertSchedulingMode"] > 0:
+    if kernel["ExpertSchedulingMode"] > 0 and kernel["ESMRuntimeGate"]:
         sgprOffset = self.argLoader.getOffset()
-        kernelArgs.add(self.argLoader.loadKernArg(self.states.tempESMSupportedWorkaroundSgpr, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=1))
+        kernelArgs.add(self.argLoader.loadKernArg(self.states.esmRuntimeFlagSgpr, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=1))
         sgprOffset += 4
         self.argLoader.setOffset(sgprOffset)
     return kernelArgs
@@ -2186,9 +2186,9 @@ class KernelWriterAssembly(KernelWriter):
         moduleArgs.add(Bypass_ArgType3_to_ArgType0_Instance1)
         moduleArgs.add(SAddU32(dst=sgpr("KernArgAddress"), src0=sgpr("KernArgAddress"), src1=hex(self.states.userArgsInfo.commonArgsSize), comment="Shift common args"))
         moduleArgs.add(SAddCU32(dst=sgpr("KernArgAddress+1"), src0=sgpr("KernArgAddress+1"), src1=0))
-        if kernel["ExpertSchedulingMode"] > 0:
-          self.states.tempESMSupportedWorkaroundSgpr = self.sgprPool.checkOut(1, preventOverflow=False)
-          self.states.tempESMSupportedWorkaroundVgpr = self.vgprPool.checkOut(1)
+        if kernel["ExpertSchedulingMode"] > 0 and kernel["ESMRuntimeGate"]:
+          self.states.esmRuntimeFlagSgpr = self.sgprPool.checkOut(1, preventOverflow=False)
+          self.states.esmRuntimeFlagVgpr = self.vgprPool.checkOut(1)
         moduleArgs.addModuleAsFlatItems(self.getKernelArgLoadModule(kernel, sgprStart, load, 0))
         if self.states.numSgprPreload > 0:
           moduleArgs.add(SWaitCnt(kmcnt=0, comment="preload"))
@@ -2370,9 +2370,9 @@ class KernelWriterAssembly(KernelWriter):
           moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u bytes of kern args" % \
                               (self.argLoader.getOffset() - (self.states.numSgprPreload*4))))
 
-        if kernel["ExpertSchedulingMode"] > 0:
-          moduleWg.add(VMovB32(dst=vgpr(self.states.tempESMSupportedWorkaroundVgpr), src=sgpr(self.states.tempESMSupportedWorkaroundSgpr), comment="move esm temp"))
-          self.sgprPool.checkIn(self.states.tempESMSupportedWorkaroundSgpr)
+        if kernel["ExpertSchedulingMode"] > 0 and kernel["ESMRuntimeGate"]:
+          moduleWg.add(VMovB32(dst=vgpr(self.states.esmRuntimeFlagVgpr), src=sgpr(self.states.esmRuntimeFlagSgpr), comment="move ESM runtime flag sgpr -> vgpr"))
+          self.sgprPool.checkIn(self.states.esmRuntimeFlagSgpr)
         moduleWg.addModuleAsFlatItems(moduleScaleAB)
 
       def calculateWG():
@@ -6624,12 +6624,16 @@ class KernelWriterAssembly(KernelWriter):
                     comment="do not enter Loop%s"%loopChar ))
 
       if kernel["ExpertSchedulingMode"] > 0:
-        skipLabel = Label("skipESM", "")
-        module.add(VCmpGEI32(dst=VCC(), src0=vgpr(self.states.tempESMSupportedWorkaroundVgpr), src1=1, comment="check if ESM supported at runtime"))
-        module.add(SCBranchVCCZ(labelName=skipLabel.getLabelName(), comment="skip s_setreg if not supported"))
-        module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=int(kernel["ExpertSchedulingMode"]), comment="enable expert scheduling mode"))
-        module.add(skipLabel)
-        self.vgprPool.checkIn(self.states.tempESMSupportedWorkaroundVgpr)
+        enableESMInstr = SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=int(kernel["ExpertSchedulingMode"]), comment="enable expert scheduling mode")
+        if kernel["ESMRuntimeGate"]:
+          skipEnableESMLabel = Label("skipEnableESM", "")
+          module.add(VCmpGEI32(dst=VCC(), src0=vgpr(self.states.esmRuntimeFlagVgpr), src1=1, comment="check if ESM supported at runtime"))
+          module.add(SCBranchVCCZ(labelName=skipEnableESMLabel.getLabelName(), comment="skip s_setreg if not supported"))
+          module.add(enableESMInstr)
+          module.add(skipEnableESMLabel)
+          self.vgprPool.checkIn(self.states.esmRuntimeFlagVgpr)
+        else:
+          module.add(enableESMInstr)
 
       if not noLabelGen:
         module.add(loopLabelBegin)
