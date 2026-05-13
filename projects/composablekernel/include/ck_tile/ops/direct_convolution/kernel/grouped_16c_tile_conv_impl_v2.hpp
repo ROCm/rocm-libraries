@@ -313,10 +313,10 @@ static constexpr Config<DT> configs[] = {
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
      // No-swizzle fallback for padding (indices 84-85)
      {.waves_per_wg = 8, .direction = Direction::Dgrad,
-      .swizzle_type = SwizzleType::NoSwizzle,
+      .swizzle_type = SwizzleType::None,
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
      {.waves_per_wg = 8,
-      .swizzle_type = SwizzleType::NoSwizzle,
+      .swizzle_type = SwizzleType::None,
       .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
 };
 static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
