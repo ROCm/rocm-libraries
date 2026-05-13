@@ -4,29 +4,33 @@
 # SPDX-License-Identifier: MIT
 
 """
-FMHA hardware and kernel specifications.
+FMHA validation and kernel specifications.
 
-This file consolidates ALL architecture-dependent facts, tile constraints,
-feature rules, tile tables, and profile definitions.
+Architecture-specific data (dtypes, pipelines, hdims, tile tables) is stored in
+``fmha_arch_specs.json`` so that it can be edited without touching Python code.
+Common GPU hardware data (element sizes, warp size, LDS capacity) is imported
+from the parent ``arch_specs_generated`` module (generated from ``arch_specs.json``).
 
-Sections:
-    1. Architecture capabilities (dtypes, pipelines, hdims)
-    2. Tile hardware parameters (LDS, warp classes, element sizes)
-    3. Tile constraints (per-arch rules that reject invalid tiles)
-    4. Feature compatibility rules (pipeline × feature flag interactions)
-    5. Variant-specific tile tables (BWD, SplitKV combine, etc.)
-    6. Receipt filters (named subsets for deployment profiles)
-    7. Profiles (named predicates for codegen filtering)
+This file provides:
+    - JSON loading helpers
+    - Tile constraints (per-arch rules that reject invalid tiles)
+    - Feature compatibility rules (pipeline × feature flag interactions)
+    - Receipt filters and profiles (deployment-specific kernel subsets)
+    - Config validation for the AOT codegen path
 """
 
+import json
 import sys
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
-# Ensure this directory is on sys.path for sibling imports
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Ensure this directory and parent codegen/ are on sys.path for sibling imports
+_THIS_DIR = Path(__file__).resolve().parent
+_CODEGEN_DIR = _THIS_DIR.parent
+sys.path.insert(0, str(_THIS_DIR))
+sys.path.insert(0, str(_CODEGEN_DIR))
 
 from symbol_map import (  # noqa: E402
     BWD_DTYPE_MAP,
@@ -36,242 +40,116 @@ from symbol_map import (  # noqa: E402
     canonical_qscale,
 )
 
-
-# =============================================================================
-# 1. Architecture capabilities
-# =============================================================================
-
-# Dtypes supported per GPU architecture.
-# Source: warp_gemm_dispatcher.hpp template specializations (MFMA for gfx9*, WMMA for gfx11/12)
-ARCH_DTYPES: Dict[str, List[str]] = {
-    "gfx90a": ["fp16", "bf16", "fp32"],
-    "gfx942": ["fp16", "bf16", "fp32", "fp8", "fp8bf16", "fp8fp32", "bf8"],
-    "gfx950": [
-        "fp16",
-        "bf16",
-        "fp32",
-        "fp8",
-        "fp8bf16",
-        "fp8fp32",
-        "bf8",
-        "mxfp8",
-        "mxfp4",
-    ],
-    "gfx1100": ["fp16", "bf16"],
-    "gfx1201": ["fp16", "bf16", "fp8", "fp8bf16"],  # WMMA fp8 dispatchers (gfx12)
-}
-
-# Supported hdim combinations per dtype family.
-# hdim_q must satisfy ceil_to_qualified_tile_length() in tile_fmha_shape.hpp:
-#   valid hdim_q: 32, 48, 64, 80, 96, 128, 160, 192, 256
-# hdim_v is constrained only by warp tile divisibility (no ceil function).
-SUPPORTED_HDIMS: Dict[str, List[Tuple[int, int]]] = {
-    "fp16": [
-        (32, 32),
-        (64, 64),
-        (80, 96),
-        (96, 128),
-        (128, 128),
-        (160, 160),
-        (192, 128),
-        (192, 192),
-        (256, 256),
-    ],
-    "bf16": [
-        (32, 32),
-        (64, 64),
-        (80, 96),
-        (96, 128),
-        (128, 128),
-        (160, 160),
-        (192, 128),
-        (192, 192),
-        (256, 256),
-    ],
-    "fp32": [
-        (32, 32),
-        (48, 48),
-        (64, 64),
-        (96, 128),
-        (128, 128),
-        (192, 192),
-        (256, 256),
-    ],
-    "fp8": [(64, 64), (128, 128), (192, 128), (256, 256)],
-    "fp8bf16": [(64, 64), (128, 128), (192, 128), (256, 256)],
-    "fp8fp32": [(128, 128)],
-    "bf8": [(64, 64), (128, 128), (192, 128), (256, 256)],
-    "mxfp8": [(128, 128), (256, 256)],
-    "mxfp4": [(128, 128), (256, 256)],
-}
-
-# Architecture metadata for validation and codegen
-ARCH_METADATA: Dict[str, dict] = {
-    "gfx90a": {
-        "family": "cdna2",
-        "arch_tag": "ck_tile::gfx9_t",
-        "supported_dtypes": ["fp16", "bf16", "fp32"],
-        "supported_pipelines": [
-            "qr",
-            "qr_async",
-            "qs",
-            "qr_pagedkv",
-            "qr_nwarp_sshuffle",
-            "appendkv",
-            "bwd",
-        ],
-        "supports_trload": False,
-        "supports_v3": False,
-    },
-    "gfx942": {
-        "family": "cdna3",
-        "arch_tag": "ck_tile::gfx9_t",
-        "supported_dtypes": [
-            "fp16",
-            "bf16",
-            "fp32",
-            "fp8",
-            "fp8fp16",
-            "fp8bf16",
-            "fp8fp32",
-            "bf8",
-        ],
-        "supported_pipelines": [
-            "qr",
-            "qr_async",
-            "qs",
-            "qr_pagedkv",
-            "qr_nwarp_sshuffle",
-            "appendkv",
-            "bwd",
-        ],
-        "supports_trload": False,
-        "supports_v3": False,
-    },
-    "gfx950": {
-        "family": "cdna4",
-        "arch_tag": "ck_tile::gfx9_t",
-        "supported_dtypes": [
-            "fp16",
-            "bf16",
-            "fp32",
-            "fp8",
-            "fp8fp16",
-            "fp8bf16",
-            "fp8fp32",
-            "bf8",
-        ],
-        "supported_pipelines": [
-            "qr",
-            "qr_async",
-            "qs",
-            "qr_async_trload",
-            "qr_async_trload_v3",
-            "v3",
-            "qr_pagedkv",
-            "qr_nwarp_sshuffle",
-            "appendkv",
-            "bwd",
-        ],
-        "supports_trload": True,
-        "supports_v3": True,
-    },
-    "gfx1100": {
-        "family": "rdna3",
-        "arch_tag": "ck_tile::gfx11_t",
-        "supported_dtypes": ["fp16", "bf16"],
-        "supported_pipelines": [
-            "qr",
-            "qr_pagedkv",
-            "qr_nwarp_sshuffle",
-            "appendkv",
-            "bwd",
-        ],
-        "supports_trload": False,
-        "supports_v3": False,
-    },
-    "gfx1201": {
-        "family": "rdna4",
-        "arch_tag": "ck_tile::gfx12_t",
-        "supported_dtypes": ["fp16", "bf16", "fp8", "fp8bf16"],
-        "supported_pipelines": [
-            "qr",
-            "qr_pagedkv",
-            "qr_nwarp_sshuffle",
-            "appendkv",
-            "bwd",
-        ],
-        "supports_trload": False,
-        "supports_v3": False,
-    },
-}
+# Import shared hardware data from parent arch_specs_generated (generated from
+# arch_specs.json by generate_arch_specs.py).  Falls back to inline defaults if
+# the generated module is unavailable (e.g. in standalone testing).
+try:
+    from arch_specs_generated import ELEMENT_SIZE_MAP as _PARENT_ELEMENT_SIZES  # noqa: E402
+except ImportError:
+    _PARENT_ELEMENT_SIZES = {
+        "fp16": 2,
+        "bf16": 2,
+        "fp32": 4,
+        "fp64": 8,
+        "fp8": 1,
+        "bf8": 1,
+        "int8": 1,
+        "int4": 0.5,
+        "pk_fp4": 0.5,
+        "int32": 4,
+    }
 
 
 # =============================================================================
-# 2. Tile hardware parameters
+# JSON data loading
 # =============================================================================
 
-# LDS capacity per pipeline type (bytes) — used for non-async pipelines.
-# Source: arch.hpp get_smem_capacity() returns 65536 (64 KiB) for gfx90a/gfx942.
-# Async pipelines (qr_async*) compute LDS budgets from the exact CK formula
-# in tile_passes_all_constraints() since they use 3× double-buffered KV tiles
-# and target gfx950 which has 163840 bytes (160 KiB) LDS.
-LDS_LIMITS: Dict[str, int] = {
-    "qr": 65536,
-    "qs": 65536,
-}
+_FMHA_SPECS_PATH = _THIS_DIR / "fmha_arch_specs.json"
 
-# Warp configurations: (wm0, wn0, wk0) — MFMA/WMMA instruction tile sizes.
-# Source: warp_gemm_dispatcher.hpp template specializations.
-WARP_CLASSES: Dict[str, List[Tuple[int, int, int]]] = {
-    "fp16": [(32, 32, 16), (16, 16, 32)],
-    "bf16": [(32, 32, 16), (16, 16, 32)],
-    "fp32": [(16, 16, 16)],
-    "fp8": [(32, 32, 32)],
-    "fp8bf16": [(32, 32, 32)],
-    "fp8fp32": [(32, 32, 32)],
-    "bf8": [(32, 32, 32)],
-    "mxfp8": [(32, 32, 64)],
-    "mxfp4": [(16, 16, 128)],
-}
 
-# Element sizes in bytes — sizeof() of the C++ storage type.
-# Source: half_t=2, bf16_t=2, float=4, fp8_t/bf8_t=1.
-# mxfp4: pk_fp4_t packs 2 fp4 elements into 1 byte (uint8_t), so elem_size=1.
-ELEMENT_SIZES: Dict[str, int] = {
-    "fp16": 2,
-    "bf16": 2,
-    "fp32": 4,
-    "fp8": 1,
-    "fp8bf16": 1,
-    "fp8fp32": 1,
-    "bf8": 1,
-    "mxfp8": 1,
-    "mxfp4": 1,
-}
+def _load_fmha_specs() -> dict:
+    """Load fmha_arch_specs.json (cached after first call)."""
+    if not hasattr(_load_fmha_specs, "_cache"):
+        with open(_FMHA_SPECS_PATH) as f:
+            _load_fmha_specs._cache = json.load(f)
+    return _load_fmha_specs._cache
 
-# Block tile dimensions to sweep — union of all tile sizes used across CK example factories.
-# Must be multiples of the warp tile (16 or 32 depending on dtype).
-# 192, 384 included for high-occupancy configs on large sequence lengths.
-VALID_BM0 = [16, 32, 64, 128, 192, 256]
-VALID_BN0 = [16, 32, 64, 96, 128, 192, 256, 384]
-VALID_BK0 = [16, 32, 64, 96, 128, 256]
 
-# K0_MAX_SUBMAX_MAP: maps hdim_q → kSubQKHeaddim (the padded K-tile length).
-# Source: tile_fmha_shape.hpp ceil_to_qualified_tile_length<Headdim>().
-#   32→32(pow2), 48→48(special), 64→64(pow2), 80→96(special),
-#   96→128(special), 128→128(pow2), 160→256(special), 192→192(special), 256→256(pow2).
-K0_MAX_SUBMAX_MAP: Dict[int, int] = {
-    32: 32,
-    48: 48,
-    64: 64,
-    80: 96,
-    96: 128,
-    128: 128,
-    160: 256,
-    192: 192,
-    256: 256,
-}
+def _build_element_sizes() -> Dict[str, int]:
+    """Merge parent element sizes with FMHA-specific composite dtypes."""
+    base = {k: int(v) for k, v in _PARENT_ELEMENT_SIZES.items()}
+    base.update(_load_fmha_specs().get("fmha_element_sizes", {}))
+    return base
+
+
+# =============================================================================
+# 1. Architecture capabilities (loaded from fmha_arch_specs.json)
+# =============================================================================
+
+
+def _build_arch_dtypes() -> Dict[str, List[str]]:
+    """Build ARCH_DTYPES from JSON architectures."""
+    return {
+        arch: info["supported_dtypes"]
+        for arch, info in _load_fmha_specs()["architectures"].items()
+    }
+
+
+def _build_supported_hdims() -> Dict[str, List[Tuple[int, int]]]:
+    """Build SUPPORTED_HDIMS from JSON, converting [q,v] lists to tuples."""
+    return {
+        dtype: [tuple(pair) for pair in pairs]
+        for dtype, pairs in _load_fmha_specs()["supported_hdims"].items()
+        if dtype != "_comment"
+    }
+
+
+def _build_arch_metadata() -> Dict[str, dict]:
+    """Build ARCH_METADATA from JSON architectures."""
+    return dict(_load_fmha_specs()["architectures"])
+
+
+ARCH_DTYPES: Dict[str, List[str]] = _build_arch_dtypes()
+SUPPORTED_HDIMS: Dict[str, List[Tuple[int, int]]] = _build_supported_hdims()
+ARCH_METADATA: Dict[str, dict] = _build_arch_metadata()
+
+
+# =============================================================================
+# 2. Tile hardware parameters (loaded from fmha_arch_specs.json + parent arch_specs)
+# =============================================================================
+
+
+def _build_warp_classes() -> Dict[str, List[Tuple[int, int, int]]]:
+    """Build WARP_CLASSES from JSON fmha_warp_tiles."""
+    return {
+        dtype: [tuple(w) for w in warps]
+        for dtype, warps in _load_fmha_specs()["fmha_warp_tiles"].items()
+        if dtype != "_comment"
+    }
+
+
+def _build_lds_limits() -> Dict[str, int]:
+    """Build LDS_LIMITS from JSON."""
+    return dict(_load_fmha_specs()["lds_limits"])
+
+
+def _build_k0max_map() -> Dict[int, int]:
+    """Build K0_MAX_SUBMAX_MAP from JSON (string keys → int keys)."""
+    return {
+        int(k): v for k, v in _load_fmha_specs()["k0max_map"].items() if k != "_comment"
+    }
+
+
+_specs = _load_fmha_specs()
+_tile_ranges = _specs["tile_sweep_ranges"]
+
+LDS_LIMITS: Dict[str, int] = _build_lds_limits()
+WARP_CLASSES: Dict[str, List[Tuple[int, int, int]]] = _build_warp_classes()
+ELEMENT_SIZES: Dict[str, int] = _build_element_sizes()
+VALID_BM0: List[int] = _tile_ranges["valid_bm0"]
+VALID_BN0: List[int] = _tile_ranges["valid_bn0"]
+VALID_BK0: List[int] = _tile_ranges["valid_bk0"]
+K0_MAX_SUBMAX_MAP: Dict[int, int] = _build_k0max_map()
 
 
 # =============================================================================
@@ -505,76 +383,73 @@ def check_group_mode_padding(mode: str, spad: str, skpad: str) -> bool:
 
 
 # =============================================================================
-# 5. Variant-specific tile tables
+# 5. Variant-specific tile tables (loaded from fmha_arch_specs.json)
 # =============================================================================
 
-# --- SplitKV combine ---
-SPLITKV_COMBINE_HDIMS_FP16 = [32, 64, 96, 128, 256]
-SPLITKV_COMBINE_HDIMS_FP8 = [64, 128, 256]
 
-# --- BWD dq_dk_dv: main tile per hdim ---
-# Source: fmha_bwd.py KernelComponentFactoryGfx9.get_dq_dk_dv_tiles().
-# Format: (bm0, bn0, bk0, bn1, bk1, bk0max, tile6, tile7, tile8)
-BWD_DQ_DK_DV_TILES_FP16: Dict[Tuple[int, int], Tuple[int, ...]] = {
-    (32, 32): (32, 128, 32, 32, 32, 32, 64, 32, 32),
-    (64, 64): (32, 128, 64, 32, 64, 32, 32, 64, 64),
-    (96, 128): (32, 128, 96, 32, 96, 32, 32, 96, 96),
-    (128, 128): (16, 128, 128, 16, 128, 16, 32, 128, 128),
-    (256, 256): (16, 64, 256, 16, 256, 16, 32, 256, 256),
-}
+def _build_bwd_tiles() -> Tuple[
+    Dict[Tuple[int, int], Tuple[int, ...]],
+    Dict[Tuple[int, int], List[Tuple[Tuple[int, ...], str, bool]]],
+    Dict[Tuple[int, int, int, str], dict],
+]:
+    """Build BWD tile tables from JSON."""
+    bwd = _load_fmha_specs()["bwd_tiles"]
 
-# Extra tiles for specific hdims: (tile_tuple, tag, is_batch_only).
-# Source: fmha_bwd.py KernelComponentFactoryGfx950 trload/small/bn192 variants.
+    # Main tiles: "hdimq_hdimv" -> 9-tuple
+    main = {}
+    for k, v in bwd["dq_dk_dv_fp16"].items():
+        hq, hv = map(int, k.split("_"))
+        main[(hq, hv)] = tuple(v)
+
+    # Extra tiles: "hdimq_hdimv" -> [(tile, tag, batch_only), ...]
+    extra = {}
+    for k, entries in bwd.get("dq_dk_dv_extra", {}).items():
+        hq, hv = map(int, k.split("_"))
+        extra[(hq, hv)] = [
+            (tuple(e["tile"]), e["tag"], e["batch_only"]) for e in entries
+        ]
+
+    # Wave/warp lookup: "bm0_bn0_bk0_trload" -> {wave, warp_k1}
+    ww = {}
+    for k, v in _load_fmha_specs()["bwd_wave_warp"].items():
+        if k.startswith("_"):
+            continue
+        parts = k.split("_")
+        key = (int(parts[0]), int(parts[1]), int(parts[2]), parts[3])
+        ww[key] = {"wave": tuple(v["wave"]), "warp_k1": v["warp_k1"]}
+
+    return main, extra, ww
+
+
+def _build_splitkv_hdims() -> Tuple[List[int], List[int]]:
+    """Build SplitKV combine hdim lists from JSON."""
+    skv = _load_fmha_specs()["splitkv_combine"]
+    return skv["hdims_fp16"], skv["hdims_fp8"]
+
+
+_bwd_main, _bwd_extra, _bwd_ww = _build_bwd_tiles()
+_skv_fp16, _skv_fp8 = _build_splitkv_hdims()
+
+SPLITKV_COMBINE_HDIMS_FP16: List[int] = _skv_fp16
+SPLITKV_COMBINE_HDIMS_FP8: List[int] = _skv_fp8
+BWD_DQ_DK_DV_TILES_FP16: Dict[Tuple[int, int], Tuple[int, ...]] = _bwd_main
 BWD_DQ_DK_DV_EXTRA_TILES: Dict[
     Tuple[int, int], List[Tuple[Tuple[int, ...], str, bool]]
-] = {
-    (64, 64): [
-        ((32, 128, 64, 32, 64, 32, 32, 64, 64), "trload", False),
-        ((32, 16, 64, 32, 64, 32, 16, 64, 64), "small", True),
-    ],
-    (128, 128): [
-        ((16, 16, 128, 16, 128, 16, 16, 128, 128), "small", True),
-        ((16, 192, 128, 16, 128, 16, 32, 128, 128), "bn192", False),
-        ((32, 128, 128, 32, 128, 32, 32, 128, 128), "trload", False),
-    ],
-}
+] = _bwd_extra
+BWD_DQ_WAVE_WARP: Dict[Tuple[int, int, int, str], dict] = _bwd_ww
 
-BWD_EXTRA_PAD_COMBOS = [("f", "f"), ("8", "8")]
-BWD_SMALL_DROPOUTS = ["no"]
-
-BWD_DOT_DO_O_HDIMS = [32, 64, 96, 128, 256]
-BWD_CONVERT_DQ_HDIMS = [32, 64, 96, 128, 256]
-BWD_CONVERT_DQ_TILE_GROUPS: Dict[int, int] = {32: 1, 64: 1, 96: 1, 128: 1, 256: 1}
-
-BWD_DROPOUTS = ["no", "dropout_wg16", "dropout_wg16_storerandval"]
-BWD_PAD_COMBOS = [
-    ("f", "f"),
-    ("f", "t"),
-    ("f", "8"),
-    ("t", "f"),
-    ("t", "t"),
-    ("t", "8"),
-    ("8", "8"),
+_bwd_json = _load_fmha_specs()["bwd_tiles"]
+BWD_EXTRA_PAD_COMBOS: List[Tuple[str, str]] = [
+    tuple(p) for p in _bwd_json["extra_pad_combos"]
 ]
-
-# --- BWD wave/warp lookup (non-derivable patterns) ---
-# Source: fmha_bwd.py FmhaBwdDQDKDVTileSize constructors (F_rm0..F_rk2, F_wk1).
-# Key: (bm0, bn0, bk0, trload_flag).  Value: {wave: 9-tuple, warp_k1: int}.
-BWD_DQ_WAVE_WARP: Dict[Tuple[int, int, int, str], dict] = {
-    (16, 16, 128, "t"): {"wave": (1, 1, 1, 1, 1, 1, 1, 1, 1), "warp_k1": 16},
-    (16, 64, 256, "f"): {"wave": (1, 4, 1, 4, 1, 1, 1, 4, 1), "warp_k1": 16},
-    (16, 128, 128, "f"): {"wave": (1, 4, 1, 4, 1, 1, 1, 4, 1), "warp_k1": 16},
-    (16, 192, 128, "t"): {"wave": (1, 4, 1, 4, 1, 1, 1, 4, 1), "warp_k1": 16},
-    (32, 16, 64, "t"): {"wave": (1, 1, 1, 1, 1, 1, 1, 1, 1), "warp_k1": 16},
-    (32, 128, 32, "f"): {"wave": (1, 4, 1, 4, 1, 1, 2, 2, 1), "warp_k1": 16},
-    (32, 128, 64, "f"): {"wave": (1, 4, 1, 4, 1, 1, 1, 4, 1), "warp_k1": 16},
-    (32, 128, 64, "t"): {"wave": (1, 4, 1, 4, 1, 1, 1, 4, 1), "warp_k1": 32},
-    (32, 128, 96, "f"): {"wave": (1, 4, 1, 4, 1, 1, 2, 2, 1), "warp_k1": 16},
-    (32, 128, 128, "t"): {"wave": (1, 4, 1, 4, 1, 1, 1, 4, 1), "warp_k1": 32},
-    (64, 128, 32, "f"): {"wave": (2, 4, 1, 4, 1, 1, 2, 4, 1), "warp_k1": 16},
-    (64, 128, 64, "f"): {"wave": (2, 4, 1, 4, 1, 1, 2, 4, 1), "warp_k1": 16},
-    (64, 128, 128, "f"): {"wave": (2, 4, 1, 4, 1, 1, 2, 4, 1), "warp_k1": 16},
+BWD_SMALL_DROPOUTS: List[str] = _bwd_json["small_dropouts"]
+BWD_DOT_DO_O_HDIMS: List[int] = _bwd_json["dot_do_o_hdims"]
+BWD_CONVERT_DQ_HDIMS: List[int] = _bwd_json["convert_dq_hdims"]
+BWD_CONVERT_DQ_TILE_GROUPS: Dict[int, int] = {
+    int(k): v for k, v in _bwd_json["convert_dq_tile_groups"].items()
 }
+BWD_DROPOUTS: List[str] = _bwd_json["dropouts"]
+BWD_PAD_COMBOS: List[Tuple[str, str]] = [tuple(p) for p in _bwd_json["pad_combos"]]
 
 
 # =============================================================================
@@ -827,31 +702,22 @@ def profile_allows(
 # 8. Validation helpers (for unified_fmha_codegen)
 # =============================================================================
 
-_DEFAULTS = {
-    "tile": [128, 64, 32, 128, 32, 128],
-    "wave": [2, 2, 1, 2, 2, 1, 1, 1, 1],
-    "warp": [32, 32, 16, 32, 32, 16, 16, 16, 16],
-    "padding": [True, True, True, True],
-    "block_per_cu": 1,
-    "num_wave_groups": 1,
-    "selection_rank": 0,
-}
-
-_GLOBAL_RULES = {
-    "hdim_192_128_no_bias_dropout": True,
-    "logits_requires_no_bias": True,
-    "group_mode_requires_padding": True,
-    "hdim_divisible_by": 8,
-}
+_DEFAULTS: dict = _load_fmha_specs()["defaults"]
+_GLOBAL_RULES: dict = _load_fmha_specs()["global_rules"]
 
 
 def load_arch_specs() -> dict:
-    """Return synthetic arch_specs dict compatible with unified_fmha_codegen."""
+    """Return arch_specs dict compatible with unified_fmha_codegen.
+
+    Combines FMHA-specific architecture data from fmha_arch_specs.json with
+    defaults, global rules, and splitkv combine params.
+    """
+    specs = _load_fmha_specs()
     return {
         "architectures": ARCH_METADATA,
         "defaults": _DEFAULTS,
         "global_rules": _GLOBAL_RULES,
-        "splitkv_combine": {"combine_bn1": 32},
+        "splitkv_combine": specs["splitkv_combine"],
     }
 
 
