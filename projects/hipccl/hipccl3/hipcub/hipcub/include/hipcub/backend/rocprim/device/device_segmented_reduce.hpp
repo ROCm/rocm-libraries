@@ -118,68 +118,200 @@ inline hipError_t launch_segmented_arg_minmax(::rocprim::detail::target current_
 
 /// Dispatch function similar to \p rocprim::segmented_reduce but writes \p empty_value for empty
 /// segments and writes a segment-relative index instead of an absolute one.
-template<class Config = rocprim::default_config,
+template<class Config,
          class InputIterator,
          class OutputIterator,
          class OffsetIterator,
          class InitValueType,
          class BinaryFunction>
-inline hipError_t segmented_arg_minmax(void*          temporary_storage,
-                                       size_t&        storage_size,
-                                       InputIterator  input,
-                                       OutputIterator output,
-                                       unsigned int   segments,
-                                       OffsetIterator begin_offsets,
-                                       OffsetIterator end_offsets,
-                                       BinaryFunction reduce_op,
-                                       InitValueType  initial_value,
-                                       InitValueType  empty_value,
-                                       hipStream_t    stream)
+struct segmented_arg_minmax
 {
-    using input_type  = detail::it_value_t<InputIterator>;
-    using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
-
-    using selector = ::rocprim::detail::segmented_reduce_config_selector<result_type>;
-
-    const ::rocprim::detail::target current_target(stream);
-
-    const auto         params = ::rocprim::detail::get_config<selector>(Config{}, current_target);
-    const unsigned int block_size = params.kernel_config.block_size;
-
-    if(temporary_storage == nullptr)
+    constexpr hipError_t operator()(void*                temporary_storage,
+                                    size_t&              storage_size,
+                                    InputIterator        input,
+                                    OutputIterator       output,
+                                    _HIPCUB_STD::int64_t segments,
+                                    OffsetIterator       begin_offsets,
+                                    OffsetIterator       end_offsets,
+                                    BinaryFunction       reduce_op,
+                                    InitValueType        initial_value,
+                                    InitValueType        empty_value,
+                                    hipStream_t          stream)
     {
-        // Make sure user won't try to allocate 0 bytes memory, because
-        // hipMalloc will return nullptr when size is zero.
-        storage_size = 4;
+        using input_type  = detail::it_value_t<InputIterator>;
+        using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
+
+        using selector = ::rocprim::detail::segmented_reduce_config_selector<result_type>;
+
+        const ::rocprim::detail::target current_target(stream);
+
+        const auto params = ::rocprim::detail::get_config<selector>(Config{}, current_target);
+        const unsigned int         block_size = params.kernel_config.block_size;
+        const _HIPCUB_STD::int64_t segments_limit
+            = static_cast<_HIPCUB_STD::int64_t>(params.kernel_config.size_limit);
+
+        if(temporary_storage == nullptr)
+        {
+            // Make sure user won't try to allocate 0 bytes memory, because
+            // hipMalloc will return nullptr when size is zero.
+            storage_size = 4;
+            return hipSuccess;
+        }
+
+        if(segments == _HIPCUB_STD::int64_t{0u})
+        {
+            return hipSuccess;
+        }
+
+        const _HIPCUB_STD::int64_t num_launch
+            = ::rocprim::detail::ceiling_div(static_cast<uint64_t>(segments),
+                                             static_cast<uint64_t>(segments_limit));
+
+        for(_HIPCUB_STD::int64_t launch = 0, segments_offset = 0; launch < num_launch;
+            ++launch, segments_offset += segments_limit)
+        {
+            const unsigned int current_segments = static_cast<unsigned int>(
+                std::min<_HIPCUB_STD::int64_t>(segments - segments_offset, segments_limit));
+
+            std::chrono::high_resolution_clock::time_point start;
+
+            if constexpr(HIPCUB_DETAIL_DEBUG_SYNC_VALUE)
+            {
+                start = std::chrono::high_resolution_clock::now();
+            }
+            ROCPRIM_RETURN_ON_ERROR(launch_segmented_arg_minmax<Config, selector>(
+                current_target,
+                input,
+                output + segments_offset,
+                begin_offsets + segments_offset,
+                end_offsets + segments_offset,
+                reduce_op,
+                static_cast<result_type>(initial_value),
+                static_cast<result_type>(empty_value),
+                dim3(current_segments),
+                dim3(block_size),
+                0,
+                stream));
+            HIPCUB_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_arg_minmax",
+                                                       current_segments,
+                                                       start);
+        }
+
         return hipSuccess;
     }
+};
 
-    if(segments == 0u)
-        return hipSuccess;
+template<typename OffsetT>
+struct transform_idx_to_offset_op
+{
+    _HIPCUB_STD::int64_t segments;
+    unsigned int         segment_length;
 
-    std::chrono::high_resolution_clock::time_point start;
-
-    if constexpr(HIPCUB_DETAIL_DEBUG_SYNC_VALUE)
+    HIPCUB_DEVICE
+    inline OffsetT       operator()(_HIPCUB_STD::int64_t i) const
     {
-        start = std::chrono::high_resolution_clock::now();
+        if(i < segments)
+        {
+            return static_cast<OffsetT>(segment_length * i);
+        }
+        else
+        {
+            return static_cast<OffsetT>(segment_length * segments);
+        }
     }
-    ROCPRIM_RETURN_ON_ERROR(
-        launch_segmented_arg_minmax<Config, selector>(current_target,
-                                                      input,
-                                                      output,
-                                                      begin_offsets,
-                                                      end_offsets,
-                                                      reduce_op,
-                                                      static_cast<result_type>(initial_value),
-                                                      static_cast<result_type>(empty_value),
-                                                      dim3(segments),
-                                                      dim3(block_size),
-                                                      0,
-                                                      stream));
-    HIPCUB_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_arg_minmax", segments, start);
+};
 
-    return hipSuccess;
-}
+template<class Config,
+         class InputIterator,
+         class OutputIterator,
+         class InitValueType,
+         class BinaryFunction>
+struct segmented_arg_minmax_fixed_size_invoker
+{
+    using SizeT = _HIPCUB_STD::int64_t;
+
+private:
+    template<class OffsetIterator>
+    using segmented_arg_minmax_t = segmented_arg_minmax<Config,
+                                                        InputIterator,
+                                                        OutputIterator,
+                                                        OffsetIterator,
+                                                        InitValueType,
+                                                        BinaryFunction>;
+
+    template<class OffsetT>
+    using transform_idx_to_offset_op_t = transform_idx_to_offset_op<OffsetT>;
+
+    template<class ActualSizeT>
+    static inline constexpr auto in_range(const SizeT& size)
+    {
+        using common_t = std::common_type_t<SizeT, ActualSizeT>;
+        return static_cast<common_t>(size)
+               < static_cast<common_t>(std::numeric_limits<ActualSizeT>::max());
+    }
+
+    template<class ArgsPre, class ArgsPost, class OffsetIterator>
+    struct invoke_impl
+    {
+        ArgsPre&             args_pre;
+        ArgsPost&            args_post;
+        _HIPCUB_STD::int64_t segments;
+        OffsetIterator       begin_offsets;
+        OffsetIterator       end_offsets;
+
+        template<std::size_t... Ip, std::size_t... Iq>
+        hipError_t operator()(std::index_sequence<Ip...>, std::index_sequence<Iq...>) const
+        {
+            return segmented_arg_minmax_t<OffsetIterator>{}(std::get<Ip>(args_pre)...,
+                                                            segments,
+                                                            begin_offsets,
+                                                            end_offsets,
+                                                            std::get<Iq>(args_post)...);
+        }
+    };
+
+public:
+    template<class ArgsPre, class ArgsPost>
+    static inline hipError_t invoke(const _HIPCUB_STD::int64_t& segments,
+                                    const unsigned int&         segment_length,
+                                    ArgsPre&&                   args_pre,
+                                    ArgsPost&&                  args_post)
+    {
+        const SizeT size = segments * segment_length;
+
+        auto run_segmented_reduce = [&](auto transform_op) -> hipError_t
+        {
+            auto offsets = ::rocprim::make_transform_iterator(
+                ::rocprim::make_counting_iterator<_HIPCUB_STD::int64_t>(0),
+                transform_op);
+            using OffsetIterator            = decltype(offsets);
+            constexpr unsigned int PreSize  = std::tuple_size<std::decay_t<ArgsPre>>::value;
+            constexpr unsigned int PostSize = std::tuple_size<std::decay_t<ArgsPost>>::value;
+
+            auto impl = invoke_impl<std::decay_t<ArgsPre>, std::decay_t<ArgsPost>, OffsetIterator>{
+                args_pre,
+                args_post,
+                segments,
+                offsets,
+                offsets + 1};
+
+            return impl(std::make_index_sequence<PreSize>{}, std::make_index_sequence<PostSize>{});
+        };
+
+        if(in_range<_HIPCUB_STD::int32_t>(size))
+        {
+            auto transform_op
+                = transform_idx_to_offset_op_t<_HIPCUB_STD::int32_t>{segments, segment_length};
+            return run_segmented_reduce(transform_op);
+        }
+        else
+        {
+            auto transform_op
+                = transform_idx_to_offset_op_t<_HIPCUB_STD::int64_t>{segments, segment_length};
+            return run_segmented_reduce(transform_op);
+        }
+    }
+};
 
 } // namespace detail
 
@@ -343,6 +475,50 @@ struct DeviceSegmentedReduce
                    stream);
     }
 
+    template<typename InputIteratorT, typename OutputIteratorT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Sum(void*                d_temp_storage,
+                          size_t&              temp_storage_bytes,
+                          InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          _HIPCUB_STD::int32_t segment_size,
+                          hipStream_t          stream = 0)
+    {
+        using input_type = detail::it_value_t<InputIteratorT>;
+
+        return Reduce(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_out,
+                      num_segments,
+                      segment_size,
+                      _HIPCUB_STD::plus<>{},
+                      input_type(),
+                      stream);
+    }
+
+    template<typename InputIteratorT, typename OutputIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Sum(void*                d_temp_storage,
+                          size_t&              temp_storage_bytes,
+                          InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          _HIPCUB_STD::int32_t segment_size,
+                          hipStream_t          stream,
+                          bool                 debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return Sum(d_temp_storage,
+                   temp_storage_bytes,
+                   d_in,
+                   d_out,
+                   num_segments,
+                   segment_size,
+                   stream);
+    }
+
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t Min(void*                d_temp_storage,
@@ -395,6 +571,54 @@ struct DeviceSegmentedReduce
                    stream);
     }
 
+    template<typename InputIteratorT, typename OutputIteratorT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Min(void*                d_temp_storage,
+                          size_t&              temp_storage_bytes,
+                          InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          _HIPCUB_STD::int32_t segment_size,
+                          hipStream_t          stream = 0)
+    {
+        using input_type = detail::it_value_t<InputIteratorT>;
+
+        return Reduce(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_out,
+                      num_segments,
+                      segment_size,
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+                      _HIPCUB_LIBCXX::minimum<>{},
+#else
+                      [] (auto a, auto b) { return a > b ? b : a;},
+#endif
+                      _HIPCUB_STD::numeric_limits<input_type>::max(),
+                      stream);
+    }
+
+    template<typename InputIteratorT, typename OutputIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Min(void*                d_temp_storage,
+                          size_t&              temp_storage_bytes,
+                          InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          _HIPCUB_STD::int32_t segment_size,
+                          hipStream_t          stream,
+                          bool                 debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return Min(d_temp_storage,
+                   temp_storage_bytes,
+                   d_in,
+                   d_out,
+                   num_segments,
+                   segment_size,
+                   stream);
+    }
+
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ArgMin(void*                d_temp_storage,
@@ -415,6 +639,13 @@ struct DeviceSegmentedReduce
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
 
+        using segmented_arg_minmax_t = detail::segmented_arg_minmax<rocprim::default_config,
+                                                                    IteratorT,
+                                                                    OutputIteratorT,
+                                                                    OffsetIteratorT,
+                                                                    OutputTupleT,
+                                                                    ::hipcub::ArgMin>;
+
         IteratorT d_indexed_in(d_in);
         // true maximum value of the full range
         // key is ::max because ArgMin finds the lowest value that has the lowest key
@@ -423,17 +654,17 @@ struct DeviceSegmentedReduce
         // special value for empty segments
         const OutputTupleT empty_value(1, detail::get_max_value<T>());
 
-        return detail::segmented_arg_minmax(d_temp_storage,
-                                            temp_storage_bytes,
-                                            d_indexed_in,
-                                            d_out,
-                                            num_segments,
-                                            d_begin_offsets,
-                                            d_end_offsets,
-                                            ::hipcub::ArgMin(),
-                                            init,
-                                            empty_value,
-                                            stream);
+        return segmented_arg_minmax_t{}(d_temp_storage,
+                                        temp_storage_bytes,
+                                        d_indexed_in,
+                                        d_out,
+                                        num_segments,
+                                        d_begin_offsets,
+                                        d_end_offsets,
+                                        ::hipcub::ArgMin(),
+                                        init,
+                                        empty_value,
+                                        stream);
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
@@ -456,6 +687,68 @@ struct DeviceSegmentedReduce
                       num_segments,
                       d_begin_offsets,
                       d_end_offsets,
+                      stream);
+    }
+
+    template<typename InputIteratorT, typename OutputIteratorT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ArgMin(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             _HIPCUB_STD::int64_t num_segments,
+                             _HIPCUB_STD::int32_t segment_size,
+                             hipStream_t          stream = 0)
+    {
+        using OffsetT = int;
+        using T       = hipcub::detail::it_value_t<InputIteratorT>;
+        using O       = hipcub::detail::it_value_t<OutputIteratorT>;
+        using OutputTupleT =
+            typename std::conditional<std::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
+
+        using OutputValueT = typename OutputTupleT::Value;
+        using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
+        using OpT          = ::hipcub::ArgMin;
+
+        IteratorT d_indexed_in(d_in);
+        // true maximum value of the full range
+        // key is ::max because ArgMin finds the lowest value that has the lowest key
+        const OutputTupleT init(_HIPCUB_STD::numeric_limits<OffsetT>::max(),
+                                detail::get_max_special_value<T>());
+        // special value for empty segments
+        const OutputTupleT empty_value(1, detail::get_max_value<T>());
+
+        OpT binary_op{};
+
+        return detail::segmented_arg_minmax_fixed_size_invoker<
+            rocprim::default_config,
+            IteratorT,
+            OutputIteratorT,
+            OutputTupleT,
+            OpT>::invoke(num_segments,
+                         segment_size,
+                         std::tie(d_temp_storage, temp_storage_bytes, d_indexed_in, d_out),
+                         std::tie(binary_op, init, empty_value, stream));
+    }
+
+    template<typename InputIteratorT, typename OutputIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ArgMin(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             _HIPCUB_STD::int64_t num_segments,
+                             _HIPCUB_STD::int32_t segment_size,
+                             hipStream_t          stream,
+                             bool                 debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return ArgMin(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_out,
+                      num_segments,
+                      segment_size,
                       stream);
     }
 
@@ -511,6 +804,54 @@ struct DeviceSegmentedReduce
                    stream);
     }
 
+    template<typename InputIteratorT, typename OutputIteratorT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Max(void*                d_temp_storage,
+                          size_t&              temp_storage_bytes,
+                          InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          _HIPCUB_STD::int32_t segment_size,
+                          hipStream_t          stream = 0)
+    {
+        using input_type = detail::it_value_t<InputIteratorT>;
+
+        return Reduce(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_out,
+                      num_segments,
+                      segment_size,
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+                      _HIPCUB_LIBCXX::maximum<>{},
+#else
+                      [] (auto a, auto b) { return a > b ? a : b;},
+#endif
+                      _HIPCUB_STD::numeric_limits<input_type>::lowest(),
+                      stream);
+    }
+
+    template<typename InputIteratorT, typename OutputIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Max(void*                d_temp_storage,
+                          size_t&              temp_storage_bytes,
+                          InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          _HIPCUB_STD::int32_t segment_size,
+                          hipStream_t          stream,
+                          bool                 debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return Max(d_temp_storage,
+                   temp_storage_bytes,
+                   d_in,
+                   d_out,
+                   num_segments,
+                   segment_size,
+                   stream);
+    }
+
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ArgMax(void*                d_temp_storage,
@@ -531,6 +872,13 @@ struct DeviceSegmentedReduce
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
 
+        using segmented_arg_minmax_t = detail::segmented_arg_minmax<rocprim::default_config,
+                                                                    IteratorT,
+                                                                    OutputIteratorT,
+                                                                    OffsetIteratorT,
+                                                                    OutputTupleT,
+                                                                    ::hipcub::ArgMax>;
+
         IteratorT d_indexed_in(d_in);
         // true minimum value of the full range
         // key is ::max because ArgMax finds the highest value that has the lowest key
@@ -539,17 +887,17 @@ struct DeviceSegmentedReduce
         // special value for empty segments
         const OutputTupleT empty_value(1, detail::get_lowest_value<T>());
 
-        return detail::segmented_arg_minmax(d_temp_storage,
-                                            temp_storage_bytes,
-                                            d_indexed_in,
-                                            d_out,
-                                            num_segments,
-                                            d_begin_offsets,
-                                            d_end_offsets,
-                                            ::hipcub::ArgMax(),
-                                            init,
-                                            empty_value,
-                                            stream);
+        return segmented_arg_minmax_t{}(d_temp_storage,
+                                        temp_storage_bytes,
+                                        d_indexed_in,
+                                        d_out,
+                                        num_segments,
+                                        d_begin_offsets,
+                                        d_end_offsets,
+                                        ::hipcub::ArgMax(),
+                                        init,
+                                        empty_value,
+                                        stream);
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
@@ -572,6 +920,68 @@ struct DeviceSegmentedReduce
                       num_segments,
                       d_begin_offsets,
                       d_end_offsets,
+                      stream);
+    }
+
+    template<typename InputIteratorT, typename OutputIteratorT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ArgMax(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             _HIPCUB_STD::int64_t num_segments,
+                             _HIPCUB_STD::int32_t segment_size,
+                             hipStream_t          stream = 0)
+    {
+        using OffsetT = int;
+        using T       = hipcub::detail::it_value_t<InputIteratorT>;
+        using O       = hipcub::detail::it_value_t<OutputIteratorT>;
+        using OutputTupleT =
+            typename std::conditional<std::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
+
+        using OutputValueT = typename OutputTupleT::Value;
+        using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
+        using OpT          = ::hipcub::ArgMax;
+
+        IteratorT d_indexed_in(d_in);
+        // true minimum value of the full range
+        // key is ::max because ArgMax finds the highest value that has the lowest key
+        const OutputTupleT init(_HIPCUB_STD::numeric_limits<OffsetT>::max(),
+                                detail::get_lowest_special_value<T>());
+        // special value for empty segments
+        const OutputTupleT empty_value(1, detail::get_lowest_value<T>());
+
+        OpT binary_op{};
+
+        return detail::segmented_arg_minmax_fixed_size_invoker<
+            rocprim::default_config,
+            IteratorT,
+            OutputIteratorT,
+            OutputTupleT,
+            OpT>::invoke(num_segments,
+                         segment_size,
+                         std::tie(d_temp_storage, temp_storage_bytes, d_indexed_in, d_out),
+                         std::tie(binary_op, init, empty_value, stream));
+    }
+
+    template<typename InputIteratorT, typename OutputIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ArgMax(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             _HIPCUB_STD::int64_t num_segments,
+                             _HIPCUB_STD::int32_t segment_size,
+                             hipStream_t          stream,
+                             bool                 debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return ArgMax(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_out,
+                      num_segments,
+                      segment_size,
                       stream);
     }
 };
