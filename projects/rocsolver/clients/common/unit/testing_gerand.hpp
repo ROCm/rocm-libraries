@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
-//#include "print_matrix.hpp"
 
 #include <complex>
 #include <limits>
@@ -97,7 +96,6 @@ void testing_gerand(Arguments& argus)
     std::vector<T> A(static_cast<size_t>(lda) * n_padded, flag);
 
     gerand(m, n, A.data(), lda);
-    //print_matrix( "A", m, n, A.data(), lda );
 
     // validate results for rocsolver-test
     int64_t nzero_re = 0, nzero_im = 0;

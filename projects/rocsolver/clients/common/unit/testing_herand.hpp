@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
-//#include "print_matrix.hpp"
 
 #include <complex>
 #include <vector>
@@ -107,7 +106,6 @@ void testing_herand(Arguments& argus)
     std::vector<T> A(static_cast<size_t>(lda) * n_padded, flag);
 
     herand(uplo, n, A.data(), lda);
-    //print_matrix( "A", n, n, A.data(), lda );
 
     // Verify filled entries and structure.
     // Count zeros to check randomness: re and im zeros should each be < 1% of
