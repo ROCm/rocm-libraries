@@ -167,7 +167,7 @@ HIPCUB_RUNTIME_FUNCTION
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ForEachInExtents(void*   d_temp_storage,
                                        size_t& temp_storage_bytes,
-                                       const ::cuda::std::extents<IndexType, Extents...>& extents,
+                                       const _HIPCUB_STD::extents<IndexType, Extents...>& extents,
                                        OpT                                                op,
                                        hipStream_t stream = {})
     {
@@ -180,7 +180,7 @@ HIPCUB_RUNTIME_FUNCTION
 
     template<class IndexType, size_t... Extents, typename OpT>
     HIPCUB_RUNTIME_FUNCTION
-    static hipError_t ForEachInExtents(const ::cuda::std::extents<IndexType, Extents...>& extents,
+    static hipError_t ForEachInExtents(const _HIPCUB_STD::extents<IndexType, Extents...>& extents,
                                        OpT                                                op,
                                        hipStream_t stream = {})
     {
