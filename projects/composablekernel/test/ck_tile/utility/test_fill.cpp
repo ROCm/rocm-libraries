@@ -395,9 +395,9 @@ TEST(FillUniformScaleDistributionE8M0, StrictFloatBounds)
 TYPED_TEST(FillUniformScaleDistributionTest, StrictFloatUpperBound)
 {
     using S               = TypeParam;
-    constexpr float max_f = 4.0f;
+    constexpr float min_f = 0.0625f, max_f = 4.0f;
     ck_tile::HostTensor<S> buf({10000});
-    ck_tile::FillUniformScaleDistribution<S>{0.0625f, max_f, 22}(buf.begin(), buf.end());
+    ck_tile::FillUniformScaleDistribution<S>{min_f, max_f, 22}(buf.begin(), buf.end());
     std::size_t i = 0;
     for(const S& v : buf)
     {
