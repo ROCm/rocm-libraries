@@ -73,6 +73,7 @@ jobs:
           path: _therock_version
 
       - name: Set TheRock version
+        shell: bash
         run: |
           THEROCK_REF=$(cat _therock_version/.github/therock-hash-version | tr -d '[:space:]')
           echo "THEROCK_REF=$THEROCK_REF" >> $GITHUB_ENV
