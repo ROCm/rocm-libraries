@@ -9,8 +9,10 @@ statistics and correctness data. Error entries carry status + message only.
 """
 
 import json
+import socket
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
@@ -113,6 +115,7 @@ class ProviderEngineResult:
     cpu_build_time_ms: Optional[float] = None
     gpu_kernel_stats: Optional[BenchmarkStats] = None
     e2e_stats: Optional[BenchmarkStats] = None
+    elapsed_time_ms: float = 0.0
     correctness: Optional[CorrectnessResult] = None
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None
@@ -143,6 +146,7 @@ class ProviderEngineResult:
                 self.gpu_kernel_stats.to_dict() if self.gpu_kernel_stats else None
             )
             d["e2e_stats"] = self.e2e_stats.to_dict() if self.e2e_stats else None
+            d["elapsed_time_ms"] = self.elapsed_time_ms
         elif self.status == "error":
             d["error_message"] = self.error_message
         elif self.status == "skipped":
@@ -184,6 +188,11 @@ class GraphResult:
     graph_name: str
     graph_path: str
     results: List[ProviderEngineResult]
+    engine_ids: List[int] = field(default_factory=list)
+
+    def is_no_engine_graph(self) -> bool:
+        """True when this graph result represents a no-engine outcome."""
+        return len(self.engine_ids) == 0
 
     def count_by_status(self) -> StatusCounts:
         """Bucket results into pass/fail/skip/error counts.
@@ -288,6 +297,35 @@ class SuiteResult:
 
     metadata: SuiteMetadata
     graphs: List[GraphResult]
+
+    @classmethod
+    def from_graph_results(
+        cls, graph_results: List[GraphResult], total_graphs: int
+    ) -> "SuiteResult":
+        """Build a SuiteResult from per-graph results with auto-computed metadata."""
+        env_info = collect_environment_info()
+        total_pass = total_fail = total_skip = total_error = 0
+        for gr in graph_results:
+            c = gr.count_by_status()
+            total_pass += c.passed
+            total_fail += c.failed
+            total_skip += c.skipped
+            total_error += c.errored
+        metadata = SuiteMetadata(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            hostname=socket.gethostname(),
+            total_graphs=total_graphs,
+            total_combinations=total_pass + total_fail + total_skip + total_error,
+            pass_combinations=total_pass,
+            fail_combinations=total_fail,
+            skip_combinations=total_skip,
+            error_combinations=total_error,
+            rocm_version=env_info.get("rocm_version"),
+            gpu_model=env_info.get("gpu_model"),
+            python_version=env_info.get("python_version"),
+            hipdnn_version=env_info.get("hipdnn_version"),
+        )
+        return cls(metadata=metadata, graphs=graph_results)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization.

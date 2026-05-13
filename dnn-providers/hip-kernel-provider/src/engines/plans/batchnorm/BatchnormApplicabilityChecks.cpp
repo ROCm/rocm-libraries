@@ -306,6 +306,8 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr)
 {
+    checkFwdActivationModeSupported(actAttr);
+
     if(bnAttr.peer_stats_tensor_uid() != nullptr && !bnAttr.peer_stats_tensor_uid()->empty())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -356,7 +358,7 @@ void BatchnormValidator::checkBwdTensorConfigSupported(
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
 }
 
-void BatchnormValidator::checkInferenceActivationBackwardTensorConfigSupported(
+void BatchnormValidator::checkBwdActivationTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr)
