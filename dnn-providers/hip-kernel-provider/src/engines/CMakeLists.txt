@@ -10,6 +10,10 @@ endif()
 # Add to the hip_kernel_provider_impl target the inlined kernels
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 include(KernelEmbedding)
+
+# Basic kernel to test the infrastructure
+add_kernels_for_embedding(${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel/vector_add.cpp)
+
 # Generate embedded kernel sources and includes at configure time
 embed_kernel_sources(
     ${CMAKE_CURRENT_BINARY_DIR}/kernel_sources.cpp
