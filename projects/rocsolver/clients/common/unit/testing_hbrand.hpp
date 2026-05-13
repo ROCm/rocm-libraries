@@ -233,3 +233,7 @@ void testing_hbrand(Arguments& argus)
 
     argus.validate_consumed();
 }
+
+#define EXTERN_TESTING_HBRAND(...) extern template void testing_hbrand<__VA_ARGS__>(Arguments&);
+
+INSTANTIATE(EXTERN_TESTING_HBRAND, FOREACH_SCALAR_TYPE, APPLY_STAMP)

@@ -165,6 +165,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   set(rocunit_inst_files
     common/unit/testing_gemm.cpp
     common/unit/testing_gerand.cpp
+    common/unit/testing_hbrand.cpp
     common/unit/testing_herand.cpp
     common/unit/testing_syrand.cpp
   )
