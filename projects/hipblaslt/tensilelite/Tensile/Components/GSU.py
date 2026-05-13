@@ -22,14 +22,14 @@
 
 from rocisa import countInstruction
 from rocisa.code import Module, Label, RegSet, ValueSet
-from rocisa.container import ContinuousRegister, SMEMModifiers, MUBUFModifiers, vgpr, sgpr, replaceHolder
+from rocisa.container import ContinuousRegister, EXEC, SMEMModifiers, MUBUFModifiers, vgpr, sgpr, replaceHolder
 from rocisa.enum import CacheScope
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, SBranch, \
     SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, SCmpGtI32, \
     SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, SCmpEQI32, SEndpgm, \
     SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SBarrier, \
     SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec, \
-    SCmpEQU64, BufferStoreB32
+    SCmpEQU64, BufferStoreB32, VMovB64, FlatAtomicDecU32
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import ceilDivide, log2, print2, INDEX_CHARS
@@ -1464,6 +1464,40 @@ class GSUOn(GSU):
 
         return module
 
+    def _generateAtomicDec(self, writer, kernel, dst, base):
+        module = Module("atomicDec")
+        if writer.states.asmCaps["HasSAtomic"]:
+            module.add(SAtomicDec(dst=dst, base=base, smem=SMEMModifiers(glc=True)))
+        else:
+            # For architectures without scalar atomic (e.g., gfx1250), use flat atomic with EXEC mask
+            addrVgpr = writer.vgprPool.checkOutAligned(2, 2, "addrVgpr")
+            dataVgpr = writer.vgprPool.checkOut(1)
+            dstVgpr = writer.vgprPool.checkOut(1)
+            # EXEC is wave-width: 1 sgpr on wave32, 2 sgprs on wave64
+            numSgpr = 1 if kernel["WavefrontSize"] == 32 else 2
+            SMovExec = SMovB32 if numSgpr == 1 else SMovB64
+            tmpSgpr = writer.sgprPool.checkOutAligned(numSgpr, numSgpr, preventOverflow=False)
+
+            # dst contains GSU-1 (the wrap value), move it to VGPR
+            module.add(VMovB32(dst=vgpr(dataVgpr), src=dst, comment="wrap value = GSU-1"))
+            module.add(VMovB64(dst=vgpr(addrVgpr, 2), src=base, comment="atomic address"))
+
+            # Save EXEC and set only lane 0 active
+            module.add(SMovExec(dst=sgpr(tmpSgpr, numSgpr), src=EXEC(), comment="save EXEC"))
+            module.add(SMovExec(dst=EXEC(), src=1, comment="only lane 0 active"))
+            module.add(FlatAtomicDecU32(dst=vgpr(dstVgpr), addr=vgpr(addrVgpr, 2), data=vgpr(dataVgpr)))
+            module.add(SWaitCnt(vlcnt=0, comment="wait for atomic"))
+            module.add(SMovExec(dst=EXEC(), src=sgpr(tmpSgpr, numSgpr), comment="restore EXEC"))
+
+            # Read return value to destination SGPR
+            module.add(VReadfirstlaneB32(dst=dst, src=vgpr(dstVgpr), comment="read atomic return value"))
+
+            writer.vgprPool.checkIn(addrVgpr)
+            writer.vgprPool.checkIn(dataVgpr)
+            writer.vgprPool.checkIn(dstVgpr)
+            writer.sgprPool.checkIn(tmpSgpr)
+        return module
+
     def GSUSynccodegenOpt(self, kernel, writer, ss, batchIdx, tmpSgpr, tmpVgpr, tmpVgprDynamic, gwvw, batchElements, \
                           labelend, vgprstart, vgproffset, reductionBodyLabel):
         module = Module("GSUSYNC")
@@ -1494,7 +1528,7 @@ class GSUOn(GSU):
             module.add(SWaitCnt(waitAll=True, comment="wait store done before synchronizer start load and add"))
             module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SSubU32(dst=sgpr(tmpS02), src0=sgpr(tmpS02), src1=1, comment=""))
-            module.add(SAtomicDec(dst=sgpr(tmpS02), base=sgpr("SrdSync", 2), smem=SMEMModifiers(glc=True)))
+            module.add(self._generateAtomicDec(writer, kernel, dst=sgpr(tmpS02), base=sgpr("SrdSync", 2)))
             if kernel["MbskPrefetchMethod"] == 0:
                 module.add(SAndB32(dst=sgpr(tmpS01), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpGtI32(src0=sgpr(tmpS01), src1=self.gsuThreshold, comment="GSU > %u ?" % self.gsuThreshold))
