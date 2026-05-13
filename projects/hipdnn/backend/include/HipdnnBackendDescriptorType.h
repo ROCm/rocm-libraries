@@ -286,4 +286,13 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR = 31,
 
+    /**
+     * @brief Resample forward operation descriptor
+     *
+     * Represents a resample forward operation (max, average, etc.).
+     * Takes an input tensor X and produces an output tensor Y,
+     * with optional index tensor IDX for max resample.
+     */
+    HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR = 32,
+
 } hipdnnBackendDescriptorType_t;

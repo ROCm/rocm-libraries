@@ -437,7 +437,8 @@ DEF_FORMAT(WMMA,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
     .maxOperands = 4,
-    .cost = {4, 8},
+    .cost = {1, 8},
+    .coissue = 0x00F0,
     .flags = {WMMA},
     .fields = {
         {D0, vdst, vgpr, 256},
@@ -449,17 +450,20 @@ DEF_FORMAT(WMMA,
 
 DEF_FORMAT(WMMA_INT8,
     .parent = WMMA,
-    .cost = {8, 16},
+    .cost = {1, 16},
+    .coissue = 0xFF00,
 )
 
 DEF_FORMAT(WMMA_FLOAT8MIX_16x16x64,
     .parent = WMMA,
-    .cost = {3, 4},
+    .cost = {1, 4},
+    .coissue = 0x0008,
 )
 
 DEF_FORMAT(WMMA_FLOAT8MIX_16x16x128,
     .parent = WMMA,
-    .cost = {5, 8},
+    .cost = {1, 8},
+    .coissue = 0x00E0,
 )
 
 // Sparse Wave Matrix Multiply-Accumulate
@@ -468,7 +472,8 @@ DEF_FORMAT(SWMMA,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
     .maxOperands = 5,
-    .cost = {6, 8},
+    .cost = {1, 8},
+    .coissue = 0x00C0,
     .flags = {SWMMA},
     .fields = {
         {D0, vdst, vgpr, 256, RW},
@@ -480,7 +485,8 @@ DEF_FORMAT(SWMMA,
 
 DEF_FORMAT(SWMMA_INT8,
     .parent = SWMMA,
-    .cost = {12, 16},
+    .cost = {1, 16},
+    .coissue = 0xF000,
 )
 
 // MX Format Wave Matrix Multiply-Accumulate (v_mxwmma_*, v_wmma_scale*)
@@ -489,7 +495,8 @@ DEF_FORMAT(MXWMMA,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
     .maxOperands = 4,
-    .cost = {6, 8},
+    .cost = {1, 8},
+    .coissue = 0x00C0,
     .flags = {MXWMMA},
 )
 

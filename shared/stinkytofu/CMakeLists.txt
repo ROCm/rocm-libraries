@@ -54,8 +54,8 @@ if(WIN32)
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
 
-# set variable of the top level source directory to STINKYTOFU_TOP_DIR
-set(STINKYTOFU_TOP_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(STINKYTOFU_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(STINKYTOFU_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" PARENT_SCOPE)
 
 ##===----------------------------------------------------------------------===##
 # Architectures

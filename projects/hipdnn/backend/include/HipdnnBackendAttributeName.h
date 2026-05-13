@@ -55,6 +55,8 @@
  * - 3000-3099: Custom op operation attributes
  * - 3100-3199: SDPA backward propagation operation attributes
  * - 3200-3299: Reduction operation attributes
+ * - 3300-3399: Resample forward operation attributes
+ * - 3400-3499: Shared resample descriptor attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -1092,6 +1094,56 @@ typedef enum
 
     /** @brief Whether reduction is deterministic (bool) */
     HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC = 3204,
+
+    /** @} */
+
+    /**
+     * @name Resample Forward Operation Attributes (3300-3399)
+     * Attributes for HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor for forward resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC = 3300,
+
+    /** @brief Output tensor for forward resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_YDESC = 3301,
+
+    /** @brief Optional index tensor for max resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC = 3302,
+
+    /** @} */
+
+    /**
+     * @name Shared Resample Descriptor Attributes (3400-3499)
+     * Attributes shared across resample operation descriptors (forward, backward).
+     * These are set directly on the operation descriptor.
+     * @{
+     */
+
+    /** @brief Resample mode (max, average, average_inclusive) */
+    HIPDNN_ATTR_RESAMPLE_MODE = 3400,
+
+    /** @brief Pre-padding values for each spatial dimension */
+    HIPDNN_ATTR_RESAMPLE_PRE_PADDINGS = 3401,
+
+    /** @brief Post-padding values for each spatial dimension */
+    HIPDNN_ATTR_RESAMPLE_POST_PADDINGS = 3402,
+
+    /** @brief Stride values for each spatial dimension */
+    HIPDNN_ATTR_RESAMPLE_STRIDES = 3403,
+
+    /** @brief Resample window for each spatial dimension */
+    HIPDNN_ATTR_RESAMPLE_WINDOW_DIMS = 3404,
+
+    /** @brief Padding mode for resample (zero pad, neg inf pad) */
+    HIPDNN_ATTR_RESAMPLE_PADDING_MODE = 3405,
+
+    /** @brief Whether to generate index output (for max resample) */
+    HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT = 3406,
+
+    /** @brief Compute data type for resample */
+    HIPDNN_ATTR_RESAMPLE_COMP_TYPE = 3407,
 
     /** @} */
 
