@@ -106,7 +106,7 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
-    SwizzleType swizzle_type = SwizzleType::CyclicShift;
+    SwizzleType swizzle_type = SwizzleType::None;
 
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
 

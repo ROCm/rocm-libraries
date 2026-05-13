@@ -74,8 +74,8 @@ struct Config
 
     Direction direction = Direction::Fprop;
 
-    // Swizzle pattern - by default cyclic-shift swizzle.
-    SwizzleType swizzle_type = SwizzleType::CyclicShift;
+    // Swizzle pattern - by default no swizzle.
+    SwizzleType swizzle_type = SwizzleType::None;
 
     // Epilogue type - by default skip LDS staging and write directly from registers to global memory.
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
