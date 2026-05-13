@@ -173,11 +173,23 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
         // receive a VGPR, not a SGPR (and vice versa).
         RegType expectedType = fieldTypeToRegType(field.fieldType);
         if (!isExpectedTypeMatch(field.fieldType, expectedType, reg.reg.type)) {
-            errors << "Instruction '";
-            inst->dump(errors);
-            errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
-                   << "has register type '" << regTypeToString(reg.reg.type) << "', expected '"
-                   << regTypeToString(expectedType) << "'\n";
+            // Check promoted encoding: e.g. VOP2 src1 is vgpr-only, but VOP3
+            // promotion widens it to src (accepts SGPR).  The assembler will
+            // promote automatically, so accept the promoted field type too.
+            unsigned fieldIdx = static_cast<unsigned>(&field - hwDesc->operandFields.data());
+            bool promotedOk = false;
+            if (fieldIdx < hwDesc->promotedFields.size()) {
+                auto promotedFT = hwDesc->promotedFields[fieldIdx].fieldType;
+                auto promotedET = fieldTypeToRegType(promotedFT);
+                promotedOk = isExpectedTypeMatch(promotedFT, promotedET, reg.reg.type);
+            }
+            if (!promotedOk) {
+                errors << "Instruction '";
+                inst->dump(errors);
+                errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
+                       << "has register type '" << regTypeToString(reg.reg.type) << "', expected '"
+                       << regTypeToString(expectedType) << "'\n";
+            }
         }
     }
 
