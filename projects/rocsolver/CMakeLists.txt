@@ -72,21 +72,30 @@ option(ROCSOLVER_EMBED_FMT "Hide libfmt symbols" ON)
 set(USE_FMT_LIB "auto" CACHE STRING "Use the fmt library instead of std::format (auto, ON, or OFF)")
 
 if(USE_FMT_LIB STREQUAL "auto")
-    # Verify std::format and std::print actually compile, not just that headers exist
+    # Verify the std::format facilities used by the std backend actually compile
     include(CheckCXXSourceCompiles)
-    set(CMAKE_REQUIRED_FLAGS "-std=c++23")
+    set(_saved_cmake_cxx_standard "${CMAKE_CXX_STANDARD}")
+    set(_saved_cmake_cxx_standard_required "${CMAKE_CXX_STANDARD_REQUIRED}")
+    set(_saved_cmake_cxx_extensions "${CMAKE_CXX_EXTENSIONS}")
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_EXTENSIONS OFF)
     check_cxx_source_compiles("
         #include <format>
-        #include <print>
+        #include <iterator>
         #include <string>
         int main() {
-            auto s = std::format(\"{}\", 42);
-            std::print(\"{}\", s);
-            std::println(\"{}\", 42);
-            return 0;
+            std::format_string<int> fmt = \"{}\";
+            auto s = std::format(fmt, 42);
+            std::string out;
+            std::format_to(std::back_inserter(out), \"{}\", s);
+            return static_cast<int>(out.size());
         }
     " CXX_FORMAT_SUPPORT)
-    message(STATUS "C++ std::format/std::print support: ${CXX_FORMAT_SUPPORT}")
+    set(CMAKE_CXX_STANDARD "${_saved_cmake_cxx_standard}")
+    set(CMAKE_CXX_STANDARD_REQUIRED "${_saved_cmake_cxx_standard_required}")
+    set(CMAKE_CXX_EXTENSIONS "${_saved_cmake_cxx_extensions}")
+    message(STATUS "C++ std::format support: ${CXX_FORMAT_SUPPORT}")
     if(CXX_FORMAT_SUPPORT)
         set(USE_FMT_LIB OFF)
     else()

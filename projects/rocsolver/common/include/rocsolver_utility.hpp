@@ -11,7 +11,10 @@
 #include <cstdio>
 #include <format>
 #include <iostream>
+#include <iterator>
 #include <ostream>
+#include <tuple>
+#include <utility>
 #endif
 
 // Aliased printing
