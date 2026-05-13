@@ -98,12 +98,6 @@ struct BasicInvoker
 
         using CodegenGemmPipeline = ck_tile::GemmPipelineAGmemBGmemCRegV1<CodegenPipelineProblem>;
 
-        std::cout << "Got pipeline with name: " << CodegenGemmPipeline::GetPipelineName() << "\n";
-
-        std::cout << "BlockGemmName: " << CodegenGemmPipeline::BlockGemm::name << "\n";
-
-        CodegenGemmPipeline::Policy_::template PrintInfo<CodegenPipelineProblem>();
-
         using GemmEpilogue = ck_tile::CShuffleEpilogue<
             ck_tile::CShuffleEpilogueProblem<ADataTypeCompute,
                                              BDataTypeCompute,

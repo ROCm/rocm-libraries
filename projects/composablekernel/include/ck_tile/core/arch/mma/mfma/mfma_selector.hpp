@@ -108,6 +108,9 @@ struct MfmaDefaultSelector<ADataType,
                    MmaOpFamily::DENSE>;
 };
 
+// TODO: We do not allow M / N composition for now, since it is not used in current CK Tile and the
+// existing implementation was not able to deal with unusual MxN sizes such as for multi-block
+// intrinsics.
 /**
  * @struct MmaDefaultSelector
  * @brief Implements the gfx9 default MMA selector strategy for wave-wise MMA decomposition.
@@ -145,23 +148,13 @@ struct MmaDefaultSelector<ADataType,
     private:
     // Provide the default depth-K search strategy for each class of common MFMA shapes.
     // Start searching from the largest K dimension MFMA shape down to the smallest.
-    using CandidateOp4x4 =
-        typename MfmaDefaultSelector<ADataType, BDataType, CDataType, 4u, 4u, 4u, CompilerTarget>::
-            SelectedOp;
-    using CandidateOp16x16 = typename MfmaDefaultSelector<ADataType,
-                                                          BDataType,
-                                                          CDataType,
-                                                          16u,
-                                                          16u,
-                                                          128u,
-                                                          CompilerTarget>::SelectedOp;
-    using CandidateOp32x32 = typename MfmaDefaultSelector<ADataType,
-                                                          BDataType,
-                                                          CDataType,
-                                                          32u,
-                                                          32u,
-                                                          64u,
-                                                          CompilerTarget>::SelectedOp;
+    using CandidateOp = typename MfmaDefaultSelector<ADataType,
+                                                     BDataType,
+                                                     CDataType,
+                                                     WaveTileM,
+                                                     WaveTileN,
+                                                     WaveTileK,
+                                                     CompilerTarget>::SelectedOp;
 
     // Default operation triggers pass-through
     using DefaultOp =
@@ -170,28 +163,17 @@ struct MmaDefaultSelector<ADataType,
 
     // Check if each candidate is supported for the given WaveTile sizes
     // For this case, we require the WaveTile sizes to be multiples of the MFMA shape
-    static constexpr bool IsSupported4x4 =
-        MmaOpTraits<CandidateOp4x4>::IsSupported && (WaveTileM % CandidateOp4x4::kM == 0u) &&
-        (WaveTileN % CandidateOp4x4::kN == 0u) && (WaveTileK % CandidateOp4x4::kK == 0u);
-    static constexpr bool IsSupported16x16 =
-        MmaOpTraits<CandidateOp16x16>::IsSupported && (WaveTileM % CandidateOp16x16::kM == 0u) &&
-        (WaveTileN % CandidateOp16x16::kN == 0u) && (WaveTileK % CandidateOp16x16::kK == 0u);
-    static constexpr bool IsSupported32x32 =
-        MmaOpTraits<CandidateOp32x32>::IsSupported && (WaveTileM % CandidateOp32x32::kM == 0u) &&
-        (WaveTileN % CandidateOp32x32::kN == 0u) && (WaveTileK % CandidateOp32x32::kK == 0u);
+    static constexpr bool IsSupported =
+        MmaOpTraits<CandidateOp>::IsSupported && (WaveTileM == CandidateOp::kM) &&
+        (WaveTileN == CandidateOp::kN) && (WaveTileK % CandidateOp::kK == 0u);
+
+    // TODO: Allowing a default passthrough op seems like a way to get silent failures. Do not allow
+    // for now.
+    static_assert(IsSupported);
 
     public:
     // Select the largest supported MFMA operation for the given WaveTile shape
-    using SelectedOp = std::conditional_t<
-        IsSupported32x32,
-        CandidateOp32x32,
-        std::conditional_t<IsSupported16x16,
-                           CandidateOp16x16,
-                           std::conditional_t<IsSupported4x4, CandidateOp4x4, DefaultOp>>>;
-
-    // TODO: Do not allow M / N composition for now.
-    static_assert(SelectedOp::kM == WaveTileM);
-    static_assert(SelectedOp::kN == WaveTileN);
+    using SelectedOp = std::conditional_t<IsSupported, CandidateOp, DefaultOp>;
 };
 
 } // namespace ck_tile::core::arch::mma

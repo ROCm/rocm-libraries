@@ -106,7 +106,7 @@ struct MmaDefaultSelector<ADataType,
                                                                 CDataType,
                                                                 16u,
                                                                 16u,
-                                                                32u,
+                                                                WaveTileK,
                                                                 CompilerTarget>::SelectedOp;
 
     // Default operation triggers pass-through

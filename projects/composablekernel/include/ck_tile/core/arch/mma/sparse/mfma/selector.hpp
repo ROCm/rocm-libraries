@@ -106,14 +106,14 @@ struct MmaDefaultSelector<ADataType,
                                                                 CDataType,
                                                                 16u,
                                                                 16u,
-                                                                32u,
+                                                                WaveTileK,
                                                                 CompilerTarget>::SelectedOp;
     using CandidateOp32x32 = typename SparseMfmaDefaultSelector<ADataType,
                                                                 BDataType,
                                                                 CDataType,
                                                                 32u,
                                                                 32u,
-                                                                64u,
+                                                                WaveTileK,
                                                                 CompilerTarget>::SelectedOp;
 
     // Default operation triggers pass-through

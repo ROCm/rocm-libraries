@@ -110,14 +110,14 @@ struct MmaDefaultSelector<ADataType,
                                                                CDataType,
                                                                16u,
                                                                16u,
-                                                               128u,
+                                                               WaveTileK,
                                                                CompilerTarget>::SelectedOp;
     using CandidateOp32x32 = typename ScaleMfmaDefaultSelector<ADataType,
                                                                BDataType,
                                                                CDataType,
                                                                32u,
                                                                32u,
-                                                               64u,
+                                                               WaveTileK,
                                                                CompilerTarget>::SelectedOp;
 
     // Default operation triggers pass-through
