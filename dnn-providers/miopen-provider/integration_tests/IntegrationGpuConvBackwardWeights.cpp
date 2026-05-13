@@ -48,6 +48,8 @@ protected:
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
 
         const ConvTestCase& testCase = this->GetParam();
 
@@ -161,8 +163,6 @@ TEST_P(IntegrationGpuConvWrwDataNcdhwFp32, Correctness)
 
 TEST_P(IntegrationGpuConvWrwDataNchwBfp16, Correctness)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     const auto& testCase = GetParam();
     auto tolerance
         = calculateConvWrwTolerance<bfloat16, bfloat16, float>(static_cast<double>(_minVal),
@@ -175,8 +175,6 @@ TEST_P(IntegrationGpuConvWrwDataNchwBfp16, Correctness)
 
 TEST_P(IntegrationGpuConvWrwDataNcdhwBfp16, Correctness)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     const auto& testCase = GetParam();
     auto tolerance
         = calculateConvWrwTolerance<bfloat16, bfloat16, float>(static_cast<double>(_minVal),
@@ -189,8 +187,6 @@ TEST_P(IntegrationGpuConvWrwDataNcdhwBfp16, Correctness)
 
 TEST_P(IntegrationGpuConvWrwDataNchwFp16, Correctness)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     const auto& testCase = GetParam();
     auto tolerance = calculateConvWrwTolerance<half, half, float>(static_cast<double>(_minVal),
                                                                   static_cast<double>(_maxVal),
@@ -202,8 +198,6 @@ TEST_P(IntegrationGpuConvWrwDataNchwFp16, Correctness)
 
 TEST_P(IntegrationGpuConvWrwDataNcdhwFp16, Correctness)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     const auto& testCase = GetParam();
     auto tolerance = calculateConvWrwTolerance<half, half, float>(static_cast<double>(_minVal),
                                                                   static_cast<double>(_maxVal),
@@ -237,8 +231,6 @@ TEST_P(IntegrationGpuConvWrwDataNdhwcFp32, Correctness)
 
 TEST_P(IntegrationGpuConvWrwDataNhwcBfp16, Correctness)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     const auto& testCase = GetParam();
     auto tolerance
         = calculateConvWrwTolerance<bfloat16, bfloat16, float>(static_cast<double>(_minVal),
@@ -251,8 +243,6 @@ TEST_P(IntegrationGpuConvWrwDataNhwcBfp16, Correctness)
 
 TEST_P(IntegrationGpuConvWrwDataNdhwcBfp16, Correctness)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     const auto& testCase = GetParam();
     auto tolerance
         = calculateConvWrwTolerance<bfloat16, bfloat16, float>(static_cast<double>(_minVal),
@@ -265,8 +255,6 @@ TEST_P(IntegrationGpuConvWrwDataNdhwcBfp16, Correctness)
 
 TEST_P(IntegrationGpuConvWrwDataNhwcFp16, Correctness)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     const auto& testCase = GetParam();
     auto tolerance = calculateConvWrwTolerance<half, half, float>(static_cast<double>(_minVal),
                                                                   static_cast<double>(_maxVal),
@@ -278,8 +266,6 @@ TEST_P(IntegrationGpuConvWrwDataNhwcFp16, Correctness)
 
 TEST_P(IntegrationGpuConvWrwDataNdhwcFp16, Correctness)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     const auto& testCase = GetParam();
     auto tolerance = calculateConvWrwTolerance<half, half, float>(static_cast<double>(_minVal),
                                                                   static_cast<double>(_maxVal),
