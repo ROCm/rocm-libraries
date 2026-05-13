@@ -130,6 +130,10 @@ void herand(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda)
             }
         }
     }
+    else
+    {
+        throw rocblas_status_invalid_value;
+    }
 }
 
 //------------------------------------------------------------------------------
@@ -184,6 +188,10 @@ void syrand(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda)
                 A[j + i * lda] = A[i + j * lda];
             }
         }
+    }
+    else
+    {
+        throw rocblas_status_invalid_value;
     }
 }
 
