@@ -334,9 +334,12 @@ class TestSyntheticPerRenderDeterminism:
 # `class_tag='PACK'` excluded pack-MFMAs from the data-flow filter
 # `("LR", "LW", "GR", "MFMA")`.
 #
-# These tests are marked xfail with strict=False so they document the
-# invariant violation without blocking the suite. Once the underlying
-# default-side double-capture is fixed, remove the xfail markers.
+# These tests were previously strict-xfailed under rocm-libraries-d3zj
+# while they consumed the SHADOW capture. rocm-libraries-aixt re-routed
+# them to consume Approach A's `build_non_cms_reference()` helper via
+# `real_kernel_capture_pair_approach_a`, and the xfail markers were
+# removed — the LCC is now present in the default-side capture because
+# Build #2 finalizes AFTER closeLoop().
 
 CANONICAL_TF32_4X4_TN_CONFIG = {
     'ProblemType': {
@@ -356,10 +359,16 @@ CANONICAL_TF32_4X4_TN_CONFIG = {
 @pytest.fixture(scope="module")
 def real_kernel_capture_pair(isa_infrastructure):
     """Build the canonical TF32 4x4 TN kernel and return
-    `(default_cap, cms_cap)` `FourPartCapture` pair.
+    `(default_cap, cms_cap)` `FourPartCapture` pair extracted from the
+    SHADOW pipeline.
 
     Module-scoped (~3-5s build); all real-kernel tests in this module
-    share the build.
+    that legitimately need the SHADOW-side default capture share the
+    build. The d3zj per-body LCC-invariant tests below have been
+    migrated OFF this fixture onto
+    ``real_kernel_capture_pair_approach_a`` (which sources the
+    default-side capture from a true second non-CMS build) — see the
+    aixt migration notes there.
     """
     import os
     import sys
@@ -386,6 +395,77 @@ def real_kernel_capture_pair(isa_infrastructure):
     return writer._last_default_capture, writer._last_cms_capture
 
 
+@pytest.fixture(scope="module")
+def real_kernel_capture_pair_approach_a(isa_infrastructure):
+    """Approach A two-build capture pair for the canonical TF32 4x4 TN
+    kernel. Returns ``(default_cap, cms_cap)`` where:
+
+    - ``default_cap`` comes from ``build_non_cms_reference`` (Approach A
+      Build #2 — a fully isolated writer with
+      ``UseCustomMainLoopSchedule=0`` forced and finalize running
+      AFTER ``closeLoop`` so LCC is captured).
+    - ``cms_cap`` comes from a real CMS build's ``_last_cms_capture``.
+
+    rocm-libraries-aixt migration: the SHADOW capture's default-side
+    ML/ML-1 bodies missed the LCC pair (``SSubU32``/``SCmpEQI32``)
+    because ``LoopBodyCaptureBuilder.finalize()`` ran BEFORE
+    ``closeLoop()`` emitted them. nyb5 closed this defect at the
+    helper level by hoisting finalize to AFTER ``closeLoop`` and
+    appending the LCC instructions via
+    ``_appendCloseLoopLCCToBuilder``. Tests that assert the per-body
+    LCC invariant now consume this fixture; the legacy fixture above
+    is retained for tests that depend on the SHADOW default-side
+    capture's particular shape (e.g.
+    ``test_example_yaml_no_spurious_order_inverted_failures``, which
+    pins zero ``OrderInvertedFailure``s — the SHADOW capture inherits
+    the CMS-mutated ``kernel`` dict so the GR-stream order matches;
+    Approach A's unmutated ``kernel`` dict surfaces 3
+    GR-OrderInverted residuals tracked under
+    ``rocm-libraries-3ija`` per
+    ``test_non_cms_reference_compare_graphs_surfaces_only_known_residuals``).
+
+    See ``D3ZJ_SCMPEQI32_INVESTIGATION.md``, ``NYB5_IMPLEMENTATION.md``
+    §"d3zj closure (LCC capture)", and ``AIXT_IMPLEMENTATION.md``.
+
+    Module-scoped (~6-10s for both builds); shared across the 3 d3zj
+    LCC tests below.
+    """
+    import os
+    import sys
+
+    _isa, isaInfoMap, asm = isa_infrastructure
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from cms_test_utils import _make_solution
+    from Tensile.KernelWriterAssembly import KernelWriterAssembly, DebugConfig
+    from Tensile.Components.CustomSchedule.approach_a import (
+        build_non_cms_reference,
+    )
+
+    config = dict(CANONICAL_TF32_4X4_TN_CONFIG)
+
+    # --- Build #1: CMS path — produces the CMS-side capture. We only
+    # consume `_last_cms_capture` from this build; the SHADOW-extracted
+    # `_last_default_capture` is intentionally discarded.
+    cms_solution = _make_solution(config, asm, isaInfoMap)
+    cms_writer = KernelWriterAssembly(asm, DebugConfig())
+    try:
+        cms_writer._getKernelSource(cms_solution)
+    except Exception:
+        # Pre-existing SHADOW-vs-CMS divergence may raise on the
+        # in-build assert. The CMS-side FourPartCapture is populated
+        # before the assert fires.
+        pass
+    cms_cap = cms_writer._last_cms_capture
+    assert cms_cap is not None, (
+        "CMS build did not populate _last_cms_capture; the kernelBody "
+        "post-loop assembly stage did not run."
+    )
+
+    # --- Build #2: non-CMS reference via Approach A's helper.
+    default_cap = build_non_cms_reference(config, asm, isaInfoMap)
+    return default_cap, cms_cap
+
+
 def _captures_per_body(four_part_capture):
     """Return `{body_label: LoopBodyCapture}` for the codepath-0 main bodies."""
     out = {}
@@ -400,28 +480,9 @@ def _captures_per_body(four_part_capture):
     return out
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "rocm-libraries-d3zj: residual SCmpEQI32 / SSubU32 (loop-counter "
-        "code, LCC) divergence between CMS-side and default-side captures "
-        "in ML and ML-1 bodies. Per the strict per-body LCC invariant "
-        "(2026-05-13), every loop body must have exactly 1 SCmpEQI32 + 1 "
-        "SSubU32; the default side is missing both in ML and ML-1. "
-        "Capture-timing root cause: ctx.default_main = builder.finalize() "
-        "runs before closeLoop() in _loopBody. **Principled fix is "
-        "rocm-libraries-nyb5** (Approach A second non-CMS reference build) "
-        "— Build #2 captures the post-closeLoop state correctly so the LCC "
-        "is present. Local Option A (move finalize() after closeLoop()) is "
-        "not pursued; nyb5 supersedes it. "
-        "Investigation memo: D3ZJ_SCMPEQI32_INVESTIGATION.md. "
-        "Scheduler-control noise (SWaitCnt / SBarrier / SNop / SSetPrior) "
-        "was eliminated by migrating this test to the shared "
-        "`data_flow_instructions` helper (rocm-libraries-d3zj). "
-        "strict=True will surface any change."
-    ),
-)
-def test_real_kernel_per_render_counts_match(real_kernel_capture_pair):
+def test_real_kernel_per_render_counts_match(
+    real_kernel_capture_pair_approach_a,
+):
     """Memo §6.2 #1: for every (body, canonical_render) in either real
     build's captures, both builds emit the same count.
 
@@ -431,10 +492,17 @@ def test_real_kernel_per_render_counts_match(real_kernel_capture_pair):
     (rocm-libraries-d3zj). SWaitCnt / SBarrier / SNop / SSetPrior are
     not user-program semantics; comparing them across CMS and default
     captures would assert against scheduler choice.
+
+    rocm-libraries-aixt: re-routed onto
+    ``real_kernel_capture_pair_approach_a`` so the default-side capture
+    comes from ``build_non_cms_reference`` (Build #2 finalize-after-
+    closeLoop) rather than the SHADOW capture (which was missing the
+    LCC pair in ML/ML-1). The xfail marker that pinned the SHADOW
+    capture's missing-LCC defect was removed alongside the re-route.
     """
     from Tensile.Components.CMSValidator import data_flow_instructions
 
-    default_cap, cms_cap = real_kernel_capture_pair
+    default_cap, cms_cap = real_kernel_capture_pair_approach_a
     default_bodies = _captures_per_body(default_cap)
     cms_bodies = _captures_per_body(cms_cap)
     assert set(default_bodies) == set(cms_bodies), (
@@ -463,20 +531,8 @@ def test_real_kernel_per_render_counts_match(real_kernel_capture_pair):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "rocm-libraries-d3zj: depends on the per-render-count invariant in "
-        "`test_real_kernel_per_render_counts_match` (also under d3zj). "
-        "Residual cause is the LCC (SCmpEQI32 / SSubU32) per-body "
-        "distribution divergence in ML / ML-1 — see "
-        "D3ZJ_SCMPEQI32_INVESTIGATION.md. **Principled fix is "
-        "rocm-libraries-nyb5** (Approach A second non-CMS reference build); "
-        "this xfail flips automatically when nyb5 lands."
-    ),
-)
 def test_real_kernel_per_ordinal_logical_instruction_matches(
-    real_kernel_capture_pair,
+    real_kernel_capture_pair_approach_a,
 ):
     """Memo §6.2 #2: for every (body, canonical_render, ordinal) tuple
     appearing in either real build, both builds resolve to a
@@ -485,10 +541,15 @@ def test_real_kernel_per_ordinal_logical_instruction_matches(
     Iterates the shared `data_flow_instructions(body)` helper from
     `CMSValidator` (rocm-libraries-d3zj); see the docstring on
     `test_real_kernel_per_render_counts_match` above for the rationale.
+
+    rocm-libraries-aixt: re-routed onto
+    ``real_kernel_capture_pair_approach_a`` (Approach A two-build).
+    The xfail marker citing nyb5 as the principled fix was removed
+    alongside the re-route — nyb5's helper is the fix.
     """
     from Tensile.Components.CMSValidator import data_flow_instructions
 
-    default_cap, cms_cap = real_kernel_capture_pair
+    default_cap, cms_cap = real_kernel_capture_pair_approach_a
     default_bodies = _captures_per_body(default_cap)
     cms_bodies = _captures_per_body(cms_cap)
     mismatches = []
@@ -622,29 +683,9 @@ def _count_lcc_on_loop_counter_l(capture):
     return cmp_count, sub_count
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "rocm-libraries-d3zj: explicit per-body LCC-on-sgprLoopCounterL "
-        "invariant. Every body with `useLoop=1` in its CMS MAINLOOP "
-        "invocation must have exactly 1 SCmpEQI32 + 1 SSubU32 on "
-        "`sgprLoopCounterL`; bodies with `useLoop=0` must have zero. "
-        "Fails today on the default-side capture for ML and ML-1 "
-        "(useLoop=1) — both bodies have 0 LCC ops because the default-"
-        "side capture path runs `LoopBodyCaptureBuilder.finalize()` "
-        "BEFORE `closeLoop()` emits the LCC pair (capture-timing defect). "
-        "The principled fix is rocm-libraries-nyb5 (Approach A second "
-        "non-CMS reference build) which replaces the shadow capture with "
-        "a real second build that runs closeLoop before finalize. After "
-        "nyb5 lands, the default side will emit 1+1 in ML / ML-1 and "
-        "this test passes naturally — just delete the marker, no other "
-        "edits required. Citations: D3ZJ_NGL_NLL_LCC_INVESTIGATION.md "
-        "(narrowed invariant + body→useLoop map), "
-        "D3ZJ_SCMPEQI32_INVESTIGATION.md (capture-timing mechanism), "
-        "KernelWriter.py:3134-3138 (MAINLOOP useLoop args)."
-    ),
-)
-def test_lcc_invariant_per_body_use_loop_predicate(real_kernel_capture_pair):
+def test_lcc_invariant_per_body_use_loop_predicate(
+    real_kernel_capture_pair_approach_a,
+):
     """Memo Q6 (D3ZJ_NGL_NLL_LCC_INVESTIGATION.md): assert the
     per-body LCC invariant on EACH side of the capture pair independently.
 
@@ -660,8 +701,15 @@ def test_lcc_invariant_per_body_use_loop_predicate(real_kernel_capture_pair):
     that the two sides AGREE), this test would catch a regression where
     both sides emit 0 LCC in ML by accident — the invariant is enforced
     per side without cross-side reference.
+
+    rocm-libraries-aixt: re-routed onto
+    ``real_kernel_capture_pair_approach_a`` (Approach A two-build); the
+    xfail marker citing nyb5 as the principled fix was removed
+    alongside the re-route. The default side now comes from
+    ``build_non_cms_reference``, whose post-closeLoop finalize captures
+    LCC correctly.
     """
-    default_cap, cms_cap = real_kernel_capture_pair
+    default_cap, cms_cap = real_kernel_capture_pair_approach_a
     violations = []
     for side_name, four_part in (("default", default_cap), ("cms", cms_cap)):
         bodies = _captures_per_body(four_part)
