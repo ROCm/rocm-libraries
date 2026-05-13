@@ -143,6 +143,7 @@ int main(int argc, char* argv[])
     primbench::settings settings;
     settings.size                 = DEFAULT_N;
     settings.min_gpu_ms_per_batch = 100;
+    settings.hot                  = true;
 
     primbench::executor executor(argc, argv, settings);
 
