@@ -1750,7 +1750,7 @@ if __name__ == "__main__":
     waveGroup = (int(wg_parts[0]), int(wg_parts[1]))
 
     kernel = create_kernel(args.mt0, args.mt1, fp4=fp4, depthU=args.du,
-                           waveGroup=waveGroup)
+                           miWaveGroup=list(waveGroup))
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
     scaleTiA = makeTileInfo('MXSA', kernel) if fp4 else None
