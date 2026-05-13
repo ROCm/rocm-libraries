@@ -36,9 +36,7 @@
 
 #include <cub/device/device_reduce.cuh> // IWYU pragma: export
 
-#include <cuda/std/limits>
-
-#include <iterator>
+#include <cuda/std/limits> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -127,7 +125,7 @@ public:
                 return hipSuccess;
             }
 
-            value_type init_value = ::cuda::std::numeric_limits<value_type>::max();
+            value_type init_value = _HIPCUB_STD::numeric_limits<value_type>::max();
             index_type init_index = 1;
 
             hipError_t e1 = hipMemcpyAsync(d_min_out,
@@ -183,7 +181,7 @@ public:
 
             pair_type init;
             init.key   = static_cast<index_type>(1);
-            init.value = ::cuda::std::numeric_limits<value_type>::max();
+            init.value = _HIPCUB_STD::numeric_limits<value_type>::max();
 
             return hipMemcpyAsync(d_out, &init, sizeof(pair_type), hipMemcpyHostToDevice, stream);
         }
@@ -249,7 +247,7 @@ public:
                 return hipSuccess;
             }
 
-            value_type init_value = ::cuda::std::numeric_limits<value_type>::lowest();
+            value_type init_value = _HIPCUB_STD::numeric_limits<value_type>::lowest();
             index_type init_index = 1; // hipCUB 1-based index
 
             hipError_t e1 = hipMemcpyAsync(d_max_out,
@@ -303,7 +301,7 @@ HIPCUB_RUNTIME_FUNCTION
 
             pair_type init;
             init.key   = static_cast<index_type>(1);
-            init.value = ::cuda::std::numeric_limits<value_type>::lowest();
+            init.value = _HIPCUB_STD::numeric_limits<value_type>::lowest();
 
             return hipMemcpyAsync(d_out, &init, sizeof(pair_type), hipMemcpyHostToDevice, stream);
         }
