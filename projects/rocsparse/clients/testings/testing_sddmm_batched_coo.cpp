@@ -81,48 +81,68 @@ void testing_sddmm_batched_coo_bad_arg(const Arguments& arg)
     int64_t       batch_stride_B;
     int64_t       batch_stride_C;
 
-    // Mismatching batch counts between A and C.
-    batch_count_A  = 10;
-    batch_count_B  = 5;
+    // C_i = (A * B_i) o C_i
+    batch_count_A  = 1;
+    batch_count_B  = 10;
     batch_count_C  = 5;
-    batch_stride_A = m * k;
+    batch_stride_A = 0;
     batch_stride_B = k * n;
     batch_stride_C = nnz;
-
     EXPECT_ROCSPARSE_STATUS(rocsparse_dnmat_set_strided_batch(mat_A, batch_count_A, batch_stride_A),
                             rocsparse_status_success);
     EXPECT_ROCSPARSE_STATUS(rocsparse_dnmat_set_strided_batch(mat_B, batch_count_B, batch_stride_B),
                             rocsparse_status_success);
     EXPECT_ROCSPARSE_STATUS(rocsparse_coo_set_strided_batch(mat_C, batch_count_C, batch_stride_C),
                             rocsparse_status_success);
-
     EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm_buffer_size(PARAMS_BUFFER_SIZE),
                             rocsparse_status_invalid_value);
     EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm_preprocess(PARAMS), rocsparse_status_invalid_value);
     EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm(PARAMS), rocsparse_status_invalid_value);
 
-    // Mismatching batch counts between B and C.
-    batch_count_A = 5;
-    batch_count_B = 10;
-    batch_count_C = 5;
-
+    // C_i = (A_i * B) o C_i
+    batch_count_A  = 10;
+    batch_count_B  = 1;
+    batch_count_C  = 5;
+    batch_stride_A = m * k;
+    batch_stride_B = 0;
+    batch_stride_C = nnz;
     EXPECT_ROCSPARSE_STATUS(rocsparse_dnmat_set_strided_batch(mat_A, batch_count_A, batch_stride_A),
                             rocsparse_status_success);
     EXPECT_ROCSPARSE_STATUS(rocsparse_dnmat_set_strided_batch(mat_B, batch_count_B, batch_stride_B),
                             rocsparse_status_success);
     EXPECT_ROCSPARSE_STATUS(rocsparse_coo_set_strided_batch(mat_C, batch_count_C, batch_stride_C),
                             rocsparse_status_success);
+    EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm_buffer_size(PARAMS_BUFFER_SIZE),
+                            rocsparse_status_invalid_value);
+    EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm_preprocess(PARAMS), rocsparse_status_invalid_value);
+    EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm(PARAMS), rocsparse_status_invalid_value);
 
+    // C_i = (A_i * B_i) o C_i
+    batch_count_A  = 10;
+    batch_count_B  = 10;
+    batch_count_C  = 5;
+    batch_stride_A = m * k;
+    batch_stride_B = k * n;
+    batch_stride_C = nnz;
+    EXPECT_ROCSPARSE_STATUS(rocsparse_dnmat_set_strided_batch(mat_A, batch_count_A, batch_stride_A),
+                            rocsparse_status_success);
+    EXPECT_ROCSPARSE_STATUS(rocsparse_dnmat_set_strided_batch(mat_B, batch_count_B, batch_stride_B),
+                            rocsparse_status_success);
+    EXPECT_ROCSPARSE_STATUS(rocsparse_coo_set_strided_batch(mat_C, batch_count_C, batch_stride_C),
+                            rocsparse_status_success);
     EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm_buffer_size(PARAMS_BUFFER_SIZE),
                             rocsparse_status_invalid_value);
     EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm_preprocess(PARAMS), rocsparse_status_invalid_value);
     EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm(PARAMS), rocsparse_status_invalid_value);
 
     // Batched computation with rocsparse_sddmm_alg_dense is not yet supported.
-    batch_count_A = 5;
-    batch_count_B = 5;
-    batch_count_C = 5;
-    alg           = rocsparse_sddmm_alg_dense;
+    batch_count_A  = 5;
+    batch_count_B  = 5;
+    batch_count_C  = 5;
+    batch_stride_A = m * k;
+    batch_stride_B = k * n;
+    batch_stride_C = nnz;
+    alg            = rocsparse_sddmm_alg_dense;
 
     EXPECT_ROCSPARSE_STATUS(rocsparse_dnmat_set_strided_batch(mat_A, batch_count_A, batch_stride_A),
                             rocsparse_status_success);
@@ -172,15 +192,12 @@ void testing_sddmm_batched_coo(const Arguments& arg)
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
 
-    // SDDMM batched support currently requires all three matrices to share the
-    // same batch count (per public API validation).
-    if(batch_count_A != batch_count_C || batch_count_B != batch_count_C)
-    {
-        return;
-    }
+    bool Ci_A_B_Ci   = (batch_count_A == 1 && batch_count_B == 1);
+    bool Ci_A_Bi_Ci  = (batch_count_A == 1 && batch_count_B == batch_count_C);
+    bool Ci_Ai_B_Ci  = (batch_count_B == 1 && batch_count_A == batch_count_C);
+    bool Ci_Ai_Bi_Ci = (batch_count_A == batch_count_C && batch_count_A == batch_count_B);
 
-    // Currently, only the default algorithm supports batched computation.
-    if(alg != rocsparse_sddmm_alg_default)
+    if(!Ci_A_B_Ci && !Ci_A_Bi_Ci && !Ci_Ai_B_Ci && !Ci_Ai_Bi_Ci)
     {
         return;
     }
@@ -211,28 +228,34 @@ void testing_sddmm_batched_coo(const Arguments& arg)
     int64_t nnz_A_per_batch = static_cast<int64_t>(A_m) * A_n;
     int64_t nnz_B_per_batch = static_cast<int64_t>(B_m) * B_n;
 
-    int64_t batch_stride_A = nnz_A_per_batch;
-    int64_t batch_stride_B = nnz_B_per_batch;
-    int64_t batch_stride_C = nnz_C;
+    int64_t batch_stride_A = (batch_count_A > 1) ? nnz_A_per_batch : 0;
+    int64_t batch_stride_B = (batch_count_B > 1) ? nnz_B_per_batch : 0;
+    int64_t batch_stride_C = (batch_count_C > 1) ? nnz_C : 0;
 
     // Allocate/initialize dense A and B matrices (per batch unique).
-    host_vector<A> hA(batch_count * nnz_A_per_batch);
-    host_vector<B> hB(batch_count * nnz_B_per_batch);
-    rocsparse_init_1d_array<A>(
-        hA, batch_count * nnz_A_per_batch, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
-    rocsparse_init_1d_array<B>(
-        hB, batch_count * nnz_B_per_batch, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+    host_vector<A> hA(batch_count_A * nnz_A_per_batch);
+    host_vector<B> hB(batch_count_B * nnz_B_per_batch);
+    rocsparse_init_1d_array<A>(hA,
+                               batch_count_A * nnz_A_per_batch,
+                               arg.convert_to_int,
+                               arg.rand_gen_min,
+                               arg.rand_gen_max);
+    rocsparse_init_1d_array<B>(hB,
+                               batch_count_B * nnz_B_per_batch,
+                               arg.convert_to_int,
+                               arg.rand_gen_min,
+                               arg.rand_gen_max);
 
     // Output sparse matrix C. The COO row/column indices are replicated per
     // batch (so the sparsity pattern is the same for each batch, but the values
     // are independent per batch).
-    host_vector<I> hcoo_row_ind(batch_count * nnz_C);
-    host_vector<I> hcoo_col_ind(batch_count * nnz_C);
-    host_vector<C> hcoo_val_1(batch_count * nnz_C);
-    host_vector<C> hcoo_val_2(batch_count * nnz_C);
-    host_vector<C> hcoo_val_gold(batch_count * nnz_C);
+    host_vector<I> hcoo_row_ind(batch_count_C * nnz_C);
+    host_vector<I> hcoo_col_ind(batch_count_C * nnz_C);
+    host_vector<C> hcoo_val_1(batch_count_C * nnz_C);
+    host_vector<C> hcoo_val_2(batch_count_C * nnz_C);
+    host_vector<C> hcoo_val_gold(batch_count_C * nnz_C);
 
-    for(I i = 0; i < batch_count; ++i)
+    for(I i = 0; i < batch_count_C; ++i)
     {
         for(I j = 0; j < nnz_C; ++j)
         {
@@ -242,7 +265,7 @@ void testing_sddmm_batched_coo(const Arguments& arg)
     }
 
     rocsparse_init_1d_array<C>(
-        hcoo_val_1, batch_count * nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+        hcoo_val_1, batch_count_C * nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
     hcoo_val_2    = hcoo_val_1;
     hcoo_val_gold = hcoo_val_1;
 
@@ -268,10 +291,10 @@ void testing_sddmm_batched_coo(const Arguments& arg)
     rocsparse_local_spmat mat_C2(
         M, N, nnz_C, dcoo_row_ind, dcoo_col_ind, dcoo_val_2, itype, base, ctype);
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_set_strided_batch(mat_A, batch_count, batch_stride_A));
-    CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_set_strided_batch(mat_B, batch_count, batch_stride_B));
-    CHECK_ROCSPARSE_ERROR(rocsparse_coo_set_strided_batch(mat_C1, batch_count, batch_stride_C));
-    CHECK_ROCSPARSE_ERROR(rocsparse_coo_set_strided_batch(mat_C2, batch_count, batch_stride_C));
+    CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_set_strided_batch(mat_A, batch_count_A, batch_stride_A));
+    CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_set_strided_batch(mat_B, batch_count_B, batch_stride_B));
+    CHECK_ROCSPARSE_ERROR(rocsparse_coo_set_strided_batch(mat_C1, batch_count_C, batch_stride_C));
+    CHECK_ROCSPARSE_ERROR(rocsparse_coo_set_strided_batch(mat_C2, batch_count_C, batch_stride_C));
 
 #define PARAMS(alpha_, A_, B_, beta_, C_)                                                      \
     handle, trans_A, trans_B, alpha_, (const rocsparse_dnmat_descr&)A_,                        \
@@ -317,9 +340,9 @@ void testing_sddmm_batched_coo(const Arguments& arg)
 
         // Copy output to host
         CHECK_HIP_ERROR(hipMemcpy(
-            hcoo_val_1, dcoo_val_1, sizeof(C) * batch_count * nnz_C, hipMemcpyDeviceToHost));
+            hcoo_val_1, dcoo_val_1, sizeof(C) * batch_count_C * nnz_C, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(
-            hcoo_val_2, dcoo_val_2, sizeof(C) * batch_count * nnz_C, hipMemcpyDeviceToHost));
+            hcoo_val_2, dcoo_val_2, sizeof(C) * batch_count_C * nnz_C, hipMemcpyDeviceToHost));
 
         // CPU reference: run cooddmm per batch.
         for(I i = 0; i < batch_count; ++i)
@@ -333,14 +356,14 @@ void testing_sddmm_batched_coo(const Arguments& arg)
                                                       K,
                                                       nnz_C,
                                                       &halpha,
-                                                      hA.data() + i * nnz_A_per_batch,
+                                                      hA.data() + i * batch_stride_A,
                                                       lda,
-                                                      hB.data() + i * nnz_B_per_batch,
+                                                      hB.data() + i * batch_stride_B,
                                                       ldb,
                                                       &hbeta,
-                                                      hcoo_row_ind.data() + i * nnz_C,
-                                                      hcoo_col_ind.data() + i * nnz_C,
-                                                      hcoo_val_gold.data() + i * nnz_C,
+                                                      hcoo_row_ind.data() + i * batch_stride_C,
+                                                      hcoo_col_ind.data() + i * batch_stride_C,
+                                                      hcoo_val_gold.data() + i * batch_stride_C,
                                                       base);
         }
 

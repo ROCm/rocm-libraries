@@ -49,8 +49,8 @@ Tests:
   M: [15, 32]
   N: [2, 3]
   K: [7, 27]
-  batch_count_A: [7]
-  batch_count_B: [7]
+  batch_count_A: [1]
+  batch_count_B: [1]
   batch_count_C: [7]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -70,7 +70,7 @@ Tests:
   N: [22, 39]
   K: [72, 265]
   batch_count_A: [5]
-  batch_count_B: [5]
+  batch_count_B: [1]
   batch_count_C: [5]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -89,7 +89,7 @@ Tests:
   M: [128]
   N: [128]
   K: [128]
-  batch_count_A: [4]
+  batch_count_A: [1]
   batch_count_B: [4]
   batch_count_C: [4]
   alpha_beta: *alpha_beta_range_quick
@@ -138,8 +138,8 @@ Tests:
   M: [64]
   N: [37]
   K: [53]
-  batch_count_A: [6]
-  batch_count_B: [6]
+  batch_count_A: [1]
+  batch_count_B: [1]
   batch_count_C: [6]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -159,7 +159,7 @@ Tests:
   N: 1
   K: [98]
   batch_count_A: [3]
-  batch_count_B: [3]
+  batch_count_B: [1]
   batch_count_C: [3]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -185,7 +185,7 @@ Tests:
   M: [16]
   N: [93]
   K: [34]
-  batch_count_A: [5]
+  batch_count_A: [1]
   batch_count_B: [5]
   batch_count_C: [5]
   alpha_beta: *alpha_beta_range_quick
@@ -224,14 +224,89 @@ Tests:
 - name: sddmm_batched_coo_file
   category: nightly
   function: sddmm_batched_coo
-  indextype: *i32_i64
-  precision: *double_only_precisions
+  indextype: *i32
+  precision: *single_only_precisions
   M: 1
   N: 1
   K: [64]
-  batch_count_A: [4]
-  batch_count_B: [4]
+  batch_count_A: [1]
+  batch_count_B: [1]
   batch_count_C: [4]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_row]
+  orderB: [rocsparse_order_row]
+  filename: [bmwcra_1, 
+             scircuit,
+             sme3Dc,
+             amazon0312,
+             shipsec1]
+
+- name: sddmm_batched_coo_file
+  category: nightly
+  function: sddmm_batched_coo
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  K: [48]
+  batch_count_A: [5]
+  batch_count_B: [1]
+  batch_count_C: [5]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_row]
+  orderB: [rocsparse_order_row]
+  filename: [bmwcra_1, 
+             scircuit,
+             sme3Dc,
+             amazon0312,
+             shipsec1]
+
+- name: sddmm_batched_coo_file
+  category: nightly
+  function: sddmm_batched_coo
+  indextype: *i32
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  K: [32]
+  batch_count_A: [1]
+  batch_count_B: [6]
+  batch_count_C: [6]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_row]
+  orderB: [rocsparse_order_row]
+  filename: [bmwcra_1, 
+             scircuit,
+             sme3Dc,
+             amazon0312,
+             shipsec1]
+
+- name: sddmm_batched_coo_file
+  category: nightly
+  function: sddmm_batched_coo
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  K: [24]
+  batch_count_A: [7]
+  batch_count_B: [7]
+  batch_count_C: [7]
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose]
