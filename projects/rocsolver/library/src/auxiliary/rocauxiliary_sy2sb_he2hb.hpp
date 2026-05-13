@@ -59,7 +59,7 @@ void rocsolver_sy2sb_he2hb_getMemorySize(const I n,
     *size_workArr = 0;
 
     // if quick return no workspace needed
-    if(n == 0 || batch_count == 0 || kd >= n-1)
+    if(n == 0 || batch_count == 0 || kd >= n - 1)
         return;
 
     size_t w, wa, s1, s2;
@@ -162,7 +162,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // If band covers matrix, just copy to Aband.
-    if (kd >= n - 1)
+    if(kd >= n - 1)
     {
         // Copies some "don't care entries". That probably messes up the fill in bulges, right?
         // Using ldab-1 converts dense to band format.
@@ -171,7 +171,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32),
                                 0, stream, n, n, // opts
                                 A, shiftA, lda, strideA, // A
-                                Aband, 0, ldab-1, strideAb); // Aband
+                                Aband, 0, ldab - 1, strideAb); // Aband
         return rocblas_status_success;
     }
 
