@@ -235,6 +235,10 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
                               AsmIRBuilder& irBuilder, GfxArchID archId,
                               const std::map<std::string, int>& asmCaps,
                               const std::map<std::string, int>& archCaps, bool hasVgprMsb) {
+    // Attach implicit special registers (SCC/VCC/`EXEC) declared by HW flags
+    // (Flags.def) to the instruction.
+    legalizeImplicitSpecialRegisters(inst, getWaveFrontSize(archId));
+
     if (isBranch(*inst)) {
         // Handle branch instructions
         rocisa::BranchInstruction* branchInst =
@@ -341,19 +345,6 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             stinkyInst->addSrcReg(reg);
         }
     }
-
-    // Add implicit special registers driven by HW flags (Flags.def).
-    if (stinkyInst->is(IF_ImplicitReadSCC)) stinkyInst->addSrcReg(StinkyRegister::getSCCRegister());
-    if (stinkyInst->is(IF_ImplicitWriteSCC))
-        stinkyInst->addDestReg(StinkyRegister::getSCCRegister());
-
-    uint32_t wfs = getWaveFrontSize(archId);
-    if (stinkyInst->is(IF_ImplicitReadVCC))
-        stinkyInst->addSrcReg(StinkyRegister::getVCCRegister(wfs));
-    if (stinkyInst->is(IF_ImplicitReadEXEC))
-        stinkyInst->addSrcReg(StinkyRegister::getEXECRegister(wfs));
-    if (stinkyInst->is(IF_ImplicitWriteEXEC))
-        stinkyInst->addDestReg(StinkyRegister::getEXECRegister(wfs));
 
 #ifndef NDEBUG
     // Verify: read-write operands must exist in both destRegs and srcRegs.
