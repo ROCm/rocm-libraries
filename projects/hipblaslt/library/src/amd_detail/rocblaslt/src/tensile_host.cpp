@@ -2424,6 +2424,12 @@ namespace
         inputs.batchC = reinterpret_cast<void const* const*>(prob.batch_C);
         inputs.batchD = reinterpret_cast<void* const*>(prob.batch_D);
 
+        // set the batched offset of A, B, C, and D.
+        inputs.batchOffsetA = prob.batch_offset_a;
+        inputs.batchOffsetB = prob.batch_offset_b;
+        inputs.batchOffsetC = prob.batch_offset_c;
+        inputs.batchOffsetD = prob.batch_offset_d;
+
         // Set the GSU workspace
         inputs.ws            = prob.workspace;
         inputs.workspaceSize = prob.workspaceSize;
