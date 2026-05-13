@@ -60,7 +60,7 @@ This includes hipSPARSELt, other BLAS libraries, and runtime components.
 
      * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
-   * ``<llvm_target>`` (starting with ``gfx``) is used if you are installating
+   * ``<llvm_target>`` (starting with ``gfx``) is used if you are installing
      for a single AMD GPU architecture. Omit this suffix to install for all
      architectures at the cost of disk space.
 
