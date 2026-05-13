@@ -153,6 +153,12 @@ TEST_P(GPU_Conv2dTuningAsmBwdWrw_OLD_BFP16, Bf16Test_smoke_solver_convasmbwdwrw)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Conv2dSingleAsmBwdWrw_OLD_FP32,
                          testing::Values(GetTestCompilerRegressionCases()));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuningAsmBwdWrw_OLD_FP32, testing::Values(GetTestCases()));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuningAsmBwdWrw_OLD_FP16, testing::Values(GetTestCases()));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2dTuningAsmBwdWrw_OLD_BFP16, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv2dTuningAsmBwdWrw_OLD_FP32,
+                         testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv2dTuningAsmBwdWrw_OLD_FP16,
+                         testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv2dTuningAsmBwdWrw_OLD_BFP16,
+                         testing::Values(GetTestCases()));

@@ -160,7 +160,9 @@ TEST_P(GPU_conv_extra_OLD_FP16, HalfTest_conv_extra) { Run2dDriver(); };
 INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_extra_OLD_FP16, testing::Values(GetTestCases("--half")));
 
 TEST_P(GPU_conv_extra_OLD_BFP16, BFloat16Test_conv_extra) { Run2dDriver(); };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_extra_OLD_BFP16, testing::Values(GetTestCases("--bfloat16")));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_conv_extra_OLD_BFP16,
+                         testing::Values(GetTestCases("--bfloat16")));
 
 TEST_P(GPU_conv_extra_OLD_I8, Int8Test_conv_extra) { Run2dDriver(); };
 INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_extra_OLD_I8, testing::Values(GetTestCases("--int8")));

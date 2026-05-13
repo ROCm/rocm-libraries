@@ -73,7 +73,8 @@ class GPU_Conv2dTuning_OLD_BFP16 : public Bf16TestCase<std::vector<TestCase>>
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-TEST_P(GPU_Conv2dTuning_OLD_BFP16, Bf16Test_smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16)
+TEST_P(GPU_Conv2dTuning_OLD_BFP16,
+       Bf16Test_smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16)
 {
     if(IsTestSupportedForDevice() && !SkipTest())
     {

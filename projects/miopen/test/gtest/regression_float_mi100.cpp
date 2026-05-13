@@ -83,4 +83,6 @@ TEST_P(GPU_Conv2d_regression_mi100_OLD_FP32, FloatTest)
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2d_regression_mi100_OLD_FP32, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv2d_regression_mi100_OLD_FP32,
+                         testing::Values(GetTestCases()));

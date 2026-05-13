@@ -117,8 +117,12 @@ TEST_P(GPU_Conv2dMLIRTestIGemmFwd_OLD_I8, Int8Test_conv_igemm_mlir_fwd)
 };
 
 // Float for FWD, BWD, WRW
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2dMLIRTestIGemmFwd_OLD_FP32, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv2dMLIRTestIGemmFwd_OLD_FP32,
+                         testing::Values(GetTestCases()));
 // Half for FWD, BWD, WRW
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2dMLIRTestIGemmFwd_OLD_FP16, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv2dMLIRTestIGemmFwd_OLD_FP16,
+                         testing::Values(GetTestCases()));
 // Int8 for FWD
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2dMLIRTestIGemmFwd_OLD_I8, testing::Values(GetTestCases()));

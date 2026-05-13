@@ -162,7 +162,8 @@ TEST_P(GPU_Conv2dDefaultIGemmDynamicDLops_OLD_FP16, HalfTest_conv_igemm_dynamic_
 {
     if(IsTestSupportedForDevice() && !SkipTest())
     {
-        invoke_with_params<conv2d_driver, GPU_Conv2dDefaultIGemmDynamicDLops_OLD_FP16>(default_check);
+        invoke_with_params<conv2d_driver, GPU_Conv2dDefaultIGemmDynamicDLops_OLD_FP16>(
+            default_check);
     }
     else
     {
