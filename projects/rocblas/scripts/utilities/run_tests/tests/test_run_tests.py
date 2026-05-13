@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from run_tests import (
     _archive_log,
     _build_exclusion_filter,
+    _FILTER_LIST_THRESHOLD,
+    _list_remaining_tests,
     _parse_completed_tests,
     _parse_test_counts,
     _record_from_dict,
@@ -968,6 +970,19 @@ def _apply_exclude_patterns(original_filter: str,
     return _build_exclusion_filter(original_filter, set(patterns)) or original_filter
 
 
+def _full_filter_pipeline(original_filter: str,
+                           exclude_patterns: Sequence[str],
+                           per_test_excluded: set) -> str:
+    """Replicate the fixed two-step filter pipeline in JobRunner._execute:
+      1. Apply --exclude-pattern additions to the job's original filter.
+      2. Apply accumulated per-test exclusions on top of step 1's result.
+    This matches the fix for the silent-drop bug (Bug 1).
+    """
+    gtest_filter = _apply_exclude_patterns(original_filter, exclude_patterns)
+    augmented = _build_exclusion_filter(gtest_filter, per_test_excluded)
+    return augmented if augmented is not None else gtest_filter
+
+
 class TestExcludePattern:
     """Tests for the --exclude-pattern CLI option and its effect on GTest filters."""
 
@@ -1040,3 +1055,211 @@ class TestExcludePattern:
         assert "*f32_c_LNN*" in negative
         assert "_/trsv.suite/test_alpha" in negative
         assert "_/trsv.suite/test_beta" in negative
+
+    # -- Bug 1 fix: exclude-pattern must survive per-test exclusion step -----
+
+    def test_exclude_pattern_preserved_with_per_test_exclusions(self):
+        """--exclude-pattern must not be silently dropped when per-test
+        exclusions from state are also applied (the two-step pipeline bug)."""
+        original = "*trsv*quick*-*_batched*:*_ex*:*tbsv*:"
+        per_test = {"_/trsv.suite/test_alpha", "_/trsv.suite/test_beta"}
+        result = _full_filter_pipeline(original, ["*f32_c_LNN*"], per_test)
+        negative = result.split("-", 1)[1]
+        assert "*f32_c_LNN*" in negative, "exclude-pattern was silently dropped"
+        assert "_/trsv.suite/test_alpha" in negative
+        assert "_/trsv.suite/test_beta" in negative
+
+    def test_exclude_pattern_preserved_with_many_per_test_exclusions(self):
+        """With a large per-test exclusion set the pattern still survives."""
+        original = "*trsv*quick*-*_batched*:*_ex*:"
+        per_test = {f"_/trsv.suite/test_{i}" for i in range(500)}
+        result = _full_filter_pipeline(original, ["*quick_trsv_fortran_f32_c_*_F*"], per_test)
+        negative = result.split("-", 1)[1]
+        assert "*quick_trsv_fortran_f32_c_*_F*" in negative
+
+    def test_no_exclude_pattern_with_per_test_exclusions(self):
+        """With no --exclude-pattern the pipeline still produces the correct
+        per-test exclusion filter."""
+        original = "*trsv*quick*-*_batched*:*_ex*:"
+        per_test = {"_/trsv.suite/test_alpha"}
+        result = _full_filter_pipeline(original, [], per_test)
+        assert "_/trsv.suite/test_alpha" in result
+        assert result.startswith("*trsv*quick*-")
+
+    # -- Bug 2 fix: long filters must not use @file syntax -------------------
+
+    def test_short_filter_threshold(self):
+        """A filter under the threshold fits inline (no GTEST_FILTER env needed)."""
+        short = "*trsv*quick*-*_ex*"
+        assert len(short) <= 32768
+
+    def test_long_filter_exceeds_threshold(self):
+        """A filter with thousands of per-test exclusions exceeds _FILTER_LIST_THRESHOLD chars."""
+        original = "*trsv*quick*-*_batched*:*_ex*:*tbsv*:"
+        per_test = {f"_/trsv.suite/quick_trsv_small_f64_r_LNN_{i}_{i}_{i}" for i in range(800)}
+        result = _full_filter_pipeline(original, [], per_test)
+        assert len(result) > _FILTER_LIST_THRESHOLD, "expected filter to exceed inline threshold"
+
+
+# ---------------------------------------------------------------------------
+# _list_remaining_tests
+# ---------------------------------------------------------------------------
+
+def _make_list_output(test_map: dict) -> str:
+    """Build a --gtest_list_tests output string.
+
+    test_map: {suite_name: [test_name, ...]}  (suite_name WITHOUT trailing dot)
+    """
+    lines = []
+    for suite, tests in test_map.items():
+        lines.append(f"{suite}.")
+        for t in tests:
+            lines.append(f"  {t}")
+    return "\n".join(lines) + "\n"
+
+
+class TestListRemainingTests:
+    """Tests for _list_remaining_tests() — the --gtest_list_tests-based fallback."""
+
+    def _run(self, test_map: dict, excluded: Optional[set] = None,
+             patterns: Optional[list] = None, returncode: int = 0):
+        """Call _list_remaining_tests with a mocked subprocess."""
+        import unittest.mock as mock
+
+        stdout = _make_list_output(test_map)
+        completed = mock.MagicMock()
+        completed.returncode = returncode
+        completed.stdout = stdout
+
+        with mock.patch("run_tests._subprocess_run", return_value=completed):
+            return _list_remaining_tests(
+                "/fake/rocblas-test",
+                "*trsv*quick*-*_ex*",
+                excluded or set(),
+                patterns or [],
+            )
+
+    def test_returns_all_tests_when_no_exclusions(self):
+        """All listed tests are returned when nothing is excluded."""
+        test_map = {"blas2/quick_trsv": ["test_a", "test_b", "test_c"]}
+        result = self._run(test_map)
+        assert result == [
+            "blas2/quick_trsv.test_a",
+            "blas2/quick_trsv.test_b",
+            "blas2/quick_trsv.test_c",
+        ]
+
+    def test_excluded_set_removes_tests(self):
+        """Tests listed in ``excluded`` are removed from the result."""
+        test_map = {"suite": ["test_a", "test_b", "test_c"]}
+        excluded = {"suite.test_b"}
+        result = self._run(test_map, excluded=excluded)
+        assert result is not None
+        assert "suite.test_b" not in result
+        assert "suite.test_a" in result
+        assert "suite.test_c" in result
+
+    def test_exclude_pattern_removes_matching_tests(self):
+        """Tests matching an --exclude-pattern glob are removed."""
+        test_map = {"blas2/trsv": [
+            "quick_trsv_f32_c_LNN_128",
+            "quick_trsv_f32_c_LNU_128",
+            "quick_trsv_f64_r_LNN_128",
+        ]}
+        result = self._run(test_map, patterns=["*f32_c_*"])
+        assert result is not None
+        names = set(result)
+        assert "blas2/trsv.quick_trsv_f32_c_LNN_128" not in names
+        assert "blas2/trsv.quick_trsv_f32_c_LNU_128" not in names
+        assert "blas2/trsv.quick_trsv_f64_r_LNN_128" in names
+
+    def test_both_excluded_and_pattern_applied(self):
+        """Both the exclusion set and pattern globs are applied simultaneously."""
+        test_map = {"suite": ["test_a", "test_b", "test_c"]}
+        excluded = {"suite.test_a"}
+        result = self._run(test_map, excluded=excluded, patterns=["*test_b*"])
+        assert result == ["suite.test_c"]
+
+    def test_returns_empty_list_when_all_excluded(self):
+        """Returns empty list (not None) when every listed test is excluded."""
+        test_map = {"suite": ["test_a", "test_b"]}
+        excluded = {"suite.test_a", "suite.test_b"}
+        result = self._run(test_map, excluded=excluded)
+        assert result is not None
+        assert result == []
+
+    def test_returns_none_on_subprocess_failure(self):
+        """Returns None when the subprocess exits with a non-zero code."""
+        test_map = {"suite": ["test_a"]}
+        result = self._run(test_map, returncode=1)
+        assert result is None
+
+    def test_returns_none_on_subprocess_exception(self):
+        """Returns None when the subprocess raises an exception."""
+        import unittest.mock as mock
+
+        with mock.patch("run_tests._subprocess_run", side_effect=OSError("no such file")):
+            result = _list_remaining_tests("/bad/path", "*filter*", set(), [])
+        assert result is None
+
+    def test_multiple_suites_parsed_correctly(self):
+        """Test names from multiple suites are all collected with correct suite prefix."""
+        test_map = {
+            "suite_a": ["alpha", "beta"],
+            "suite_b": ["gamma"],
+        }
+        result = self._run(test_map)
+        assert result is not None
+        assert "suite_a.alpha" in result
+        assert "suite_a.beta" in result
+        assert "suite_b.gamma" in result
+        assert len(result) == 3
+
+    def test_threshold_constant_matches_usage(self):
+        """_FILTER_LIST_THRESHOLD is the documented 32768 byte limit."""
+        assert _FILTER_LIST_THRESHOLD == 32768
+
+    def test_strips_get_param_annotation_from_test_name(self):
+        """GTest --gtest_list_tests annotates parameterized tests with
+        '  # GetParam() = ...'.  These annotations must be stripped, otherwise
+        the resulting filter contains spaces/parens that GTest can't match."""
+        import unittest.mock as mock
+
+        stdout = (
+            "_/trsv.\n"
+            "  blas2_tensile/quick_trsv_f64_r_LNN  # GetParam() = (1, 2, 3)\n"
+            "  blas2_tensile/quick_trsv_f64_r_LNT  # GetParam() = (4, 5, 6)\n"
+        )
+        completed = mock.MagicMock()
+        completed.returncode = 0
+        completed.stdout = stdout
+
+        with mock.patch("run_tests._subprocess_run", return_value=completed):
+            result = _list_remaining_tests("/x", "*trsv*", set(), [])
+
+        assert result is not None
+        # Names must NOT include the "# GetParam()..." annotation
+        for name in result:
+            assert "#" not in name, f"annotation leaked into test name: {name}"
+            assert "GetParam" not in name
+        assert "_/trsv.blas2_tensile/quick_trsv_f64_r_LNN" in result
+        assert "_/trsv.blas2_tensile/quick_trsv_f64_r_LNT" in result
+
+    def test_excluded_set_matches_stripped_names_for_parameterized(self):
+        """Per-test exclusions use the bare name (no annotation), so stripping
+        must happen *before* the excluded-set check."""
+        import unittest.mock as mock
+
+        stdout = (
+            "suite.\n"
+            "  test_a  # GetParam() = (1)\n"
+            "  test_b  # GetParam() = (2)\n"
+        )
+        completed = mock.MagicMock()
+        completed.returncode = 0
+        completed.stdout = stdout
+
+        with mock.patch("run_tests._subprocess_run", return_value=completed):
+            result = _list_remaining_tests("/x", "*", {"suite.test_a"}, [])
+
+        assert result == ["suite.test_b"]

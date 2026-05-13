@@ -78,15 +78,16 @@ Caveats
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
+import re
 import signal
 import sys
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from subprocess import Popen, STDOUT
+from subprocess import Popen, STDOUT, run as _subprocess_run
 from typing import Dict, List, Optional
 
 # ---------------------------------------------------------------------------
@@ -383,6 +384,74 @@ def _build_exclusion_filter(original_filter: str, excluded: set) -> Optional[str
     return f"{positive}-{new_negative}"
 
 
+_SUITE_LINE_RE = re.compile(r"^\S+\.$")
+
+# Inline filter length threshold: use --gtest_list_tests enumeration when the
+# filter string would exceed this many bytes.  ARG_MAX is ~128 KiB, but
+# GTEST_FILTER env var is also not supported by all GTest builds, so instead we
+# enumerate remaining tests with --gtest_list_tests and build a compact
+# positive-only filter from those names (typically a few KB).
+_FILTER_LIST_THRESHOLD = 32768
+
+
+def _list_remaining_tests(
+    executable: str,
+    original_filter: str,
+    excluded: set,
+    exclude_patterns: List[str],
+) -> Optional[List[str]]:
+    """Return the list of test names that will actually run after filtering.
+
+    Runs ``executable --gtest_filter=original_filter --gtest_list_tests`` to
+    enumerate all test names matched by the *original* (pre-exclusion) filter,
+    then removes names in ``excluded`` and names matching any ``exclude_patterns``
+    glob via :func:`fnmatch.fnmatch`.
+
+    Returns None if the subprocess fails (caller falls back to inline filter).
+
+    Note on parameterized tests: ``--gtest_list_tests`` annotates each test name
+    with ``  # GetParam() = ...`` describing the parameter values.  These
+    annotations are NOT part of the actual test name and must be stripped before
+    constructing the filter.  No timeout is set because slow targets (e.g. the
+    FFM simulator) can take several minutes to initialize before listing tests.
+    """
+    try:
+        result = _subprocess_run(
+            [executable, f"--gtest_filter={original_filter}", "--gtest_list_tests"],
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    suite = ""
+    remaining: List[str] = []
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.rstrip()
+        if _SUITE_LINE_RE.match(line):
+            suite = line  # e.g. "blas2_tensile/quick_trsv."
+        elif line.startswith("  ") and suite:
+            # Strip the "  # GetParam() = ..." annotation that GTest appends to
+            # parameterized test entries; keep only the bare test name.
+            stripped = line.strip()
+            hash_pos = stripped.find("#")
+            if hash_pos != -1:
+                stripped = stripped[:hash_pos].rstrip()
+            if not stripped:
+                continue
+            test_name = suite + stripped  # fully-qualified: "Suite.TestName"
+            if test_name in excluded:
+                continue
+            if any(fnmatch.fnmatch(test_name, pat) for pat in exclude_patterns):
+                continue
+            remaining.append(test_name)
+
+    return remaining
+
+
 def recover_interrupted_jobs(
     state: RunState,
     all_jobs: Dict[str, JobSpec],
@@ -597,6 +666,10 @@ class LiveDisplay:
                         fail += 1
                 elif rec.status == "running":
                     run += 1
+                    # Include in-progress test counts so the group totals reflect
+                    # work done so far, not just what completed jobs contributed.
+                    tests_pass += rec.tests_passed
+                    tests_fail += rec.tests_failed
             arrow = "► " if run else "  "
             pass_raw = f"{pass_} ({tests_pass:>6})"
             fail_raw = f"{fail} ({tests_fail:>6})"
@@ -730,11 +803,12 @@ class JobRunner:
                         rec.tests_passed = current_passed + offset
                         rec.tests_failed = current_failed
                         rec.current_test = cur_test
-                        # Always refresh total from the current run's header so
-                        # stale values from previous (differently-filtered) runs
-                        # don't persist.  Only update when GTest reports a count;
-                        # a 0-test run leaves the last known value intact so that
-                        # false-pass detection can still compare against it.
+                        # Refresh total from the current run's header.  We update
+                        # only when GTest has actually written the count line
+                        # (current_total > 0); before that, _execute() seeds
+                        # rec.tests_total with an estimate, so the display shows
+                        # something reasonable instead of stale values from
+                        # previous runs.
                         if current_total > 0:
                             rec.tests_total = current_total + offset
                     updated = True
@@ -800,7 +874,10 @@ class JobRunner:
         cumulative_passed = prev_passed_offset + new_passed_count
         cumulative_failed = prev_failed_offset + new_failed_count
 
-        augmented = _build_exclusion_filter(spec.gtest_filter, all_excluded)
+        # Build per-test exclusion filter on top of the already-modified
+        # gtest_filter (which may include --exclude-pattern additions) so
+        # that user-supplied patterns are not silently dropped.
+        augmented = _build_exclusion_filter(gtest_filter, all_excluded)
         if augmented is not None:
             gtest_filter = augmented
             n_excluded = len(all_excluded)
@@ -816,21 +893,40 @@ class JobRunner:
                 "",
             ]
 
-        # ARG_MAX on Linux is ~128 KiB; use a file-based filter when the inline
-        # form would grow too large (accumulated exclusion lists can hit thousands
-        # of test names).  GTest supports --gtest_filter=@<file> for this.
-        _FILTER_FILE_THRESHOLD = 32768
-        filter_file: Optional[str] = None
-        if len(gtest_filter) > _FILTER_FILE_THRESHOLD:
-            fd, filter_file = tempfile.mkstemp(
-                prefix=f"{spec.job_id}.", suffix=".filter",
-                dir=os.path.dirname(spec.log_file),
+        # When the accumulated exclusion filter exceeds _FILTER_LIST_THRESHOLD
+        # bytes, passing it inline risks hitting ARG_MAX (~128 KiB on Linux).
+        # The @file and GTEST_FILTER env var alternatives are not supported by
+        # this GTest build.  Instead: enumerate all test names that match the
+        # *original* job filter with --gtest_list_tests, subtract the excluded
+        # set and apply any --exclude-pattern globs, then build a compact
+        # positive-only filter from the remaining names (typically ~8 KB).
+        if len(gtest_filter) > _FILTER_LIST_THRESHOLD:
+            remaining = _list_remaining_tests(
+                self._state.executable,
+                spec.gtest_filter,
+                all_excluded,
+                self._exclude_patterns,
             )
-            with os.fdopen(fd, "w") as fh:
-                fh.write(gtest_filter)
-            cmd = [self._state.executable, f"--gtest_filter=@{filter_file}"]
-        else:
-            cmd = [self._state.executable, f"--gtest_filter={gtest_filter}"]
+            if remaining is not None:
+                if not remaining:
+                    # All tests already excluded — nothing to run.
+                    with self._state_lock:
+                        rec.status = "finished"
+                        rec.result = "pass"
+                        rec.end_time = time.time()
+                        rec.exit_code = 0
+                    save_state(self._state, self._state_path, self._state_lock)
+                    self._display.log_plain(f"SKIP (all excluded) {spec.job_id}")
+                    return
+                gtest_filter = ":".join(remaining)
+                if preamble_lines:
+                    # Update filter line to show the compact form
+                    preamble_lines[-2] = (
+                        f"[run_tests.py] Filter (compact, {len(remaining)} tests): "
+                        f"{gtest_filter[:200]}"
+                        + ("..." if len(gtest_filter) > 200 else "")
+                    )
+        cmd = [self._state.executable, f"--gtest_filter={gtest_filter}"]
 
         # Compute best estimate of the original (unfiltered) test count.
         # partial_total is what GTest ran under the *previous* exclusion set,
@@ -847,9 +943,11 @@ class JobRunner:
             rec.tests_passed = cumulative_passed
             rec.tests_failed_offset = cumulative_failed
             rec.tests_failed = 0   # reset; poller will fill with current-run count
-            # tests_total is sticky: only grow it, never shrink it.
-            if estimated_original > rec.tests_total:
-                rec.tests_total = estimated_original
+            # tests_total: seed with our best estimate of the original (unfiltered)
+            # count.  This is reset (not "only-grow") because a stale value from a
+            # previously-buggy run (e.g. unfiltered binary execution) would
+            # otherwise leak into the new run's display until the poller caught up.
+            rec.tests_total = estimated_original
 
         try:
             with open(spec.log_file, "w") as log_fh:
@@ -872,11 +970,6 @@ class JobRunner:
         finally:
             with _active_procs_lock:
                 _active_procs.pop(spec.job_id, None)
-            if filter_file:
-                try:
-                    os.unlink(filter_file)
-                except OSError:
-                    pass
 
         end = time.time()
         _passed, _failed, _total, _ = _parse_test_counts(spec.log_file)
@@ -929,9 +1022,9 @@ class JobRunner:
         end = time.time()
         spec = self._all_jobs.get(job_id)
         if spec:
-            _passed, _failed, _total, _ = _parse_test_counts(spec.log_file)
+            _, _failed, _, _ = _parse_test_counts(spec.log_file)
         else:
-            _passed, _failed, _total = 0, 0, 0
+            _failed = 0
         if exit_code == 0:
             result = "pass"
         elif _failed > 0:
