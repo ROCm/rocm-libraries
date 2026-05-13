@@ -17,7 +17,7 @@
 #include "ck_tile/builder/conv_builder.hpp"
 #include "tile_profiler_common.hpp"
 #include "tile_profiler_utils.hpp"
-#include "direct_conv_profiler_bridge.hpp"
+#include "direct_conv_instance_registry.hpp"
 
 namespace ck_tile::builder::profiling {
 
@@ -191,14 +191,28 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
 #ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp16_calls.inc"
 #endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_data_direct/grouped_convolution_backward_data_tile_nhwgc_fp16_calls.inc"
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_4c())
+            run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_16c())
+            run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_8c())
+            run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_32c())
+            run_alg(fn);
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_BF16_BWD_DATA)
     {
 #ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_bf16_calls.inc"
 #endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_data_direct/grouped_convolution_backward_data_tile_nhwgc_bf16_calls.inc"
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_4c())
+            run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_16c())
+            run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_8c())
+            run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_32c())
+            run_alg(fn);
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP32_BWD_DATA)
     {
