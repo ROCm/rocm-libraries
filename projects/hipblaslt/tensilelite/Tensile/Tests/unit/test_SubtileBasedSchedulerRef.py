@@ -988,38 +988,38 @@ EXPECTED_EMIT_DEP_ORDER_128x96_BF16_PGR1_WG4x1 = """\
 MAINLOOP (dependency paths):
   Partition 0:
     subIterK=0:
-      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-1] , B : [0-5] <- [4]
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-1] , B : [0-5] <- [5]
       preMFMA path 0:
-        [ 4] wait_lr    wait_lr
+        [ 5] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [1]) [0-1]
         [ 2] lr         LR B  (MT n, subIterK [1]) [0-5]
       path 1:
-        [ 5] gr_inc     gr_inc(A)
+        [ 6] gr_inc     gr_inc(A)
         [ 3] gr         GR A (MT n+1, subIterK [0,1]) ids [0-1]
+        [ 7] gr_inc     gr_inc(B)
+        [ 4] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
     subIterK=1:
       MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-1] , B : [0-5] <- [4]
       preMFMA path 0:
         [ 4] wait_lr    wait_lr
       path 0:
-        [ 5] wait_gr    wait_gr(A=2)
+        [ 5] wait_gr    wait_gr(A=2,B=1)
         [ 6] sync       sync
         [ 1] lr         LR A  (MT n, subIterK [2]) [0-1]
         [ 2] lr         LR B  (MT n, subIterK [2]) [0-5]
       path 1:
-        [ 7] gr_inc     gr_inc(B)
-        [ 3] gr         GR B (MT n+1, subIterK [0,1]) ids [0-3]
+        [ 3] gr         GR B (MT n+1, subIterK [0,1]) ids [2-5]
     subIterK=2:
-      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-1] , B : [0-5] <- [6]
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-1] , B : [0-5] <- [5]
       preMFMA path 0:
-        [ 6] wait_lr    wait_lr
+        [ 5] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [3]) [0-1]
         [ 2] lr         LR B  (MT n, subIterK [3]) [0-5]
       path 1:
-        [ 3] gr         GR B (MT n+1, subIterK [0,1]) ids [4-5]
-        [ 4] gr         GR A (MT n+1, subIterK [2,3]) ids [0-1]
-        [ 5] gr         GR B (MT n+1, subIterK [2,3]) ids [0-5]
+        [ 3] gr         GR A (MT n+1, subIterK [2,3]) ids [0-1]
+        [ 4] gr         GR B (MT n+1, subIterK [2,3]) ids [0-5]
     subIterK=3:
       MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-1] , B : [0-5] <- [3]
       preMFMA path 0:

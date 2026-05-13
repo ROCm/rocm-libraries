@@ -54,7 +54,8 @@ def _mock_dtype(num_bytes=2):
     return mock
 
 
-def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
+def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
+                  miWaveGroup=None, sourceSwap=False):
     mxblock = 32 if fp4 else 0
     bpe = 0.5 if fp4 else 2
     matrixInstK = 128 if fp4 else 32
@@ -82,7 +83,7 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
         "MatrixInstM": 16,
         "MatrixInstN": 16,
         "MatrixInstK": matrixInstK,
-        "MIWaveGroup": list(waveGroup),
+        "MIWaveGroup": list(miWaveGroup),
         "WavefrontSize": 64,
         "SourceSwap": sourceSwap,
         "MIArchVgpr": False,
