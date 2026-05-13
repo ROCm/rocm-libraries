@@ -55,7 +55,8 @@ enum InstFlag : uint8_t {
 //
 // 2. (simpler) Just add another std::bitset<32> flag.
 constexpr size_t flagCapacity = 64;
-
+static_assert(static_cast<size_t>(InstFlag::IF_COUNT) <= flagCapacity,
+              "InstFlag indices must fit in HwInstDesc.flags (increase flagCapacity)");
 // Helper function to convert flags to a bit pattern at compile time
 constexpr uint64_t makeFlagBits(std::initializer_list<InstFlag> flags) {
     static_assert(flagCapacity <= 64, "flagCapacity exceeds uint64_t bit width");

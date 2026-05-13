@@ -1120,10 +1120,28 @@ void init_stinkytofu(nb::module_ m) {
             return module_->getName();
         }
 
+        void setOutputName(const std::string& name) {
+            module_->setOutputName(name);
+        }
+
+        std::string getOutputName() const {
+            return module_->getOutputName();
+        }
+
+        void setOutputDir(const std::string& dir) {
+            module_->setOutputDir(dir);
+        }
+
+        std::string getOutputDir() const {
+            return module_->getOutputDir();
+        }
+
         // Override emitAssembly to include signature
         std::string emitAssembly() const {
             std::string result;
             if (signature_) {
+                int64_t totalBytes = module_->getTotalInstructionBytes();
+                if (totalBytes >= 0) signature_->setTotalInstructionBytes(totalBytes);
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
@@ -1141,6 +1159,13 @@ void init_stinkytofu(nb::module_ m) {
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
         .def("getName", &StinkyAsmModuleWithSignature::getName)
+        .def("setOutputName", &StinkyAsmModuleWithSignature::setOutputName,
+             "Set full kernel name for output files (e.g. cost file); should match .o basename")
+        .def("getOutputName", &StinkyAsmModuleWithSignature::getOutputName)
+        .def("setOutputDir", &StinkyAsmModuleWithSignature::setOutputDir,
+             "Set output dir for cost file: comparison_output/<yaml_name>; file at "
+             "<dir>/<kernel_name>/aggregated_instruction_cost.txt")
+        .def("getOutputDir", &StinkyAsmModuleWithSignature::getOutputDir)
         .def("getModule", &StinkyAsmModuleWithSignature::getModule);
 
     // Bind toStinkyTofuModule with signature support

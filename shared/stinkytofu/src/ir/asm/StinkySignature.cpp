@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -359,6 +360,10 @@ void SignatureKernelDescriptor::setGprs(int totalVgprs, int totalAgprs, int tota
     this->totalSgprs = totalSgprs;
 }
 
+void SignatureKernelDescriptor::setTotalInstructionBytes(int64_t totalBytes) {
+    totalInstructionBytes = totalBytes;
+}
+
 void SignatureKernelDescriptor::setOptimizationConfig(const std::array<int, 2>& tt,
                                                       const std::array<int, 2>& sg,
                                                       const std::array<int, 2>& wg, int vwA,
@@ -584,6 +589,10 @@ void SignatureBase::setOptimizationConfig(const std::array<int, 2>& tt,
                                           int glvwB, bool d2lA, bool d2lB, int useSgprForGRO) {
     kernelDescriptor.setOptimizationConfig(tt, sg, wg, vwA, vwB, glvwA, glvwB, d2lA, d2lB,
                                            useSgprForGRO);
+}
+
+void SignatureBase::setTotalInstructionBytes(int64_t totalBytes) {
+    kernelDescriptor.setTotalInstructionBytes(totalBytes);
 }
 
 std::string SignatureBase::toString() const {
