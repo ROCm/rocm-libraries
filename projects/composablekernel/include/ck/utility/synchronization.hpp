@@ -73,6 +73,18 @@ __device__ void block_sync_lds_async_load()
 #endif
 }
 
+#if defined(__gfx13__)
+/// Cluster-wide sync
+__device__ void sync_cluster()
+{
+    const bool isFirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);
+    __builtin_amdgcn_s_barrier_wait(-1);
+    if(isFirst)
+        __builtin_amdgcn_s_barrier_signal(-3);
+    __builtin_amdgcn_s_barrier_wait(-3);
+}
+#endif
+
 __device__ void s_nop()
 {
 #if 1

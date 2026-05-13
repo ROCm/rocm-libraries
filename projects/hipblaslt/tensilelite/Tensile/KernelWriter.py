@@ -2863,7 +2863,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # initialize SubTileIdx
     self.states.SubTileIdx = 1 if self.states.numItersPLR and kernel["numSubTiles"] else 0
 
-    if isNGLL:
+    hasMXS = kernel["ProblemType"].get("MXBlockA", 0) or kernel["ProblemType"].get("MXBlockB", 0)
+    if isNGLL and hasMXS:
       self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
 
     for uIdx in range(0, kernel["LoopIters"]):
@@ -2943,7 +2944,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.makeSchedule(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, skipGlobalReadInc=skipGlobalReadInc, lastLoop=NLLlast, isNGLL=isNGLL)
           module.add(self.codes.unrollLoopHeader)
 
-        if isNGLL and not callMakeSchedule:
+        if isNGLL and not callMakeSchedule and hasMXS:
           globalReadIncACode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementA")
           globalReadIncBCode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementB")
           self.codes.perIterGlobalRead[u].addComment1("Global Read IncA")

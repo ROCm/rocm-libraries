@@ -367,7 +367,7 @@ endif()
 
 # Benchmark dependencies
 if(BUILD_BENCHMARK)
-  set(BENCHMARK_VERSION 1.9.4)
+  set(BENCHMARK_VERSION 1.9.5)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Benchmark (https://github.com/google/benchmark.git)
     find_package(benchmark ${BENCHMARK_VERSION} QUIET)

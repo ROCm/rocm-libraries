@@ -8,7 +8,7 @@
 #include "ck/utility/mxfp_utils.hpp"
 #include "dtype_vector.hpp"
 
-#if CK_MX_ARCH_950 || CK_MX_ARCH_125
+#if CK_MX_ARCH_950 || CK_MX_ARCH_125 || CK_MX_ARCH_13
 #define CK_MX_FP4_CVT_FAST_PATH 1
 #else
 #define CK_MX_FP4_CVT_FAST_PATH 0
@@ -287,7 +287,7 @@ static inline __device__ f4x8_t cast_to_f4_scaled(T x, float scale)
     return ret.vf4;
 }
 
-#elif CK_MX_ARCH_125
+#elif CK_MX_ARCH_125 || CK_MX_ARCH_13
 // from f4
 template <typename T>
 static inline __device__ enable_if_t<scalar_type<T>::vector_size == 1, T>
@@ -430,7 +430,7 @@ static inline __device__ f4x8_t cast_to_f4_scaled(T x, float scale)
 
     return value.v8f4;
 }
-#endif
+#endif // CK_MX_ARCH_125 || CK_MX_ARCH_13
 #endif // CK_MX_FP4_CVT_FAST_PATH
 } // namespace ck
 

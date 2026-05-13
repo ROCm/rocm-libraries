@@ -118,5 +118,5 @@ int main(int argc, char* argv[])
     // clang-format on
 
     std::cout << "TestGemm ..... " << (pass ? "SUCCESS" : "FAILURE") << std::endl;
-    return pass;
+    return pass ? 0 : 1;
 }

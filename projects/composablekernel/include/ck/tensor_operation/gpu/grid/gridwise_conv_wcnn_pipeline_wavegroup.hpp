@@ -424,7 +424,9 @@ struct GridwiseConvPipeline_v2
         {
             if(get_wave_id_in_wavegroup() == WaveIdLoad)
             {
-                semaDataLdsFree.template wait<0>();
+                semaDataLdsFree.template wait<0>(); // sync within wavegroup
+                barrierLds.signal();                // sync in workgroup
+                barrierLds.wait();
                 if constexpr(WeiDataEnableLds)
                 {
                     if constexpr(EnableAsync)

@@ -211,7 +211,7 @@ function(add_gtest_executable TEST_NAME)
             message(DEBUG "removing xdl test ${source} ")
             list(REMOVE_ITEM ARGN "${source}")
         endif()
-        if(NOT TEST_TARGETS MATCHES "gfx95|gfx125" AND source_name MATCHES "mx_")
+        if(NOT TEST_TARGETS MATCHES "gfx95|gfx125|gfx13" AND source_name MATCHES "mx_")
             message(DEBUG "removing microscaling test ${source} ")
             list(REMOVE_ITEM ARGN "${source}")
         endif()
@@ -250,11 +250,11 @@ function(add_gtest_executable TEST_NAME)
              list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx950 gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic)
         elseif(source_name_list MATCHES "_smfmac")
              list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx908 gfx90a gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic gfx1250 gfx1251 ${CK_GFX13_GPU_TARGETS})
-        elseif(source_name_list MATCHES "_mx") #only build mx example for gfx950 and gfx125x
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic ${CK_GFX13_GPU_TARGETS})
+        elseif(source_name_list MATCHES "_mx") #only build mx example for gfx950, gfx125x and gfx13
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic)
         elseif(source_name_list MATCHES "wcnn") #only build wcnn example for gfx13
              list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx950 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic)
-             if(ARGN MATCHES "_pk4scale") #only build pk4scale for gfx1250
+             if(ARGN MATCHES "_pk4scale") #only build pk4scale for gfx1250 and gfx13
                 list(REMOVE_ITEM TEST_TARGETS gfx950)
              endif()
         endif()

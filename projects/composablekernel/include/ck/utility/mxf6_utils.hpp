@@ -7,10 +7,16 @@
 #include "ck/utility/numeric_limits.hpp"
 #include "ck/utility/mxfp_utils.hpp"
 
-#if CK_MX_ARCH_950 || CK_MX_ARCH_125
-#define CK_MX_FP6_CVT_FAST_PATH 1
+#if CK_MX_ARCH_950 || CK_MX_ARCH_125 || CK_MX_ARCH_13
+#define CK_MX_TO_FP6_CVT_FAST_PATH 1
 #else
-#define CK_MX_FP6_CVT_FAST_PATH 0
+#define CK_MX_TO_FP6_CVT_FAST_PATH 0
+#endif
+
+#if CK_MX_ARCH_950 || CK_MX_ARCH_125
+#define CK_MX_FROM_FP6_CVT_FAST_PATH 1
+#else
+#define CK_MX_FROM_FP6_CVT_FAST_PATH 0
 #endif
 
 namespace ck {
@@ -459,7 +465,7 @@ struct bf6_result_type
 
 } // namespace utils
 
-#if CK_MX_FP6_CVT_FAST_PATH
+#if CK_MX_FROM_FP6_CVT_FAST_PATH
 // declare
 template <typename T, typename T_F6>
 inline __device__ enable_if_t<scalar_type<T>::vector_size == 1, T>
@@ -472,7 +478,9 @@ cast_from_f6_scaled(T_F6 x, Ts scale = 1.f);
 template <typename T, typename T_F6>
 inline __device__ enable_if_t<scalar_type<T>::vector_size == 32, T>
 cast_from_f6_scaled(T_F6 x, float scale = 1.f);
+#endif
 
+#if CK_MX_TO_FP6_CVT_FAST_PATH
 template <typename T_F6,
           bool stochastic_rounding = false,
           typename T,
@@ -490,10 +498,12 @@ template <typename T_F6,
           typename T,
           enable_if_t<scalar_type<T>::vector_size == 32, bool> = true>
 inline __device__ T_F6 cast_to_f6_scaled(T x, float scale = 1.f);
+#endif
 
 // definition
 #if CK_MX_ARCH_950
 // from f6
+#if CK_MX_FROM_FP6_CVT_FAST_PATH
 template <typename T, typename T_F6>
 inline __device__ enable_if_t<scalar_type<T>::vector_size == 1, T> cast_from_f6_scaled(T_F6 x,
                                                                                        float scale)
@@ -580,8 +590,10 @@ inline __device__ enable_if_t<scalar_type<T>::vector_size == 32, T> cast_from_f6
             static_assert(false_type::value, "Unsupported type.");
     }
 }
+#endif
 
 // to f6
+#if CK_MX_TO_FP6_CVT_FAST_PATH
 template <typename T_F6,
           bool stochastic_rounding,
           typename T,
@@ -720,9 +732,11 @@ inline __device__ T_F6 cast_to_f6_scaled(T x, float scale)
         }
     }
 }
+#endif
 
 #elif CK_MX_ARCH_125
 // from f6
+#if CK_MX_FROM_FP6_CVT_FAST_PATH
 template <typename T, typename T_F6>
 inline __device__ enable_if_t<scalar_type<T>::vector_size == 1, T> cast_from_f6_scaled(T_F6 x,
                                                                                        float scale)
@@ -822,8 +836,10 @@ inline __device__ enable_if_t<scalar_type<T>::vector_size == 32, T> cast_from_f6
     out.array[1] = cast_from_f6_scaled<T16>(f6_hi, scale);
     return out.vector;
 }
+#endif
 
 // to f6
+#if CK_MX_TO_FP6_CVT_FAST_PATH
 template <typename T_F6,
           bool stochastic_rounding,
           typename T,
@@ -950,7 +966,130 @@ inline __device__ T_F6 cast_to_f6_scaled(T x, float scale)
     return T_F6{pk_out};
 }
 #endif
-#endif // CK_MX_FP4_CVT_FAST_PATH
+#endif // CK_MX_ARCH_125
+
+#if CK_MX_ARCH_13
+// to f6
+#if CK_MX_TO_FP6_CVT_FAST_PATH
+template <typename T_F6,
+          bool stochastic_rounding,
+          typename T,
+          enable_if_t<scalar_type<T>::vector_size == 1, bool>>
+inline __device__ T_F6 cast_to_f6_scaled(T x, float scale)
+{
+    using BaseT         = typename scalar_type<T>::type;
+    using f6_vec32_type = conditional_t<is_same_v<T_F6, f6_t>, f6x32_t, bf6x32_t>;
+    using T32           = typename vector_type<BaseT, 32>::type;
+    union
+    {
+        T32 vector;
+        T array[32];
+    } in{x};
+
+    auto f6_vector = cast_to_f6_scaled<f6_vec32_type, stochastic_rounding>(in.vector, scale);
+    auto f6_packed = static_cast<utils::get_f6_packed_type_t<f6_vec32_type>>(f6_vector);
+
+    return f6_packed.unpack(0);
+}
+
+template <typename T_F6,
+          bool stochastic_rounding,
+          typename T,
+          enable_if_t<scalar_type<T>::vector_size == 16, bool>>
+inline __device__ T_F6 cast_to_f6_scaled(T x, float scale)
+{
+    using BaseT         = typename scalar_type<T>::type;
+    using f6_vec32_type = conditional_t<is_same_v<T_F6, f6x16_t>, f6x32_t, bf6x32_t>;
+    using T32           = typename vector_type<BaseT, 32>::type;
+    constexpr int N     = 32 / scalar_type<T>::vector_size;
+    using T6X16_TYPE    = utils::get_f6_packed_type_t<T_F6>;
+    using T6X32_TYPE    = utils::get_f6_packed_type_t<f6_vec32_type>;
+    union
+    {
+        T array[N];
+        T32 vector;
+    } in{{x, x}};
+
+    auto f6_vector = cast_to_f6_scaled<f6_vec32_type, stochastic_rounding>(in.vector, scale);
+    const T6X32_TYPE& pk_f6_vector = f6_vector.template AsType<T6X32_TYPE>()[Number<0>{}];
+    T6X16_TYPE pk_out;
+    pk_out.data_[0] = pk_f6_vector.data_[0];
+    pk_out.data_[1] = pk_f6_vector.data_[1];
+    pk_out.data_[2] = pk_f6_vector.data_[2];
+
+    return T_F6{pk_out};
+}
+
+template <typename T_F6,
+          bool stochastic_rounding,
+          typename T,
+          enable_if_t<scalar_type<T>::vector_size == 32, bool>>
+inline __device__ T_F6 cast_to_f6_scaled(T x, float scale)
+{
+    static_assert(is_same_v<T_F6, f6x32_t> || is_same_v<T_F6, bf6x32_t>,
+                  "T_F6 must be either f6x32_t or bf6x32_t");
+    using BaseT = typename scalar_type<T>::type;
+
+    if constexpr(stochastic_rounding)
+    {
+        uint32_t rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
+                                                 (get_thread_global_1d_id() + 1));
+
+        if constexpr(is_same_v<T_F6, f6x32_t>)
+        {
+            if constexpr(is_same_v<BaseT, float>)
+                return f6x32_t{__builtin_amdgcn_cvt_scalef32_sr_pk32_fp6_f32(x, rng, scale)};
+            else if constexpr(is_same_v<BaseT, half_t>)
+                return f6x32_t{__builtin_amdgcn_cvt_scalef32_sr_pk32_fp6_f16(x, rng, scale)};
+            else if constexpr(is_same_v<BaseT, bhalf_t>)
+                return f6x32_t{__builtin_amdgcn_cvt_scalef32_sr_pk32_fp6_bf16(x, rng, scale)};
+            else
+                static_assert(false_type::value, "Unsupported type.");
+        }
+        else
+        {
+            if constexpr(is_same_v<BaseT, float>)
+                return bf6x32_t{__builtin_amdgcn_cvt_scalef32_sr_pk32_bf6_f32(x, rng, scale)};
+            else if constexpr(is_same_v<BaseT, half_t>)
+                return bf6x32_t{__builtin_amdgcn_cvt_scalef32_sr_pk32_bf6_f16(x, rng, scale)};
+            else if constexpr(is_same_v<BaseT, bhalf_t>)
+                return bf6x32_t{__builtin_amdgcn_cvt_scalef32_sr_pk32_bf6_bf16(x, rng, scale)};
+            else
+                static_assert(false_type::value, "Unsupported type.");
+        }
+    }
+    else
+    {
+        if constexpr(is_same_v<T_F6, f6x32_t>)
+        {
+            if constexpr(is_same_v<BaseT, float>)
+                /* Unlike __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32 in gfx950, no interleaved
+                 * input is required. */
+                return f6x32_t{__builtin_amdgcn_cvt_scalef32_pk32_fp6_f32(x, scale)};
+            else if constexpr(is_same_v<BaseT, half_t>)
+                return f6x32_t{__builtin_amdgcn_cvt_scalef32_pk32_fp6_f16(x, scale)};
+            else if constexpr(is_same_v<BaseT, bhalf_t>)
+                return f6x32_t{__builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16(x, scale)};
+            else
+                static_assert(false_type::value, "Unsupported type.");
+        }
+        else
+        {
+            if constexpr(is_same_v<BaseT, float>)
+                /* Unlike __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32 in gfx950, no interleaved
+                 * input is required. */
+                return bf6x32_t{__builtin_amdgcn_cvt_scalef32_pk32_bf6_f32(x, scale)};
+            else if constexpr(is_same_v<BaseT, half_t>)
+                return bf6x32_t{__builtin_amdgcn_cvt_scalef32_pk32_bf6_f16(x, scale)};
+            else if constexpr(is_same_v<BaseT, bhalf_t>)
+                return bf6x32_t{__builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16(x, scale)};
+            else
+                static_assert(false_type::value, "Unsupported type.");
+        }
+    }
+}
+#endif
+#endif // CK_MX_ARCH_13
 
 } // namespace ck
 #endif

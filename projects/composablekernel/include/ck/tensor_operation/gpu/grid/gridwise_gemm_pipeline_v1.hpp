@@ -1138,12 +1138,7 @@ struct GridwiseGemmPipeline_v1<1,
         a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
 
 #if defined(__gfx13__)
-        // Cluster sync
-        bool isFirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);
-        __builtin_amdgcn_s_barrier_wait(-1);
-        if(isFirst)
-            __builtin_amdgcn_s_barrier_signal(-3);
-        __builtin_amdgcn_s_barrier_wait(-3);
+        sync_cluster();
 
         const int wgRank = __builtin_amdgcn_cluster_workgroup_flat_id();
 #else
@@ -1170,6 +1165,10 @@ struct GridwiseGemmPipeline_v1<1,
 
         block_sync_lds();
 
+#if defined(__gfx13__)
+        sync_cluster();
+#endif
+
         // main body
         if constexpr(HasMainLoop)
         {
@@ -1183,12 +1182,7 @@ struct GridwiseGemmPipeline_v1<1,
                 a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
 
 #if defined(__gfx13__)
-                // Cluster sync
-                isFirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);
-                __builtin_amdgcn_s_barrier_wait(-1);
-                if(isFirst)
-                    __builtin_amdgcn_s_barrier_signal(-3);
-                __builtin_amdgcn_s_barrier_wait(-3);
+                sync_cluster();
 #endif
 
                 do
@@ -1208,6 +1202,10 @@ struct GridwiseGemmPipeline_v1<1,
                 } while(j < a_cluster_size);
 
                 block_sync_lds();
+
+#if defined(__gfx13__)
+                sync_cluster();
+#endif
 
                 ++i;
             } while(i < (num_loop / a_cluster_size - 1));
@@ -1279,12 +1277,7 @@ struct GridwiseGemmPipeline_v1<1,
         b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
 
 #if defined(__gfx13__)
-        // Cluster sync
-        bool isFirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);
-        __builtin_amdgcn_s_barrier_wait(-1);
-        if(isFirst)
-            __builtin_amdgcn_s_barrier_signal(-3);
-        __builtin_amdgcn_s_barrier_wait(-3);
+        sync_cluster();
 
         const int wgRank = __builtin_amdgcn_cluster_workgroup_flat_id();
 #else
@@ -1310,6 +1303,10 @@ struct GridwiseGemmPipeline_v1<1,
 
         block_sync_lds();
 
+#if defined(__gfx13__)
+        sync_cluster();
+#endif
+
         // main body
         if constexpr(HasMainLoop)
         {
@@ -1322,12 +1319,7 @@ struct GridwiseGemmPipeline_v1<1,
                 b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
                 b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
 #if defined(__gfx13__)
-                // Cluster sync
-                isFirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);
-                __builtin_amdgcn_s_barrier_wait(-1);
-                if(isFirst)
-                    __builtin_amdgcn_s_barrier_signal(-3);
-                __builtin_amdgcn_s_barrier_wait(-3);
+                sync_cluster();
 #endif
                 do
                 {
@@ -1346,7 +1338,9 @@ struct GridwiseGemmPipeline_v1<1,
                 } while(j < b_cluster_size);
 
                 block_sync_lds();
-
+#if defined(__gfx13__)
+                sync_cluster();
+#endif
                 ++i;
             } while(i < (num_loop / b_cluster_size - 1));
         }
@@ -1417,12 +1411,7 @@ struct GridwiseGemmPipeline_v1<1,
         b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
 
 #if defined(__gfx13__)
-        // Cluster sync
-        bool isFirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);
-        __builtin_amdgcn_s_barrier_wait(-1);
-        if(isFirst)
-            __builtin_amdgcn_s_barrier_signal(-3);
-        __builtin_amdgcn_s_barrier_wait(-3);
+        sync_cluster();
 
         const int wgRank = __builtin_amdgcn_cluster_workgroup_flat_id();
 #else
@@ -1455,6 +1444,10 @@ struct GridwiseGemmPipeline_v1<1,
 
         block_sync_lds();
 
+#if defined(__gfx13__)
+        sync_cluster();
+#endif
+
         // main body
         if constexpr(HasMainLoop)
         {
@@ -1468,12 +1461,7 @@ struct GridwiseGemmPipeline_v1<1,
                 b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
 
 #if defined(__gfx13__)
-                // Cluster sync
-                isFirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);
-                __builtin_amdgcn_s_barrier_wait(-1);
-                if(isFirst)
-                    __builtin_amdgcn_s_barrier_signal(-3);
-                __builtin_amdgcn_s_barrier_wait(-3);
+                sync_cluster();
 
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "global");
                 __builtin_amdgcn_s_barrier_signal(-3);
@@ -1503,6 +1491,10 @@ struct GridwiseGemmPipeline_v1<1,
                 } while(j < b_cluster_size);
 
                 block_sync_lds();
+
+#if defined(__gfx13__)
+                sync_cluster();
+#endif
 
                 ++i;
             } while(i < (num_loop / b_cluster_size - 1));
