@@ -22,13 +22,14 @@
 
 from rocisa import countInstruction
 from rocisa.code import Module, Label, RegSet, ValueSet
-from rocisa.container import ContinuousRegister, SMEMModifiers, vgpr, sgpr, replaceHolder
+from rocisa.container import ContinuousRegister, SMEMModifiers, MUBUFModifiers, vgpr, sgpr, replaceHolder
+from rocisa.enum import CacheScope
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, SBranch, \
     SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, SCmpGtI32, \
     SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, SCmpEQI32, SEndpgm, \
     SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SBarrier, \
     SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec, \
-    SCmpEQU64
+    SCmpEQU64, BufferStoreB32
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import ceilDivide, log2, print2, INDEX_CHARS
@@ -1109,9 +1110,9 @@ class GSUOn(GSU):
 
         return module
 
-    def lastGsuWgBusyWaiting(self, writer, kernel, ss, tmpSgpr, lastGsuWgBusyWaitingLabel, reductionBodyLabel):
+    def lastGsuWgBusyWaiting(self, writer, kernel, ss, tmpSgpr, tmpVgpr, lastGsuWgBusyWaitingLabel, reductionBodyLabel):
         module = Module("GSU Common lastGsuWgBusyWaiting")
-    
+
         tmpS01 = tmpSgpr.idx
 
         module.add(SLoadB32(dst=sgpr(tmpS01), base=sgpr("SrdSync",2), soffset=0, smem=SMEMModifiers(glc=True), comment="get atomic_dec value"))
@@ -1119,7 +1120,21 @@ class GSUOn(GSU):
         module.add(SCmpEQU32(src0=sgpr(tmpS01), src1=1, comment="last GSU WG?"))
         module.add(SCBranchSCC0(labelName=lastGsuWgBusyWaitingLabel.getLabelName(), comment="branch if false"))
         module.add(SMovB32(dst=sgpr(tmpS01), src=0, comment="reset synchronizer"))
-        module.add(SStoreB32(src=sgpr(tmpS01), base=sgpr("SrdSync", 2), soffset=0, smem=SMEMModifiers(glc=True), comment="reset synchronizer"))
+        if writer.states.asmCaps["HasScalarStore"]:
+            module.add(SStoreB32(src=sgpr(tmpS01), base=sgpr("SrdSync", 2), soffset=0, smem=SMEMModifiers(glc=True), comment="reset synchronizer"))
+        else:
+            # gfx1250 does not have s_store_b32, use buffer_store_b32 instead
+            tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+            module.add(VMovB32(dst=vgpr(tmpVgpr.idx), src=0, comment="move 0 to tmpVgpr for store data and vaddr"))
+            module.add(SMovB64(dst=sgpr(tmpSgprBuffer, 2), src=sgpr("SrdSync", 2)))
+            module.add(SMovB32(dst=sgpr(tmpSgprBuffer+2), src="BufferOOB"))
+            module.add(SMovB32(dst=sgpr(tmpSgprBuffer+3), src="Srd127_96"))
+            # Use tmpVgpr (=0) for both src data and vaddr offset
+            module.add(BufferStoreB32(src=vgpr(tmpVgpr.idx), vaddr=vgpr(tmpVgpr.idx), saddr=sgpr(tmpSgprBuffer, 4), soffset=0, \
+                                      mubuf=MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV), \
+                                      comment="reset synchronizer"))
+            module.add(SWaitCnt(vscnt=0, comment="wait for buffer store"))
+            writer.sgprPool.checkIn(tmpSgprBuffer)
         module.add(SBranch(labelName=reductionBodyLabel.getLabelName(), comment=""))
 
         return module
@@ -1135,7 +1150,7 @@ class GSUOn(GSU):
 
         if batchIdx == 0 and kernel["MbskPrefetchMethod"] == 0:
             module.add(lastGsuWgBusyWaitingLabel)
-            module.add(self.lastGsuWgBusyWaiting(writer, kernel, ss, tmpSgpr, lastGsuWgBusyWaitingLabel, reductionBodyLabel))
+            module.add(self.lastGsuWgBusyWaiting(writer, kernel, ss, tmpSgpr, tmpVgpr, lastGsuWgBusyWaitingLabel, reductionBodyLabel))
             module.add(partialWriteLabel)
 
         module.addComment0("optSingleColVgpr=%u optSharedColVgpr=%u optSGPRUsage=%s optSrdIncForRow=%u" % \
