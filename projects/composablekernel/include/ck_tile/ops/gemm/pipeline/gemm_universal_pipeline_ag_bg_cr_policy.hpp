@@ -1084,9 +1084,10 @@ struct UniversalGemmBasePolicy
 
         constexpr index_t KPack = static_cast<index_t>(BlockGemm::Traits::KPackA);
         constexpr index_t VecElems =
-            static_cast<index_t>(Problem::VectorLoadSize / sizeof(A) * PackedSize);
+            static_cast<index_t>(Problem::VectorLoadSize / sizeof(A) * PackedSize) *
+            numeric_traits<A>::PackedSize;
 
-        return (KPack < VecElems) ? KPack : VecElems;
+        return ck_tile::min(KPack, VecElems);
     }
 
     template <typename Problem>
@@ -1099,9 +1100,10 @@ struct UniversalGemmBasePolicy
 
         constexpr index_t KPack = static_cast<index_t>(BlockGemm::Traits::KPackB);
         constexpr index_t VecElems =
-            static_cast<index_t>(Problem::VectorLoadSize / sizeof(B) * PackedSize);
+            static_cast<index_t>(Problem::VectorLoadSize / sizeof(B) * PackedSize) *
+            numeric_traits<B>::PackedSize;
 
-        return (KPack < VecElems) ? KPack : VecElems;
+        return ck_tile::min(KPack, VecElems);
     }
 
     template <typename Problem>
@@ -1111,7 +1113,8 @@ struct UniversalGemmBasePolicy
         constexpr index_t PackedSize    = numeric_traits<ADataType>::PackedSize;
         constexpr auto a_lds_block_desc = Derived::template MakeALdsBlockDescriptor<Problem>();
         constexpr index_t smem_size_a   = integer_least_multiple(
-            a_lds_block_desc.get_element_space_size() * sizeof(ADataType) / PackedSize, 16);
+            a_lds_block_desc.get_element_space_size() * lds_padded_sizeof<ADataType>() / PackedSize,
+            16);
         return smem_size_a;
     }
 
@@ -1124,8 +1127,10 @@ struct UniversalGemmBasePolicy
                                                                         BLdsDataType_<Problem>>;
         constexpr auto BPackedSize                 = numeric_traits<BDataType>::PackedSize;
         constexpr auto b_lds_block_desc = Derived::template MakeBLdsBlockDescriptor<Problem>();
-        constexpr index_t smem_size_b   = integer_least_multiple(
-            b_lds_block_desc.get_element_space_size() * sizeof(BDataType) / BPackedSize, 16);
+        constexpr index_t smem_size_b =
+            integer_least_multiple(b_lds_block_desc.get_element_space_size() *
+                                       lds_padded_sizeof<BDataType>() / BPackedSize,
+                                   16);
         return smem_size_b;
     }
 
@@ -1450,11 +1455,17 @@ struct UniversalGemmPipelineAgBgCrPolicy
         constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Default;
 #endif
 
-        using ATypeToUse = remove_cvref_t<typename Problem::AComputeDataType>;
-        using BTypeToUse = remove_cvref_t<typename Problem::BComputeDataType>;
+        using ATypeToUse = if_select_t<typename Problem::AComputeDataType,
+                                       tf32_t,
+                                       float_t,
+                                       typename Problem::AComputeDataType>;
+        using BTypeToUse = if_select_t<typename Problem::BComputeDataType,
+                                       tf32_t,
+                                       float_t,
+                                       typename Problem::BComputeDataType>;
 
-        using WarpGemm = WarpGemmDispatcher<ATypeToUse,
-                                            BTypeToUse,
+        using WarpGemm = WarpGemmDispatcher<typename Problem::AComputeDataType,
+                                            typename Problem::BComputeDataType,
                                             typename Problem::CDataType,
                                             WarpTile::at(I0),
                                             WarpTile::at(I1),

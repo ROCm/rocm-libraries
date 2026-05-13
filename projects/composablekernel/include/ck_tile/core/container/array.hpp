@@ -198,7 +198,7 @@ CK_TILE_HOST_DEVICE static void print(const array<T, 0>&)
     printf("array{size: 0, data: []}");
 }
 
-template <typename, typename>
+template <typename T, typename>
 struct vector_traits;
 
 // specialization for array

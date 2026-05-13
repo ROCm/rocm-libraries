@@ -119,7 +119,7 @@ public:
 
         // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        const int64_t channels = xDims[1];
 
         // Validate scale has correct channel-only shape (required user parameter)
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
@@ -139,8 +139,8 @@ public:
         // Why: Backward computation uses saved statistics (mean_c, invStd_c) from forward pass.
         // These must be provided together (both or neither). If neither is provided, they will
         // be recomputed during backward pass (less efficient but valid).
-        bool hasMean = (mean != nullptr);
-        bool hasInvVariance = (invVar != nullptr);
+        const bool hasMean = (mean != nullptr);
+        const bool hasInvVariance = (invVar != nullptr);
         if(hasMean != hasInvVariance)
         {
             return {ErrorCode::INVALID_VALUE,

@@ -141,12 +141,12 @@ struct GemmPipelineAgBgCrImplBase
         constexpr auto a_lds_block_desc = Policy::template MakeALdsBlockDescriptor<Problem>();
         auto a_lds_block = make_tensor_view<address_space_enum::lds>(p_a_lds, a_lds_block_desc);
 
-        constexpr index_t APackedSize =
-            ck_tile::numeric_traits<remove_cvref_t<ALdsType>>::PackedSize;
-
         // TODO: LDS alignment should come from Policy!
-        constexpr index_t a_lds_block_space_size_aligned = integer_least_multiple(
-            sizeof(ALdsType) * a_lds_block_desc.get_element_space_size() / APackedSize, 16);
+        constexpr index_t APackedSize = numeric_traits<ALdsType>::PackedSize;
+        constexpr index_t a_lds_block_space_size =
+            lds_padded_sizeof<ALdsType>() * a_lds_block_desc.get_element_space_size() / APackedSize;
+        constexpr index_t a_lds_block_space_size_aligned =
+            integer_least_multiple(a_lds_block_space_size, 16);
 
         // B tile in LDS
         BLdsType* __restrict__ p_b_lds = static_cast<BLdsType*>(

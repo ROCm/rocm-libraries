@@ -187,6 +187,10 @@ std::shared_ptr<SolutionParameters>
     gemm->workgroupSizeX = workgroupSize.first;
     gemm->workgroupSizeY = workgroupSize.second;
 
+    // Pass StreamK flag from solution index parameters
+    if(solutionIndexParameters.streamK)
+        gemm->streamK = rocRoller::StreamKMode::TwoTile;
+
     // Direct To LDS only supported in certain situations
     if(kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6)
         gemm->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
@@ -197,8 +201,16 @@ std::shared_ptr<SolutionParameters>
        && (solutionIndexParameters.workgroupTile.m <= 64
            || solutionIndexParameters.workgroupTile.n <= 64))
     {
-        gemm->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        if (gemm->streamK == rocRoller::StreamKMode::None)
+        {
+            gemm->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+            gemm->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        }
+        else
+        {
+            gemm->loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->loadPathB = SolutionParams::LoadPath::BufferToVGPR;
+        }
     }
 
     if(not(SolutionParams::IsBufferToLDS(gemm->loadPathA)
@@ -253,10 +265,6 @@ std::shared_ptr<SolutionParameters>
         gemm->workgroupMappingDim = 0;
         gemm->workgroupRemapXCC   = true;
     }
-
-    // Pass StreamK flag from solution index parameters
-    if(solutionIndexParameters.streamK)
-        gemm->streamK = rocRoller::StreamKMode::Standard;
 
     // Pass tailLoops flag from solution index parameters
     gemm->tailLoops = solutionIndexParameters.tailLoops;

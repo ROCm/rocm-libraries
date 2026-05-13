@@ -23,7 +23,7 @@ class TestFp8E5M2 : public ::testing::Test
 {
 protected:
     // FP8 E5M2 has limited precision (only 2 mantissa bits), use larger tolerance
-    static constexpr float K_TOLERANCE = 0.5f; // NOLINT(readability-identifier-naming)
+    static constexpr float K_TOLERANCE = 0.5f;
 
     static bool nearEqual(float a, float b, float tol = K_TOLERANCE)
     {
@@ -42,7 +42,7 @@ protected:
 
 TEST_F(TestFp8E5M2, SignalingNaN)
 {
-    fp8_e5m2 snan = fp8_e5m2::from_bits(0x7D);
+    const fp8_e5m2 snan = fp8_e5m2::from_bits(0x7D);
     EXPECT_TRUE(isnan(snan));
 }
 
@@ -53,7 +53,7 @@ TEST_F(TestFp8E5M2, SignalingNaN)
 TEST_F(TestFp8E5M2, WideDynamicRange)
 {
     // Test a larger value (E5M2 has wider range than E4M3)
-    fp8_e5m2 d(1024.0f);
+    const fp8_e5m2 d(1024.0f);
     EXPECT_TRUE(nearEqual(static_cast<float>(d), 1024.0f, 128.0f));
 }
 
@@ -64,28 +64,31 @@ TEST_F(TestFp8E5M2, WideDynamicRange)
 TEST_F(TestFp8E5M2, NumericLimitsSpecificValues)
 {
     // E5M2 max is 0x7B = (1 + 3/4) * 2^15 = 1.75 * 32768 = 57344.0
-    fp8_e5m2 maxVal = std::numeric_limits<fp8_e5m2>::max();
+    const fp8_e5m2 maxVal = std::numeric_limits<fp8_e5m2>::max();
     auto maxFloat = static_cast<float>(maxVal);
     EXPECT_EQ(maxFloat, 57344.0f);
     EXPECT_EQ(maxVal.data, 0x7B);
 
     // E5M2 min (smallest positive normal) is 0x04 = 2^(1-15) = 2^-14 ≈ 6.1035e-5
-    fp8_e5m2 minVal = std::numeric_limits<fp8_e5m2>::min();
+    const fp8_e5m2 minVal = std::numeric_limits<fp8_e5m2>::min();
     auto minFloat = static_cast<float>(minVal);
     EXPECT_GT(minFloat, 6.0e-5f);
     EXPECT_LT(minFloat, 6.2e-5f);
     EXPECT_EQ(minVal.data, 0x04);
 
     // E5M2 lowest is -max = 0xFB = -57344.0
-    fp8_e5m2 lowestVal = std::numeric_limits<fp8_e5m2>::lowest();
+    const fp8_e5m2 lowestVal = std::numeric_limits<fp8_e5m2>::lowest();
     auto lowestFloat = static_cast<float>(lowestVal);
     EXPECT_EQ(lowestFloat, -57344.0f);
     EXPECT_EQ(lowestVal.data, 0xFB);
 
     // E5M2 epsilon is 2^-2 = 0.25 (2 mantissa bits)
-    fp8_e5m2 eps = std::numeric_limits<fp8_e5m2>::epsilon();
+    const fp8_e5m2 eps = std::numeric_limits<fp8_e5m2>::epsilon();
     auto epsFloat = static_cast<float>(eps);
     EXPECT_EQ(epsFloat, 0.25f);
+
+    // E5M2 round_error is 0.5
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<fp8_e5m2>::round_error()), 0.5f);
 }
 
 // ============================================================================
@@ -112,12 +115,12 @@ TEST_F(TestFp8E5M2, NamedConstants)
 
 TEST_F(TestFp8E5M2, ConstructSubnormal)
 {
-    fp8_e5m2 val(0x1p-15f);
+    const fp8_e5m2 val(0x1p-15f);
     EXPECT_EQ(static_cast<float>(val), 0x1p-15f);
 }
 
 TEST_F(TestFp8E5M2, ConstructFromInt64)
 {
-    fp8_e5m2 d(int64_t{16});
+    const fp8_e5m2 d(int64_t{16});
     EXPECT_TRUE(nearEqual(static_cast<float>(d), 16.0f));
 }

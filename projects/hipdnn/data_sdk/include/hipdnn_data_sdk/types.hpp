@@ -17,6 +17,8 @@
  * - fp8_e4m3: 8-bit floating point (1 sign, 4 exponent, 3 mantissa) - OCP format
  * - fp8_e5m2: 8-bit floating point (1 sign, 5 exponent, 2 mantissa) - OCP format
  * - fp8_e8m0: 8-bit floating point (0 sign, 8 exponent, 0 mantissa) - OCP MX scale format
+ * - fp6_e2m3: 6-bit floating point (1 sign, 2 exponent, 3 mantissa) - OCP MX format
+ * - fp6_e3m2: 6-bit floating point (1 sign, 3 exponent, 2 mantissa) - OCP MX format
  * - fp4_e2m1: 4-bit floating point (1 sign, 2 exponent, 1 mantissa) - OCP MX format
  *
  * **Forwarding Functions:**
@@ -52,6 +54,8 @@
 #include "types/Double.hpp"
 #include "types/Float.hpp"
 #include "types/Fp4E2M1.hpp"
+#include "types/Fp6E2M3.hpp"
+#include "types/Fp6E3M2.hpp"
 #include "types/Fp8E4M3.hpp"
 #include "types/Fp8E5M2.hpp"
 #include "types/Fp8E8M0.hpp"

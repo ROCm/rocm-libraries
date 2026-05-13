@@ -2292,44 +2292,24 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic
         }
         else
         {
-            static_for<0, num_access, 1>{}([&](auto idx_1d) {
+            static_ford<Sequence<num_access, DstScalarPerVector>>{}([&](auto access_idx) {
+                constexpr auto idx_1d = Number<access_idx[Number<0>{}]>{};
+                constexpr auto i      = Number<access_idx[Number<1>{}]>{};
                 constexpr auto idx_md = SpaceFillingCurve::GetIndex(idx_1d);
 
-                // copy data from src_buf into dst_vector
-                if constexpr(is_same<SrcData, DstData>::value)
-                {
-                    using src_vector_t =
-                        typename vector_type_maker<SrcData, DstScalarPerVector>::type::type;
+                constexpr index_t src_offset = src_desc.CalculateOffset(
+                    src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
 
-                    constexpr index_t src_offset =
-                        src_desc.CalculateOffset(src_slice_origin_idx + idx_md);
+                constexpr index_t dst_offset = dst_desc.CalculateOffset(
+                    dst_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
 
-                    constexpr index_t dst_offset =
-                        dst_desc.CalculateOffset(dst_slice_origin_idx + idx_md);
-                    src_vector_t* dst_buf_ptr =
-                        reinterpret_cast<src_vector_t*>(&dst_buf(Number<dst_offset>{}));
-                    const src_vector_t* src_buf_ptr =
-                        reinterpret_cast<const src_vector_t*>(&src_buf[Number<src_offset>{}]);
-                    *dst_buf_ptr = *src_buf_ptr;
-                }
-                else
-                {
-                    static_for<0, DstScalarPerVector, 1>{}([&](auto i) {
-                        constexpr index_t src_offset = src_desc.CalculateOffset(
-                            src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+                DstData v;
 
-                        constexpr index_t dst_offset = dst_desc.CalculateOffset(
-                            dst_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+                // apply element-wise operation
+                element_op_(v, src_buf[Number<src_offset>{}]);
 
-                        DstData v;
-
-                        // apply element-wise operation
-                        element_op_(v, src_buf[Number<src_offset>{}]);
-
-                        // apply type convert
-                        dst_buf(Number<dst_offset>{}) = v;
-                    });
-                }
+                // apply type convert
+                dst_buf(Number<dst_offset>{}) = v;
             });
         }
     }
@@ -2417,57 +2397,56 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic_InterRow
 
         constexpr auto num_access = SpaceFillingCurve::GetNumOfAccess();
 
-        static_for<0, num_access, 1>{}([&](auto idx_1d) {
+        static_ford<Sequence<num_access, DstScalarPerVector>>{}([&](auto access_idx) {
+            constexpr auto idx_1d = Number<access_idx[Number<0>{}]>{};
+            constexpr auto i      = Number<access_idx[Number<1>{}]>{};
             constexpr auto idx_md = SpaceFillingCurve::GetIndex(idx_1d);
 
-            // copy data from src_buf into dst_vector
-            static_for<0, DstScalarPerVector, 1>{}([&](auto i) {
-                // src_desc error, non constexpr, caused by merge transform
-                constexpr index_t src_offset = src_desc.CalculateOffset(
-                    src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+            // src_desc error, non constexpr, caused by merge transform
+            constexpr index_t src_offset = src_desc.CalculateOffset(src_slice_origin_idx + idx_md +
+                                                                    i * dst_scalar_step_in_vector);
 
-                constexpr index_t dst_offset = dst_desc.CalculateOffset(
-                    dst_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+            constexpr index_t dst_offset = dst_desc.CalculateOffset(dst_slice_origin_idx + idx_md +
+                                                                    i * dst_scalar_step_in_vector);
 
-                SrcData v_this_row, v_theother_row;
-                // int type temp value due to intrinsic requirement
-                int temp = 0;
+            SrcData v_this_row, v_theother_row;
+            // int type temp value due to intrinsic requirement
+            int temp = 0;
 
-                // apply element-wise operation
-                element_op_(v_this_row, src_buf[Number<src_offset>{}]);
+            // apply element-wise operation
+            element_op_(v_this_row, src_buf[Number<src_offset>{}]);
 
-                // apply intra-row permute.
-                if constexpr(IntraRowSwizzlePerm)
-                {
-                    temp = __builtin_amdgcn_permlane16(
-                        temp, type_convert_sp<int>(v_this_row), 0xb3a29180, 0xf7e6d5c4, 1, 0);
-                    v_this_row = type_convert_sp<SrcData>(temp);
-                }
+            // apply intra-row permute.
+            if constexpr(IntraRowSwizzlePerm)
+            {
+                temp = __builtin_amdgcn_permlane16(
+                    temp, type_convert_sp<int>(v_this_row), 0xb3a29180, 0xf7e6d5c4, 1, 0);
+                v_this_row = type_convert_sp<SrcData>(temp);
+            }
 
-                // apply inter-row permute.
-                temp           = __builtin_amdgcn_permlanex16(temp,
-                                                    type_convert_sp<int>(v_this_row),
-                                                    LowEightRowlaneIdx,
-                                                    HighEightRowLaneIdx,
-                                                    1,
-                                                    0);
-                v_theother_row = type_convert_sp<SrcData>(temp);
+            // apply inter-row permute.
+            temp           = __builtin_amdgcn_permlanex16(temp,
+                                                type_convert_sp<int>(v_this_row),
+                                                LowEightRowlaneIdx,
+                                                HighEightRowLaneIdx,
+                                                1,
+                                                0);
+            v_theother_row = type_convert_sp<SrcData>(temp);
 
-                if(get_thread_local_1d_id() % 32 < 16)
-                {
-                    // apply type convert
-                    dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_this_row);
-                    dst_buf(Number<dst_offset + DstScalarPerVector>{}) =
-                        type_convert_sp<DstData>(v_theother_row);
-                }
-                else
-                {
-                    // apply type convert
-                    dst_buf(Number<dst_offset + DstScalarPerVector>{}) =
-                        type_convert_sp<DstData>(v_this_row);
-                    dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_theother_row);
-                }
-            });
+            if(get_thread_local_1d_id() % 32 < 16)
+            {
+                // apply type convert
+                dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_this_row);
+                dst_buf(Number<dst_offset + DstScalarPerVector>{}) =
+                    type_convert_sp<DstData>(v_theother_row);
+            }
+            else
+            {
+                // apply type convert
+                dst_buf(Number<dst_offset + DstScalarPerVector>{}) =
+                    type_convert_sp<DstData>(v_this_row);
+                dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_theother_row);
+            }
         });
     }
 };
@@ -2544,36 +2523,35 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic_IntraRow
 
         constexpr auto num_access = SpaceFillingCurve::GetNumOfAccess();
 
-        static_for<0, num_access, 1>{}([&](auto idx_1d) {
+        static_ford<Sequence<num_access, DstScalarPerVector>>{}([&](auto access_idx) {
+            constexpr auto idx_1d = Number<access_idx[Number<0>{}]>{};
+            constexpr auto i      = Number<access_idx[Number<1>{}]>{};
             constexpr auto idx_md = SpaceFillingCurve::GetIndex(idx_1d);
 
-            // copy data from src_buf into dst_vector
-            static_for<0, DstScalarPerVector, 1>{}([&](auto i) {
-                // src_desc error, non constexpr, caused by merge transform
-                constexpr index_t src_offset = src_desc.CalculateOffset(
-                    src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+            // src_desc error, non constexpr, caused by merge transform
+            constexpr index_t src_offset = src_desc.CalculateOffset(src_slice_origin_idx + idx_md +
+                                                                    i * dst_scalar_step_in_vector);
 
-                constexpr index_t dst_offset = dst_desc.CalculateOffset(
-                    dst_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+            constexpr index_t dst_offset = dst_desc.CalculateOffset(dst_slice_origin_idx + idx_md +
+                                                                    i * dst_scalar_step_in_vector);
 
-                SrcData v_this_row;
-                // int type temp value due to intrinsic requirement
-                int temp = 0;
+            SrcData v_this_row;
+            // int type temp value due to intrinsic requirement
+            int temp = 0;
 
-                // apply element-wise operation
-                element_op_(v_this_row, src_buf[Number<src_offset>{}]);
+            // apply element-wise operation
+            element_op_(v_this_row, src_buf[Number<src_offset>{}]);
 
-                // apply intra-row permute.
-                if constexpr(IntraRowSwizzlePerm)
-                {
-                    temp = __builtin_amdgcn_permlane16(
-                        temp, type_convert_sp<int>(v_this_row), 0xb3a29180, 0xf7e6d5c4, 1, 0);
-                    v_this_row = type_convert_sp<SrcData>(temp);
-                }
+            // apply intra-row permute.
+            if constexpr(IntraRowSwizzlePerm)
+            {
+                temp = __builtin_amdgcn_permlane16(
+                    temp, type_convert_sp<int>(v_this_row), 0xb3a29180, 0xf7e6d5c4, 1, 0);
+                v_this_row = type_convert_sp<SrcData>(temp);
+            }
 
-                // apply type convert
-                dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_this_row);
-            });
+            // apply type convert
+            dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_this_row);
         });
     }
     ElementwiseOperation element_op_{};
@@ -2745,8 +2723,8 @@ struct ThreadwiseTensorSliceTransfer_DsTiledLoad
 
             if constexpr(is_same<remove_cvref_t<SrcData>, pk_i4_t>::value)
             {
-                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData to
-                // DstData)
+                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData
+                // to DstData)
                 vector_type_maker_t<DstData, SrcScalarPerVector> dst_tmp_vector;
 
                 constexpr index_t pack_size = 8;
@@ -2774,8 +2752,8 @@ struct ThreadwiseTensorSliceTransfer_DsTiledLoad
                               is_same<remove_cvref_t<DstData>, half_t>::value &&
                               SrcScalarPerVector % 2 == 0)
             {
-                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData to
-                // DstData)
+                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData
+                // to DstData)
                 vector_type_maker_t<DstData, SrcScalarPerVector> dst_tmp_vector;
 
                 constexpr index_t pack_size = 2;
@@ -2798,8 +2776,8 @@ struct ThreadwiseTensorSliceTransfer_DsTiledLoad
             }
             else
             {
-                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData to
-                // DstData)
+                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData
+                // to DstData)
                 vector_type_maker_t<DstData, SrcScalarPerVector / PackedSize> dst_tmp_vector;
 
                 // TODO: if SrcData and DstData are vetor type, then static_cast may not compile
@@ -2940,8 +2918,8 @@ struct ThreadwiseTensorSliceTransfer_DsTiledLoad
 
             if constexpr(is_same<remove_cvref_t<SrcData>, pk_i4_t>::value)
             {
-                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData to
-                // DstData)
+                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData
+                // to DstData)
                 vector_type_maker_t<DstData, SrcScalarPerVector> dst_tmp_vector;
                 vector_type<DstData, 2> scale_vector;
                 scale_vector.template AsType<DstData>()(Number<0>{}) = scale;
@@ -2974,8 +2952,8 @@ struct ThreadwiseTensorSliceTransfer_DsTiledLoad
                               is_same<remove_cvref_t<DstData>, half_t>::value &&
                               SrcScalarPerVector % 2 == 0)
             {
-                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData to
-                // DstData)
+                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData
+                // to DstData)
                 vector_type_maker_t<DstData, SrcScalarPerVector> dst_tmp_vector;
 
                 constexpr index_t pack_size = 2;
@@ -2998,8 +2976,8 @@ struct ThreadwiseTensorSliceTransfer_DsTiledLoad
             }
             else
             {
-                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData to
-                // DstData)
+                // copy data from src_tmp_vector to dst_tmp_vector (data cast data from SrcData
+                // to DstData)
                 vector_type_maker_t<DstData, SrcScalarPerVector> dst_tmp_vector;
 
                 // TODO: if SrcData and DstData are vetor type, then static_cast may not compile

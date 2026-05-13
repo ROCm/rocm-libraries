@@ -97,8 +97,8 @@ struct BlockUniversalGemmAsBsCr
     using BComputeDataType = remove_cvref_t<typename Traits::BComputeDataType>;
     using CDataType        = remove_cvref_t<typename Traits::CDataType>;
 
-    using ATypeToUse = AComputeDataType;
-    using BTypeToUse = BComputeDataType;
+    using ATypeToUse = if_select_t<AComputeDataType, tf32_t, float_t, AComputeDataType>;
+    using BTypeToUse = if_select_t<BComputeDataType, tf32_t, float_t, BComputeDataType>;
 
     using WarpGemm = remove_cvref_t<typename Traits::WarpGemm>;
 

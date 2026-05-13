@@ -24,30 +24,35 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
 
-namespace hipdnn_integration_tests {
+namespace hipdnn_integration_tests
+{
 
 using namespace hipdnn_data_sdk;
 using namespace hipdnn_frontend;
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
 template <typename DataType, typename TestCaseType>
-class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType> {
-   protected:
+class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType>
+{
+protected:
     int _deviceId = 0;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>>
         _tensorIdToValidatorMap;
     std::vector<std::function<void()>> _deferredValidators;
 
-    void SetUp() override {
+    void SetUp() override
+    {
         SKIP_IF_NO_DEVICES();
 
         // Skip tests that are listed as expected failures in the config
         auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
-        if (testInfo != nullptr) {
-            std::string fullName =
-                std::string(testInfo->test_suite_name()) + "." + std::string(testInfo->name());
-            if (TestConfig::get().isExpectedFailure(fullName)) {
+        if(testInfo != nullptr)
+        {
+            std::string fullName
+                = std::string(testInfo->test_suite_name()) + "." + std::string(testInfo->name());
+            if(TestConfig::get().isExpectedFailure(fullName))
+            {
                 GTEST_SKIP() << "Expected failure (XFAIL)";
             }
         }
@@ -61,11 +66,14 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
 
     // Determine tolerance for an output tensor based on the graph and
     // configured tolerance mode for the engine.
-    float getTolerance(int64_t engineId, const hipdnn_frontend::graph::Graph& graph,
-                       const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output) {
+    float getTolerance(int64_t engineId,
+                       const hipdnn_frontend::graph::Graph& graph,
+                       const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output)
+    {
         ToleranceMode mode = TestConfig::get().getToleranceMode(engineId);
 
-        if (mode == ToleranceMode::Default) {
+        if(mode == ToleranceMode::DEFAULT)
+        {
             // We determine the tolerance based on the last non-PointwiseNode
             // (the root op). This will be gradually updated to use dynamic
             // calculation as possible; eventually, the tolerance will be
@@ -74,13 +82,15 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
             // NOTE: after validate(), the graph's sub-nodes are in topological order.
             const hipdnn_frontend::graph::INode* rootOp = nullptr;
             graph.visit([&](const hipdnn_frontend::graph::INode& node) {
-                if (dynamic_cast<const hipdnn_frontend::graph::PointwiseNode*>(&node) == nullptr &&
-                    dynamic_cast<const hipdnn_frontend::graph::Graph*>(&node) == nullptr) {
+                if(dynamic_cast<const hipdnn_frontend::graph::PointwiseNode*>(&node) == nullptr
+                   && dynamic_cast<const hipdnn_frontend::graph::Graph*>(&node) == nullptr)
+                {
                     rootOp = &node;
                 }
             });
 
-            if (rootOp == nullptr) {
+            if(rootOp == nullptr)
+            {
                 ADD_FAILURE() << "getTolerance: no root op found in graph";
                 return 0.0f;
             }
@@ -92,7 +102,8 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
         return 0.0f;
     }
 
-    void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed) {
+    void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
+    {
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
         std::vector<int64_t> outputTensorIds;
 
@@ -115,11 +126,13 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
 
         // Lazily register validators after graph execution since tensor Ids and types may be
         // inferred during graph finalization
-        for (const auto& registerValidator : _deferredValidators) {
+        for(const auto& registerValidator : _deferredValidators)
+        {
             registerValidator();
         }
 
-        for (const auto& tensorId : outputTensorIds) {
+        for(const auto& tensorId : outputTensorIds)
+        {
             auto& cpuTensor = cpuBundle.tensors.at(tensorId);
             auto& gpuTensor = gpuBundle.tensors.at(tensorId);
 
@@ -129,7 +142,8 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
             // host when requested by the validation step.
             gpuTensor->markDeviceModified();
 
-            if (_tensorIdToValidatorMap.find(tensorId) == _tensorIdToValidatorMap.end()) {
+            if(_tensorIdToValidatorMap.find(tensorId) == _tensorIdToValidatorMap.end())
+            {
                 FAIL() << "No validator registered for tensor with id: " << tensorId
                        << ", name: " << getOutputTensorName(tensorId);
             }
@@ -141,15 +155,18 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
     }
 
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
-                           float tolerance) {
+                           float tolerance)
+    {
         registerValidator(attr, tolerance, tolerance);
     }
 
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
-                           float absoluteTolerance, float relativeTolerance) {
+                           float absoluteTolerance,
+                           float relativeTolerance)
+    {
         // Since the graph can infer properties + Ids, we defer validator registration until right
         // before validation in verifyGraph
-        _deferredValidators.emplace_back([=]() {
+        _deferredValidators.emplace_back([this, attr, absoluteTolerance, relativeTolerance]() {
             _tensorIdToValidatorMap.insert(
                 {attr->get_uid(),
                  hipdnn_test_sdk::utilities::createAllCloseValidator(
@@ -159,13 +176,14 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
     }
 
     void registerRmsValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
-                              float rmsThreshold) {
+                              float rmsThreshold)
+    {
         // Since the graph can infer properties + Ids, we defer validator registration until right
         // before validation in verifyGraph
-        _deferredValidators.emplace_back([=]() {
-            _tensorIdToValidatorMap.insert(
-                {attr->get_uid(), hipdnn_test_sdk::utilities::createRmsValidator(
-                                      toSdkType(attr->get_data_type()), rmsThreshold)});
+        _deferredValidators.emplace_back([this, attr, rmsThreshold]() {
+            _tensorIdToValidatorMap.insert({attr->get_uid(),
+                                            hipdnn_test_sdk::utilities::createRmsValidator(
+                                                toSdkType(attr->get_data_type()), rmsThreshold)});
             _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
         });
     }
@@ -173,14 +191,18 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
                                  hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle,
                                  hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle,
-                                 std::vector<int64_t>& outputTensorIds) {
+                                 std::vector<int64_t>& outputTensorIds)
+    {
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
-            for (const auto& tensorAttr : node.getNodeOutputTensorAttributes()) {
-                if (tryAddTensorToBundles(tensorAttr, cpuBundle, gpuBundle)) {
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                if(tryAddTensorToBundles(tensorAttr, cpuBundle, gpuBundle))
+                {
                     outputTensorIds.push_back(tensorAttr->get_uid());
                 }
             }
-            for (const auto& tensorAttr : node.getNodeInputTensorAttributes()) {
+            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+            {
                 tryAddTensorToBundles(tensorAttr, cpuBundle, gpuBundle);
             }
         });
@@ -188,55 +210,62 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
 
     virtual void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
                                   hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
-                                  unsigned int seed) {
-        for (auto& tensorPair : bundle.tensors) {
+                                  unsigned int seed)
+    {
+        for(auto& tensorPair : bundle.tensors)
+        {
             bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
         }
     }
 
     static float toleranceForNode(const hipdnn_frontend::graph::INode& node,
-                                  hipdnn_frontend::DataType dataType) {
-        switch (dataType) {
-            case hipdnn_frontend::DataType::FLOAT:
-                return toleranceForNodeTyped<float>(node);
-            case hipdnn_frontend::DataType::HALF:
-                return toleranceForNodeTyped<half>(node);
-            case hipdnn_frontend::DataType::BFLOAT16:
-                return toleranceForNodeTyped<bfloat16>(node);
-            default:
-                ADD_FAILURE() << "toleranceForNode: unsupported data type";
-                return 0.0f;
+                                  hipdnn_frontend::DataType dataType)
+    {
+        switch(dataType)
+        {
+        case hipdnn_frontend::DataType::FLOAT:
+            return toleranceForNodeTyped<float>(node);
+        case hipdnn_frontend::DataType::HALF:
+            return toleranceForNodeTyped<half>(node);
+        case hipdnn_frontend::DataType::BFLOAT16:
+            return toleranceForNodeTyped<bfloat16>(node);
+        default:
+            ADD_FAILURE() << "toleranceForNode: unsupported data type";
+            return 0.0f;
         }
     }
 
     template <typename T>
-    static float toleranceForNodeTyped(const hipdnn_frontend::graph::INode& node) {
+    static float toleranceForNodeTyped(const hipdnn_frontend::graph::INode& node)
+    {
         namespace fe = hipdnn_frontend::graph;
         using namespace hipdnn_test_sdk::utilities;
 
-        if (dynamic_cast<const fe::ConvolutionFpropNode*>(&node) != nullptr)
+        if(dynamic_cast<const fe::ConvolutionFpropNode*>(&node) != nullptr)
             return static_cast<float>(conv::getToleranceFwd<T>());
-        if (dynamic_cast<const fe::ConvolutionDgradNode*>(&node) != nullptr)
+        if(dynamic_cast<const fe::ConvolutionDgradNode*>(&node) != nullptr)
             return static_cast<float>(conv::getToleranceBwd<T>());
-        if (dynamic_cast<const fe::ConvolutionWgradNode*>(&node) != nullptr)
+        if(dynamic_cast<const fe::ConvolutionWgradNode*>(&node) != nullptr)
             return static_cast<float>(conv::getToleranceWrw<T>());
-        if (dynamic_cast<const fe::BatchnormInferenceNodeVarianceExt*>(&node) != nullptr)
+        if(dynamic_cast<const fe::BatchnormInferenceNodeVarianceExt*>(&node) != nullptr)
             return static_cast<float>(batchnorm::getToleranceInferenceWithVariance<T>());
-        if (dynamic_cast<const fe::BatchnormInferenceNode*>(&node) != nullptr)
+        if(dynamic_cast<const fe::BatchnormInferenceNode*>(&node) != nullptr)
             return static_cast<float>(batchnorm::getToleranceInference<T>());
-        if (dynamic_cast<const fe::BatchnormNode*>(&node) != nullptr)
+        if(dynamic_cast<const fe::BatchnormNode*>(&node) != nullptr)
             return static_cast<float>(batchnorm::getToleranceTraining<T>());
-        if (dynamic_cast<const fe::BatchnormBackwardNode*>(&node) != nullptr)
+        if(dynamic_cast<const fe::BatchnormBackwardNode*>(&node) != nullptr)
             return static_cast<float>(batchnorm::getToleranceBackward<T>());
-        if (dynamic_cast<const fe::MatmulNode*>(&node) != nullptr)
+        if(dynamic_cast<const fe::MatmulNode*>(&node) != nullptr)
             return static_cast<float>(matmul::getTolerance<T>());
 
         ADD_FAILURE() << "toleranceForNodeTyped: unsupported node type";
         return 0.0f;
     }
 
-    void executeGpuGraph(hipdnnHandle_t handle, hipdnn_frontend::graph::Graph& graph,
-                         hipdnn_test_sdk::utilities::GraphTensorBundle& bundle) {
+    void executeGpuGraph(hipdnnHandle_t handle,
+                         hipdnn_frontend::graph::Graph& graph,
+                         hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
+    {
         int64_t workspaceSize;
         auto result = graph.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
@@ -249,25 +278,29 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
     }
 
     void executeCpuGraph(hipdnn_frontend::graph::Graph& graph,
-                         hipdnn_test_sdk::utilities::GraphTensorBundle& bundle) {
+                         hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
+    {
         auto flatbufferGraph = graph.buildFlatbufferOperationGraph();
 
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), bundle.toHostVariantPack());
     }
 
-    std::string getOutputTensorName(int64_t tensorId) {
+    std::string getOutputTensorName(int64_t tensorId)
+    {
         return _tensorIdToNameMap.at(tensorId);
     }
 
     bool tryAddTensorToBundles(
         const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensorAttr,
         hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle,
-        hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle) {
+        hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle)
+    {
         int64_t tensorId = tensorAttr->get_uid();
 
-        if (tensorAttr->get_is_virtual() ||
-            cpuBundle.tensors.find(tensorId) != cpuBundle.tensors.end()) {
+        if(tensorAttr->get_is_virtual()
+           || cpuBundle.tensors.find(tensorId) != cpuBundle.tensors.end())
+        {
             return false;
         }
 
@@ -281,4 +314,4 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
 
 // NOLINTEND (portability-template-virtual-member-function)
 
-}  // namespace hipdnn_integration_tests
+} // namespace hipdnn_integration_tests

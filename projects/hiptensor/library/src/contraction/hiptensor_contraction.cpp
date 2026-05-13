@@ -200,15 +200,6 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
     bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY)
                       || (opC != HIPTENSOR_OP_IDENTITY);
 
-    //TODO: Before fixing CK conversion problem from bhalf_t to float, disable bhalf_t support for contraction with unary op
-    if(hasUnaryOp
-       && (descCompute == HIPTENSOR_COMPUTE_DESC_16BF || descA->mType == HIPTENSOR_R_16BF
-           || descB->mType == HIPTENSOR_R_16BF
-           || (descC != nullptr && descC->mType == HIPTENSOR_R_16BF)))
-    {
-        return HIPTENSOR_STATUS_NOT_SUPPORTED;
-    }
-
     auto contractionOp = descC ? (descCompute == HIPTENSOR_COMPUTE_DESC_C32F
                                           || descCompute == HIPTENSOR_COMPUTE_DESC_C64F
                                       ? hiptensor::ContractionOpId_t::BILINEAR_COMPLEX
@@ -409,7 +400,7 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
             // log perf metrics (not name/id)
             snprintf(msg,
                      sizeof(msg),
-                     "KernelId: %lu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
+                     "KernelId: %zu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
                      metrics.mKernelUid,
                      metrics.mKernelName.c_str(),
                      metrics.mAvgTimeMs,
@@ -449,9 +440,9 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
     {
         snprintf(msg,
                  sizeof(msg),
-                 "Insufficient workspace: req: %lu alloc: %lu (%s)",
+                 "Insufficient workspace: req: %zu alloc: %llu (%s)",
                  cSolution->workspaceSize(),
-                 workspaceSize,
+                 static_cast<unsigned long long>(workspaceSize),
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorContraction", msg);
     }
@@ -684,26 +675,27 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
         else if(pref->mSelectionAlgorithm == HIPTENSOR_ALGO_ACTOR_CRITIC)
         {
             if(hasUnaryOp)
-                result = hiptensor::actorCriticModelUnaryOps(&winner,
-                                                             solutionQ.solutions(),
-                                                             ADataType,
-                                                             hiptensor::getTensorLengths(desc->mDescA),
-                                                             hiptensor::getTensorStrides(desc->mDescA),
-                                                             desc->mModeA,
-                                                             BDataType,
-                                                             hiptensor::getTensorLengths(desc->mDescB),
-                                                             hiptensor::getTensorStrides(desc->mDescB),
-                                                             desc->mModeB,
-                                                             DDataType,
-                                                             hiptensor::getTensorLengths(desc->mDescC),
-                                                             hiptensor::getTensorStrides(desc->mDescC),
-                                                             desc->mModeC,
-                                                             EDataType,
-                                                             hiptensor::getTensorLengths(desc->mDescD),
-                                                             hiptensor::getTensorStrides(desc->mDescD),
-                                                             desc->mModeC,
-                                                             desc->mDescCompute,
-                                                             workspaceSizeLimit);
+                result
+                    = hiptensor::actorCriticModelUnaryOps(&winner,
+                                                          solutionQ.solutions(),
+                                                          ADataType,
+                                                          hiptensor::getTensorLengths(desc->mDescA),
+                                                          hiptensor::getTensorStrides(desc->mDescA),
+                                                          desc->mModeA,
+                                                          BDataType,
+                                                          hiptensor::getTensorLengths(desc->mDescB),
+                                                          hiptensor::getTensorStrides(desc->mDescB),
+                                                          desc->mModeB,
+                                                          DDataType,
+                                                          hiptensor::getTensorLengths(desc->mDescC),
+                                                          hiptensor::getTensorStrides(desc->mDescC),
+                                                          desc->mModeC,
+                                                          EDataType,
+                                                          hiptensor::getTensorLengths(desc->mDescD),
+                                                          hiptensor::getTensorStrides(desc->mDescD),
+                                                          desc->mModeC,
+                                                          desc->mDescCompute,
+                                                          workspaceSizeLimit);
             else
                 result = hiptensor::actorCriticModel(&winner,
                                                      solutionQ.solutions(),
@@ -750,7 +742,7 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
     // Log the selected contraction solution and selection timing
     snprintf(msg,
              sizeof(msg),
-             "Algo: %d, KernelId: %lu, KernelName: %s, SelectionTime: %0.3f ms",
+             "Algo: %d, KernelId: %zu, KernelName: %s, SelectionTime: %0.3f ms",
              pref->mSelectionAlgorithm,
              winner->uid(),
              winner->kernelName().c_str(),

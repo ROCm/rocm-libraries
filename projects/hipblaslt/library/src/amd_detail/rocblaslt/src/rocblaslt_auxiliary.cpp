@@ -1955,6 +1955,7 @@ rocblaslt_status
             if(rocblaslt_status_success
                == getAllSolutions(prob, handle, allSolutionsResults, pref->max_workspace_bytes))
             {
+                status = rocblaslt_status_success;
                 int oriReturnAlgoCount = *returnAlgoCount;
                 for(int i = 0;
                     *returnAlgoCount < requestedAlgoCount && i < allSolutionsResults.size();
@@ -2185,10 +2186,6 @@ rocblaslt_status
         }
 
         log_api(__func__, "returnAlgoCount", results.size());
-        if(status != rocblaslt_status_success)
-        {
-            throw status;
-        }
 
         int duplicated_counts = 0;
         static TensileLite::StringSet emptySet({});
@@ -2209,6 +2206,7 @@ rocblaslt_status
                == getAllSolutions(
                    gemmData, handle, gemmType, allSolutionsResults, maxWorkspaceBytes))
             {
+                status = rocblaslt_status_success;
                 int oriReturnAlgoCount = results.size();
                 for(int i = 0;
                     results.size() < requestedAlgoCount && i < allSolutionsResults.size();
@@ -2245,6 +2243,11 @@ rocblaslt_status
         }
 
         log_api(__func__, "duplicated counts from getAll", duplicated_counts);
+
+        if(status != rocblaslt_status_success)
+        {
+            throw status;
+        }
     }
     catch(const rocblaslt_status& status)
     {

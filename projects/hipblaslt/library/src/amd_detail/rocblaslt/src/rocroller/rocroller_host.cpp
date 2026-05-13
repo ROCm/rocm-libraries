@@ -425,10 +425,6 @@ rocblaslt_status
                                          int                          solutionIndex,
                                          std::shared_ptr<GemmKernel>& kernel)
 {
-    // TODO: Remove once rocRoller supports swizzleA and swizzleB
-    if (kernelType.swizzleA || kernelType.swizzleB)
-        return rocblaslt_status_not_implemented;
-
     auto params = genSolutionParameters(kernelType, solutionIndexParameter);
     try
     {

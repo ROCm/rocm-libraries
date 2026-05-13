@@ -49,7 +49,7 @@ inline void dispatchMessage(hipdnnSeverity_t severity,
     if(callback != nullptr && !message.empty())
     {
         // Use bracketed format for consistency with backend: [component] message
-        std::string formattedMsg = "[" + std::string(componentName) + "] " + message;
+        const std::string formattedMsg = "[" + std::string(componentName) + "] " + message;
         callback(severity, formattedMsg.c_str());
     }
 }
@@ -68,7 +68,7 @@ public:
 
     ~LogStream()
     {
-        std::string msg = _stream.str();
+        const std::string msg = _stream.str();
         if(!msg.empty())
         {
             dispatchMessage(_severity, _componentName, msg);

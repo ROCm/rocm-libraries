@@ -1,18 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-<<<<<<< HEAD
 # Custom kernels - build from assembly source files into a single combined .co
 
 # Determine the destination directory for custom kernels
-=======
-# Custom kernels
-
-set(CUSTOM_KERNELS
-    "${CMAKE_CURRENT_SOURCE_DIR}/f4gemm_bf16_per1x32Fp4_noBpreShuffle_256x256.co"
-)
-
->>>>>>> gfx1310
 if(NOT "${HIPBLASLT_TENSILE_LIBPATH}")
     set(CUSTOM_KERNEL_DST_DIR "${hipblaslt_BINARY_DIR}/Tensile/library")
 else()
@@ -21,7 +12,6 @@ endif()
 
 file(MAKE_DIRECTORY "${CUSTOM_KERNEL_DST_DIR}")
 
-<<<<<<< HEAD
 find_program(ROCM_LLD
     NAMES ld.lld
     PATH_SUFFIXES lib/llvm/bin llvm/bin bin
@@ -132,24 +122,5 @@ else()
         message(FATAL_ERROR "ROCm ld.lld not found, cannot build custom kernels from assembly")
     endif()
 endif()
-=======
-set(CUSTOM_KERNEL_OUTPUTS)
-foreach(CUSTOM_KERNEL_FILE ${CUSTOM_KERNELS})
-    get_filename_component(CUSTOM_KERNEL_FILENAME "${CUSTOM_KERNEL_FILE}" NAME)
-    set(CUSTOM_KERNEL_DST "${CUSTOM_KERNEL_DST_DIR}/${CUSTOM_KERNEL_FILENAME}")
-    add_custom_command(
-        OUTPUT "${CUSTOM_KERNEL_DST}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CUSTOM_KERNEL_FILE}" "${CUSTOM_KERNEL_DST}"
-        DEPENDS "${CUSTOM_KERNEL_FILE}"
-        COMMENT "Copying ${CUSTOM_KERNEL_FILENAME}"
-        VERBATIM
-    )
-    list(APPEND CUSTOM_KERNEL_OUTPUTS "${CUSTOM_KERNEL_DST}")
-endforeach()
-
-add_custom_target(custom-kernels ALL
-    DEPENDS ${CUSTOM_KERNEL_OUTPUTS}
-)
->>>>>>> gfx1310
 
 add_dependencies(hipblaslt-rocroller custom-kernels)

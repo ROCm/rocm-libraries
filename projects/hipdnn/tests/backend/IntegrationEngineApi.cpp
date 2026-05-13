@@ -95,7 +95,7 @@ TEST_F(IntegrationEngineApi, SetAttrEngineAlreadyFinalized)
 
 TEST_F(IntegrationEngineApi, Finalize)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     EXPECT_EQ(hipdnnBackendFinalize(_engine), HIPDNN_STATUS_BAD_PARAM);
     test_util::populateTestEngine(_engine, &_graph, _handle, gidx);
@@ -105,7 +105,7 @@ TEST_F(IntegrationEngineApi, Finalize)
 TEST_F(IntegrationEngineApi, GetEngineOperationGraph)
 {
     hipdnnBackendDescriptor_t graph = nullptr;
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     test_util::populateTestEngine(_engine, &_graph, _handle, gidx, true);
     EXPECT_EQ(hipdnnBackendGetAttribute(_engine,
@@ -122,7 +122,7 @@ TEST_F(IntegrationEngineApi, GetEngineOperationGraph)
 
 TEST_F(IntegrationEngineApi, GetEngineGlobalIndex)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
     int64_t gidxOut;
 
     test_util::populateTestEngine(_engine, &_graph, _handle, gidx, true);

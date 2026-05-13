@@ -21,7 +21,7 @@ struct FakeAttributes : public Attributes<FakeAttributes>
 class FakeNode : public NodeCRTP<FakeNode>
 {
 public:
-    FakeNode(FakeAttributes&& fakeAttrs, GraphAttributes const& graphAttrs)
+    FakeNode(FakeAttributes&& fakeAttrs, const GraphAttributes& graphAttrs)
         : NodeCRTP<FakeNode>(graphAttrs)
         , attributes(std::move(fakeAttrs))
     {
@@ -31,10 +31,10 @@ public:
 
 TEST(TestNode, PostValidateNodeComputeDataType)
 {
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     FakeNode node(FakeAttributes{}, graphAttributes);
 
-    std::vector<std::pair<DataType, ErrorCode>> expectedResults
+    const std::vector<std::pair<DataType, ErrorCode>> expectedResults
         = {{DataType::NOT_SET, ErrorCode::ATTRIBUTE_NOT_SET},
            {DataType::FLOAT, ErrorCode::OK},
            {DataType::HALF, ErrorCode::OK},
@@ -112,7 +112,7 @@ TEST_P(TestNodePostValidateNodeTensors, Correctness)
 
               for(const auto& [id, tensor] : tensors)
               {
-                  std::string isValid = (tensor->validate().is_good()) ? "VALID" : "INVALID";
+                  const std::string isValid = (tensor->validate().is_good()) ? "VALID" : "INVALID";
                   ret += isValid + ", ";
               }
 
@@ -125,9 +125,9 @@ TEST_P(TestNodePostValidateNodeTensors, Correctness)
               return ret;
           };
 
-    std::string caseString = "Inputs: " + tensorsToString(_attributes.inputs)
-                             + " Outputs: " + tensorsToString(_attributes.outputs);
-    FakeNode node(std::move(_attributes), _graphAttributes);
+    const std::string caseString = "Inputs: " + tensorsToString(_attributes.inputs)
+                                   + " Outputs: " + tensorsToString(_attributes.outputs);
+    const FakeNode node(std::move(_attributes), _graphAttributes);
 
     auto nodes = node.getNodeOutputTensorAttributes();
 

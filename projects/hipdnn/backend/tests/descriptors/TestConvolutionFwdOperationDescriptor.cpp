@@ -511,7 +511,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeTensorDescriptor)
                                        1,
                                        &elementCount,
                                        static_cast<void*>(&rawX)));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
@@ -817,7 +817,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("ConvolutionFwdOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("w_uid=" + std::to_string(K_TENSOR_W_UID)), std::string::npos);

@@ -69,6 +69,8 @@ namespace hipdnn_frontend::graph
 class BatchnormAttributes : public Attributes<BatchnormAttributes>
 {
 public:
+    BatchnormAttributes() = default;
+
     enum class InputNames
     {
         X = 0,
