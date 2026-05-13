@@ -16,11 +16,18 @@
 
 using namespace hip_kernel_provider;
 
+constexpr uint32_t EXPECTED_ENGINES = 0
+
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-constexpr uint32_t EXPECTED_ENGINES = 2u;
-#else
-constexpr uint32_t EXPECTED_ENGINES = 1u;
+ + 1
 #endif
+
+#ifdef HIPDNN_ENGINE_HIP_KERNEL
+ + 1
+#endif
+
+// Add more blocks like this as more engines are implemented
+;
 
 TEST(TestHipKernelContainer, ConstructsSuccessfully)
 {
@@ -36,8 +43,12 @@ TEST(TestHipKernelContainer, CopyEngineIdsReturnsExpectedEngineCount)
     EXPECT_EQ(numEngines, EXPECTED_ENGINES);
 }
 
+
 TEST(TestHipKernelContainer, CopyEngineIdsWithBufferContainsHipKernelEngineId)
 {
+    #ifndef HIPDNN_ENGINE_HIP_KERNEL
+        GTEST_SKIP();
+    #else
     std::array<int64_t, EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
     auto totalEngines
@@ -45,7 +56,14 @@ TEST(TestHipKernelContainer, CopyEngineIdsWithBufferContainsHipKernelEngineId)
 
     EXPECT_EQ(totalEngines, EXPECTED_ENGINES);
     EXPECT_EQ(numEngines, EXPECTED_ENGINES);
-    EXPECT_EQ(engineIds[0], hipdnn_data_sdk::utilities::HIP_KERNEL_ENGINE_ID);
+
+    bool containsHipKernelEngine = false;
+    for (int64_t engine : engineIds)
+    {
+        containsHipKernelEngine |= (engine == hipdnn_data_sdk::utilities::HIP_KERNEL_ENGINE_ID);
+    }
+    EXPECT_EQ(containsHipKernelEngine, true);
+    #endif
 }
 
 TEST(TestHipKernelContainer, GetEngineManagerReturnsValidReference)
