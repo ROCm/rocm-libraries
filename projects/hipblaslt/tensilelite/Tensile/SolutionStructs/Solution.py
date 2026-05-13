@@ -4952,11 +4952,13 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "LoopIters need to greater than 0")
       return
 
-    # In Solution.py, reject SIA3 + PLR>0 + PGR2 when DepthU is too small for                                                                                                                                    
-    # the prefetch scheduling to avoid VGPR WAR hazards  
-    if state["ScheduleIterAlg"] == 3 and state["PrefetchLocalRead"] > 0 \
+    # Reject SIA3 + PLR>0 + PGR2 + BufferLoad=0 when LoopIters <= 1.
+    # With flat addressing the prefetch scheduling duplicates a load (see analysis.txt).
+    # BufferLoad=1 is unaffected because SRD-based offsets avoid the duplication.
+    if not state["BufferLoad"] \
+       and state["ScheduleIterAlg"] == 3 and state["PrefetchLocalRead"] > 0 \
        and state["PrefetchGlobalRead"] == 2 and state["LoopIters"] <= 1:
-      reject(state, printRejectionReason, "ScheduleIterAlg=3 with PrefetchLocalRead and PrefetchGlobalRead=2 requires LoopIters > 1")
+      reject(state, printRejectionReason, "BufferLoad=0 with ScheduleIterAlg=3, PrefetchLocalRead and PrefetchGlobalRead=2 requires LoopIters > 1")
       return
 
     # Since we use PLR >= LoopIters for allocating numberOfIters vgprBuffer for a while
