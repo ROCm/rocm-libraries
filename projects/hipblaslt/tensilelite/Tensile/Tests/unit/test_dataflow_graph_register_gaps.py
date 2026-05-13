@@ -3364,13 +3364,12 @@ class TestSSetPriorCoverage:
     op with NO register dataflow (`getParams() -> {prior}` only; no
     RegisterContainer reads or writes).
 
-    Fix shape: add to `_SSETPRIO_CLASS_NAMES`, extend `_NoDataflowRule.
-    applies` to claim it, exclude from cross-graph data-flow identity set
-    in `build_dataflow_graph`, and add a `SSETPRIO` category in
-    `_captureSubIterToBuilder` so it routes through
-    `_class_tag_from_category` rather than falling back through
-    `_class_tag(UNKNOWN-class)` (which would still work post-fix because
-    `_class_tag` now also recognizes `_is_ssetprio`).
+    Fix shape: register SSetPrior in `_CLASS_NAME_TO_CATEGORY` mapped to
+    `InstructionCategory.SSETPRIO`, extend `_NoDataflowRule.applies` to
+    claim it, exclude from cross-graph data-flow identity set in
+    `build_dataflow_graph`, and add a `SSETPRIO` category in
+    `_captureSubIterToBuilder` so the capture pipeline tags bare SSetPrior
+    leaves with the same string the rocisa-derived registry agrees on.
     """
 
     def _build_ssetprio(self):
@@ -3402,20 +3401,35 @@ class TestSSetPriorCoverage:
         assert wrapper.reads == ()
         assert wrapper.writes == ()
 
-    def test_ssetprio_class_tag_does_not_raise(self):
-        """Pre-fix: `WrappedInstruction.class_tag(SSetPrior(...))` raised
-        CaptureUnknownInstructionError. Post-fix: it returns 'SSETPRIO'."""
-        from Tensile.Components.ScheduleCapture import WrappedInstruction
-        assert WrappedInstruction.class_tag(self._build_ssetprio()) == "SSETPRIO"
+    def test_ssetprio_registered_in_class_name_registry(self):
+        """SSetPrior must appear in `_CLASS_NAME_TO_CATEGORY` mapped to
+        `InstructionCategory.SSETPRIO`. The pre-rocm-libraries-hdu1 form
+        of this test asserted via `WrappedInstruction.class_tag(...)`; that
+        helper has been deleted in favor of consulting the rocisa-derived
+        registry directly. Semantic invariant preserved: SSetPrior is
+        recognized as its own category, not collapsed to UNKNOWN."""
+        from Tensile.Components.InstructionCategory import (
+            InstructionCategory, _CLASS_NAME_TO_CATEGORY,
+        )
+        assert _CLASS_NAME_TO_CATEGORY["SSetPrior"] is InstructionCategory.SSETPRIO
 
-    def test_ssetprio_class_tag_from_category_routes_explicit_category(self):
-        """`_captureSubIterToBuilder` now assigns category="SSETPRIO" to
-        bare SSetPrior leaves; `WrappedInstruction.class_tag_for_category` must
-        route that category to the same tag without falling back to
-        `WrappedInstruction.class_tag`."""
-        from Tensile.Components.ScheduleCapture import WrappedInstruction
+    def test_ssetprio_category_routes_via_rocisa_registry(self):
+        """`_captureSubIterToBuilder` assigns category="SSETPRIO" to bare
+        SSetPrior leaves; the rocisa-derived registry must agree on the
+        SSETPRIO bucket so `_role(node)` and the build_dataflow_graph
+        identity-set skip route consistently. The pre-hdu1 form asserted via
+        `WrappedInstruction.class_tag_for_category("SSETPRIO", inst) ==
+        "SSETPRIO"`; that helper has been deleted. The semantic invariant —
+        the rocisa class agrees with the capture-side category — is
+        preserved by checking `_category(inst)` directly."""
+        from Tensile.Components.InstructionCategory import (
+            InstructionCategory, category as instruction_category,
+        )
         inst = self._build_ssetprio()
-        assert WrappedInstruction.class_tag_for_category("SSETPRIO", inst) == "SSETPRIO"
+        assert instruction_category(inst) is InstructionCategory.SSETPRIO
+        # The capture-side category string ("SSETPRIO") matches the rocisa
+        # enum value — both sides pin the same bucket name.
+        assert InstructionCategory.SSETPRIO.value == "SSETPRIO"
 
     def test_ssetprio_excluded_from_dataflow_identity_set(self):
         """SSetPrior nodes go into the per-body sidecar but NOT into
@@ -3500,8 +3514,8 @@ class TestNodeLabelAfterCoverageFix:
     MT192x256x64 (Run 7) was secondary to instruction-coverage gaps.
 
     Mechanism: pre-fix, an unrecognized class (e.g. SSetPrior) landed
-    with category='UNKNOWN'. `_class_tag_from_category` then fell back
-    to `_class_tag(inst)` which raised, OR (when both reference and
+    with category='UNKNOWN'. The legacy class-tag chain raised, OR (when
+    both reference and
     subject captures categorized the same instruction differently
     because of the UNKNOWN fallthrough) `_node_label`'s same-category
     lookup in the formatter capture missed the node and raised

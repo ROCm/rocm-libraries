@@ -43,9 +43,9 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
 from Tensile.Components.register import Register
 # Single source of truth for rocisa-instruction-class -> scheduler-role
-# bucket dispatch. WrappedInstruction's `is_*` properties and the static
-# `class_tag` / `class_tag_for_category` helpers all read this map.
-# (rocm-libraries-009 re-scoped + nn0 follow-up.)
+# bucket dispatch. WrappedInstruction's `is_*` properties read this map.
+# (rocm-libraries-009 re-scoped + nn0 follow-up + hdu1 deletion of the
+# Layer-2 `class_tag` / `class_tag_for_category` static helpers.)
 from Tensile.Components.InstructionCategory import (
     InstructionCategory,
     category as _category,
@@ -332,98 +332,15 @@ class WrappedInstruction:
         # Collapse internal whitespace to single spaces for consistent matching
         return " ".join(s.split())
 
-    @staticmethod
-    def class_tag(inst) -> str:
-        """Return the stable class tag
-        (LR/LW/GR/MFMA/SWAIT/SBARRIER/SNOP/SSETPRIO) for an instruction.
-        Used as the first element of the identity tuple so diagnostic
-        categorization works without parsing the render-string.
-
-        SNop and SSetPrior are recognized here so that the production capture
-        path — which may end up assigning category="UNKNOWN" (via
-        `_captureSubIterToBuilder`'s fallback) when an instruction is neither
-        in the id-map nor matched by the explicit isinstance branches — still
-        falls through `class_tag_for_category(category="UNKNOWN", inst)` to
-        a recognized tag rather than raising
-        `CaptureUnknownInstructionError`. These tags are excluded from the
-        cross-graph data-flow identity set (`build_dataflow_graph` Phase 1)
-        just like SWait/SBarrier.
-        """
-        w = inst if isinstance(inst, WrappedInstruction) else WrappedInstruction(inst)
-        if w.is_lr:
-            return "LR"
-        if w.is_lw:
-            return "LW"
-        if w.is_gr:
-            return "GR"
-        if w.is_mfma:
-            return "MFMA"
-        if w.is_swait:
-            return "SWAIT"
-        if w.is_sbarrier:
-            return "SBARRIER"
-        if w.is_snop:
-            return "SNOP"
-        if w.is_ssetprio:
-            return "SSETPRIO"
-        raise CaptureUnknownInstructionError(
-            f"WrappedInstruction.class_tag: cannot classify instruction class "
-            f"{type(inst).__name__!r}."
-        )
-
-    @staticmethod
-    def class_tag_for_category(category, inst) -> str:
-        """Like class_tag(inst) but consults TaggedInstruction.category first.
-
-        The pure isinstance path is wrong for instructions whose Python class
-        doesn't reflect their scheduler role: F32X TF32 emulation MFMAs in the
-        pack path are real MFMAInstruction objects but are categorized as
-        PackA{u}/PackB{u}. Treating them as cls='MFMA' in the identity tuple
-        causes them to appear as missing main-loop MFMAs in compare_graphs
-        when the two captures see different counts of pack-MFMAs.
-
-        Maps categories to scheduler-role tags so cross-capture comparison
-        discriminates pack-MFMAs from real MFMAs.
-
-        Falls back to class_tag(inst) when category is None or unrecognized
-        so test sites that pass bare insts (no TaggedInstruction wrapping)
-        keep working.
-        """
-        if category is None:
-            return WrappedInstruction.class_tag(inst)
-        # Per-tensor / per-iteration suffixes -> scheduler-role tag.
-        if category.startswith(("LRA", "LRB", "LRMXSA", "LRMXSB", "LRMetadata")):
-            return "LR"
-        if category.startswith("LRS"):
-            return "LRS"
-        if category.startswith("LWS"):
-            return "LWS"
-        if category.startswith("LW"):
-            return "LW"
-        if category.startswith("GRInc"):
-            return "GRINC"
-        if category.startswith("GR"):
-            return "GR"
-        if category.startswith("Pack"):
-            return "PACK"
-        if category == "LCC":
-            return "LCC"
-        if category == "SYNC":
-            # _captureSubIterToBuilder lumps SWaitCnt AND SBarrier into category
-            # "SYNC", so we must distinguish them here by class. Without this,
-            # an SBarrier would render as cls='SWAIT' and never match a real
-            # SBARRIER identity in the other graph.
-            return WrappedInstruction.class_tag(inst)
-        if category == "SNOP":
-            return "SNOP"
-        if category == "SSETPRIO":
-            return "SSETPRIO"
-        if category == "BARRIER":
-            return "SBARRIER"
-        if category == "MFMA":
-            return "MFMA"
-        # Unrecognized category (e.g. UNKNOWN) -> fall back to isinstance.
-        return WrappedInstruction.class_tag(inst)
+    # `class_tag(inst)` and `class_tag_for_category(category, inst)` were
+    # removed by rocm-libraries-hdu1. Their two remaining consumers — the
+    # `_make_node` missed-instruction guard in CMSValidator and the SSetPrior
+    # recognition tests — now consult the rocisa-derived
+    # `_CLASS_NAME_TO_CATEGORY` registry directly via `_category(inst)`. The
+    # CMS-shaped role-tag collapse table (LR/LW/GR/PACK/...) was dropped
+    # entirely; rocisa-derived role discrimination lives on
+    # `InstructionCategory` (`Components/InstructionCategory.py`) and on
+    # `_role(node)` in CMSValidator.
 
 
 @dataclass(frozen=True)

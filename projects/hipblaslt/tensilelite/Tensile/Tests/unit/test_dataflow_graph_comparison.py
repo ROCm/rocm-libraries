@@ -565,15 +565,15 @@ class TestRenderStringIdentity:
     # `test_category_overrides_isinstance_class_tag` was DELETED by the
     # rocm-libraries-4up4 identity-tuple refactor (2026-05-12). Per
     # EMISSION_ORDINAL_DESIGN.md §4.5 the test became obsolete: it pinned
-    # `class_tag_for_category`'s identity-tuple-position behavior, and
-    # `class_tag_for_category` is no longer consulted by identity. The
-    # pack-MFMA / main-loop-MFMA same-render disambiguation is now handled
-    # by `emission_ordinal` instead — see the new ordinal-disambiguation
-    # tests in `test_dataflow_graph_emission_ordinal.py`. The
-    # `WrappedInstruction.class_tag_for_category` static helper itself
-    # remains as a public API; the test_dataflow_graph_register_gaps suite
-    # still exercises its rocisa-derived recognition behavior on bare
-    # rocisa instances (e.g. SSetPrior).
+    # the legacy class-tag helper's identity-tuple-position behavior, and
+    # the legacy helper is no longer consulted by identity. The pack-MFMA /
+    # main-loop-MFMA same-render disambiguation is now handled by
+    # `emission_ordinal` instead — see the new ordinal-disambiguation tests
+    # in `test_dataflow_graph_emission_ordinal.py`. The `class_tag` /
+    # `class_tag_for_category` static helpers themselves were removed by
+    # rocm-libraries-hdu1; the test_dataflow_graph_register_gaps suite now
+    # exercises the rocisa-derived `InstructionCategory` registry directly
+    # for SSetPrior recognition.
 
 
 # =============================================================================

@@ -1609,12 +1609,44 @@ def _role(node) -> str:
     return cat.value if cat is not None else "UNKNOWN"
 
 
-# `_class_tag(inst)` and `_class_tag_from_category(category, inst)` are now
-# `WrappedInstruction.class_tag(inst)` and
-# `WrappedInstruction.class_tag_for_category(category, inst)` (static methods on
-# the wrapper) — see ScheduleCapture.py. The 009-introduced
-# `_CLASS_TAG_CATEGORIES` frozenset is gone with them: WrappedInstruction.class_tag
-# enumerates the per-bucket properties directly (is_lr / is_lw / ...).
+# `_class_tag(inst)` and `_class_tag_from_category(category, inst)` were
+# removed (rocm-libraries-hdu1) along with `WrappedInstruction.class_tag` /
+# `class_tag_for_category` — categorization now flows exclusively through
+# the rocisa-derived `_CLASS_NAME_TO_CATEGORY` registry (`_category(inst)`,
+# `_role(node)`). See `Components/InstructionCategory.py`.
+
+
+# Recognized capture-side category prefixes / exact matches. Layer 1
+# (`build_idmap` / `build_id_to_category_per_iter`) and the
+# `_captureSubIterToBuilder` capture loop emit categories drawn from this
+# enumerated set; anything outside it (e.g. "WHATEVER", "UNKNOWN") signals
+# an upstream capture-pipeline gap and must be flagged by the missed-
+# instruction guard in `_make_node` when the rocisa class is also
+# unregistered. Kept enumerated here (rather than buried in the guard) so
+# adding a new capture-side category requires touching this list.
+_RECOGNIZED_CATEGORY_PREFIXES = (
+    "LR",    # LRA{u}, LRB{u}, LRSA, LRSB, LRMXSA{u}, LRMXSB{u}, LRMetadata{u}
+    "LW",    # LWA, LWB, LWSA, LWSB
+    "GR",    # GRA, GRB, GRIncA, GRIncB
+    "Pack",  # PackA{u}, PackB{u}
+)
+_RECOGNIZED_CATEGORY_EXACT = frozenset({
+    "LCC", "MFMA", "SYNC", "SNOP", "SSETPRIO", "BARRIER",
+})
+
+
+def _is_recognized_capture_category(category) -> bool:
+    """True iff `category` is a structural capture-side tag.
+
+    Returns False for None, "UNKNOWN", and arbitrary unknown strings —
+    those signal the missed-instruction guard's "category-side recognition
+    failed" condition. Used by `_make_node`'s rocisa-or-category guard.
+    """
+    if category is None:
+        return False
+    if category in _RECOGNIZED_CATEGORY_EXACT:
+        return True
+    return category.startswith(_RECOGNIZED_CATEGORY_PREFIXES)
 
 
 # =============================================================================
@@ -1686,21 +1718,19 @@ def _make_node(
     profile: Optional[ArchProfile] = None,
 ) -> GraphNode:
     inst = tagged_inst.wrapped.rocisa_inst
-    # Missed-instruction guard: an instruction whose category is unrecognized
-    # (UNKNOWN / arbitrary text) AND whose rocisa class isn't in
-    # `_CLASS_NAME_TO_CATEGORY` raises CaptureUnknownInstructionError. The
-    # historical guard piggy-backed on `class_tag(inst)` being called from
-    # inside `identity_for` — under EMISSION_ORDINAL_DESIGN.md the identity
-    # tuple no longer consults class_tag, so we must invoke the rocisa-derived
-    # recognition check explicitly here. Outcome is unchanged: synthetic
-    # stand-ins whose Python class is not a registered rocisa class still
-    # raise on entry to graph construction.
-    if WrappedInstruction.class_tag_for_category(
-            tagged_inst.category, inst) is None:
-        # Defensive: class_tag_for_category is documented to raise rather than
-        # return None, so this branch is unreachable in practice. Kept for
-        # belt-and-suspenders against a future refactor that loosens the
-        # contract.
+    # Missed-instruction guard: raise CaptureUnknownInstructionError when
+    # neither rocisa-class recognition nor capture-side category recognition
+    # succeeds. The rocisa-class side consults the centralized
+    # `_CLASS_NAME_TO_CATEGORY` registry via `_category(inst)` (the same path
+    # `WrappedInstruction.is_lr` / `is_mfma` / etc. ride). The category-side
+    # tolerates synthetic stand-ins (e.g. an unregistered VPermB32 stand-in
+    # tagged with category="PackA0" by Layer 1's `build_idmap`) — these are
+    # node-only entries that don't participate in FIFO/edge action; see
+    # `test_known_category_with_unmodeled_class_becomes_node`. Outcome is
+    # byte-identical to the legacy `class_tag_for_category` guard for every
+    # rocisa class registered in the registry.
+    if (_category(inst) is None
+            and not _is_recognized_capture_category(tagged_inst.category)):
         raise CaptureUnknownInstructionError(
             f"_make_node: cannot classify instruction "
             f"{type(inst).__name__!r} (category={tagged_inst.category!r}) "
