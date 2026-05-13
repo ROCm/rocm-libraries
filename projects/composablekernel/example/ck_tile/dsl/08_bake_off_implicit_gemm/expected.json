@@ -1,0 +1,34 @@
+{
+  "schema": "ck.dsl.example.expected/v1",
+  "kind": "conv_fp16",
+  "notes": [
+    "Implicit-GEMM convolution bake-off.",
+    "Reference numbers from convolution_direct_vs_implicit_gemm_study.md:",
+    " - CK Tile cktile_fixed_lean:      ~250 TFLOPS",
+    " - HIP pure_hip_conv direct:       ~200 TFLOPS",
+    "",
+    "Achieved on this DSL (MI300X / gfx950):",
+    " - per-launch:    248 TFLOPS",
+    " - graph 5x200:   280 TFLOPS",
+    " - correctness:   bad=0 vs grouped NumPy fp32 reference",
+    "                  (max_abs = 7.6e-6, thresh 1e-2)",
+    "",
+    "Levers applied (each maps to one runbook section):",
+    " - cshuffle epilogue (§9.3)       wide vec-8 buffer_store_dwordx",
+    " - 32x32x16 MFMA atom (§7.2)      max FLOPs/cycle on gfx950",
+    " - K-pad LDS layout (§6.3)        +8 halves of pad per K row to",
+    "                                  break ds_read bank conflicts",
+    " - buffer rsrc DWORD3=0x27000     proper bounds-checked rsrc",
+    " - coord-transform DAG (§2.2)     pad/embed/unmerge over IR Values",
+    "                                  for clean conv addressing",
+    "",
+    "CI/example-test lower bound is intentionally below the best recorded",
+    "per-launch number because this shape is bimodal under repeated Python",
+    "runner subprocesses; ck_dsl.benchmark should be used for final median/spread."
+  ],
+  "min_tflops": 200.0,
+  "verify": {
+    "max_abs_atol": 1.0e-2,
+    "max_rel_rtol": 5.0e-2
+  }
+}

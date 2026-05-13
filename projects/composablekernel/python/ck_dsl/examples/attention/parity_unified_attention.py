@@ -1,0 +1,811 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Parity + benchmark harness comparing Triton and CK DSL unified attention.
+
+Run with the venv's python interpreter (it has torch + triton + aiter installed):
+
+    sudo -n /workspace/dsl_bake_off/venv/bin/python3 \\
+        python/ck_dsl/examples/attention/parity_unified_attention.py [--scenario name]
+
+The harness:
+  1. Builds the standard AITER unified-attention test inputs (paged KV, GQA).
+  2. Runs the Triton backend.
+  3. Runs the CK DSL backend (if `supports_native_unified_attention` returns true).
+  4. Compares both to the reference `ref_paged_attn` implementation.
+  5. Reports latency (ms) for each backend across `attempts` repetitions.
+
+The reference path matches AITER's own test
+(`op_tests/triton_tests/attention/test_unified_attention.py`) byte-for-byte.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import torch
+
+ROOT = Path(__file__).resolve().parents[5]  # composablekernel/
+sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, "/workspace/aiter")
+
+import aiter.ops.triton.attention.unified_attention as _uam  # noqa: E402
+from aiter.ops.triton.attention.unified_attention import unified_attention  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Path forcing
+#
+# AITER's `unified_attention` internally picks between its 2D and 3D Triton
+# kernels via `use_2d_kernel(...)`. The CK DSL backend has its own dispatch
+# (`run_unified_attention_torch`) that prefers 3D split-KV whenever
+# supported. For an honest apples-to-apples comparison we want both
+# backends to run the same algorithmic path. These helpers force either
+# backend to a specific (2D or 3D) kernel.
+# ---------------------------------------------------------------------------
+
+
+_ORIG_USE_2D = _uam.use_2d_kernel
+_LAST_TRITON_PATH = {"path": None}
+
+
+def _force_triton_path(path: str):
+    """Force AITER's `unified_attention` to pick a specific Triton kernel.
+
+    `path` must be one of `"2d"`, `"3d"`, or `"auto"`. `"auto"` restores the
+    default heuristic but also records which kernel the heuristic actually
+    picked in `_LAST_TRITON_PATH["path"]`.
+    """
+    if path == "2d":
+        _uam.use_2d_kernel = lambda *a, **kw: _record_path("2d", True)
+    elif path == "3d":
+        _uam.use_2d_kernel = lambda *a, **kw: _record_path("3d", False)
+    elif path == "auto":
+
+        def _sniffer(*args, **kwargs):
+            v = _ORIG_USE_2D(*args, **kwargs)
+            return _record_path("2d" if v else "3d", v)
+
+        _uam.use_2d_kernel = _sniffer
+    else:
+        raise ValueError(f"unknown force-path {path!r}")
+
+
+def _record_path(name: str, value):
+    _LAST_TRITON_PATH["path"] = name
+    return value
+
+
+def _ck_backend(path: str) -> str:
+    """Translate a force-path string into a CK DSL `run_unified_attention_torch` backend."""
+    if path == "2d":
+        return "tiled"
+    if path == "3d":
+        return "3d"
+    if path == "auto":
+        return "auto"
+    raise ValueError(f"unknown force-path {path!r}")
+
+
+# ---------------------------------------------------------------------------
+# Reference paged attention (verbatim from AITER op_tests)
+# ---------------------------------------------------------------------------
+
+
+def ref_paged_attn(
+    query: torch.Tensor,
+    key_cache: torch.Tensor,
+    value_cache: torch.Tensor,
+    query_lens: List[int],
+    kv_lens: List[int],
+    block_tables: torch.Tensor,
+    scale: float,
+    sliding_window: Optional[int] = None,
+    soft_cap: Optional[float] = None,
+    sinks: Optional[torch.Tensor] = None,
+    alibi_slopes: Optional[torch.Tensor] = None,
+    qq_bias: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Reference paged attention. Matches AITER's reference plus ALiBi/QQ-bias.
+
+    ALiBi: `S += alibi_slope[h] * (key_pos - context_len)`.
+    QQ-bias: `S += qq_bias[q_local, k_local - context_len]` over key positions
+    inside the query section (else 0).
+    Both biases are added *after* the standard scaling and softcap, before the
+    softmax row reduction (matches the AITER Triton kernel exactly).
+    """
+    num_seqs = len(query_lens)
+    block_tables_np = block_tables.cpu().numpy()
+    _, block_size, num_kv_heads, head_size = key_cache.shape
+    outputs: List[torch.Tensor] = []
+    start_idx = 0
+    for i in range(num_seqs):
+        query_len = query_lens[i]
+        kv_len = int(kv_lens[i])
+        context_len = kv_len - query_len
+        q = query[start_idx : start_idx + query_len]
+        q = q * scale
+        num_kv_blocks = (kv_len + block_size - 1) // block_size
+        block_indices = block_tables_np[i, :num_kv_blocks]
+        k = key_cache[block_indices].view(-1, num_kv_heads, head_size)
+        k = k[:kv_len]
+        v = value_cache[block_indices].view(-1, num_kv_heads, head_size)
+        v = v[:kv_len]
+        if q.shape[1] != k.shape[1]:
+            k = torch.repeat_interleave(k, q.shape[1] // k.shape[1], dim=1)
+            v = torch.repeat_interleave(v, q.shape[1] // v.shape[1], dim=1)
+        attn = torch.einsum("qhd,khd->hqk", q, k).float()
+        if soft_cap is not None and soft_cap > 0:
+            attn = soft_cap * torch.tanh(attn / soft_cap)
+        if alibi_slopes is not None:
+            # alibi_slopes shape: [num_query_heads]
+            num_q_heads = q.shape[1]
+            pos = (
+                torch.arange(kv_len, device=q.device, dtype=torch.float32) - context_len
+            )
+            slopes = alibi_slopes.float().view(num_q_heads, 1, 1)
+            attn = attn + slopes * pos.view(1, 1, kv_len)
+        if qq_bias is not None:
+            # qq_bias shape: [N0, N1]; first axis indexed by local query pos
+            # within this sequence; second axis indexed by local key pos
+            # within the query section (key_rel_pos = k_idx - context_len).
+            qq_b = torch.zeros(query_len, kv_len, dtype=torch.float32, device=q.device)
+            qq_size_0 = qq_bias.shape[0]
+            qq_size_1 = qq_bias.shape[1]
+            for qp in range(query_len):
+                if qp >= qq_size_0:
+                    continue
+                for kp in range(kv_len):
+                    krp = kp - context_len
+                    if 0 <= krp < qq_size_1:
+                        qq_b[qp, kp] = qq_bias[qp, krp].float()
+            attn = attn + qq_b.view(1, query_len, kv_len)
+        empty_mask = torch.ones(query_len, kv_len, device=q.device)
+        mask = torch.triu(empty_mask, diagonal=kv_len - query_len + 1).bool()
+        if sliding_window is not None:
+            sw_mask = (
+                torch.triu(
+                    empty_mask, diagonal=kv_len - (query_len + sliding_window) + 1
+                )
+                .bool()
+                .logical_not()
+            )
+            mask |= sw_mask
+        attn.masked_fill_(mask, float("-inf"))
+        if sinks is not None:
+            s_aux = sinks[:, None, None].repeat_interleave(attn.shape[-2], dim=-2)
+            attn = torch.cat((attn, s_aux), dim=-1)
+        attn = torch.softmax(attn, dim=-1).to(v.dtype)
+        if sinks is not None:
+            attn = attn[..., :-1]
+        out = torch.einsum("hqk,khd->qhd", attn, v)
+        outputs.append(out)
+        start_idx += query_len
+    return torch.cat(outputs, dim=0)
+
+
+# ---------------------------------------------------------------------------
+# Scenarios
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Scenario:
+    name: str
+    seq_lens: List[Tuple[int, int]]
+    num_query_heads: int
+    num_kv_heads: int
+    head_size: int
+    block_size: int
+    dtype: torch.dtype
+    sliding_window: Optional[int] = None
+    softcap: float = 0.0
+    use_sinks: bool = False
+    num_blocks: int = 32768
+    use_alibi: bool = False
+    use_qq_bias: bool = False
+    qq_bias_stride_0: int = 0
+
+
+def default_scenarios() -> List[Scenario]:
+    return [
+        Scenario(
+            name="decode_d128_b16",
+            seq_lens=[(1, 1024), (1, 2048), (1, 4096), (1, 512)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="decode_d128_b64",
+            seq_lens=[(1, 1024), (1, 2048), (1, 4096), (1, 512)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=64,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="decode_d256_b16",
+            seq_lens=[(1, 1024), (1, 2048)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="prefill_d128_b16",
+            seq_lens=[(64, 64), (128, 256), (32, 256)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="mixed_d128_b16",
+            seq_lens=[(1, 1328), (5, 18), (129, 463)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="sliding_d128_b16",
+            seq_lens=[(1, 2048), (1, 4096), (1, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            sliding_window=256,
+        ),
+        Scenario(
+            name="softcap_d128_b16",
+            seq_lens=[(1, 1024), (1, 2048)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            softcap=50.0,
+        ),
+        Scenario(
+            name="bf16_decode_d128_b64",
+            seq_lens=[(1, 1024), (1, 2048), (1, 4096)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=64,
+            dtype=torch.bfloat16,
+        ),
+        Scenario(
+            name="alibi_decode_d128_b16",
+            seq_lens=[(1, 1024), (1, 2048), (1, 4096)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            use_alibi=True,
+        ),
+        Scenario(
+            name="alibi_mixed_d128_b16",
+            seq_lens=[(1, 1328), (5, 18), (129, 463)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            use_alibi=True,
+        ),
+        Scenario(
+            name="qq_bias_prefill_d128_b16",
+            seq_lens=[(64, 64), (128, 256), (32, 256)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            use_qq_bias=True,
+            qq_bias_stride_0=256,
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Materialise inputs
+# ---------------------------------------------------------------------------
+
+
+def make_inputs(s: Scenario, seed: int = 0):
+    torch.manual_seed(seed)
+    query_lens = [x[0] for x in s.seq_lens]
+    kv_lens_list = [x[1] for x in s.seq_lens]
+    num_seqs = len(s.seq_lens)
+    max_query_len = max(query_lens)
+    max_kv_len = max(kv_lens_list)
+    scale = s.head_size**-0.5
+    query = torch.randn(
+        sum(query_lens), s.num_query_heads, s.head_size, dtype=s.dtype, device="cuda"
+    )
+    key_cache = torch.randn(
+        s.num_blocks,
+        s.block_size,
+        s.num_kv_heads,
+        s.head_size,
+        dtype=s.dtype,
+        device="cuda",
+    )
+    value_cache = torch.randn_like(key_cache)
+    cu_q = torch.tensor([0] + query_lens, dtype=torch.int32, device="cuda").cumsum(
+        dim=0, dtype=torch.int32
+    )
+    kv_lens = torch.tensor(kv_lens_list, dtype=torch.int32, device="cuda")
+    max_blocks = (max_kv_len + s.block_size - 1) // s.block_size
+    block_tables = torch.randint(
+        0, s.num_blocks, (num_seqs, max_blocks), dtype=torch.int32, device="cuda"
+    )
+    sinks = (
+        torch.randn(s.num_query_heads, dtype=torch.bfloat16, device="cuda")
+        if s.use_sinks
+        else None
+    )
+    alibi_slopes = None
+    if s.use_alibi:
+        # Match Triton's typical ALiBi slope distribution (small negative
+        # exponents). Using moderate magnitudes keeps S finite under fp16.
+        alibi_slopes = -torch.linspace(
+            0.05, 0.5, s.num_query_heads, dtype=torch.float32, device="cuda"
+        )
+    qq_bias = None
+    if s.use_qq_bias:
+        # qq_bias shape: [N0, N1]; first dim indexed by local query pos within
+        # this sequence, second by local key pos within the query section.
+        # N1 = qq_bias_stride_0 by definition (contiguous last dim).
+        n0 = max(max_query_len, s.qq_bias_stride_0)
+        n1 = s.qq_bias_stride_0
+        qq_bias = torch.randn(n0, n1, dtype=torch.float32, device="cuda") * 0.1
+    return {
+        "query": query,
+        "key_cache": key_cache,
+        "value_cache": value_cache,
+        "cu_q": cu_q,
+        "kv_lens": kv_lens,
+        "query_lens": query_lens,
+        "kv_lens_list": kv_lens_list,
+        "block_tables": block_tables,
+        "scale": scale,
+        "sinks": sinks,
+        "alibi_slopes": alibi_slopes,
+        "qq_bias": qq_bias,
+        "max_query_len": max_query_len,
+        "max_kv_len": max_kv_len,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Runners
+# ---------------------------------------------------------------------------
+
+
+def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
+    """Run AITER's Triton `unified_attention` with the requested path forced."""
+    output = torch.empty_like(data["query"])
+    window_size = (s.sliding_window - 1, 0) if s.sliding_window else (-1, -1)
+    _force_triton_path(path)
+    try:
+
+        def call_once():
+            unified_attention(
+                q=data["query"],
+                k=data["key_cache"],
+                v=data["value_cache"],
+                out=output,
+                cu_seqlens_q=data["cu_q"],
+                seqused_k=data["kv_lens"],
+                max_seqlen_q=data["max_query_len"],
+                max_seqlen_k=data["max_kv_len"],
+                softmax_scale=data["scale"],
+                causal=True,
+                window_size=window_size,
+                block_table=data["block_tables"],
+                softcap=s.softcap,
+                q_descale=None,
+                k_descale=None,
+                v_descale=None,
+                alibi_slopes=data["alibi_slopes"],
+                qq_bias=data["qq_bias"],
+                sinks=data["sinks"],
+                backend="triton",
+            )
+
+        for _ in range(warmup):
+            call_once()
+        torch.cuda.synchronize()
+        t_start = torch.cuda.Event(enable_timing=True)
+        t_end = torch.cuda.Event(enable_timing=True)
+        t_start.record()
+        for _ in range(attempts):
+            call_once()
+        t_end.record()
+        t_end.synchronize()
+        ms = t_start.elapsed_time(t_end) / attempts
+        return output, ms
+    finally:
+        _force_triton_path("auto")
+
+
+def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
+    """Run CK DSL `run_unified_attention_torch` with the requested path forced.
+
+    Uses the DSL's direct entry point (bypassing AITER's wrapper) so that the
+    path argument is honored exactly.
+    """
+    import torch
+    from ck_dsl.instances import (
+        UnifiedAttentionProblem,
+        run_unified_attention_torch,
+    )
+
+    output = torch.empty_like(data["query"])
+    q = data["query"]
+    qq_bias = data["qq_bias"]
+    qq_bias_stride_0 = int(qq_bias.stride(0)) if qq_bias is not None else 0
+    dtype_str = (
+        "fp16"
+        if q.dtype is torch.float16
+        else "bf16"
+        if q.dtype is torch.bfloat16
+        else str(q.dtype)
+    )
+    problem = UnifiedAttentionProblem(
+        total_q=q.shape[0],
+        num_seqs=len(s.seq_lens),
+        num_query_heads=s.num_query_heads,
+        num_kv_heads=s.num_kv_heads,
+        head_size=s.head_size,
+        block_size=s.block_size,
+        max_seqlen_q=data["max_query_len"],
+        max_seqlen_k=data["max_kv_len"],
+        dtype=dtype_str,
+        sliding_window=s.sliding_window or 0,
+        softcap=float(s.softcap),
+        use_sinks=data["sinks"] is not None,
+        use_alibi=data["alibi_slopes"] is not None,
+        use_qq_bias=qq_bias is not None,
+        use_fp8=False,
+        num_sms=120,
+    )
+
+    def call_once():
+        run_unified_attention_torch(
+            problem=problem,
+            q=q,
+            k=data["key_cache"],
+            v=data["value_cache"],
+            out=output,
+            cu_seqlens_q=data["cu_q"],
+            seqused_k=data["kv_lens"],
+            softmax_scale=data["scale"],
+            block_table=data["block_tables"],
+            softcap=float(s.softcap),
+            sinks=data["sinks"],
+            alibi_slopes=data["alibi_slopes"],
+            qq_bias=qq_bias,
+            qq_bias_stride_0=qq_bias_stride_0,
+            backend=_ck_backend(path),
+        )
+
+    for _ in range(warmup):
+        call_once()
+    torch.cuda.synchronize()
+    t_start = torch.cuda.Event(enable_timing=True)
+    t_end = torch.cuda.Event(enable_timing=True)
+    t_start.record()
+    for _ in range(attempts):
+        call_once()
+    t_end.record()
+    t_end.synchronize()
+    ms = t_start.elapsed_time(t_end) / attempts
+    return output, ms
+
+
+def run_unified(backend: str, s: Scenario, data, warmup: int = 3, attempts: int = 10):
+    """Backwards-compatible wrapper: backend in {triton, ck_dsl}; path auto."""
+    if backend == "triton":
+        return _run_triton(s, data, path="auto", warmup=warmup, attempts=attempts)
+    if backend == "ck_dsl":
+        return _run_ck_dsl(s, data, path="auto", warmup=warmup, attempts=attempts)
+    raise ValueError(f"unknown backend {backend!r}")
+
+
+def run_reference(s: Scenario, data) -> torch.Tensor:
+    return ref_paged_attn(
+        query=data["query"],
+        key_cache=data["key_cache"],
+        value_cache=data["value_cache"],
+        query_lens=data["query_lens"],
+        kv_lens=data["kv_lens_list"],
+        block_tables=data["block_tables"],
+        scale=data["scale"],
+        sliding_window=s.sliding_window,
+        soft_cap=s.softcap if s.softcap > 0 else None,
+        sinks=data["sinks"],
+        alibi_slopes=data["alibi_slopes"],
+        qq_bias=data["qq_bias"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+
+
+def compare(reference: torch.Tensor, out: torch.Tensor) -> dict:
+    diff = (reference - out).float()
+    abs_diff = diff.abs()
+    abs_ref = reference.float().abs()
+    rel = abs_diff / (abs_ref + 1e-6)
+    return {
+        "max_abs": float(abs_diff.max().item()),
+        "mean_abs": float(abs_diff.mean().item()),
+        "max_rel": float(rel.max().item()),
+        "mean_rel": float(rel.mean().item()),
+    }
+
+
+def _safe_run(fn, *, skip_err: bool = True):
+    """Run a `(out, ms)`-returning callable, capturing NotImplementedError."""
+    try:
+        return fn(), None
+    except NotImplementedError as e:
+        return None, ("skip", str(e))
+    except Exception as e:  # pragma: no cover - capture and continue
+        if not skip_err:
+            raise
+        return None, ("error", repr(e))
+
+
+def _row_print(label: str, out_ms, ref_out, t_out):
+    if out_ms is None:
+        return
+    out, ms = out_ms
+    diffs = compare(ref_out, out) if ref_out is not None else None
+    extra = f"max_abs={diffs['max_abs']:.4g}" if diffs else ""
+    print(f"  {label:14s}: {ms * 1000:9.2f} us  {extra}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--scenario", default=None, action="append")
+    parser.add_argument("--attempts", type=int, default=10)
+    parser.add_argument("--warmup", type=int, default=3)
+    parser.add_argument("--report", type=Path, default=None)
+    parser.add_argument("--skip-ck", action="store_true")
+    # Which apples-to-apples lanes to run. Default: all four.
+    parser.add_argument(
+        "--paths",
+        default="auto,2d,3d",
+        help="comma-separated list of paths to run: auto, 2d, 3d",
+    )
+    args = parser.parse_args()
+
+    if not torch.cuda.is_available():
+        print("CUDA/HIP device unavailable; exiting", file=sys.stderr)
+        return 1
+    print("device:", torch.cuda.get_device_name(0))
+
+    scenarios = default_scenarios()
+    if args.scenario:
+        wanted = set(args.scenario)
+        scenarios = [s for s in scenarios if s.name in wanted]
+        if not scenarios:
+            print(f"unknown scenarios {args.scenario!r}", file=sys.stderr)
+            return 2
+
+    requested_paths = [p.strip() for p in args.paths.split(",") if p.strip()]
+    for p in requested_paths:
+        if p not in ("auto", "2d", "3d"):
+            print(f"unknown path {p!r} (expected: auto, 2d, 3d)", file=sys.stderr)
+            return 2
+
+    results = []
+    for s in scenarios:
+        print(
+            f"\n=== scenario: {s.name}  dtype={s.dtype}  block={s.block_size}  d={s.head_size} ==="
+        )
+        # See notes in `_run_ck_dsl`: empty the caching allocator between
+        # scenarios so transient reference tensors don't fragment VA space.
+        torch.cuda.empty_cache()
+        data = make_inputs(s)
+        row = {
+            "scenario": s.name,
+            "dtype": str(s.dtype),
+            "block_size": s.block_size,
+            "head_size": s.head_size,
+            "num_seqs": len(s.seq_lens),
+            "total_q": sum(q for q, _ in s.seq_lens),
+        }
+
+        with torch.inference_mode():
+            ref_out = run_reference(s, data)
+
+            # Reference Triton "natural" path. This is what unified_attention()
+            # picks via its own use_2d_kernel selector.
+            t_auto, err = _safe_run(
+                lambda: _run_triton(
+                    s,
+                    data,
+                    path="auto",
+                    warmup=args.warmup,
+                    attempts=args.attempts,
+                )
+            )
+            if t_auto:
+                t_auto_out, t_auto_ms = t_auto
+                row["triton_auto_ms"] = t_auto_ms
+                row["triton_auto_vs_ref"] = compare(ref_out, t_auto_out)
+                row["triton_natural_path"] = _LAST_TRITON_PATH["path"]
+            _row_print("triton-auto", t_auto, ref_out, None)
+
+            # Lane 2/3: forced 2D and 3D on both Triton and CK DSL.
+            for path in requested_paths:
+                if path == "auto":
+                    # Already done above. Just run CK auto for the
+                    # apples-to-apples lane on CK side.
+                    if not args.skip_ck:
+                        ck_auto, err_ck = _safe_run(
+                            lambda: _run_ck_dsl(
+                                s,
+                                data,
+                                path="auto",
+                                warmup=args.warmup,
+                                attempts=args.attempts,
+                            )
+                        )
+                        if ck_auto:
+                            ck_out, ck_ms = ck_auto
+                            row["ck_auto_ms"] = ck_ms
+                            row["ck_auto_vs_ref"] = compare(ref_out, ck_out)
+                            if t_auto:
+                                row["speedup_auto"] = t_auto_ms / ck_ms
+                                row["ck_auto_vs_triton"] = compare(t_auto_out, ck_out)
+                        elif err_ck:
+                            row["ck_auto_status"] = err_ck
+                        _row_print("ck-auto", ck_auto, ref_out, None)
+                    continue
+
+                # Force-path: Triton on `path`, CK DSL on `path`.
+                t_p, err_t = _safe_run(
+                    lambda p=path: _run_triton(
+                        s,
+                        data,
+                        path=p,
+                        warmup=args.warmup,
+                        attempts=args.attempts,
+                    )
+                )
+                _row_print(f"triton-{path}", t_p, ref_out, None)
+
+                if not args.skip_ck:
+                    ck_p, err_c = _safe_run(
+                        lambda p=path: _run_ck_dsl(
+                            s,
+                            data,
+                            path=p,
+                            warmup=args.warmup,
+                            attempts=args.attempts,
+                        )
+                    )
+                    _row_print(f"ck-{path}", ck_p, ref_out, None)
+
+                    if t_p:
+                        t_p_out, t_p_ms = t_p
+                        row[f"triton_{path}_ms"] = t_p_ms
+                        row[f"triton_{path}_vs_ref"] = compare(ref_out, t_p_out)
+                    if ck_p:
+                        ck_p_out, ck_p_ms = ck_p
+                        row[f"ck_{path}_ms"] = ck_p_ms
+                        row[f"ck_{path}_vs_ref"] = compare(ref_out, ck_p_out)
+                    if t_p and ck_p:
+                        row[f"speedup_{path}"] = (
+                            row[f"triton_{path}_ms"] / row[f"ck_{path}_ms"]
+                            if row[f"ck_{path}_ms"] > 0
+                            else 0.0
+                        )
+                        row[f"ck_{path}_vs_triton_{path}"] = compare(t_p_out, ck_p_out)
+                    if err_t and not t_p:
+                        row[f"triton_{path}_status"] = err_t
+                    if err_c and not ck_p:
+                        row[f"ck_{path}_status"] = err_c
+                else:
+                    if t_p:
+                        t_p_out, t_p_ms = t_p
+                        row[f"triton_{path}_ms"] = t_p_ms
+                        row[f"triton_{path}_vs_ref"] = compare(ref_out, t_p_out)
+        results.append(row)
+
+    # Apples-to-apples table summaries.
+    print("\n--- triton-auto vs ck-auto (each backend's own selector) ---")
+    print(
+        f"  {'scenario':32s}  {'tri-auto':>10s} {'ck-auto':>10s} {'speedup':>9s} {'tri-path':>9s}"
+    )
+    for row in results:
+        t_ms = row.get("triton_auto_ms")
+        c_ms = row.get("ck_auto_ms")
+        sp = row.get("speedup_auto", 0.0)
+        tp = row.get("triton_natural_path", "?")
+        if t_ms is not None and c_ms is not None:
+            print(
+                f"  {row['scenario']:32s}  {t_ms * 1000:9.2f}us {c_ms * 1000:9.2f}us {sp:8.2f}x {tp:>9s}"
+            )
+        else:
+            print(f"  {row['scenario']:32s}  -")
+
+    if "2d" in requested_paths:
+        print("\n--- 2D vs 2D (force both to 2D kernel) ---")
+        print(f"  {'scenario':32s}  {'tri-2d':>10s} {'ck-2d':>10s} {'speedup':>9s}")
+        for row in results:
+            t_ms = row.get("triton_2d_ms")
+            c_ms = row.get("ck_2d_ms")
+            sp = row.get("speedup_2d", 0.0)
+            if t_ms is not None and c_ms is not None:
+                print(
+                    f"  {row['scenario']:32s}  {t_ms * 1000:9.2f}us {c_ms * 1000:9.2f}us {sp:8.2f}x"
+                )
+            else:
+                t_str = f"{t_ms * 1000:9.2f}us" if t_ms else "      err "
+                c_str = (
+                    f"{c_ms * 1000:9.2f}us"
+                    if c_ms
+                    else (
+                        " skip(ck) "
+                        if row.get("ck_2d_status", (None,))[0] == "skip"
+                        else "      err "
+                    )
+                )
+                print(f"  {row['scenario']:32s}  {t_str} {c_str}")
+
+    if "3d" in requested_paths:
+        print("\n--- 3D vs 3D (force both to 3D split-KV kernel) ---")
+        print(f"  {'scenario':32s}  {'tri-3d':>10s} {'ck-3d':>10s} {'speedup':>9s}")
+        for row in results:
+            t_ms = row.get("triton_3d_ms")
+            c_ms = row.get("ck_3d_ms")
+            sp = row.get("speedup_3d", 0.0)
+            if t_ms is not None and c_ms is not None:
+                print(
+                    f"  {row['scenario']:32s}  {t_ms * 1000:9.2f}us {c_ms * 1000:9.2f}us {sp:8.2f}x"
+                )
+            else:
+                t_str = f"{t_ms * 1000:9.2f}us" if t_ms else "      err "
+                c_str = (
+                    f"{c_ms * 1000:9.2f}us"
+                    if c_ms
+                    else (
+                        " skip(ck) "
+                        if row.get("ck_3d_status", (None,))[0] == "skip"
+                        else "      err "
+                    )
+                )
+                print(f"  {row['scenario']:32s}  {t_str} {c_str}")
+
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(results, indent=2))
+        print(f"\nwrote report -> {args.report}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

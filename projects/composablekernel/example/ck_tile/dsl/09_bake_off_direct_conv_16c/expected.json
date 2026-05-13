@@ -1,0 +1,16 @@
+{
+  "schema": "ck.dsl.example.expected/v1",
+  "kind": "conv_fp16",
+  "notes": [
+    "Direct grouped convolution bake-off 2, 16c path.",
+    "Default shape: N=32, H=W=200, groups=16, cpg=kpg=16, R=S=3, pad=1.",
+    "Correctness gate: grouped CPU reference, fp32 accumulation, fp16 output, bad=0 at abs tolerance 1e-2.",
+    "Performance note: standalone no-verify runs reach ~210 TFLOPS on this workspace, which is in the high-performance band for this shape on gfx950.",
+    "The example-test path runs verify first, so the lower bound is intentionally conservative to avoid thermal/cache noise from the large CPU reference."
+  ],
+  "min_tflops": 180.0,
+  "verify": {
+    "max_abs_atol": 1.0e-2,
+    "max_rel_rtol": 5.0e-2
+  }
+}

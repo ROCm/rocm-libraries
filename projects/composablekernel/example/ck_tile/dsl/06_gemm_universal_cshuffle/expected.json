@@ -1,0 +1,12 @@
+{
+  "shapes": [
+    {
+      "M": 3328,
+      "N": 4096,
+      "K": 4096,
+      "tflops_lower_bound": 280.0
+    }
+  ],
+  "max_codegen_ms": 200.0,
+  "notes": "First universal-builder example with cshuffle epilogue. Lower bound is conservative until we measure the production shape; once we have a fresh run, replace with the median-of-3."
+}
