@@ -109,7 +109,7 @@ TEST_F(TestSupportMatrixCollector, WriteMarkdownProducesFile)
     auto& collector = SupportMatrixCollector::get();
     collector.setEnabled(true);
 
-    std::string tmpPath = "test_support_matrix_output.md";
+    const std::string tmpPath = "test_support_matrix_output.md";
     collector.setOutputPath(tmpPath);
     collector.recordGraphSupport("Conv", "ConvFprop fp32", "Test1", {}, "", "NHWC");
 
@@ -118,7 +118,8 @@ TEST_F(TestSupportMatrixCollector, WriteMarkdownProducesFile)
     std::ifstream inFile(tmpPath);
     ASSERT_TRUE(inFile.is_open());
 
-    std::string content((std::istreambuf_iterator<char>(inFile)), std::istreambuf_iterator<char>());
+    const std::string content((std::istreambuf_iterator<char>(inFile)),
+                              std::istreambuf_iterator<char>());
     inFile.close();
     std::remove(tmpPath.c_str());
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -77,7 +77,7 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  for each stage. The required buffer size can be different between stages.
 *
 *  \note
-*  The \ref rocsparse_format_bell format is not supported.
+*  The \ref rocsparse_format_bell and \ref rocsparse_format_sell formats are not supported.
 *
 *  \note
 *  This routine does not support batched computation.

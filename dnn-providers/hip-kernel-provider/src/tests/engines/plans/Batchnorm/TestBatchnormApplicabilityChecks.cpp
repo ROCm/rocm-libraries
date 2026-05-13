@@ -109,8 +109,8 @@ TEST(TestBatchnormValidator, ValidInferenceActivationBackward)
     const auto& bnBwdAttr = *bnBwdNode.attributes_as_BatchnormBackwardAttributes();
 
     BatchnormValidator validator(graph.getTensorMap());
-    EXPECT_NO_THROW(validator.checkInferenceActivationBackwardTensorConfigSupported(
-        bnInfAttr, actAttr, bnBwdAttr));
+    EXPECT_NO_THROW(
+        validator.checkBwdActivationTensorConfigSupported(bnInfAttr, actAttr, bnBwdAttr));
 }
 
 TEST(TestBatchnormValidator, MismatchShapes)

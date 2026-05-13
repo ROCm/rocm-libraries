@@ -513,6 +513,10 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.
     rv["RequiresXCntForVolatileVMEM"]  = checkInList(isaVersion, {{12, 5, 0}});
 
+    // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.
+    rv["LDSBankCount"] = 64;
+    rv["LDSBankWidth"] = 4; // bytes per bank
+
     // Vector L1 Data cache line size (bytes) used for alignment-sensitive optimizations in codegen.
     // NOTE: This is a *codegen-time* (compile-time) constant selected by target ISA.
     //
