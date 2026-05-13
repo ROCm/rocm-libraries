@@ -89,6 +89,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 128, 1, 512]
+          - Exact: [128, 128, 4, 256] # batch=4 (wave-separated)
 
   #######################################
   # TN - MX F6, Block16, E8
@@ -152,3 +153,4 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 128, 1, 512]
+          - Exact: [128, 128, 4, 256] # batch=4 (wave-separated)

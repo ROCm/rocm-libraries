@@ -91,6 +91,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 128, 1, 512]
+          - Exact: [128, 128, 2, 256] # batch=2
 
   #######################################
   # TN - MX A=F6, B=F4, Block32, E8
@@ -156,6 +157,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 128, 1, 512]
+          - Exact: [128, 128, 2, 256] # batch=2
 
   #######################################
   # TN - MX A=F4, B=F6, Block16, E8
