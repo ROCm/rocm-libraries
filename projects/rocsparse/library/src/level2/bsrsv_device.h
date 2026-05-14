@@ -117,7 +117,8 @@ namespace rocsparse
         // Process diagonal
         if(local_col == row)
         {
-            const rocsparse_int safe_j = (j < row_end) ? j : row_end - 1;
+            rocsparse_device_assert(j < row_end, "diagonal found implies loop index is in bounds");
+            const rocsparse_int safe_j = rocsparse::min(j, row_end - 1);
             for(rocsparse_int bi = 0; bi < block_dim; ++bi)
             {
                 // Load diagonal matrix entry
@@ -246,7 +247,9 @@ namespace rocsparse
         // Process diagonal
         if(local_col == row)
         {
-            const rocsparse_int safe_j = (j >= row_begin) ? j : row_begin;
+            rocsparse_device_assert(j >= row_begin,
+                                    "diagonal found implies loop index is in bounds");
+            const rocsparse_int safe_j = rocsparse::max(j, row_begin);
             for(rocsparse_int bi = block_dim - 1; bi >= 0; --bi)
             {
                 // Load diagonal matrix entry

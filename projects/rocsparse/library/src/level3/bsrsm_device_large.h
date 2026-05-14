@@ -125,7 +125,7 @@ namespace rocsparse
         // Process diagonal
         if(row < mb && row == local_col && col_X < nrhs)
         {
-            const rocsparse_int safe_j = (j >= row_begin) ? j : row_begin;
+            const rocsparse_int safe_j = rocsparse::max(j, row_begin);
             // Loop over rows of the BSR block
             for(int bi = block_dim - 1; bi >= 0; --bi)
             {
@@ -273,7 +273,7 @@ namespace rocsparse
         // Process diagonal
         if(row < mb && row == local_col && col_X < nrhs)
         {
-            const rocsparse_int safe_j = (j < row_end) ? j : row_end - 1;
+            const rocsparse_int safe_j = rocsparse::min(j, row_end - 1);
             // Loop over rows of the BSR block
             for(int bi = 0; bi < block_dim; ++bi)
             {
