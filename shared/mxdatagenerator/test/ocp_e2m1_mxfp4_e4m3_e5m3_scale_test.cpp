@@ -1,10 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <mxDataGenerator/DataGenerator.hpp>
 #include <mxDataGenerator/dataTypeInfo.hpp>
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -65,6 +67,36 @@ double scaleFactorFromByte(uint8_t scaleByte)
         return getScaleValue<ScaleInfo<ScaleType::E5M3>>(scaleByte);
     else
         return getScaleValue<ScaleInfo<ScaleType::E4M3>>(scaleByte);
+}
+
+template <typename DT>
+bool hasNonzeroScaleMantissa(const std::vector<uint8_t>& scales)
+{
+    const uint8_t mantissaMask = (1 << DT::scaleInfo.mantissaBits) - 1;
+    return std::any_of(scales.begin(), scales.end(), [mantissaMask](uint8_t scale) {
+        return (scale & mantissaMask) != 0;
+    });
+}
+
+template <typename DT>
+bool hasDenormalScale(const std::vector<uint8_t>& scales)
+{
+    const uint8_t mantissaMask = (1 << DT::scaleInfo.mantissaBits) - 1;
+    return std::any_of(scales.begin(), scales.end(), [mantissaMask](uint8_t scale) {
+        const uint8_t exponent
+            = getExponentValue<uint8_t>(scale, DT::scaleInfo.mantissaBits, DT::scaleInfo.exponentBits);
+        return exponent == 0 && (scale & mantissaMask) != 0;
+    });
+}
+
+template <typename DT>
+double denormalOnlyGenerationMax()
+{
+    constexpr auto st = scaleTypeFor<DT>();
+    if constexpr(st == ScaleType::E5M3)
+        return std::ldexp(1.0, -16);
+    else
+        return std::ldexp(1.0, -8);
 }
 
 template <typename DT>
@@ -231,6 +263,100 @@ TYPED_TEST(OcpE2M1MxFp4AltScaleTest, ToDoubleMatchesBaseTypeWithDecodedScaling)
                 << "scaleByte=" << int(scaleByte) << " dataByte=" << int(dataByte);
         }
     }
+}
+
+TYPED_TEST(OcpE2M1MxFp4AltScaleTest, BoundedGenerationUsesNonzeroScaleMantissas)
+{
+    DataGeneratorOptions opts;
+    opts.initMode     = DataInitMode(Bounded{});
+    opts.min          = -1.0;
+    opts.max          = 1.0;
+    opts.blockScaling = 1;
+    opts.forceDenorm  = false;
+
+    auto dgen = DataGenerator<TypeParam>();
+    dgen.setSeed(12345);
+    dgen.generate({4096}, {1}, opts);
+
+    const auto scales = dgen.getScaleBytes();
+    EXPECT_TRUE(hasNonzeroScaleMantissa<TypeParam>(scales));
+}
+
+TYPED_TEST(OcpE2M1MxFp4AltScaleTest, UnboundedGenerationUsesNonzeroScaleMantissas)
+{
+    DataGeneratorOptions opts;
+    opts.initMode     = DataInitMode(Unbounded{});
+    opts.blockScaling = 1;
+    opts.forceDenorm  = false;
+
+    auto dgen = DataGenerator<TypeParam>();
+    dgen.setSeed(67890);
+    dgen.generate({4096}, {1}, opts);
+
+    const auto scales = dgen.getScaleBytes();
+    EXPECT_TRUE(hasNonzeroScaleMantissa<TypeParam>(scales));
+}
+
+TYPED_TEST(OcpE2M1MxFp4AltScaleTest, SmallRangeBoundedGenerationUsesDenormalScales)
+{
+    DataGeneratorOptions opts;
+    opts.initMode     = DataInitMode(Bounded{});
+    opts.min          = 0.0;
+    opts.max          = denormalOnlyGenerationMax<TypeParam>();
+    opts.blockScaling = 1;
+    opts.forceDenorm  = false;
+
+    auto dgen = DataGenerator<TypeParam>();
+    dgen.setSeed(13579);
+    dgen.generate({1024}, {1}, opts);
+
+    const auto scales = dgen.getScaleBytes();
+    EXPECT_TRUE(hasDenormalScale<TypeParam>(scales));
+}
+
+TYPED_TEST(OcpE2M1MxFp4AltScaleTest, GeneratedReferencesUseDecodedScaleValues)
+{
+    DataGeneratorOptions opts;
+    opts.initMode     = DataInitMode(Bounded{});
+    opts.min          = -1.0;
+    opts.max          = 1.0;
+    opts.blockScaling = 1;
+    opts.forceDenorm  = false;
+
+    auto dgen = DataGenerator<TypeParam>();
+    dgen.setSeed(24680);
+    dgen.generate({512}, {1}, opts);
+
+    const auto data      = dgen.getDataBytes();
+    const auto scales    = dgen.getScaleBytes();
+    const auto reference = dgen.getReferenceDouble();
+
+    const uint8_t baseScale[1] = {DGen::Constants::E8M0_1};
+    for(index_t i = 0; i < reference.size(); i++)
+    {
+        const double dataValue = toDoublePacked<DGen::ocp_e2m1_mxfp4>(baseScale, data.data(), 0, i);
+        const double expected  = scaleFactorFromByte<TypeParam>(scales[i]) * dataValue;
+        EXPECT_DOUBLE_EQ(reference[i], expected) << "i=" << i << " scale=" << int(scales[i]);
+    }
+}
+
+TEST(OcpE2M1MxFp4E8M0ScaleGenerationTest, BoundedGenerationKeepsExponentOnlyScaleFormat)
+{
+    DataGeneratorOptions opts;
+    opts.initMode     = DataInitMode(Bounded{});
+    opts.min          = -1.0;
+    opts.max          = 1.0;
+    opts.blockScaling = 1;
+    opts.forceDenorm  = false;
+
+    auto dgen = DataGenerator<DGen::ocp_e2m1_mxfp4>();
+    dgen.setSeed(12345);
+    dgen.generate({512}, {1}, opts);
+
+    const auto scales = dgen.getScaleBytes();
+    EXPECT_TRUE(std::none_of(scales.begin(), scales.end(), [](uint8_t scale) {
+        return scale == DGen::Constants::E8M0_NAN;
+    }));
 }
 } // namespace
 

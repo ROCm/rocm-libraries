@@ -328,6 +328,73 @@ namespace DGen
         return static_cast<float>(getScaleValue<scaleInfo>(scale));
     }
 
+    template <typename scaleInfo>
+    inline bool isCanonicalScaleByte(uint8_t scale)
+    {
+        return scale == getScalePayload<scaleInfo>(scale);
+    }
+
+    template <typename scaleInfo>
+    inline bool isFiniteScaleByte(uint8_t scale)
+    {
+        return isCanonicalScaleByte<scaleInfo>(scale) && std::isfinite(getScaleValue<scaleInfo>(scale));
+    }
+
+    template <typename scaleInfo>
+    inline bool isFiniteNonzeroScaleByte(uint8_t scale)
+    {
+        const auto value = getScaleValue<scaleInfo>(scale);
+        return isCanonicalScaleByte<scaleInfo>(scale) && std::isfinite(value) && value != 0.0;
+    }
+
+    template <typename scaleInfo>
+    inline std::vector<uint8_t> enumerateFiniteScaleBytes(
+        double minValue = 0.0, double maxValue = std::numeric_limits<double>::infinity())
+    {
+        std::vector<uint8_t> candidates;
+        for(uint32_t raw = 0; raw <= getScalePayloadMask<scaleInfo>(); raw++)
+        {
+            const auto scale = static_cast<uint8_t>(raw);
+            const auto value = getScaleValue<scaleInfo>(scale);
+            if(std::isfinite(value) && value >= minValue && value <= maxValue)
+                candidates.push_back(scale);
+        }
+        return candidates;
+    }
+
+    template <typename scaleInfo>
+    inline std::vector<uint8_t> enumerateFiniteNonzeroScaleBytes(
+        double minValue = 0.0, double maxValue = std::numeric_limits<double>::infinity())
+    {
+        std::vector<uint8_t> candidates;
+        for(const auto scale : enumerateFiniteScaleBytes<scaleInfo>(minValue, maxValue))
+        {
+            if(getScaleValue<scaleInfo>(scale) != 0.0)
+                candidates.push_back(scale);
+        }
+        return candidates;
+    }
+
+    template <typename scaleInfo>
+    inline uint8_t nearestFiniteScaleByte(double target, const std::vector<uint8_t>& candidates)
+    {
+        assert(!candidates.empty());
+
+        auto best     = candidates.front();
+        auto bestDiff = std::abs(getScaleValue<scaleInfo>(best) - target);
+        for(const auto candidate : candidates)
+        {
+            const auto diff = std::abs(getScaleValue<scaleInfo>(candidate) - target);
+            if(diff < bestDiff)
+            {
+                best     = candidate;
+                bestDiff = diff;
+            }
+        }
+
+        return best;
+    }
+
     /**
      * Check if the product of the scale and data
      * at a index is POSITIVE one or not from
