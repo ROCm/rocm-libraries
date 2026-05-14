@@ -272,7 +272,7 @@ class AddrCalculation:
                 comment="scale element by non-unit stride"))
             elementVgpr = addrVgpr
 
-        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel") or kernel["StreamK"] > 0
+        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or kernel["StreamK"] > 0
         if ss.optSingleColVgpr:
             # This is first element in the first batch, create a byte address that will
             # be re-used by subsequent elements:
@@ -697,7 +697,7 @@ class AddrCalculation:
 
         laneSGPRCount = self.kernelWriter.states.laneSGPRCount
         module = Module("emitLdChange")
-        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel") or kernel["StreamK"] > 0
+        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or kernel["StreamK"] > 0
         if kernel["BufferStore"]:
             module.add(self.emitScaleToBpe(kernel, ss, tmpVgpr, tmpSgpr, singleUpdate, tc, dim))
             if edge and (not kernel["StoreRemapVectorWidth"] or (kernel["StoreRemapVectorWidth"] and (beta or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"))) and \

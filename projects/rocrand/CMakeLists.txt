@@ -128,7 +128,7 @@ if(GPU_TARGETS STREQUAL "all")
     )
   else()
     rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;gfx1151;gfx1152;gfx1153"
+      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;gfx1150;gfx1151;gfx1152;gfx1153"
     )
   endif()
 
@@ -179,7 +179,7 @@ if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)
 endif()
 
 # Set version variables
-rocm_setup_version( VERSION "4.3.0" )
+rocm_setup_version( VERSION "4.4.0" )
 set ( rocrand_VERSION ${rocRAND_VERSION} )
 # Old-style version number used within the library's API. rocrand_get_version should be modified.
 math(EXPR rocrand_VERSION_NUMBER "${rocRAND_VERSION_MAJOR} * 100000 + ${rocRAND_VERSION_MINOR} * 100 + ${rocRAND_VERSION_PATCH}")

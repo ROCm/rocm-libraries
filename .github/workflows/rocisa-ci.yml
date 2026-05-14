@@ -1,0 +1,72 @@
+name: rocISA CI
+
+on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+    paths:
+      - 'projects/hipblaslt/tensilelite/rocisa/**'
+      - 'shared/stinkytofu/**'
+      - '.github/workflows/rocisa-ci.yml'
+  pull_request:
+    paths:
+      - 'projects/hipblaslt/tensilelite/rocisa/**'
+      - 'shared/stinkytofu/**'
+      - '.github/workflows/rocisa-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  Linux:
+    runs-on: azure-linux-scale-rocm
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Test pip install
+        uses: ./.github/actions/pip-install-test
+        with:
+          package_path: projects/hipblaslt/tensilelite/rocisa
+          test_path: test
+
+  Windows:
+    runs-on: azure-windows-scale-rocm
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Configure git long paths
+        run: git config --global core.longpaths true
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-windows
+        with:
+          amdgpu_family: gfx1151
+
+      - name: Test pip install
+        uses: ./.github/actions/pip-install-test
+        with:
+          package_path: projects/hipblaslt/tensilelite/rocisa
+          test_path: test

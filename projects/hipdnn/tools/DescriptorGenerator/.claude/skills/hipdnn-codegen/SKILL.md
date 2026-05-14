@@ -1,13 +1,13 @@
 ---
 name: hipdnn-codegen
-description: Generate hipDNN operation boilerplate from a FlatBuffer schema. Use when the user wants to add a new operation type to hipDNN, or generate descriptor/packer/unpacker code.
-argument-hint: "<schema-path-or-op-name> [mode: backend|frontend|full|lift-only]"
+description: Generate hipDNN operation boilerplate from a YAML config. Use when the user wants to add a new operation type to hipDNN, or generate descriptor/packer/unpacker code.
+argument-hint: "<schema-path-or-op-name> [mode: backend|frontend|full]"
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion
 ---
 
 # hipDNN Code Generator Skill
 
-Generate all boilerplate code needed to add a new operation to hipDNN from a FlatBuffer schema.
+Generate all boilerplate code needed to add a new operation to hipDNN from a YAML config.
 
 ## Philosophy
 
@@ -24,10 +24,9 @@ The goal is a clean, building, tested integration. If generated code needs tweak
 - `$ARGUMENTS` can contain:
   - **Schema or operation**: Path to `.fbs` schema file, path to existing YAML config, or operation name (e.g., `convolution_fwd`)
   - **Mode** (one of):
-    - `backend` (default) - Descriptor, Packer, Unpacker + backend tests
-    - `frontend` - Node, Attributes, Graph method + frontend tests
-    - `full` - Everything (backend + frontend)
-    - `lift-only` - Unpacker + lifting fragments for existing operations
+    - `backend` (default) — Descriptor, Packer, Unpacker, backend tests, lifting fragments, and lifting integration test (the previous `lift-only` mode is folded in)
+    - `frontend` — Node, Attributes, Graph method + frontend tests
+    - `full` — Everything (backend + frontend)
 
 ## Directory Locations
 
@@ -152,7 +151,7 @@ The generator automatically produces all mode enum plumbing:
   - `BackendEnumStringUtils.hpp` (string case)
   - `hipdnn_backend.h` (#include directive)
 - `fragments/mode_frontend_plumbing_<field>.txt` — Combined frontend fragment with sections for:
-  - `Types.hpp` (frontend enum class, toSdkType, fromSdkType, toBackend, fromHipdnn converters)
+  - `Types.hpp` (frontend enum class, toBackend, fromHipdnn converters)
 
 Insert each section from the fragment files into the corresponding target file, just like other fragments. The type tag `PLACEHOLDER_VALUE` must be replaced with the next available value in `HipdnnBackendAttributeType.h`.
 
@@ -165,7 +164,7 @@ grep -r "HIPDNN_TYPE_" $HIPDNN_SRC/backend/include/HipdnnBackendAttributeType.h
 
 If missing, create the plumbing by hand following existing patterns (ConvMode, PointwiseMode).
 
-**4c. Place inverse converter in Types.hpp (REQUIRED for lift-only and full modes):**
+**4c. Place inverse converter in Types.hpp (REQUIRED for backend and full modes):**
 
 The unpacker calls the inverse converter (e.g., `fromHipdnnPointwiseMode`). It MUST exist in `Types.hpp` or the code will not compile. Check if it already exists:
 ```bash
@@ -192,14 +191,6 @@ $VENV/bin/python generate.py \
     --config configs/<operation>.yaml \
     --output-dir $OUTPUT_DIR \
     --mode $MODE
-```
-
-**For `lift-only` mode**: Also run `backend` mode to get mode enum plumbing fragments (needed for the inverse converter in `Types.hpp`):
-```bash
-$VENV/bin/python generate.py \
-    --config configs/<operation>.yaml \
-    --output-dir $OUTPUT_DIR \
-    --mode backend
 ```
 
 If the generator fails, show the error and stop.
@@ -259,7 +250,7 @@ Read each fragment file from the output and insert it into the correct shared fi
 | `fragments/factory_case.txt` | `$HIPDNN_SRC/backend/src/descriptors/DescriptorFactory.cpp` | Add `#include` at top, add `case` in `create()` switch. |
 | `fragments/cmake_entries.txt` | Multiple CMakeLists.txt files | Add source to `backend/src/CMakeLists.txt`, tests to `backend/tests/CMakeLists.txt` and `tests/frontend/CMakeLists.txt`. |
 
-**Lifting fragments** (for `backend`, `full`, or `lift-only` mode):
+**Lifting fragments** (for `backend` or `full` mode):
 
 | Fragment | Target File | Insertion Point |
 |----------|-------------|----------------|
@@ -268,12 +259,12 @@ Read each fragment file from the output and insert it into the correct shared fi
 | `fragments/operation_type_enum.txt` | `$HIPDNN_SRC/backend/include/HipdnnOperationType.h` | Before the closing brace of the enum. |
 | `fragments/node_unpack_override.txt` | Frontend node header | Add method to the node class. |
 
-**Mode enum fragments** (for ANY mode when `enum_def` is present — including `lift-only`):
+**Mode enum fragments** (for `backend` or `full` mode when `enum_def` is present on a data field):
 
 | Fragment | Target Files | Insertion |
 |----------|-------------|-----------|
 | `fragments/mode_backend_plumbing_<field>.txt` | Multiple backend files | Read the fragment — it has clearly labeled sections for each target file. Insert each section into the corresponding file. Replace `PLACEHOLDER_VALUE` in the type tag section. |
-| `fragments/mode_frontend_plumbing_<field>.txt` | `$HIPDNN_SRC/frontend/include/hipdnn_frontend/Types.hpp` | Read the fragment — it has sections for the enum class, toSdkType, fromSdkType, toBackend, and fromHipdnn. Insert each near existing similar code. |
+| `fragments/mode_frontend_plumbing_<field>.txt` | `$HIPDNN_SRC/frontend/include/hipdnn_frontend/Types.hpp` | Read the fragment — it has sections for the enum class, toBackend, and fromHipdnn. Insert each near existing similar code. |
 
 The generated `backend/include/<header>.h` file is a complete file — copy it directly to `$HIPDNN_SRC/backend/include/`.
 
@@ -283,7 +274,6 @@ The generated `backend/include/<header>.h` file is a complete file — copy it d
 |----------|-------------|----------------|
 | `fragments/graph_method.txt` | `$HIPDNN_SRC/frontend/include/hipdnn_frontend/Graph.hpp` | After the last operation method (find the pattern `_sub_nodes.emplace_back`). |
 | `fragments/graph_includes.txt` | `$HIPDNN_SRC/frontend/include/hipdnn_frontend/Graph.hpp` | In the includes section at the top, grouped with other operation includes. |
-| `fragments/deserialize_case.txt` | `$HIPDNN_SRC/frontend/include/hipdnn_frontend/Graph.hpp` | In the `deserializeFromFlatBuffer()` switch. |
 | `fragments/frontend_cmake_entries.txt` | `$HIPDNN_SRC/frontend/tests/CMakeLists.txt` | Add test files to the test target source list. |
 
 ### 8. Add Enum Test Coverage
@@ -294,7 +284,7 @@ After inserting enum fragments, add test entries to `$HIPDNN_SRC/backend/tests/T
 - One `EXPECT_STREQ` per new attribute enum value
 - Place entries near existing similar tests
 
-### 9. Apply Descriptor Lifting Additions (lift-only and full modes)
+### 9. Apply Descriptor Lifting Additions (backend and full modes)
 
 If `fragments/descriptor_lifting_additions.txt` exists:
 - Read it for the exact changes needed to the existing descriptor `.hpp` and `.cpp`
@@ -339,7 +329,7 @@ The generator now produces complete integration tests for both lowering and lift
 **Lifting** (`Integration<Op>DescriptorLifting.cpp`):
 - `Basic<Op>RoundTrip` — Full lifting round-trip with field-by-field validation
 - `<Op>TensorSharingPreserved` — Pointer equality verification
-- `<Op>LiftWithoutFinalization` — FlatBuffer-direct path
+- `<Op>LiftWithoutFinalization` — Backend binary serialization path
 - `AutoAssignedUidsPreservedInLiftingRoundTrip` — Auto-assigned UID distinctness and round-trip
 - Per-optional-scalar preservation tests
 
@@ -401,7 +391,7 @@ Summarize what was generated and placed:
 ## Notes
 
 - The generated integration tests (lowering and lifting) are complete with round-trip, tensor sharing, auto-UIDs, and per-scalar tests. Review and add operation-specific tests as needed.
-- For `lift-only` mode, existing descriptor files are modified in-place per `descriptor_lifting_additions.txt`.
+- When `descriptor_lifting_additions.txt` is emitted (any backend run), apply its changes to the existing descriptor `.hpp`/`.cpp` in-place.
 - `mode` type is REQUIRED for all enum fields in new operations. Never use the legacy `enum` type.
 - Read `$CODEGEN/CLAUDE.md` for the full detailed post-generation workflow if you need additional context on any step.
 - Always use `convolution_fwd.yaml` as the reference config when creating new configs.

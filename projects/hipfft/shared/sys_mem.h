@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,11 +24,13 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -74,6 +76,19 @@ static std::string byte_size_to_str(size_t byte_sz)
     return ret;
 }
 
+// return a string reporting a vec of byte sizes in a readable format.
+static std::string byte_sizes_to_str(const std::vector<size_t>& byte_sizes)
+{
+    std::string ret;
+    for(auto i : byte_sizes)
+    {
+        if(!ret.empty())
+            ret.push_back(',');
+        ret += byte_size_to_str(i);
+    }
+    return ret;
+}
+
 struct system_memory
 {
 public:
@@ -107,14 +122,19 @@ public:
         set_limit_bytes(limit_gbytes_ * ONE_GiB);
     }
 
+    // The non-default specialization should *never* be used by non-members
+    template <bool accountant_mutex_is_locked = false>
     size_t get_usable_bytes()
     {
-        update_free_bytes();
+        update_free_bytes<accountant_mutex_is_locked>();
 
         // Limit the amount of usable memory. If we are too aggressive
         // with host memory usage, the host process may get OOM killed
         // on systems with little or no swap space.
-        std::shared_lock lock(sys_memory_mutex);
+        using lock_t = std::shared_lock<decltype(sys_memory_mutex)>;
+        std::optional<lock_t> lock;
+        if constexpr(!accountant_mutex_is_locked)
+            lock = std::make_optional<lock_t>(sys_memory_mutex);
         return std::min(free_bytes < ONE_GiB ? 0 : free_bytes,
                         used_bytes < limit_bytes ? limit_bytes - used_bytes : 0);
     }
@@ -123,11 +143,6 @@ public:
     {
         std::shared_lock lock(sys_memory_mutex);
         return limit_bytes;
-    }
-
-    size_t get_usable_gbytes()
-    {
-        return bytes_to_GiB(get_usable_bytes());
     }
 
     void record_used_bytes(size_t allocation_size)
@@ -142,10 +157,15 @@ public:
         used_bytes -= std::min(allocation_size, used_bytes);
     }
 
+    // The non-default specialization should *never* be used by non-members
+    template <bool accountant_mutex_is_locked = false>
     std::string get_details(bool double_tab = false)
     {
-        const auto        usable_bytes = get_usable_bytes();
-        std::shared_lock  lock(sys_memory_mutex);
+        const auto usable_bytes = get_usable_bytes<accountant_mutex_is_locked>();
+        using lock_t            = std::shared_lock<decltype(sys_memory_mutex)>;
+        std::optional<lock_t> lock;
+        if constexpr(!accountant_mutex_is_locked)
+            lock = std::make_optional<lock_t>(sys_memory_mutex);
         std::stringstream ss;
         const auto        incr = (double_tab ? "\t\t" : "\t");
         ss << incr << "Usable system memory: " << byte_size_to_str(usable_bytes) << "\n"
@@ -154,6 +174,70 @@ public:
            << incr << "Enforced limit on memory usage: " << byte_size_to_str(limit_bytes);
         return ss.str();
     }
+
+    // Structure effectively reserving a chunk of system memory by a given amount, estimated
+    // for untracked/nonowned needs, e.g., by some black-box dependency.
+    struct nonowned_reservation_t
+    {
+        nonowned_reservation_t(size_t block_byte_size = 0)
+            : byte_size(0)
+        {
+            if(block_byte_size > 0)
+                set_desired_size(block_byte_size);
+        }
+        // disable copies
+        nonowned_reservation_t(const nonowned_reservation_t&) = delete;
+        nonowned_reservation_t& operator=(const nonowned_reservation_t&) = delete;
+
+        void release()
+        {
+            if(byte_size > 0)
+            {
+                auto&            accountant = system_memory::singleton();
+                std::unique_lock lock(accountant.sys_memory_mutex);
+                accountant.limit_bytes += byte_size;
+                byte_size = 0;
+            }
+        }
+
+        // An std::invalid_argument exception is thrown if the desired size cannot be reserved reliably.
+        void set_desired_size(size_t desired_byte_size)
+        {
+            release();
+            auto&            accountant = system_memory::singleton();
+            std::unique_lock lock(accountant.sys_memory_mutex);
+            constexpr bool   accountant_mutex_is_locked = true;
+            const auto usable_bytes = accountant.get_usable_bytes<accountant_mutex_is_locked>();
+            if(desired_byte_size > usable_bytes)
+            {
+                throw std::invalid_argument(
+                    "Desired reservation of " + byte_size_to_str(desired_byte_size)
+                    + " of system memory cannot be honored reliably as only "
+                    + byte_size_to_str(usable_bytes) + " of system memory is usable.\n"
+                    + accountant.get_details<accountant_mutex_is_locked>());
+            }
+            accountant.limit_bytes -= desired_byte_size;
+            byte_size = desired_byte_size;
+        }
+
+        size_t size() const
+        {
+            return byte_size;
+        }
+
+        ~nonowned_reservation_t()
+        {
+            release();
+        }
+
+        void swap(nonowned_reservation_t& other)
+        {
+            std::swap(byte_size, other.byte_size);
+        }
+
+    private:
+        size_t byte_size;
+    };
 
 private:
     const size_t total_bytes;
@@ -171,9 +255,13 @@ private:
     {
     }
 
+    template <bool accountant_mutex_is_locked>
     void update_free_bytes()
     {
-        std::unique_lock lock(sys_memory_mutex);
+        using lock_t = std::unique_lock<decltype(sys_memory_mutex)>;
+        std::optional<lock_t> lock;
+        if constexpr(!accountant_mutex_is_locked)
+            lock = std::make_optional<lock_t>(sys_memory_mutex);
         free_bytes = read_sys_mem<sys_mem_label::FREE>();
     }
 

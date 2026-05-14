@@ -31,6 +31,10 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Serialization/Base.hpp>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     namespace Serialization
@@ -108,6 +112,7 @@ namespace TensileLite
                 iot::mapRequired(io, "sourceKernel", s.sourceKernel);
 
                 iot::mapRequired(io, "globalAccumulation", s.globalAccumulation);
+                iot::mapOptional(io, "adaptiveGemmGSUA", s.adaptiveGemmGSUA);
                 iot::mapRequired(io, "workspaceSizePerElemC", s.workspaceSizePerElemC);
                 iot::mapRequired(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
 
@@ -247,3 +252,5 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

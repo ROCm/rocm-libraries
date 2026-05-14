@@ -4,15 +4,17 @@
 cmake_minimum_required(VERSION 3.25.2)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(HIP_KERNEL_PLUGIN_VERSION "0.0.1")
-project(hip-kernel-provider VERSION ${HIP_KERNEL_PLUGIN_VERSION} LANGUAGES CXX)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
+dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
 
-if(NOT WIN32)
+project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
+
+if(NOT WIN32 AND DEFINED ROCM_PATH)
     # Only set if not already specified by user
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
         set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
@@ -32,8 +34,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip
-     ${HIP_DIR}/cmake
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+     ${CMAKE_CURRENT_SOURCE_DIR}/../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
 )
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
@@ -83,8 +85,18 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
 find_package(hiprtc REQUIRED)
-find_package(hipdnn_data_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+
+# hipdnn SDK dependencies - use targets directly if available (superbuild),
+# otherwise find installed packages (true standalone)
+if(NOT TARGET hipdnn_data_sdk)
+    find_package(hipdnn_data_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_flatbuffers_sdk)
+    find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 include(CheckToolVersion)
 include(ClangCheck)
@@ -92,6 +104,10 @@ include(ClangTidy)
 
 # Setup testing dependencies
 include(Dependencies)
+if(HIPKERNELPROVIDER_ENABLE_TESTS)
+    fetch_gtest_dependency()
+endif()
+set(SKIP_TEST_NAME_VALIDATION ON)
 include(Tests)
 
 if(WIN32)

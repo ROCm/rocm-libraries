@@ -1,7 +1,18 @@
-# Changelog for rocRAND
+#Changelog for rocRAND
 
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
+
+## Since last release ROCm 7.12
+
+### Added
+
+* gfx1150,gfx1152 and gfx1153 support
+* rocrand.dll now contains embedded file version metadata.
+
+### Resolved Issues
+
+* Fixed memory leak in unit tests.
 
 ## rocRAND 4.3.0 for ROCm 7.12
 

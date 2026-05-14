@@ -12,6 +12,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hip_kernel_provider;
 
@@ -57,10 +58,12 @@ TEST(TestHipKernelContainer, GetEngineManagerReturnsValidReference)
 
 TEST(TestHipKernelContainer, GetApplicableEngineIdsSdpaGraph)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    SKIP_IF_NO_DEVICES();
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     HipKernelHandle handle;
-    if(hip_kernel_provider_common::getDeviceString(handle.getStream()) != "gfx942")
+    auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }
@@ -73,8 +76,8 @@ TEST(TestHipKernelContainer, GetApplicableEngineIdsSdpaGraph)
         dims, strides, dims, strides, dims, strides, dims, strides, DataType::BFLOAT16);
     auto graphBuffer = graph.Release();
 
-    auto graphWrapper = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer.data(),
-                                                                            graphBuffer.size());
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuffer.data(), graphBuffer.size());
 
     auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
 
