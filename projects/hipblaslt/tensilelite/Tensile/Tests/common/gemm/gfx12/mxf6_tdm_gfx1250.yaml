@@ -89,6 +89,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 128, 1, 512]
           - Exact: [128, 128, 4, 256] # batch=4 (wave-separated)
+          - Exact: [128, 128, 1, 136] # K=136, tail=8 not multiple of MXBlock=16 or 32 -> expect rejection
 
   #######################################
   # TN - MX F6, Block16, E8
@@ -152,3 +153,4 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 128, 1, 512]
           - Exact: [128, 128, 4, 256] # batch=4 (wave-separated)
+          - Exact: [128, 128, 1, 136] # K=136, tail=8 not multiple of MXBlock=16 -> expect rejection
