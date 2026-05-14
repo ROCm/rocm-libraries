@@ -305,7 +305,7 @@ hipdnnPluginStatus_t
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                            opGraph->size);
 
         auto applicableEngines = engineManager.getApplicableEngineIds(*typedHandle, opGraphWrapper);
@@ -346,7 +346,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
                                                                            opGraph->size);
 
         engineManager.getEngineDetails(*typedHandle, opGraphWrapper, engineId, *engineDetails);
@@ -392,10 +392,10 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
 
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
             engineConfig->ptr, engineConfig->size);
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                           opGraph->size);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
+            opGraph->ptr, opGraph->size);
         *workspaceSize
             = engineManager.getMaxWorkspaceSize(*typedHandle, opGraphWrapper, engineConfigWrapper);
 
@@ -422,9 +422,9 @@ hipdnnPluginStatus_t
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
 
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                           opGraph->size);
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
+            opGraph->ptr, opGraph->size);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
             engineConfig->ptr, engineConfig->size);
 
         auto& engineManager = typedHandle->getEngineManager();

@@ -39,7 +39,7 @@ bool isApplicableFwd(const HipdnnMiopenHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -77,7 +77,7 @@ bool isApplicableBwd(const HipdnnMiopenHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -115,7 +115,7 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -151,7 +151,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     const auto& attr
         = opGraph.getNodeWrapper(0)
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
-    ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+    const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
@@ -207,7 +207,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     const auto& attr
         = opGraph.getNodeWrapper(0)
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes>();
-    ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+    const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(
@@ -264,7 +264,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     const auto& attr
         = opGraph.getNodeWrapper(0)
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes>();
-    ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+    const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(
@@ -326,7 +326,7 @@ size_t getMaxWorkspaceSizeFwd(const HipdnnMiopenHandle& handle,
         const auto& attr
             = opGraph.getNodeWrapper(0)
                   .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
-        ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
         THROW_ON_MIOPEN_FAILURE(
             miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
                                                      params.w().tensorDescriptor(),
@@ -351,7 +351,7 @@ size_t getMaxWorkspaceSizeBwd(const HipdnnMiopenHandle& handle,
         const auto& attr
             = opGraph.getNodeWrapper(0)
                   .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes>();
-        ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         THROW_ON_MIOPEN_FAILURE(
             miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
@@ -377,7 +377,7 @@ size_t getMaxWorkspaceSizeWrw(const HipdnnMiopenHandle& handle,
         const auto& attr
             = opGraph.getNodeWrapper(0)
                   .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes>();
-        ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         THROW_ON_MIOPEN_FAILURE(
             miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
