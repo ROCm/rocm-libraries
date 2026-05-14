@@ -40,7 +40,7 @@
 #include <vector>
 
 //------------------------------------------------------------------------------
-// Bad-argument tests: herand should throw rocblas_status_invalid_pointer when
+// Bad-argument tests: gerand should throw rocblas_status_invalid_pointer when
 // A is null (with m, n > 0), but not throw for quick return (m or n == 0).
 //------------------------------------------------------------------------------
 template <typename T>
@@ -112,9 +112,7 @@ void testing_gerand(Arguments& argus)
 
     // validate results for rocsolver-test
     // Count zeros to check randomness: re and im zeros should each be < 1% of
-    // the n*(n+1)/2 independently-filled entries (lower/diag triangle).
-    // For herand the diagonal im is forced real (always 0 for complex), so only
-    // off-diagonal entries contribute to nzero_im.
+    // the m*n independently-filled entries.
     int64_t nfilled = int64_t(m) * n;
     int64_t nzero_re = 0, nzero_im = 0;
 

@@ -122,7 +122,7 @@ void testing_herand(Arguments& argus)
     // validate results for rocsolver-test
     // Count zeros to check randomness: re and im zeros should each be < 1% of
     // the n*(n+1)/2 independently-filled entries (lower/diag triangle).
-    // For herand the diagonal im is forced real (always 0 for complex), so only
+    // For herand, the diagonal is forced to be real, so only
     // off-diagonal entries contribute to nzero_im.
     int64_t nfilled = int64_t(n) * (n + 1) / 2;
     int64_t nzero_re = 0, nzero_im = 0;
