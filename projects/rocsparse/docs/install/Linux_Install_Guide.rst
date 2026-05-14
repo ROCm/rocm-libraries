@@ -21,7 +21,7 @@ Building rocSPARSE from source
 ==============================
 
 It isn't necessary to build rocSPARSE from source because it's ready to use after installing
-the prebuilt packages, as described above.
+the prebuilt packages, as described in :doc:`Install rocSPARSE <./install>`.
 To build rocSPARSE from source, follow the instructions in this section.
 
 Requirements

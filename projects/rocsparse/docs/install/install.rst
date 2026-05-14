@@ -9,7 +9,7 @@ Install rocSPARSE
 *****************
 
 Before you begin, verify that your system is supported. For more information,
-see :ref:`ROCm Core SDK components <rocm:release-components>`.
+see :doc:`ROCm compatibility matrix <rocm:compatibility/compatibility-matrix>`.
 
 For advanced workflows, source builds, or custom configurations, see
 :doc:`./Linux_Install_Guide` or :doc:`./Windows_Install_Guide`.
