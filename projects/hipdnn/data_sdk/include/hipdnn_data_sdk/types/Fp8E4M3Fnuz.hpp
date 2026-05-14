@@ -172,7 +172,7 @@ inline uint8_t float_to_fp8_e4m3_fnuz_bits(float f) noexcept
        || (remainder == FP8_E4M3_FNUZ_ROUND_THRESHOLD && ((fp8Mant & 1) != 0)))
     {
         fp8Mant++;
-        if(fp8Mant > 7)
+        if(fp8Mant > FP8_E4M3_FNUZ_MANT_MASK)
         {
             fp8Mant = 0;
             exp++;
