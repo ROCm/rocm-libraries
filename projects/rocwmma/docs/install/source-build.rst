@@ -13,10 +13,8 @@ instructions
 <https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
 TheRock is the recommended way to build ROCm components from source.
 
-Alternatively, you can build rocWMMA standalone using the following
-instructions.
-
-This topic provides instructions for installing and configuring the rocWMMA library.
+Alternatively, you can build rocWMMA standalone using the following sections,
+which provide instructions for installing and configuring the rocWMMA library.
 
 Prerequisites
 =============

@@ -2,19 +2,16 @@
    :description: Installation instructions for the rocWMMA library
    :keywords: install, rocwmma, wmma, rocm, lib, library, sdk
 
-.. _installation:
-
 ***************
 Install rocWMMA
 ***************
 
 Before you begin, verify that your system is supported. For more information,
-see :ref:`ROCm Core SDK components <rocm:release-components>`.
+see the :doc:`ROCm compatibility matrix
+<rocm:compatibility/compatibility-matrix>`.
 
 For advanced workflows, source builds, or custom configurations, see
 :doc:`./source-build`.
-
-.. _install-rocm:
 
 Install the ROCm Core SDK
 =========================
@@ -26,8 +23,6 @@ package.
 For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
 selector panel on that page to view instructions appropriate for your system
 environment.
-
-.. _install-base:
 
 Install common math libraries on Linux
 ======================================
@@ -47,7 +42,7 @@ package. This includes the ROCm runtime and system dependencies.
 
       amdrocm-math-common<rocm_version>
 
-   Where ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+   ``<rocm_version>`` represents the ROCm Core SDK version to install. Omit this
    suffix to install the latest available version.
 
    For example, to install the latest ROCm common math libraries release for
@@ -72,8 +67,6 @@ package. This includes the ROCm runtime and system dependencies.
          .. code-block:: bash
 
             sudo zypper install amdrocm-math-common
-
-.. _install-nightly:
 
 Install a nightly build
 =======================
