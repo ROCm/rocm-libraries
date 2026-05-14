@@ -93,7 +93,7 @@ namespace rocsparse
             {
                 __syncthreads();
 
-                const I safe_idx = j + rocsparse::min(hipThreadIdx_x, row_end - j - 1);
+                const I safe_idx = j + rocsparse::min(static_cast<I>(hipThreadIdx_x), row_end - j - 1);
                 scsr_col_ind[hipThreadIdx_x]
                     = (hipThreadIdx_x < row_end - j) ? csr_col_ind[safe_idx] - idx_base : -1;
                 scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j) ? csr_val[safe_idx] : -1;
