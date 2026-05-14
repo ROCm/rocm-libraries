@@ -22,6 +22,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/ReductionAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/ResampleFwdAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/TensorAttributes.hpp>
@@ -49,6 +50,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::BlockScaleQuantizeAttributes, "BlockScaleQuantizeAttributes"},
      {NodeAttributes::CustomOpAttributes, "CustomOpAttributes"},
      {NodeAttributes::ReductionAttributes, "ReductionAttributes"},
+     {NodeAttributes::ResampleFwdAttributes, "ResampleFwdAttributes"},
      {NodeAttributes::NONE, ""}})
 
 NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
@@ -116,6 +118,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::ReductionAttributes:
         nodeJson = *node.attributes_as_ReductionAttributes();
+        break;
+    case data_objects::NodeAttributes::ResampleFwdAttributes:
+        nodeJson = *node.attributes_as_ResampleFwdAttributes();
         break;
     default:
         throw std::runtime_error(
@@ -193,6 +198,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::CustomOpAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::ReductionAttributes:
             return to<data_objects::ReductionAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::ResampleFwdAttributes:
+            return to<data_objects::ResampleFwdAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error("hipdnn_flatbuffers_sdk::json::to<data_objects::Node>(): "
                                      "Unsupported NodeAttributes type: "
