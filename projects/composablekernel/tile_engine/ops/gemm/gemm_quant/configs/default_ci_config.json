@@ -48,17 +48,19 @@
         }
     },
     "trait_config": {
-        "profile": {
+        "pipeline": {
             "values": [
-                "aquantdecode",
-                "bquantdecode",
-                "rowcol",
-                "tensor"
+                "compv3"
             ]
         },
         "epilogue": {
             "values": [
                 "cshuffle"
+            ]
+        },
+        "scheduler": {
+            "values": [
+                "intrawave"
             ]
         },
         "pad_m": {
@@ -79,21 +81,6 @@
         "persistent": {
             "values": [
                 false
-            ]
-        }
-    },
-    "quant_config": {
-        "a_group": {
-            "values": [
-                "1x1x1",
-                "1x1x128"
-            ]
-        },
-        "b_group": {
-            "values": [
-                "1x1x1",
-                "1x1x128",
-                "1x32x128"
             ]
         }
     },
