@@ -100,13 +100,20 @@ void block_load_direct_blocked(unsigned int flat_id,
                                unsigned int valid)
 {
     unsigned int offset = flat_id * ItemsPerThread;
-    InputIterator thread_iter = block_input + offset;
+    // Clamp the base to a valid index for threads entirely outside the range.
+    // AMD GPU issues speculative loads regardless of the if-guard below, so the
+    // load address must always be in-bounds to avoid ASAN violations.
+    unsigned int safe_base = (offset < valid) ? offset : 0;
+    InputIterator thread_iter = block_input + safe_base;
     ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
-        if (item + offset < valid)
+        const bool valid_item = (item + offset < valid);
+        // Clamp per-item index so the speculative load address stays in-bounds.
+        const unsigned int safe_item = valid_item ? item : 0;
+        if (valid_item)
         {
-            items[item] = thread_iter[item];
+            items[item] = thread_iter[safe_item];
         }
     }
 }
@@ -293,12 +300,14 @@ void block_load_direct_striped(unsigned int flat_id,
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         unsigned int offset = item * BlockSize;
-        if (flat_id + offset < valid)
+        const bool valid_item = (flat_id + offset < valid);
+        // Clamp to 0 when OOB: AMD GPU issues speculative loads regardless of
+        // the if-guard, so the load address must always be in-bounds.
+        // Note: Loading via thread_iter doesn't work on gfx11xx/Windows (compiler bug).
+        const unsigned int safe_idx = valid_item ? (flat_id + offset) : 0;
+        if (valid_item)
         {
-            // Note: Loading data using thread_iter like the other overloads do (thread_iter[offset])
-            // doesn't work here for gfx11xx on Windows due to a compiler bug.
-            // Temporarily load using the approach below until we have a fix.
-            items[item] = block_input[flat_id + offset];
+            items[item] = block_input[safe_idx];
         }
     }
 }
@@ -477,14 +486,21 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
     unsigned int warp_id     = flat_id / VirtualWaveSize;
     unsigned int warp_offset = warp_id * VirtualWaveSize * ItemsPerThread;
 
-    InputIterator thread_iter = block_input + thread_id + warp_offset;
+    unsigned int base_idx = thread_id + warp_offset;
+    // Clamp base for threads entirely outside the valid range.
+    // AMD GPU issues speculative loads regardless of the if-guard below.
+    unsigned int safe_base = (base_idx < valid) ? base_idx : 0;
+    InputIterator thread_iter = block_input + safe_base;
     ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         unsigned int offset = item * VirtualWaveSize;
-        if (warp_offset + thread_id + offset < valid)
+        const bool valid_item = (warp_offset + thread_id + offset < valid);
+        // Clamp per-item offset so the speculative load address stays in-bounds.
+        const unsigned int safe_offset = valid_item ? offset : 0;
+        if (valid_item)
         {
-            items[item] = thread_iter[offset];
+            items[item] = thread_iter[safe_offset];
         }
     }
 }
