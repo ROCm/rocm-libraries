@@ -2991,7 +2991,7 @@ class KernelWriterAssembly(KernelWriter):
     tP["vgprPackedOffsets"] = None
     tP["vgprTileOffsetsCheckOut"] = False
     tP["numVgprTileOffsets"] = 0
-    skipGroTileOffsetsLoop = False
+
     if kernel["_UseSgprForGRO"]:
       # Let the vgprTileOffsets checkin handle tReg later since these are same vgpr
       tP["vgprTileOffsets"] = tP["gpr"]["tReg"]
@@ -3077,25 +3077,23 @@ class KernelWriterAssembly(KernelWriter):
                 comment="swzBlkVWOffset = swzBlkWvGSize - laneSize * (VW - 1)"))
               module.add(VMovB32(dst=vgpr(swzBlkVWSizeVgpr), src=sgpr(swzBlkVWSizeSgpr)) )
 
-      # If groB1J_* was emitted above (interleave path), skip this generic loop to avoid duplicate emissions.
-      if not skipGroTileOffsetsLoop:
-        for l in range(1, tP["nrt"]):
-          strideValue = stride
-          if strideInterleave and (l & strideMask) != 0:
-            strideValue = 1
-          if not tP["isSwizzled"]:
-            module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=strideValue, \
-              src1=vgpr(v+l-1), comment="gro%s%s_%u += %s"%(tP["tensorChar"], tP["tileChar"], l, strideIdx) ))
-          # swizzle
+      for l in range(1, tP["nrt"]):
+        strideValue = stride
+        if strideInterleave and (l & strideMask) != 0:
+          strideValue = 1
+        if not tP["isSwizzled"]:
+          module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=strideValue, \
+            src1=vgpr(v+l-1), comment="gro%s%s_%u += %s"%(tP["tensorChar"], tP["tileChar"], l, strideIdx) ))
+        # swizzle
+        else:
+          # VW > 1
+          if (strideInterleave and (l & strideMask) != 0):
+            module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=laneSize, \
+              src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
+          # VW == 1
           else:
-            # VW > 1
-            if (strideInterleave and (l & strideMask) != 0):
-              module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=laneSize, \
-                src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
-            # VW == 1
-            else:
-              module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=vgpr(swzBlkVWSizeVgpr), \
-                src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
+            module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=vgpr(swzBlkVWSizeVgpr), \
+              src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
       if tP["isSwizzled"]:
         self.vgprPool.checkIn(swzBlkVWSizeVgpr)
 
