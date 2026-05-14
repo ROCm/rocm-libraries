@@ -46,6 +46,7 @@ class reduce_by_key_benchmark : public primbench::benchmark_interface
     {
         return primbench::json{}
             .add("algo", "device_reduce_by_key")
+            .add("lvl", "device")
             .add("key_data_type", primbench::name<Key>())
             .add("value_data_type", primbench::name<Value>())
             .add("random_number_range", "[1, " + std::to_string(MaxLength) + "]")

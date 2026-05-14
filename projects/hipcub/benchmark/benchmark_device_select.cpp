@@ -41,6 +41,7 @@ private:
         return primbench::json{}
             .add("algo", "device_select")
             .add("subalgo", "flagged")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("output_data_type", primbench::name<T>())
             .add("flag_type", primbench::name<FlagType>())
@@ -146,6 +147,7 @@ public:
         return primbench::json{}
             .add("algo", "device_select")
             .add("subalgo", "if")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("output_data_type", primbench::name<T>())
             .add("selected_output_data_type", "u32")
@@ -228,6 +230,7 @@ public:
         return primbench::json{}
             .add("algo", "device_select")
             .add("subalgo", "flagged_if")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("flag_type", primbench::name<FlagType>())
             .add("output_data_type", primbench::name<T>())
@@ -327,6 +330,7 @@ private:
         return primbench::json{}
             .add("algo", "device_select")
             .add("subalgo", "unique")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("output_data_type", primbench::name<T>())
             .add("selected_output_data_type", "u32")
@@ -416,6 +420,7 @@ private:
         return primbench::json{}
             .add("algo", "device_select")
             .add("subalgo", "unique_by_key")
+            .add("lvl", "device")
             .add("key_data_type", primbench::name<KeyT>())
             .add("value_data_type", primbench::name<ValueT>())
             .add("selected_output_data_type", "u32")

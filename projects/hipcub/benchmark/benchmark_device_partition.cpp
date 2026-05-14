@@ -59,6 +59,7 @@ private:
         return primbench::json{}
             .add("algo", "device_partition")
             .add("subalgo", "flagged")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("flag_type", primbench::name<F>())
             .add("split_threshold", Threshold);
@@ -135,6 +136,7 @@ private:
         return primbench::json{}
             .add("algo", "device_partition")
             .add("subalgo", "predicate")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("split_threshold", Threshold);
     }
@@ -202,6 +204,7 @@ private:
         return primbench::json{}
             .add("algo", "device_partition")
             .add("subalgo", "threeway")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("small_threshold", SmallThreshold)
             .add("large_threshold", LargeThreshold);

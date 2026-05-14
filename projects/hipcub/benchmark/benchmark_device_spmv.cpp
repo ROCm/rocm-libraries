@@ -48,6 +48,7 @@ private:
     {
         return primbench::json{}
             .add("algo", "device_spmv_CsrMV")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("probability", probability_string());
     }

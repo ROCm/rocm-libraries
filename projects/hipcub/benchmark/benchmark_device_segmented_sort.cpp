@@ -37,6 +37,7 @@ class sort_keys_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_segmented_sort")
             .add("subalgo", "sort_keys")
+            .add("lvl", "device")
             .add("key_type", primbench::name<Key>())
             .add("desired_segments", DesiredSegments)
             .add("ascending", !Descending)
@@ -159,6 +160,7 @@ class sort_pairs_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_segmented_sort")
             .add("subalgo", "sort_pairs")
+            .add("lvl", "device")
             .add("key_type", primbench::name<Key>())
             .add("value_type", primbench::name<Value>())
             .add("desired_segments", DesiredSegments)

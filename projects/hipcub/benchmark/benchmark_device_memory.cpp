@@ -313,6 +313,7 @@ class device_memory_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_memory")
             .add("subalgo", get_name(MemOp))
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("items_per_thread", ItemsPerThread)
             .add("kernel_op", get_name(KernelOp))
@@ -369,6 +370,7 @@ class memcpy_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_memory")
             .add("subalgo", "memcpy")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("size", Size);
     }

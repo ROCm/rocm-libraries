@@ -132,6 +132,7 @@ class scan_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_scan")
             .add("subalgo", "scan")
+            .add("lvl", "device")
             .add("exclusive", Exclusive)
             .add("data_type", primbench::name<T>())
             .add("op", Tag::name);
@@ -198,6 +199,7 @@ class scan_by_key_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_scan")
             .add("subalgo", "scan_by_key")
+            .add("lvl", "device")
             .add("exclusive", Exclusive)
             .add("data_type", primbench::name<T>())
             .add("op", Tag::name);

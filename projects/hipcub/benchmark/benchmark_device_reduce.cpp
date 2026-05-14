@@ -37,6 +37,7 @@ class reduce_benchmark : public primbench::benchmark_interface
     {
         return primbench::json{}
             .add("algo", "device_reduce")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("op", ReduceKernel::name);
     }
