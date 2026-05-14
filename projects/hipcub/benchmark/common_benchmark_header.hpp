@@ -77,8 +77,16 @@ PRIMBENCH_REGISTER_TYPE(unsigned long long, "u64")
 PRIMBENCH_REGISTER_TYPE(__half, "f16")
 
 // these are very commonly used in the benchmarks
-using custom_float2  = benchmark_utils::custom_type<float, float>;
-using custom_double2 = benchmark_utils::custom_type<double, double>;
+using custom_float2      = benchmark_utils::custom_type<float, float>;
+using custom_double2     = benchmark_utils::custom_type<double, double>;
+using custom_char_double = benchmark_utils::custom_type<char, double>;
+using custom_double_char = benchmark_utils::custom_type<double, char>;
+using custom_int_t       = benchmark_utils::custom_type<int>;
+using custom_int_double  = benchmark_utils::custom_type<int, double>;
 
 PRIMBENCH_REGISTER_TYPE(custom_float2, "custom<f32,f32>")
 PRIMBENCH_REGISTER_TYPE(custom_double2, "custom<f64,f64>")
+PRIMBENCH_REGISTER_TYPE(custom_char_double, "custom<i8,f64>")
+PRIMBENCH_REGISTER_TYPE(custom_double_char, "custom<f64,i8>")
+PRIMBENCH_REGISTER_TYPE(custom_int_t, "custom<i32>")
+PRIMBENCH_REGISTER_TYPE(custom_int_double, "custom<i32,f64>")
