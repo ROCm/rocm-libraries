@@ -49,6 +49,7 @@ class sort_keys_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_merge_sort")
             .add("subalgo", "keys")
+            .add("lvl", "device")
             .add("key_data_type", primbench::name<Key>());
     }
 
@@ -117,6 +118,7 @@ class sort_pairs_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_merge_sort")
             .add("subalgo", "pairs")
+            .add("lvl", "device")
             .add("key_data_type", primbench::name<Key>())
             .add("value_data_type", primbench::name<Value>());
     }

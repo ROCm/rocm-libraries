@@ -43,6 +43,7 @@ class encode_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_run_length_encode")
             .add("subalgo", "encode")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("random_number_range", "[1, " + std::to_string(MaxLength) + "]");
     }
@@ -133,6 +134,7 @@ class non_trivial_runs_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_run_length_encode")
             .add("subalgo", "non_trivial_runs")
+            .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("random_number_range", "[1, " + std::to_string(MaxLength) + "]");
     }

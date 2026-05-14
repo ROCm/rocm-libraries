@@ -48,6 +48,7 @@ class merge_keys_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_merge")
             .add("subalgo", "merge_keys")
+            .add("lvl", "device")
             .add("key_data_type", primbench::name<Key>());
     }
 
@@ -140,6 +141,7 @@ class merge_pairs_benchmark : public primbench::benchmark_interface
         return primbench::json{}
             .add("algo", "device_merge")
             .add("subalgo", "merge_pairs")
+            .add("lvl", "device")
             .add("key_data_type", primbench::name<Key>())
             .add("value_data_type", primbench::name<Value>());
     }

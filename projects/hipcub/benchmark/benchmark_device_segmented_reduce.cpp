@@ -38,6 +38,7 @@ class reduce_benchmark : public primbench::benchmark_interface
     {
         return primbench::json{}
             .add("algo", "device_segmented_reduce")
+            .add("lvl", "device")
             .add("reduce_op", SegmentedReduceKernel::name)
             .add("data_type", primbench::name<T>())
             .add("desired_segments", DesiredSegments);
