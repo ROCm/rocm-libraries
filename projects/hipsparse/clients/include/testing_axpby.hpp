@@ -96,8 +96,8 @@ void testing_axpby(Arguments argus)
     I size = argus.N;
     I nnz  = argus.nnz;
 
-    T alpha = make_DataType<T>(argus.alpha);
-    T beta  = make_DataType<T>(argus.beta);
+    T alpha = argus.get_alpha<T>();
+    T beta  = argus.get_beta<T>();
 
     hipsparseIndexBase_t idxBase = argus.baseA;
 

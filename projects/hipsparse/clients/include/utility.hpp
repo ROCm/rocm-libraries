@@ -477,13 +477,17 @@ inline T testing_fma(T p, T q, T r)
 template <>
 inline hipComplex testing_fma(hipComplex p, hipComplex q, hipComplex r)
 {
-    return hipCfmaf(p, q, r);
+    float re = std::fmaf(-p.y, q.y, std::fmaf(p.x, q.x, r.x));
+    float im = std::fmaf(p.x, q.y, std::fmaf(p.y, q.x, r.y));
+    return make_hipComplex(re, im);
 }
 
 template <>
 inline hipDoubleComplex testing_fma(hipDoubleComplex p, hipDoubleComplex q, hipDoubleComplex r)
 {
-    return hipCfma(p, q, r);
+    double re = std::fma(-p.y, q.y, std::fma(p.x, q.x, r.x));
+    double im = std::fma(p.x, q.y, std::fma(p.y, q.x, r.y));
+    return make_hipDoubleComplex(re, im);
 }
 
 /* ============================================================================================ */
@@ -7361,7 +7365,7 @@ void host_hybmv(int                  m,
 
                 if(col >= 0 && col < n)
                 {
-                    sum = sum + testing_mult(ell_val[idx], x[col]);
+                    sum = testing_fma(ell_val[idx], x[col], sum);
                 }
                 else
                 {
@@ -7371,7 +7375,7 @@ void host_hybmv(int                  m,
 
             if(beta != zero)
             {
-                y[i] = testing_mult(beta, y[i]) + testing_mult(alpha, sum);
+                y[i] = testing_fma(alpha, sum, testing_mult(beta, y[i]));
             }
             else
             {
@@ -7395,7 +7399,7 @@ void host_hybmv(int                  m,
             int row = coo_row_ind[i] - idx_base;
             int col = coo_col_ind[i] - idx_base;
 
-            y[row] = y[row] + testing_mult(alpha, testing_mult(coo_val[i], x[col]));
+            y[row] = testing_fma(alpha, testing_mult(coo_val[i], x[col]), y[row]);
         }
     }
 }
@@ -7735,7 +7739,7 @@ void host_axpyi(I nnz, T alpha, const T* x_val, const I* x_ind, T* y, hipsparseI
 {
     for(I i = 0; i < nnz; ++i)
     {
-        y[x_ind[i] - idx_base] = y[x_ind[i] - idx_base] + testing_mult(alpha, x_val[i]);
+        y[x_ind[i] - idx_base] = testing_fma(alpha, x_val[i], y[x_ind[i] - idx_base]);
     }
 }
 
