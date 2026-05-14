@@ -139,10 +139,4 @@ pp_3d_kernels = [
         NS(type=pp_transform_type.R2C.value, length=[108,108,80], batch_low=25, dims=[0,2], factors=[[6,6,3],[10,4]], factors_pp=[[4],[9,3]], threads_per_transform=[9,5], threads_per_transform_pp=[1,1], workgroup_size=[72,135], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_1201.value, precision=['sp']),
         NS(type=pp_transform_type.R2C.value, length=[108,108,80], batch_low=20, dims=[0,2], factors=[[6,6,3],[4,10]], factors_pp=[[4],[9,3]], threads_per_transform=[9,4], threads_per_transform_pp=[1,1], workgroup_size=[72,108], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_90A.value, precision=['sp']),
         NS(type=pp_transform_type.R2C.value, length=[108,108,80], batch_low=20, batch_high=7500, dims=[0,2], factors=[[6,6,3],[4,10]], factors_pp=[[4],[9,3]], threads_per_transform=[9,2], threads_per_transform_pp=[1,1], workgroup_size=[72,54], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_950.value, precision=['sp']),
-
-
-
-
-        NS(type=pp_transform_type.C2C.value, length=[108,108,80], batch_low=5, dims=[0,2], factors=[[6,6,3],[10,8]], factors_pp=[[4],[3,3,3]], threads_per_transform=[9,5], threads_per_transform_pp=[1,1], workgroup_size=[36,135], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_1030.value, precision=['sp']),
-        NS(type=pp_transform_type.C2C.value, length=[108,108,80], batch_high=1, dims=[0,2], factors=[[6,6,3],[10,8]], factors_pp=[[2],[6,3,3]], threads_per_transform=[9,5], threads_per_transform_pp=[1,1], workgroup_size=[36,270], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_1030.value, precision=['sp']),
 ]

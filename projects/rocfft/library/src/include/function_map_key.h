@@ -173,8 +173,18 @@ struct KernelConfig
             ss << COMMA << factor;
             COMMA = ", ";
         }
-        ss << "], batch_low: " << batch_low.value_or(0)
-           << ", batch_high: " << batch_high.value_or(0);
+        if(batch_low.has_value())
+            ss << "], batch_low: " << batch_low.value();
+        else
+            ss << "], batch_low: "
+               << "n/a";
+
+        if(batch_high.has_value())
+            ss << "], batch_high: " << batch_high.value();
+        else
+            ss << "], batch_low: "
+               << "n/a";
+
         ss << "}";
 
         return ss.str();

@@ -192,10 +192,10 @@ def merge_kernel_list(kernels, all_precisions):
                 key = (get_kernel_key(kernel_cpy), kernel_cpy.precision,
                        kernel_cpy.transform_type)
 
-                if key not in d:
-                    min_batch = 1
-                    max_batch = sys.maxsize
+                min_batch = 1
+                max_batch = sys.maxsize
 
+                if key not in d:
                     d[key] = list()
                     if not is_empty_batch(kernel_cpy):
                         d[key].append(
@@ -214,10 +214,10 @@ def merge_kernel_list(kernels, all_precisions):
                             if new_range.start <= curr_range.stop and new_range.stop >= curr_range.start:
                                 print(batch_range_err_msg + str(kernel))
                                 sys.exit(1)
-                            else:
-                                d[key].append(new_range)
-                                r.append(kernel_cpy)
-                                break
+                        # New range is disjoint with the current ranges, so add it to the list
+                        d[key].append(new_range)
+                        r.append(kernel_cpy)
+
     return r
 
 
