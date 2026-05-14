@@ -8239,10 +8239,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.preloadGuard = []
     self.states.numSgprPreload = 0
     if kernel["PreloadKernArgs"]:
-      # Max num spgrs can be setup by CP is only 16 for now
       # kernel argument buffer address needs 2 sgprs
       # Workgroup ID x, y, z need 3 sgprs
-      numWorkgroupIDSgpr = kernel["ProblemType"]["NumIndicesC"]
       self.states.numSgprPreload = self.states.archCaps["MaxSgprPreload"] - self.states.rpga - kernel["ProblemType"]["NumIndicesC"]
 
       # Safe guard for preload arguments
