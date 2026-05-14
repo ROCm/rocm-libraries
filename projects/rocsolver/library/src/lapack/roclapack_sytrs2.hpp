@@ -836,7 +836,7 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
                 = (istat == rocblas_status_success) || (istat == rocblas_status_continue);
             if(!is_ok)
             {
-                return rocblas_status_internal_error;
+                THROW_IF_ROCBLAS_ERROR(rocblas_status_internal_error);
             }
         }
 
@@ -850,7 +850,7 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         pfree += size_work4;
 
         if(pfree > (pwork + size_work))
-            return rocblas_status_memory_error;
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
 
         ROCBLAS_CHECK(rocblasCall_trsm<T, I>(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_arg,
                                              shiftA, lda, strideA, B_arg, shiftB, ldb, strideB,
