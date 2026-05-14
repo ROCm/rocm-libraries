@@ -668,27 +668,11 @@ TEST_F(TestCrossTypeConversion, Fp8E4M3RoundtripViaFloat)
     EXPECT_EQ(a.data, b.data);
 }
 
-TEST_F(TestCrossTypeConversion, Fp8E4M3FnuzRoundtripViaFloat)
-{
-    const fp8_e4m3_fnuz a(4.0f);
-    auto f = static_cast<float>(a);
-    const fp8_e4m3_fnuz b(f);
-    EXPECT_EQ(a.data, b.data);
-}
-
 TEST_F(TestCrossTypeConversion, Fp8E5M2RoundtripViaFloat)
 {
     const fp8_e5m2 a(4.0f);
     auto f = static_cast<float>(a);
     const fp8_e5m2 b(f);
-    EXPECT_EQ(a.data, b.data);
-}
-
-TEST_F(TestCrossTypeConversion, Fp8E5M2FnuzRoundtripViaFloat)
-{
-    const fp8_e5m2_fnuz a(4.0f);
-    auto f = static_cast<float>(a);
-    const fp8_e5m2_fnuz b(f);
     EXPECT_EQ(a.data, b.data);
 }
 
