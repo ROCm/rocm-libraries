@@ -328,6 +328,7 @@ def writeSolutionsAndKernels(
     errorTolerant: bool=False,
     generateSourcesAndExit: bool=False,
     compress: bool=True,
+    removeTemporaries: bool=True,
 ):
     if globalParameters["PythonProfile"]:
         globalParameters["CpuThreads"] = 0
@@ -391,6 +392,8 @@ def writeSolutionsAndKernels(
     def assemble(ret):
         p, isa, wavefrontsize, _ = ret
         asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
+        if removeTemporaries:
+            p.unlink()
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
@@ -437,6 +440,11 @@ def writeSolutionsAndKernels(
                 srcKernelFile,
                 cmdlineArchs,
             )
+
+    if removeTemporaries and not generateSourcesAndExit:
+        buildTmp = outputPath / "build_tmp"
+        if buildTmp.exists() and buildTmp.is_dir():
+            shutil.rmtree(buildTmp)
 
     return codeObjectFiles, numKernels
 

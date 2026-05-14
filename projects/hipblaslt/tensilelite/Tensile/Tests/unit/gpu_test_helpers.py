@@ -25,11 +25,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-try:
-    from hip import hip, hiprtc  # type: ignore
-    HAS_HIP = True
-except ImportError:
-    HAS_HIP = False
+from hip import hip, hiprtc  # type: ignore
 
 from unittest.mock import MagicMock
 from types import SimpleNamespace
@@ -42,8 +38,43 @@ from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
 from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
 
+# ---- GPU target detection ----
+def _detect_gfx_target():
+    """Detect the GPU architecture from the current device.
+
+    Detection order:
+    1. TENSILE_GPU_TARGET env var (explicit override)
+    2. rocm_agent_enumerator (GPU hardware detection)
+
+    Returns None if no GPU can be detected.
+    """
+    override = os.environ.get("TENSILE_GPU_TARGET")
+    if override:
+        return override
+
+    rocmpath = os.environ.get("ROCM_PATH", "/opt/rocm")
+    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
+    if os.path.exists(enumerator):
+        try:
+            output = subprocess.check_output(
+                [enumerator, "-t", "GPU"], stderr=subprocess.DEVNULL
+            )
+            archs = [
+                line.strip()
+                for line in output.decode().splitlines()
+                if line.strip() and "gfx000" not in line
+            ]
+            if archs:
+                return archs[0]
+        except subprocess.CalledProcessError:
+            pass
+
+    return None
+
+
 # ---- Constants ----
-GFX_TARGET = "gfx950"
+GFX_TARGET = _detect_gfx_target()
+HAS_GFX950 = GFX_TARGET == "gfx950"
 WAVESIZE   = 64
 NUM_WAVES  = 4
 NUM_THREADS = WAVESIZE * NUM_WAVES  # 256
@@ -192,17 +223,21 @@ def generate_set_directives(sgprs):
 
 
 def init_rocisa():
-    """Initialize rocIsa singleton for gfx950.
+    """Initialize rocIsa singleton for the detected GPU target.
 
     Always calls ri.init() because other module imports (e.g. KernelWriter)
     may have already initialized the singleton with a different target.
     """
     import shutil
     from rocisa import rocIsa
+    from Tensile.Common.Architectures import gfxToIsa
     ri = rocIsa.getInstance()
+    if not GFX_TARGET:
+        raise ValueError(f"Invalid GPU target: '{GFX_TARGET}'")
+    isa = gfxToIsa(GFX_TARGET)
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
-    ri.init((9, 5, 0), asmpath)
-    ri.setKernel((9, 5, 0), WAVESIZE)
+    ri.init(isa, asmpath)
+    ri.setKernel(isa, WAVESIZE)
 
 
 # ---- Kernel assembly generator ----
