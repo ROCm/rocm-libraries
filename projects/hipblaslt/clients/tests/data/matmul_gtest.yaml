@@ -1641,7 +1641,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d{2}|120\d{1}'
 
 - name: matmul_groupedgemm
   category: pre_checkin
@@ -1656,7 +1656,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [0, 2]
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d{2}|120\d{1}'
 
 - name: matmul_groupedgemm_f8_fnuz
   category: pre_checkin

@@ -34,6 +34,7 @@
 #include <tuple>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "../driver.hpp"
@@ -230,6 +231,8 @@ private:
 };
 
 Gpu GetDevGpuType();
+std::string_view GetBaseDeviceName(std::string_view dev_name);
+Gpu GetGpuType(const std::string& dev_name);
 const std::multimap<Gpu, DevDescription>& GetAllKnownDevices();
 bool IsTestSupportedByDevice(Gpu supported_devs);
 
