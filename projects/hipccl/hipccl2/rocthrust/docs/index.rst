@@ -15,13 +15,10 @@ The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/
 .. grid:: 2
   :gutter: 3
 
-  .. grid-item-card:: Installation
+  .. grid-item-card:: Install
 
-    * :doc:`Prerequisites <install/rocThrust-prerequisites>`
-    * :doc:`Installation overview <install/rocThrust-install-overview>`
-    * :doc:`Installing on Linux <install/rocThrust-install-script>`
-    * :doc:`Installing on Windows <install/rocThrust-rmake-install>`
-    * :doc:`Installing on Linux and Windows with CMake <install/rocThrust-install-with-cmake>`
+    * :doc:`Install rocThrust <install/install>`
+    * :doc:`Build from source <install/source-build>`
 
   .. grid-item-card:: Conceptual
 
