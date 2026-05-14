@@ -69,9 +69,9 @@ try:
         select_reduction,
         select_workgroup_mapping,
         compute_number_of_output_tiles,
-        # Triton-target functions
-        compute_triton_sk_grid,
-        get_triton_default_configs,
+        # Triton-target heuristics sub-module (origami.triton.*).
+        # Provides: triton.compute_sk_grid, triton.get_default_configs.
+        triton,
         # Reduction functions
         int_to_reduction_t,
     )
@@ -143,9 +143,8 @@ __all__ = [
     "select_reduction",
     "select_workgroup_mapping",
     "compute_number_of_output_tiles",
-    # Triton-target functions
-    "compute_triton_sk_grid",
-    "get_triton_default_configs",
+    # Triton-target heuristics sub-module
+    "triton",
     # Reduction functions
     "int_to_reduction_t",
 ]

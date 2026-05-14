@@ -8,10 +8,10 @@
 #include "origami/hardware.hpp"
 #include "origami/types.hpp"
 
-namespace origami {
+namespace origami::triton {
 
 /**
- * @brief Compute Triton-specific StreamK grid size.
+ * @brief Compute the StreamK grid size for a Triton kernel.
  *
  * Uses the shared streamk::pick_fractional_grid / streamk::pick_k_split
  * helpers for the heuristic core (no logic duplication with
@@ -27,12 +27,12 @@ namespace origami {
  * @param hardware Hardware description (uses `N_CU`).
  * @return std::size_t StreamK grid size.
  */
-std::size_t compute_triton_sk_grid(const problem_t&  problem,
-                                   const config_t&   config,
-                                   const hardware_t& hardware);
+std::size_t compute_sk_grid(const problem_t&  problem,
+                            const config_t&   config,
+                            const hardware_t& hardware);
 
 /**
- * @brief Default Triton tile candidate configs for the given problem and hardware.
+ * @brief Default tile candidate configs for a Triton kernel on this hardware.
  *
  * Returns the architecture-aware cross-product of candidate (block_m, block_n,
  * block_k) tile sizes as a flat list of `config_t`. The arch-specific gating
@@ -55,7 +55,7 @@ std::size_t compute_triton_sk_grid(const problem_t&  problem,
  * @param hardware Hardware description (uses `arch`).
  * @return std::vector<config_t> Flat list of candidate tile configs.
  */
-std::vector<config_t> get_triton_default_configs(const problem_t&  problem,
-                                                 const hardware_t& hardware);
+std::vector<config_t> get_default_configs(const problem_t&  problem,
+                                          const hardware_t& hardware);
 
-}  // namespace origami
+}  // namespace origami::triton

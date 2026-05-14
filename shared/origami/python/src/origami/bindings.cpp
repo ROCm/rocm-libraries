@@ -357,19 +357,24 @@ NB_MODULE(origami, m) {
         nanobind::arg("config"),
         "Check if a config's macro tile fits in LDS.");
 
-  // Triton-target functions
-  m.def("compute_triton_sk_grid",
-        &origami::compute_triton_sk_grid,
-        nanobind::arg("problem"),
-        nanobind::arg("config"),
-        nanobind::arg("hardware"),
-        "Compute Triton-specific StreamK grid size from (problem, config, hardware)");
-  m.def("get_triton_default_configs",
-        &origami::get_triton_default_configs,
-        nanobind::arg("problem"),
-        nanobind::arg("hardware"),
-        "Default Triton tile candidate configs (mt only) for (problem, hardware). "
-        "Caller is responsible for setting mi.");
+  // Triton-target heuristics: exposed under the `origami.triton` sub-module to
+  // mirror the C++ `origami::triton` namespace. Reach them via:
+  //   origami.triton.compute_sk_grid(problem, config, hardware)
+  //   origami.triton.get_default_configs(problem, hardware)
+  auto triton_sub = m.def_submodule(
+      "triton", "Triton-target heuristics (matches C++ namespace origami::triton)");
+  triton_sub.def("compute_sk_grid",
+                 &origami::triton::compute_sk_grid,
+                 nanobind::arg("problem"),
+                 nanobind::arg("config"),
+                 nanobind::arg("hardware"),
+                 "Compute the StreamK grid size for a Triton kernel.");
+  triton_sub.def("get_default_configs",
+                 &origami::triton::get_default_configs,
+                 nanobind::arg("problem"),
+                 nanobind::arg("hardware"),
+                 "Default tile candidate configs for a Triton kernel on this hardware. "
+                 "Only `mt` is populated; the caller must set `mi` per its selection policy.");
   m.def("compute_mem_bw_from_occupancy",
         &origami::compute_mem_bw_from_occupancy,
         "Compute limited achievable memory bandwidth based on active CUs");

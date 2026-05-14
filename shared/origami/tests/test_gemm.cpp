@@ -1064,7 +1064,7 @@ TEST_CASE("GEMM: estimate_lds_bytes sub-byte dtypes", "[gemm]") {
 
 TEST_CASE("StreamK: pick_fractional_grid", "[streamk]") {
   // Reproduces the inner loop that both Tensile (grid_k_split_aware) and
-  // Triton (compute_triton_sk_grid) use when tiles > cu_count. Verifies that
+  // Triton (triton::compute_sk_grid) use when tiles > cu_count. Verifies that
   // the shared helper returns the first fractional candidate that fits the
   // workspace budget and is <= cu_count.
   const std::vector<double> kFracs = {0.0, 0.5, 0.125, 0.2, 0.25, 1.0 / 3.0};
@@ -1112,7 +1112,7 @@ TEST_CASE("StreamK: pick_k_split", "[streamk]") {
   REQUIRE(origami::streamk::pick_k_split(32, 0, 256, kFactors, 8) == 0);
 }
 
-TEST_CASE("Triton: compute_triton_sk_grid - basic + last-wave", "[triton]") {
+TEST_CASE("triton::compute_sk_grid - basic + last-wave", "[triton]") {
   // Basic sanity: data-parallel-sized problem returns a positive grid.
   auto hardware = make_hardware(950);
 
@@ -1129,7 +1129,7 @@ TEST_CASE("Triton: compute_triton_sk_grid - basic + last-wave", "[triton]") {
   config.mi     = {16, 16, 16};
   config.target = origami::target_t::triton;
 
-  REQUIRE(origami::compute_triton_sk_grid(problem, config, hardware) > 0);
+  REQUIRE(origami::triton::compute_sk_grid(problem, config, hardware) > 0);
 
   // Last-wave compensation: when tiles > n_cu and the remainder is < 128
   // tiles, the helper falls back to prev_pow2(n_cu). gfx950 N_CU = 256 is
@@ -1149,11 +1149,11 @@ TEST_CASE("Triton: compute_triton_sk_grid - basic + last-wave", "[triton]") {
   origami::config_t c_lw = config;
   c_lw.mt                = {128, 128, 64};
 
-  const size_t grid_lw = origami::compute_triton_sk_grid(p_lw, c_lw, hw_nonpow2);
+  const size_t grid_lw = origami::triton::compute_sk_grid(p_lw, c_lw, hw_nonpow2);
   REQUIRE(grid_lw == origami::math::prev_pow2(304));
 }
 
-TEST_CASE("Triton: compute_triton_sk_grid - batch-aware tile count", "[triton]") {
+TEST_CASE("triton::compute_sk_grid - batch-aware tile count", "[triton]") {
   // A batched problem must produce a different grid than the same per-batch
   // shape with batch=1, because the unified path now goes through
   // streamk::compute_number_of_output_tiles (batch-aware). Previously the
@@ -1184,14 +1184,14 @@ TEST_CASE("Triton: compute_triton_sk_grid - batch-aware tile count", "[triton]")
   origami::problem_t batched = base;
   batched.batch              = 8;
 
-  const size_t g_single  = origami::compute_triton_sk_grid(single, config, hardware);
-  const size_t g_batched = origami::compute_triton_sk_grid(batched, config, hardware);
+  const size_t g_single  = origami::triton::compute_sk_grid(single, config, hardware);
+  const size_t g_batched = origami::triton::compute_sk_grid(batched, config, hardware);
   REQUIRE(g_single > 0);
   REQUIRE(g_batched > 0);
   REQUIRE(g_batched != g_single);
 }
 
-TEST_CASE("Triton: compute_triton_sk_grid - sub-byte C dtype", "[triton]") {
+TEST_CASE("triton::compute_sk_grid - sub-byte C dtype", "[triton]") {
   // F4 output dtype must not collapse the per-tile workspace to zero. The
   // previous primitive-arg helper used out_dtype_bits / 8, which truncated
   // 4-bit dtypes to 0 bytes per element and disabled the workspace gate
@@ -1210,10 +1210,10 @@ TEST_CASE("Triton: compute_triton_sk_grid - sub-byte C dtype", "[triton]") {
   config.mi     = {16, 16, 16};
   config.target = origami::target_t::triton;
 
-  REQUIRE(origami::compute_triton_sk_grid(problem, config, hardware) > 0);
+  REQUIRE(origami::triton::compute_sk_grid(problem, config, hardware) > 0);
 }
 
-TEST_CASE("Triton: get_triton_default_configs - default range BF16", "[triton]") {
+TEST_CASE("triton::get_default_configs - default range BF16", "[triton]") {
   // BF16 is a >8-bit dtype, so the default range applies on every arch:
   //   MN in {16, 32, 64, 128, 256}, K in {16, 32, 64, 128, 256, 512}
   //   |configs| = 5 * 5 * 6 = 150
@@ -1223,7 +1223,7 @@ TEST_CASE("Triton: get_triton_default_configs - default range BF16", "[triton]")
   problem.a_dtype = origami::data_type_t::BFloat16;
   problem.b_dtype = origami::data_type_t::BFloat16;
 
-  const auto configs = origami::get_triton_default_configs(problem, hardware);
+  const auto configs = origami::triton::get_default_configs(problem, hardware);
   REQUIRE(configs.size() == 5u * 5u * 6u);
 
   std::set<size_t> ms, ns, ks;
@@ -1237,7 +1237,7 @@ TEST_CASE("Triton: get_triton_default_configs - default range BF16", "[triton]")
   REQUIRE(ks == std::set<size_t>{16, 32, 64, 128, 256, 512});
 }
 
-TEST_CASE("Triton: get_triton_default_configs - gfx950 F8 excludes 16 MN", "[triton]") {
+TEST_CASE("triton::get_default_configs - gfx950 F8 excludes 16 MN", "[triton]") {
   // gfx950 with <=8-bit narrow input restricts MN to {32, 64, 128, 256}
   // (no 16-MN MFMA support for those dtypes). |configs| = 4 * 4 * 6 = 96.
   auto hardware = make_hardware(950);
@@ -1246,7 +1246,7 @@ TEST_CASE("Triton: get_triton_default_configs - gfx950 F8 excludes 16 MN", "[tri
   problem.a_dtype = origami::data_type_t::Float8;
   problem.b_dtype = origami::data_type_t::Float8;
 
-  const auto configs = origami::get_triton_default_configs(problem, hardware);
+  const auto configs = origami::triton::get_default_configs(problem, hardware);
   REQUIRE(configs.size() == 4u * 4u * 6u);
 
   for (const auto& c : configs) {
@@ -1255,7 +1255,7 @@ TEST_CASE("Triton: get_triton_default_configs - gfx950 F8 excludes 16 MN", "[tri
   }
 }
 
-TEST_CASE("Triton: get_triton_default_configs - gfx942 F8 includes 512 MN", "[triton]") {
+TEST_CASE("triton::get_default_configs - gfx942 F8 includes 512 MN", "[triton]") {
   // gfx942 with 8-bit narrow input adds the 512 MN entry on top of the
   // default range. |configs| = 6 * 6 * 6 = 216.
   auto hardware = make_hardware(942);
@@ -1264,7 +1264,7 @@ TEST_CASE("Triton: get_triton_default_configs - gfx942 F8 includes 512 MN", "[tr
   problem.a_dtype = origami::data_type_t::Float8;
   problem.b_dtype = origami::data_type_t::Float8;
 
-  const auto configs = origami::get_triton_default_configs(problem, hardware);
+  const auto configs = origami::triton::get_default_configs(problem, hardware);
   REQUIRE(configs.size() == 6u * 6u * 6u);
 
   bool has_m512 = false, has_n512 = false, has_m16 = false, has_n16 = false;
@@ -1281,7 +1281,7 @@ TEST_CASE("Triton: get_triton_default_configs - gfx942 F8 includes 512 MN", "[tr
   REQUIRE(has_n16);
 }
 
-TEST_CASE("Triton: get_triton_default_configs - asymmetric dtypes use narrower",
+TEST_CASE("triton::get_default_configs - asymmetric dtypes use narrower",
           "[triton]") {
   // Mixed precision: A=BF16 (16 bits), B=F8 (8 bits). The narrower (8 bits)
   // drives gating, so on gfx942 the 512 MN extension must kick in.
@@ -1291,7 +1291,7 @@ TEST_CASE("Triton: get_triton_default_configs - asymmetric dtypes use narrower",
   problem.a_dtype = origami::data_type_t::BFloat16;
   problem.b_dtype = origami::data_type_t::Float8;
 
-  const auto configs = origami::get_triton_default_configs(problem, hardware);
+  const auto configs = origami::triton::get_default_configs(problem, hardware);
   bool has_512 = false;
   for (const auto& c : configs) {
     if (c.mt.m == 512 || c.mt.n == 512) {
@@ -1302,7 +1302,7 @@ TEST_CASE("Triton: get_triton_default_configs - asymmetric dtypes use narrower",
   REQUIRE(has_512);
 }
 
-TEST_CASE("Triton: get_triton_default_configs - mt only, mi left default", "[triton]") {
+TEST_CASE("triton::get_default_configs - mt only, mi left default", "[triton]") {
   // Only mt.{m,n,k} is populated; mi is intentionally left at its
   // default-constructed value. Callers must set mi per their selection policy.
   auto hardware = make_hardware(942);
@@ -1312,7 +1312,7 @@ TEST_CASE("Triton: get_triton_default_configs - mt only, mi left default", "[tri
   problem.b_dtype = origami::data_type_t::Half;
 
   const origami::config_t default_cfg;
-  const auto              configs = origami::get_triton_default_configs(problem, hardware);
+  const auto              configs = origami::triton::get_default_configs(problem, hardware);
   REQUIRE(!configs.empty());
   for (const auto& c : configs) {
     REQUIRE(c.mt.mnk() > 0);

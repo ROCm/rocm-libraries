@@ -9,11 +9,11 @@
 #include "origami/targets/triton/gemm.hpp"
 #include "origami/types.hpp"
 
-namespace origami {
+namespace origami::triton {
 
 namespace {
 
-// ----- compute_triton_sk_grid heuristic constants -----
+// ----- compute_sk_grid heuristic constants -----
 
 // Caller-side workspace cap (matches Tensile's StreamK budget).
 constexpr std::size_t kMaxWorkspaceBytes = 128ull * 1024 * 1024;
@@ -31,7 +31,7 @@ constexpr std::size_t kSmallLastWaveTileCount = 128;
 
 }  // namespace
 
-// Compute Triton-specific StreamK grid size.
+// Compute the StreamK grid size for a Triton kernel.
 //
 // Reuses the shared streamk fractional-grid and k-split helpers (no logic
 // duplication with streamk::grid_k_split_aware), and adds the Triton-only
@@ -45,9 +45,9 @@ constexpr std::size_t kSmallLastWaveTileCount = 128;
 //     (fixes a latent zero-divide for F4/F6 outputs).
 //   - Falls back to config.workspace_size_per_elem_c when the caller has
 //     populated it (matches Tensile semantics in streamk::grid_k_split_aware).
-std::size_t compute_triton_sk_grid(const problem_t&  problem,
-                                   const config_t&   config,
-                                   const hardware_t& hardware) {
+std::size_t compute_sk_grid(const problem_t&  problem,
+                            const config_t&   config,
+                            const hardware_t& hardware) {
   const std::size_t n_cu = hardware.N_CU;
   if (n_cu == 0) return 0;
 
@@ -97,7 +97,7 @@ std::size_t compute_triton_sk_grid(const problem_t&  problem,
   return sk_grid;
 }
 
-// Default Triton tile candidate configs for the given problem and hardware.
+// Default tile candidate configs for a Triton kernel on this hardware.
 //
 // Architecture-aware cross-product of (block_m, block_n, block_k) candidates
 // expanded into a flat std::vector<config_t>. The MN range is gated by the
@@ -105,8 +105,8 @@ std::size_t compute_triton_sk_grid(const problem_t&  problem,
 // matrix; the K range is the same for every (arch, dtype). Only mt is
 // populated (via dim3_t aggregate-init); the caller is responsible for
 // setting mi and any other config fields per its selection policy.
-std::vector<config_t> get_triton_default_configs(const problem_t&  problem,
-                                                 const hardware_t& hardware) {
+std::vector<config_t> get_default_configs(const problem_t&  problem,
+                                          const hardware_t& hardware) {
   const int narrow_bits =
       std::min(datatype_to_bits(problem.a_dtype), datatype_to_bits(problem.b_dtype));
 
@@ -140,4 +140,4 @@ std::vector<config_t> get_triton_default_configs(const problem_t&  problem,
   return configs;
 }
 
-}  // namespace origami
+}  // namespace origami::triton

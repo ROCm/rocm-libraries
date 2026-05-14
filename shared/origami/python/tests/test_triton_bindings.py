@@ -172,13 +172,13 @@ class TestTritonSKGrid:
         # Enough tiles to cover all CUs without StreamK.
         problem = _make_sk_problem(16384, 16384, 4096)
         config = _make_sk_config(128, 128, 64)
-        result = origami.compute_triton_sk_grid(problem, config, HARDWARE["gfx950"])
+        result = origami.triton.compute_sk_grid(problem, config, HARDWARE["gfx950"])
         assert result > 0
 
     def test_small_problem(self):
         problem = _make_sk_problem(256, 256, 256)
         config = _make_sk_config(128, 128, 64)
-        result = origami.compute_triton_sk_grid(problem, config, HARDWARE["gfx950"])
+        result = origami.triton.compute_sk_grid(problem, config, HARDWARE["gfx950"])
         assert result > 0
 
     def test_batched_problem_uses_batch_dimension(self):
@@ -190,10 +190,10 @@ class TestTritonSKGrid:
         batch-aware.
         """
         config = _make_sk_config(128, 128, 64)
-        single = origami.compute_triton_sk_grid(
+        single = origami.triton.compute_sk_grid(
             _make_sk_problem(2048, 2048, 1024, batch=1), config, HARDWARE["gfx950"]
         )
-        batched = origami.compute_triton_sk_grid(
+        batched = origami.triton.compute_sk_grid(
             _make_sk_problem(2048, 2048, 1024, batch=8), config, HARDWARE["gfx950"]
         )
         assert single > 0
@@ -209,7 +209,7 @@ class TestTritonSKGrid:
         """
         problem = _make_sk_problem(8192, 8192, 1024, c_dtype=origami.data_type_t.Float4)
         config = _make_sk_config(128, 128, 64)
-        result = origami.compute_triton_sk_grid(problem, config, HARDWARE["gfx950"])
+        result = origami.triton.compute_sk_grid(problem, config, HARDWARE["gfx950"])
         assert result > 0
 
 
@@ -293,7 +293,7 @@ def _make_default_configs_problem(a_dtype, b_dtype=None):
 
 
 class TestTritonDefaultConfigs:
-    """Tests for `get_triton_default_configs(problem, hardware)`.
+    """Tests for `origami.triton.get_default_configs(problem, hardware)`.
 
     The function returns a flat list of `config_t` whose `mt.{m,n,k}` covers
     the architecture-aware tile candidate space. The narrower of
@@ -302,7 +302,7 @@ class TestTritonDefaultConfigs:
 
     def test_returns_nonempty_list(self):
         problem = _make_default_configs_problem(origami.data_type_t.Half)
-        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        configs = origami.triton.get_default_configs(problem, HARDWARE["gfx942"])
         assert isinstance(configs, list)
         assert len(configs) > 0
         for c in configs:
@@ -313,7 +313,7 @@ class TestTritonDefaultConfigs:
         # Default (>8-bit) range: MN in {16,32,64,128,256}, K in {16,32,64,128,256,512}.
         # Cross-product = 5 * 5 * 6 = 150.
         problem = _make_default_configs_problem(origami.data_type_t.BFloat16)
-        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        configs = origami.triton.get_default_configs(problem, HARDWARE["gfx942"])
         assert len(configs) == 5 * 5 * 6
         ms = {c.mt.m for c in configs}
         ns = {c.mt.n for c in configs}
@@ -325,7 +325,7 @@ class TestTritonDefaultConfigs:
     def test_gfx950_f8_excludes_mn16(self):
         # gfx950 with <=8-bit narrow input: MN restricted to {32,64,128,256}.
         problem = _make_default_configs_problem(origami.data_type_t.Float8)
-        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx950"])
+        configs = origami.triton.get_default_configs(problem, HARDWARE["gfx950"])
         assert len(configs) == 4 * 4 * 6
         ms = {c.mt.m for c in configs}
         ns = {c.mt.n for c in configs}
@@ -338,7 +338,7 @@ class TestTritonDefaultConfigs:
         if not hasattr(origami.data_type_t, "Float4"):
             pytest.skip("Float4 not available in this build")
         problem = _make_default_configs_problem(origami.data_type_t.Float4)
-        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx950"])
+        configs = origami.triton.get_default_configs(problem, HARDWARE["gfx950"])
         ms = {c.mt.m for c in configs}
         ns = {c.mt.n for c in configs}
         assert 16 not in ms and 16 not in ns
@@ -346,7 +346,7 @@ class TestTritonDefaultConfigs:
     def test_gfx942_f8_includes_mn512(self):
         # gfx942 with 8-bit narrow input adds MN=512.
         problem = _make_default_configs_problem(origami.data_type_t.Float8)
-        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        configs = origami.triton.get_default_configs(problem, HARDWARE["gfx942"])
         assert len(configs) == 6 * 6 * 6
         ms = {c.mt.m for c in configs}
         ns = {c.mt.n for c in configs}
@@ -360,7 +360,7 @@ class TestTritonDefaultConfigs:
         problem = _make_default_configs_problem(
             origami.data_type_t.BFloat16, origami.data_type_t.Float8
         )
-        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        configs = origami.triton.get_default_configs(problem, HARDWARE["gfx942"])
         ms = {c.mt.m for c in configs}
         assert 512 in ms
 
@@ -368,7 +368,7 @@ class TestTritonDefaultConfigs:
         # The function only populates mt; mi is intentionally left at its
         # default-constructed value. Callers are expected to fill mi in.
         problem = _make_default_configs_problem(origami.data_type_t.Half)
-        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        configs = origami.triton.get_default_configs(problem, HARDWARE["gfx942"])
         default_mi = origami.config_t().mi
         for c in configs:
             assert c.mi.m == default_mi.m
@@ -377,6 +377,6 @@ class TestTritonDefaultConfigs:
 
     def test_no_duplicate_configs(self):
         problem = _make_default_configs_problem(origami.data_type_t.Half)
-        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        configs = origami.triton.get_default_configs(problem, HARDWARE["gfx942"])
         seen = {(c.mt.m, c.mt.n, c.mt.k) for c in configs}
         assert len(seen) == len(configs)

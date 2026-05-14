@@ -13,10 +13,7 @@
 
 namespace origami {
 
-// ============================================================================
-// heuristic_params_t Implementation
-// ============================================================================
-
+// heuristic_params_t implementation.
 void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   // Default-aware overlay: only fields that have been changed away from the
   // default-constructed value in `other` override `*this`. Fields that `other`
@@ -84,10 +81,7 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   if (other.main_loop_efficiency != defaults.main_loop_efficiency) main_loop_efficiency = other.main_loop_efficiency;
 }
 
-// ============================================================================
-// heuristic_key_t Implementation
-// ============================================================================
-
+// heuristic_key_t implementation.
 bool heuristic_key_t::matches(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config) const {
@@ -137,10 +131,7 @@ size_t heuristic_key_t::specificity() const {
   return count;
 }
 
-// ============================================================================
-// heuristics_database_t Implementation
-// ============================================================================
-
+// heuristics_database_t implementation.
 heuristics_database_t::heuristics_database_t() { initialize_defaults(); }
 
 heuristics_database_t& heuristics_database_t::get_instance() {
@@ -443,10 +434,7 @@ void heuristics_database_t::initialize_defaults() {
   }
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
+// Helpers.
 heuristic_key_t make_hand_optimized_kernel_key(hardware_t::architecture_t arch,
                                                data_type_t mi_dtype,
                                                transpose_t transA,
