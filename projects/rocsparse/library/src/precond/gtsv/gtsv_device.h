@@ -932,17 +932,18 @@ namespace rocsparse
         __shared__ T sv[2 * BLOCKSIZE];
         __shared__ T srhs[2 * BLOCKSIZE];
 
-        sw[tidx] = (gid < nblocks) ? w[gid] : static_cast<T>(0);
+        const rocsparse_int safe_gid = (gid < nblocks) ? gid : 0;
+        sw[tidx] = (gid < nblocks) ? w[safe_gid] : static_cast<T>(0);
         sw[tidx + BLOCKSIZE]
-            = (gid < nblocks) ? w[gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
+            = (gid < nblocks) ? w[safe_gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
 
-        sv[tidx] = (gid < nblocks) ? v[gid] : static_cast<T>(0);
+        sv[tidx] = (gid < nblocks) ? v[safe_gid] : static_cast<T>(0);
         sv[tidx + BLOCKSIZE]
-            = (gid < nblocks) ? v[gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
+            = (gid < nblocks) ? v[safe_gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
 
-        srhs[tidx]             = (gid < nblocks) ? rhs[gid + m_pad * bidy] : static_cast<T>(0);
+        srhs[tidx]             = (gid < nblocks) ? rhs[safe_gid + m_pad * bidy] : static_cast<T>(0);
         srhs[tidx + BLOCKSIZE] = (gid < nblocks)
-                                     ? rhs[gid + (BLOCKDIM - 1) * nblocks + m_pad * bidy]
+                                     ? rhs[safe_gid + (BLOCKDIM - 1) * nblocks + m_pad * bidy]
                                      : static_cast<T>(0);
 
         __syncthreads();
@@ -1132,17 +1133,18 @@ namespace rocsparse
         __shared__ T sv[2 * BLOCKSIZE];
         __shared__ T srhs[2 * BLOCKSIZE + 2];
 
-        sw[tidx] = (gid < nblocks) ? w[gid] : static_cast<T>(0);
+        const rocsparse_int safe_gid = (gid < nblocks) ? gid : 0;
+        sw[tidx] = (gid < nblocks) ? w[safe_gid] : static_cast<T>(0);
         sw[tidx + BLOCKSIZE]
-            = (gid < nblocks) ? w[gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
+            = (gid < nblocks) ? w[safe_gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
 
-        sv[tidx] = (gid < nblocks) ? v[gid] : static_cast<T>(0);
+        sv[tidx] = (gid < nblocks) ? v[safe_gid] : static_cast<T>(0);
         sv[tidx + BLOCKSIZE]
-            = (gid < nblocks) ? v[gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
+            = (gid < nblocks) ? v[safe_gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
 
-        srhs[tidx + 1] = (gid < nblocks) ? rhs[gid + (BLOCKDIM - 1) * nblocks + m_pad * bidy]
+        srhs[tidx + 1] = (gid < nblocks) ? rhs[safe_gid + (BLOCKDIM - 1) * nblocks + m_pad * bidy]
                                          : static_cast<T>(0);
-        srhs[tidx + 1 + BLOCKSIZE] = (gid < nblocks) ? rhs[gid + m_pad * bidy] : static_cast<T>(0);
+        srhs[tidx + 1 + BLOCKSIZE] = (gid < nblocks) ? rhs[safe_gid + m_pad * bidy] : static_cast<T>(0);
 
         __syncthreads();
 
@@ -1213,9 +1215,11 @@ namespace rocsparse
             return;
         }
 
-        T tmp1 = (gid > 0) ? rhs[gid - 1 + (BLOCKDIM - 1) * nblocks + m_pad * bidy]
+        const rocsparse_int safe_gid_m1 = (gid > 0) ? gid - 1 : 0;
+        const rocsparse_int safe_gid_p1 = (gid + BLOCKDIM < m_pad) ? gid + 1 : 0;
+        T tmp1 = (gid > 0) ? rhs[safe_gid_m1 + (BLOCKDIM - 1) * nblocks + m_pad * bidy]
                            : static_cast<T>(0);
-        T tmp2 = (gid + BLOCKDIM < m_pad) ? rhs[gid + 1 + m_pad * bidy] : static_cast<T>(0);
+        T tmp2 = (gid + BLOCKDIM < m_pad) ? rhs[safe_gid_p1 + m_pad * bidy] : static_cast<T>(0);
 
         for(rocsparse_int i = 1; i < BLOCKDIM - 1; i++)
         {

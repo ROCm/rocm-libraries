@@ -97,8 +97,10 @@ namespace rocsparse
 
         // Load the first column of the current row from A and B to set the starting
         // point for the first chunk
-        const J col_A = (row_begin_A < row_end_A) ? csr_col_ind_A[row_begin_A] - idx_base_A : n;
-        const J col_B = (row_begin_B < row_end_B) ? csr_col_ind_B[row_begin_B] - idx_base_B : n;
+        const I safe_begin_A = (row_begin_A < row_end_A) ? row_begin_A : 0;
+        const I safe_begin_B = (row_begin_B < row_end_B) ? row_begin_B : 0;
+        const J col_A = (row_begin_A < row_end_A) ? csr_col_ind_A[safe_begin_A] - idx_base_A : n;
+        const J col_B = (row_begin_B < row_end_B) ? csr_col_ind_B[safe_begin_B] - idx_base_B : n;
 
         // Begin of the current row chunk
         J chunk_begin = rocsparse::min(col_A, col_B);
@@ -259,8 +261,10 @@ namespace rocsparse
 
         // Load the first column of the current row from A and B to set the starting
         // point for the first chunk
-        const J col_A = (row_begin_A < row_end_A) ? csr_col_ind_A[row_begin_A] - idx_base_A : n;
-        const J col_B = (row_begin_B < row_end_B) ? csr_col_ind_B[row_begin_B] - idx_base_B : n;
+        const I safe_begin_A = (row_begin_A < row_end_A) ? row_begin_A : 0;
+        const I safe_begin_B = (row_begin_B < row_end_B) ? row_begin_B : 0;
+        const J col_A = (row_begin_A < row_end_A) ? csr_col_ind_A[safe_begin_A] - idx_base_A : n;
+        const J col_B = (row_begin_B < row_end_B) ? csr_col_ind_B[safe_begin_B] - idx_base_B : n;
 
         // Begin of the current row chunk
         J chunk_begin = rocsparse::min(col_A, col_B);

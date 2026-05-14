@@ -80,16 +80,18 @@ namespace rocsparse
         // Perform PCR iterations
         for(int k = 1; k < BLOCKSIZE; k <<= 1)
         {
-            const int left  = tid - k;
-            const int right = tid + k;
+            const int left       = tid - k;
+            const int right      = tid + k;
+            const int safe_left  = (left >= 0) ? left : 0;
+            const int safe_right = (right < BLOCKSIZE) ? right : BLOCKSIZE - 1;
 
-            const T a_left = (left >= 0) ? a_shared[left] : static_cast<T>(0);
-            const T b_left = (left >= 0) ? b_shared[left] : static_cast<T>(1);
-            const T c_left = (left >= 0) ? c_shared[left] : static_cast<T>(0);
+            const T a_left = (left >= 0) ? a_shared[safe_left] : static_cast<T>(0);
+            const T b_left = (left >= 0) ? b_shared[safe_left] : static_cast<T>(1);
+            const T c_left = (left >= 0) ? c_shared[safe_left] : static_cast<T>(0);
 
-            const T a_right = (right < BLOCKSIZE) ? a_shared[right] : static_cast<T>(0);
-            const T b_right = (right < BLOCKSIZE) ? b_shared[right] : static_cast<T>(1);
-            const T c_right = (right < BLOCKSIZE) ? c_shared[right] : static_cast<T>(0);
+            const T a_right = (right < BLOCKSIZE) ? a_shared[safe_right] : static_cast<T>(0);
+            const T b_right = (right < BLOCKSIZE) ? b_shared[safe_right] : static_cast<T>(1);
+            const T c_right = (right < BLOCKSIZE) ? c_shared[safe_right] : static_cast<T>(0);
 
             const T alpha = (left >= 0) ? -a / b_left : static_cast<T>(0);
             const T gamma = (right < BLOCKSIZE) ? -c / b_right : static_cast<T>(0);
@@ -101,9 +103,9 @@ namespace rocsparse
             T d_new[NUM_RHS];
             for(int rhs = 0; rhs < NUM_RHS; rhs++)
             {
-                const T d_left = (left >= 0) ? x_shared[left + rhs * BLOCKSIZE] : static_cast<T>(0);
+                const T d_left = (left >= 0) ? x_shared[safe_left + rhs * BLOCKSIZE] : static_cast<T>(0);
                 const T d_right
-                    = (right < BLOCKSIZE) ? x_shared[right + rhs * BLOCKSIZE] : static_cast<T>(0);
+                    = (right < BLOCKSIZE) ? x_shared[safe_right + rhs * BLOCKSIZE] : static_cast<T>(0);
 
                 d_new[rhs] = x[rhs] + alpha * d_left + gamma * d_right;
             }
@@ -264,16 +266,18 @@ namespace rocsparse
         // PCR Algorithm
         for(int h = 1; h < BLOCKSIZE; h *= 2)
         {
-            const int left  = tid - h;
-            const int right = tid + h;
+            const int left       = tid - h;
+            const int right      = tid + h;
+            const int safe_left  = (left >= 0) ? left : 0;
+            const int safe_right = (right < BLOCKSIZE) ? right : BLOCKSIZE - 1;
 
-            const T a_left = (left >= 0) ? a_shared[left] : static_cast<T>(0);
-            const T b_left = (left >= 0) ? b_shared[left] : static_cast<T>(1);
-            const T c_left = (left >= 0) ? c_shared[left] : static_cast<T>(0);
+            const T a_left = (left >= 0) ? a_shared[safe_left] : static_cast<T>(0);
+            const T b_left = (left >= 0) ? b_shared[safe_left] : static_cast<T>(1);
+            const T c_left = (left >= 0) ? c_shared[safe_left] : static_cast<T>(0);
 
-            const T a_right = (right < BLOCKSIZE) ? a_shared[right] : static_cast<T>(0);
-            const T b_right = (right < BLOCKSIZE) ? b_shared[right] : static_cast<T>(1);
-            const T c_right = (right < BLOCKSIZE) ? c_shared[right] : static_cast<T>(0);
+            const T a_right = (right < BLOCKSIZE) ? a_shared[safe_right] : static_cast<T>(0);
+            const T b_right = (right < BLOCKSIZE) ? b_shared[safe_right] : static_cast<T>(1);
+            const T c_right = (right < BLOCKSIZE) ? c_shared[safe_right] : static_cast<T>(0);
 
             const T k1 = (left >= 0) ? a / b_left : static_cast<T>(0);
             const T k2 = (right < BLOCKSIZE) ? c / b_right : static_cast<T>(0);
@@ -285,9 +289,9 @@ namespace rocsparse
             T d_new[NUM_RHS];
             for(int rhs = 0; rhs < NUM_RHS; rhs++)
             {
-                const T d_left = (left >= 0) ? x_shared[left + rhs * BLOCKSIZE] : static_cast<T>(0);
+                const T d_left = (left >= 0) ? x_shared[safe_left + rhs * BLOCKSIZE] : static_cast<T>(0);
                 const T d_right
-                    = (right < BLOCKSIZE) ? x_shared[right + rhs * BLOCKSIZE] : static_cast<T>(0);
+                    = (right < BLOCKSIZE) ? x_shared[safe_right + rhs * BLOCKSIZE] : static_cast<T>(0);
 
                 d_new[rhs] = x[rhs] - d_left * k1 - d_right * k2;
             }

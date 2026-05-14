@@ -81,61 +81,64 @@ namespace rocsparse
             {
                 const I k = j + lid;
 
+                const bool k_valid = (k < block_row_end);
+                const I    safe_k  = k_valid ? k : block_row_start;
+
                 const J my_col
-                    = (k < block_row_end) ? BSR_BLOCK_DIM * (bsr_col_ind[k] - idx_base) : 0;
+                    = k_valid ? BSR_BLOCK_DIM * (bsr_col_ind[safe_k] - idx_base) : 0;
 
                 T my_val[BSR_BLOCK_DIM];
                 if(direction == rocsparse_direction_row)
                 {
-                    my_val[0] = (k < block_row_end)
-                                    ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                    my_val[0] = k_valid
+                                    ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                              + BSR_BLOCK_DIM * local_row])
                                     : static_cast<T>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
-                        my_val[1] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[1] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * local_row + 1])
                                         : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
-                        my_val[2] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[2] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * local_row + 2])
                                         : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
-                        my_val[3] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[3] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * local_row + 3])
                                         : static_cast<T>(0);
                     }
                 }
                 else
                 {
-                    my_val[0] = (k < block_row_end) ? static_cast<T>(
-                                    bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row])
-                                                    : static_cast<T>(0);
+                    my_val[0] = k_valid ? static_cast<T>(
+                                    bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k + local_row])
+                                        : static_cast<T>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
-                        my_val[1] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[1] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * 1 + local_row])
                                         : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
-                        my_val[2] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[2] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * 2 + local_row])
                                         : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
-                        my_val[3] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[3] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * 3 + local_row])
                                         : static_cast<T>(0);
                     }
@@ -258,61 +261,64 @@ namespace rocsparse
             {
                 const I k = j + lid;
 
+                const bool k_valid = (k < block_row_end);
+                const I    safe_k  = k_valid ? k : block_row_start;
+
                 const J my_col
-                    = (k < block_row_end) ? BSR_BLOCK_DIM * (bsr_col_ind[k] - idx_base) : 0;
+                    = k_valid ? BSR_BLOCK_DIM * (bsr_col_ind[safe_k] - idx_base) : 0;
 
                 T my_val[BSR_BLOCK_DIM];
                 if(direction == rocsparse_direction_row)
                 {
-                    my_val[0] = (k < block_row_end)
-                                    ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                    my_val[0] = k_valid
+                                    ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                              + BSR_BLOCK_DIM * local_row])
                                     : static_cast<T>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
-                        my_val[1] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[1] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * local_row + 1])
                                         : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
-                        my_val[2] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[2] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * local_row + 2])
                                         : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
-                        my_val[3] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[3] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * local_row + 3])
                                         : static_cast<T>(0);
                     }
                 }
                 else
                 {
-                    my_val[0] = (k < block_row_end) ? static_cast<T>(
-                                    bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row])
-                                                    : static_cast<T>(0);
+                    my_val[0] = k_valid ? static_cast<T>(
+                                    bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k + local_row])
+                                        : static_cast<T>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
-                        my_val[1] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[1] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * 1 + local_row])
                                         : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
-                        my_val[2] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[2] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * 2 + local_row])
                                         : static_cast<T>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
-                        my_val[3] = (k < block_row_end)
-                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
+                        my_val[3] = k_valid
+                                        ? static_cast<T>(bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * safe_k
                                                                  + BSR_BLOCK_DIM * 3 + local_row])
                                         : static_cast<T>(0);
                     }

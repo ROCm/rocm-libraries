@@ -62,8 +62,9 @@ namespace rocsparse
 
         const J row = sell_slice_size * sliceid + tidx;
 
-        const I start = (row < m) ? sell_slice_offsets[sliceid] - idx_base : 0;
-        const I end   = (row < m) ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
+        const bool row_valid = (row < m);
+        const I start = row_valid ? sell_slice_offsets[sliceid] - idx_base : 0;
+        const I end   = row_valid ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
 
         T sum = static_cast<T>(0);
 
@@ -197,8 +198,9 @@ namespace rocsparse
 
         const J row = sell_slice_size * sliceid + tidx;
 
-        const I start = (row < m) ? sell_slice_offsets[sliceid] - idx_base : 0;
-        const I end   = (row < m) ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
+        const bool row_valid = (row < m);
+        const I start = row_valid ? sell_slice_offsets[sliceid] - idx_base : 0;
+        const I end   = row_valid ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
 
         T row_val = alpha * x[row];
 
