@@ -508,7 +508,9 @@ defaultBenchmarkCommonParameters = [
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
-    {"TDMSplit": [False]}
+    {"TDMSplit": [False]},
+    {"MXScaleFormat": ["Auto"]},
+    {"MXLoadInst": ["Auto"]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

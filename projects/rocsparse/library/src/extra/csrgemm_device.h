@@ -982,6 +982,7 @@ namespace rocsparse
 
         // Entry point of current row into C
         I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = csr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over hash table
         for(uint32_t i = lid; i < HASHSIZE; i += WFSIZE)
@@ -1018,8 +1019,11 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtained position in C
-            csr_col_ind_C[idx_C] = col_C + idx_base_C;
-            csr_val_C[idx_C]     = data[i];
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
+            {
+                csr_col_ind_C[idx_C] = col_C + idx_base_C;
+                csr_val_C[idx_C]     = data[i];
+            }
         }
     }
 
@@ -1227,8 +1231,11 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtain position in C
-            csr_col_ind_C[idx_C] = col_C + idx_base_C;
-            csr_val_C[idx_C]     = val_C;
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
+            {
+                csr_col_ind_C[idx_C] = col_C + idx_base_C;
+                csr_val_C[idx_C]     = val_C;
+            }
         }
     }
 
@@ -1295,6 +1302,7 @@ namespace rocsparse
 
         // Entry point into columns of C
         I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = csr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over the row chunks until the end of the row has been reached (which is
         // the number of total columns)
@@ -1481,7 +1489,7 @@ namespace rocsparse
                 I idx = row_begin_C + offset - 1;
 
                 // Only threads with a non-zero value write to C
-                if(has_nnz)
+                if(has_nnz && idx < row_end_C)
                 {
                     csr_col_ind_C[idx] = i + chunk_begin + idx_base_C;
                     csr_val_C[idx]     = value;
