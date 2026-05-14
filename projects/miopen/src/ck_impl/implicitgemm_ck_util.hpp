@@ -411,8 +411,7 @@ template <typename DeviceOpType,
           typename CKArgsType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription,
           bool CheckSplitK                = false>
-bool IsCKArgsSupported([[maybe_unused]] const ProblemDescriptionType& problem,
-                       [[maybe_unused]] const std::string& kernel_id)
+bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string& kernel_id)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(!kernel_id.empty())
@@ -449,6 +448,9 @@ bool IsCKArgsSupported([[maybe_unused]] const ProblemDescriptionType& problem,
             return (ptr_iter != conv_ptrs.end()) && CKArgsType{problem}.IsSupportedBy(*ptr_iter);
         }
     }
+#else
+    (void)problem;
+    (void)kernel_id;
 #endif
     return false;
 }
@@ -671,7 +673,7 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
 
 template <typename DataType, typename OutElemOp>
 OutElemOp
-GetOutElementOp([[maybe_unused]] const miopen::fusion::ActivationOpInvokeParam& activationOp)
+GetOutElementOp(const miopen::fusion::ActivationOpInvokeParam& activationOp)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto activationMode = activationOp.activMode;
@@ -685,6 +687,7 @@ GetOutElementOp([[maybe_unused]] const miopen::fusion::ActivationOpInvokeParam& 
                      "Unsupported activation type: " + std::to_string(activationMode));
     }
 #else
+    (void)activationOp;
     MIOPEN_THROW(miopenStatusNotImplemented, "Not implemented without ck enabled");
 #endif
 }
@@ -877,13 +880,12 @@ template <bool ZeroOutputs,
           typename Input1TposeOp,
           typename Input2TposeOp,
           typename OutputTposeOp>
-ConvSolution
-InitInvokerFactoryNCHW([[maybe_unused]] const ExecutionContext& ctx,
-                       [[maybe_unused]] const miopen::conv::ProblemDescription& problem,
-                       [[maybe_unused]] const std::string& kernel_id,
-                       [[maybe_unused]] const Input1TposeOp& input1_op,
-                       [[maybe_unused]] const Input2TposeOp& input2_op,
-                       [[maybe_unused]] const OutputTposeOp& output_op)
+ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem,
+                                    const std::string& kernel_id,
+                                    const Input1TposeOp& input1_op,
+                                    const Input2TposeOp& input2_op,
+                                    const OutputTposeOp& output_op)
 {
     assert(problem.IsLayoutDefault());
 
@@ -1044,6 +1046,12 @@ InitInvokerFactoryNCHW([[maybe_unused]] const ExecutionContext& ctx,
             output_tr_inst2.ConvertTo(handle, kernels, conv_tensors);
         };
     };
+#else
+    (void)ctx;
+    (void)kernel_id;
+    (void)input1_op;
+    (void)input2_op;
+    (void)output_op;
 #endif
     return result;
 }
@@ -1274,10 +1282,10 @@ ConvSolution InitInvokerFactoryWrwNCHW(const ExecutionContext& ctx,
 
 template <typename InvokerFactoryMakerNCHW, typename InvokerFactoryMakerNHWC>
 ConvSolution MakeSolutionGroupConvImplicitGemmXdlops(
-    [[maybe_unused]] const miopen::conv::ProblemDescription& problem,
-    [[maybe_unused]] InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
-    [[maybe_unused]] InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
-    [[maybe_unused]] const bool use_tf32 = false)
+    const miopen::conv::ProblemDescription& problem,
+    InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
+    InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
+    const bool use_tf32 = false)
 {
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -1334,6 +1342,10 @@ ConvSolution MakeSolutionGroupConvImplicitGemmXdlops(
             "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this data type");
     }
 #else
+    (void)problem;
+    (void)invoker_factory_maker_ncdhw;
+    (void)invoker_factory_maker_ndhwc;
+    (void)use_tf32;
     return {};
 #endif
 }

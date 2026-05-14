@@ -29,11 +29,15 @@
 // Suppress warnings from rocrand's own headers: in TheRock builds rocrand/stage/include
 // is injected globally as -I (not -isystem), so rocrand headers are not treated as system
 // includes and their internal issues trigger our warnings.
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wundef"
+#endif
 #include <rocrand/rocrand.hpp>
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 
 namespace gpumemrand {
 
