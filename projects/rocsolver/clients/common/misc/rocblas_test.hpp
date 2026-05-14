@@ -178,8 +178,8 @@ inline void rocblas_expect_status(rocblas_status status, rocblas_status expect)
             if(ex != value)                                                                \
             {                                                                              \
                 fmt::print(stderr, "caught expected exception, but it has wrong value\n"); \
+                rocblas_abort();                                                           \
             }                                                                              \
-            throw;                                                                         \
         }                                                                                  \
     } while(0)
 
