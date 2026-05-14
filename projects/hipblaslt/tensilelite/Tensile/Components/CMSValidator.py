@@ -31,6 +31,11 @@ from typing import ClassVar, Optional
 
 from rocisa.instruction import SWaitCnt, SBarrier
 from Tensile.Common.Utilities import printWarning
+from Tensile.Components.CMSValidatorDialect import (
+    CDNA4_DIALECT,
+    ValidatorDialect,
+    resolve_dialect,
+)
 
 
 @functools.total_ordering
@@ -67,6 +72,15 @@ class ValidatorPass(Enum):
     VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS = auto()
     VERIFY_ASCENDING_ORDER = auto()
     VERIFY_SCC_OVERLAP = auto()
+    # Numerical-correctness checks (statically detectable bug patterns
+    # that produce wrong answers but compile cleanly):
+    #   * VERIFY_NO_LR_LW_LDS_RACE: For LDSB=1 (single LDS buffer),
+    #     LWs must not begin until the LAST LR of the same iter has
+    #     issued. Otherwise iter K-1's data is partially overwritten
+    #     by iter K's LWs while iter K-1's LRs are still reading.
+    #     For LDSB=0 (double-buffered), the schedule must contain
+    #     LWSA/LWSB swaps that flip the write address before LWs.
+    VERIFY_NO_LR_LW_LDS_RACE = auto()
     # Timeline passes
     ADD_LOCAL_READ_CONSTRAINTS = auto()
     ADD_PACK_CONSTRAINTS = auto()
@@ -192,11 +206,26 @@ class LocalRead(ValidatorInstruction):
         return f"{self.name} @ idx={issued_at} issued too late, must be guaranteed before {self.needed_by.name} @ idx={needed_by}{context_str} but only guaranteed @ idx={guaranteed_by}."
 
 @dataclass
-class MFMA(ValidatorInstruction):
+class MatrixInst(ValidatorInstruction):
+    """Architecture-agnostic matrix-instruction placeholder.
+
+    Used to mark matrix-instruction slots (MFMA on CDNA, WMMA on RDNA 3.5)
+    in the timeline. The class-level ``mfma_finish_cycles`` is the CDNA 4
+    default (ISA §7.6 -> 3 quad-cycles). Architecture-specific timing is
+    carried by the validator's active ``ValidatorDialect`` for dialect-aware
+    passes; this ClassVar survives for the existing CDNA-4 code paths that
+    read it directly off the instruction object.
+    """
     mfma_finish_cycles: ClassVar[int] = QUAD_CYCLES_STANDARD_MFMA_FINISH
 
     def validate(self) -> Optional[str]:
         return None
+
+
+# Back-compat alias. The legacy name ``MFMA`` is kept for one release so
+# external callers (tests, diagnostics that match on ``instruction.name``)
+# keep working while the codebase transitions to ``MatrixInst``.
+MFMA = MatrixInst
 
 @dataclass
 class Pack(ValidatorInstruction):
@@ -465,16 +494,57 @@ ALL_INSTRUCTION_NAMES = [
 def create_unified_timeline(
     schedule_info: 'ScheduleInfo',
     kernel: 'Solution',
-    code_path: int
+    code_path: int,
+    dialect: ValidatorDialect = CDNA4_DIALECT,
 ) -> 'Timeline':
-    """Create a single Timeline with all instruction types."""
+    """Create a single Timeline with all instruction types.
+
+    If the dialect provides a ``timeline_factory``, it is used to construct
+    the Timeline. Otherwise the default ``Timeline`` class (CDNA-4 DTL=1
+    layout) is used, which is the behavior the CDNA 4 dialect relies on.
+    The RDNA 3.5 dialect supplies its own factory that yields an
+    ``RDNA35WMMATimeline`` configured for DTL=0 single-stream GR.
+    """
     available_names = set(schedule_info.optSchedule.keys())
     names_to_add = [n for n in ALL_INSTRUCTION_NAMES if n in available_names]
-    return Timeline(names_to_add, code_path, schedule_info, kernel)
+    factory = dialect.timeline_factory
+    if factory is None:
+        return Timeline(names_to_add, code_path, schedule_info, kernel, dialect)
+    return factory(names_to_add, code_path, schedule_info, kernel, dialect)
 
 
 class Timeline:
-    def __init__(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution'):
+    """Base timeline.
+
+    Policy knobs (override in subclasses):
+      ``REQUIRES_DIRECT_TO_LDS``: when True, the timeline asserts
+          ``kernel['DirectToLds']`` during population. CDNA-4 kernels use
+          DTL=1 so the assert is active there; RDNA 3.5 WMMA kernels use
+          DTL=0 so the subclass turns this off.
+      ``GR_HAS_M0_POINTER_UPDATES``: when True, treat every even index in
+          ``GRA``/``GRB`` streams as an ``m0`` pointer update (skip it and
+          require an even stream length). On DTL=1 CDNA-4 each GR is
+          preceded by an SMEM m0 write; on DTL=0 RDNA 3.5 GRs are plain
+          VMEM loads with no m0 interleave.
+      ``WAVEFRONT_SIZE``: informational; structural checks are currently
+          independent of wave size, but stream-length auditing uses it to
+          express the wave32/wave64 ratio authored schedules must match.
+
+    The default values preserve historical CDNA-4 behavior for every
+    test and caller of the bare ``Timeline`` class.
+    """
+
+    REQUIRES_DIRECT_TO_LDS: ClassVar[bool] = True
+    GR_HAS_M0_POINTER_UPDATES: ClassVar[bool] = True
+    WAVEFRONT_SIZE: ClassVar[int] = 64
+    # When True, the CDNA-4 "can't mix LR1s and LR3s" assert is enforced.
+    # CDNA-4 kernels either use a two-sub-iter (LR0/LR1) or a four-sub-iter
+    # layout (LR0..LR3) layout but never mix both LR1 and LR3. RDNA 3.5
+    # WMMA kernels with DepthU > 2 * matrixInstK use LR0..LR(numSubIter-1)
+    # including both LR1 and LR3, so the subclass disables this check.
+    ENFORCE_LR1_LR3_EXCLUSIVITY: ClassVar[bool] = True
+
+    def __init__(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution', dialect: ValidatorDialect = CDNA4_DIALECT):
         """
         Create a timeline from the provided schedule_info which contains only the instructions inside `instruction_names_to_add`.
         Organized as a list of lists indexed by vmfma_index + 1.
@@ -499,9 +569,10 @@ class Timeline:
         """
         
         available_keys = schedule_info.optSchedule.keys()
-        has_lr1s = "LRA1" in available_keys or "LRB1" in available_keys
-        has_lr3s = "LRA3" in available_keys or "LRB3" in available_keys
-        assert not (has_lr1s and has_lr3s), "Can't mix LR1s and LR3s."
+        if self.ENFORCE_LR1_LR3_EXCLUSIVITY:
+            has_lr1s = "LRA1" in available_keys or "LRB1" in available_keys
+            has_lr3s = "LRA3" in available_keys or "LRB3" in available_keys
+            assert not (has_lr1s and has_lr3s), "Can't mix LR1s and LR3s."
 
         # Validate that sub-iteration suffixes are consistent with the kernel configuration.
         # The valid suffixes depend on how numLoopIter is determined:
@@ -561,6 +632,11 @@ class Timeline:
         # Track which validation passes have already been applied to this timeline to avoid applying them multiple times.
         self._applied_passes: set[Callable[['Timeline', 'ValidatorPassContext'], None]] = set()
 
+        # Architecture dialect (drives pack-group layout, matrix-instruction
+        # timing, SCC cluster shape). Defaults to CDNA4 so existing
+        # call-sites keep working.
+        self.dialect: ValidatorDialect = dialect
+
         # Populate the timeline with instructions
         self._populate_instructions(instruction_names_to_add, code_path, schedule_info, kernel)
         self._linearize_timeline()
@@ -569,7 +645,8 @@ class Timeline:
         """
         Populates all timelines with deep copies of the instructions from schedule_info.
         """
-        assert kernel["DirectToLds"], "Only DirectToLds cases are supported by validator."
+        if self.REQUIRES_DIRECT_TO_LDS:
+            assert kernel["DirectToLds"], "Only DirectToLds cases are supported by validator."
 
         swap_global_read_order = kernel["SwapGlobalReadOrder"]
         is_tf32_emulation = kernel.get("UseF32XEmulation", False)
@@ -586,7 +663,21 @@ class Timeline:
 
         # NOTE: Relative ordering of instructions must be preserved.
         #       Order dictates the order in which instructions are scheduled if they are scheduled at the same vmfmaindex.
-        for name in schedule_info.optSchedule.keys():
+        #
+        # Dialect override: when ``sync_insert_last`` is set (RDNA 3.5 WMMA),
+        # the SYNC key is processed AFTER every other instruction stream so
+        # that SWaitCnt/SBarrier instructions end up at the highest
+        # ``sub_index`` of their ``vmfma_index`` bucket. This makes
+        # ``apply_swaits``'s backward walk from a SWaitCnt reach LRs/GRs
+        # authored at the same boundary, which matches the gfx1151 CMS
+        # author's intent (SWaitCnt at vmfma=N covers all same-iter LDS
+        # traffic at vmfma<=N). Codegen is unaffected -- this only reorders
+        # the validator's in-memory timeline model.
+        schedule_keys = list(schedule_info.optSchedule.keys())
+        if self.dialect.sync_insert_last and "SYNC" in schedule_keys:
+            schedule_keys.remove("SYNC")
+            schedule_keys.append("SYNC")
+        for name in schedule_keys:
             if name not in instruction_names_to_add:
                 continue
 
@@ -624,13 +715,20 @@ class Timeline:
                     self._insert(idx_vmfma, grinc, kernel)
             elif name.startswith("GRA") or name.startswith("GRB"):
                 global_reads = schedule_get(name, code_path, schedule_info)
-                assert len(global_reads) % 2 == 0, f"Code path {code_path}: {name} has an odd number of indices. Must be even if DirectToLds is True."
-                
+                if self.GR_HAS_M0_POINTER_UPDATES:
+                    # CDNA 4 DTL=1: every even index is an m0 pointer update,
+                    # every odd index is the real buffer_load. Stream must be
+                    # even-length to pair them up.
+                    assert len(global_reads) % 2 == 0, f"Code path {code_path}: {name} has an odd number of indices. Must be even if DirectToLds is True."
+
                 for idx_GR, idx_vmfma in enumerate(global_reads):
                     assert idx_vmfma >= -1, f"Code path {code_path}: GlobalRead {name} at index {idx_GR} is not valid. Must be >= -1."
 
-                    # If using DirectToLds, only every other index (starting at index=1) is an actual GR, the others are increments to a pointer.
-                    if idx_GR % 2 == 0:
+                    # DTL=1 only: skip the m0 pointer update, keep the real
+                    # buffer_load that follows it. On RDNA 3.5 DTL=0 the
+                    # subclass sets ``GR_HAS_M0_POINTER_UPDATES = False`` and
+                    # every index is a real GR.
+                    if self.GR_HAS_M0_POINTER_UPDATES and idx_GR % 2 == 0:
                         continue
 
                     global_read = GlobalRead(name=name, issued_at=POSITION_NEG_INF, swap_global_read_order=swap_global_read_order)
@@ -640,19 +738,20 @@ class Timeline:
 
                 for idx_pack, idx_vmfma in enumerate(packs):
                     assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
+                    pg = self.dialect.pack_graph
                     if is_4x4mfma_tf32:
-                        # Construction-time constants: PACK_GROUP_SIZE_TF32_4X4, TF32_4X4_MFMA_START/END
-                        idx_in_group = idx_pack % PACK_GROUP_SIZE_TF32_4X4
-                        group_idx = idx_pack // PACK_GROUP_SIZE_TF32_4X4
-                        if TF32_4X4_MFMA_START <= idx_in_group < TF32_4X4_MFMA_END:
+                        # Dialect-driven constants (CDNA4: 10-wide, MFMAs at 4..6).
+                        idx_in_group = idx_pack % pg.group_size_tf32_4x4
+                        group_idx = idx_pack // pg.group_size_tf32_4x4
+                        if pg.tf32_4x4_mfma_start <= idx_in_group < pg.tf32_4x4_mfma_end:
                             pack = MFMAPack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack, group_index=group_idx)
                         else:
                             pack = CVTPack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack, group_index=group_idx)
                     elif is_tf32_emulation:
-                        # Construction-time constants: PACK_GROUP_SIZE_TF32, TF32_MIDDLE_16_START/END
-                        idx_in_group = idx_pack % PACK_GROUP_SIZE_TF32
-                        group_idx = idx_pack // PACK_GROUP_SIZE_TF32
-                        if TF32_MIDDLE_16_START <= idx_in_group < TF32_MIDDLE_16_END:
+                        # Dialect-driven constants (CDNA4: 24-wide, middle-16 at 4..20).
+                        idx_in_group = idx_pack % pg.group_size_tf32
+                        group_idx = idx_pack // pg.group_size_tf32
+                        if pg.tf32_middle_16_start <= idx_in_group < pg.tf32_middle_16_end:
                             pack = MiddlePack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack, group_index=group_idx)
                         else:
                             pack = CVTPack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack, group_index=group_idx)
@@ -764,6 +863,51 @@ class Timeline:
             self.combined_timeline.extend(self._timelines[loop_name])
 
 
+class CDNA4DTLTimeline(Timeline):
+    """Timeline specialized for CDNA 4 MFMA kernels with DirectToLds=1.
+
+    This is the historical layout and is what the base ``Timeline`` class
+    already produces (all policy knobs are at their CDNA-4 defaults). The
+    explicit subclass exists so that ``CMSValidatorDialect.CDNA4_DIALECT``
+    can name it as its ``timeline_factory`` without coupling to the base
+    class identity.
+    """
+
+    REQUIRES_DIRECT_TO_LDS: ClassVar[bool] = True
+    GR_HAS_M0_POINTER_UPDATES: ClassVar[bool] = True
+    WAVEFRONT_SIZE: ClassVar[int] = 64
+
+
+class RDNA35WMMATimeline(Timeline):
+    """Timeline specialized for RDNA 3.5 WMMA kernels with DirectToLds=0.
+
+    Differences from CDNA 4:
+      * DTL=0: no ``assert kernel['DirectToLds']`` at construction.
+      * GR is a plain wave32 ``buffer_load`` / VMEM op. There is no m0
+        pointer-update interleave, so every index in ``GRA``/``GRB`` is
+        a real GlobalRead and the stream length is NOT required to be
+        even.
+      * Wave32: ``WAVEFRONT_SIZE = 32``. Structural checks do not yet key
+        off this value directly; it is consulted by the stream-length
+        auditing helpers when comparing authored schedule lengths against
+        the wave32 ``idMap``.
+
+    The waitcnt counter-name handling in ``_insert`` / ``apply_swaits``
+    currently reuses the CDNA 4 model. The ``VMcnt`` / ``VScnt`` /
+    ``LGKMcnt`` / ``EXPcnt`` split for RDNA 3.5 can be specialized here
+    later if a pass needs per-counter precision that the shared model
+    cannot express.
+    """
+
+    REQUIRES_DIRECT_TO_LDS: ClassVar[bool] = False
+    GR_HAS_M0_POINTER_UPDATES: ClassVar[bool] = False
+    WAVEFRONT_SIZE: ClassVar[int] = 32
+    # RDNA 3.5 WMMA CMS schedules (see _get_schedule_*_gfx1151 in
+    # CustomSchedule.py) routinely use LR0..LR7 when DepthU/matrixInstK
+    # is 8, so LR1 and LR3 legitimately coexist in the same schedule.
+    ENFORCE_LR1_LR3_EXCLUSIVITY: ClassVar[bool] = False
+
+
 def applies_only_once(func):
     """Decorator: skips the function if it has already been applied to this timeline."""
     @functools.wraps(func)
@@ -867,7 +1011,7 @@ def apply_swaits(timeline: Timeline) -> None:
 
 
 @applies_only_once
-def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
+def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int], dialect: ValidatorDialect = CDNA4_DIALECT) -> None:
     """
     Set the needed_by field of LocalReads based on the VMFMA index they are required for.
     Timeline is modified in place.
@@ -911,7 +1055,8 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
                     n_local_reads_a=n_local_reads_a,
                     n_local_reads_b=n_local_reads_b,
                     force_unroll_sub_iter=kernel.get("ForceUnrollSubIter", False),
-                    use_f32x_emulation=kernel.get("UseF32XEmulation", False))
+                    use_f32x_emulation=kernel.get("UseF32XEmulation", False),
+                    dialect=dialect)
                 lr.needed_by = mfma_for_linear_index[needed_by + loop_offset]
 
 
@@ -1312,7 +1457,7 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 pack.needed_by = cvt1_needed_by
        
 
-def _handle_min_pack_quad_cycles(packs: list[Pack]) -> None:
+def _handle_min_pack_quad_cycles(packs: list[Pack], dialect: ValidatorDialect = CDNA4_DIALECT) -> None:
     """
     Set the min_quad_cycles_before_result_used field for TimedPack instructions.
     This is used to enforce timing constraints for TF32 emulation modes.
@@ -1321,14 +1466,17 @@ def _handle_min_pack_quad_cycles(packs: list[Pack]) -> None:
 
     Args:
         packs: List of Pack instructions to set minimum quad-cycles for.
+        dialect: Architecture dialect that owns the quad-cycle constants.
+            Defaults to the CDNA 4 dialect, whose values equal the historical
+            module-level constants byte-for-byte.
     """
     for pack in packs:
         if isinstance(pack, MFMAPack):
-            # 4x4 MFMAs need 5 quad-cycles before CVT1 can use result
-            pack.min_quad_cycles_before_result_used = QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1
+            # 4x4 MFMAs need 5 quad-cycles before CVT1 can use result (CDNA 4 ISA §7.6)
+            pack.min_quad_cycles_before_result_used = dialect.timing.mfma_4x4_before_cvt1
         elif isinstance(pack, CVTPack):
-            # CVT packs need 2 quad-cycles before MFMAs can use their results
-            pack.min_quad_cycles_before_result_used = QUAD_CYCLES_CVT_BEFORE_MFMA
+            # CVT packs need 2 quad-cycles before MFMAs can use their results (CDNA 4 ISA §7.6)
+            pack.min_quad_cycles_before_result_used = dialect.timing.cvt_before_mfma
         # All other packs have no timing constraints
 
 def _hook_up_packs_bf16(packs: list[Pack], local_reads: list[LocalRead]) -> None:
@@ -1564,7 +1712,7 @@ def _get_lrs_for_pack(timeline: Timeline, use_plr_pack: bool, pack_name: str, lo
     return [lr for _,lr in local_reads]
 
 @applies_only_once
-def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
+def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int], dialect: ValidatorDialect = CDNA4_DIALECT) -> None:
     """
     Set the needed_by fields 
     Set the needed_by and must_start_after fields of Packs based on the LR(s) they depend on.
@@ -1622,18 +1770,21 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
                     _hook_up_packs_f32_mfma(packs, local_reads)
                 else:
                     _hook_up_packs_f32(packs, all_middle_16_packs, local_reads)
-                _handle_min_pack_quad_cycles(packs)
+                _handle_min_pack_quad_cycles(packs, dialect)
             else:
                 _hook_up_packs_bf16(packs, local_reads)
             
             _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
 
-def precompute_issue_times(instructions: list[ValidatorInstruction]) -> list[int]:
+def precompute_issue_times(instructions: list[ValidatorInstruction], dialect: ValidatorDialect = CDNA4_DIALECT) -> list[int]:
     """
     Returns a list where issue_times[i] represents the quad-cycle when instruction i starts issuing.
 
     Args:
         instructions: List of ValidatorInstruction objects in execution order.
+        dialect: Architecture dialect that owns the type-switch thresholds.
+            Defaults to the CDNA 4 dialect, whose values equal the historical
+            module-level constants byte-for-byte.
     """
     mfma_free_at = 0
     current_issue = 0
@@ -1650,11 +1801,22 @@ def precompute_issue_times(instructions: list[ValidatorInstruction]) -> list[int
             current_mfma_class = type(instruction)
             if last_mfma_class and current_mfma_class != last_mfma_class:
                 gap = current_issue - last_mfma_issue
-                threshold = MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 if last_mfma_class is MFMAPack else MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD
+                threshold = dialect.timing.type_switch_threshold_from_4x4 \
+                            if last_mfma_class is MFMAPack \
+                            else dialect.timing.type_switch_threshold_from_standard
                 if gap < threshold:
                     current_issue += 1
 
-            mfma_free_at = current_issue + 1 + instruction.mfma_finish_cycles  # 1 to issue + finish_cycles to complete
+            # Matrix-instruction "finish" latency is dialect-dependent.
+            # CDNA 4 uses ISA section 7.6 quad-cycles (3 standard, 1 for
+            # 4x4 MFMA). RDNA 3.5 uses the LLVM GFX11SpeedModel binding
+            # (Write32Bit=5 cycles = 2 quad-cycles; no 4x4 WMMA variant).
+            finish_cycles = (
+                dialect.timing.mfma_4x4_finish
+                if current_mfma_class is MFMAPack
+                else dialect.timing.standard_mfma_finish
+            )
+            mfma_free_at = current_issue + 1 + finish_cycles  # 1 to issue + finish_cycles to complete
 
             last_mfma_issue = current_issue
             last_mfma_class = current_mfma_class
@@ -1684,7 +1846,7 @@ def estimate_quad_cycles_precomputed(i_start: int, i_end: int, issue_times: list
     return issue_times[i_end] - issue_times[i_start] - 1
 
 @applies_only_once
-def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
+def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution', dialect: ValidatorDialect = CDNA4_DIALECT) -> int:
     """
     Perform a rough estimate on the number of quad-cycles that pass between when an instruction is issued and when its result is used.
     Needed to ensure the restrictions laid out in section 7.6 of the CDNA 4 ISA are met. Failing to meet these restrictions will result in deterministic errors.
@@ -1723,8 +1885,8 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     # Build helper lookup
     index_for_inst_id = {id(inst): i for i, inst in enumerate(timeline.combined_timeline)}
 
-    # Precompute issue times
-    issue_times = precompute_issue_times(timeline.combined_timeline)
+    # Precompute issue times using dialect-driven type-switch thresholds
+    issue_times = precompute_issue_times(timeline.combined_timeline, dialect)
         
     # Estimate number of quad-cycles between being issued and result being used
     for i_instruction, instruction in enumerate(timeline.combined_timeline):
@@ -1791,6 +1953,7 @@ def _transform_index_with_force_unroll_sub_iter(
     use_f32x_emulation: bool,
     mfma_reorder: list[int],
     num_vmfma: int,
+    dialect: ValidatorDialect = CDNA4_DIALECT,
 ) -> int:
     """
     Convert column-major linear index into needed_by mfma index when ForceUnrollSubIter is enabled.
@@ -1845,8 +2008,14 @@ def _transform_index_with_force_unroll_sub_iter(
             needed_by = compute_consumer_mfma_index(0, b_tile)
     
     if not is_lr0:  # LR1/LR3 reads data for next iteration.
-        needed_by += num_vmfma
-    
+        # Force-unroll-sub-iter schedules are CDNA 4 only in the current
+        # CustomSchedule.py corpus, so the LR1 offset follows the CDNA 4
+        # "first half of NEXT iteration" convention. The dialect-supplied
+        # offset (``lr1_consumer_half_offset`` * num_vmfma//2) is applied
+        # in place of the old hard-coded ``+ num_vmfma`` to keep parity
+        # with the non-force-unroll path.
+        needed_by += dialect.lr1_consumer_half_offset * (num_vmfma // 2)
+
     return needed_by
 
 
@@ -1858,45 +2027,43 @@ def _transform_index_standard(
     n_tiles_b: int,
     use_f32x_emulation: bool,
     mfma_reorder: list[int],
-    num_vmfma: int
+    num_vmfma: int,
+    dialect: ValidatorDialect = CDNA4_DIALECT,
 ) -> int:
     """
     Convert column-major linear index into needed_by mfma index when ForceUnrollSubIter is disabled.
-    
+
     LR data is consumed by multiple MFMAs (one for each tile in the opposite dimension).
     With MFMA reordering, we find the earliest consumer.
+
+    The per-LR consumer-phase offset (which "half" of the schedule the LR
+    feeds) is taken from ``dialect.lr0_consumer_half_offset`` /
+    ``lr1_consumer_half_offset`` so CDNA 4 and RDNA 3.5 WMMA can coexist.
     """
     mfmas_per_tile = MFMAS_PER_TILE_TF32 if use_f32x_emulation else MFMAS_PER_TILE_BF16
-    
-    # Convert linear index to MFMA base index
+
     needed_by = linear_index * mfmas_per_tile
-    
-    if is_lr0:  # LR0 reads data for 2nd half of this iteration (when present)
-        needed_by += num_vmfma // 2
-    
+
+    half_step = num_vmfma // 2
+    if is_lr0:
+        needed_by += dialect.lr0_consumer_half_offset * half_step
+
     if mfma_reorder:
-        # With reordering, we need to find the earliest consumer across all tiles in the opposite dimension.
-        # LR data is used by multiple MFMAs - one for each tile in the opposite dimension.
-        # mfma_reorder[new_pos] = original_pos, so we need the inverse to find execution position.
         inverse = invert_mfma_reorder(mfma_reorder)
         if is_lra:
-            # LRA's A tile is consumed by MFMAs at (a, b) for all b tiles
-            # In column-major layout: index = base + b * n_tiles_a * mfmas_per_tile
             needed_by = min(
                 inverse[needed_by + b * n_tiles_a * mfmas_per_tile]
                 for b in range(n_tiles_b)
             )
         else:
-            # LRB's B tile is consumed by MFMAs at (a, b) for all a tiles
-            # In column-major layout: index = base + a * mfmas_per_tile
             needed_by = min(
                 inverse[needed_by + a * mfmas_per_tile]
                 for a in range(n_tiles_a)
             )
-    
-    if not is_lr0:  # LR1/LR3 reads data for first half of next iteration
-        needed_by += num_vmfma
-    
+
+    if not is_lr0:
+        needed_by += dialect.lr1_consumer_half_offset * half_step
+
     return needed_by
 
 
@@ -1911,6 +2078,7 @@ def lr_needed_by_mfma(
     n_local_reads_b: int,
     force_unroll_sub_iter: bool,
     use_f32x_emulation: bool,
+    dialect: ValidatorDialect = CDNA4_DIALECT,
     ) -> int:
     """
     Helper function to calculate the index of the MFMA at which the given LRA/LRB will be needed by.
@@ -1966,7 +2134,7 @@ def lr_needed_by_mfma(
         transform_function = _transform_index_with_force_unroll_sub_iter        
     needed_by = transform_function(
         linear_index, is_lr0, is_lra, n_tiles_a, n_tiles_b,
-        use_f32x_emulation, mfma_reorder, num_vmfma
+        use_f32x_emulation, mfma_reorder, num_vmfma, dialect
     )
     
     return needed_by
@@ -1982,30 +2150,60 @@ class GRIncData:
     insts: list[int]
 
 def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure we don't overlap scalar instructions modifying SCC for a single code path.
-    This can happen:
-        - between GRIncA and GRIncB
-        - between GRInc and GR when DLT is activated
-        - between GRInc and LWS
+    """SCC data-flow integrity check for a single code path.
 
-    By default, GRInc instructions can be split into 3 distinct intervals where we shouldn't touch SCC
-      - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32 (3)
-      - s_add_u32, s_addc_u32 (2)
-      - s_sub_u32, s_subb_u32 (2)
-      - s_cmp_eq_u32, s_cselect_b32 (2)
-    With ShadowLimit disabled (`Use64bShadowLimit`):
-      - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32 (3)
-      - s_add_u32, s_addc_u32 (2)
-      - s_sub_u32  (2)
+    Guarantees that no unrelated SCC-writing scalar op is scheduled between
+    the producer (``s_add_u32`` / ``s_cmp_eq_u32``) and consumer
+    (``s_addc_u32`` / ``s_cselect_b32``) of each GRInc cluster. Otherwise
+    the consumer would observe the wrong SCC value and compute a corrupt
+    address.
 
-        This function checks no other scalar instructions is inside the above intervals.
+    Interaction with the dialect:
+
+    * ``dialect.scc_cluster.interval_sizes_shadow_limit`` /
+      ``interval_sizes_no_shadow_limit`` supply the cluster shape (SALU
+      op counts per cluster). CDNA 4 and RDNA 3.5 both use a standard
+      64-bit buffer-address increment with identical SALU mnemonics, so
+      the interval shapes are also identical.
+    * ``dialect.scc_cluster.check_gr_m0_updates_when_dtl`` selects whether
+      GRA/GRB streams are also inspected. CDNA 4 DTL=1 embeds an
+      ``s_mov_b32 m0, ...`` + m0-pointer update per GR, so the pass must
+      confirm that no SCC writer lands between those m0 writes and the
+      GR buffer-load. RDNA 3.5 DTL=0 has no such m0 update, so the GR
+      streams are skipped entirely.
+
+    Semantic note on RDNA 3.5: per ISA section 5.6 (lines 2171-2172),
+    ``S_NOP`` is NOT required between dependent scalar ops on RDNA 3.5
+    for correctness -- so this pass is a data-flow integrity check on
+    that architecture, not a hardware-hazard check. The CDNA 4 rationale
+    (hardware hazard that requires an ``s_nop 1``) is subsumed.
+
+    Historical shapes (preserved for CDNA 4 via ``CDNA4_DIALECT``):
+
+    * Shadow limit (``Use64bShadowLimit=1``):
+        - s_cmp_eq_u32, s_cselect_b32, s_cselect_b32 (3)
+        - s_add_u32,    s_addc_u32                   (2)
+        - s_sub_u32,    s_subb_u32                   (2)
+        - s_cmp_eq_u32, s_cselect_b32                (2)
+    * No shadow limit:
+        - s_cmp_eq_u32, s_cselect_b32, s_cselect_b32 (3)
+        - s_add_u32,    s_addc_u32                   (2)
+        - s_sub_u32                                  (2)
+
+    This function checks no unrelated scalar op writes SCC inside those
+    intervals.
     """
     kernel = context["kernel"]
     DTL = kernel["DirectToLds"]
     ShadowLimit = kernel["Use64bShadowLimit"]
 
-    intervalSize = [3,2,2,2] if ShadowLimit else [3,2,1] # Values explained above
+    # Dialect-driven cluster shape. CDNA4_DIALECT mirrors the historical
+    # `[3,2,2,2]` / `[3,2,1]` values exactly; RDNA dialects are free to
+    # specify different interval templates.
+    dialect = context.get("dialect", CDNA4_DIALECT)
+    scc = dialect.scc_cluster
+    intervalSize = list(scc.interval_sizes_shadow_limit) if ShadowLimit \
+                   else list(scc.interval_sizes_no_shadow_limit)
     numElements = sum(intervalSize)
 
     # Gets intervals from GRInc indices based on the above `intervalSize` value
@@ -2033,8 +2231,10 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
 
     GRIncNames = ["GRIncA", "GRIncB"]
     names = ["LWSA", "LWSB"]
-    # We only care about GRA/B when DTL is activated (m0 usage)
-    if DTL:
+    # We only care about GRA/B when DTL is activated (m0 usage).
+    # On RDNA 3.5 DTL=0, GR is a plain VMEM op with no SCC writer, so the
+    # dialect switches this off via ``check_gr_m0_updates_when_dtl=False``.
+    if DTL and scc.check_gr_m0_updates_when_dtl:
         names += ["GRA", "GRB"]
 
     def verifyIndices(grIncData: GRIncData, name: str, indices: list[int]) -> Optional[str]:
@@ -2045,6 +2245,14 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
                 if inInterval(v,interval, dclIndex<dclIndexGrInc):
                     return f"{name} at index {v} can't be between {grIncData.name} {interval[0]}-{interval[1]} due to SCC usage."
         return None
+
+    # SCC-overlap validation is only meaningful when the schedule emits GRIncA and GRIncB.
+    # Some schedule variants (e.g. wave32 PGR=2 schedules that bake the pointer increment
+    # into GRA/GRB themselves) do not emit separate GRInc groups; there is nothing to check
+    # in that case.
+    missing_grincs = [n for n in GRIncNames if n not in scheduleInfo.optSchedule]
+    if missing_grincs:
+        return True, ""
 
     GRIncs = []
     for GRIncName in GRIncNames:
@@ -2057,9 +2265,13 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
     if errorMessage:
         return False, errorMessage
 
-    # Then, check GR and LW on all GRIncs
+    # Then, check GR and LW on all GRIncs. Skip names that are not emitted by this
+    # schedule variant: for example, schedules that use PGR=2 buffer alternation
+    # may not emit LWSA/LWSB swap instructions.
     for grIncData in GRIncs:
         for name in names:
+            if name not in scheduleInfo.optSchedule:
+                continue
             insts = schedule_get(name, code_path, scheduleInfo)
             # In case of GRA/GRB, just take m0 updates indices
             if name.startswith("GR"):
@@ -2077,11 +2289,17 @@ class ValidatorPassContext:
     kernel: 'Solution'
     mfma_reorder: list[int]
     swap_global_read_order: bool
+    # Architecture dialect (CDNA 4 MFMA, RDNA 3.5 WMMA, ...).
+    # Defaults to CDNA4 so existing callers/tests that construct
+    # ValidatorPassContext by hand keep working byte-identically.
+    # ``CDNA4_DIALECT`` is a frozen dataclass, so a plain default is
+    # safe and avoids the per-instance lambda allocation.
+    dialect: ValidatorDialect = CDNA4_DIALECT
 
 
 def add_local_read_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
     """Add LR.needed_by and LR.guaranteed_by constraints to the provided timeline."""
-    set_lr_needed_by_for_VMFMA(timeline, ctx.kernel, ctx.mfma_reorder)
+    set_lr_needed_by_for_VMFMA(timeline, ctx.kernel, ctx.mfma_reorder, ctx.dialect)
     apply_swaits(timeline)
     apply_barriers(timeline)
 
@@ -2101,8 +2319,8 @@ def add_pack_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
         printWarning("UseF32XEmulation is set to True but UseDirect32XEmulation is not set to True. Skipping CMS validation for packs.")
         return
     apply_swaits(timeline)
-    hook_up_packs(timeline, ctx.kernel, ctx.mfma_reorder)
-    estimate_quad_cycles(timeline, ctx.kernel)
+    hook_up_packs(timeline, ctx.kernel, ctx.mfma_reorder, ctx.dialect)
+    estimate_quad_cycles(timeline, ctx.kernel, ctx.dialect)
 
 
 def add_gr_not_too_early_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
@@ -2129,13 +2347,44 @@ def add_gr_not_too_early_constraints(timeline: Timeline, ctx: ValidatorPassConte
 
     # apply_swaits must run first so that LR0.guaranteed_by (done_idx) is set before must_start_after hookup.
     apply_swaits(timeline)
-    set_gr_must_start_after_from_lr0s(timeline, ctx.swap_global_read_order, dtl_plus_lds_buf)
-    set_gr_must_start_after_from_grinc(timeline, ctx.swap_global_read_order)
+    # ``set_gr_must_start_after_from_lr0s`` encodes the CDNA 4 DTL=1 same-
+    # LDS-block reuse hazard: GR writes (DDR->LDS) land in the same LDS
+    # block LR0 was just reading from, so each GR must be issued after the
+    # last same-iteration LR0 is guaranteed done. RDNA 3.5 DTL=0 kernels
+    # perform GR as a plain ``buffer_load`` to VGPRs (LDS traffic goes
+    # through separate LocalWrites), so there is no same-block LDS
+    # dependency between LR0 and GR. The dialect flag
+    # ``gr_must_start_after_lr0s`` selects.
+    if ctx.dialect.gr_must_start_after_lr0s:
+        set_gr_must_start_after_from_lr0s(timeline, ctx.swap_global_read_order, dtl_plus_lds_buf)
+    # ``set_gr_must_start_after_from_grinc`` encodes the CDNA 4 DTL=1
+    # convention that each loop iteration's GRInc stream must complete
+    # before that same iteration's GR stream issues (because GRInc writes
+    # ``m0`` and the following buffer-load reads it). RDNA 3.5 WMMA uses
+    # DTL=0 with a PGR=2 schedule where iteration N's GRs read scalar
+    # addresses prepared by iteration N-1's GRInc, so the same-loop
+    # ordering requirement does not apply there. The dialect flag
+    # ``gr_must_follow_grinc_in_same_loop`` selects.
+    if ctx.dialect.gr_must_follow_grinc_in_same_loop:
+        set_gr_must_start_after_from_grinc(timeline, ctx.swap_global_read_order)
     apply_must_start_after_barriers(timeline)
 
 
 def add_gr_finish_before_lr_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
-    """Add GR.needed_by and GR.barriered_at constraints."""
+    """Add GR.needed_by and GR.barriered_at constraints.
+
+    This pass encodes the CDNA 4 DTL=1 invariant "GR -> SWait -> SBarrier
+    -> next-iter LR1". Under DTL=1 the GlobalRead writes directly to the
+    LDS block that the NEXT iteration's LR1 will read, so a barrier must
+    sit between the GR's SWait and that LR1. On RDNA 3.5 WMMA (DTL=0)
+    the GR is a plain ``buffer_load`` whose destination is a VGPR pool;
+    the LDS fill happens through a separate ``LocalWrite`` stream that
+    has its own wait/barrier handshake. The ``needed_by`` chain between
+    GR and next-iter LR1 therefore does not exist on this dialect, and
+    the constraint is skipped.
+    """
+    if not ctx.dialect.gr_finish_before_lr:
+        return
     apply_swaits(timeline)
     set_gr_needed_by_from_lrs(timeline, ctx.swap_global_read_order)
     apply_barriers(timeline)
@@ -2197,7 +2446,23 @@ def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
 
 def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
     """
-    Verify that the number of instructions in the schedule is correct for a single code path.
+    Verify that the authored CMS stream lengths are consistent with the
+    wave-specific ``idMap`` the kernel writer emits, for a single code path.
+
+    The invariant is dialect-aware:
+
+    * CDNA 4 (DTL=1, wave64): strict equality ``len(authored) == len(idMap)``.
+      Each authored slot maps 1:1 onto exactly one physically-issued
+      instruction, so strict equality is the correct check.
+    * RDNA 3.5 (DTL=0, wave32): divisibility
+      ``len(idMap) % len(authored) == 0 and len(authored) > 0``. Authored
+      load/store slots represent bundles of N physically-issued ops where
+      N is a structural function of ``(MIWaveTile, LocalReadVectorWidth,
+      bpe)``.
+
+    The choice is driven by ``dialect.stream_length_strict_equality``
+    which is set to True on ``CDNA4_DIALECT`` and False on
+    ``RDNA35_WMMA_DIALECT``.
     """
     if "idMap" not in context:
         # NOTE: Only skipping because the idMap is hard to construct in testing, but will always be present
@@ -2205,13 +2470,35 @@ def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context
         printWarning("idMap not found in context. Skipping CMS validation for correct number of instructions.")
         return True, ""
 
+    # Resolve the invariant: strict equality vs divisibility. Tests that
+    # build a context without a dialect get CDNA-4 semantics (the
+    # historical default).
+    dialect = context.get("dialect")
+    strict_equality = getattr(dialect, "stream_length_strict_equality", True)
+
     for instruction_name in schedule_info.optSchedule.keys():
         schedule = schedule_get(instruction_name, code_path, schedule_info)
 
         len_actual = len(schedule)
         len_expected = len(context["idMap"][instruction_name])
-        if len_actual != len_expected:
-            return False, f"{instruction_name} has {len_actual} instructions, but {len_expected} instructions are required."
+
+        if strict_equality:
+            if len_actual != len_expected:
+                return False, f"{instruction_name} has {len_actual} instructions, but {len_expected} instructions are required."
+        else:
+            if len_actual == 0:
+                return False, (
+                    f"{instruction_name} has 0 authored slots but "
+                    f"idMap expects {len_expected} emitted instructions."
+                )
+            if len_expected % len_actual != 0:
+                return False, (
+                    f"{instruction_name} has {len_actual} authored slots, which does not evenly divide "
+                    f"the {len_expected} emitted instructions expected by idMap "
+                    f"(remainder {len_expected % len_actual}). RDNA 3.5 DTL=0 requires "
+                    f"authored_len | idmap_len so each authored slot represents a uniform pack of "
+                    f"{len_expected // max(len_actual, 1)} ops."
+                )
     return True, ""
 
 
@@ -2252,10 +2539,128 @@ def verify_ascending_order(scheduleInfo, context: dict, code_path: int) -> tuple
     return True, ""
 
 
+def verify_no_lr_lw_lds_race(scheduleInfo, context: dict, code_path: int) -> tuple[bool, str]:
+    """
+    Detect statically-visible LR-vs-LW LDS races in the schedule.
+
+    Why this matters
+    ----------------
+    The CMS framework lets a schedule freely interleave LRX (local read)
+    and LW (local write) instructions across mfma slots. But the
+    HARDWARE rule is that LWs of iter K and LRs of iter K must access
+    the LDS in a coherent order:
+
+      * LDSB=1 (single LDS buffer): iter K LWs OVERWRITE the same bytes
+        that iter K LRs read. Therefore every LR of iter K must finish
+        BEFORE any LW of iter K starts. In schedule slot terms:
+            max(slot(LRX_*)) < min(slot(LWA_*) ∪ slot(LWB_*))
+        (with `slot=-1` treated as iter-prologue, i.e. before slot 0.)
+
+      * LDSB=0 (double-buffered): iter K LWs write to the OTHER LDS
+        half so the same-iter race doesn't apply, but the schedule MUST
+        contain LWSA/LWSB swap entries (so iter K's LW addr lands in
+        the half iter K's LRs are NOT reading), and matching LRSA/LRSB
+        swap entries (so iter K+1's LR addr flips to where iter K just
+        wrote). A schedule that omits these swaps reads stale data.
+
+    This pass catches the pattern that broke sol[12]/sol[17]/sol[22]
+    CMS in the gfx1151 Equality library — those schedules placed LR3
+    overlapping or after sub2/sub3 LWs with LDSB=1, producing NaN
+    outputs that compiled successfully.
+
+    Implementation notes
+    --------------------
+    * 'GRX' (global reads) are unrelated — they target G2L vgprs, not
+      LDS.
+    * 'LCC' (loop counter) is irrelevant.
+    * SYNC entries between LR and LW *can* legalise an interleaved
+      pattern (lgkmcnt(0) drains DS before the next LW), so we look
+      for an explicit dscnt-draining SWaitCnt at slot in
+      [max_lr_slot, min_lw_slot]. If found, we accept the schedule.
+    """
+    kernel = context.get("kernel", {})
+    lds_buffer = kernel.get("1LDSBuffer", 1)
+
+    sched = scheduleInfo.optSchedule
+
+    def slots_for_prefix(prefix: str) -> list[int]:
+        """Collect all schedule slots for keys starting with prefix."""
+        out = []
+        for key, indexLists in sched.items():
+            if not key.startswith(prefix):
+                continue
+            seq = schedule_get(key, code_path, scheduleInfo)
+            out.extend(seq)
+        return out
+
+    # Local Reads: LRA0/LRA1/.../LRB0/.../LRSA/LRSB
+    lr_slots = [s for s in slots_for_prefix("LRA") + slots_for_prefix("LRB")]
+    # Drop swap entries (LRSA/LRSB) — these are addr swaps, not LDS reads
+    lrs_swap = sched.get("LRSA", [[]])[0] + sched.get("LRSB", [[]])[0] \
+               if "LRSA" in sched or "LRSB" in sched else []
+
+    lw_slots = sched.get("LWA", [[]])[0] + sched.get("LWB", [[]])[0]
+
+    if not lr_slots or not lw_slots:
+        return True, ""  # nothing to race
+
+    max_lr = max(lr_slots)
+    min_lw = min(lw_slots)
+
+    if lds_buffer == 1:
+        # LDSB=1: same-buffer race. All LRs must finish before any LW.
+        if min_lw <= max_lr:
+            # Look for a dscnt-draining sync between min_lw and the LR
+            # that overlaps with it. The sync must drain DS counter
+            # (dscnt=0) at a slot in [max_lr_overlap_slot, min_lw-1].
+            # If present, the LRs are done before the LW fires.
+            sync_slots = sched.get("SYNC", [[]])[0]
+            sync_codes = scheduleInfo.syncCode
+            # Find any SWaitCnt with dscnt=0 (or ==0 explicitly) at a
+            # slot >= max_lr that overlaps with min_lw (i.e. fires
+            # before the first LW). Ascending ordering is guaranteed
+            # by VERIFY_ASCENDING_ORDER.
+            for slot, code in zip(sync_slots, sync_codes):
+                if not isinstance(code, SWaitCnt):
+                    continue
+                if code.dscnt != 0:
+                    continue
+                # Sync drains DS at this slot. If slot >= max_lr and
+                # slot <= min_lw, it legalises the LR-then-LW order.
+                # We require slot in [max_lr_overlap, min_lw] — the
+                # tightest possible window.
+                if slot >= max_lr and slot <= min_lw:
+                    return True, ""
+            return False, (
+                f"LDSB=1 LR-vs-LW race: LRs span up to slot {max_lr} but "
+                f"LWs begin at slot {min_lw}. With LDSB=1 the iter-K LWs "
+                f"overwrite the same LDS bytes that iter-K LRs read, so "
+                f"all LRs must complete before any LW. Either move the "
+                f"LR3 group earlier (before any LW slot) or add an "
+                f"`SWaitCnt(dscnt=0)` SYNC entry in [{max_lr}, {min_lw}]."
+            )
+    elif lds_buffer == 0:
+        # LDSB=0: double-buffered. Schedule must contain LWS/LRS swaps.
+        has_lws = bool(sched.get("LWSA", [[]])[0]) or bool(sched.get("LWSB", [[]])[0])
+        has_lrs = bool(sched.get("LRSA", [[]])[0]) or bool(sched.get("LRSB", [[]])[0])
+        if not has_lws or not has_lrs:
+            return False, (
+                f"LDSB=0 missing buffer swaps: LDSB=0 is a double-buffered "
+                f"LDS layout requiring iter-end LWSA/LWSB (LW addr swap) "
+                f"and pre-next-iter LRSA/LRSB (LR addr swap) entries to "
+                f"flip between the two halves. Without these every iter "
+                f"writes to and reads from the same half, racing with "
+                f"itself. Found LWSA/LWSB={has_lws}, LRSA/LRSB={has_lrs}."
+            )
+
+    return True, ""
+
+
 STRUCTURAL_CHECKS: dict[ValidatorPass, Callable] = {
     ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS: verify_correct_number_of_instructions,
     ValidatorPass.VERIFY_ASCENDING_ORDER: verify_ascending_order,
     ValidatorPass.VERIFY_SCC_OVERLAP: verify_scc_overlap,
+    ValidatorPass.VERIFY_NO_LR_LW_LDS_RACE: verify_no_lr_lw_lds_race,
 }
 
 
@@ -2281,6 +2686,14 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     is invalid. It may be a false positive.
     """
     kernel = context["kernel"]
+
+    # Resolve the architecture dialect once and propagate it to every pass
+    # via the context dict (structural checks) and ValidatorPassContext
+    # (timeline passes). Tests may override by setting ``context["dialect"]``
+    # directly; otherwise we ask ``resolve_dialect`` to pick based on kernel
+    # fields.
+    dialect: ValidatorDialect = context.get("dialect") or resolve_dialect(kernel)
+    context["dialect"] = dialect
 
     # Log disabled passes once, before iterating over code paths.
     kernel_desc = format_kernel_string(kernel)
@@ -2315,13 +2728,18 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
                 return False, f"Code path {code_path}: {message}"
 
         # === Timeline-based checks ===
+        # The per-dialect Timeline subclass enforces architecture-specific
+        # layout invariants (CDNA-4 DTL=1 vs RDNA 3.5 DTL=0) during
+        # population, so Timeline construction is safe even if every
+        # timeline pass is disabled.
         ctx = ValidatorPassContext(
             kernel=kernel,
             mfma_reorder=scheduleInfo.mfmaReorder or [],
             swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
+            dialect=dialect,
         )
 
-        timeline = create_unified_timeline(scheduleInfo, kernel, code_path)
+        timeline = create_unified_timeline(scheduleInfo, kernel, code_path, dialect)
 
         for pass_id, add_constraints in TIMELINE_PASSES.items():
             if pass_id in disabled_timeline:
