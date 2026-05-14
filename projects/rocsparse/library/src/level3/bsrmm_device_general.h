@@ -82,35 +82,43 @@ namespace rocsparse
 
                 for(J y = 0; y < block_dim; y += BLK_SIZE_Y)
                 {
+                    const bool is_B_valid = (global_col < N && (tidx + y) < block_dim);
+                    const J    safe_B_row = is_B_valid ? (tidx + y) : 0;
+                    const J    safe_B_col = is_B_valid ? block_col : 0;
+
                     if(nn)
                     {
                         shared_B[BSR_BLOCK_DIM * tidy + tidx]
-                            = (global_col < N && (tidx + y) < block_dim)
-                                  ? dense_B[block_dim * block_col + (tidx + y) + global_col * ldb]
+                            = is_B_valid
+                                  ? dense_B[block_dim * safe_B_col + safe_B_row + global_col * ldb]
                                   : static_cast<B>(0);
                     }
                     else
                     {
                         shared_B[BSR_BLOCK_DIM * tidy + tidx]
-                            = (global_col < N && (tidx + y) < block_dim)
-                                  ? dense_B[global_col + ldb * (block_dim * block_col + (tidx + y))]
+                            = is_B_valid
+                                  ? dense_B[global_col + ldb * (block_dim * safe_B_col + safe_B_row)]
                                   : static_cast<B>(0);
                     }
+
+                    const bool is_A_valid = ((tidx + x) < block_dim && (tidy + y) < block_dim);
+                    const J    safe_A_x   = is_A_valid ? (tidx + x) : 0;
+                    const J    safe_A_y   = is_A_valid ? (tidy + y) : 0;
 
                     if(direction == rocsparse_direction_row)
                     {
                         shared_A[BSR_BLOCK_DIM * tidy + tidx]
-                            = ((tidx + x) < block_dim && (tidy + y) < block_dim)
-                                  ? bsr_val[block_dim * block_dim * k + block_dim * (tidx + x)
-                                            + (tidy + y)]
+                            = is_A_valid
+                                  ? bsr_val[block_dim * block_dim * k + block_dim * safe_A_x
+                                            + safe_A_y]
                                   : static_cast<A>(0);
                     }
                     else
                     {
                         shared_A[BSR_BLOCK_DIM * tidy + tidx]
-                            = ((tidx + x) < block_dim && (tidy + y) < block_dim)
-                                  ? bsr_val[block_dim * block_dim * k + block_dim * (tidy + y)
-                                            + (tidx + x)]
+                            = is_A_valid
+                                  ? bsr_val[block_dim * block_dim * k + block_dim * safe_A_y
+                                            + safe_A_x]
                                   : static_cast<A>(0);
                     }
 

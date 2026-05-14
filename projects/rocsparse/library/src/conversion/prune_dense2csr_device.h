@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -66,15 +66,14 @@ namespace rocsparse
         {
             for(rocsparse_int k = 0; k < 4; ++k)
             {
-                if(ind + k * DIM_X < m)
+                const bool        row_valid = (ind + k * DIM_X < m);
+                const rocsparse_int safe_row  = row_valid ? (ind + k * DIM_X) : 0;
+                for(rocsparse_int j = 0; j < 4; ++j)
                 {
-                    for(rocsparse_int j = 0; j < 4; ++j)
-                    {
-                        res_A[k]
-                            += (rocsparse::abs(A[ind + k * DIM_X + (col + j) * lda]) > threshold)
-                                   ? 1
-                                   : 0;
-                    }
+                    res_A[k]
+                        += (rocsparse::abs(A[safe_row + (col + j) * lda]) > threshold && row_valid)
+                               ? 1
+                               : 0;
                 }
             }
         }
@@ -83,17 +82,18 @@ namespace rocsparse
         {
             for(rocsparse_int k = 0; k < 4; ++k)
             {
-                if(ind + k * DIM_X < m)
+                const bool        row_valid = (ind + k * DIM_X < m);
+                const rocsparse_int safe_row  = row_valid ? (ind + k * DIM_X) : 0;
+                for(rocsparse_int j = 0; j < 4; ++j)
                 {
-                    for(rocsparse_int j = 0; j < 4; ++j)
+                    const bool        col_valid = (col + j < n);
+                    const rocsparse_int safe_col  = col_valid ? (col + j) : 0;
+                    if(col_valid && row_valid)
                     {
-                        if(col + j < n)
-                        {
-                            res_A[k] += (rocsparse::abs(A[ind + k * DIM_X + (col + j) * lda])
-                                         > threshold)
-                                            ? 1
-                                            : 0;
-                        }
+                        res_A[k] += (rocsparse::abs(A[safe_row + safe_col * lda])
+                                     > threshold)
+                                        ? 1
+                                        : 0;
                     }
                 }
             }
@@ -144,9 +144,6 @@ namespace rocsparse
             // The warp handles the entire row.
             for(rocsparse_int column_index = lane_index; column_index < n; column_index += WF_SIZE)
             {
-                // Synchronize for cache considerations.
-                __syncthreads();
-
                 // Get value.
                 const T value = dense_val[row_index + column_index * ld];
 

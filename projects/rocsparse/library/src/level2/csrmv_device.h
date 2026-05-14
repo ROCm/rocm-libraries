@@ -348,15 +348,18 @@ namespace rocsparse
                 // numThreadsForRed guaranteed to be a power of two, so the clz code below
                 // avoids an integer divide.
                 // size_t st = lid/numThreadsForRed;
-                const I local_row       = row + (lid >> (31 - __clz(numThreadsForRed)));
-                const J local_first_val = csr_row_ptr[local_row] - row_offset;
-                const J local_last_val  = csr_row_ptr[local_row + 1] - row_offset;
-                const J threadInBlock   = lid & (numThreadsForRed - 1);
+                const I local_row     = row + (lid >> (31 - __clz(numThreadsForRed)));
+                const J threadInBlock = lid & (numThreadsForRed - 1);
 
                 // Not all row blocks are full -- they may have an odd number of rows. As such,
                 // we need to ensure that adjacent-groups only work on real data for this rowBlock.
                 if(local_row < stop_row)
                 {
+                    // Hoist csr_row_ptr reads inside the guard: local_row may be >= stop_row
+                    // for out-of-bounds threads, which would be a speculative OOB load.
+                    const J local_first_val = csr_row_ptr[local_row] - row_offset;
+                    const J local_last_val  = csr_row_ptr[local_row + 1] - row_offset;
+
                     // This is dangerous -- will infinite loop if your last value is within
                     // numThreadsForRed of MAX_UINT. Noticable performance gain to avoid a
                     // long induction variable here, though.

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,8 +62,13 @@ namespace rocsparse
         // Column index into B
         const J col_B = (hipBlockIdx_x / m) * BLOCKSIZE + hipThreadIdx_x;
 
+        // Clamp column index for address computation to prevent speculative OOB loads.
+        // GPU SIMD evaluates both branches of ternary; the guard (col_B < nrhs) only
+        // controls the result, not the load itself.
+        const J safe_col_B = (col_B < nrhs) ? col_B : static_cast<J>(0);
+
         // Index into B (i,j)
-        const int64_t idx_B = row * ldb + col_B;
+        const int64_t idx_B = row * ldb + safe_col_B;
 
         // Index into done array
         const J id = (hipBlockIdx_x / m) * m;
@@ -184,7 +189,7 @@ namespace rocsparse
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
             // Index into X
-            const int64_t idx_X = local_col * ldb + col_B;
+            const int64_t idx_X = local_col * ldb + safe_col_B;
 
             // Local sum computation for each lane
             local_sum = (col_B < nrhs) ? rocsparse::fma(-local_val, B[idx_X], local_sum)

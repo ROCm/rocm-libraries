@@ -57,7 +57,6 @@ namespace rocsparse
         const uint32_t tid = hipThreadIdx_x;
         const J        gid = hipBlockIdx_x * BLOCKSIZE + tid;
         const uint32_t lid = gid & (WF_SIZE - 1);
-        const uint32_t wid = tid / WF_SIZE;
         const J        row = gid / WF_SIZE;
         const J        col = lid + hipBlockIdx_y * WF_SIZE;
 
@@ -70,9 +69,6 @@ namespace rocsparse
 
         const int64_t colB = col * ldb;
 
-        __shared__ J shared_col[BLOCKSIZE / WF_SIZE][WF_SIZE];
-        __shared__ T shared_val[BLOCKSIZE / WF_SIZE][WF_SIZE];
-
         const I row_start = csr_row_ptr[row + offsets_batch_stride_A * batch] - idx_base;
         const I row_end   = csr_row_ptr[row + 1 + offsets_batch_stride_A * batch] - idx_base;
 
@@ -82,31 +78,24 @@ namespace rocsparse
         {
             const I k = j + lid;
 
-            __syncthreads();
+            const bool k_valid = (k < row_end);
+            const I    safe_k  = k_valid ? k : row_start;
+            const J my_col = k_valid
+                                 ? csr_col_ind[safe_k + columns_values_batch_stride_A * batch] - idx_base
+                                 : 0;
+            const T my_val = k_valid ? static_cast<T>(rocsparse::conj_val(
+                                 csr_val[safe_k + columns_values_batch_stride_A * batch], conj_A))
+                                     : static_cast<T>(0);
 
-            if(k < row_end)
+            for(uint32_t i = 0; i < WF_SIZE; ++i)
             {
-                shared_col[wid][lid]
-                    = csr_col_ind[k + columns_values_batch_stride_A * batch] - idx_base;
-                shared_val[wid][lid] = rocsparse::conj_val(
-                    csr_val[k + columns_values_batch_stride_A * batch], conj_A);
-            }
-            else
-            {
-                shared_col[wid][lid] = 0;
-                shared_val[wid][lid] = static_cast<T>(0);
-            }
-
-            __syncthreads();
-
-            if(col < N)
-            {
-                for(uint32_t i = 0; i < WF_SIZE; ++i)
+                const J sc = rocsparse::shfl(my_col, i, WF_SIZE);
+                const T sv = rocsparse::shfl(my_val, i, WF_SIZE);
+                if(col < N)
                 {
                     sum = rocsparse::fma<T>(
-                        shared_val[wid][i],
-                        rocsparse::conj_val(
-                            dense_B[shared_col[wid][i] + colB + batch_stride_B * batch], conj_B),
+                        sv,
+                        rocsparse::conj_val(dense_B[sc + colB + batch_stride_B * batch], conj_B),
                         sum);
                 }
             }
@@ -322,17 +311,20 @@ namespace rocsparse
             {
                 const I k = j + lid;
 
-                const J c = (k < row_end)
+                const bool k_valid = (k < row_end);
+                const I    safe_k  = k_valid ? k : row_start;
+
+                const J c = k_valid
                                 ? (rocsparse::nontemporal_load(
-                                       csr_col_ind + k + columns_values_batch_stride_A * batch)
+                                       csr_col_ind + safe_k + columns_values_batch_stride_A * batch)
                                    - idx_base)
                                 : 0;
 
-                const T v = (k < row_end) ? static_cast<T>(rocsparse::conj_val(
+                const T v = k_valid ? static_cast<T>(rocsparse::conj_val(
                                 rocsparse::nontemporal_load(
-                                    csr_val + k + columns_values_batch_stride_A * batch),
+                                    csr_val + safe_k + columns_values_batch_stride_A * batch),
                                 conj_A))
-                                          : static_cast<T>(0);
+                                    : static_cast<T>(0);
 
                 for(uint32_t i = 0; i < SUBWFSIZE; ++i)
                 {
@@ -454,7 +446,6 @@ namespace rocsparse
         const J        gid = hipBlockIdx_x * BLOCKSIZE + tid;
         const J        row = gid / WF_SIZE;
         const uint32_t lid = tid & (WF_SIZE - 1);
-        const uint32_t wid = tid / WF_SIZE;
 
         const uint32_t slid = lid & (SUB_WF_SIZE - 1);
         const uint32_t swid = lid / SUB_WF_SIZE;
@@ -465,9 +456,6 @@ namespace rocsparse
         {
             return;
         }
-
-        __shared__ int64_t shared_col[BLOCKSIZE / WF_SIZE][WF_SIZE];
-        __shared__ T       shared_val[BLOCKSIZE / WF_SIZE][WF_SIZE];
 
         const I row_start
             = rocsparse::nontemporal_load(csr_row_ptr + row + offsets_batch_stride_A * batch)
@@ -483,39 +471,30 @@ namespace rocsparse
         {
             const I k = j + lid;
 
-            __syncthreads();
+            const bool k_valid = (k < row_end);
+            const I    safe_k  = k_valid ? k : row_start;
+            const int64_t my_col
+                = k_valid
+                      ? ldb
+                                * (rocsparse::nontemporal_load(
+                                       csr_col_ind + safe_k + columns_values_batch_stride_A * batch)
+                                   - idx_base)
+                            + batch_stride_B * batch
+                      : 0;
+            const T my_val = k_valid ? static_cast<T>(rocsparse::conj_val(
+                                 rocsparse::nontemporal_load(
+                                     csr_val + safe_k + columns_values_batch_stride_A * batch),
+                                 conj_A))
+                                     : static_cast<T>(0);
 
-            if(k < row_end)
+            for(uint32_t i = 0; i < SUB_WF_SIZE; ++i)
             {
-                shared_col[wid][lid]
-                    = ldb
-                          * (rocsparse::nontemporal_load(csr_col_ind + k
-                                                         + columns_values_batch_stride_A * batch)
-                             - idx_base)
-                      + batch_stride_B * batch;
-                shared_val[wid][lid]
-                    = rocsparse::conj_val(rocsparse::nontemporal_load(
-                                              csr_val + k + columns_values_batch_stride_A * batch),
-                                          conj_A);
-            }
-            else
-            {
-                shared_col[wid][lid] = 0;
-                shared_val[wid][lid] = static_cast<T>(0);
-            }
-
-            __syncthreads();
-
-            if(col < col_end)
-            {
-                for(uint32_t i = 0; i < SUB_WF_SIZE; ++i)
+                const int64_t sc = rocsparse::shfl(my_col, SUB_WF_SIZE * swid + i, WF_SIZE);
+                const T       sv = rocsparse::shfl(my_val, SUB_WF_SIZE * swid + i, WF_SIZE);
+                if(col < col_end)
                 {
                     sum = rocsparse::fma<T>(
-                        shared_val[wid][SUB_WF_SIZE * swid + i],
-                        rocsparse::conj_val(
-                            rocsparse::ldg(dense_B + col + shared_col[wid][SUB_WF_SIZE * swid + i]),
-                            conj_B),
-                        sum);
+                        sv, rocsparse::conj_val(rocsparse::ldg(dense_B + col + sc), conj_B), sum);
                 }
             }
         }
@@ -665,17 +644,20 @@ namespace rocsparse
         {
             const I k = j + lid;
 
-            const J c = (k < row_end)
-                            ? (rocsparse::nontemporal_load(csr_col_ind + k
+            const bool k_valid = (k < row_end);
+            const I    safe_k  = k_valid ? k : row_start;
+
+            const J c = k_valid
+                            ? (rocsparse::nontemporal_load(csr_col_ind + safe_k
                                                            + columns_values_batch_stride_A * batch)
                                - idx_base)
                             : 0;
 
-            const T v = (k < row_end) ? static_cast<T>(rocsparse::conj_val(
-                            rocsparse::nontemporal_load(csr_val + k
+            const T v = k_valid ? static_cast<T>(rocsparse::conj_val(
+                            rocsparse::nontemporal_load(csr_val + safe_k
                                                         + columns_values_batch_stride_A * batch),
                             conj_A))
-                                      : static_cast<T>(0);
+                                : static_cast<T>(0);
 
             for(uint32_t i = 0; i < SUBWFSIZE; ++i)
             {

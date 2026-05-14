@@ -83,33 +83,38 @@ namespace rocsparse
                     const bool is_B_valid
                         = ((global_col < N) && ((tidx + y) < block_dim)) && (block_col >= 0);
 
+                    const I safe_B_col = is_B_valid ? block_col : 0;
+                    const I safe_B_row = is_B_valid ? (tidx + y) : 0;
+                    const I safe_A_x   = is_A_valid ? (tidx + x) : 0;
+                    const I safe_A_y   = is_A_valid ? (tidy + y) : 0;
+
                     if((trans_B == rocsparse_operation_none && order_B == rocsparse_order_column)
                        || (trans_B != rocsparse_operation_none
                            && order_B != rocsparse_order_column))
                     {
                         shared_B[BELL_BLOCK_DIM * tidy + tidx]
-                            = (is_B_valid) ? dense_B[block_dim * block_col + (tidx + y) + colB]
+                            = (is_B_valid) ? dense_B[block_dim * safe_B_col + safe_B_row + colB]
                                            : static_cast<B>(0);
                     }
                     else
                     {
                         shared_B[BELL_BLOCK_DIM * tidy + tidx]
                             = (is_B_valid)
-                                  ? dense_B[global_col + ldb * (block_dim * block_col + (tidx + y))]
+                                  ? dense_B[global_col + ldb * (block_dim * safe_B_col + safe_B_row)]
                                   : static_cast<B>(0);
                     }
                     if(dir_A == rocsparse_direction_row)
                     {
                         shared_A[BELL_BLOCK_DIM * tidy + tidx]
                             = (is_A_valid) ? bell_val[block_dim * block_dim * ell_idx
-                                                      + block_dim * (tidx + x) + (tidy + y)]
+                                                      + block_dim * safe_A_x + safe_A_y]
                                            : static_cast<A>(0);
                     }
                     else
                     {
                         shared_A[BELL_BLOCK_DIM * tidy + tidx]
                             = (is_A_valid) ? bell_val[block_dim * block_dim * ell_idx
-                                                      + block_dim * (tidy + y) + (tidx + x)]
+                                                      + block_dim * safe_A_y + safe_A_x]
                                            : static_cast<A>(0);
                     }
 

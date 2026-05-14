@@ -65,8 +65,17 @@ namespace rocsparse
 
         rocsparse_int global_col = tidy + hipBlockIdx_y * BLK_SIZE_Y;
 
-        int64_t colB = global_col * ldb;
-        int64_t colC = global_col * ldc;
+        // Clamp global_col to [0, N-1] for B pointer arithmetic.
+        // Out-of-bounds threads (global_col >= N) use col 0 as a safe landing
+        // address; the loaded value is discarded (multiplied by zero via shared_A
+        // or ignored during the final C write).  This prevents speculative GPU
+        // loads from reading past the end of B even when the compiler or hardware
+        // hoists the load above the bounds predicate.
+        bool          col_in_range = (global_col < N);
+        rocsparse_int safe_col     = col_in_range ? global_col : 0;
+
+        int64_t colB = safe_col * ldb; // always a valid column offset into B
+        int64_t colC = safe_col * ldc; // clamped: C read (fma) is also guarded this way
 
         for(rocsparse_int x = 0; x < row_block_dim; x += BSR_BLOCK_DIM)
         {
@@ -81,36 +90,56 @@ namespace rocsparse
                 for(rocsparse_int y = 0; y < col_block_dim; y += BLK_SIZE_Y)
                 {
 
+                    // Always load from a clamped (always valid) address.
+                    // AMD GPU hardware may speculatively issue loads from both branches
+                    // of a conditional, so we must ensure the address is in-range
+                    // unconditionally.  safe_col clamps global_col to [0, N-1], so colB
+                    // always points to a valid column.  We then mask out the loaded value
+                    // with a scalar multiply by the in-range predicate (0 or 1) so
+                    // out-of-bounds threads contribute zero to the shared tile.
+                    //
+                    // Separate row guard: (tidx+y) < col_block_dim prevents reading past
+                    // the row dimension of B — this access is harmless even when clamped
+                    // because safe_row stays within [0, col_block_dim-1].
+                    rocsparse_int safe_row = (tidx + y) < col_block_dim ? (tidx + y) : 0;
+                    T             row_mask = (tidx + y) < col_block_dim
+                                                ? static_cast<T>(1)
+                                                : static_cast<T>(0);
+                    T col_mask = col_in_range ? static_cast<T>(1) : static_cast<T>(0);
+
                     if(trans_B == rocsparse_operation_none)
                     {
-                        shared_B[BSR_BLOCK_DIM * tidy + tidx]
-                            = (global_col < N && (tidx + y) < col_block_dim)
-                                  ? B[col_block_dim * block_col + (tidx + y) + colB]
-                                  : static_cast<T>(0);
+                        T bval = B[col_block_dim * block_col + safe_row + colB];
+                        shared_B[BSR_BLOCK_DIM * tidy + tidx] = bval * row_mask * col_mask;
                     }
                     else
                     {
-                        shared_B[BSR_BLOCK_DIM * tidy + tidx]
-                            = (global_col < N && (tidx + y) < col_block_dim)
-                                  ? B[global_col + ldb * (col_block_dim * block_col + (tidx + y))]
-                                  : static_cast<T>(0);
+                        T bval = B[safe_col + ldb * (col_block_dim * block_col + safe_row)];
+                        shared_B[BSR_BLOCK_DIM * tidy + tidx] = bval * row_mask * col_mask;
                     }
+
+                    // Same clamping pattern for bsr_val (shared_A).
+                    // Threads where (tidx+x) >= row_block_dim or (tidy+y) >= col_block_dim
+                    // are out of the block — clamp indices and mask the result to zero.
+                    rocsparse_int safe_tidx_x
+                        = (tidx + x) < row_block_dim ? (tidx + x) : 0;
+                    rocsparse_int safe_tidy_y
+                        = (tidy + y) < col_block_dim ? (tidy + y) : 0;
+                    T a_mask = ((tidx + x) < row_block_dim && (tidy + y) < col_block_dim)
+                                   ? static_cast<T>(1)
+                                   : static_cast<T>(0);
 
                     if(direction == rocsparse_direction_row)
                     {
-                        shared_A[BSR_BLOCK_DIM * tidy + tidx]
-                            = ((tidx + x) < row_block_dim && (tidy + y) < col_block_dim)
-                                  ? bsr_val[row_block_dim * col_block_dim * k
-                                            + col_block_dim * (tidx + x) + (tidy + y)]
-                                  : static_cast<T>(0);
+                        T aval = bsr_val[row_block_dim * col_block_dim * k
+                                         + col_block_dim * safe_tidx_x + safe_tidy_y];
+                        shared_A[BSR_BLOCK_DIM * tidy + tidx] = aval * a_mask;
                     }
                     else
                     {
-                        shared_A[BSR_BLOCK_DIM * tidy + tidx]
-                            = ((tidx + x) < row_block_dim && (tidy + y) < col_block_dim)
-                                  ? bsr_val[row_block_dim * col_block_dim * k
-                                            + row_block_dim * (tidy + y) + (tidx + x)]
-                                  : static_cast<T>(0);
+                        T aval = bsr_val[row_block_dim * col_block_dim * k
+                                         + row_block_dim * safe_tidy_y + safe_tidx_x];
+                        shared_A[BSR_BLOCK_DIM * tidy + tidx] = aval * a_mask;
                     }
 
                     __syncthreads();

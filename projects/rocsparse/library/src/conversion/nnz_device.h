@@ -95,10 +95,8 @@ namespace rocsparse
         {
             for(J i = 0; i < m_full; i += NB_X)
             {
-                if((tx + i) < m)
-                {
-                    res += (A[col + (tx + i) * lda] != s_zero) ? 1 : 0;
-                }
+                const J safe_row = ((tx + i) < m) ? (tx + i) : 0;
+                res += (A[col + safe_row * lda] != s_zero && (tx + i) < m) ? 1 : 0;
             }
 
             if(tx + m_full < m)
@@ -170,23 +168,22 @@ namespace rocsparse
         {
             for(int k = 0; k < 4; ++k)
             {
-                if(ind + k * DIM_X < m)
+                const bool row_valid = (ind + k * DIM_X < m);
+                const J    safe_row  = row_valid ? (ind + k * DIM_X) : 0;
+                if(order == rocsparse_order_column)
                 {
-                    if(order == rocsparse_order_column)
+                    for(int j = 0; j < 4; ++j)
                     {
-                        for(int j = 0; j < 4; ++j)
-                        {
-                            if(A[ind + k * DIM_X + (col + j) * lda] != s_zero)
-                                res_A[k] += 1;
-                        }
+                        if(A[safe_row + (col + j) * lda] != s_zero && row_valid)
+                            res_A[k] += 1;
                     }
-                    else
+                }
+                else
+                {
+                    for(int j = 0; j < 4; ++j)
                     {
-                        for(int j = 0; j < 4; ++j)
-                        {
-                            if(A[(ind + k * DIM_X) * lda + col + j] != s_zero)
-                                res_A[k] += 1;
-                        }
+                        if(A[safe_row * lda + col + j] != s_zero && row_valid)
+                            res_A[k] += 1;
                     }
                 }
             }
@@ -196,22 +193,23 @@ namespace rocsparse
         {
             for(int k = 0; k < 4; ++k)
             {
-                if(ind + k * DIM_X < m)
+                const bool row_valid = (ind + k * DIM_X < m);
+                const J    safe_row  = row_valid ? (ind + k * DIM_X) : 0;
+                for(int j = 0; j < 4; ++j)
                 {
-                    for(int j = 0; j < 4; ++j)
+                    const bool col_valid = (col + j < n);
+                    const J    safe_col  = col_valid ? (col + j) : 0;
+                    if(col_valid && row_valid)
                     {
-                        if(col + j < n)
+                        if(order == rocsparse_order_column)
                         {
-                            if(order == rocsparse_order_column)
-                            {
-                                res_A[k]
-                                    += (A[ind + k * DIM_X + (col + j) * lda] != s_zero) ? 1 : 0;
-                            }
-                            else
-                            {
-                                res_A[k]
-                                    += (A[(ind + k * DIM_X) * lda + col + j] != s_zero) ? 1 : 0;
-                            }
+                            res_A[k]
+                                += (A[safe_row + safe_col * lda] != s_zero) ? 1 : 0;
+                        }
+                        else
+                        {
+                            res_A[k]
+                                += (A[safe_row * lda + safe_col] != s_zero) ? 1 : 0;
                         }
                     }
                 }

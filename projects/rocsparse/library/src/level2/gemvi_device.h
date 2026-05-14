@@ -57,11 +57,12 @@ namespace rocsparse
         // Subsequently, all lanes with id 0 process the first row,
         // all lanes with id 1 process the second row, etc.
         // This guarantees good access pattern into A and x
+        const I safe_row = (row < m) ? row : 0;
         if(row < m)
         {
             for(I j = wid; j < nnz; j += BLOCKSIZE / WFSIZE)
             {
-                sum = rocsparse::fma(x_val[j], A[(x_ind[j] - idx_base) * lda + row], sum);
+                sum = rocsparse::fma(x_val[j], A[(x_ind[j] - idx_base) * lda + safe_row], sum);
             }
         }
 

@@ -86,7 +86,12 @@ namespace rocsparse
 
             for(I k = next_k + c; k < row_end; k += (WFSIZE / BLOCKDIM))
             {
-                J block_col = (csr_col_ind[k] - csr_base) / block_dim;
+                // AMD GPU hardware may speculatively issue this load even when k >= row_end.
+                // Clamp k to a valid index; if truly out-of-bounds, use nb as sentinel so
+                // block_col != chunk_begin and the else-branch is taken (never match).
+                I safe_k    = (k < row_end) ? k : static_cast<I>(0);
+                J raw_col   = (csr_col_ind[safe_k] - csr_base) / block_dim;
+                J block_col = (k < row_end) ? raw_col : nb;
 
                 if(block_col == chunk_begin)
                 {
@@ -180,7 +185,12 @@ namespace rocsparse
 
             for(I k = next_k + lid; k < row_end; k += (BLOCKSIZE / BLOCKDIM))
             {
-                J block_col = (csr_col_ind[k] - csr_base) / block_dim;
+                // AMD GPU hardware may speculatively issue this load even when k >= row_end.
+                // Clamp k to a valid index; if truly out-of-bounds, use nb as sentinel so
+                // block_col != chunk_begin and the else-branch is taken (never match).
+                I safe_k    = (k < row_end) ? k : static_cast<I>(0);
+                J raw_col   = (csr_col_ind[safe_k] - csr_base) / block_dim;
+                J block_col = (k < row_end) ? raw_col : nb;
 
                 if(block_col == chunk_begin)
                 {

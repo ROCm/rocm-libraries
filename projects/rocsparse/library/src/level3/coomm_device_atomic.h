@@ -60,10 +60,12 @@ namespace rocsparse
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc);
 
-        const I row = (gid < nnz) ? rocsparse::nontemporal_load(coo_row_ind + gid) - idx_base : 0;
-        const I col = (gid < nnz) ? rocsparse::nontemporal_load(coo_col_ind + gid) - idx_base : 0;
-        const T val = (gid < nnz) ? static_cast<T>(rocsparse::nontemporal_load(coo_val + gid))
-                                  : static_cast<T>(0);
+        const bool    gid_valid = (gid < nnz);
+        const int64_t safe_gid  = gid_valid ? gid : 0;
+        const I row = gid_valid ? rocsparse::nontemporal_load(coo_row_ind + safe_gid) - idx_base : 0;
+        const I col = gid_valid ? rocsparse::nontemporal_load(coo_col_ind + safe_gid) - idx_base : 0;
+        const T val = gid_valid ? static_cast<T>(rocsparse::nontemporal_load(coo_val + safe_gid))
+                                : static_cast<T>(0);
 
         for(I l = 0; l < ncol; l += WF_SIZE * LOOPS)
         {
