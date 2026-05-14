@@ -60,7 +60,7 @@ This includes rocFFT and hipFFT.
    * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
      suffix to install the latest available version.
 
-   * ``<llvm_target>`` (starting with ``gfx``) is used if you are installing
+   * ``<-llvm_target>`` (starting with ``gfx``) is used if you are installing
      for a single AMD GPU architecture. Omit this to install for all
      architectures at the cost of disk space.
 
