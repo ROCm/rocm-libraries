@@ -29,9 +29,11 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
+#include <cstdint>
 #include <format>
 #include <memory>
 #include <optional>
+#include <random>
 #include <unordered_map>
 
 #include "hipdnn_engine_plugin_execution_context.h"
@@ -56,6 +58,8 @@ inline fusilli::ErrorOr<fusilli::DataType> hipDnnDataTypeToFusilliDataType(
     return ok(fusilli::DataType::Int32);
   case hipdnn_flatbuffers_sdk::data_objects::DataType::INT4:
     return ok(fusilli::DataType::Int4);
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
+    return ok(fusilli::DataType::Boolean);
   case hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET:
     return ok(fusilli::DataType::NotSet);
   default:
@@ -145,8 +149,20 @@ private:
   // Helper class for reading from flatbuffer.
   hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper;
 
+  // Per-instance random nonce mixed into the fusilli graph name (see
+  // importGraph below).
+  uint64_t graphInstanceNonce;
+
   GraphImport(const hipdnnPluginConstData_t *opGraph)
-      : opGraphWrapper(opGraph->ptr, opGraph->size) {}
+      : opGraphWrapper(opGraph->ptr, opGraph->size),
+        graphInstanceNonce(makeGraphInstanceNonce()) {}
+
+  static uint64_t makeGraphInstanceNonce() {
+    std::random_device rd;
+    std::seed_seq seq{rd(), rd()};
+    std::mt19937_64 rng(seq);
+    return rng();
+  }
 
   fusilli::ErrorObject importGraph() {
     const hipdnn_flatbuffers_sdk::data_objects::Graph &hipDnnGraph =
@@ -164,7 +180,15 @@ private:
     FUSILLI_ASSIGN_OR_RETURN(
         computeDataType,
         hipDnnDataTypeToFusilliDataType(hipDnnGraph.compute_data_type()));
-    fusilliGraph.setName(hipDnnGraph.name()->str())
+    // Mix the per-instance nonce into the fusilli graph name so each Graph
+    // gets a unique compile-cache directory. Also covers the null-name case
+    // that would otherwise segfault on name()->str().
+    std::string graphName =
+        hipDnnGraph.name()
+            ? std::format("{}_{:016x}", hipDnnGraph.name()->str(),
+                          graphInstanceNonce)
+            : std::format("hipdnn_{:016x}", graphInstanceNonce);
+    fusilliGraph.setName(graphName)
         .setIODataType(ioDataType)
         .setIntermediateDataType(intermediateDataType)
         .setComputeDataType(computeDataType);
@@ -540,8 +564,9 @@ private:
       scaleValue = scaleTensor->value_as_Float32Value()->value();
     }
 
-    // GQA: enable when Q has more heads than K/V.
-    bool enableGqa = q->getDim()[1] != k->getDim()[1];
+    // GQA: enable when Q has more heads than K or V.
+    bool enableGqa =
+        q->getDim()[1] != k->getDim()[1] || q->getDim()[1] != v->getDim()[1];
 
     // #TODO(iree/issues/21858) GQA with f32 triggers an IREE distribution
     // failure. SdpaNode does not check this, so we must reject here.
@@ -813,6 +838,7 @@ importGraph(const hipdnnPluginConstData_t *opGraph) {
   FUSILLI_CHECK_ERROR(gc.importGraph());
   FUSILLI_CHECK_ERROR(gc.fusilliGraph.validate());
   return HipdnnEnginePluginExecutionContext{.graph = std::move(gc.fusilliGraph),
+                                            .serializedOpGraph = {},
                                             .uidToFusilliTensorAttr =
                                                 std::move(gc.uidToIOTensor)};
 }

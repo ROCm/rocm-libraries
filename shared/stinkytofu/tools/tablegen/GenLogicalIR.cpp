@@ -682,7 +682,6 @@ bool genPythonBindings(const std::string& outdir) {
         out << "        return makeLogicalInstructionShared(" << className << "(";
 
         // Pass parameters, converting optional sources to pointers
-        size_t srcIdx = 0;
         for (size_t i = 0; i < paramNames.size(); i++) {
             std::string paramName = paramNames[i];
 

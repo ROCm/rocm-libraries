@@ -30,6 +30,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace {
@@ -73,23 +74,6 @@ static int getMFMAIndexOfLR(BasicBlock::iterator regStart, BasicBlock::iterator 
         }
     }
     return index;
-}
-
-/// True when both \p lhs and \p rhs are null, or when both are \c s_set_vgpr_msb
-/// with identical source operands (same encoding / MSB set value).
-static bool compareVgprMsb(StinkyInstruction* lhs, StinkyInstruction* rhs) {
-    if (lhs == nullptr && rhs == nullptr) return true;
-    if (lhs == nullptr || rhs == nullptr) return false;
-
-    const auto& srcL = lhs->getSrcRegs();
-    const auto& srcR = rhs->getSrcRegs();
-    if (srcL.size() != srcR.size()) return false;
-    for (size_t i = 0; i < srcL.size(); ++i) {
-        // std::cout<<"srcL["<<i<<"]: "<<srcL[i].getLiteralInt()<<", srcR["<<i<<"]:
-        // "<<srcR[i].getLiteralInt()<<std::endl;
-        if (srcL[i].getLiteralInt() != srcR[i].getLiteralInt()) return false;
-    }
-    return true;
 }
 
 /// If the next queued LR may be scheduled before MFMA index \p mfmaIndex, pop it into
@@ -151,7 +135,6 @@ void scheduleFirstLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx) {
     BasicBlock::iterator regionFirstBarrier = endIt;
     uint32_t mfmaLatency = 0, mfmaIssueCycles = 0;
     std::unordered_map<StinkyInstruction*, int> usedBeforeIndexMap;
-    StinkyInstruction* currSetVgprMsb = nullptr;
     for (BasicBlock::iterator it = regionLoopBeginL; it != endIt; ++it) {
         StinkyInstruction& inst = getStinkyInst(it);
         if (isBarrier(inst)) {
@@ -199,7 +182,6 @@ void scheduleFirstLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx) {
     // numLRPerMFMAFromDeps: "<<numLRPerMFMAFromDeps<<", numLRPerMFMA: "<<numLRPerMFMA<<std::endl;
 
     // 2. Push the instructions before the barrier.
-    int currentIndex = 0;
     int mfmaIndex = 0;
     int currentMFMAFreeSpaces = 0;
     for (BasicBlock::iterator it = beginIt; it != regionFirstBarrier; ++it) {
@@ -213,13 +195,12 @@ void scheduleFirstLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx) {
             scheduled.push_back(&inst);
             currentMFMAFreeSpaces = numLRPerMFMAAtMost;
             // inst.dump(std::cout);
-            for (auto i = 0; i < numLRPerMFMA; i++) {
+            for (uint32_t i = 0; i < numLRPerMFMA; i++) {
                 if (scheLR.empty()) continue;
                 if (!tryPopLrForMfmaSchedule(scheLR, usedBeforeIndexMap, mfmaIndex, scheduled))
                     break;
                 currentMFMAFreeSpaces--;
             }
-            currentIndex++;
         } else if (!isDSRead(inst)) {
             scheduled.push_back(&inst);
             currentMFMAFreeSpaces--;
@@ -265,10 +246,11 @@ class ScheduleFirstLRsPass : public StinkyInstPass {
         scheduleFirstLocalReadWithLatency(bb, passCtx);
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) runOnBasicBlock(bb, passCtx);
         }
+        return preserveCFGAnalyses();
     }
 };
 

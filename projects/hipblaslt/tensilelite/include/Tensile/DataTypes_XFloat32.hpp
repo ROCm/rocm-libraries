@@ -30,6 +30,10 @@
 #include <cmath>
 #include <iostream>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 #define TENSILE_USE_XF32
 
 #ifndef __BYTE_ORDER__
@@ -234,3 +238,5 @@ namespace std
         return static_cast<TensileLite::XFloat32>(std::cos(static_cast<float>(a)));
     }
 } // namespace std
+
+TENSILE_HIDDEN_END

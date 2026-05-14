@@ -266,6 +266,8 @@ protected:
                                     this->getTolerance(graphObj, outputs.nextRunningVariance));
         }
 
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(bnTestCase.note);
         this->verifyGraph(graphObj, bnTestCase.seed);
     }
 };

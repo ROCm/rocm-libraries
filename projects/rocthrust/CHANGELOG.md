@@ -3,6 +3,17 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## Since last release ROCm 7.12
+
+### Added
+
+* Improved documentation on relevant environment variables.
+
+### Resolved issues
+
+* Fixed memory leak in unit test.
+* Fixed unit test compatibility with ASAN.
+
 ## rocThrust 4.3.0 for ROCm 7.12
 
 ### Added

@@ -401,6 +401,16 @@ exclude_gpu:
       - "full"
       - "ex_gpu_gfx950"
 
+  exclude_gpu_gfx94X:
+    test_patterns:
+      - "*GPU_GetitemBwd_FP32*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx94X"
+
 execution_settings:
   default_timeout: 300  # 5 minutes per test
   timeout_multiplier: 2 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)

@@ -426,16 +426,15 @@ ConvOclDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
                             result.n_in_data_tiles = (1 << i_t);
                         }
 
-                        const auto ret =
-                            MeasurePerfConfig<Tgpu, ConvOclDirectFwd1x1>(profile_h,
-                                                                         bot_ocl_ptr,
-                                                                         top_ocl_ptr,
-                                                                         wei_ocl_ptr,
-                                                                         bias_ocl_ptr,
-                                                                         processing_time,
-                                                                         ctx,
-                                                                         problem,
-                                                                         result);
+                        const auto ret = MeasurePerfConfig<Tgpu, ConvOclDirectFwd>(profile_h,
+                                                                                   bot_ocl_ptr,
+                                                                                   top_ocl_ptr,
+                                                                                   wei_ocl_ptr,
+                                                                                   bias_ocl_ptr,
+                                                                                   processing_time,
+                                                                                   ctx,
+                                                                                   problem,
+                                                                                   result);
                         --runs_left;
                         if(ret != 0)
                         {
@@ -647,32 +646,15 @@ ConvOclDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
         int ret                   = -1;
         double default_time       = std::numeric_limits<double>::max();
         const auto default_config = GetDefaultPerformanceConfig(ctx, problem);
-        if(problem.GetWeightsWidth() == 1 && problem.GetWeightsHeight() == 1 &&
-           problem.GetGroupCount() ==
-               1) // Group conv: None 1x1 version yet, fallback to universal kernel.
-        {
-            ret = MeasurePerfConfig<Tgpu, ConvOclDirectFwd1x1>(profile_h,
-                                                               bot_ocl_ptr,
-                                                               top_ocl_ptr,
-                                                               wei_ocl_ptr,
-                                                               bias_ocl_ptr,
-                                                               default_time,
-                                                               ctx,
-                                                               problem,
-                                                               default_config);
-        }
-        else
-        {
-            ret = MeasurePerfConfig<Tgpu, ConvOclDirectFwd>(profile_h,
-                                                            bot_ocl_ptr,
-                                                            top_ocl_ptr,
-                                                            wei_ocl_ptr,
-                                                            bias_ocl_ptr,
-                                                            default_time,
-                                                            ctx,
-                                                            problem,
-                                                            default_config);
-        }
+        ret                       = MeasurePerfConfig<Tgpu, ConvOclDirectFwd>(profile_h,
+                                                        bot_ocl_ptr,
+                                                        top_ocl_ptr,
+                                                        wei_ocl_ptr,
+                                                        bias_ocl_ptr,
+                                                        default_time,
+                                                        ctx,
+                                                        problem,
+                                                        default_config);
         if(ret == 0)
         {
             is_passed = true;

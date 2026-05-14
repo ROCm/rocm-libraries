@@ -26,6 +26,7 @@
 #include <memory>
 #include <string>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 
@@ -43,10 +44,11 @@ struct AsmVerifierConfig {
 /// Validate StinkyTofu Assembly IR (structure, HwInstDesc, register widths).
 /// Returns error message if invalid, empty string if valid.
 /// Only for ASM; do not use for Logical IR.
-std::string validateStinkyIR(Function& func, const AsmVerifierConfig& config = {});
+STINKYTOFU_EXPORT std::string validateStinkyIR(Function& func,
+                                               const AsmVerifierConfig& config = {});
 
 /// Pass that verifies StinkyTofu Assembly IR. Used only in the ASM pass pipeline.
-class StinkyIRVerifierPass : public Pass {
+class STINKYTOFU_EXPORT StinkyIRVerifierPass : public Pass {
    public:
     static char ID;
 
@@ -58,7 +60,7 @@ class StinkyIRVerifierPass : public Pass {
     const char* getName() const override {
         return "StinkyIRVerifier";
     }
-    void run(Function& func, PassContext& ctx) override;
+    PreservedAnalyses run(Function& func, PassContext& ctx, AnalysisManager& /*AM*/) override;
 
    private:
     AsmVerifierConfig config_;

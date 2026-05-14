@@ -7,18 +7,19 @@
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "detail/GpuPlanBuilderRegistry.hpp"
+#include "harness/IReferenceGraphExecutor.hpp"
 
 namespace hipdnn_integration_tests::gpu_graph_executor
 {
 
-class GpuReferenceGraphExecutor
+class GpuReferenceGraphExecutor : public IReferenceGraphExecutor
 {
 public:
     GpuReferenceGraphExecutor() = default;
 
     void execute(void* graphBuffer,
                  size_t size,
-                 const std::unordered_map<int64_t, void*>& variantPack)
+                 const std::unordered_map<int64_t, void*>& variantPack) override
     {
         auto graphWrap
             = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer, size);
@@ -42,6 +43,11 @@ public:
         }
     }
 
+    bool requiresDeviceMemory() const override
+    {
+        return true;
+    }
+
 private:
     static std::unordered_map<int64_t, void*> populateVariantPackWithMissingVirtualTensors(
         const std::unordered_map<int64_t, void*>& variantPack,
@@ -59,8 +65,7 @@ private:
                 auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(*attr);
                 virtualTensors.push_back(std::move(tensor));
 
-                // TODO: Switch to rawDeviceData() when real GPU plans are added
-                updatedVariantPack[id] = virtualTensors.back()->rawHostData();
+                updatedVariantPack[id] = virtualTensors.back()->rawDeviceData();
             }
         }
         return updatedVariantPack;
@@ -97,12 +102,14 @@ private:
         case NodeAttrs::PointwiseAttributes:
             return detail::GpuPointwiseDummySignatureKey(node, tensorMap);
 
+        case NodeAttrs::ConvolutionFwdAttributes:
+            return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
+
         // Node types with no GPU plan yet - throw descriptive error
         case NodeAttrs::BatchnormInferenceAttributes:
         case NodeAttrs::BatchnormInferenceAttributesVarianceExt:
         case NodeAttrs::BatchnormBackwardAttributes:
         case NodeAttrs::BatchnormAttributes:
-        case NodeAttrs::ConvolutionFwdAttributes:
         case NodeAttrs::ConvolutionBwdAttributes:
         case NodeAttrs::ConvolutionWrwAttributes:
         case NodeAttrs::MatmulAttributes:
