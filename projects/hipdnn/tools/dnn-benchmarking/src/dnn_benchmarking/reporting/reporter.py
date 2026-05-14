@@ -429,7 +429,10 @@ class Reporter:
         self._print(f"Running benchmark on {total} file(s)...")
 
     def print_suite_header(
-        self, total_graphs: int, tarball_source: Optional[str] = None
+        self,
+        total_graphs: int,
+        tarball_source: Optional[str] = None,
+        extra_profiling_runs: int = 0,
     ) -> None:
         """Print suite execution header.
 
@@ -437,6 +440,10 @@ class Reporter:
         by ``metrics.machine_info`` so console output matches the JSON
         metadata. Failures are silent — ``machine_info`` already routes
         them through ``warn_once``.
+
+        When ``extra_profiling_runs > 0`` the user gets an upfront notice
+        of the cost of opt-in profiling so they can size their suite
+        accordingly.
         """
         self._print_line("=")
         self._print(f"hipDNN Benchmark Suite: {total_graphs} graph(s)")
@@ -444,6 +451,11 @@ class Reporter:
         if tarball_source is not None:
             self._print(f"Source:  {tarball_source} (extracted)")
         self._print_machine_summary()
+        if extra_profiling_runs > 0:
+            self._print(
+                f"Profiling: {extra_profiling_runs} extra workload run(s) "
+                "per (graph, engine)"
+            )
         self._print("")
 
     def _print_machine_summary(self) -> None:

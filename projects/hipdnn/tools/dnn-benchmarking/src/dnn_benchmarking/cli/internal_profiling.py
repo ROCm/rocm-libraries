@@ -26,20 +26,6 @@ from ..common.exceptions import GraphLoadError
 from ..config.benchmark_config import MetricsConfig, SuiteConfig
 from ..execution.suite_runner import _run_single_provider_engine
 from ..graph.loader import GraphLoader
-from ..reporting.reporter import Reporter
-
-
-def _quiet_reporter() -> Reporter:
-    """Reporter that swallows every print so the inner run is silent."""
-
-    class _Sink:
-        def write(self, *_args, **_kwargs):
-            return 0
-
-        def flush(self):
-            return None
-
-    return Reporter(output=_Sink())  # type: ignore[arg-type]
 
 
 def run_internal_profiling(args: argparse.Namespace) -> int:
@@ -54,33 +40,29 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
         )
         return 1
 
-    reporter = _quiet_reporter()
-
     try:
         import hipdnn_frontend as hipdnn
+
+        if args.plugin_path is not None:
+            hipdnn.set_engine_plugin_paths([str(args.plugin_path)])
+        handle = hipdnn.Handle()
+
+        loader = GraphLoader()
+        graph_json = loader.load_json(graph_path)
+        loader.validate(graph_json)
+        tensor_infos = loader.extract_tensor_info(graph_json)
     except ImportError:
         print(
             "internal-profiling-run: hipdnn_frontend not importable",
             file=sys.stderr,
         )
         return 1
-
-    try:
-        if args.plugin_path is not None:
-            hipdnn.set_engine_plugin_paths([str(args.plugin_path)])
-        handle = hipdnn.Handle()
     except RuntimeError as e:
         print(
             f"internal-profiling-run: failed to create hipDNN handle: {e}",
             file=sys.stderr,
         )
         return 1
-
-    try:
-        loader = GraphLoader()
-        graph_json = loader.load_json(graph_path)
-        loader.validate(graph_json)
-        tensor_infos = loader.extract_tensor_info(graph_json)
     except GraphLoadError as e:
         print(f"internal-profiling-run: graph load failed: {e}", file=sys.stderr)
         return 1
@@ -128,5 +110,4 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
     # Quiet success — the profiler captures everything it needs from
     # the run itself. Avoid emitting anything on stdout so trace-format
     # consumers don't accidentally treat our text as part of their data.
-    _ = reporter  # kept for symmetry; orchestrator may want logging later
     return 0

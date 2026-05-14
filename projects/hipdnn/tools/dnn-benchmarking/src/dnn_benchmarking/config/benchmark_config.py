@@ -181,6 +181,17 @@ class MetricsConfig:
         """True when any opt-in profiling source was requested."""
         return bool(self.emit_trace or self.perf)
 
+    @property
+    def extra_runs_per_engine(self) -> int:
+        """How many additional workload runs each opt-in source contributes.
+
+        Each opt-in profiling source re-runs the workload once under its
+        external tool. The basic always-on tier wraps the timed pass and
+        does not add a run. Used by the reporter to give the user an
+        upfront cost estimate.
+        """
+        return int(self.emit_trace is not None) + int(self.perf)
+
 
 @dataclass
 class SuiteConfig:

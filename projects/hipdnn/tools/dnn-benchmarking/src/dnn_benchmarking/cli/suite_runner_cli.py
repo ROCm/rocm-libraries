@@ -95,7 +95,11 @@ def run_suite_benchmark(
             )
             return 1
 
-    reporter.print_suite_header(total, tarball_source=tarball_source)
+    reporter.print_suite_header(
+        total,
+        tarball_source=tarball_source,
+        extra_profiling_runs=config.metrics.extra_runs_per_engine,
+    )
 
     reporter.print_hipdnn_init_start()
     try:

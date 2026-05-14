@@ -365,6 +365,62 @@ def run_graph_all_providers(
     )
 
 
+def _collect_basic_metrics_post_loop(
+    result: ProviderEngineResult,
+    rusage_probe: Optional[RusageProbe],
+    benchmark_iters: int,
+    analytical_flops: Optional[int],
+    analytical_flops_partial: bool,
+    analytical_io_bytes: Optional[int],
+) -> None:
+    """Populate the basic always-on metric fields on ``result``.
+
+    Called once after the timed loop when ``metrics.tier == "basic"``.
+    Pulled out of :func:`_run_single_provider_engine` to keep that
+    function focused on the timed loop itself; the basic-tier book
+    keeping is otherwise just a long sequence of conditionals on
+    intermediate results.
+    """
+    if rusage_probe is not None and rusage_probe.delta is not None:
+        # Per-iter microseconds is the interpretable unit: the loop
+        # total is dominated by Python dispatch cost, and per-iter
+        # lets users compare directly against the kernel mean (also
+        # reported per-iter).
+        iters = max(benchmark_iters, 1)
+        result.cpu_user_time_per_iter_us = (
+            rusage_probe.delta.user_time_ms * 1000.0 / iters
+        )
+        result.cpu_kernel_time_per_iter_us = (
+            rusage_probe.delta.kernel_time_ms * 1000.0 / iters
+        )
+
+    # Analytical totals were computed once at the graph level; propagate
+    # them onto every engine's result so JSON consumers don't have to
+    # look up across structures.
+    result.analytical_flops = analytical_flops
+    result.analytical_flops_partial = analytical_flops_partial
+    result.analytical_io_bytes = analytical_io_bytes
+
+    kernel_mean = (
+        result.gpu_kernel_stats.mean_ms if result.gpu_kernel_stats is not None else None
+    )
+    tflops, gbytes = derive_throughputs(
+        analytical_flops, analytical_io_bytes, kernel_mean
+    )
+    result.derived_tflops_per_s = tflops
+    result.derived_gbytes_per_s = gbytes
+
+    # VRAM is sampled here (still inside the BufferManager context, so
+    # workspace + I/O buffers are still allocated). This is the only
+    # amdsmi field we expose per-engine — see ProviderEngineResult
+    # docstring.
+    try:
+        snap = GpuSmiProbe().snapshot()
+        result.vram_used_mb = snap.get("vram_used_mb")
+    except Exception as e:
+        warn_once("gpu_smi", f"vram snapshot failed: {e}")
+
+
 def _run_single_provider_engine(
     graph_path: Path,
     graph_json_str: str,
@@ -442,46 +498,14 @@ def _run_single_provider_engine(
                 )
 
             if metrics_basic:
-                if rusage_probe is not None and rusage_probe.delta is not None:
-                    # Per-iter microseconds is the interpretable unit:
-                    # the loop total is dominated by Python dispatch
-                    # cost, and per-iter lets users compare directly
-                    # against the kernel mean (also reported per-iter).
-                    iters = max(config.benchmark_iters, 1)
-                    result.cpu_user_time_per_iter_us = (
-                        rusage_probe.delta.user_time_ms * 1000.0 / iters
-                    )
-                    result.cpu_kernel_time_per_iter_us = (
-                        rusage_probe.delta.kernel_time_ms * 1000.0 / iters
-                    )
-
-                # Analytical totals were computed once at the graph level;
-                # propagate them onto every engine's result so JSON
-                # consumers don't have to look up across structures.
-                result.analytical_flops = analytical_flops
-                result.analytical_flops_partial = analytical_flops_partial
-                result.analytical_io_bytes = analytical_io_bytes
-
-                kernel_mean = (
-                    result.gpu_kernel_stats.mean_ms
-                    if result.gpu_kernel_stats is not None
-                    else None
+                _collect_basic_metrics_post_loop(
+                    result=result,
+                    rusage_probe=rusage_probe,
+                    benchmark_iters=config.benchmark_iters,
+                    analytical_flops=analytical_flops,
+                    analytical_flops_partial=analytical_flops_partial,
+                    analytical_io_bytes=analytical_io_bytes,
                 )
-                tflops, gbytes = derive_throughputs(
-                    analytical_flops, analytical_io_bytes, kernel_mean
-                )
-                result.derived_tflops_per_s = tflops
-                result.derived_gbytes_per_s = gbytes
-
-                # VRAM is sampled here (still inside the BufferManager
-                # context, so workspace + I/O buffers are still
-                # allocated). This is the only amdsmi field we expose
-                # per-engine — see ProviderEngineResult docstring.
-                try:
-                    snap = GpuSmiProbe().snapshot()
-                    result.vram_used_mb = snap.get("vram_used_mb")
-                except Exception as e:
-                    warn_once("gpu_smi", f"vram snapshot failed: {e}")
 
             # Opt-in profiling pass — runs *after* the timed pass and
             # always-on probes, so the profiler's overhead can't
