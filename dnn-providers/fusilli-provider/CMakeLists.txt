@@ -37,7 +37,12 @@ set(IREE_BUILD_SAMPLES OFF)
 set(IREE_ERROR_ON_MISSING_SUBMODULES OFF)
 set(IREE_HAL_DRIVER_DEFAULTS OFF)
 set(IREE_HAL_DRIVER_HIP ON)
-set(IREE_HIP_TEST_TARGET_CHIP "" CACHE STRING "")
+# Target chip for IREE's ROCm-specific tests -- empty string disables the tests.
+# IREE build requires an explicit choice. Given IREE_BUILD_TESTS=OFF we
+# shouldn't really need to set this this, IREE should gate the relevant code
+# behind the IREE_BUILD_TESTS flag. Just keeping the build happy until things
+# are gated properly.
+set(IREE_ROCM_TEST_TARGET_CHIP "" CACHE STRING "")
 # Build IREERuntime as part of plugin
 FetchContent_Declare(
   IREERuntime
