@@ -6,6 +6,8 @@
 - [IR Converter](user/ir-converter.md) -- Convert instruction strings to IRList
 - [Assembly Emitter](user/asm-emitter.md) -- Convert IR to GPU assembly
 - [Virtual Registers](user/virtual-registers.md) -- Template-based code generation with register remapping
+- [Long-Branch CFG Construction](user/long-branch-cfg.md) -- How `s_setpc_b64` / `s_swappc_b64` get correct CFG edges (branch vocabulary, `LongBranchLoweringPass`, rocisa `longBranchLabel`)
+- [StinkyWaitCnt Insertion Pass](user/stinky-waitcnt-insertion-pass.md) -- Def-use-chain-driven `s_waitcnt` insertion across DS / buffer-load / tensor counters
 - [Error Codes](user/error-codes.md) -- Error code reference
 
 ## For Developers
