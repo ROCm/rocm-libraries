@@ -38,9 +38,21 @@
 #include "hipsparse_datatype2string.hpp"
 
 template <typename T>
-static T convert_alpha_beta(double r, double i)
+inline T convert_alpha_beta(double r, double i)
 {
     return static_cast<T>(r);
+}
+
+template <>
+inline hipComplex convert_alpha_beta<hipComplex>(double r, double i)
+{
+    return make_hipFloatComplex(static_cast<float>(r), static_cast<float>(i));
+}
+
+template <>
+inline hipDoubleComplex convert_alpha_beta<hipDoubleComplex>(double r, double i)
+{
+    return make_hipDoubleComplex(r, i);
 }
 
 struct Arguments
@@ -63,9 +75,10 @@ struct Arguments
 
     hipsparseIndexType_t index_type_I;
     hipsparseIndexType_t index_type_J;
-    hipDataType          compute_type;
+    hipDataType          a_type;
     hipDataType          x_type;
     hipDataType          y_type;
+    hipDataType          compute_type;
 
     double alpha;
     double alphai;
@@ -147,9 +160,10 @@ struct Arguments
 
         this->index_type_I = HIPSPARSE_INDEX_32I;
         this->index_type_J = HIPSPARSE_INDEX_32I;
-        this->compute_type = HIP_R_32F;
+        this->a_type       = HIP_R_32F;
         this->x_type       = HIP_R_32F;
         this->y_type       = HIP_R_32F;
+        this->compute_type = HIP_R_32F;
 
         this->alpha      = 0.0;
         this->alphai     = 0.0;
@@ -288,9 +302,10 @@ struct Arguments
         HIPSPARSE_FORMAT_CHECK(batch_count);
         HIPSPARSE_FORMAT_CHECK(index_type_I);
         HIPSPARSE_FORMAT_CHECK(index_type_J);
-        HIPSPARSE_FORMAT_CHECK(compute_type);
+        HIPSPARSE_FORMAT_CHECK(a_type);
         HIPSPARSE_FORMAT_CHECK(x_type);
         HIPSPARSE_FORMAT_CHECK(y_type);
+        HIPSPARSE_FORMAT_CHECK(compute_type);
         HIPSPARSE_FORMAT_CHECK(alpha);
         HIPSPARSE_FORMAT_CHECK(alphai);
         HIPSPARSE_FORMAT_CHECK(beta);
@@ -434,9 +449,10 @@ private:
         print("batch_count", arg.batch_count);
         print("index_type_I", hipsparse_indextype2string(arg.index_type_I));
         print("index_type_J", hipsparse_indextype2string(arg.index_type_J));
-        print("compute_type", hipsparse_datatype2string(arg.compute_type));
+        print("a_type", hipsparse_datatype2string(arg.a_type));
         print("x_type", hipsparse_datatype2string(arg.x_type));
         print("y_type", hipsparse_datatype2string(arg.y_type));
+        print("compute_type", hipsparse_datatype2string(arg.compute_type));
         print("alpha", arg.alpha);
         print("alphai", arg.alphai);
         print("beta", arg.beta);

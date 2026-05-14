@@ -28,6 +28,7 @@
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 
@@ -593,6 +594,38 @@ Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
     inst->erase();
 
     return {store1, store2};
+}
+
+namespace {
+// Add `reg` to the dest list of `inst`, unless a register with the same
+// RegType/idx is already present. SCC/VCC/EXEC are singletons, so RegType+idx
+// is sufficient to detect duplicates introduced by an upstream stage or by an
+// instruction that already encodes the register as an explicit operand.
+void addUniqueSpecialDest(StinkyInstruction* inst, const StinkyRegister& reg) {
+    for (const StinkyRegister& d : inst->getDestRegs())
+        if (isSameRegister(d, reg)) return;
+    inst->addDestReg(reg);
+}
+
+void addUniqueSpecialSrc(StinkyInstruction* inst, const StinkyRegister& reg) {
+    for (const StinkyRegister& s : inst->getSrcRegs())
+        if (isSameRegister(s, reg)) return;
+    inst->addSrcReg(reg);
+}
+}  // namespace
+
+void legalizeImplicitSpecialRegisters(StinkyInstruction* inst, uint32_t wavefrontSize) {
+    if (inst == nullptr) return;
+
+    if (inst->is(IF_ImplicitReadSCC)) addUniqueSpecialSrc(inst, StinkyRegister::getSCCRegister());
+    if (inst->is(IF_ImplicitWriteSCC)) addUniqueSpecialDest(inst, StinkyRegister::getSCCRegister());
+
+    if (inst->is(IF_ImplicitReadVCC))
+        addUniqueSpecialSrc(inst, StinkyRegister::getVCCRegister(wavefrontSize));
+    if (inst->is(IF_ImplicitReadEXEC))
+        addUniqueSpecialSrc(inst, StinkyRegister::getEXECRegister(wavefrontSize));
+    if (inst->is(IF_ImplicitWriteEXEC))
+        addUniqueSpecialDest(inst, StinkyRegister::getEXECRegister(wavefrontSize));
 }
 
 }  // namespace stinkytofu

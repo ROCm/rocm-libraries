@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2018-2022 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -499,7 +499,7 @@ namespace hipsparse
             return rocsparse_spmv_alg_csr_adaptive;
         // case HIPSPARSE_CSRMV_ALG2:
         case HIPSPARSE_SPMV_CSR_ALG2:
-            return rocsparse_spmv_alg_csr_stream;
+            return rocsparse_spmv_alg_csr_rowsplit;
         case HIPSPARSE_SPMV_SELL_ALG1:
             return rocsparse_spmv_alg_sell;
         default:

@@ -22,19 +22,13 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-try:
-    from hip import hip  # type: ignore
-    HAS_HIP = True
-except ImportError:
-    HAS_HIP = False
+from hip import hip  # type: ignore
 
 from unittest.mock import MagicMock
 
 from rocisa.code import Module, TextBlock
 from rocisa.container import accvgpr, vgpr, sgpr
 from rocisa.instruction import SWaitCnt
-from rocisa.register import RegisterPool
-from rocisa.enum import RegisterType
 
 from Tensile.Common.Types import DebugConfig
 from Tensile.KernelWriter import CodeModules, StateValues, StateVgprs
@@ -45,22 +39,19 @@ from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
 
 from gpu_test_helpers import (
     TileConfig,
+    HAS_GFX950,
     GFX_TARGET,
     WAVESIZE,
-    NUM_WAVES,
     NUM_THREADS,
-    BPE,
     create_writer,
     generate_kernel_asm,
-    generate_set_directives,
-    generate_load_params,
     assemble_and_run,
     assemble_kernel,
     hip_check,
     init_rocisa,
 )
 
-pytestmark = pytest.mark.skipif(not HAS_HIP, reason="HIP not available")
+pytestmark = pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 
 # ---------------------------------------------------------------------------
 # Test configurations: (mt_a, mt_b, depth_u)
@@ -222,6 +213,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["BAddrInterleave"] = False
     kernel["EnableMatrixInstruction"] = True
     kernel["AdaptiveGemm"] = 0
+    kernel["AdaptiveGemmGSUA"] = 0
     kernel["ActivationFuncCall"] = False
     kernel["ISA"] = [9, 5, 0]
     kernel["KernelLanguage"] = "Assembly"
@@ -394,7 +386,7 @@ def _allocate_d_tile(kernel, writer):
     Returns (tileInfoD, agpr_base) where agpr_base is the first accvgpr index.
     """
     tileInfoD = TileInfo(CD_F32, 'D', writer, kernel)
-    tileInfoD.allocVgprTileRegisters(writer, kernel)
+    tileInfoD.allocVgprTileRegisters_legacy(writer, kernel)
     # Collect all allocated agpr indices (in order)
     agpr_indices = []
     for vtile in tileInfoD.vgprTiles:
@@ -406,6 +398,22 @@ def _allocate_d_tile(kernel, writer):
 def _sgpr_offset(writer_sgprs, name):
     """Return byte offset of a named sgpr in the sgprs dict (4 bytes per reg)."""
     return writer_sgprs[name] * 4
+
+
+def _finalize_inner_asm(parts, kw):
+    """Join ASM parts, appending deferred edge modules (after s_endpgm) if present.
+
+    UseSubtileImpl defers edge store batches to kw.states.deferredEdgeModules.
+    These are reached via PC-relative jumps (s_getpc/s_setpc), not fall-through,
+    so they must be placed after an s_endpgm that terminates the main code path.
+    Without this, execution falls through label_GW_End into the deferred code.
+    """
+    if hasattr(kw.states, 'deferredEdgeModules') and kw.states.deferredEdgeModules:
+        deferred = "\n".join(str(m) for m in kw.states.deferredEdgeModules)
+        kw.states.deferredEdgeModules = []
+        parts.append("  s_waitcnt vmcnt(0)\n  s_endpgm\n")
+        parts.append(deferred)
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +512,12 @@ def _build_sgprs_for_test(writer):
     # SrdInput: input buffer descriptor (4-aligned)
     srd_in_base = writer.sgprPool.checkOut(4, "SrdInput")
     writer.sgprs["SrdInput"] = srd_in_base       # s[24]; s[24:27] used as SRD
+
+    # Subtile guard sgprs (used by UseSubtileImpl edge/non-edge dispatch)
+    mGuard = writer.sgprPool.checkOut(1, "subtileMValidBlocks")
+    writer.sgprs["subtileMValidBlocks"] = mGuard
+    nGuard = writer.sgprPool.checkOut(1, "subtileNValidBlocks")
+    writer.sgprs["subtileNValidBlocks"] = nGuard
 
     return writer.sgprs
 
@@ -626,6 +640,47 @@ def _build_prologue(sgprs, num_agprs, mt0, mt1, stride_d=None, use_input_buf=Tru
     m.add(SMovB32(dst=sgpr(sgprs["Alpha"]),     src="0x3f800000", comment="Alpha[0] = 1.0f"))
     m.add(SMovB32(dst=sgpr(sgprs["Alpha"] + 1), src="0x3f800000", comment="Alpha[1] = 1.0f"))
 
+    # Subtile guard SGPRs: compute numValidMBlocks / numValidNBlocks per wave.
+    if "subtileMValidBlocks" in sgprs:
+        import math
+        miM = 16
+        miWaveGroup0 = mt0 // (miM * (mt0 // (miM * max(1, mt0 // (miM * 4)))))
+        miWaveGroup1 = num_agprs // (mt0 // miM * mt1 // 16) if mt1 > 16 else 1
+        # Derive MIWaveGroup from tile: same logic as _create_kernel
+        if ((mt0 // 16) % 2 == 0) and ((mt1 // 16) % 2 == 0):
+            wg0, wg1 = 2, 2
+        elif ((mt0 // 16) % 2 != 0) and ((mt1 // 16) % 4 == 0):
+            wg0, wg1 = 1, 4
+        elif ((mt0 // 16) % 4 == 0) and ((mt1 // 16) % 2 != 0):
+            wg0, wg1 = 4, 1
+        else:
+            wg0, wg1 = 2, 2
+        miwt0 = mt0 // (miM * wg0)
+        miwt1 = mt1 // (16 * wg1)
+        waveGroupM = miM * miwt0
+        waveGroupN = 16 * miwt1
+        log2_wg0 = int(math.log2(wg0))
+        miMShift = int(math.log2(miM))
+        mGuard = sgprs["subtileMValidBlocks"]
+        nGuard = sgprs["subtileNValidBlocks"]
+        m.add(TextBlock(
+            f"  v_readfirstlane_b32 s{mGuard}, v0          // lane0 tid\n"
+            f"  s_lshr_b32 s{mGuard}, s{mGuard}, 6         // waveId = tid >> 6\n"
+            f"  s_lshr_b32 s{nGuard}, s{mGuard}, {log2_wg0} // waveIdN\n"
+            f"  s_and_b32  s{mGuard}, s{mGuard}, {wg0-1}   // waveIdM\n"
+            f"  s_mul_i32  s{mGuard}, s{mGuard}, {waveGroupM} // waveBase\n"
+            f"  s_sub_u32  s{mGuard}, s{sgprs['SizeI']}, s{mGuard} // remainder\n"
+            f"  s_cselect_b32 s{mGuard}, 0, s{mGuard}      // clamp to 0 if OOB\n"
+            f"  s_add_u32  s{mGuard}, s{mGuard}, {miM-1}   // ceil\n"
+            f"  s_lshr_b32 s{mGuard}, s{mGuard}, {miMShift} // >> {miMShift}\n"
+            f"  s_min_u32  s{mGuard}, s{mGuard}, {miwt0}   // clamp to MIWaveTile[0]\n"
+            f"  s_mul_i32  s{nGuard}, s{nGuard}, {waveGroupN} // waveBaseN\n"
+            f"  s_sub_u32  s{nGuard}, s{sgprs['SizeJ']}, s{nGuard} // validN - waveBaseN\n"
+            f"  s_cselect_b32 s{nGuard}, 0, s{nGuard}      // clamp to 0 if OOB\n"
+            f"  s_min_u32  s{nGuard}, s{nGuard}, {waveGroupN} // min(validN_wave, waveGroupN)\n"
+            f"  s_lshr_b32 s{nGuard}, s{nGuard}, 4          // numValid16NBlocks\n"
+        ))
+
     return m
 
 
@@ -673,128 +728,6 @@ def _compute_reference(cfg, kernel, tileInfoD, size_i, size_j, rng=None):
     input_bytes = ref_arr.tobytes()
     expected_set = None if rng is not None else {float(v) for v in range(size_i * size_j)}
     return input_bytes, expected_set, ref_arr
-
-
-@pytest.mark.skip
-@pytest.mark.parametrize("cfg", CONFIGS, ids=lambda c: c.label)
-def test_storeD_roundtrip(cfg, tmp_path):
-    """GPU roundtrip: init accvgprs → notLocalSplitUGlobalWrite* → verify output."""
-    init_rocisa()
-
-    # ---- Build kernel dict ----
-    kernel = _build_store_kernel(cfg)
-
-    # ---- Build mock writer (pools) ----
-    writer, _, _, _ = create_writer(cfg)
-
-    # ---- Allocate sgprs ----
-    sgprs = _build_sgprs_for_test(writer)
-
-    # ---- Allocate D-tile accvgprs ----
-    tileInfoD, agpr_indices = _allocate_d_tile(kernel, writer)
-    num_agprs = len(agpr_indices)
-
-    # ---- Build KernelWriterAssembly ----
-    kw = _build_kwa(kernel, writer)
-    kw.states.d.tileInfo = tileInfoD
-
-    # ---- Allocate init vgprs BEFORE store code so they land at low indices ----
-    # v0 = Serial (already occupied).  Our init vgprs land at v1, v2, v3.
-    # notLocalSplitUGlobalWriteIndices uses v4+ for coords.
-    # notLocalSplitUGlobalWrite then allocates staging vgprs above coords.
-    tmp_v       = writer.vgprPool.checkOut(1, "tmp_init",    preventOverflow=False)
-    vByteSerial = writer.vgprPool.checkOut(1, "vByteSerial", preventOverflow=False)
-    vBufOff     = writer.vgprPool.checkOut(1, "vBufOff",     preventOverflow=False)
-    byte_serial_asm = (
-        f"  v_lshlrev_b32 v{vByteSerial}, 2, v0  // byte_offset = tid * 4\n"
-        f"  v_mov_b32 v{vBufOff}, v{vByteSerial}  // init accvgpr load offset\n"
-    )
-
-    # ---- Set up codes.accVgprRead for the serialized store path ----
-    kw.codes.accVgprRead = mapAcctoArchRegs(kernel, kw.states.maxLimitAgprs, write=False)
-
-    # ---- Emit the coord index code ----
-    store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
-
-    # ---- startVgprValu = 0: let placeholder encode the full vgpr index ----
-    # AsmStoreState: placeholder = sumIdx*regsPerScalar + vi + rIdx - startVgprValu
-    # With startVgprValu=0: placeholder = sumIdx + vi + rIdx (the absolute vgpr index)
-    # Generated ASM: v[vgprValuC+placeholder] with vgprValuC=0 -> correct absolute vgpr.
-    # buffer_store uses absolute vgpr ranges like v[8:11] which match directly.
-    kw.states.c.startVgprValu = 0
-
-    # ---- Emit the store-D write code ----
-    store_write_mod = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
-
-    # ---- Assemble the inner asm ----
-    prologue = _build_prologue(sgprs, num_agprs, cfg.mt_a, cfg.mt_b)
-    init_mod = _build_accvgpr_init_asm(agpr_indices, sgprs, tmp_v, vBufOff)
-
-    # vgprValuC=0: placeholder already encodes the absolute vgpr index.
-    # BufferOOB must be a constant 0x80000000 (not a label) matching SrdD[2]=0x80000000
-    # so that OOB-redirected stores at offset >= num_records are suppressed by hardware.
-    inner_asm = "\n".join([
-        ".set BufferOOB, 0x80000000\n",
-        ".set vgprValuC, 0\n",
-        str(prologue),
-        byte_serial_asm,
-        str(init_mod),
-        "  s_nop 3  // 4 NOPs: satisfy CDNA3 acc write→read latency\n",
-        str(store_indices_mod),
-        str(store_write_mod),
-    ])
-
-    # ---- Build args descriptors ----
-    # run_on_gpu builds kernargs as: [input_ptrs...] + [output_ptr] + [scalars...]
-    # With inputs=(input_arr,) and scalars=(mt_a, mt_b):
-    #   kernarg[0:8]   = input_ptr
-    #   kernarg[8:16]  = output_ptr (our SrdD base)
-    #   kernarg[16:20] = mt_a (SizeI)
-    #   kernarg[20:24] = mt_b (SizeJ)
-    args = [
-        ("input",  8, "global_buffer", "u8"),
-        ("output", 8, "global_buffer", "u8"),
-        ("mt0",    4, "by_value",      "u32"),
-        ("mt1",    4, "by_value",      "u32"),
-    ]
-
-    # Compute output size: mt_a * mt_b f32 elements
-    output_size = cfg.mt_a * cfg.mt_b * 4  # bytes
-
-    # ---- Prepare input data ----
-    input_bytes, expected_set = _compute_reference(cfg, agpr_indices, tileInfoD)
-    input_arr = np.frombuffer(input_bytes, dtype=np.float32)
-
-    # ---- Generate full asm ----
-    set_directives = generate_set_directives(sgprs)
-    full_asm = generate_kernel_asm(inner_asm, writer, args, lds_size=0)
-
-    # ---- Assemble and run ----
-    raw = assemble_and_run(
-        full_asm, tmp_path, cfg.label,
-        output_size=output_size,
-        inputs=(input_arr,),
-        scalars=(cfg.mt_a, cfg.mt_b),
-    )
-
-    # ---- Parse output ----
-    num_floats = cfg.mt_a * cfg.mt_b
-    out = struct.unpack(f"{num_floats}f", raw[:num_floats * 4])
-
-    # ---- Verify ----
-    # Every output value should come from the expected set
-    unexpected = [v for v in out if v not in expected_set]
-    assert not unexpected, \
-        f"Found {len(unexpected)} unexpected output values: {unexpected[:10]}"
-
-    # All expected values should appear in the output (bijection for full tile)
-    out_set = set(out)
-    missing = expected_set - out_set
-    assert not missing, \
-        f"Missing {len(missing)} expected values in output: {list(missing)[:10]}"
-
-    if cfg.mt_a == 128 and cfg.mt_b == 128:
-        _print_subtile_map(cfg.mt_a, cfg.mt_b, out, tileInfoD, cfg.label)
 
 
 def _is_sentinel(v):
@@ -1184,6 +1117,7 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
 
     kernel = _build_store_kernel(cfg, mi_wave_group=mi_wave_group, use_bf16=use_bf16)
     kernel["NumThreads"] = num_threads
+    kernel["UseSubtileImpl"] = True
 
     writer, _, _, _ = create_writer(cfg, mi_wave_group=mi_wave_group)
 
@@ -1193,12 +1127,18 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     kw = _build_kwa(kernel, writer, use_bf16=use_bf16)
     kw.states.d.tileInfo = tileInfoD
 
+    kw.states.subtileM32ValidBlocksSgpr = sgprs["subtileMValidBlocks"]
+    kw.states.subtileN16ValidBlocksSgpr = sgprs["subtileNValidBlocks"]
+    kw.sgprs["SubtileMGuard"] = sgprs["subtileMValidBlocks"]
+    kw.sgprs["SubtileNGuard"] = sgprs["subtileNValidBlocks"]
+    kw.states.subtileMBlockSize         = 16
+
     tmp_v = writer.vgprPool.checkOut(1, "tmp_init", preventOverflow=False)
 
     kw.codes.accVgprRead = mapAcctoArchRegs(kernel, kw.states.maxLimitAgprs, write=False)
     store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
     kw.states.c.startVgprValu = 0
-    store_write_mod = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
+    store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
 
     store_write_asm = str(store_write_mod)
 
@@ -1257,7 +1197,7 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
         run_inputs = (np.frombuffer(input_bytes, dtype=np.float32),)
 
     init_asm = str(init_mod)
-    inner_asm = "\n".join([
+    parts = [
         ".set BufferOOB, 0x80000000\n",
         ".set vgprValuC, 0\n",
         str(prologue),
@@ -1265,8 +1205,8 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
         "  s_nop 3  // 4 NOPs: satisfy CDNA3 acc write→read latency\n",
         str(store_indices_mod),
         store_write_asm,
-        "// end of kernel (BufferOOB constant above redirects OOB writes to /dev/null)\n",
-    ])
+    ]
+    inner_asm = _finalize_inner_asm(parts, kw)
 
     wg = mi_wave_group or kernel["MIWaveGroup"]
     label = f"{cfg.label}_wg{'x'.join(str(g) for g in wg)}_m{size_i}n{size_j}"
@@ -1315,81 +1255,6 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-
-@pytest.mark.skip
-@pytest.mark.parametrize("cfg", CONFIGS, ids=lambda c: c.label)
-def test_storeD_roundtrip(cfg, tmp_path):
-    """GPU roundtrip: init accvgprs → notLocalSplitUGlobalWrite* → verify output."""
-    init_rocisa()
-    out, tileInfoD, expected_set, round_mt0, round_mt1 = _run_storeD(cfg, tmp_path, cfg.mt_a, cfg.mt_b)
-    _verify_output(out, expected_set)
-    if cfg.mt_a == 128 and cfg.mt_b == 128:
-        _print_subtile_map(round_mt0, round_mt1, out, tileInfoD, cfg.label)
-
-
-@pytest.mark.skip
-def test_storeD_wave_id_init(tmp_path):
-    """Print 128x128 D subtile map with wave-id initialization."""
-    init_rocisa()
-    cfg = TileConfig(mt_a=128, mt_b=128, depth_u=64)
-    out, tileInfoD, _, round_mt0, round_mt1 = _run_storeD(cfg, tmp_path, cfg.mt_a, cfg.mt_b, init_mode="wave_id")
-    _print_subtile_map(round_mt0, round_mt1, out, tileInfoD, "128x128x64 wave_id init")
-
-
-@pytest.mark.skip
-def test_storeD_1wave_8x8_128x128(tmp_path):
-    """Print 128x128 D subtile map with 1 wave (MIWaveGroup=[1,1])."""
-    init_rocisa()
-    cfg = TileConfig(mt_a=128, mt_b=128, depth_u=64)
-    out, tileInfoD, _, round_mt0, round_mt1 = _run_storeD(cfg, tmp_path, cfg.mt_a, cfg.mt_b,
-                                                           mi_wave_group=[1, 1], num_threads=WAVESIZE)
-    _print_subtile_map(round_mt0, round_mt1, out, tileInfoD, "128x128x64 1-wave MIWaveGroup=[1,1]")
-
-
-@pytest.mark.skip
-def test_storeD_16x16_1wave(tmp_path):
-    """Store-D roundtrip for a 16x16 tile with 1 wave (MIWaveGroup=[1,1]), accN init."""
-    init_rocisa()
-    cfg = TileConfig(mt_a=16, mt_b=16, depth_u=64)
-    out, tileInfoD, expected_set, round_mt0, round_mt1 = _run_storeD(cfg, tmp_path, cfg.mt_a, cfg.mt_b,
-                                                                      mi_wave_group=[1, 1], init_mode="acc_index",
-                                                                      num_threads=WAVESIZE)
-    _verify_output(out, expected_set)
-    _print_full_matrix(out, round_mt0, round_mt1, "16x16x64 1-wave MIWaveGroup=[1,1]")
-
-
-@pytest.mark.skip
-def test_storeD_16x16_1wave_m15n16(tmp_path):
-    """Store-D with 16x16 macrotile, 1 wave, partial M=15 N=16 (last row OOB)."""
-    init_rocisa()
-    cfg = TileConfig(mt_a=16, mt_b=16, depth_u=64)
-    out, tileInfoD, _, round_mt0, round_mt1 = _run_storeD(cfg, tmp_path, 15, 16,
-                                                           mi_wave_group=[1, 1], init_mode="acc_index",
-                                                           num_threads=WAVESIZE)
-    _print_full_matrix(out, round_mt0, round_mt1, "16x16x64 1-wave M=15 N=16")
-
-
-@pytest.mark.skip
-def test_storeD_16x16_1wave_m32n32(tmp_path):
-    """Store-D with 16x16 macrotile, 1 wave, M=N=32 (macrotile covers top-left quadrant)."""
-    init_rocisa()
-    cfg = TileConfig(mt_a=16, mt_b=16, depth_u=64)
-    out, tileInfoD, _, round_mt0, round_mt1 = _run_storeD(cfg, tmp_path, 32, 32,
-                                                           mi_wave_group=[1, 1], init_mode="acc_index",
-                                                           num_threads=WAVESIZE)
-    _print_full_matrix(out, round_mt0, round_mt1, "16x16x64 1-wave M=32 N=32 (WG at (0,0))")
-
-
-@pytest.mark.skip
-def test_storeD_16x16_1wave_m21n23(tmp_path):
-    """Store-D with 16x16 MT, 1 wave, M=21 N=23 — shows written region vs OOB sentinel."""
-    init_rocisa()
-    cfg = TileConfig(mt_a=16, mt_b=16, depth_u=64)
-    out, tileInfoD, _, round_mt0, round_mt1 = _run_storeD(cfg, tmp_path, 21, 23,
-                                                           mi_wave_group=[1, 1], init_mode="acc_index",
-                                                           num_threads=WAVESIZE)
-    _print_full_matrix(out, round_mt0, round_mt1, "16x16x64 1-wave M=21 N=23")
-
 
 @pytest.mark.parametrize("use_bf16", [False, True], ids=["f32", "bf16"])
 @pytest.mark.parametrize("cfg", CONFIGS, ids=lambda c: c.label)
@@ -1518,22 +1383,6 @@ def _verify_bf16_positions(out, round_mt0, round_mt1, kernel, check_ncol=True, c
         )
 
 
-
-@pytest.mark.skip
-def test_storeD_32x32_m32n32(tmp_path):
-    """Store-D roundtrip for a 32x32 macrotile with M=N=32, acc_index init.
-
-    MIWaveGroup=[2,2] → 4 waves, MIWaveTile=[1,1] → each wave owns one 16x16 MMA tile.
-    Verifies that all 4 MMA tiles are written to the correct locations.
-    """
-    init_rocisa()
-    cfg = TileConfig(mt_a=32, mt_b=32, depth_u=64)
-    out, tileInfoD, expected_set, round_mt0, round_mt1 = _run_storeD(cfg, tmp_path, 32, 32,
-                                                                      init_mode="acc_index")
-    _verify_output(out, expected_set)
-    _print_subtile_map(round_mt0, round_mt1, out, tileInfoD, "32x32x64 MIWaveGroup=[2,2] M=32 N=32")
-
-
 def _build_accvgpr_init_matrix_asm(agpr_indices, kernel, tileInfoD, sgprs, tmp_v, vaddr, vtmp2):
     """Init accvgprs from a column-major MT_a×MT_b host matrix using the MFMA output layout.
 
@@ -1570,8 +1419,8 @@ def _build_accvgpr_init_matrix_asm(agpr_indices, kernel, tileInfoD, sgprs, tmp_v
     # Dimensions of each wave's block and per-wave subtile grid.
     wave_rows = MT_a // wg0                              # rows owned by one wave
     wave_cols = kernel["MacroTile1"] // wg1              # cols owned by one wave
-    local_sg0 = tileInfoD.localSubtileGrid[0]            # sId0 range
-    local_sg1 = tileInfoD.localSubtileGrid[1]            # sId1 range
+    local_sg0 = int(tileInfoD.localSubtileGrid[0])        # sId0 range
+    local_sg1 = int(tileInfoD.localSubtileGrid[1])        # sId1 range
 
     stride_bytes = MT_a * 4   # bytes per column in the column-major matrix
 
@@ -1941,6 +1790,8 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
     # Wire subtile guard SGPRs into kw.states so GlobalWriteBatch can use them.
     kw.states.subtileM32ValidBlocksSgpr = sgprs["subtileMValidBlocks"]
     kw.states.subtileN16ValidBlocksSgpr = sgprs["subtileNValidBlocks"]
+    kw.sgprs["SubtileMGuard"] = sgprs["subtileMValidBlocks"]
+    kw.sgprs["SubtileNGuard"] = sgprs["subtileNValidBlocks"]
     kw.states.subtileMBlockSize         = 16  # MatrixInstM for f32
 
     tmp_v = writer.vgprPool.checkOut(1, "tmp_v", preventOverflow=False)
@@ -1948,7 +1799,7 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
     kw.codes.accVgprRead = mapAcctoArchRegs(kernel, kw.states.maxLimitAgprs, write=False)
     store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
     kw.states.c.startVgprValu = 0
-    store_write_mod = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
+    store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
 
     round_mt0 = cfg.mt_a
     round_mt1 = cfg.mt_b
@@ -1972,7 +1823,7 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
     init_mod = _build_accvgpr_zero_asm(agpr_indices, tmp_v)
 
     store_write_asm = str(store_write_mod)
-    inner_asm = "\n".join([
+    parts = [
         ".set BufferOOB, 0x80000000\n",
         ".set vgprValuC, 0\n",
         str(prologue),
@@ -1980,7 +1831,8 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
         "  s_nop 3  // CDNA3 acc write→read latency\n",
         str(store_indices_mod),
         store_write_asm,
-    ])
+    ]
+    inner_asm = _finalize_inner_asm(parts, kw)
 
     wg = mi_wave_group
     label = f"beta_{cfg.label}_wg{'x'.join(str(g) for g in wg)}_m{size_i}n{size_j}"
@@ -2161,6 +2013,8 @@ def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=Non
 
     kw.states.subtileM32ValidBlocksSgpr = sgprs["subtileMValidBlocks"]
     kw.states.subtileN16ValidBlocksSgpr = sgprs["subtileNValidBlocks"]
+    kw.sgprs["SubtileMGuard"] = sgprs["subtileMValidBlocks"]
+    kw.sgprs["SubtileNGuard"] = sgprs["subtileNValidBlocks"]
     kw.states.subtileMBlockSize         = 16
 
     tmp_v = writer.vgprPool.checkOut(1, "tmp_v", preventOverflow=False)
@@ -2168,7 +2022,7 @@ def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=Non
     kw.codes.accVgprRead = mapAcctoArchRegs(kernel, kw.states.maxLimitAgprs, write=False)
     store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
     kw.states.c.startVgprValu = 0
-    store_write_mod = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
+    store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
 
     round_mt0 = cfg.mt_a
     round_mt1 = cfg.mt_b
@@ -2181,7 +2035,7 @@ def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=Non
     init_mod = _build_accvgpr_zero_asm(agpr_indices, tmp_v)
 
     store_write_asm = str(store_write_mod)
-    inner_asm = "\n".join([
+    parts = [
         ".set BufferOOB, 0x80000000\n",
         ".set vgprValuC, 0\n",
         str(prologue),
@@ -2189,7 +2043,8 @@ def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=Non
         "  s_nop 3\n",
         str(store_indices_mod),
         store_write_asm,
-    ])
+    ]
+    inner_asm = _finalize_inner_asm(parts, kw)
 
     label = f"cload_pg_{cfg.label}_m{size_i}n{size_j}"
     args = [

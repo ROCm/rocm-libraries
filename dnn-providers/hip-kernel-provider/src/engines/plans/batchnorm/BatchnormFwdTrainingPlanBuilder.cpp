@@ -310,7 +310,6 @@ bool BatchnormFwdTrainingPlanBuilder::isApplicable(
         checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
 
         validator.checkFwdTrainingActivationTensorConfigSupported(bnAttr, activAttr);
-        BatchnormValidator::checkFwdActivationModeSupported(activAttr);
 
         HIPDNN_PLUGIN_LOG_INFO(
             "BatchnormFwdTraining plan builder applicable for training + activation fusion");

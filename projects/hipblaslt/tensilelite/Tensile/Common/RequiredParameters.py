@@ -101,6 +101,8 @@ def getRequiredParametersMin() -> set:
         'TransposeLDSMetadata',
         'TDMInst',
         "TDMSplit",
+        "MXScaleFormat",
+        "MXLoadInst",
         'UnrollLoopSwapGlobalReadOrder',
         'Use64bShadowLimit',
         'Use64bShadowLimitMX',
