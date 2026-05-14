@@ -48,6 +48,9 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # HIP is required to build _rocisa (via hip::host).  Set the search prefix
     # so find_package works both in developer environments and in the temporary
     # build sandbox created by scikit-build-core / uv.
+    if(ROCM_PATH)
+        list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+    endif()
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
     find_package(hip REQUIRED)
 
@@ -146,6 +149,11 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     )
     # _build_info.py is intentionally NOT in install() rules so it is absent
     # from wheels and pre-built packages, acting as the source-build sentinel.
+    # For editable/dev installs, pass -DROCISA_INCLUDE_BUILD_INFO=ON to include it.
+    option(ROCISA_INCLUDE_BUILD_INFO "Install _build_info.py for staleness detection" OFF)
+    if(ROCISA_INCLUDE_BUILD_INFO)
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py" DESTINATION rocisa)
+    endif()
 
     if(ROCISA_STANDALONE)
         # Install rules for scikit-build-core: place _rocisa.so, libstinkytofu.so,
