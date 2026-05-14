@@ -56,6 +56,9 @@ constexpr int FP8_E4M3_FNUZ_MANT_BITS = 3;
 /// Number of exponent bits
 constexpr int FP8_E4M3_FNUZ_EXP_BITS = 4;
 
+/// Maximum biased exponent representable in EXP_BITS bits
+constexpr int FP8_E4M3_FNUZ_MAX_BIASED_EXP = (1 << FP8_E4M3_FNUZ_EXP_BITS) - 1;
+
 // ============================================================================
 // FP8 E4M3 FNUZ Special Values (bit patterns)
 // ============================================================================
@@ -122,7 +125,7 @@ inline uint8_t float_to_fp8_e4m3_fnuz_bits(float f) noexcept
     }
 
     // Handle overflow: saturate to MAX or LOWEST
-    if(exp > 15)
+    if(exp > FP8_E4M3_FNUZ_MAX_BIASED_EXP)
     {
         return static_cast<uint8_t>(sign | FP8_E4M3_FNUZ_ABS_MASK);
     }
@@ -176,7 +179,7 @@ inline uint8_t float_to_fp8_e4m3_fnuz_bits(float f) noexcept
         {
             fp8Mant = 0;
             exp++;
-            if(exp > 15)
+            if(exp > FP8_E4M3_FNUZ_MAX_BIASED_EXP)
             {
                 return static_cast<uint8_t>(sign | FP8_E4M3_FNUZ_ABS_MASK);
             }
