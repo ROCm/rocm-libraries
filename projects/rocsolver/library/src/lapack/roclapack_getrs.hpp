@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -153,9 +153,7 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     if(trans == rocblas_operation_none)
     {
@@ -166,7 +164,6 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
                 handle, nrhs, B, shiftB, incb, ldb, strideB, 1, n, ipiv, 0, 1, strideP, batch_count);
             if(istat != rocblas_status_success)
             {
-                rocblas_set_pointer_mode(handle, old_mode);
                 return (istat);
             }
         }
@@ -179,7 +176,6 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
                 work3, work4);
             if(istat != rocblas_status_success)
             {
-                rocblas_set_pointer_mode(handle, old_mode);
                 return (istat);
             }
         }
@@ -192,7 +188,6 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
                 work2, work3, work4);
             if(istat != rocblas_status_success)
             {
-                rocblas_set_pointer_mode(handle, old_mode);
                 return (istat);
             }
         }
@@ -207,7 +202,6 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
                 work2, work3, work4);
             if(istat != rocblas_status_success)
             {
-                rocblas_set_pointer_mode(handle, old_mode);
                 return (istat);
             }
         }
@@ -220,7 +214,6 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
                 work3, work4);
             if(istat != rocblas_status_success)
             {
-                rocblas_set_pointer_mode(handle, old_mode);
                 return (istat);
             }
         }
@@ -234,13 +227,11 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
 
             if(istat != rocblas_status_success)
             {
-                rocblas_set_pointer_mode(handle, old_mode);
                 return (istat);
             }
         }
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 
