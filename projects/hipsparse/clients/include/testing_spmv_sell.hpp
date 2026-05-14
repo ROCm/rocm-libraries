@@ -192,8 +192,8 @@ void testing_spmv_sell(Arguments argus)
     J                    m          = argus.M;
     J                    n          = argus.N;
     J                    slice_size = argus.slice_size;
-    T                    h_alpha    = make_DataType<T>(argus.alpha);
-    T                    h_beta     = make_DataType<T>(argus.beta);
+    T                    h_alpha    = argus.get_alpha<T>();
+    T                    h_beta     = argus.get_beta<T>();
     hipsparseOperation_t transA     = argus.transA;
     hipsparseIndexBase_t idx_base   = argus.baseA;
     hipsparseSpMVAlg_t   alg        = static_cast<hipsparseSpMVAlg_t>(argus.spmv_alg);

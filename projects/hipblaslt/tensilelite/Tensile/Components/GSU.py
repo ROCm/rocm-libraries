@@ -212,6 +212,7 @@ class GSUOff(GSU):
         module = Module("GSU Off graIncrements")
 
         tc = tP["tensorChar"]
+        tIdx: int = tP["idx"]
         dimIdx = kernel["ProblemType"]["IndicesSummation"][loopIdx] # dimension index
         loopChar = writer.states.indexChars[dimIdx]
         stride = writer.strideRef(tc, dimIdx)
@@ -231,7 +232,22 @@ class GSUOff(GSU):
                 module.add(VMovB32(dst=vgpr("GlobalReadIncs%s+%u+0"%(tc, 2*loopIdx)), src=sgpr(tmpSgpr+0)))
                 module.add(VMovB32(dst=vgpr("GlobalReadIncs%s+%u+1"%(tc, 2*loopIdx)), src=sgpr(tmpSgpr+1)))
         else:
-            module.add(self.graIncrementsCommon(writer, loopIdx, tc, stride, m))
+            # MX scale unroll-step SRD increment, gated by MXScaleFormat:
+            #   - Swizzled (HostPreSwizzle/InMemorySwizzle): each K-block of
+            #     scales (DepthU/MXBlock K-scales per M) is laid out as a
+            #     contiguous (M, K_inner) block, so a K-step of DepthU advances
+            #     the SRD by Size{tile} * (DepthU/MXBlock * bpe).
+            #   - NoSwizzle: canonical row/column layout with K-axis stride 1;
+            #     the K-step of DepthU is just DepthU/MXBlock * bpe and goes
+            #     through the standard graIncrementsCommon path.
+            mxFmt = kernel.get("MXScaleFormat", "NoSwizzle")
+            isMxSwizzledScale = ('MXS' in tc) and mxFmt in ("InMemorySwizzle", "HostPreSwizzle")
+            if isMxSwizzledScale and writer.isConstUnitStride(stride):
+                module.add(SMulI32(dst=sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx)), \
+                    src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=m, \
+                    comment="incr%s = Size%s*DepthU*Bpe (unrollIdx, swizzled MX scale layout)"%(tc, INDEX_CHARS[tIdx])))
+            else:
+                module.add(self.graIncrementsCommon(writer, loopIdx, tc, stride, m))
 
         return module
 
@@ -358,9 +374,13 @@ class GSUOn(GSU):
 
         tc = tP["tensorChar"]
         isgfx950 = kernel["ISA"][:2] == (9, 5)
-        isgfx950mx = isgfx950 and ("MXS" in tc)
+        # MX scales in a swizzled layout (HostPreSwizzle / InMemorySwizzle)
+        # use the per-tensor _DepthU{tc} sequencing because their effective
+        # K stride differs from A/B; NoSwizzle MX scales share _DepthU with A/B.
+        mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+        isMxSwizzledScaleLayout = ("MXS" in tc) and mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
         depthU = kernel["DepthU"]
-        depthUDiv = kernel["_DepthU%s"%tc] if isgfx950mx else kernel["_DepthU"]
+        depthUDiv = kernel["_DepthU%s"%tc] if isMxSwizzledScaleLayout else kernel["_DepthU"]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
             depthUDiv = kernel["DepthU"] * kernel["MatrixInstM"]
@@ -463,8 +483,14 @@ class GSUOn(GSU):
                 duBpe = int(du * tP["bpeGR"]) * mi_dim
                 module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
 
-                if 'MXS' in tc:
-                    module.add(SMulI32(dst=incSgpr, src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
+                # MX scale GSU SRD increment, gated by MXScaleFormat:
+                #   - Swizzled (HostPreSwizzle/InMemorySwizzle): the K-block is
+                #     M*K_inner contiguous, so the increment scales with Size{tile}.
+                #   - NoSwizzle: canonical layout, same step as A/B (duBpe only).
+                mxFmt = kernel.get("MXScaleFormat", "NoSwizzle")
+                isMxSwizzledScale = ('MXS' in tc) and mxFmt in ("InMemorySwizzle", "HostPreSwizzle")
+                if isMxSwizzledScale:
+                    module.add(SMulI32(dst=incSgpr, src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d) (swizzled MX scale layout)"%(mi_dim)))
                 else:
                     module.add(SMovB32(dst=incSgpr, src=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
                 module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=incSgpr, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))

@@ -127,7 +127,6 @@ public:
     static std::shared_ptr<const EngineExecutionContextWrapper>
         createExecutionContextFromSerialized(const std::shared_ptr<EnginePluginResourceManager>& rm,
                                              int64_t engineId,
-                                             const hipdnnPluginConstData_t* engineConfig,
                                              const hipdnnPluginConstData_t* serializedContext);
 
     virtual size_t getEngineCount() const;
@@ -155,9 +154,7 @@ private:
                                const hipdnnPluginConstData_t* engineConfig,
                                const GraphDescriptor* graphDesc) const;
     [[nodiscard]] virtual hipdnnEnginePluginExecutionContext_t createExecutionContextFromSerialized(
-        int64_t engineId,
-        const hipdnnPluginConstData_t* engineConfig,
-        const hipdnnPluginConstData_t* serializedContext) const;
+        int64_t engineId, const hipdnnPluginConstData_t* serializedContext) const;
     virtual void
         destroyExecutionContext(int64_t engineId,
                                 hipdnnEnginePluginExecutionContext_t executionContext) const;
@@ -210,7 +207,6 @@ public:
                                   const GraphDescriptor* graphDesc);
     EngineExecutionContextWrapper(const std::shared_ptr<EnginePluginResourceManager>& rm,
                                   int64_t engineId,
-                                  const hipdnnPluginConstData_t* engineConfig,
                                   const hipdnnPluginConstData_t* serializedContext);
     ~EngineExecutionContextWrapper();
 

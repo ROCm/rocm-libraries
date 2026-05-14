@@ -155,8 +155,8 @@ void testing_spmv_coo(Arguments argus)
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     I                    m        = argus.M;
     I                    n        = argus.N;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
-    T                    h_beta   = make_DataType<T>(argus.beta);
+    T                    h_alpha  = argus.get_alpha<T>();
+    T                    h_beta   = argus.get_beta<T>();
     hipsparseOperation_t transA   = argus.transA;
     hipsparseIndexBase_t idx_base = argus.baseA;
     hipsparseSpMVAlg_t   alg      = argus.spmv_alg;

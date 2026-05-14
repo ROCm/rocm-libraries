@@ -310,6 +310,15 @@ namespace rocsparse
             // Stream all of this row block's matrix values into local memory.
             // Perform the matvec in parallel with this work.
             const I col = row_offset + lid - idx_base;
+#ifdef ROCSPARSE_WITH_ASAN
+            // Under ASAN, always use bounds-checked path to avoid intentional OOB reads
+            // in the fast path below (which are safe on dGPUs but trigger ASAN errors).
+            for(I i = 0; col + i < csr_row_ptr[stop_row] - idx_base; i += WG_SIZE)
+            {
+                partialSums[lid + i] = alpha * rocsparse::conj_val(csr_val[col + i], conj)
+                                       * x[csr_col_ind[col + i] - idx_base];
+            }
+#else
             if(col + BLOCKSIZE - WG_SIZE < nnz)
             {
                 for(J i = 0; i < BLOCKSIZE; i += WG_SIZE)
@@ -333,6 +342,7 @@ namespace rocsparse
                                            * x[csr_col_ind[col + i] - idx_base];
                 }
             }
+#endif
             __syncthreads();
 
             if(numThreadsForRed > 1)
