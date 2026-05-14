@@ -72,8 +72,8 @@ double scaleFactorFromByte(uint8_t scaleByte)
 template <typename DT>
 bool hasNonzeroScaleMantissa(const std::vector<uint8_t>& scales)
 {
-    const uint8_t mantissaMask = (1 << DT::scaleInfo.mantissaBits) - 1;
-    return std::any_of(scales.begin(), scales.end(), [mantissaMask](uint8_t scale) {
+    return std::any_of(scales.begin(), scales.end(), [](uint8_t scale) {
+        const uint8_t mantissaMask = (1 << DT::scaleInfo.mantissaBits) - 1;
         return (scale & mantissaMask) != 0;
     });
 }
@@ -81,8 +81,8 @@ bool hasNonzeroScaleMantissa(const std::vector<uint8_t>& scales)
 template <typename DT>
 bool hasDenormalScale(const std::vector<uint8_t>& scales)
 {
-    const uint8_t mantissaMask = (1 << DT::scaleInfo.mantissaBits) - 1;
-    return std::any_of(scales.begin(), scales.end(), [mantissaMask](uint8_t scale) {
+    return std::any_of(scales.begin(), scales.end(), [](uint8_t scale) {
+        const uint8_t mantissaMask = (1 << DT::scaleInfo.mantissaBits) - 1;
         const uint8_t exponent
             = getExponentValue<uint8_t>(scale, DT::scaleInfo.mantissaBits, DT::scaleInfo.exponentBits);
         return exponent == 0 && (scale & mantissaMask) != 0;
