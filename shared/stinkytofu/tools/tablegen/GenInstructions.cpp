@@ -127,7 +127,7 @@ struct FormatDef {
     int maxOperands = 0;
     int cycle = 0;  // 0 = not specified (inherit from parent or arch default)
     int latency = 0;
-    int coIssueMask = -1;  // -1 = not specified (inherit from parent); VALU co-issue bitmask
+    int coIssueWindow = -1;  // -1 = not specified (inherit from parent); VALU co-issue window
     std::vector<std::string> flags;
 
     // Default operand field descriptions for instructions using this format
@@ -140,9 +140,9 @@ struct FormatDef {
     std::vector<OperandFieldEntry> altFields;
 };
 
-// Cost override: when modifier matches (e.g. MatrixFmtData(FP4, FP4)), use (cycle, latency)
+// Cost override: when modifier matches (e.g. MatrixFmtModifiers(FP4, FP4)), use (cycle, latency)
 struct CostOverrideEntry {
-    std::string modifierType;       // e.g. "MatrixFmtData"
+    std::string modifierType;       // e.g. "MatrixFmtModifiers"
     std::vector<std::string> args;  // e.g. {"FP4", "FP4"}
     int cycle = 1;
     int latency = 1;
@@ -158,7 +158,7 @@ struct InstructionDef {
     std::string format;  // e.g., "VOP3"
     int cycle = 0;       // 0 = not specified (inherit from format, then arch default)
     int latency = 0;
-    int coIssueMask = -1;  // -1 = not specified (inherit from format); VALU co-issue bitmask
+    int coIssueWindow = -1;  // -1 = not specified (inherit from format); VALU co-issue window
     std::vector<CostOverrideEntry> costOverrides;     // modifier-keyed overrides
     std::vector<OperandSpec> operands;                // Operand specifications
     std::vector<OperandFieldEntry> operandFields;     // Operand field descriptions
@@ -246,7 +246,7 @@ class DefTParser {
         if (fmt.encoding.empty()) fmt.encoding = p.encoding;
         if (fmt.cycle == 0) fmt.cycle = p.cycle;
         if (fmt.latency == 0) fmt.latency = p.latency;
-        if (fmt.coIssueMask < 0) fmt.coIssueMask = p.coIssueMask;
+        if (fmt.coIssueWindow < 0) fmt.coIssueWindow = p.coIssueWindow;
         // Flags: parent first, then child (child adds MFMA etc.)
         fmt.flags = p.flags;
         fmt.flags.insert(fmt.flags.end(), it->second.flags.begin(), it->second.flags.end());
@@ -268,7 +268,7 @@ class DefTParser {
                 inst.finalOperandFields = inst.operandFields;
                 if (inst.cycle == 0) inst.cycle = arch_.defaultCycle;
                 if (inst.latency == 0) inst.latency = arch_.defaultLatency;
-                if (inst.coIssueMask < 0) inst.coIssueMask = 0;
+                if (inst.coIssueWindow < 0) inst.coIssueWindow = 0;
                 continue;
             }
 
@@ -299,11 +299,12 @@ class DefTParser {
             if (inst.latency == 0 && fmt.latency > 0) inst.latency = fmt.latency;
             if (inst.cycle == 0) inst.cycle = arch_.defaultCycle;
             if (inst.latency == 0) inst.latency = arch_.defaultLatency;
-            if (inst.coIssueMask < 0 && fmt.coIssueMask >= 0) inst.coIssueMask = fmt.coIssueMask;
-            if (inst.coIssueMask < 0) inst.coIssueMask = 0;
-            if (inst.coIssueMask > 0xFFFF) {
+            if (inst.coIssueWindow < 0 && fmt.coIssueWindow >= 0)
+                inst.coIssueWindow = fmt.coIssueWindow;
+            if (inst.coIssueWindow < 0) inst.coIssueWindow = 0;
+            if (inst.coIssueWindow > 0xFFFF) {
                 std::cerr << "error: " << inst.mnemonic << ": .coissue value 0x" << std::hex
-                          << inst.coIssueMask << " exceeds uint16_t range\n";
+                          << inst.coIssueWindow << " exceeds uint16_t range\n";
                 return false;
             }
 
@@ -505,7 +506,7 @@ class DefTParser {
             parseField(block, ".unit", fmt.unit);
             parseFieldInt(block, ".maxOperands", fmt.maxOperands);
             parseFieldCost(block, ".cost", fmt.cycle, fmt.latency);
-            parseFieldIntAuto(block, ".coissue", fmt.coIssueMask);
+            parseFieldIntAuto(block, ".coissue", fmt.coIssueWindow);
             parseFieldFlags(block, ".flags", fmt.flags);
             parseFieldOperandFields(block, ".fields", fmt.fields);
             parseField(block, ".promotedFormat", fmt.promotedFormat);
@@ -675,7 +676,7 @@ class DefTParser {
 
                 // Parse per-entry optional fields (same helpers as DEF_T)
                 parseFieldCost(entryFields, ".cost", inst.cycle, inst.latency);
-                parseFieldIntAuto(entryFields, ".coissue", inst.coIssueMask);
+                parseFieldIntAuto(entryFields, ".coissue", inst.coIssueWindow);
                 parseFieldCostOverrides(entryFields, inst.costOverrides);
                 parseFieldOperandFields(entryFields, ".operand_fields", inst.operandFields);
                 parseFieldOperandFields(entryFields, ".alt_operand_fields", inst.altOperandFields);
@@ -812,7 +813,7 @@ class DefTParser {
             // Parse optional fields
             parseField(block, ".format", inst.format);
             parseFieldCost(block, ".cost", inst.cycle, inst.latency);
-            parseFieldIntAuto(block, ".coissue", inst.coIssueMask);
+            parseFieldIntAuto(block, ".coissue", inst.coIssueWindow);
             parseFieldCostOverrides(block, inst.costOverrides);
             parseFieldFlags(block, ".flags", inst.flags);
             parseFieldOperandFields(block, ".operand_fields", inst.operandFields);
@@ -906,7 +907,7 @@ class DefTParser {
         return std::string::npos;
     }
 
-    // Helper: Parse .costOverrides = { { MatrixFmtData(FP4, FP4), 6, 24 }, ... }
+    // Helper: Parse .costOverrides = { { MatrixFmtModifiers(FP4, FP4), 6, 24 }, ... }
     void parseFieldCostOverrides(const std::string& block, std::vector<CostOverrideEntry>& out) {
         size_t pos = block.find(".costOverrides");
         if (pos == std::string::npos) return;
@@ -924,7 +925,7 @@ class DefTParser {
             size_t entryR = findMatchingBrace(content, entryL);
             if (entryR == std::string::npos) break;
             std::string entry = content.substr(entryL + 1, entryR - entryL - 1);
-            // entry is "MatrixFmtData(FP4, FP4), 6, 24"
+            // entry is "MatrixFmtModifiers(FP4, FP4), 6, 24"
             size_t sep = entry.find("),");
             if (sep == std::string::npos) {
                 entryStart = entryR + 1;
@@ -1175,27 +1176,32 @@ class InstructionCodeGen {
 
         out << "};\n\n";
 
-        // Emit cost overrides keyed by modifier (e.g. MatrixFmtData(a, b)); runtime uses for
+        // Emit cost overrides keyed by modifier (e.g. MatrixFmtModifiers(a, b)); runtime uses for
         // modifier-dependent cost
         std::vector<const InstructionDef*> withOverrides;
         for (const auto& inst : instructions_) {
             if (!inst.costOverrides.empty()) withOverrides.push_back(&inst);
         }
         if (!withOverrides.empty()) {
-            out << "// Cost overrides: when modifier matches (e.g. MatrixFmtData), use (cycle, "
-                   "latency). fmtA/fmtB: 0=FP4, 1=FP6, 2=FP8 (stinkytofu::MatrixFmt)\n";
+            out << "// Cost overrides: when modifier matches (e.g. MatrixFmtModifiers), use "
+                   "(cycle, latency).\n"
+                   "// fmtA/fmtB values match stinkytofu::MatrixFmt enum (LLVM "
+                   "WMMA::MatrixFMT).\n";
             out << "struct InstructionCostOverrideMatrixFmt { const char* mnemonic; uint8_t "
                    "fmtA; uint8_t fmtB; uint16_t cycle; uint16_t latency; };\n";
             out << "constexpr InstructionCostOverrideMatrixFmt " << arch_
                 << "_COST_OVERRIDES_MATRIX_FMT[] = {\n";
             for (const auto* inst : withOverrides) {
                 for (const auto& ov : inst->costOverrides) {
-                    if (ov.modifierType != "MatrixFmtData" || ov.args.size() < 2) continue;
+                    if (ov.modifierType != "MatrixFmtModifiers" || ov.args.size() < 2) continue;
+                    // Map .def format names to MatrixFmt enum values (LLVM WMMA::MatrixFMT)
                     auto toFmt = [](const std::string& s) -> int {
-                        if (s == "FP4") return 0;
-                        if (s == "FP6") return 1;
-                        if (s == "FP8") return 2;
-                        return 0;
+                        if (s == "FP8") return 0;
+                        if (s == "BF8") return 1;
+                        if (s == "FP6") return 2;
+                        if (s == "BF6") return 3;
+                        if (s == "FP4") return 4;
+                        return 0xFF;  // NONE
                     };
                     out << "    {\"" << inst->mnemonic << "\", " << toFmt(ov.args[0]) << ", "
                         << toFmt(ov.args[1]) << ", " << ov.cycle << ", " << ov.latency << "},\n";
@@ -1505,11 +1511,11 @@ static bool emitArchIsaFile(const std::string& arch,
         std::string flagStr = flagsToMakeFlagSetContent(inst.finalFlags);
         out << "  { " << std::setw(3) << i << ", " << std::setw(5) << uop << ", " << std::setw(3)
             << inst.cycle << ", " << std::setw(4) << inst.latency << ", " << "0x" << std::hex
-            << std::setfill('0') << std::setw(4) << (inst.coIssueMask >= 0 ? inst.coIssueMask : 0)
-            << std::dec << std::setfill(' ') << ", " << "\"" << inst.mnemonic << "\", "
-            << "makeFlagSet({" << (flagStr.empty() ? "" : flagStr) << "}), "
-            << microcodeToCpp(inst.finalMicrocode) << ", " << inst.finalEncoding << ", "
-            << unitToCpp(inst.finalUnit) << ", " << "{} },\n";
+            << std::setfill('0') << std::setw(4)
+            << (inst.coIssueWindow >= 0 ? inst.coIssueWindow : 0) << std::dec << std::setfill(' ')
+            << ", " << "\"" << inst.mnemonic << "\", " << "makeFlagSet({"
+            << (flagStr.empty() ? "" : flagStr) << "}), " << microcodeToCpp(inst.finalMicrocode)
+            << ", " << inst.finalEncoding << ", " << unitToCpp(inst.finalUnit) << ", " << "{} },\n";
     }
     out << "};\n\n";
     out << "#endif // GET_ISAINFO_HWINSTDESC_TABLE\n\n";

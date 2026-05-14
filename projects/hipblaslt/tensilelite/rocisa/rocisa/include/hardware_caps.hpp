@@ -500,6 +500,12 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
 
+    // True on archs whose MFMA-scale path can consume a swizzled MX scale
+    // layout: gfx950 (HostPreSwizzle via the subtile path) and gfx1250
+    // (InMemorySwizzle via TDM). The kernel-side MXScaleFormat enum and the
+    // Solution.py guards decide which concrete layout is in use.
+    rv["HasMXScaleSwizzle"]            = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
+
     // Cross-CU/L2 release+acquire fences for device-scope inter-workgroup
     // synchronization (e.g. StreamK partial-tile handshake). When set, a
     // store-release sequence must emit `s_wait_loadcnt 0; s_wait_storecnt 0;
