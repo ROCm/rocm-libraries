@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -72,7 +72,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB']
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -133,8 +133,8 @@ class ProblemType:
 
         rv.transA = bool(d['TransposeA'])
         rv.transB = bool(d['TransposeB'])
-        # it will either be set as d['MacDataType'] or a specified input
-        if 'MacDataTypeA' in d: 
+
+        if 'MacDataTypeA' in d: #it will either be set as d['MacDataType'] or a specified input
             rv.computeInputTypeA = DataType(d['MacDataTypeA'])
         else:
             rv.computeInputTypeA = srcType
@@ -284,6 +284,8 @@ class ProblemType:
         rv.mxBlockB = d.get('MXBlockB', 0)
         rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
         rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
+        # mxScaleFormat is a Solution-level parameter and is populated by
+        # Solution.FromOriginalState, which has access to the parent dict.
 
         rv.metadataLayout = 0
         if 'MetadataLayout' in d:
@@ -414,7 +416,6 @@ class ProblemType:
             predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
             if self.mxBlockB:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
-
         return predicates
 
 def extractDimPredicate(cls, key, value, predicateName):
@@ -658,7 +659,7 @@ class SizeMapping:
                  'VectorWidthB',
                  'LocalSplitU',
                  'DirectToLdsA',
-                 'DirectToLdsB'
+                 'DirectToLdsB',
                  ]
 
     @classmethod
@@ -843,6 +844,14 @@ class Solution:
             rv.kernelName = d['KernelNameMin']
 
         rv.problemType = ProblemType.FromOriginalState(d['ProblemType'])
+
+        # MXScaleFormat is a Solution-level knob (lives in d, not d['ProblemType']),
+        # but it describes the in-device MX scale layout the kernel expects, which
+        # the host (DataInitialization) needs to know to pick an upload layout.
+        # Plumb it onto problemType so the host can read it post-solution-pick.
+        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
+                                        "HostPreSwizzle": 1,
+                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)

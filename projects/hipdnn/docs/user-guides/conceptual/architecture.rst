@@ -106,22 +106,39 @@ This section is relevant to plugin developers wanting a breakdown of the SDK and
 SDKs
 ----
 
-hipDNN provides three header-only SDK libraries that serve as the foundation for communication between different components.
+hipDNN provides four header-only SDK libraries that serve as the foundation for communication between different components.
 
 .. _data:
 
 Data SDK (``data_sdk``)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-The Data SDK contains ``FlatBuffers`` schemas and data structures for graph representation.
+The Data SDK contains shared types and utilities used across hipDNN.
+
+- **Purpose**: Provides common type helpers, tensor abstractions, logging, and engine name registry.
+- **Expected usage**: Consumed by the other SDKs, the backend, and plugins.
+- **Core functionality**:
+
+  - Logging utilities and type helpers (for example, ``half`` and ``bfloat16``).
+  - Tensor and memory utilities.
+  - Engine name registry (``EngineNames.hpp``).
+
+.. _flatbuffers-sdk:
+
+FlatBuffers SDK (``flatbuffers_sdk``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The FlatBuffers SDK contains the ``FlatBuffers`` schemas, generated headers, and wrapper classes for graph representation.
 The serialized structures allow data to be marshalled and passed between the backend and plugins in a type-safe and highly version-compatible manner.
 
+- **Dependencies**: :ref:`data`.
 - **Purpose**: Provides data structures for graphs, tensors, and configurations.
 - **Expected usage**: Consumed by the backend and plugins for graph data handling.
 - **Core functionality**:
 
-  - ``FlatBuffer`` schema definitions for graphs, nodes, and attributes.
-  - Logging utilities and type helpers (for example, ``half`` and ``bfloat16``).
+  - ``FlatBuffer`` schema definitions for graphs, nodes, and attributes (under ``hipdnn_flatbuffers_sdk/data_objects/``).
+  - Wrapper classes such as ``GraphWrapper``, ``NodeWrapper``, and ``IEngineConfig`` (under ``hipdnn_flatbuffers_sdk/flatbuffer_utilities/``).
+  - Optional JSON conversion helpers.
 
 .. _plugin-sdk:
 
@@ -130,7 +147,7 @@ Plugin SDK (``plugin_sdk``)
 
 The Plugin SDK contains the plugin API and utilities for creating engine plugins.
 
-- **Dependencies**: :ref:`data`.
+- **Dependencies**: :ref:`data` and :ref:`flatbuffers-sdk`.
 - **Purpose**: Provides the interface and utilities for plugin development.
 - **Expected usage**: Consumed by plugin projects.
 - **Core functionality**:
@@ -146,7 +163,7 @@ Test SDK (``test_sdk``)
 
 The Test SDK provides utilities for testing plugins.
 
-- **Dependencies**: :ref:`data` and :ref:`plugin-sdk`.
+- **Dependencies**: :ref:`data`, :ref:`flatbuffers-sdk`, and :ref:`plugin-sdk`.
 - **Purpose**: Provides testing infrastructure for plugin validation.
 - **Expected usage**: Consumed by plugin test suites.
 - **Core functionality**:

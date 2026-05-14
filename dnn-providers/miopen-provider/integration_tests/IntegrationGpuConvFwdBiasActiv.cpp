@@ -6,6 +6,7 @@
 
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
+#include "../tests/common/TestWorkarounds.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
@@ -24,10 +25,24 @@ class ConvFwdBiasActiv
           std::tuple<test_conv_common::ConvTestCase, bool, test_activation_common::ActivTestCase>>
 {
 protected:
+    /// CBA fusion has limited engine coverage (gfx90a + RDNA archs without CK
+    /// fusion kernels). Skip when no engine has an applicable solution.
+    std::optional<std::string>
+        shouldSkipOnEngineConfigResult(const hipdnn_frontend::Error& result) override
+    {
+        if(IS_WORKAROUND_ISSUE_6979(result))
+        {
+            return WORKAROUND_ISSUE_6979_SKIP_MSG;
+        }
+        return std::nullopt;
+    }
+
     void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
 
         const auto& [convTestCase, doBias, activTestCase] = this->GetParam();
 

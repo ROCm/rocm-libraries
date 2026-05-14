@@ -1,0 +1,259 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Lightweight CI for hipDNN + providers using the rocm-libraries superbuild
+# and pre-built ROCm wheels (no TheRock source build required).
+
+name: hipDNN Superbuild CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - 'projects/hipdnn/**'
+      - 'dnn-providers/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  # Labels that trigger this workflow. Extend this list to gate on additional labels.
+  TRIGGER_LABELS: '["project: hipdnn", "project: miopen-provider", "project: hipblaslt-provider", "project: hip-kernel-provider", "project: hipdnn-integration-tests"]'
+
+jobs:
+  gate:
+    name: Check Labels
+    runs-on: ubuntu-24.04
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Evaluate PR labels
+        id: check
+        env:
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          echo "PR labels: $PR_LABELS"
+
+          # Check if any trigger label is present
+          TRIGGER='${{ env.TRIGGER_LABELS }}'
+          MATCH=$(echo "$PR_LABELS" | jq -e --argjson trigger "$TRIGGER" \
+            '[.[] | select(. as $l | $trigger | index($l))] | length > 0')
+
+          if [ "$MATCH" = "true" ]; then
+            echo "Trigger label found"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No trigger label found"
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  hipdnn-windows-superbuild:
+    name: HipDNN Windows Superbuild
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: azure-windows-scale-rocm
+    defaults:
+      run:
+        shell: bash
+    env:
+      BUILD_DIR: B:\build
+      VENV_PATH: B:\rocm_wheels
+      GPU_TARGET: gfx1151
+    steps:
+      - name: Runner health status
+        shell: pwsh
+        run: |
+          Write-Host "=== OS ==="
+          (Get-CimInstance Win32_OperatingSystem).Caption
+          Write-Host "=== CPU ==="
+          $cpu = Get-CimInstance Win32_Processor
+          Write-Host "$($cpu.Name)  ($($cpu.NumberOfLogicalProcessors) logical cores)"
+          Write-Host "=== Memory ==="
+          $os = Get-CimInstance Win32_OperatingSystem
+          $totalGB = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
+          $freeGB  = [math]::Round($os.FreePhysicalMemory / 1MB, 1)
+          Write-Host "Total: ${totalGB} GB  Free: ${freeGB} GB"
+          Write-Host "=== Disk ==="
+          Get-PSDrive -PSProvider FileSystem |
+            Select-Object Name,
+              @{N='Used(GB)';E={[math]::Round($_.Used/1GB,1)}},
+              @{N='Free(GB)';E={[math]::Round($_.Free/1GB,1)}},
+              Root |
+            Format-Table -AutoSize | Out-String | Write-Host
+
+      - name: Configure git longpaths
+        run: git config --global core.longpaths true
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            dnn-providers
+            projects/hipdnn
+            projects/miopen
+            test
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Configure MSVC
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      - name: Install build tools
+        run: |
+          choco source disable -n=chocolatey
+          choco source add -n=internal -s http://10.0.167.96:8081/repository/choco-group/ --priority=1
+          choco install --no-progress -y ccache
+          choco install --no-progress -y ninja --version 1.12.1
+
+      - name: Install ROCm wheels
+        shell: pwsh
+        run: |
+          Write-Host "Creating Python virtual environment at $env:VENV_PATH"
+          python -m venv $env:VENV_PATH
+          & "$env:VENV_PATH\Scripts\Activate.ps1"
+
+          Write-Host "Installing ROCm wheels from nightlies (target: $env:GPU_TARGET)"
+          pip install --index-url "https://rocm.nightlies.amd.com/v2/$env:GPU_TARGET/" "rocm[libraries,devel]"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install ROCm wheels" }
+
+          Write-Host "Initializing ROCm SDK"
+          rocm-sdk init
+          if ($LASTEXITCODE -ne 0) { throw "Failed to initialize ROCm SDK" }
+
+          $RocmSdkPath = "$env:VENV_PATH\Lib\site-packages\_rocm_sdk_devel" -replace '\\', '/'
+          Write-Host "ROCM_SDK_PATH=$RocmSdkPath"
+          echo "ROCM_SDK_PATH=$RocmSdkPath" >> $env:GITHUB_ENV
+
+      - name: Configure superbuild
+        run: |
+          cmake --preset hipdnn-providers-all -GNinja \
+            -DROCM_PATH="$ROCM_SDK_PATH" \
+            -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
+            -DGPU_TARGETS="$GPU_TARGET" \
+            -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
+            -DENABLE_CLANG_FORMAT=OFF \
+            -DENABLE_CLANG_TIDY=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      # Windows tests have a few issues where we are loading plugins and thats causing issues with super build tests
+      # as they end up trying to init a gpu on a non gpu machine.  This work is ticketed to be fixed later.
+      #- name: Add ROCm bin to PATH
+      #  run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
+
+      #- name: Run tests
+      #  run: ctest --test-dir build --output-on-failure
+
+  hipdnn-linux-superbuild:
+    name: HipDNN Linux Superbuild
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: azure-linux-scale-rocm
+    env:
+      GPU_TARGET: gfx94X-dcgpu
+    steps:
+      - name: Runner health status
+        run: |
+          echo "=== OS ==="
+          cat /etc/os-release | head -2
+          echo "=== CPU ==="
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          echo "=== Memory ==="
+          free -h | grep Mem
+          echo "=== Disk ==="
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            dnn-providers
+            projects/hipdnn
+            projects/miopen
+            test
+
+      - name: Set environment
+        run: echo "VENV_PATH=${{ runner.temp }}/rocm_wheels" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache lsb-release wget software-properties-common gnupg
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+          sudo apt-get install -y clang-tidy-20 clang-tools-20
+
+      - name: Install ROCm wheels
+        run: |
+          echo "Creating Python virtual environment at $VENV_PATH"
+          python -m venv "$VENV_PATH"
+          source "$VENV_PATH/bin/activate"
+
+          echo "Installing ROCm wheels from nightlies (target: $GPU_TARGET)"
+          pip install --index-url "https://rocm.nightlies.amd.com/v2/$GPU_TARGET/" "rocm[libraries,devel]"
+
+          echo "Initializing ROCm SDK"
+          rocm-sdk init
+
+          SITE_PACKAGES=$("$VENV_PATH/bin/python" -c "import site; print(site.getsitepackages()[0])")
+          ROCM_SDK_PATH="$SITE_PACKAGES/_rocm_sdk_devel"
+          echo "ROCM_SDK_PATH=$ROCM_SDK_PATH"
+          echo "ROCM_SDK_PATH=$ROCM_SDK_PATH" >> "$GITHUB_ENV"
+
+      - name: Configure superbuild
+        run: |
+          cmake --preset hipdnn-providers-all -GNinja \
+            -DROCM_PATH="$ROCM_SDK_PATH" \
+            -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
+            -DGPU_TARGETS="$GPU_TARGET" \
+            -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
+            -DENABLE_CLANG_FORMAT=OFF \
+            -DENABLE_CLANG_TIDY=ON \
+            -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  hipdnn_build_summary:
+    name: hipDNN Superbuild Summary
+    if: always()
+    needs:
+      - gate
+      - hipdnn-windows-superbuild
+      - hipdnn-linux-superbuild
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report results
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "Failed jobs: ${FAILED_JOBS}"
+            exit 1
+          fi

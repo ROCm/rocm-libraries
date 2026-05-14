@@ -22,6 +22,7 @@
 
 import os
 import pytest
+import re
 import subprocess
 from pathlib import Path
 
@@ -124,3 +125,63 @@ def test_use_cache(tensile_args: list[str], tmp_path: Path) -> None:
 
     # Second run: use cache -- should not crash
     Tensile.Tensile([config_path, output_dir, "--use-cache", *tensile_args])
+
+
+def _find_caches_dirs(output_dir: str) -> list[Path]:
+    """Find all 'caches' directories under the output dir."""
+    return list(Path(output_dir).rglob("caches"))
+
+
+def _write_config_with_depth_u(path: str, depth_u: int) -> None:
+    """Write config with a specific DepthU value, regardless of what the base value is."""
+    config, n = re.subn(r"DepthU:\s*\[\s*\d+\s*\]", f"DepthU: [{depth_u}]", _CONFIG)
+    assert n == 1, f"Expected exactly one DepthU entry in _CONFIG, found {n}"
+    assert config != _CONFIG, f"DepthU substitution to {depth_u} produced no change in _CONFIG"
+    with open(path, "w") as f:
+        f.write(config)
+
+
+@pytest.mark.skipif(not _HAS_GFX942, reason="gfx942 GPU not available")
+def test_use_cache_creates_cache_dir(tensile_args: list[str], tmp_path: Path) -> None:
+    """After a compile+benchmark run, a caches/ directory with one entry should exist."""
+    config_path = str(tmp_path / "config.yaml")
+    _write_config(config_path)
+    output_dir = str(tmp_path / "output")
+
+    Tensile.Tensile([config_path, output_dir, *tensile_args])
+
+    caches_dirs = _find_caches_dirs(output_dir)
+    assert len(caches_dirs) >= 1, "Expected at least one caches/ directory"
+    # Each caches/ dir should have exactly one cache entry
+    for caches_dir in caches_dirs:
+        entries = [e for e in caches_dir.iterdir() if e.is_dir()]
+        assert len(entries) == 1, f"Expected 1 cache entry in {caches_dir}, got {len(entries)}"
+
+
+@pytest.mark.skipif(not _HAS_GFX942, reason="gfx942 GPU not available")
+def test_use_cache_different_params(tensile_args: list[str], tmp_path: Path) -> None:
+    """Different parameters should produce separate cache entries, each independently reusable."""
+    output_dir = str(tmp_path / "output")
+
+    # Run 1: DepthU=32
+    config1 = str(tmp_path / "config1.yaml")
+    _write_config(config1)
+    Tensile.Tensile([config1, output_dir, *tensile_args])
+
+    # Run 2: DepthU=64 (different params, same output dir)
+    config2 = str(tmp_path / "config2.yaml")
+    _write_config_with_depth_u(config2, 64)
+    Tensile.Tensile([config2, output_dir, *tensile_args])
+
+    # Verify: caches/ directory should have 2 entries
+    caches_dirs = _find_caches_dirs(output_dir)
+    assert len(caches_dirs) >= 1
+    for caches_dir in caches_dirs:
+        entries = [e for e in caches_dir.iterdir() if e.is_dir()]
+        assert len(entries) == 2, f"Expected 2 cache entries in {caches_dir}, got {len(entries)}"
+
+    # Run 3: --use-cache with original config should reuse first cache (no crash, no new entries)
+    Tensile.Tensile([config1, output_dir, "--use-cache", *tensile_args])
+    for caches_dir in caches_dirs:
+        entries = [e for e in caches_dir.iterdir() if e.is_dir()]
+        assert len(entries) == 2, f"Expected still 2 cache entries after reuse, got {len(entries)}"
