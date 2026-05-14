@@ -64,8 +64,6 @@ void Run2dDriver(miopenDataType_t prec)
                   "miopenDouble data "
                   "type not supported by "
                   "miopen_conv test";
-
-    default: params = GPU_Conv2d_MIOpenTestConv_FP32::GetParam();
     }
 
     for(const auto& test_value : params)

@@ -74,8 +74,7 @@ void PerformanceConfigLayernorm::HeuristicInit(const miopen::layernorm::ProblemD
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
 #endif
     initialized = true;
@@ -139,8 +138,7 @@ bool PerformanceConfigLayernorm::IsValid(const ExecutionContext& context,
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
     return false;
 #endif

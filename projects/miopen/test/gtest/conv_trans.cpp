@@ -64,8 +64,6 @@ void Run2dDriver(miopenDataType_t prec)
         FAIL() << "miopenHalf, miopenInt8, miopenBFloat16, miopenInt32, miopenDouble "
                   "data type not supported by "
                   "conv_trans test";
-
-    default: params = GPU_conv_trans_FP32::GetParam();
     }
 
     for(const auto& test_value : params)

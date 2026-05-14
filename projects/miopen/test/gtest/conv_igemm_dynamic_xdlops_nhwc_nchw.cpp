@@ -73,7 +73,6 @@ void Run2dDriver(miopenDataType_t prec)
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
-    default:
         FAIL() << "miopenInt8, miopenBFloat16, miopenInt32, "
                   "miopenDouble, miopenFloat8_fnuz, miopenBFloat8_fnuz "
                   "data type not supported by conv_igemm_dynamic_xdlops_nhwc_nchw test";

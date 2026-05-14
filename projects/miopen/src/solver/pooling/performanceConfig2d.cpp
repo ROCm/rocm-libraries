@@ -36,8 +36,7 @@ void PerformanceConfigPooling2d<OpType>::HeuristicInit(
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
 #endif
 }
@@ -82,8 +81,7 @@ bool PerformanceConfigPooling2d<OpType>::IsValid(
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
     return false;
 #endif

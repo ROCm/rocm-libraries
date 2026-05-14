@@ -181,10 +181,6 @@ void RunPooling3dTest(const PoolingTestCase& test_case)
             RunPooling3dTestWithIndexType<T, uint64_t>(test_case);
             break;
         }
-        default: {
-            GTEST_FAIL() << "Unsupported index type: " << test_case.index_type;
-            break;
-        }
         }
     }
     catch(const std::exception& e)

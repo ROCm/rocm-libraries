@@ -1294,7 +1294,6 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
         case miopenDouble:
         case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz:
-        default:
             MIOPEN_THROW(miopenStatusInternalError,
                          "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this "
                          "data type");
@@ -1317,7 +1316,6 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
         case miopenDouble:
         case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz:
-        default:
             MIOPEN_THROW(miopenStatusInternalError,
                          "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this "
                          "data type");

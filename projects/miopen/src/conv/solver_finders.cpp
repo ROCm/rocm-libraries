@@ -488,9 +488,10 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& p
         return env::disabled(MIOPEN_DEBUG_CONV_WINOGRAD);
     case miopenConvolutionAlgoImplicitGEMM:
         return env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM);
-    default: // Disable future algos by default to enforce explicit handling:
-        return true;
     } // clang-format on
+
+    // Disable future algos by default to enforce explicit handling:
+    return true;
 }
 
 bool IsEnoughWorkspace(std::string_view where,

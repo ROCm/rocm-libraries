@@ -65,8 +65,7 @@ std::string GetKernelName(miopenDataType_t data_type)
     case miopenInt64:
     case miopenInt32:
     case miopenInt8:
-    case miopenDouble:
-    default: return {""};
+    case miopenDouble: return {""};
     }
 }
 

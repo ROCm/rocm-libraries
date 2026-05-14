@@ -577,7 +577,6 @@ std::string TensorDescriptor::LayoutEnumToStr(miopenTensorLayout_t layout)
     case miopenTensorCHWNc8: return "CHWNc";
     case miopenTensorNCDHW: return "NCDHW";
     case miopenTensorNDHWC: return "NDHWC";
-    default: MIOPEN_THROW(miopenStatusInternalError, "Unknown layout");
     }
 }
 
@@ -694,7 +693,6 @@ bool TensorDescriptor::IsPossibleLayout(const std::string& storage_layout,
             }
             break;
         case LayoutValidationMode::StrictDecreasingStrides: break;
-        default: MIOPEN_THROW(miopenStatusInternalError, "Unknown validation mode provided");
         }
 
         layout_strides.push_back(strides[pos]);
@@ -1574,8 +1572,9 @@ std::string GetCastTensorBuildOptionFromType(const std::string& buildOption, mio
         MIOPEN_THROW(miopenStatusBadParm, "miopenDouble data type not supported in cast tensor.");
     case miopenInt64:
         MIOPEN_THROW(miopenStatusBadParm, "miopenInt64 data type not supported in cast tensor.");
-    default: MIOPEN_THROW(miopenStatusBadParm, "Invalid data type in cast tensor desc.");
     }
+
+    MIOPEN_THROW(miopenStatusBadParm, "Invalid data type in cast tensor desc.");
 }
 
 void CastTensor(const Handle& handle,

@@ -79,8 +79,6 @@ void Run2dDriver(miopenDataType_t prec)
                   "miopenBFloat8_fnuz "
                   "data type not supported by "
                   "pooling2d_wide test";
-
-    default: params = GPU_WidePooling2d_FP32::GetParam();
     }
 
     for(const auto& test_value : params)

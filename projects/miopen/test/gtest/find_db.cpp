@@ -29,8 +29,6 @@ void RunFindDbDriver(miopenDataType_t prec)
                   "miopenFloat8_fnuz, miopenBFloat8_fnuz "
                   "data type not supported by "
                   "find_db test";
-
-    default: break;
     }
 
     // Set up environment variables with automatic restoration

@@ -224,8 +224,9 @@ inline int GetDataTypeSize(miopenDataType_t t)
     case miopenInt8: return (1);
     case miopenBFloat16: return (2);
     case miopenInt32: return (4);
+
     case miopenInt64:
-    default: MIOPEN_THROW("Only float, half, double, bfloat16, int8 data types are supported.");
+        MIOPEN_THROW("Only float, half, double, bfloat16, int8 data types are supported.");
     };
 };
 
@@ -245,10 +246,10 @@ static ck::DataTypeEnum_t mapDataTypeId(miopenDataType_t t)
     case miopenDouble: return DataTypeEnum_t::Double;
     case miopenInt8: return DataTypeEnum_t::Int8;
     case miopenInt32: return DataTypeEnum_t::Int32;
+
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
-    case miopenInt64:
-    default: MIOPEN_THROW("Only float, half, double data type is supported.");
+    case miopenInt64: MIOPEN_THROW("Only float, half, double data type is supported.");
     };
 };
 
@@ -266,9 +267,9 @@ static ck::ReduceTensorOp_t mapReduceOpId(miopenReduceTensorOp_t t)
     case MIOPEN_REDUCE_TENSOR_AVG: return ReduceTensorOp_t::AVG;
     case MIOPEN_REDUCE_TENSOR_NORM1: return ReduceTensorOp_t::NORM1;
     case MIOPEN_REDUCE_TENSOR_NORM2: return ReduceTensorOp_t::NORM2;
-
-    default: MIOPEN_THROW("Operation is not supported");
     };
+
+    MIOPEN_THROW("Operation is not supported");
 };
 
 static std::string get_network_config_string_from_type_enums(miopenDataType_t TSrc,
@@ -351,8 +352,9 @@ static std::string getReductionMethodStr(ReductionMethod_t reduceImpl)
     case Reduce_DirectWarpWise: return {"warpwise"};
     case Reduce_BlockWise: return {"blockwise"};
     case Reduce_MultiBlock: return {"multiblock"};
-    default: MIOPEN_THROW("Invalid reduction method ID!"); break;
     };
+
+    MIOPEN_THROW("Invalid reduction method ID!");
 };
 
 static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
@@ -394,7 +396,6 @@ static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
             copySliceLen;
         src_need_padding = (toReduceLen < static_cast<size_t>(reduceSizePerBlock) * BlkGroupSize);
         break;
-    default: MIOPEN_THROW("Invalid reduction method ID!"); break;
     };
 
     return (std::make_pair(src_need_padding, dst_need_padding));

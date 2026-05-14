@@ -956,7 +956,6 @@ struct verify_forward_conv : conv_base<T, Tout>
             }
             break;
         case ConvApi::Invalid: MIOPEN_THROW(miopenStatusInvalidValue);
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
         if(count != 0)
@@ -1311,7 +1310,6 @@ struct verify_backward_conv : conv_base<T>
             break;
         }
         case ConvApi::Invalid: MIOPEN_THROW(miopenStatusInvalidValue);
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
         if(count != 0)
@@ -1571,7 +1569,6 @@ struct verify_backward_weights_conv : conv_base<T>
             break;
         }
         case ConvApi::Invalid: MIOPEN_THROW(miopenStatusInvalidValue);
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
         if(count != 0)

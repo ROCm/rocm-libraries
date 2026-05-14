@@ -50,8 +50,7 @@ static void LogCmdRedux(const miopen::ReduceTensorDescriptor reduceTensorDesc,
         case miopenDouble: ss << "reducefp64"; break;
         case miopenFloat8_fnuz: ss << "reducefp8"; break;
         case miopenBFloat8_fnuz: ss << "reducebfp8"; break;
-        case miopenInt64:
-        default: ss << "reduce";
+        case miopenInt64: ss << "reduce";
         }
 
         ss << " -A " << *reinterpret_cast<const float*>(alpha);

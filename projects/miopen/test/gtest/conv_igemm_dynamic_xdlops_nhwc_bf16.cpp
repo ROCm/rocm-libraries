@@ -65,8 +65,6 @@ void Run2dDriver(miopenDataType_t prec)
         FAIL() << "miopenFloat, miopenHalf, miopenInt8, miopenInt32, "
                   "miopenDouble, miopenFloat8_fnuz, miopenBFloat8_fnuz "
                   "data type not supported by conv_igemm_dynamic_xdlops_nhwc_bf16 test";
-
-    default: params = GPU_Conv2d_BFP16::GetParam();
     }
 
     ScopedEnvironment<std::string> find_mode_env1(MIOPEN_FIND_MODE, "normal");

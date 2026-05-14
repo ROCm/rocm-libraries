@@ -95,17 +95,14 @@ miopenAlphaBetaCase_t ClassifyAlphaBeta(const Scalar& alpha, const Scalar& beta)
 
 std::string ProblemDescription::GetDirectionStr() const
 {
-    std::string s;
-
     switch(GetDirection())
     {
-    case Direction::Forward: s = "F"; break;
-    case Direction::BackwardData: s = "B"; break;
-    case Direction::BackwardWeights: s = "W"; break;
-    default: assert(false);
+    case Direction::Forward: return "F";
+    case Direction::BackwardData: return "B";
+    case Direction::BackwardWeights: return "W";
     }
 
-    return s;
+    assert(false);
 }
 
 std::string ProblemDescription::GetAlphaBetaCaseStr() const
@@ -115,7 +112,7 @@ std::string ProblemDescription::GetAlphaBetaCaseStr() const
     case BILINEAR: return "Bilinear";
     case SCALE: return "Scale";
     case DEFAULT: return "Default";
-    default: MIOPEN_THROW(miopenStatusInvalidValue, "Alpha Beta Case in ERROR_STATE");
+    case ERROR_STATE: MIOPEN_THROW(miopenStatusInvalidValue, "Alpha Beta Case in ERROR_STATE");
     }
 }
 

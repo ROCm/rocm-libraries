@@ -55,7 +55,6 @@ inline void Pooling_logging_cmd(const miopenPoolingDescriptor_t poolDesc,
         case miopenDouble:
         case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz:
-        default:
             MIOPEN_LOG_W(
                 "Pooing cmd args logging is not implemented properly for " +
                 miopen::GetDataType(miopen::deref(tensorDesc).GetType()) +

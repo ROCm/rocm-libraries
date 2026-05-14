@@ -1067,7 +1067,7 @@ RNNDescriptor::convertRNNBaseLayout(miopenRNNBaseLayout_t layout)
     case miopenRNNDataSeqMajorPadded: return {std::vector<unsigned int>{1, 0, 2}, true};
 
     case miopenRNNDataUnknownLayout:
-    default: MIOPEN_THROW(miopenStatusBadParm, "error: Unknown miopenRNNBaseLayout_t "); break;
+        MIOPEN_THROW(miopenStatusBadParm, "error: Unknown miopenRNNBaseLayout_t ");
     }
 }
 

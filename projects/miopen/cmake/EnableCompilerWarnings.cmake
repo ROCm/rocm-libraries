@@ -55,7 +55,7 @@ set(__clang_cxx_compile_options
     -Wno-padded
     -Wno-unused-command-line-argument
     -Wno-weak-vtables
-    -Wno-covered-switch-default
+    -Wcovered-switch-default
     -Wno-unsafe-buffer-usage
     -Wno-global-constructors
     -Wno-reserved-identifier
