@@ -39,8 +39,6 @@
 #include "common/misc/generate.hpp"
 
 //------------------------------------------------------------------------------
-// todo: why not put CPU, GPU as regular arguments, rather than template
-// arguments? Reduces object size and compile time.
 template <bool CPU, bool GPU, typename T, typename I, typename Ud, typename Uh>
 void sb2st_hb2st_initData(const rocblas_handle handle,
                           const rocblas_fill uplo,
@@ -50,13 +48,10 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
                           const I ldab,
                           Uh& hAband)
 {
-//printf( "%s:%d\n", __func__, __LINE__ );
-
-    // TODO: how to handle uplo? Easiest would be to convert upper to lower.
-
     if (CPU)
     {
-        hbrand( n, kd, hAband[0], ldab );
+        // Upper band doesn't need kd-th diagonal.
+        hbrand( n, kd, kd-1, hAband[0], ldab );
     }
 
     if (GPU)
@@ -522,7 +517,7 @@ void testing_sb2st_hb2st( Arguments& argus )
         CHECK_HIP_ERROR( dE.memcheck() );
 
     // check quick return
-    if (kd == 0 || n == 0)
+    if (n == 0)
     {
         EXPECT_ROCBLAS_STATUS(
             rocsolver_sb2st_hb2st(

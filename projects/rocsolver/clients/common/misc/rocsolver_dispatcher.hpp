@@ -492,11 +492,8 @@ class rocsolver_dispatcher
         // Map for functions that support only single-complex and double-complex precisions
         static const func_map map_complex = {
             // auxiliaries
-            {"hb2st", testing_sb2st_hb2st<T>},
             {"lacgv", testing_lacgv<T, rocblas_int>},
             {"lacgv_64", testing_lacgv<T, int64_t>},
-            {"he2hb", testing_sy2sb_he2hb<T, rocblas_int>},
-            {"he2hb_64", testing_sy2sb_he2hb<T, int64_t>},
             // ungxx
             {"ung2r", testing_orgxr_ungxr<T, 0>},
             {"ungqr", testing_orgxr_ungxr<T, 1>},
@@ -522,6 +519,9 @@ class rocsolver_dispatcher
             {"hetrd", testing_sytxx_hetxx<false, false, 1, T>},
             {"hetrd_batched", testing_sytxx_hetxx<true, true, 1, T>},
             {"hetrd_strided_batched", testing_sytxx_hetxx<false, true, 1, T>},
+            {"he2hb", testing_sy2sb_he2hb<T, rocblas_int>},
+            {"he2hb_64", testing_sy2sb_he2hb<T, int64_t>},
+            {"hb2st", testing_sb2st_hb2st<T>},
             // hegst
             {"hegs2", testing_sygsx_hegsx<false, false, 0, T>},
             {"hegs2_batched", testing_sygsx_hegsx<true, true, 0, T>},

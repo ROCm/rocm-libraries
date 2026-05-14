@@ -36,11 +36,10 @@ using namespace std;
 template <typename I>
 using sb2st_hb2st_tuple = std::tuple<vector<I>, printable_char>;
 
-// each matrix_size_range is a {n, ldab, kd}
-// ldab = 3*kd - 1
-// todo: min( 3*kd - 1, 2*n - 1 )? If kd = n - 1, that's the whole matrix.
+// each matrix_size_range is a {n, kd, ldab}
+// ldab >= 3*kd - 1
 
-// case when n = 0 and kd = 0 will also execute the bad arguments test
+// case when n = 0 and kd = 1 will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
 const vector<printable_char> uplo_range = {'L', 'U'};
@@ -48,47 +47,45 @@ const vector<printable_char> uplo_range = {'L', 'U'};
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
     // quick return
-    {0, 1, 1},
-    {1, 1, 0},
+    {0, 1, 2},
     // invalid
-    {-1, 1, 1},
-    {1, 1, -1},
-    {20, 14, 5},
+    {-1, 1, 2},
+    {1, 0, 1},
+    {20, 5, 13},  // ldab >= 14
     // normal (valid) samples
-    {10, 5, 2},
-    {20, 59, 20},
-    {128, 96, 32},   // ldab >= 95
-    {128, 120, 40},  // ldab >= 119
+    {10, 2, 5},
+    {20, 20, 59},
+    {128, 32, 96},   // ldab >= 95
+    {128, 40, 120},  // ldab >= 119
 };
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
     // quick return
-    {0, 1, 1},
-    {1, 1, 0},
+    {0, 1, 2},
     // invalid
-    {-1, 1, 1},
-    {1, 1, -1},
-    {20, 14, 5},
+    {-1, 1, 2},
+    {1, 0, 1},
+    {20, 5, 13},  // ldab >= 14
     // normal (valid) samples
-    {10, 5, 2},
-    {20, 59, 20},
-    {128, 96, 32},   // ldab >= 95
-    {128, 120, 40},  // ldab >= 119
+    {10, 2, 5},
+    {20, 20, 59},
+    {128, 32, 96},   // ldab >= 95
+    {128, 40, 120},  // ldab >= 119
 };
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range = {
-    {152,  192, 64},   // ldab >= 191
-    {640,  192, 64},   // ldab >= 191
-    {1000, 384, 128},  // ldab >= 383
-    {512,  960, 312},  // ldab >= 935
+    {152, 64, 192},   // ldab >= 191
+    {640, 64, 192},   // ldab >= 191
+    {1000, 128, 384},  // ldab >= 383
+    {512, 312, 960},  // ldab >= 935
 };
 
 const vector<vector<int64_t>> large_matrix_size_range_64 = {
-    {152,  192, 64},   // ldab >= 191
-    {640,  192, 64},   // ldab >= 191
-    {1000, 384, 128},  // ldab >= 383
-    {512,  960, 312},  // ldab >= 935
+    {152, 64, 192},   // ldab >= 191
+    {640, 64, 192},   // ldab >= 191
+    {1000, 128, 384},  // ldab >= 383
+    {512, 312, 960},  // ldab >= 935
 };
 
 template <typename I>
@@ -100,8 +97,8 @@ Arguments sb2st_hb2st_setup_arguments( sb2st_hb2st_tuple<I> tup )
     Arguments arg;
 
     arg.set<I>("n", matrix_size[0]);
-    arg.set<I>("ldab", matrix_size[1]);
-    arg.set<I>("kd", matrix_size[2]);
+    arg.set<I>("kd", matrix_size[1]);
+    arg.set<I>("ldab", matrix_size[2]);
     arg.set<char>("uplo", uplo);
 
     arg.timing = 0;
@@ -123,7 +120,7 @@ protected:
     {
         Arguments arg = sb2st_hb2st_setup_arguments( this->GetParam() );
 
-        if (arg.peek<I>("n") == 0 && arg.peek<I>("kd") == 0)
+        if (arg.peek<I>("n") == 0 && arg.peek<I>("kd") == 1)
             testing_sb2st_hb2st_bad_arg<T, I>();
 
         testing_sb2st_hb2st<T, I>(arg);
