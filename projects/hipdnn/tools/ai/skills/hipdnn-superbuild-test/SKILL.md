@@ -25,7 +25,7 @@ Run tests against an existing superbuild produced by `/hipdnn-superbuild`. Each 
   - `integration` — GPU required
   - `all` — both unit and integration
 - `jobs=<N>` — Parallel job count for test execution (passed via `-j`)
-- `ROCM_PATH=<path>` — Override ROCm SDK devel path. Auto-discovered via the wheel setup helper if unset on Windows.
+- `ROCM_PATH=<path>` — Override ROCm SDK devel path. Auto-discovered via the wheel setup helper if unset on Windows; defaults to `/opt/rocm` on Linux. Threaded into the test process env as `ROCM_PATH` so providers that JIT-compile kernels via hiprtc (e.g. `hip-kernel-provider`) can find the HIP headers.
 - `--filter=<gtest_pattern>` — Run only matching tests via gtest_filter (forces direct binary execution)
 - `--verbose` — Use the `-verbose` ctest target variants
 - `--keep-going` — When `component: all`, continue running remaining components after one fails (rather than stopping)
@@ -57,7 +57,7 @@ Parse `$ARGUMENTS` for:
 - **Component**: `hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all` (default: `all`)
 - **Scope**: `unit`, `integration`, or `all` (default: `unit`)
 - **Jobs**: value after `jobs=`
-- **ROCM_PATH**: value after `ROCM_PATH=` (Windows only)
+- **ROCM_PATH**: value after `ROCM_PATH=`
 - **Filter**: value after `--filter=`
 - **Verbose**: presence of `--verbose`
 - **Keep going**: presence of `--keep-going`
@@ -94,13 +94,13 @@ The helper outputs one `<component>:<target>` line per match. If `--filter` was 
 
 ### Step 5a: Run via cmake target (helper-wrapped)
 
-For each `component:target` line from Step 4, run the shared cmake build helper. On Windows it wraps the invocation in PowerShell with PATH set so DLLs resolve. On Linux it runs cmake directly.
+For each `component:target` line from Step 4, run the shared cmake build helper. On Windows it wraps the invocation in PowerShell with PATH set so DLLs resolve. On Linux it runs cmake directly. On both platforms the helper sets `ROCM_PATH` in the test process env so providers that JIT-compile kernels via hiprtc (e.g. `hip-kernel-provider`) can find the HIP headers.
 
 ```bash
-python $HELPERS/pwsh_cmake_run.py --build-dir $BUILD_DIR --target <target> [--jobs <N>] [--rocm-bin $ROCM_BIN] 2>&1 | tail -100
+python $HELPERS/pwsh_cmake_run.py --build-dir $BUILD_DIR --target <target> [--jobs <N>] [--rocm-path $ROCM_PATH] [--rocm-bin $ROCM_BIN] 2>&1 | tail -100
 ```
 
-Pass `--rocm-bin $ROCM_BIN` only on Windows (Linux uses `/opt/rocm` defaults).
+`--rocm-path` is optional: the helper defaults to `/opt/rocm` on Linux and to `--rocm-bin`'s parent on Windows. Pass it explicitly only when the user supplied `ROCM_PATH=`. Pass `--rocm-bin $ROCM_BIN` only on Windows.
 
 If `--verbose` was provided, append `-verbose` to the target name (e.g., `hipdnn-unit-check-verbose`). For path-qualified targets like `dnn-providers/hip-kernel-provider/src/unit-check`, use `dnn-providers/hip-kernel-provider/src/unit-check-verbose`.
 
