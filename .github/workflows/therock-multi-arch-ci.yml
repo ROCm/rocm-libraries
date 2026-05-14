@@ -84,7 +84,7 @@ jobs:
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
-      external_repo: ${{ needs.setup.outputs.external_repo }}
+      external_repo: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
       ref: rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     permissions:
@@ -106,7 +106,7 @@ jobs:
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
-      external_repo: ${{ needs.setup.outputs.external_repo }}
+      external_repo: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
       ref: rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     permissions:
