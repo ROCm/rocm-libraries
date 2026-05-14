@@ -23,26 +23,27 @@ using namespace ck_tile;
 using namespace ck_tile::core::arch;
 using namespace mma;
 
-using I4        = pk_int4_t;
-using F4        = pk_fp4_t;
-using F6        = pk_fp6x16_t;
-using BF6       = pk_bf6x16_t;
-using F8        = fp8_t;
-using BF8       = bf8_t;
-using I32       = int32_t;
-using F16       = fp16_t;
-using BF16      = bf16_t;
-using F32       = fp32_t;
-using F64       = fp64_t;
-using I8        = int8_t;
-using BF8       = bf8_t;
-using I32       = int32_t;
-using Target908 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
-using Target90a = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX90A>());
-using Target942 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX942>());
-using Target950 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX950>());
-using Target11  = decltype(make_amdgcn_gfx11_target<amdgcn_target_id::GFX1100>());
-using Target12  = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1201>());
+using I4         = pk_int4_t;
+using F4         = pk_fp4_t;
+using F6         = pk_fp6x16_t;
+using BF6        = pk_bf6x16_t;
+using F8         = fp8_t;
+using BF8        = bf8_t;
+using I32        = int32_t;
+using F16        = fp16_t;
+using BF16       = bf16_t;
+using F32        = fp32_t;
+using F64        = fp64_t;
+using I8         = int8_t;
+using BF8        = bf8_t;
+using I32        = int32_t;
+using Target908  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
+using Target90a  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX90A>());
+using Target942  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX942>());
+using Target950  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX950>());
+using Target11   = decltype(make_amdgcn_gfx11_target<amdgcn_target_id::GFX1100>());
+using Target12   = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1201>());
+using Target1250 = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1250>());
 #if defined(CK_MMA_TEST_ARCH_GFX950)
 using TestTarget = Target950;
 #elif defined(CK_MMA_TEST_ARCH_GFX942)
@@ -336,7 +337,6 @@ void run_mma_layout_test()
         const uint32_t m = case_idx / (MmaOp::kK * MmaOp::kN);
         const uint32_t k = (case_idx / MmaOp::kN) % MmaOp::kK;
         const uint32_t n = case_idx % MmaOp::kN;
-
         EXPECT_EQ(h_errors[case_idx], 0u) << "Mismatch for m=" << m << " k=" << k << " n=" << n;
     }
 }
@@ -477,6 +477,33 @@ using Gfx12Intrinsics = ::testing::Types<
     amdgcn_mma<I4,   I4,   I32,  16u, 16u, 32u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::SPARSE>, // swmmac_i32_16x16x32_iu4_w32
     amdgcn_mma<I4,   I4,   I32,  16u, 16u, 64u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::SPARSE>  // swmmac_i32_16x16x64_iu4_w32
 >;
+
+using Gfx1250Intrinsics = ::testing::Types<
+    amdgcn_mma<F32,  F32,  F32, 16u, 16u, 4u,   DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x4_f32
+    amdgcn_mma<BF16, BF16, F32, 16u, 16u, 32u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x32_bf16
+    amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 32u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_bf16_16x16x32_bf16
+    amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 32u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_bf16f32_16x16x32_bf16
+    amdgcn_mma<F8,   F8,   F32, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_fp8_fp8
+    amdgcn_mma<F8,   BF8,  F32, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_fp8_bf8
+    amdgcn_mma<BF8,  F8,   F32, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_bf8_fp8
+    amdgcn_mma<BF8,  BF8,  F32, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_bf8_bf8
+    amdgcn_mma<F8,   F8,   F16, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x64_fp8_fp8
+    amdgcn_mma<F8,   BF8,  F16, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x64_fp8_bf8
+    amdgcn_mma<BF8,  F8,   F16, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x64_bf8_fp8
+    amdgcn_mma<BF8,  BF8,  F16, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x64_bf8_bf8
+    amdgcn_mma<I8,   I8,   I32, 16u, 16u, 64u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_i32_16x16x64_iu8
+    amdgcn_mma<F8,   F8,   F16, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x128_fp8_fp8
+    amdgcn_mma<F8,   BF8,  F16, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x128_fp8_bf8
+    amdgcn_mma<BF8,  F8,   F16, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x128_bf8_fp8
+    amdgcn_mma<BF8,  BF8,  F16, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f16_16x16x128_bf8_bf8
+    amdgcn_mma<F8,   F8,   F32, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x128_fp8_fp8
+    amdgcn_mma<F8,   BF8,  F32, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x128_fp8_bf8
+    amdgcn_mma<BF8,  F8,   F32, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x128_bf8_fp8
+    amdgcn_mma<BF8,  BF8,  F32, 16u, 16u, 128u, DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x128_bf8_bf8
+    amdgcn_mma<F16,  F16,  F32, 16u, 16u, 32u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x32_f16
+    amdgcn_mma<F16,  F16,  F16, 16u, 16u, 32u,  DefaultWmmaCtrlFlags,             Target1250, MmaOpFamily::DENSE>  // wmma_f16_16x16x32_f16
+>;
+
 // clang-format on
 
 template <typename MmaOp>
