@@ -192,4 +192,9 @@ Tests:
   category: pre_checkin
   function:
     - aux_check_numerics_func: *hpa_half_precision
+
+- name: aux_check_numerics_gemm
+  category: pre_checkin
+  function:
+    - aux_check_numerics_gemm: *hpa_half_precision
 ...

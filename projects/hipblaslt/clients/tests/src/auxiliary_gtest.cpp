@@ -26,6 +26,7 @@
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
+#include "testing_aux_check_numerics_gemm.hpp"
 #include "testing_auxiliary.hpp"
 #include <cctype>
 #include <cstring>
@@ -116,6 +117,8 @@ namespace
             else if(!strcmp(arg.function, "aux_check_numerics_func"))
                 testing_aux_check_numerics_func(arg);
 #endif
+            else if(!strcmp(arg.function, "aux_check_numerics_gemm"))
+                testing_aux_check_numerics_gemm(arg);
             else if(!strcmp(arg.function, "aux_mat_copy"))
                 testing_aux_mat_copy(arg);
             else
@@ -172,6 +175,7 @@ namespace
                    || !strcmp(arg.function, "aux_rocblaslt_rocroller_host_func")
                    || !strcmp(arg.function, "aux_check_numerics_func")
 #endif
+                   || !strcmp(arg.function, "aux_check_numerics_gemm")
                    || !strcmp(arg.function, "aux_mat_copy");
         }
 
