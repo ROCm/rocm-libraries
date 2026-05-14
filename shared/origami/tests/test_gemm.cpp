@@ -1497,6 +1497,103 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   REQUIRE(base.weight_epilogue == origami::heuristic_defaults_t::WEIGHT_EPILOGUE);
 }
 
+TEST_CASE("Heuristics: merge_with preserves base when overlay leaves a field at default",
+          "[heuristics]") {
+  // Regression guard: an overlay that does not touch a field (i.e. leaves it
+  // at the default-constructed value) must NOT clobber a non-default value
+  // already in `base`. This is what makes hierarchical lookup compose.
+  origami::heuristic_params_t base;
+  base.weight_prologue = 2.5;  // base has been tuned away from default 1.5
+  base.epilogue_l_smem = 800.0;  // base has been tuned away from default 900.0
+
+  origami::heuristic_params_t overlay;          // all defaults
+  overlay.weight_tile_total = 0.95;             // overlay only opinions on this one field
+
+  base.merge_with(overlay);
+
+  REQUIRE(base.weight_tile_total == 0.95);  // overlay applied
+  REQUIRE(base.weight_prologue == 2.5);     // base preserved
+  REQUIRE(base.epilogue_l_smem == 800.0);   // base preserved
+}
+
+TEST_CASE("Heuristics: merge_with treats overlay value equal to default as no-op",
+          "[heuristics]") {
+  // Even if an overlay explicitly stores the default value into a field,
+  // merge_with cannot distinguish it from "not set" and therefore must leave
+  // `base` unchanged. This is the documented limitation of the default-aware
+  // overlay; encoding this as a test pins the behaviour so it can't silently
+  // regress to overwrite-everything semantics.
+  origami::heuristic_params_t base;
+  base.weight_prologue = 2.5;
+
+  origami::heuristic_params_t overlay;
+  overlay.weight_prologue = origami::heuristic_defaults_t::WEIGHT_PROLOGUE;  // explicit default
+
+  base.merge_with(overlay);
+
+  REQUIRE(base.weight_prologue == 2.5);  // base value preserved, overlay is a no-op here
+}
+
+TEST_CASE("Heuristics: merge_with composes broad then narrow overlays", "[heuristics]") {
+  // Two-layer hierarchical merge: a broad overlay opinions on a couple
+  // fields, a narrower overlay opinions on a subset of those. After both
+  // merges, the narrow overlay should win on its own field while the broad
+  // overlay's contribution survives on fields the narrow one did not touch.
+  origami::heuristic_params_t base;     // all defaults
+  origami::heuristic_params_t broad;
+  broad.weight_compute  = 2.0;
+  broad.weight_prologue = 3.0;
+  origami::heuristic_params_t narrow;
+  narrow.weight_compute = 5.0;          // touches only one field that broad also touched
+
+  base.merge_with(broad);
+  base.merge_with(narrow);
+
+  REQUIRE(base.weight_compute  == 5.0);  // narrow wins on its field
+  REQUIRE(base.weight_prologue == 3.0);  // broad's tuning survives the narrow merge
+  REQUIRE(base.weight_memory   == origami::heuristic_defaults_t::WEIGHT_MEMORY);  // untouched
+}
+
+TEST_CASE("Triton overlay: applied at context_t construction, no per-call patching",
+          "[heuristics][triton]") {
+  // End-to-end check that the Triton-target overlay set up in
+  // triton_heuristics_database_t (currently a 0.95 weight_tile_total for
+  // the 256x256x64 tile) is actually merged into context_t::heuristic at
+  // construction time. Previously this lived as a manual `if (target ==
+  // triton) L_tile_total *= triton_h.weight_tile_total;` patch inside
+  // compute_tile_latency, which (a) ran on every latency call and (b) only
+  // worked because the manual patch reproduced what the overlay would have
+  // done. After the unification, a single `merge_with` at construction is
+  // the only thing required to make the Triton tuning take effect.
+  auto hardware = make_hardware(950);
+  auto problem  = make_problem(4096, 4096, 1024,
+                               origami::transpose_t::T, origami::transpose_t::N);
+
+  // Triton config that matches the 256x256x64 overlay entry.
+  auto triton_cfg   = make_config(256, 256, 64);
+  triton_cfg.target = origami::target_t::triton;
+
+  // Identical config but with the default (Tensile) target.
+  auto tensile_cfg   = make_config(256, 256, 64);
+  tensile_cfg.target = origami::target_t::tensilelite;
+
+  origami::context_t triton_ctx (problem, hardware, triton_cfg);
+  origami::context_t tensile_ctx(problem, hardware, tensile_cfg);
+
+  // The Triton overlay opinions on weight_tile_total only -> Triton context
+  // sees 0.95, Tensile context sees the default 1.0. All other fields stay
+  // identical, which proves the overlay didn't clobber the rest of the
+  // heuristic.
+  REQUIRE(triton_ctx.heuristic.weight_tile_total == 0.95);
+  REQUIRE(tensile_ctx.heuristic.weight_tile_total
+          == origami::heuristic_defaults_t::WEIGHT_TILE_TOTAL);
+  REQUIRE(triton_ctx.heuristic.weight_prologue == tensile_ctx.heuristic.weight_prologue);
+  REQUIRE(triton_ctx.heuristic.weight_epilogue == tensile_ctx.heuristic.weight_epilogue);
+  REQUIRE(triton_ctx.heuristic.epilogue_l_smem == tensile_ctx.heuristic.epilogue_l_smem);
+  REQUIRE(triton_ctx.heuristic.main_loop_efficiency
+          == tensile_ctx.heuristic.main_loop_efficiency);
+}
+
 TEST_CASE("Heuristics: Key matching - exact match", "[heuristics]") {
   auto hardware = make_hardware(950);
   auto problem  = make_problem(1024, 1024, 1024);

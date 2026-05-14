@@ -45,8 +45,13 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
 
-  // Heuristic parameters
+  // Heuristic parameters. The base lookup hits the unified database (Tensile
+  // entries). For Triton kernels, overlay any Triton-specific tuning on top
+  // via the default-aware merge so only fields the Triton DB actually opines
+  // on are changed; everything else inherits from the base lookup.
   heuristic = get_heuristic_params(problem, hardware, config);
+  if (config.target == target_t::triton)
+    heuristic.merge_with(get_triton_heuristic_params(problem, hardware, config));
 
   // Element sizes
   a_bytes = data_type_to_bytes(problem.a_dtype);
@@ -1757,13 +1762,11 @@ double compute_tile_latency(const problem_t& problem,
   L_tile_total += heuristic.weight_wg_setup * L_WG_setup;
   L_tile_total += heuristic.weight_loop_overhead * static_cast<double>(num_iter);
 
-  // Apply final tile total weight
+  // Apply final tile total weight. For Triton kernels the heuristic returned
+  // by context_t already has the Triton overlay merged in (see
+  // context_t::context_t), so this single multiply covers both base and
+  // target-specific weights.
   L_tile_total *= heuristic.weight_tile_total;
-
-  if (config.target == target_t::triton) {
-    auto triton_h = get_triton_heuristic_params(problem, hardware, config);
-    L_tile_total *= triton_h.weight_tile_total;
-  }
 
   if (debug) {
     OLOG_DEBUG("utilization: " << utilization);

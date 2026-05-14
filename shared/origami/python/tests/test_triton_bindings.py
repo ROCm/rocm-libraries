@@ -255,3 +255,74 @@ class TestTritonSKGrid:
         config = _make_sk_config(128, 128, 64)
         result = origami.compute_triton_sk_grid(problem, config, HARDWARE["gfx950"])
         assert result > 0
+
+
+def _make_overlay_problem():
+    p = origami.problem_t()
+    p.size = origami.dim3_t(4096, 4096, 1024)
+    p.batch = 1
+    p.a_dtype = origami.data_type_t.BFloat16
+    p.b_dtype = origami.data_type_t.BFloat16
+    p.c_dtype = origami.data_type_t.BFloat16
+    p.d_dtype = origami.data_type_t.BFloat16
+    p.mi_dtype = origami.data_type_t.BFloat16
+    p.a_transpose = origami.transpose_t.T
+    p.b_transpose = origami.transpose_t.N
+    return p
+
+
+def _make_overlay_config(target):
+    c = origami.config_t()
+    c.mt = origami.dim3_t(256, 256, 64)
+    c.mi = origami.dim3_t(16, 16, 16)
+    c.occupancy = 1
+    c.target = target
+    return c
+
+
+class TestTritonHeuristicOverlay:
+    """End-to-end check that the Triton-target heuristic overlay is applied
+    via `heuristic_params_t::merge_with` at `context_t` construction time.
+
+    This used to be a manual `if (target == triton) L_tile_total *=
+    triton_h.weight_tile_total` patch inside `compute_tile_latency`. After
+    the unification, a single default-aware merge at construction is the
+    only thing required to make the Triton tuning take effect, and any
+    consumer that reads `heuristic.weight_tile_total` (including the
+    binding-exposed `compute_tile_latency`) sees the overlay automatically.
+    """
+
+    def test_triton_overlay_scales_tile_latency_by_overlay_weight(self):
+        # The Triton heuristics DB entry for the 256x256x64 tile sets
+        # weight_tile_total = 0.95 (a 5% latency discount). With identical
+        # everything-else, the Triton-target tile latency must be exactly
+        # 0.95x the Tensile-target tile latency.
+        problem = _make_overlay_problem()
+        triton_cfg = _make_overlay_config(origami.target_t.triton)
+        tensile_cfg = _make_overlay_config(origami.target_t.tensilelite)
+        hw = HARDWARE["gfx950"]
+
+        triton_lat = origami.compute_tile_latency(problem, hw, triton_cfg)
+        tensile_lat = origami.compute_tile_latency(problem, hw, tensile_cfg)
+
+        assert triton_lat > 0.0
+        assert tensile_lat > 0.0
+        assert triton_lat == pytest.approx(0.95 * tensile_lat, rel=1e-12)
+
+    def test_non_overlay_tile_does_not_scale(self):
+        # A tile that does NOT match any Triton heuristic entry (e.g.
+        # 128x128x32) gets the default weight_tile_total = 1.0 from the
+        # overlay, so triton and tensile tile latencies must coincide.
+        problem = _make_overlay_problem()
+        triton_cfg = _make_overlay_config(origami.target_t.triton)
+        tensile_cfg = _make_overlay_config(origami.target_t.tensilelite)
+        triton_cfg.mt = origami.dim3_t(128, 128, 32)
+        tensile_cfg.mt = origami.dim3_t(128, 128, 32)
+        hw = HARDWARE["gfx950"]
+
+        triton_lat = origami.compute_tile_latency(problem, hw, triton_cfg)
+        tensile_lat = origami.compute_tile_latency(problem, hw, tensile_cfg)
+
+        assert triton_lat > 0.0
+        assert tensile_lat > 0.0
+        assert triton_lat == pytest.approx(tensile_lat, rel=1e-12)

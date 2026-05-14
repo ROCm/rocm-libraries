@@ -146,7 +146,21 @@ struct heuristic_params_t {
 
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).
-   * Only non-default values from 'other' override values in 'this'.
+   *
+   * Default-aware overlay: a field in `other` overrides the corresponding
+   * field in `*this` only if it has been changed away from the
+   * default-constructed value. Fields that `other` left at default are
+   * treated as "no opinion" and leave `*this` unchanged.
+   *
+   * This is what makes hierarchical lookup compose cleanly: a more-specific
+   * entry that touches one knob does not silently clobber tuning that a
+   * broader entry contributed to other knobs, and a target-specific overlay
+   * (e.g. Triton) can be merged onto a tuned base without erasing it.
+   *
+   * @note Caveat: a field whose default is exactly 0 cannot currently be
+   * driven back to 0 by an overlay. None exist today; if one is added, pick
+   * a sentinel default or extend this struct with explicit "is_set"
+   * bookkeeping.
    */
   void merge_with(const heuristic_params_t& other);
 };
