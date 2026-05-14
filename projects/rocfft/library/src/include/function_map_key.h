@@ -182,7 +182,7 @@ struct KernelConfig
         if(batch_high.has_value())
             ss << "], batch_high: " << batch_high.value();
         else
-            ss << "], batch_low: "
+            ss << "], batch_high: "
                << "n/a";
 
         ss << "}";
