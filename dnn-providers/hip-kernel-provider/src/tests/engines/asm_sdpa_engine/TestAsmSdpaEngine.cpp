@@ -8,6 +8,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipKernelHandle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
@@ -43,6 +44,8 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)
 
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
     if(deviceString != "gfx942" && deviceString != "gfx950")
     {
