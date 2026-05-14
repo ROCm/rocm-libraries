@@ -1059,9 +1059,11 @@ class IRBuilder:
           - after issuing `ds_read`s, `s_waitcnt(lgkmcnt=0)` ensures
             the LDS data is in registers before MFMA.
 
-        AMDGPU bit encoding (gfx9): bits[3:0]=vmcnt, bits[6:4]=expcnt,
-        bits[11:8]=lgkmcnt. We default the not-set counters to their
-        max value (no wait).
+        AMDGPU bit encoding is handled by the lowerers. For gfx950 the
+        important detail is that VMCNT is 6 bits split across bits [3:0]
+        and [15:14], so values such as ``vmcnt=16`` are valid partial
+        waits and must not be masked down to zero. We default the not-set
+        counters to their max value (no wait).
         """
         self._op(
             "tile.s_waitcnt",

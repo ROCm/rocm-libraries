@@ -67,6 +67,7 @@ from ck_dsl.instances import (
     UnifiedAttention3DSpec,
     UnifiedAttentionReduceSpec,
     UniversalGemmSpec,
+    attention_3d_workspace_nbytes,
     build_unified_attention_2d,
     build_unified_attention_3d,
     build_unified_attention_reduce,
@@ -158,6 +159,17 @@ class TestCoreIR(unittest.TestCase):
             "ptr addrspace(1) noalias readonly nocapture align 16 dereferenceable(128) %A",
             ll,
         )
+
+    def test_s_waitcnt_encodes_extended_vmcnt_without_wrapping(self):
+        b = IRBuilder("waitcnt_extended")
+        # gfx950 uses the gfx9/gfx10 s_waitcnt layout: vmcnt is six bits
+        # split across low bits [3:0] and high bits [15:14]. This must not
+        # wrap vmcnt=16 to vmcnt(0), or the 2D attention kernel's partial
+        # wait becomes a full VMEM drain. lgkmcnt=16 is out of range on
+        # gfx950 and should clamp to 15 rather than wrap to 0.
+        b.s_waitcnt(vmcnt=16, lgkmcnt=16)
+        ll = lower_kernel_to_llvm(b.kernel)
+        self.assertIn("call void @llvm.amdgcn.s.waitcnt(i32 20336)", ll)
 
 
 # ---------------------------------------------------------------------
@@ -645,6 +657,24 @@ class TestHelpers(unittest.TestCase):
         # Both ALiBi and QQ-bias kernel-name suffixes show up.
         self.assertIn("_alibi", ll)
         self.assertIn("_qqb", ll)
+
+    def test_attention_3d_workspace_size_matches_shapes(self):
+        p = UnifiedAttentionProblem(
+            total_q=3,
+            num_seqs=2,
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=2,
+            max_seqlen_k=4096,
+            dtype="fp16",
+        )
+        # AITER's 3D selector chooses 128 segments for this shape.
+        # segm_output: 3 * 16 * 128 * 128 f32
+        # segm_max/expsum: 2 * (3 * 16 * 128) f32
+        expected = (3 * 16 * 128 * 128 + 2 * 3 * 16 * 128) * 4
+        self.assertEqual(attention_3d_workspace_nbytes(p), expected)
 
     def test_fp8_cvt_intrinsic_lowering(self):
         """fp8e4m3->f32 conversion lowers to llvm.amdgcn.cvt.f32.fp8."""

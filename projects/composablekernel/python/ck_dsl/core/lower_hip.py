@@ -61,6 +61,21 @@ def _name(v: Value) -> str:
     return v.name[1:] if v.name.startswith("%") else v.name
 
 
+def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
+    """Encode `s_waitcnt` for the gfx9/gfx10 layout used by gfx950.
+
+    VMCNT is 6 bits split between bits [3:0] and [15:14]. EXPCNT is
+    bits [6:4]. LGKMCNT is bits [11:8] on gfx950. This mirrors the
+    LLVM lowerer and keeps the HIP debug printer from silently turning
+    partial waits such as `vmcnt=16` into full waits.
+    """
+
+    vm_b = 0x3F if vmcnt < 0 else min(max(vmcnt, 0), 0x3F)
+    ec_b = 0x7 if expcnt < 0 else min(max(expcnt, 0), 0x7)
+    lk_b = 0xF if lgkmcnt < 0 else min(max(lgkmcnt, 0), 0xF)
+    return (vm_b & 0xF) | (ec_b << 4) | (lk_b << 8) | (((vm_b >> 4) & 0x3) << 14)
+
+
 class _Lowerer:
     def __init__(self, kernel: KernelDef) -> None:
         self.kernel = kernel
@@ -387,10 +402,7 @@ class _Lowerer:
         vm = int(op.attrs.get("vmcnt", -1))
         lk = int(op.attrs.get("lgkmcnt", -1))
         ec = int(op.attrs.get("expcnt", -1))
-        vm_b = vm if vm >= 0 else 0xF
-        lk_b = lk if lk >= 0 else 0xF
-        ec_b = ec if ec >= 0 else 0x7
-        mask = (vm_b & 0xF) | ((ec_b & 0x7) << 4) | ((lk_b & 0xF) << 8)
+        mask = _encode_waitcnt_gfx9_10(vm, ec, lk)
         self._emit(f"__builtin_amdgcn_s_waitcnt({mask});")
 
     def _op_tile_sched_barrier(self, op: Op) -> None:

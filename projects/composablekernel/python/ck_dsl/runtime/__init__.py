@@ -78,6 +78,8 @@ from .launcher import (
     LaunchSummary,
     PipelineLauncher,
     WorkspacePool,
+    release_retained_for_stream,
+    synchronize_and_release,
     time_launches,
 )
 from .torch_module import (
@@ -104,6 +106,8 @@ __all__ = [
     "empty_workspace",
     "launch_torch_kernel",
     "pack_args",
+    "release_retained_for_stream",
     "resolve_stream",
+    "synchronize_and_release",
     "time_launches",
 ]

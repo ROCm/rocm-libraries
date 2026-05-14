@@ -647,6 +647,16 @@ def _time_call_loop(call_once, warmup: int, attempts: int):
         call_once()
     t_end.record()
     t_end.synchronize()
+    # The CK DSL raw-HIP launcher retains packed args and tensor objects
+    # until the stream is known complete. We just synchronized the timing
+    # event on torch's current stream, so release those retained resources
+    # before the next independent benchmark lane allocates fresh tensors.
+    try:
+        from ck_dsl.runtime import release_retained_for_stream
+
+        release_retained_for_stream(int(torch.cuda.current_stream().cuda_stream))
+    except Exception:
+        pass
     return t_start.elapsed_time(t_end) / attempts
 
 
@@ -809,6 +819,28 @@ def compare(reference: torch.Tensor, out: torch.Tensor) -> dict:
     }
 
 
+def _isolate_benchmark_lane() -> None:
+    """Strongly isolate independent benchmark lanes.
+
+    The parity harness intentionally runs several independent kernels
+    (Triton auto, CK auto, Triton 2D, CK 2D, Triton 3D, CK 3D) against
+    the same inputs and reference. The comparisons allocate temporary
+    tensors between lanes, while CK DSL launches are raw HIP ctypes
+    calls with their own retained-args/tensor lifetime queue. Synchronize
+    and release that queue before the next lane so report-generation
+    allocations cannot perturb a later lane. This runs *after* event
+    timing, so it does not affect the reported kernel latency.
+    """
+    torch.cuda.synchronize()
+    try:
+        from ck_dsl.runtime import synchronize_and_release
+
+        synchronize_and_release()
+    except Exception:
+        pass
+    torch.cuda.empty_cache()
+
+
 def _safe_run(fn, *, skip_err: bool = True):
     """Run a `(out, ms)`-returning callable, capturing NotImplementedError."""
     try:
@@ -920,6 +952,7 @@ def main() -> int:
                 row["triton_auto_vs_ref"] = compare(ref_out, t_auto_out)
                 row["triton_natural_path"] = _LAST_TRITON_PATH["path"]
             _row_print("triton-auto", t_auto, ref_out, None)
+            _isolate_benchmark_lane()
 
             # Lane 2/3: forced 2D and 3D on both Triton and CK DSL.
             for path in requested_paths:
@@ -946,6 +979,7 @@ def main() -> int:
                         elif err_ck:
                             row["ck_auto_status"] = err_ck
                         _row_print("ck-auto", ck_auto, ref_out, None)
+                        _isolate_benchmark_lane()
                     continue
 
                 # Force-path: Triton on `path`, CK DSL on `path`.
@@ -959,6 +993,7 @@ def main() -> int:
                     )
                 )
                 _row_print(f"triton-{path}", t_p, ref_out, None)
+                _isolate_benchmark_lane()
 
                 if not args.skip_ck:
                     ck_p, err_c = _safe_run(
@@ -991,11 +1026,13 @@ def main() -> int:
                         row[f"triton_{path}_status"] = err_t
                     if err_c and not ck_p:
                         row[f"ck_{path}_status"] = err_c
+                    _isolate_benchmark_lane()
                 else:
                     if t_p:
                         t_p_out, t_p_ms = t_p
                         row[f"triton_{path}_ms"] = t_p_ms
                         row[f"triton_{path}_vs_ref"] = compare(ref_out, t_p_out)
+                    _isolate_benchmark_lane()
         results.append(row)
 
     # Apples-to-apples table summaries.

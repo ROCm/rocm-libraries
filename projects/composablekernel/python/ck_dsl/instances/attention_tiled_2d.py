@@ -172,7 +172,7 @@ def supports_tiled_2d(
         )
     if use_fp8 or q_dtype is not None:
         return False, "tiled 2D kernel does not implement FP8 path yet"
-    # ALiBi and QQ-bias are now supported by the tiled 2D kernel.
+    # ALiBi and QQ-bias are supported by the tiled 2D kernel.
     return True, "supported"
 
 
@@ -702,12 +702,15 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 s_scaled = b.fmul(s_raw, qk_scale)
                 if USE_SOFTCAP:
                     s_scaled = b.fmul(_apply_softcap(b, s_scaled, softcap_p), rcp_ln2)
+                score = b.select(m_ok, s_scaled, neg_inf)
                 if USE_ALIBI:
-                    # s_scaled += slope * (col_abs - context_len) * RCP_LN2.
+                    # Triton order: mask first, then add ALiBi. For invalid
+                    # cells this is `-inf + finite == -inf`, avoiding any
+                    # pre-mask finite arithmetic from leaking into reductions.
                     pos_off = b.sub(col_abs, context_len)
                     pos_f = b.sitofp_f32(pos_off)
                     add_term = b.fmul(b.fmul(alibi_per_row[reg], pos_f), rcp_ln2)
-                    s_scaled = b.fadd(s_scaled, add_term)
+                    score = b.fadd(score, add_term)
                 if USE_QQ_BIAS:
                     # qq_bias[qp_r, key_rel_pos] with key_rel_pos = col - ctx.
                     # Valid range 0 <= key_rel_pos < qq_bias_stride_0 AND
@@ -731,8 +734,8 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                         dtype=F32,
                         align=4,
                     )
-                    s_scaled = b.fadd(s_scaled, b.fmul(qq_v, rcp_ln2))
-                masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)
+                    score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
+                masked[(n, reg)] = score
 
         # ---- per-row max via cross-lane butterfly ----
         # Each lane has 4 floats (one per row in its row-group), repeated for
@@ -746,8 +749,18 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 v = masked[(n, reg)]
                 s_local[(reg, n)] = v
                 local_max = b.fmax(local_max, v)
-            full_max_raw = _warp_xor_reduce_max(b, local_max)
-            # Triton NaN guard: if the entire row was -inf, force max to 0.
+            tile_max = _warp_xor_reduce_max(b, local_max)
+            # Online softmax update (FlashAttention/Triton): the new
+            # running max is max(previous_m, current_tile_max). The old
+            # code used only `current_tile_max`, which is numerically
+            # wrong when logits decrease across KV tiles. ALiBi with
+            # negative slopes is exactly that case: the first tile can
+            # have a very large positive bias and later tiles a much
+            # smaller one, so exp2(previous_m - current_tile_max)
+            # overflows to inf and the final acc/l normalization becomes
+            # NaN. If both previous and tile max are -inf (fully masked
+            # row), mirror Triton's guard and force the max to 0.
+            full_max_raw = b.fmax(m_vals[reg], tile_max)
             ok = b.fcmp("ogt", full_max_raw, neg_inf)
             m_new.append(b.select(ok, full_max_raw, zero_f))
 
@@ -840,6 +853,15 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         b.scf_yield(*yields)
 
     # ---------------- epilogue ----------------
+    # The loop issues a uniform "next K" async load every iteration, including
+    # the final iteration where that load is intentionally never consumed. The
+    # partial wait before PV leaves that final prefetch in flight. CK Tile
+    # kernels always close outstanding async-copy groups before the CTA exits;
+    # do the same here so no raw global->LDS operation can outlive the kernel
+    # and corrupt later launches in the same process.
+    b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+    b.sync()
+
     final = kvloop.results
     l_final = [final[2 * r + 1] for r in range(4)]
     acc_final = [final[8 + n] for n in range(PV_N_TILES)]
@@ -851,7 +873,11 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
             row = b.add(wave_row_base, in_warp_row)
             col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
             v = b.vec_extract(acc_final[n], reg)
-            b.smem_store_vN_f32(Acc_lds, [row, col], b.fmul(v, b.rcp(l_final[reg])), 1)
+            l_nonzero = b.fcmp("ogt", l_final[reg], zero_f)
+            normalized = b.fmul(v, b.rcp(l_final[reg]))
+            b.smem_store_vN_f32(
+                Acc_lds, [row, col], b.select(l_nonzero, normalized, zero_f), 1
+            )
     b.sync()
 
     OUT_THREADS_PER_ROW = HD // 32

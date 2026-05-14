@@ -162,17 +162,24 @@ class Event:
 
 
 class Runtime:
-    # Per-stream list of ctypes objects (args buffers, size cells, extra
-    # arrays) that we must keep alive until the stream has executed the
-    # launches that reference them. The HIP_LAUNCH_PARAM_BUFFER_POINTER
-    # ("extra") API does not promise to copy the packed-args buffer at
-    # enqueue time; observation on ROCm 6/7 is that the GPU command
-    # processor reads from the buffer later, when it actually starts
-    # the kernel. If the Python-owned ctypes buffer has been garbage
-    # collected by then, the kernel reads stale memory and writes to
-    # whatever pointer those bytes now decode as -- producing the
-    # mysterious "k_cache mutates" / "max_abs jumps to 2.5" symptoms
-    # observed in the parity harness's Triton-then-CK alternation.
+    # Per-stream list of Python-owned objects that must remain alive
+    # until the stream has executed the launches that reference them.
+    #
+    # This includes:
+    #   * ctypes args buffers, size cells, and HIP "extra" arrays;
+    #   * torch tensors passed as kernel args (inputs, outputs,
+    #     workspaces) so accidental temporary tensors are not
+    #     garbage-collected while a raw ctypes launch is still in flight.
+    #
+    # The HIP_LAUNCH_PARAM_BUFFER_POINTER ("extra") API does not
+    # promise to copy the packed-args buffer at enqueue time; observation
+    # on ROCm 6/7 is that the GPU command processor reads from the
+    # buffer later, when it actually starts the kernel. If the
+    # Python-owned ctypes buffer has been garbage collected by then, the
+    # kernel reads stale memory and writes to whatever pointer those
+    # bytes now decode as -- producing the mysterious "k_cache mutates" /
+    # "max_abs jumps to 2.5" symptoms observed in the parity harness's
+    # Triton-then-CK alternation.
     #
     # By contrast, Triton's AMD driver uses the kernelParams path
     # (cf. backends/amd/driver.py:392-402) which CUDA/HIP semantics
@@ -228,6 +235,20 @@ class Runtime:
         ensured (e.g. via hipStreamSynchronize or an event sync) that
         every launch queued on `stream` has actually completed."""
         self._pending_args.pop(int(stream), None)
+
+    def retain_for_stream(self, stream: int, *objects) -> None:
+        """Keep arbitrary Python objects alive until the next stream/device sync.
+
+        Raw HIP launches issued through ctypes are invisible to Python's
+        garbage collector and mostly invisible to torch's stream-aware
+        caching allocator. Launcher code should call this for every tensor
+        argument and workspace tensor it passes into a kernel. Once the
+        stream is known complete, `release_pending_for_stream` or `sync`
+        can drop the references.
+        """
+        keep = [obj for obj in objects if obj is not None and not isinstance(obj, int)]
+        if keep:
+            self._pending_args.setdefault(int(stream), []).append(tuple(keep))
 
     def event(self) -> Event:
         h = _HipEventHandle()

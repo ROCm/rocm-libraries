@@ -19,6 +19,7 @@ from ..runtime.launcher import (
     KernelLauncher,
     LaunchConfig,
     PipelineLauncher,
+    WorkspaceSpec,
     WorkspacePool,
 )
 
@@ -451,8 +452,6 @@ def _run_3d_tiled(
          `(total_num_q_blocks, num_kv_heads, num_segments)`.
       4. Launch the reduce kernel with grid `(total_q, num_query_heads, 1)`.
     """
-    import torch
-
     num_segments = _num_segments(problem)
     cache_key = _tiled_3d_cache_key(problem)
 
@@ -465,25 +464,12 @@ def _run_3d_tiled(
     # only remaining per-call cost is packing args and issuing two
     # ``hipModuleLaunchKernel`` calls on the caller's stream.
     pipeline, pool = _get_3d_pipeline(problem, cache_key, num_segments)
-
-    segm_output = pool.get(
-        "segm_output",
-        (problem.total_q, problem.num_query_heads, num_segments, problem.head_size),
-        dtype=torch.float32,
-        device=q.device,
+    workspace = pool.prepare(
+        _attention_3d_workspace_specs(problem, num_segments, q.device)
     )
-    segm_max = pool.get(
-        "segm_max",
-        (problem.total_q, problem.num_query_heads, num_segments),
-        dtype=torch.float32,
-        device=q.device,
-    )
-    segm_expsum = pool.get(
-        "segm_expsum",
-        (problem.total_q, problem.num_query_heads, num_segments),
-        dtype=torch.float32,
-        device=q.device,
-    )
+    segm_output = workspace["segm_output"]
+    segm_max = workspace["segm_max"]
+    segm_expsum = workspace["segm_expsum"]
 
     block_q = (
         16 // problem.num_queries_per_kv if problem.num_queries_per_kv <= 16 else 1
@@ -545,6 +531,67 @@ def _run_3d_tiled(
 _3D_PIPELINES: Dict[Tuple, Tuple[PipelineLauncher, WorkspacePool]] = {}
 _2D_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
+
+
+def _attention_3d_workspace_specs(
+    problem: UnifiedAttentionProblem,
+    num_segments: int,
+    device,
+) -> Tuple[WorkspaceSpec, WorkspaceSpec, WorkspaceSpec]:
+    """CK Tile-style workspace declaration for the split-KV 3D pipeline.
+
+    This is the Python equivalent of FMHA forward split-KV's
+    `lse_acc_ptr` + `o_acc_ptr` sizing in
+    `example/ck_tile/01_fmha/fmha_fwd_runner.hpp`: all scratch shapes
+    are derived from the problem up front, owned by a long-lived pool,
+    and passed to the segment and reduce kernels by pointer.
+    """
+    try:
+        import torch
+
+        f32 = torch.float32
+    except Exception:
+        # CPU-only/static tests can still ask for byte accounting without
+        # importing torch. WorkspacePool.required_nbytes understands this
+        # string fallback via `_dtype_element_size`.
+        f32 = "float32"
+
+    return (
+        WorkspaceSpec(
+            "segm_output",
+            (problem.total_q, problem.num_query_heads, num_segments, problem.head_size),
+            f32,
+            device,
+        ),
+        WorkspaceSpec(
+            "segm_max",
+            (problem.total_q, problem.num_query_heads, num_segments),
+            f32,
+            device,
+        ),
+        WorkspaceSpec(
+            "segm_expsum",
+            (problem.total_q, problem.num_query_heads, num_segments),
+            f32,
+            device,
+        ),
+    )
+
+
+def attention_3d_workspace_nbytes(
+    problem: UnifiedAttentionProblem,
+    *,
+    device=None,
+) -> int:
+    """Return required split-KV 3D workspace bytes for `problem`.
+
+    Public helper for tests/bench harnesses that want to report scratch
+    usage before dispatch. The `device` value only matters for the
+    eventual allocation, not byte accounting.
+    """
+    return WorkspacePool.required_nbytes(
+        _attention_3d_workspace_specs(problem, _num_segments(problem), device)
+    )
 
 
 def _get_3d_pipeline(

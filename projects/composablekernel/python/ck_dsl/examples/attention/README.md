@@ -155,33 +155,30 @@ sequence is below the kernel-launch overhead floor, so individual
 launches in this row routinely vary 3-4x between attempts on this
 GPU. Re-run the harness a few times for a stable median.
 
-### 2D vs 2D — same single-warp algorithm on both backends
+### 2D vs 2D — same single-CTA algorithm on both backends
 
-Triton's 2D kernel is multi-warp inside the CTA; CK DSL's tiled 2D
-kernel is single-warp by design and is intentionally not optimized
-because the 3D path already supports every problem the 2D path
-supports. We never pick this path in `backend="auto"`. The table is
-shown only for honesty.
+CK DSL's tiled 2D kernel is single-warp by design, but the current
+runtime/compiler/kernel stack makes it faster than Triton's 2D path on
+every default scenario. The important fixes were:
+
+- `KernelLauncher` keeps the HSACO module/function loaded across calls,
+  removing the old per-call load/event/unload tax;
+- gfx950 `s_waitcnt` encoding preserves 6-bit VMCNT partial waits;
+- online softmax uses `m_new = max(m_old, tile_max)`, fixing ALiBi.
 
 | Scenario                  | tri-2d   | ck-2d    | speedup |
 |---------------------------|---------:|---------:|--------:|
-| decode_d128_b16           | 113.9us  | 641.6us  |  0.18x  |
-| prefill_d128_b16          |  51.0us  | 598.3us  |  0.09x  |
-| mixed_d128_b16            |  55.5us  | 630.3us  |  0.09x  |
-| sliding_d128_b16          |  52.6us  | 601.0us  |  0.09x  |
-| softcap_d128_b16          | 100.3us  | 685.3us  |  0.15x  |
-| bf16_decode_d128_b64      |  89.4us  | 610.6us  |  0.15x  |
-| alibi_decode_d128_b16     | 124.9us  | 627.2us  |  0.20x  |
-| qq_bias_prefill_d128_b16  |  56.1us  | 633.5us  |  0.09x  |
-
-Notes:
-
-- `alibi_mixed_d128_b16` produces a NaN on CK 2D. Tracked as a
-  known limitation of the single-warp fallback path; the auto
-  selector never uses this kernel for that scenario.
-- Adding a multi-warp variant of the 2D kernel is on the follow-up
-  list, but not a priority — every problem currently routed to 2D in
-  AITER is faster on our 3D kernel anyway.
+| decode_d128_b16           | 115.6us  |  21.2us  | **5.46x** |
+| decode_d128_b64           |  91.9us  |  16.6us  | **5.55x** |
+| decode_d256_b16           |  79.0us  |  16.9us  | **4.66x** |
+| prefill_d128_b16          |  51.8us  |  18.1us  | **2.87x** |
+| mixed_d128_b16            |  54.9us  |  16.3us  | **3.37x** |
+| sliding_d128_b16          |  50.0us  |  17.8us  | **2.81x** |
+| softcap_d128_b16          | 100.0us  |  22.8us  | **4.40x** |
+| bf16_decode_d128_b64      |  88.8us  |  17.3us  | **5.14x** |
+| alibi_decode_d128_b16     | 122.6us  |  19.2us  | **6.40x** |
+| alibi_mixed_d128_b16      |  53.7us  |  16.3us  | **3.30x** |
+| qq_bias_prefill_d128_b16  |  74.6us  |  17.1us  | **4.37x** |
 
 ## JSON report layout
 

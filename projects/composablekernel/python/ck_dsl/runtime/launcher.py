@@ -49,8 +49,8 @@ the obvious performance problems:
     re-use object ids across distinct bytes objects. The launcher
     keys its cache by a *semantic* key supplied at construction.
 
-This module supplies three small primitives that, together, fix
-all five categories above by construction:
+This module supplies a small set of primitives that, together, fix
+the categories above by construction:
 
 * :class:`KernelLauncher`: owns one compiled-and-loaded HSACO module,
   packs and issues args for one kernel, manages stream + args lifetime.
@@ -61,11 +61,17 @@ all five categories above by construction:
   ``ck_tile::launch_kernel(stream_config, k0, k1)`` chained-callable
   semantics for split-KV / segment-then-reduce pipelines.
 
-* :class:`WorkspacePool`: a thin owner of named torch workspace
-  tensors keyed by (shape, dtype, device). Lazily allocates and
-  reuses across launches; equivalent to CK Tile's
-  ``DeviceMem ws_buf(ws_size);`` held over the whole problem
-  lifetime.
+* :class:`WorkspaceSpec` + :class:`WorkspacePool`: declarative
+  workspace sizing plus a thin owner of named torch workspace tensors
+  keyed by (shape, dtype, device). Lazily allocates and reuses across
+  launches; equivalent to CK Tile's ``workspace_size`` plus
+  ``DeviceMem ws_buf(ws_size);`` held over the whole problem lifetime.
+
+* :class:`DeviceMem`: RAII over `hipMalloc`/`hipFree` for numpy /
+  manifest flows that do not use torch tensors.
+
+* :func:`time_launches`: the event-timing loop, kept separate from
+  launchers so production dispatch has no benchmarking branches.
 
 Each kernel-emitting instance (attention 2D, attention 3D, GEMM,
 conv, ...) should construct exactly one :class:`KernelLauncher`
@@ -94,7 +100,10 @@ __all__ = [
     "LaunchConfig",
     "LaunchSummary",
     "PipelineLauncher",
+    "WorkspaceSpec",
     "WorkspacePool",
+    "release_retained_for_stream",
+    "synchronize_and_release",
     "time_launches",
 ]
 
@@ -138,6 +147,32 @@ class LaunchConfig:
     kernel's statically-declared LDS)."""
 
 
+@dataclass(frozen=True)
+class WorkspaceSpec:
+    """Declarative workspace requirement, CK Tile-style.
+
+    This is the Python analogue of CK Tile's `workspace_size` contract:
+    the op declares the exact named workspaces it needs (shape + dtype +
+    device), and a `WorkspacePool` turns those specs into long-lived
+    tensors. The spec exposes `numel()` and `nbytes()` so callers can
+    report and validate total scratch usage before launching.
+    """
+
+    name: str
+    shape: Tuple[int, ...]
+    dtype: Any
+    device: Any
+
+    def numel(self) -> int:
+        n = 1
+        for dim in self.shape:
+            n *= int(dim)
+        return int(n)
+
+    def nbytes(self) -> int:
+        return self.numel() * _dtype_element_size(self.dtype)
+
+
 # Module-global Runtime. There's no per-Runtime state worth instancing
 # (everything lives on HIP itself); subclassing Runtime to add hooks
 # would still share the singleton.
@@ -149,6 +184,50 @@ def _runtime() -> Runtime:
     if _HIP_RUNTIME is None:
         _HIP_RUNTIME = Runtime()
     return _HIP_RUNTIME
+
+
+def release_retained_for_stream(stream: int = 0) -> None:
+    """Drop retained args/tensors for a stream after external synchronization.
+
+    Use this after `torch.cuda.synchronize()` or an equivalent event/stream
+    synchronization that guarantees all raw HIP launches on the stream have
+    completed. It mirrors CK Tile's RAII cleanup point: the owner keeps
+    launch resources alive until the stream is known done, then releases
+    them explicitly.
+    """
+    _runtime().release_pending_for_stream(resolve_stream(stream))
+
+
+def synchronize_and_release(stream: int = 0) -> None:
+    """Synchronize the device and release all retained launch resources.
+
+    This is intentionally device-wide (`Runtime.sync`) because it must also
+    be safe for callers using the legacy HIP null stream or multiple torch
+    streams. Benchmark harnesses should call this between independent lanes
+    (e.g. Triton 2D -> CK 2D -> Triton 3D -> CK 3D) when they want strong
+    isolation rather than maximum overlap.
+    """
+    _runtime().sync()
+
+
+def _dtype_element_size(dtype: Any) -> int:
+    """Return element size in bytes for a torch/numpy-like dtype."""
+    if hasattr(dtype, "itemsize"):
+        return int(dtype.itemsize)
+    try:
+        import torch
+
+        return int(torch.empty((), dtype=dtype).element_size())
+    except Exception:
+        # Common torch dtype repr fallback for docs/tests that don't import torch.
+        name = str(dtype)
+        if any(x in name for x in ("float16", "bfloat16", "int16")):
+            return 2
+        if any(x in name for x in ("float32", "int32")):
+            return 4
+        if any(x in name for x in ("float64", "int64")):
+            return 8
+        raise TypeError(f"cannot determine element size for dtype {dtype!r}")
 
 
 class KernelLauncher:
@@ -217,6 +296,10 @@ class KernelLauncher:
             shared_bytes=config.shared_bytes,
             stream=stream,
         )
+        # Keep all tensor-like objects in `values` alive until the stream
+        # is complete. This covers inputs/outputs/workspaces even when a
+        # caller passes a temporary tensor expression by accident.
+        rt.retain_for_stream(stream, *values.values())
         return LaunchSummary(launches=1)
 
     def __repr__(self) -> str:
@@ -291,6 +374,7 @@ class _Slot:
     name: str
     tensor: Any  # torch.Tensor; not typed to avoid the import at module-load
     shape: Tuple[int, ...]
+    capacity_numel: int
     dtype: Any
     device: Any
 
@@ -308,9 +392,10 @@ class WorkspacePool:
 
     Slots are keyed by ``name``. Re-requesting a slot with the same
     name but a larger shape grows the underlying tensor in place
-    (lazy realloc); a smaller shape just returns a view of the
-    existing buffer. Re-requesting with a different ``dtype`` or
-    ``device`` reallocates.
+    (lazy realloc); a smaller shape returns a view of the existing
+    allocation. Re-requesting with a different ``dtype`` or ``device``
+    reallocates. The pool tracks capacity separately from the requested
+    shape, so size accounting is explicit and stable.
 
     The pool is the natural place to hang onto split-KV / segment-
     reduce intermediates in the attention dispatcher: one pool per
@@ -334,18 +419,16 @@ class WorkspacePool:
         nbytes_needed = 1
         for s in shape_t:
             nbytes_needed *= s
+        required_numel = int(nbytes_needed)
         if name in self._slots:
             slot = self._slots[name]
             same_dtype = slot.dtype == dtype
             same_device = slot.device == device
-            existing_elems = 1
-            for s in slot.shape:
-                existing_elems *= s
-            if same_dtype and same_device and existing_elems >= nbytes_needed:
+            if same_dtype and same_device and slot.capacity_numel >= required_numel:
                 if slot.shape == shape_t:
                     return slot.tensor
                 # Reshape view into the existing allocation.
-                return slot.tensor.flatten()[:nbytes_needed].view(shape_t)
+                return slot.tensor.flatten()[:required_numel].view(shape_t)
             # Outgrow or change dtype/device: drop the old slot. The
             # tensor's storage is freed by torch when the slot's
             # reference dies (and any pending kernel keeps the
@@ -353,8 +436,25 @@ class WorkspacePool:
             # same-stream FIFO).
             del self._slots[name]
         t = torch.empty(shape_t, dtype=dtype, device=device)
-        self._slots[name] = _Slot(name, t, shape_t, dtype, device)
+        self._slots[name] = _Slot(name, t, shape_t, required_numel, dtype, device)
         return t
+
+    def get_spec(self, spec: WorkspaceSpec) -> Any:
+        return self.get(spec.name, spec.shape, dtype=spec.dtype, device=spec.device)
+
+    def prepare(self, specs: Sequence[WorkspaceSpec]) -> Dict[str, Any]:
+        """Allocate/reuse every spec and return a name->tensor mapping."""
+        return {spec.name: self.get_spec(spec) for spec in specs}
+
+    @staticmethod
+    def required_nbytes(specs: Sequence[WorkspaceSpec]) -> int:
+        return sum(spec.nbytes() for spec in specs)
+
+    def capacity_nbytes(self) -> int:
+        total = 0
+        for slot in self._slots.values():
+            total += slot.capacity_numel * _dtype_element_size(slot.dtype)
+        return total
 
     def drop(self, name: str) -> None:
         self._slots.pop(name, None)

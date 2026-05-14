@@ -924,10 +924,7 @@ class _Lowerer:
         vm = int(op.attrs.get("vmcnt", -1))
         lk = int(op.attrs.get("lgkmcnt", -1))
         ec = int(op.attrs.get("expcnt", -1))
-        vm_b = vm if vm >= 0 else 0xF
-        lk_b = lk if lk >= 0 else 0xF
-        ec_b = ec if ec >= 0 else 0x7
-        mask = (vm_b & 0xF) | ((ec_b & 0x7) << 4) | ((lk_b & 0xF) << 8)
+        mask = _encode_waitcnt_gfx9_10(vm, ec, lk)
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
 
     def _op_tile_sched_barrier(self, op: Op) -> None:
@@ -1614,6 +1611,31 @@ def _param_attrs(attrs: Dict[str, object], t: Type) -> str:
     if "dereferenceable" in attrs and attrs["dereferenceable"] is not None:
         out.append(f"dereferenceable({int(attrs['dereferenceable'])})")
     return (" " + " ".join(out)) if out else ""
+
+
+def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
+    """Encode an AMDGPU ``s_waitcnt`` immediate for gfx9/gfx10-style ISAs.
+
+    The gfx9/gfx10 encoding is not just a 4-bit VMCNT. LLVM's
+    ``AMDGPUBaseInfo::encodeWaitcnt`` splits VMCNT across low bits
+    ``[3:0]`` and high bits ``[15:14]`` for major versions 9 and 10.
+    gfx950 uses that layout, and its VMCNT is 6 bits wide. If we mask
+    ``vmcnt=16`` with ``0xf`` it becomes ``vmcnt(0)``, turning the 2D
+    attention kernel's intended "leave next K in flight" partial wait
+    into a full VMEM drain.
+
+    ``-1`` means "no wait" and is encoded as the architectural maximum
+    for each counter. Explicit values are clamped to the maximum instead
+    of wrapping to zero; wrapping ``lgkmcnt=16`` to ``lgkmcnt(0)`` has
+    the same full-drain bug for async global-to-LDS traffic.
+    """
+
+    vm_b = 0x3F if vmcnt < 0 else min(max(vmcnt, 0), 0x3F)
+    ec_b = 0x7 if expcnt < 0 else min(max(expcnt, 0), 0x7)
+    lk_b = 0xF if lgkmcnt < 0 else min(max(lgkmcnt, 0), 0xF)
+    vm_lo = vm_b & 0xF
+    vm_hi = (vm_b >> 4) & 0x3
+    return vm_lo | (ec_b << 4) | (lk_b << 8) | (vm_hi << 14)
 
 
 def _fp32_hex(x: float) -> str:

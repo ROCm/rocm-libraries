@@ -72,6 +72,7 @@ from .attention_unified import (  # noqa: F401
     UnifiedAttention2DSpec,
     UnifiedAttention3DSpec,
     UnifiedAttentionReduceSpec,
+    attention_3d_workspace_nbytes,
     build_unified_attention_2d,
     build_unified_attention_3d,
     build_unified_attention_reduce,
