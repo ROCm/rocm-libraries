@@ -77,7 +77,6 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Matrix published as a regular CI artifact ⏳
 
 ### Heuristics
-- **Heuristic plugin architecture** ⏳
 - **Engine selection config file support** ⏳
 
 ### Core
@@ -94,8 +93,8 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### Heuristics
 - Heuristic plugin API
-- **Initial heuristic plugin (Phase 1)**
-- **Heuristics Plug-in implementation** Phase 2 (Refining and expanding heuristic capabilities)
+- Plugin architecture ⏳
+- **Phase 1 heuristic plugin: providing heuristic engine selection for limited architectures**
 
 ### Normalization
 - Expanded LayerNorm & RMSNorm kernel coverage in the HIP kernel provider
