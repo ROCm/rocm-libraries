@@ -223,6 +223,78 @@ void unit_check_general(int64_t M, int64_t N, int64_t lda, size_t* hCPU, size_t*
 // a wrapper will cause the loop keep going
 
 template <>
+void unit_check_near(int64_t M, int64_t N, int64_t lda, int8_t* hCPU, int8_t* hGPU)
+{
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+#ifdef GOOGLE_TEST
+            ASSERT_EQ(hCPU[i + j * lda], hGPU[i + j * lda]);
+#else
+            assert(hCPU[i + j * lda] == hGPU[i + j * lda]);
+#endif
+        }
+    }
+}
+
+template <>
+void unit_check_near(int64_t M, int64_t N, int64_t lda, int32_t* hCPU, int32_t* hGPU)
+{
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+#ifdef GOOGLE_TEST
+            ASSERT_EQ(hCPU[i + j * lda], hGPU[i + j * lda]);
+#else
+            assert(hCPU[i + j * lda] == hGPU[i + j * lda]);
+#endif
+        }
+    }
+}
+
+template <>
+void unit_check_near(
+    int64_t M, int64_t N, int64_t lda, hipsparseFloat16* hCPU, hipsparseFloat16* hGPU)
+{
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+            float cpu         = static_cast<float>(hCPU[i + j * lda]);
+            float gpu         = static_cast<float>(hGPU[i + j * lda]);
+            float compare_val = std::max(std::abs(cpu * 1e-2f), 1e-3f);
+#ifdef GOOGLE_TEST
+            ASSERT_NEAR(cpu, gpu, compare_val);
+#else
+            assert(std::abs(cpu - gpu) < compare_val);
+#endif
+        }
+    }
+}
+
+template <>
+void unit_check_near(
+    int64_t M, int64_t N, int64_t lda, hipsparseBfloat16* hCPU, hipsparseBfloat16* hGPU)
+{
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+            float cpu         = static_cast<float>(hCPU[i + j * lda]);
+            float gpu         = static_cast<float>(hGPU[i + j * lda]);
+            float compare_val = std::max(std::abs(cpu * 1e-1f), 1e-2f);
+#ifdef GOOGLE_TEST
+            ASSERT_NEAR(cpu, gpu, compare_val);
+#else
+            assert(std::abs(cpu - gpu) < compare_val);
+#endif
+        }
+    }
+}
+
+template <>
 void unit_check_near(int64_t M, int64_t N, int64_t lda, float* hCPU, float* hGPU)
 {
     for(int64_t j = 0; j < N; j++)

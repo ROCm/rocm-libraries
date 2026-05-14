@@ -1,0 +1,14 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+table SerializedExecutionPlan {
+    version: uint;
+    engine_id: int64;
+    workspace_size: int64;
+    tensor_uids: [int64];
+    plugin_payload: [ubyte];
+}
+
+root_type SerializedExecutionPlan;

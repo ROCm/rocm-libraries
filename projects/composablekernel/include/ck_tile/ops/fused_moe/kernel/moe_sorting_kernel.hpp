@@ -11,6 +11,7 @@
 #include <type_traits>
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 #if !defined(CK_TILE_HAS_ROW_NEWBCAST)
@@ -1685,7 +1686,7 @@ struct MoeSortingMultiPhaseKernel_P0_v1
                 IndexType eid = x[j.value]; // ext_vector_type must use int to []
                 uint32_t curr_token_id, curr_topk_id;
                 kargs.topk_mdiv.divmod(i * Problem::SubTokenTile + j, curr_token_id, curr_topk_id);
-                if(eid < kargs.num_experts)
+                if(eid < kargs.num_experts && eid >= 0)
                 {
                     if constexpr(Problem::LocalToken)
                     {

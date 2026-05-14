@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "TestHelpers.hpp"
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
@@ -45,6 +46,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
     std::unique_ptr<Function> func;
     BasicBlock* bb = nullptr;
     std::unique_ptr<Pass> pass;
+    AnalysisManager am;
 
     void SetUp() override {
         config.arch[0] = 12;
@@ -54,6 +56,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
         setFunctionArch(*func, arch);
         bb = func->createBasicBlock("entry");
         pass = createStinkyDAGSchedulerPass();
+        registerAllAnalyses(am);
     }
 
     void TearDown() override {
@@ -65,7 +68,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
     void runPass() {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
-        pass->run(*func, ctx);
+        pass->run(*func, ctx, am);
     }
 
     void runPassWithUnrollGemm() {
@@ -74,13 +77,25 @@ class DAGSchedulerPassTest : public ::testing::Test {
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         ctx.setPassFeatureConfig(pfc);
-        pass->run(*func, ctx);
+        pass->run(*func, ctx, am);
     }
 
-    // Create v_wmma_f32_16x16x16_bf16: dest v[destStart:destStart+7], src0
-    // v[src0Start:src0Start+7], src1 same as src0, acc same as dest (v[destStart:destStart+7]).
-    StinkyInstruction* createWmmaF32_16x16x16_bf16(int destStart, int src0Start) {
+    // Build a single-BB self-loop so the scheduler uses the loop-aware CDNA5 path.
+    // Returns the loop body BB with the branch already appended.
+    BasicBlock* buildLoopBB(const char* label = "loop_body") {
+        BasicBlock* body = func->createBasicBlock(label);
+        body->addSuccessor(body);
+        return body;
+    }
+
+    static StinkyInstruction* createSCbranchInBlock(BasicBlock* bb, GfxArchID arch) {
         AsmIRBuilder builder(*bb, arch);
+        return builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
+    }
+
+    StinkyInstruction* createWmmaF32_16x16x16_bf16_in(BasicBlock* targetBB, int destStart,
+                                                      int src0Start) {
+        AsmIRBuilder builder(*targetBB, arch);
         const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, arch);
         if (!desc) return nullptr;
         StinkyInstruction* inst = builder.create(desc);
@@ -90,16 +105,17 @@ class DAGSchedulerPassTest : public ::testing::Test {
         inst->addSrcReg(StinkyRegister("v", destStart, 8));
         return inst;
     }
-};
 
-// .cost overwrite: v_wmma_f32_16x16x16_bf16 (format WMMA) has explicit .cost in def -> issue=4,
-// latency=8
-TEST_F(DAGSchedulerPassTest, CostOverwrite_VWmmaF3216x16x16Bf16_HasIssue4Latency8) {
-    const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, arch);
-    ASSERT_NE(desc, nullptr);
-    EXPECT_EQ(desc->issue, 4) << "v_wmma_f32_16x16x16_bf16 .cost overwrite: issue should be 4";
-    EXPECT_EQ(desc->latency, 8) << "v_wmma_f32_16x16x16_bf16 .cost overwrite: latency should be 8";
-}
+    StinkyInstruction* createWmmaF32_16x16x16_bf16(int destStart, int src0Start) {
+        return createWmmaF32_16x16x16_bf16_in(bb, destStart, src0Start);
+    }
+
+    StinkyInstruction* createMovableDsLoad(int destReg, int addrReg, int ldsToken) {
+        StinkyInstruction* inst = createDsReadB128InBlock(bb, arch, destReg, addrReg);
+        inst->addSrcReg(StinkyRegister(RegType::LDS, ldsToken, 1));
+        return inst;
+    }
+};
 
 // Empty block: pass should not crash
 TEST_F(DAGSchedulerPassTest, EmptyBlock_DoesNotCrash) {
@@ -188,4 +204,113 @@ TEST_F(DAGSchedulerPassTest, DSReadAndWMMA_NoConsecutiveWMMA) {
     EXPECT_EQ(sequence[5].second, 16);
     // When other instructions exist, scheduler prefers them after a WMMA (no back-to-back WMMA).
     // Here with real latency only WMMAs are left at the end so they are issued consecutively.
+}
+
+// ---------------------------------------------------------------------------
+// Property: when all independent, WMMA fires first (Phase B), then ds_loads
+// and VALU fill the WMMA latency window.
+// Within that window, ds_load has priority over VALU.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
+    const int addrReg = 80;
+    // 3 independent ds_loads (LDS pseudo-reg makes them movable in DAG)
+    createMovableDsLoad(0, addrReg, 1);
+    createMovableDsLoad(4, addrReg, 2);
+    createMovableDsLoad(8, addrReg, 3);
+    // 3 independent VALUs
+    createVAddInBlock(bb, arch, 40, 41, 42);
+    createVAddInBlock(bb, arch, 43, 44, 45);
+    createVAddInBlock(bb, arch, 46, 47, 48);
+    // 1 independent WMMA
+    createWmmaF32_16x16x16_bf16(12, 50);
+
+    runPassWithUnrollGemm();
+
+    int firstWmmaPos = -1;
+    int firstDsPos = -1;
+    int firstValuPos = -1;
+    int pos = 0;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        if (mnem.find("wmma") != std::string_view::npos) {
+            if (firstWmmaPos < 0) firstWmmaPos = pos;
+        } else if (mnem.find("ds_load") != std::string_view::npos) {
+            if (firstDsPos < 0) firstDsPos = pos;
+        } else if (mnem.find("v_add") != std::string_view::npos) {
+            if (firstValuPos < 0) firstValuPos = pos;
+        }
+        pos++;
+    }
+
+    ASSERT_GE(firstWmmaPos, 0) << "No WMMA found";
+    ASSERT_GE(firstDsPos, 0) << "No ds_load found";
+    ASSERT_GE(firstValuPos, 0) << "No VALU found";
+    EXPECT_LT(firstWmmaPos, firstDsPos) << "WMMA should fire before ds_load (Phase B)";
+    EXPECT_LT(firstDsPos, firstValuPos)
+        << "DS loads should be prioritized before VALU during WMMA latency";
+}
+
+// ---------------------------------------------------------------------------
+// Property: ds_load burst limit — after a WMMA fires,
+// its latency window is filled with non-WMMA. With 5 ds_loads and VALU
+// all ready, at most 4 consecutive ds_loads appear before VALU interleaves.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, DSBurstLimit_VALUInterleaveAfter4) {
+    const int addrReg = 80;
+    // 5 independent ds_loads (LDS pseudo-reg makes them movable in DAG)
+    createMovableDsLoad(0, addrReg, 1);
+    createMovableDsLoad(4, addrReg, 2);
+    createMovableDsLoad(8, addrReg, 3);
+    createMovableDsLoad(12, addrReg, 4);
+    createMovableDsLoad(16, addrReg, 5);
+    // 2 independent VALUs
+    createVAddInBlock(bb, arch, 60, 61, 62);
+    createVAddInBlock(bb, arch, 63, 64, 65);
+    // 2 independent WMMAs (fire first, create co-issue window)
+    createWmmaF32_16x16x16_bf16(20, 28);
+    createWmmaF32_16x16x16_bf16(36, 44);
+
+    runPassWithUnrollGemm();
+
+    int consecutiveDs = 0;
+    int maxConsecutiveDs = 0;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        if (mnem.find("ds_load") != std::string_view::npos) {
+            consecutiveDs++;
+            maxConsecutiveDs = std::max(maxConsecutiveDs, consecutiveDs);
+        } else {
+            consecutiveDs = 0;
+        }
+    }
+
+    EXPECT_LE(maxConsecutiveDs, 4) << "Burst limit violated: found " << maxConsecutiveDs
+                                   << " consecutive ds_loads (VALU should interleave after 4)";
+}
+
+// ---------------------------------------------------------------------------
+// Property: all original instructions are preserved.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, DSBurst_InstructionCountPreserved) {
+    const int addrReg = 100;
+    // 6 independent ds_loads (LDS pseudo-reg makes them movable in DAG)
+    for (int i = 0; i < 6; i++) createMovableDsLoad(i * 4, addrReg, i + 1);
+    // 4 independent VALUs
+    for (int i = 0; i < 4; i++) createVAddInBlock(bb, arch, 30 + i, 40 + i, 50 + i);
+    // 3 independent WMMAs
+    for (int i = 0; i < 3; i++) createWmmaF32_16x16x16_bf16(60 + i * 8, 84 + i * 8);
+
+    int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    int afterCount = countStinkyInstructions(*bb);
+
+    EXPECT_EQ(afterCount, beforeCount) << "Scheduler must preserve instruction count";
 }

@@ -29,6 +29,8 @@
 #ifndef _HIPBLASLT_E8_H_
 #define _HIPBLASLT_E8_H_
 
+#include <iostream>
+
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
@@ -40,7 +42,9 @@ struct hipblaslt_e8
     // default constructor
     HIP_HOST_DEVICE hipblaslt_e8() = default;
 
-    HIP_HOST_DEVICE hipblaslt_e8(float v0)
+    HIP_HOST_DEVICE hipblaslt_e8(const hipblaslt_e8& other) = default;
+
+    explicit HIP_HOST_DEVICE hipblaslt_e8(float v0)
     {
         union {
             uint32_t x;
@@ -84,6 +88,11 @@ struct hipblaslt_e8
 
         return v.f;
     }
+
+    inline HIP_HOST_DEVICE hipblaslt_e8 operator-() const
+    {
+        return hipblaslt_e8(*this);
+    }
 };
 
 inline float operator*(hipblaslt_e8 a, float b)
@@ -103,9 +112,11 @@ namespace std
         return std::to_string(static_cast<float>(a));
     }
 
-    inline ostream& operator<<(ostream& stream, const hipblaslt_e8 a)
+    inline std::ostream& operator<<(std::ostream& stream, const hipblaslt_e8& a)
     {
-        return stream << static_cast<float>(a);
+        float val = static_cast<float>(a);
+        stream << val;
+        return stream;
     }
 } // namespace std
 

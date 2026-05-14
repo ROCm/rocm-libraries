@@ -93,3 +93,15 @@ struct hipsparse_test_config_scatter
                                      hipsparse_test_numeric_types_enum::scatter>
 {
 };
+
+struct hipsparse_test_config_ijabct_spmv
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::ijabct_spmv,
+                                     hipsparse_test_numeric_types_enum::spmv>
+{
+};
+
+struct hipsparse_test_config_iabct_spmv
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::iabct_spmv,
+                                     hipsparse_test_numeric_types_enum::spmv>
+{
+};

@@ -10,6 +10,9 @@
 #include "ck/tensor_operation/gpu/device/device_base.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 namespace ck {
 
 template <typename ALayout,
@@ -275,3 +278,4 @@ struct ReferenceGemm : public device::BaseOperator
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+#pragma clang diagnostic pop

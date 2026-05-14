@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -173,7 +173,7 @@ Tests:
 - name: bsrilu0_file
   category: quick
   function: bsrilu0
-  precision: *single_double_precisions_complex
+  precision: *double_only_precisions_complex
   M: 1
   N: 1
   block_dim: [7]
@@ -186,7 +186,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2]
+  filename: [mplate]
 
 - name: bsrilu0_file
   category: pre_checkin

@@ -25,6 +25,7 @@
 #include <set>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/ir/asm/DefUseChainUpdater.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -54,25 +55,20 @@ class DeadCodeEliminationPassImpl : public Pass {
         return PassName;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
-        int totalRemoved = 0;
-
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         // Process all basic blocks
         for (BasicBlock& bb : func) {
             // Skip filtered basic blocks
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
             // Iteratively remove dead stores until fixpoint
-            int removedInBB = 0;
             bool changed = true;
             while (changed) {
                 int removed = runOnBasicBlock(bb, func);
-                removedInBB += removed;
                 changed = (removed > 0);
             }
-
-            totalRemoved += removedInBB;
         }
+        return preserveCFGAnalyses();
     }
 
    private:

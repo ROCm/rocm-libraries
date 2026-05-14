@@ -9,6 +9,7 @@
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -121,8 +122,15 @@ TEST(SdpaIntegrationTest, SimpleSdpa) {
   variantPack[vUID] = vTensor.memory().deviceData();
   variantPack[oUID] = oTensor.memory().deviceData();
 
+  // Allocate workspace if the compiled graph requires it.
+  int64_t workspaceSize;
+  result = graph->get_workspace_size(workspaceSize);
+  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+  ASSERT_GE(workspaceSize, 0) << result.err_msg;
+  const Workspace workspace(static_cast<size_t>(workspaceSize));
+
   // Execute graph.
-  result = graph->execute(handle, variantPack, nullptr);
+  result = graph->execute(handle, variantPack, workspace.get());
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
   oTensor.memory().markDeviceModified();
 
@@ -234,8 +242,15 @@ TEST(SdpaIntegrationTest, SdpaGqa) {
   variantPack[vUID] = vTensor.memory().deviceData();
   variantPack[oUID] = oTensor.memory().deviceData();
 
+  // Allocate workspace if the compiled graph requires it.
+  int64_t workspaceSize;
+  result = graph->get_workspace_size(workspaceSize);
+  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+  ASSERT_GE(workspaceSize, 0) << result.err_msg;
+  const Workspace workspace(static_cast<size_t>(workspaceSize));
+
   // Execute graph.
-  result = graph->execute(handle, variantPack, nullptr);
+  result = graph->execute(handle, variantPack, workspace.get());
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
   oTensor.memory().markDeviceModified();
 
@@ -349,8 +364,15 @@ TEST(SdpaIntegrationTest, SdpaIndependentKVHeads) {
   variantPack[vUID] = vTensor.memory().deviceData();
   variantPack[oUID] = oTensor.memory().deviceData();
 
+  // Allocate workspace if the compiled graph requires it.
+  int64_t workspaceSize;
+  result = graph->get_workspace_size(workspaceSize);
+  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+  ASSERT_GE(workspaceSize, 0) << result.err_msg;
+  const Workspace workspace(static_cast<size_t>(workspaceSize));
+
   // Execute graph.
-  result = graph->execute(handle, variantPack, nullptr);
+  result = graph->execute(handle, variantPack, workspace.get());
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
   oTensor.memory().markDeviceModified();
 

@@ -33,6 +33,10 @@ struct Int64Value {
   value: long;
 }
 
+struct BoolValue {
+  value: bool;
+}
+
 // Note: FP4 and FP6 MX formats (e.g., FP4_E2M1, FP6_E2M3, FP6_E3M2) are intentionally
 // excluded from TensorValue. These OCP Microscaling formats are designed for block-scaled
 // tensor storage where values share scaling factors at the block level.
@@ -43,7 +47,8 @@ union TensorValue {
   Float8Value,
   Int32Value,
   Float64Value,
-  Int64Value
+  Int64Value,
+  BoolValue
 }
 
 table TensorAttributes {

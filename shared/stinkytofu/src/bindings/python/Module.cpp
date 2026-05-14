@@ -117,6 +117,10 @@ void StinkyAsmModule::runOptimizationPipeline() {
     backend.runOptimization();
 }
 
+std::optional<uint64_t> StinkyAsmModule::getMetaDataU64(const std::string& key) const {
+    return getFunction().getMetaData(key);
+}
+
 void StinkyAsmModule::addGroup(const std::string& name) {
     if (pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end()) {
         return;
@@ -134,8 +138,13 @@ StinkyAsmModule::findGroupRange(const std::string& groupName) const {
         return std::nullopt;
     }
 
-    return std::make_optional(std::make_pair(pImpl->instructionGroups.at(groupName).begin(),
-                                             pImpl->instructionGroups.at(groupName).end()));
+    const auto& range = pImpl->instructionGroups.at(groupName);
+    // Return nullopt if the group was registered but never populated
+    if (range.first == IntrusiveListIterator<IRBase>()) {
+        return std::nullopt;
+    }
+
+    return std::make_optional(std::make_pair(range.begin(), range.end()));
 }
 
 void StinkyAsmModule::updateInstructionGroups(const std::vector<const std::string*>& groups,
@@ -147,7 +156,7 @@ void StinkyAsmModule::updateInstructionGroups(const std::vector<const std::strin
             auto& groupRange = pImpl->instructionGroups.at(*groupName);
             if (groupRange.first == IntrusiveListIterator<IRBase>()) {
                 auto it = bb.rbegin();
-                for (auto i = 1; i < newInstructionCount; ++i) {
+                for (size_t i = 1; i < newInstructionCount; ++i) {
                     it++;
                 }
                 groupRange.first = IntrusiveListIterator<IRBase>(it.getNodePtr());

@@ -22,6 +22,10 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/BBIndexAnalysis.hpp"
+#include "stinkytofu/analysis/LoopAnalysis.hpp"
+#include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
@@ -36,10 +40,27 @@
 namespace {
 using namespace stinkytofu;
 
-// Check if instruction is a movable side effect (like s_barrier)
-static bool isMovableSideEffect(const StinkyInstruction& inst) {
-    // This is a barrier and has manually defined dependencies.
-    return isBarrier(inst) && !inst.getDestRegs().empty();
+static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGraph,
+                         const DAGNodeList& dagNodes) {
+    std::cerr << "*** DAG Graph Dump: ***\n";
+    for (unsigned i = 0; i < dagGraph.size(); ++i) {
+        std::cerr << "Node " << i << ": ";
+        dagNodes[i].inst->dump(std::cerr);
+        std::cerr << "  successors: ";
+        for (unsigned succId : dagGraph[i]) {
+            std::cerr << succId << " ";
+        }
+        std::cerr << "\n";
+    }
+    std::cerr << "\n\n";
+}
+
+static bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
+    for (const StinkyRegister& r : inst.getSrcRegs())
+        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
+    for (const StinkyRegister& r : inst.getDestRegs())
+        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
+    return false;
 }
 
 // --- Region scheduler (does NOT move fences) ---
@@ -49,7 +70,7 @@ static bool isMovableSideEffect(const StinkyInstruction& inst) {
 // (only when both endpoints are inside the region).
 static void scheduleRegionWithMovableSideEffects(
     IRList::iterator regionStart, IRList::iterator regionEnd, IRList::iterator blockBegin,
-    std::vector<StinkyInstruction*>& scheduled, ReadyQueue& readyQueue,
+    std::vector<IRBase*>& scheduled, ReadyQueue& readyQueue,
     const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
     if (regionStart == regionEnd) {
         return;  // Empty region, nothing to schedule.
@@ -309,14 +330,16 @@ static void scheduleRegionWithMovableSideEffects(
 }
 
 static bool hasSideEffect(const StinkyInstruction& inst) {
-    if (
-        // TODO: provide a configurable way to ignore certain instructions,
-        //       e.g. LocalWriteInstruction
-        //
-        // dynamic_cast<const LocalWriteInstruction*>(op) ||
-        //
-        isGlobalMemStore(inst) || isBranch(inst) || isBarrier(inst) || isWaitCnt(inst) ||
-        isHasSideEffect(inst)) {
+    if (isGlobalMemStore(inst) || isBranch(inst) || isWaitCnt(inst) || isHasSideEffect(inst)) {
+        return true;
+    }
+
+    // Barriers and memory ops without LDS pseudo-registers (no MemTokenData
+    // assigned) must be treated conservatively as non-movable side effects to
+    // preserve strict ordering. When LDS pseudo-regs are present, ordering is
+    // enforced by the DAG via def-use edges, so they are safe to schedule.
+    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
+        !hasLdsPseudoRegs(inst)) {
         return true;
     }
     return false;
@@ -334,7 +357,7 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
 
     if (bb.empty()) return;
 
-    std::vector<StinkyInstruction*> scheduled;
+    std::vector<IRBase*> scheduled;
     scheduled.reserve(bb.size());
 
     BasicBlock::iterator beginIt = bb.begin();
@@ -345,9 +368,21 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
     BasicBlock::iterator regionStart = beginIt;
 
     for (BasicBlock::iterator it = beginIt; it != endIt; ++it) {
-        StinkyInstruction& inst = getStinkyInst(it);
-        // Only break regions on non-movable side effects
-        if (hasSideEffect(inst) && !isMovableSideEffect(inst)) {
+        IRBase* irNode = it.getNodePtr();
+        auto* instPtr = dyn_cast<StinkyInstruction>(irNode);
+
+        if (!instPtr) {
+            // Non-instruction IR (e.g. AsmDirective): treat as non-movable
+            // side-effect boundary so its position is strictly preserved.
+            scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
+                                                 wmmaIndex);
+            scheduled.push_back(irNode);
+            regionStart = std::next(it);
+            continue;
+        }
+
+        StinkyInstruction& inst = *instPtr;
+        if (hasSideEffect(inst)) {
             scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
                                                  wmmaIndex);
 
@@ -369,9 +404,9 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
 
     // Now we have a scheduled list of instructions.
     // Reorder the block to reflect the scheduling (move each to end in order).
-    for (StinkyInstruction* inst : scheduled) {
-        bb.removeIR(inst);
-        bb.appendIR(inst);
+    for (IRBase* ir : scheduled) {
+        bb.removeIR(ir);
+        bb.appendIR(ir);
     }
 
     readyQueue.onFinishBB();
@@ -399,25 +434,29 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
         return &StinkyDAGSchedulerPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         // Build def-use chains so we can look up cross-BB WMMA consumers
         // of ds_reads for wmmaAffinity annotation.
-        buildUseDefChain(func, true);
+        const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
+        buildUseDefChain(func, domInfo, true);
+
+        const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
 
         // Pre-assign a function-wide index to each WMMA/SWMMA so wmmaAffinity
         // values are comparable across scheduling regions.
         std::unordered_map<StinkyInstruction*, unsigned> wmmaIndex;
         {
             unsigned idx = 0;
-            traverseCFGInRPO(func, [&](BasicBlock* bb) {
+            for (auto* bb : rpo) {
                 for (auto it = bb->begin(); it != bb->end(); ++it) {
-                    StinkyInstruction& inst = getStinkyInst(it);
-                    if (isWMMA(inst) || isSWMMA(inst)) wmmaIndex[&inst] = idx++;
+                    auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                    if (!inst) continue;
+                    if (isWMMA(*inst) || isSWMMA(*inst)) wmmaIndex[inst] = idx++;
                 }
-            });
+            }
         }
 
-        auto loops = detectLoops(func);
+        const auto& loops = AM.getResult<LoopAnalysis>(func);
 
         PASS_DEBUG(for (const Loop& loop
                         : loops) {
@@ -445,8 +484,8 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
             for (BasicBlock* bb : loop.bodyBBs) bbToLoop[bb] = &loop;
         }
 
-        traverseCFGInRPO(func, [&](BasicBlock* bb) {
-            if (!passCtx.shouldProcessBasicBlock(*bb)) return;
+        for (auto* bb : rpo) {
+            if (!passCtx.shouldProcessBasicBlock(*bb)) continue;
 
             auto it = bbToLoop.find(bb);
             if (it != bbToLoop.end()) {
@@ -463,7 +502,8 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                 rq->setAnalysisCache(&analysisCache);
                 scheduleInDAG(*bb, *rq, wmmaIndex);
             }
-        });
+        }
+        return preserveCFGAnalyses();
     }
 };
 

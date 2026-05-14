@@ -28,6 +28,7 @@
 ///   # CHECK: expected_substring
 ///   # CHECK-NEXT: must_be_on_next_line
 ///   # CHECK-NOT: must_not_appear
+///   # XFAIL: the command is expected to exit non-zero; CHECK patterns still verified
 ///
 /// Executes the RUN command, captures stdout, and verifies CHECK directives.
 
@@ -94,15 +95,16 @@ struct CheckDirective {
     int lineNum;
 };
 
-// Parse # RUN: and # CHECK: directives from the test file.
+// Parse # RUN:, # XFAIL, and # CHECK: directives from the test file.
 bool parseTestFile(const std::string& filename, std::string& runCmd,
-                   std::vector<CheckDirective>& checks) {
+                   std::vector<CheckDirective>& checks, bool& xfail) {
     std::ifstream file(filename);
     if (!file.is_open()) {
         std::cerr << "Error: cannot open " << filename << "\n";
         return false;
     }
 
+    xfail = false;
     std::string line;
     int lineNum = 0;
     while (std::getline(file, line)) {
@@ -119,7 +121,9 @@ bool parseTestFile(const std::string& filename, std::string& runCmd,
         if (pos == std::string::npos) continue;
         rest = rest.substr(pos);
 
-        if (rest.rfind("RUN:", 0) == 0) {
+        if (rest.rfind("XFAIL", 0) == 0) {
+            xfail = true;
+        } else if (rest.rfind("RUN:", 0) == 0) {
             runCmd = rest.substr(4);
             // Trim leading whitespace
             pos = runCmd.find_first_not_of(" \t");
@@ -160,11 +164,12 @@ bool parseTestFile(const std::string& filename, std::string& runCmd,
     return !runCmd.empty();
 }
 
-// Execute a command and capture stdout.
-std::string executeCommand(const std::string& cmd) {
+// Execute a command and capture stdout. Returns the exit status via out-param.
+std::string executeCommand(const std::string& cmd, int& exitStatus) {
     FILE* pipe = popen(cmd.c_str(), "r");
     if (!pipe) {
         std::cerr << "Error: failed to execute: " << cmd << "\n";
+        exitStatus = -1;
         return {};
     }
 
@@ -172,11 +177,7 @@ std::string executeCommand(const std::string& cmd) {
     char buffer[4096];
     while (fgets(buffer, sizeof(buffer), pipe)) result += buffer;
 
-    int status = pclose(pipe);
-    if (status != 0) {
-        std::cerr << "Warning: command exited with status " << status << "\n";
-    }
-
+    exitStatus = pclose(pipe);
     return result;
 }
 
@@ -314,14 +315,6 @@ bool verifyChecks(const std::vector<std::string>& outputLines,
             for (size_t g = 0; g < dagGroup.size(); ++g) {
                 bool found = false;
                 for (size_t j = startIdx; j < endIdx; ++j) {
-                    // Skip lines already consumed by another DAG pattern.
-                    bool alreadyUsed = false;
-                    for (size_t g2 = 0; g2 < g; ++g2) {
-                        if (matched[g2]) {
-                            // Check if this line was the one that matched g2
-                            // (simplified: we re-scan, so just check all)
-                        }
-                    }
                     if (matchPattern(outputLines[j], dagGroup[g]->pattern)) {
                         matched[g] = true;
                         found = true;
@@ -384,7 +377,8 @@ int main(int argc, char** argv) {
     // Parse test file
     std::string runCmd;
     std::vector<CheckDirective> checks;
-    if (!parseTestFile(testFile, runCmd, checks)) {
+    bool xfail = false;
+    if (!parseTestFile(testFile, runCmd, checks, xfail)) {
         std::cerr << "Error: no RUN: directive found in " << testFile << "\n";
         return 1;
     }
@@ -395,7 +389,15 @@ int main(int argc, char** argv) {
 
     // Substitute variables and execute
     std::string cmd = substituteVars(runCmd, testFile, optBinary);
-    std::string output = executeCommand(cmd);
+    int exitStatus = 0;
+    std::string output = executeCommand(cmd, exitStatus);
+    if (exitStatus != 0) {
+        if (xfail) {
+            std::cerr << testFile << ": note: command exited non-zero (expected by XFAIL)\n";
+        } else {
+            std::cerr << "Warning: command exited with status " << exitStatus << "\n";
+        }
+    }
 
     // Split output into lines
     std::vector<std::string> outputLines;

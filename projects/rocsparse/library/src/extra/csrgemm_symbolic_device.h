@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -84,6 +84,7 @@ namespace rocsparse
 
         // Entry point into columns of C
         I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = csr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over the row chunks until the end of the row has been reached (which is
         // the number of total columns)
@@ -260,7 +261,7 @@ namespace rocsparse
                 I idx = row_begin_C + offset - 1;
 
                 // Only threads with a non-zero value write to C
-                if(has_nnz)
+                if(has_nnz && idx < row_end_C)
                 {
                     csr_col_ind_C[idx] = i + chunk_begin + idx_base_C;
                 }
@@ -659,6 +660,7 @@ namespace rocsparse
 
         // Entry point of current row into C
         I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = csr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over hash table
         for(uint32_t i = lid; i < HASHSIZE; i += WFSIZE)
@@ -695,7 +697,10 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtained position in C
-            csr_col_ind_C[idx_C] = col_C + idx_base_C;
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
+            {
+                csr_col_ind_C[idx_C] = col_C + idx_base_C;
+            }
         }
     }
 
@@ -888,7 +893,10 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtain position in C
-            csr_col_ind_C[idx_C] = col_C + idx_base_C;
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
+            {
+                csr_col_ind_C[idx_C] = col_C + idx_base_C;
+            }
         }
     }
 }

@@ -3,6 +3,7 @@
 
 #include <HipdnnBackendPluginLoadingMode.h>
 #include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
@@ -53,4 +54,20 @@ NB_MODULE(hipdnn_frontend_python, m)
         nb::arg("paths"),
         nb::arg("mode") = HIPDNN_DEFAULT_PLUGIN_LOADING_MODE,
         "Set custom engine plugin paths. Must be called before creating any handles.");
+
+    m.def(
+        "engine_id_to_name",
+        [](int64_t id) -> std::string {
+            try
+            {
+                return std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(id));
+            }
+            catch(const std::out_of_range&)
+            {
+                return std::string{};
+            }
+        },
+        nb::arg("engine_id"),
+        "Look up the registered engine name for a given engine ID. "
+        "Returns an empty string if the ID is not registered.");
 }
