@@ -36,6 +36,7 @@ def getRequiredParametersMin() -> set:
         '1LDSBuffer',
         'ActivationFuncCall',
         'AdaptiveGemm',
+        'AdaptiveGemmNTAB',
         'AssertFree0ElementMultiple',
         'AssertFree1ElementMultiple',
         'AssertSummationElementMultiple',

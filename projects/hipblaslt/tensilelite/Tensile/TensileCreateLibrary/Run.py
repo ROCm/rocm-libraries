@@ -284,6 +284,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                     sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
                     sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
                     sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
+                    sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
                     sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
                     sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
                     sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
@@ -313,6 +314,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                         sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
                         sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
                         sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
+                        sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
                         sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
                         sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
                         sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
