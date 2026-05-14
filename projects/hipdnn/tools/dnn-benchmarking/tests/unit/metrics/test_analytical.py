@@ -204,6 +204,95 @@ class TestComputeFlops:
         assert flops == 4 * 32 * 64 * 28 * 28
         assert partial is False
 
+    def test_batchnorm_attributes_treated_as_fwd_training(self):
+        # Real MIOpen workloads use BatchnormAttributes (without
+        # Fwd/Bwd suffix) for forward training. 8 ops/elem on the
+        # y_tensor output.
+        graph = _bnorm_graph()
+        graph["nodes"][0]["type"] = "BatchnormAttributes"
+        flops, partial = compute_flops(graph)
+        assert flops == 8 * 32 * 64 * 28 * 28
+        assert partial is False
+
+    def test_batchnorm_backward_uses_dx_for_element_count(self):
+        # Real MIOpen wgrad emits BatchnormBackwardAttributes whose
+        # output is dx_tensor_uid (no y_tensor_uid). 8 ops/elem on dx.
+        graph = {
+            "tensors": [
+                {"uid": 1, "dims": [16, 64, 28, 28], "data_type": "float"},
+                {"uid": 2, "dims": [16, 64, 28, 28], "data_type": "float"},
+            ],
+            "nodes": [
+                {
+                    "name": "bn_bwd",
+                    "type": "BatchnormBackwardAttributes",
+                    "inputs": {"dy_tensor_uid": 1, "x_tensor_uid": 1},
+                    "outputs": {
+                        "dx_tensor_uid": 2,
+                        "dscale_tensor_uid": 1,
+                        "dbias_tensor_uid": 1,
+                    },
+                }
+            ],
+        }
+        flops, partial = compute_flops(graph)
+        assert flops == 8 * 16 * 64 * 28 * 28
+        assert partial is False
+
+    def test_conv_bwd_attributes_uses_dx_for_input_shape_dy_for_output_spatial(self):
+        # ConvolutionBwdAttributes (dgrad): dx = conv_transposed(dy, w).
+        # Input gradient dx has shape [N, C_in, H_in, W_in], dy has
+        # [N, K, H_out, W_out]. FLOPs equal forward conv.
+        n, c, h_in, w_in = 8, 16, 32, 32
+        k, h_out, w_out = 32, 30, 30
+        r, s = 3, 3
+        graph = {
+            "tensors": [
+                {"uid": 1, "dims": [n, k, h_out, w_out], "data_type": "float"},  # dy
+                {"uid": 2, "dims": [k, c, r, s], "data_type": "float"},  # w
+                {"uid": 3, "dims": [n, c, h_in, w_in], "data_type": "float"},  # dx
+            ],
+            "nodes": [
+                {
+                    "name": "dgrad",
+                    "type": "ConvolutionBwdAttributes",
+                    "inputs": {"dy_tensor_uid": 1, "w_tensor_uid": 2},
+                    "outputs": {"dx_tensor_uid": 3},
+                    "parameters": {"group_count": 1},
+                }
+            ],
+        }
+        flops, partial = compute_flops(graph)
+        # 2 * N * C_in * R * S * K * H_out * W_out
+        assert flops == 2 * n * c * r * s * k * h_out * w_out
+        assert partial is False
+
+    def test_conv_wrw_attributes_uses_x_dy_for_shape(self):
+        # ConvolutionWrwAttributes (wgrad): dw = conv(x, dy). Output
+        # dw has the weight shape; FLOPs equal forward conv.
+        n, c, h_in, w_in = 8, 16, 32, 32
+        k, h_out, w_out = 32, 30, 30
+        r, s = 3, 3
+        graph = {
+            "tensors": [
+                {"uid": 1, "dims": [n, c, h_in, w_in], "data_type": "float"},  # x
+                {"uid": 2, "dims": [n, k, h_out, w_out], "data_type": "float"},  # dy
+                {"uid": 3, "dims": [k, c, r, s], "data_type": "float"},  # dw
+            ],
+            "nodes": [
+                {
+                    "name": "wgrad",
+                    "type": "ConvolutionWrwAttributes",
+                    "inputs": {"x_tensor_uid": 1, "dy_tensor_uid": 2},
+                    "outputs": {"dw_tensor_uid": 3},
+                    "parameters": {"group_count": 1},
+                }
+            ],
+        }
+        flops, partial = compute_flops(graph)
+        assert flops == 2 * n * c * r * s * k * h_out * w_out
+        assert partial is False
+
     def test_layernorm_8_flops_per_element(self):
         graph = {
             "tensors": [

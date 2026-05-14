@@ -61,59 +61,40 @@ def _tensor_lookup(graph_json: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
     return {int(t["uid"]): t for t in graph_json.get("tensors", []) if "uid" in t}
 
 
-def _conv_flops(
-    node: Dict[str, Any], tensors_by_uid: Dict[int, Dict[str, Any]]
+def _conv_flops_impl(
+    x: Optional[Dict[str, Any]],
+    w: Optional[Dict[str, Any]],
+    y: Optional[Dict[str, Any]],
+    params: Dict[str, Any],
 ) -> Optional[int]:
-    """FLOPs for ConvolutionFwdAttributes (also used for bwd-data/weights).
+    """Compute conv FLOPs given resolved input / weight / output tensors.
 
-    Uses the MIOpen formula: ``2 * N * C * R * S * K * H_out * W_out /
-    group``. For ND convolutions all spatial dims of weight + output are
-    multiplied, matching ``conv_driver.hpp:1750-1751``.
+    The three conv directions (fwd / bwd-data / bwd-filter) all do the
+    same total scalar work; they only differ in which tensor is being
+    produced. Each direction-specific handler resolves the right
+    UID-keyed tensor as ``x`` (the activation-shaped input),
+    ``w`` (the weight), ``y`` (the activation-shaped output) and calls
+    this implementation.
+
+    MIOpen formula: ``2 * N * C_in * R * S * K * H_out * W_out / group``
+    (matches ``conv_driver.hpp:1750-1751``).
     """
-    inputs = node.get("inputs", {}) or {}
-    outputs = node.get("outputs", {}) or {}
-    params = node.get("parameters", {}) or {}
-
-    # TODO: lift this string-keyed UID lookup into a structural pass
-    # over the parsed graph once a Graph/Node abstraction is available.
-    # Today every handler in this module reaches into the raw JSON and
-    # probes hipDNN-specific input/output names by string, which couples
-    # us to the exact key strings emitted by hipDNN's frontend.
-    #
-    # Cannot use ``or`` chains here: hipDNN tensor UIDs start at 0 and
-    # ``0 or fallback`` evaluates to fallback, masking the real UID.
-    x_uid = inputs.get("x_tensor_uid")
-    if x_uid is None:
-        x_uid = inputs.get("dy_tensor_uid")
-    w_uid = inputs.get("w_tensor_uid")
-    y_uid = outputs.get("y_tensor_uid")
-    if y_uid is None:
-        y_uid = outputs.get("dx_tensor_uid")
-    if y_uid is None:
-        y_uid = outputs.get("dw_tensor_uid")
-    if x_uid is None or w_uid is None or y_uid is None:
-        return None
-    x = tensors_by_uid.get(int(x_uid))
-    w = tensors_by_uid.get(int(w_uid))
-    y = tensors_by_uid.get(int(y_uid))
     if not x or not w or not y:
         return None
-
     x_dims = x.get("dims") or []
     w_dims = w.get("dims") or []
     y_dims = y.get("dims") or []
     if len(x_dims) < 4 or len(w_dims) < 4 or len(y_dims) < 4:
+        return None
+    spatial_w = w_dims[2:]
+    spatial_y = y_dims[2:]
+    if not spatial_w or not spatial_y:
         return None
 
     # NCHW / NCDHW: dim 0 = N, dim 1 = C; for weight K = dim 0, C/g = dim 1.
     n = int(x_dims[0])
     c_in = int(x_dims[1])
     k = int(w_dims[0])
-    spatial_w = w_dims[2:]
-    spatial_y = y_dims[2:]
-
-    if not spatial_w or not spatial_y:
-        return None
 
     weight_spatial = 1
     for d in spatial_w:
@@ -125,6 +106,83 @@ def _conv_flops(
     group_count = int(params.get("group_count", 1)) or 1
 
     return 2 * n * c_in * weight_spatial * k * output_spatial // group_count
+
+
+# TODO: lift the string-keyed UID lookups in the per-direction handlers
+# below into a structural pass over the parsed graph once a Graph/Node
+# abstraction is available. Today every handler reaches into the raw
+# JSON and probes hipDNN-specific input/output names by string, which
+# couples us to the exact key strings emitted by hipDNN's frontend.
+#
+# Cannot use ``or`` chains for UID lookups: hipDNN tensor UIDs start at
+# 0 and ``0 or fallback`` evaluates to fallback, masking the real UID.
+
+
+def _conv_fwd_flops(
+    node: Dict[str, Any], tensors_by_uid: Dict[int, Dict[str, Any]]
+) -> Optional[int]:
+    """ConvolutionFwdAttributes: ``y = conv(x, w)``."""
+    inputs = node.get("inputs", {}) or {}
+    outputs = node.get("outputs", {}) or {}
+    x_uid = inputs.get("x_tensor_uid")
+    w_uid = inputs.get("w_tensor_uid")
+    y_uid = outputs.get("y_tensor_uid")
+    if x_uid is None or w_uid is None or y_uid is None:
+        return None
+    return _conv_flops_impl(
+        x=tensors_by_uid.get(int(x_uid)),
+        w=tensors_by_uid.get(int(w_uid)),
+        y=tensors_by_uid.get(int(y_uid)),
+        params=node.get("parameters", {}) or {},
+    )
+
+
+def _conv_dgrad_flops(
+    node: Dict[str, Any], tensors_by_uid: Dict[int, Dict[str, Any]]
+) -> Optional[int]:
+    """ConvolutionBwdAttributes (dgrad): ``dx = conv_transposed(dy, w)``.
+
+    The output ``dx`` has the activation-input shape ``[N, C, H_in, W_in]``
+    and ``dy`` has the activation-output shape ``[N, K, H_out, W_out]``.
+    Map them onto the fwd-shaped impl: dx -> x, dy -> y.
+    """
+    inputs = node.get("inputs", {}) or {}
+    outputs = node.get("outputs", {}) or {}
+    dy_uid = inputs.get("dy_tensor_uid")
+    w_uid = inputs.get("w_tensor_uid")
+    dx_uid = outputs.get("dx_tensor_uid")
+    if dy_uid is None or w_uid is None or dx_uid is None:
+        return None
+    return _conv_flops_impl(
+        x=tensors_by_uid.get(int(dx_uid)),
+        w=tensors_by_uid.get(int(w_uid)),
+        y=tensors_by_uid.get(int(dy_uid)),
+        params=node.get("parameters", {}) or {},
+    )
+
+
+def _conv_wgrad_flops(
+    node: Dict[str, Any], tensors_by_uid: Dict[int, Dict[str, Any]]
+) -> Optional[int]:
+    """ConvolutionWrwAttributes (wgrad): ``dw = conv(x, dy)``.
+
+    Output ``dw`` has the weight shape ``[K, C/G, R, S]`` and ``dy``
+    has the activation-output shape. Map onto the fwd-shaped impl:
+    x -> x, dw -> w, dy -> y.
+    """
+    inputs = node.get("inputs", {}) or {}
+    outputs = node.get("outputs", {}) or {}
+    x_uid = inputs.get("x_tensor_uid")
+    dy_uid = inputs.get("dy_tensor_uid")
+    dw_uid = outputs.get("dw_tensor_uid")
+    if x_uid is None or dy_uid is None or dw_uid is None:
+        return None
+    return _conv_flops_impl(
+        x=tensors_by_uid.get(int(x_uid)),
+        w=tensors_by_uid.get(int(dw_uid)),
+        y=tensors_by_uid.get(int(dy_uid)),
+        params=node.get("parameters", {}) or {},
+    )
 
 
 def _matmul_flops(
@@ -213,8 +271,25 @@ def _batchnorm_inference_flops(
 def _batchnorm_training_flops(
     node: Dict[str, Any], tensors_by_uid: Dict[int, Dict[str, Any]]
 ) -> Optional[int]:
-    """BatchNorm fwd/bwd training: 8 ops/elem (reductions + inference math)."""
+    """BatchNorm fwd training: 8 ops/elem (reductions + inference math).
+
+    Output count comes from ``y_tensor_uid`` which is the activation
+    output of the BN forward.
+    """
     elems = _output_elements(node, tensors_by_uid)
+    return 8 * elems if elems is not None else None
+
+
+def _batchnorm_backward_flops(
+    node: Dict[str, Any], tensors_by_uid: Dict[int, Dict[str, Any]]
+) -> Optional[int]:
+    """BatchNorm bwd: 8 ops/elem on the activation-shaped gradient.
+
+    BN backward emits ``dx_tensor_uid`` (the gradient w.r.t. the input
+    activation), plus ``dscale`` / ``dbias`` (parameter-sized — small
+    enough to ignore). The dominant cost is over ``dx`` elements.
+    """
+    elems = _output_elements(node, tensors_by_uid, output_key="dx_tensor_uid")
     return 8 * elems if elems is not None else None
 
 
@@ -268,14 +343,26 @@ def _rng_flops(
 # when tensor data is incomplete). Unrecognised types flip the
 # ``partial`` flag in compute_flops.
 _FLOP_HANDLERS = {
-    "ConvolutionFwdAttributes": _conv_flops,
-    "ConvolutionBwdDataAttributes": _conv_flops,
-    "ConvolutionBwdFilterAttributes": _conv_flops,
+    # Convolution: hipDNN's actual node names are ConvolutionFwdAttributes,
+    # ConvolutionBwdAttributes (dgrad), and ConvolutionWrwAttributes
+    # (wgrad). The *DataAttributes / *FilterAttributes spellings are
+    # kept as aliases for older graph snapshots.
+    "ConvolutionFwdAttributes": _conv_fwd_flops,
+    "ConvolutionBwdAttributes": _conv_dgrad_flops,
+    "ConvolutionBwdDataAttributes": _conv_dgrad_flops,
+    "ConvolutionWrwAttributes": _conv_wgrad_flops,
+    "ConvolutionBwdFilterAttributes": _conv_wgrad_flops,
     "MatmulAttributes": _matmul_flops,
     "PointwiseAttributes": _pointwise_flops,
+    # BatchNorm: hipDNN's BatchnormAttributes covers fwd training (with
+    # next_running_* outputs) and BatchnormBackwardAttributes covers
+    # bwd. BatchnormFwdAttributes / BatchnormBwdAttributes are kept as
+    # aliases for older graph snapshots.
     "BatchnormInferenceAttributes": _batchnorm_inference_flops,
+    "BatchnormAttributes": _batchnorm_training_flops,
     "BatchnormFwdAttributes": _batchnorm_training_flops,
-    "BatchnormBwdAttributes": _batchnorm_training_flops,
+    "BatchnormBackwardAttributes": _batchnorm_backward_flops,
+    "BatchnormBwdAttributes": _batchnorm_backward_flops,
     "LayerNormAttributes": _layernorm_flops,
     "RmsNormAttributes": _layernorm_flops,
     "SoftmaxAttributes": _softmax_flops,
