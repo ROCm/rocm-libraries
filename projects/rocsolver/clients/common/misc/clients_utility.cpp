@@ -160,7 +160,7 @@ void print_asan_kernel_warning(const char* program_name)
 {
     if constexpr(rocsolver_enable_asan)
     {
-        fmt::print(
+        rocsolver::formatting::print(
             "{} WARNING: AddressSanitizer build active; some kernel launch configurations are "
             "reduced for stability and may not match production performance.\n",
             program_name);
