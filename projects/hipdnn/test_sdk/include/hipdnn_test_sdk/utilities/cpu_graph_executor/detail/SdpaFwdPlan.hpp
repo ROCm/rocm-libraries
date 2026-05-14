@@ -138,8 +138,7 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
 
         // Unsupported mask modes
-        if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask()
-           || nodeAttributes->causal_mask_bottom_right())
+        if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
         {
             return false;
         }
