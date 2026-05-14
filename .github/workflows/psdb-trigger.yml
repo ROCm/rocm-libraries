@@ -15,10 +15,17 @@ jobs:
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Check if this is our own merge commit
         id: check
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           COMMIT_MSG=$(curl -s \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -38,6 +45,13 @@ jobs:
     if: needs.check.outputs.should_run == 'true' && (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-psdb'))
     runs-on: rocm-ci-runner
     steps:
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Cleanup workspace
         run: sudo rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.[!.]*
 
@@ -46,7 +60,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
-          token: ${{ secrets.ROCM_SERVICE_ACCOUNT_PAT }}
+          token: ${{ steps.generate-token.outputs.token }}
 
       - name: Check if base already merged
         id: check
@@ -76,7 +90,7 @@ jobs:
       - name: Post conflict status
         if: steps.merge.outputs.merge_success == 'false'
         env:
-          GH_TOKEN: ${{ secrets.ROCM_SERVICE_ACCOUNT_PAT }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           gh api repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }} \
             -f state=error \
@@ -91,7 +105,7 @@ jobs:
       - name: Cancel previous PSDB runs
         if: steps.merge.outputs.merge_success != 'false'
         env:
-          GH_TOKEN: ${{ secrets.ROCM_SERVICE_ACCOUNT_PAT }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           RUNS=$(curl -s \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -118,7 +132,7 @@ jobs:
       - name: Trigger PSDB
         if: steps.merge.outputs.merge_success != 'false'
         env:
-          GH_TOKEN: ${{ secrets.ROCM_SERVICE_ACCOUNT_PAT }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           COMMIT="${{ steps.merge.outputs.commit_sha || steps.check.outputs.commit_sha }}"
           HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" -X POST \
