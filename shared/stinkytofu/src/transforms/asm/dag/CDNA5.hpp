@@ -26,9 +26,8 @@
 // StinkyDAGSchedulerPass splits each basic block into regions at non-movable side effects
 // (waits, stores, branches, etc.), builds a per-region dependency DAG from physical registers,
 // then drains ready nodes via this queue. CDNA5 models the WMMA–VALU co-issue timeline:
-// WMMA issues in 1 cycle, but its latency creates a per-cycle timeline where VALU can only
-// execute during I-slots (coIssueMask). Memory ops (ds_load, global_read, tensor_load) and
-// SALU use independent pipelines with no co-issue constraints.
+// WMMA issues in 1 cycle; VALU is only gated by the co-issue window.
+// Memory ops and SALU use independent pipelines.
 //
 #include <algorithm>
 #include <cassert>
@@ -172,7 +171,7 @@ static std::vector<BarrierTokenEntry> collectBarrierTokens(IRList::iterator regi
 //
 // Scheduling model: WMMA issues in 1 cycle; its latency defines a co-issue
 // timeline during which VALU can only execute in specific cycle slots given
-// by HwInstDesc::coIssueMask.  Memory ops (ds_load, global_read, tensor_load)
+// by HwInstDesc::coIssueWindow.  Memory ops (ds_load, global_read, tensor_load)
 // and SALU use independent pipelines and have no co-issue constraint with WMMA.
 //
 // Scheduling rules (every pick still respects the DAG: in-degree 0 only):
@@ -181,8 +180,7 @@ static std::vector<BarrierTokenEntry> collectBarrierTokens(IRList::iterator regi
 //      non-WMMA node with a smaller DAG id (preload / double-buffer).
 //  (2) DS / VGPR latency — block WMMA until modeled ds_load latency for WMMA
 //      src VGPRs has decayed; seed from the BB prefix before each region.
-//  (3) VALU co-issue timeline — after WMMA, VALU can only issue during I-slots
-//      (coIssueMask bit set); X-slots (bit clear) are VALU-free.
+//  (3) VALU is only gated by the co-issue window.
 //  (4) Adaptive DS distribution — soft hint to spread ds_loads across WMMAs;
 //      prefer issuing ds_loads before WMMA when under the per-WMMA milestone.
 //  (5) Loop tail vs head — defer first WMMA in the loop header BB until
@@ -202,7 +200,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int globalReadPerWMMA = 1;
 
     // --- VALU co-issue timeline tracker ---
-    uint16_t activeCoIssueMask_ = 0;
+    uint16_t activeCoIssueWindow_ = 0;
     int coIssueCyclePos_ = 0;
     int activeWmmaLatency_ = 0;
 
@@ -286,7 +284,7 @@ void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
 // True if VALU can be picked in the current co-issue timeline position.
 bool CDNA5ReadyQueue::isValuPickable() const {
     if (coIssueCyclePos_ >= activeWmmaLatency_) return true;
-    return (activeCoIssueMask_ >> coIssueCyclePos_) & 1;
+    return (activeCoIssueWindow_ >> coIssueCyclePos_) & 1;
 }
 
 // Pop a non-WMMA node by kind (0=global, 1=local, 2=other, 3=valu),
@@ -360,7 +358,7 @@ std::pair<DAGNode*, int> CDNA5ReadyQueue::findMostReadyWMMA() {
     return {best, bestLatency};
 }
 
-// Pick a WMMA: start a new co-issue timeline from its coIssueMask,
+// Pick a WMMA: start a new co-issue timeline from its coIssueWindow,
 // update DS distribution counters, clear loop-head deferral.
 DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     assert(!wmmaQueue.empty() && "The WMMA queue must not be empty");
@@ -376,7 +374,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // Decay DS latency for the WMMA's own issue cycle before resetting the timeline.
     advanceTime(node->inst->issueCycles);
 
-    activeCoIssueMask_ = node->inst->hwInstDesc->coIssueMask;
+    activeCoIssueWindow_ = node->inst->hwInstDesc->coIssueWindow;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
 
@@ -593,10 +591,8 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
 //   Phase A: forced barrier — when wmmaIssuedCountThisRegion_ reaches a per-barrier threshold.
 //   Phase B: WMMA if DS latency gate (rule 2) passed, DS distribution hint (rule 4) met,
 //            loop head balance (rule 5) ok, and program order (rule 1) allows.
-//   Phase C: inside WMMA co-issue timeline — fill slots with non-WMMA work.
-//            VALU only during I-slots (coIssueMask bit set); memory/SALU anytime.
-//            Fast-forward past timeline when no non-WMMA work is pickable.
-//   Phase D: outside WMMA timeline — pick smallest-id from any non-WMMA queue.
+//   Phase C: inside WMMA latency window — fill with non-WMMA work.
+//   Phase D: outside WMMA latency — pick smallest-id from any non-WMMA queue.
 //   Phase E: forced WMMA — pick most-ready WMMA when all non-WMMA queues are empty.
 //   Phase F: barriers — only after all compute queues (WMMA + non-WMMA) are drained.
 DAGNode* CDNA5ReadyQueue::pickOne() {
@@ -624,21 +620,17 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         bool programOrderOk = hasWMMAInRegion_ ||
                               (smallestPickable == nullptr || bestWMMA->id < smallestPickable->id);
 
-        // DS-first: prefer issuing ds_loads before WMMA when available and
-        // burst limit not reached.
-        bool dsPreferLoad = !localReadQueue.empty() && consecutiveDsCount_ < kMaxConsecutiveDs;
-
         const bool blockWmmaForLoopHeadBalance =
             deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
 
-        if (bestLatency <= 0 && programOrderOk && !dsPreferLoad && !blockWmmaForLoopHeadBalance) {
+        if (bestLatency <= 0 && programOrderOk && !blockWmmaForLoopHeadBalance) {
             DAGNode* node = pickOneFromWMMA(bestWMMA);
             return node;
         }
     }
 
-    // Phase C — inside WMMA timeline: fill co-issue slots with non-WMMA work.
-    // If nothing non-WMMA is pickable, fast-forward past the timeline so
+    // Phase C — inside WMMA latency window: fill with non-WMMA work.
+    // If nothing non-WMMA is pickable, fast-forward past the window so
     // Phase D/E can pick the next WMMA. Barriers are deferred until all
     // compute queues (including wmmaQueue) are empty.
     if (coIssueCyclePos_ < activeWmmaLatency_) {
@@ -650,12 +642,10 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             return popNonWmmaByKind(pickKind);
         }
 
-        // Nothing productive can fill remaining slots — fast-forward past timeline
-        // and decay DS latency for the skipped cycles.
         advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
     }
 
-    // Phase D — outside WMMA timeline: pick smallest-id from any non-WMMA queue.
+    // Phase D — outside WMMA latency: pick smallest-id from any non-WMMA queue.
     {
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
@@ -731,7 +721,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     deferFirstHeadWmmaActive_ = false;
     deferHeadBalanceThisRegion_ = false;
 
-    activeCoIssueMask_ = 0;
+    activeCoIssueWindow_ = 0;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = 0;
 
