@@ -51,7 +51,7 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   // on are changed; everything else inherits from the base lookup.
   heuristic = get_heuristic_params(problem, hardware, config);
   if (config.target == target_t::triton)
-    heuristic.merge_with(get_triton_heuristic_params(problem, hardware, config));
+    heuristic.merge_with(triton::get_heuristic_params(problem, hardware, config));
 
   // Element sizes
   a_bytes = data_type_to_bytes(problem.a_dtype);

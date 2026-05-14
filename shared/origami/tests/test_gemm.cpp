@@ -1666,7 +1666,7 @@ TEST_CASE("Heuristics: merge_with composes broad then narrow overlays", "[heuris
 TEST_CASE("Triton overlay: applied at context_t construction, no per-call patching",
           "[heuristics][triton]") {
   // End-to-end check that the Triton-target overlay set up in
-  // triton_heuristics_database_t (currently a 0.95 weight_tile_total for
+  // triton::heuristics_database_t (currently a 0.95 weight_tile_total for
   // the 256x256x64 tile) is actually merged into context_t::heuristic at
   // construction time. Previously this lived as a manual `if (target ==
   // triton) L_tile_total *= triton_h.weight_tile_total;` patch inside
