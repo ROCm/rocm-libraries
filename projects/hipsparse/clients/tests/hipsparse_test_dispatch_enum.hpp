@@ -30,6 +30,8 @@ struct hipsparse_test_dispatch_enum
         t,
         it,
         ijt,
-        gather
+        gather,
+        ijabct_spmv,
+        iabct_spmv
     } value_type;
 };

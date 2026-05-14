@@ -220,7 +220,7 @@ void Solution::RunImpl(const Handle& handle,
         return;
     }
 
-    const auto net_cfg       = conv_problem.BuildConfKey();
+    const auto net_cfg       = conv_problem.MakeNetworkConfig();
     const auto found_invoker = handle.GetInvoker(net_cfg, GetSolver());
 
     if(found_invoker)

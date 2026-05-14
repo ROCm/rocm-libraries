@@ -17,11 +17,10 @@ namespace hip_kernel_provider
 class BatchnormValidator : public IValidator
 {
     // --- Activation Mode Validators ---
-public:
+private:
     static void checkFwdActivationModeSupported(
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr);
 
-private:
     static void checkBwdActivationModeSupported(
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr);
 
@@ -84,7 +83,7 @@ public:
     void checkBwdTensorConfigSupported(
         const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr);
 
-    void checkInferenceActivationBackwardTensorConfigSupported(
+    void checkBwdActivationTensorConfigSupported(
         const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
         const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr);

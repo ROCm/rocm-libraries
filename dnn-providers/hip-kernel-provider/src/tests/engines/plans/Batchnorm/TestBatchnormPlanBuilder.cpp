@@ -96,19 +96,6 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidThreeNodeGraph)
 }
 
 // ============================================================================
-// isApplicable - invalid graphs
-// ============================================================================
-
-TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeGraph)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
-
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
-}
-
-// ============================================================================
 // buildPlan - valid graphs
 // ============================================================================
 
@@ -153,31 +140,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeFwdTraining)
 
 TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForFusedBackwardGraph)
 {
-    hipDeviceProp_t deviceProps = {};
-    deviceProps.multiProcessorCount = 60;
-    deviceProps.warpSize = 64;
-    std::snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", "gfx942");
-
-    EXPECT_CALL(_mockDevicePropertyProvider, getDeviceProperties())
-        .WillOnce(::testing::Return(deviceProps));
-
-    auto makeMockKernel = []() {
-        auto mockKernel = std::make_unique<MockRunnableKernel>();
-        EXPECT_CALL(*mockKernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
-        EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
-        return mockKernel;
-    };
-
-    auto mockProgram = std::make_unique<MockCompiledProgram>();
-    EXPECT_CALL(*mockProgram, getKernel(::testing::_))
-        .WillOnce(::testing::Return(::testing::ByMove(makeMockKernel())))
-        .WillOnce(::testing::Return(::testing::ByMove(makeMockKernel())))
-        .WillOnce(::testing::Return(::testing::ByMove(makeMockKernel())))
-        .WillOnce(::testing::Return(::testing::ByMove(makeMockKernel())))
-        .WillOnce(::testing::Return(::testing::ByMove(makeMockKernel())));
-
-    EXPECT_CALL(_mockKernelCompiler, compile(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
+    setupMockCompileChain();
 
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
