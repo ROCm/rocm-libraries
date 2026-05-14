@@ -1,6 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-# generate kernel instances to speed up compilation
 
 FWD_DTYPE_MAP = {
     "fp16": "FmhaSparseFwdFp16",
@@ -51,18 +50,20 @@ def get_mask_check_map(mask: str):
         return None
 
 
-MODE_MAP = {"batch": "false"}
+MODE_MAP = {"batch": "false", "group": "true"}
 
 LAYOUT_MAP = {"row": "true", "col": "false"}
 
 PIPELINE_MAP = {
-    "qr_async": "ck_tile::BlockFmhaPipelineQRKSVSAsyncJenga",
+    "qr_async_jenga": "ck_tile::BlockFmhaPipelineQRKSVSAsyncJenga",
     "qr_async_vsa": "ck_tile::BlockFmhaPipelineQRKSVSAsyncVSA",
+    "qr_async_sparge": "ck_tile::BlockFmhaPipelineQRKSVSAsyncSparge",
 }
 
 PIPELINE_ENUM_MAP = {
-    "qr_async": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC",
+    "qr_async_jenga": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC",
     "qr_async_vsa": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC",
+    "qr_async_sparge": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC",
 }
 
 BOOL_MAP = {
@@ -70,4 +71,16 @@ BOOL_MAP = {
     "f": "false",
     True: "true",
     False: "false",
+}
+
+BIAS_MAP = {
+    "no":          "ck_tile::BlockAttentionBiasEnum::NO_BIAS",
+    "elementwise": "ck_tile::BlockAttentionBiasEnum::ELEMENTWISE_BIAS",
+    "alibi":       "ck_tile::BlockAttentionBiasEnum::ALIBI",
+}
+
+BIAS_CHECK_MAP = {
+    "no":          "0",
+    "elementwise": "1",
+    "alibi":       "2",
 }

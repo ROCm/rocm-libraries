@@ -33,22 +33,31 @@ CK_TILE_HOST_DEVICE constexpr AccT to_acc(T value)
 }
 
 // Reference implementation: blocked attention (for sparse attention tests).
-template <typename T, typename MaskT, typename AccT = float>
+template <typename T, typename MaskT, typename BiasT = T, typename AccT = float>
 void reference_blocked_attention(
-    const HostTensor<T>& q,                  // [B, H, S_q, D]
-    const HostTensor<T>& k,                  // [B, H, S_k, D]
-    const HostTensor<T>& v,                  // [B, H, S_k, D_v]
-    const HostTensor<MaskT>& block_relation, // [B, H, Q_blocks, K_blocks]
-    HostTensor<T>& output,                   // [B, H, S_q, D_v]
+    const HostTensor<T>& q,
+    const HostTensor<T>& k,
+    const HostTensor<T>& v,
+    const HostTensor<MaskT>& block_relation,
+    HostTensor<T>& output,
     index_t BLKQ,
     index_t BLKK,
-    AccT scale)
+    AccT scale,
+    int causal_type           = 0,
+    int window_left           = -1,
+    int window_right          = -1,
+    AccT logits_soft_cap      = AccT{0},
+    const HostTensor<BiasT>* bias = nullptr,
+    int bias_rank             = 0)
 {
     auto q_lengths   = q.get_lengths();
     index_t batch    = q_lengths[0];
-    index_t nhead    = q_lengths[1];
+    index_t nhead_q  = q_lengths[1];
     index_t seqlen_q = q_lengths[2];
     index_t hdim     = q_lengths[3];
+
+    auto k_lengths  = k.get_lengths();
+    index_t nhead_k = k_lengths[1];
 
     auto v_lengths   = v.get_lengths();
     index_t seqlen_k = v_lengths[2];
@@ -57,10 +66,24 @@ void reference_blocked_attention(
     index_t num_q_blocks = (seqlen_q + BLKQ - 1) / BLKQ;
     index_t num_k_blocks = (seqlen_k + BLKK - 1) / BLKK;
 
+    const index_t qk_head_ratio = (nhead_k > 0) ? (nhead_q / nhead_k) : index_t{1};
+
+    const index_t causal_delta = (causal_type == 2) ? (seqlen_k - seqlen_q) : index_t{0};
+
+    const bool has_left_bound  = (window_left >= 0);
+    const bool has_right_bound = (window_right >= 0);
+
+    const bool has_soft_cap = (logits_soft_cap > AccT{0});
+    const bool has_bias     = (bias != nullptr);
+    const AccT inv_cap      = has_soft_cap ? (AccT{1} / logits_soft_cap) : AccT{0};
+
     for(index_t b = 0; b < batch; ++b)
     {
-        for(index_t h = 0; h < nhead; ++h)
+        for(index_t h = 0; h < nhead_q; ++h)
         {
+            const index_t hk     = h / qk_head_ratio;
+            const index_t bias_b = (bias_rank == 2) ? b : index_t{0};
+            const index_t bias_h = (bias_rank == 0) ? index_t{0} : h;
             for(index_t qb = 0; qb < num_q_blocks; ++qb)
             {
                 index_t q_start = qb * BLKQ;
@@ -73,7 +96,6 @@ void reference_blocked_attention(
                 std::vector<index_t> relevant_k_indices;
                 for(index_t kb = 0; kb < num_k_blocks; ++kb)
                 {
-                    // Treat block_relation as boolean; >0.5 marks an active block.
                     if(static_cast<float>(block_relation(b, h, qb, kb)) > 0.5f)
                     {
                         relevant_k_indices.push_back(kb);
@@ -101,50 +123,85 @@ void reference_blocked_attention(
 
                         for(index_t sk = k_start; sk < k_end; ++sk)
                         {
-                            AccT score = 0.0f;
+                            bool masked = false;
+                            if(has_right_bound &&
+                               sk > sq + causal_delta + static_cast<index_t>(window_right))
+                            {
+                                masked = true;
+                            }
+                            if(has_left_bound &&
+                               sk < sq + causal_delta - static_cast<index_t>(window_left))
+                            {
+                                masked = true;
+                            }
+                            if(masked)
+                            {
+                                scores.push_back(-std::numeric_limits<AccT>::infinity());
+                                continue;
+                            }
+                            AccT score = AccT{0};
                             for(index_t d = 0; d < hdim; ++d)
                             {
                                 score +=
-                                    to_acc<AccT>(q(b, h, sq, d)) * to_acc<AccT>(k(b, h, sk, d));
+                                    to_acc<AccT>(q(b, h, sq, d)) * to_acc<AccT>(k(b, hk, sk, d));
                             }
-                            score = score * scale;
+                            if(has_soft_cap)
+                            {
+                                score = logits_soft_cap * std::tanh(score * scale * inv_cap);
+                            }
+                            else
+                            {
+                                score = score * scale;
+                                if(has_bias)
+                                {
+                                    score += to_acc<AccT>((*bias)(bias_b, bias_h, sq, sk));
+                                }
+                            }
                             scores.push_back(score);
                             max_score = std::max(max_score, score);
                         }
                     }
 
+                    const bool all_masked =
+                        (max_score == -std::numeric_limits<AccT>::infinity());
+
                     AccT sum_exp = 0.0f;
-                    for(auto& s : scores)
+                    if(!all_masked)
                     {
-                        s = std::exp(s - max_score);
-                        sum_exp += s;
-                    }
-                    for(auto& s : scores)
-                    {
-                        s /= sum_exp;
+                        for(auto& s : scores)
+                        {
+                            s = std::exp(s - max_score);
+                            sum_exp += s;
+                        }
+                        for(auto& s : scores)
+                        {
+                            s /= sum_exp;
+                        }
                     }
 
                     for(index_t dv = 0; dv < hdim_v; ++dv)
                     {
-                        AccT out_val     = 0.0f;
-                        size_t score_idx = 0;
-
-                        for(auto kb : relevant_k_indices)
+                        AccT out_val = 0.0f;
+                        if(!all_masked)
                         {
-                            index_t k_start = kb * BLKK;
-                            if(k_start >= seqlen_k)
+                            size_t score_idx = 0;
+                            for(auto kb : relevant_k_indices)
                             {
-                                continue;
-                            }
-                            index_t k_end = std::min<index_t>(k_start + BLKK, seqlen_k);
+                                index_t k_start = kb * BLKK;
+                                if(k_start >= seqlen_k)
+                                {
+                                    continue;
+                                }
+                                index_t k_end = std::min<index_t>(k_start + BLKK, seqlen_k);
 
-                            for(index_t sk = k_start; sk < k_end; ++sk)
-                            {
-                                out_val += scores[score_idx] * to_acc<AccT>(v(b, h, sk, dv));
-                                score_idx++;
+                                for(index_t sk = k_start; sk < k_end; ++sk)
+                                {
+                                    out_val += scores[score_idx] *
+                                               to_acc<AccT>(v(b, hk, sk, dv));
+                                    score_idx++;
+                                }
                             }
                         }
-
                         output(b, h, sq, dv) = static_cast<T>(out_val);
                     }
                 }

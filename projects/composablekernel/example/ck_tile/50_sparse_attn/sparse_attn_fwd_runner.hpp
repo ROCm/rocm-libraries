@@ -1,0 +1,1819 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <numeric>
+#include <optional>
+#include <random>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "ck_tile/host.hpp"
+#include "ck_tile/core.hpp"
+#include "ck_tile/host/reference/reference_blocked_attention.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
+
+#include "sparse_attn_fwd.hpp"
+#include "../01_fmha/mask.hpp"
+#include "../01_fmha/bias.hpp"
+#include "sparse_attention.h"
+#include "ck_tile/host/reference/reference_sparge_mask_prediction.hpp"
+
+enum class sparse_attn_result
+{
+    success,
+    failure,
+    skipped,
+};
+
+// Throws std::invalid_argument on bad input or length mismatch.
+inline std::vector<float> parse_csv_floats(const std::string& csv,
+                                           const char* field_name,
+                                           ck_tile::index_t expected_len)
+{
+    std::vector<float> out;
+    if(csv.empty())
+        return out;
+    if(expected_len <= 0)
+        throw std::invalid_argument(
+            std::string("parse_csv_floats: expected_len must be > 0 (field '") +
+            field_name + "')");
+
+    std::stringstream ss(csv);
+    std::string token;
+    while(std::getline(ss, token, ','))
+    {
+        const auto first = token.find_first_not_of(" \t");
+        const auto last  = token.find_last_not_of(" \t");
+        token = (first == std::string::npos) ? std::string{} : token.substr(first, last - first + 1);
+        try
+        {
+            out.push_back(std::stof(token));
+        }
+        catch(const std::exception&)
+        {
+            throw std::invalid_argument(
+                std::string("-") + field_name + " contains non-float token '" + token + "'");
+        }
+    }
+    if(static_cast<ck_tile::index_t>(out.size()) != expected_len)
+        throw std::invalid_argument(
+            std::string("-") + field_name + " has " + std::to_string(out.size()) +
+            " values but expected " + std::to_string(expected_len) + " (= nhead_q)");
+    return out;
+}
+
+template <typename T>
+ck_tile::HostTensor<T> make_qkv_tensor(ck_tile::index_t batch,
+                                       ck_tile::index_t nhead,
+                                       ck_tile::index_t seqlen,
+                                       ck_tile::index_t hdim,
+                                       bool i_perm)
+{
+    if(i_perm)
+        return ck_tile::HostTensor<T>({batch, nhead, seqlen, hdim});
+    return ck_tile::HostTensor<T>({batch, seqlen, nhead, hdim});
+}
+
+template <typename T>
+ck_tile::HostTensor<T> to_bhsd(const ck_tile::HostTensor<T>& tensor, bool is_bhsd)
+{
+    auto lens               = tensor.get_lengths();
+    ck_tile::index_t batch  = lens[0];
+    ck_tile::index_t seqlen = is_bhsd ? lens[2] : lens[1];
+    ck_tile::index_t nhead  = is_bhsd ? lens[1] : lens[2];
+    ck_tile::index_t hdim   = lens[3];
+    ck_tile::HostTensor<T> out({batch, nhead, seqlen, hdim});
+    for(ck_tile::index_t b = 0; b < batch; ++b)
+        for(ck_tile::index_t h = 0; h < nhead; ++h)
+            for(ck_tile::index_t s = 0; s < seqlen; ++s)
+                for(ck_tile::index_t d = 0; d < hdim; ++d)
+                    out(b, h, s, d) = is_bhsd ? tensor(b, h, s, d) : tensor(b, s, h, d);
+    return out;
+}
+
+template <typename DataTypeConfig>
+auto get_error_tolerance()
+{
+    using T = typename FmhaSparseFwdTypeConfig<DataTypeConfig>::QDataType;
+    // fp16 atol=2.5e-1 covers worst-case alibi drift (slope*k); bf16 ceiling 3e-1.
+    double rtol = 2e-2;
+    double atol = 2.5e-1;
+    if constexpr(std::is_same_v<T, ck_tile::bf16_t>)
+    {
+        atol = 3.5e-1;
+        rtol = 2e-1;
+    }
+    return ck_tile::make_tuple(rtol, atol);
+}
+
+template <typename T>
+float to_float_for_compare(T value)
+{
+    return static_cast<float>(value);
+}
+
+template <>
+inline float to_float_for_compare<ck_tile::bf16_t>(ck_tile::bf16_t value)
+{
+#if CK_TILE_USE_CUSTOM_DATA_TYPE
+    return static_cast<float>(value);
+#else
+    return ck_tile::bf16_to_float_raw(ck_tile::bit_cast<ck_tile::bf16_raw_t>(value));
+#endif
+}
+
+template <typename T>
+bool validate_tensors(const ck_tile::HostTensor<T>& gpu_bhsd,
+                      const ck_tile::HostTensor<T>& ref_bhsd,
+                      double rtol,
+                      double atol,
+                      [[maybe_unused]] const std::string& label = "",
+                      bool print_result = true)
+{
+    float max_diff     = 0.0f;
+    float max_rel_diff = 0.0f;
+    size_t num_errors  = 0;
+    constexpr size_t kMaxMismatchPrint = 5;
+    std::vector<std::string> mismatch_msgs;
+
+    for(size_t i = 0; i < gpu_bhsd.mData.size(); ++i)
+    {
+        float gpu_val  = to_float_for_compare(gpu_bhsd.mData[i]);
+        float ref_val  = to_float_for_compare(ref_bhsd.mData[i]);
+        float diff     = std::abs(gpu_val - ref_val);
+        float rel_diff = (std::abs(ref_val) > 1e-6f) ? diff / std::abs(ref_val) : diff;
+
+        max_diff     = std::max(max_diff, diff);
+        max_rel_diff = std::max(max_rel_diff, rel_diff);
+
+        if(diff > atol && rel_diff > rtol)
+        {
+            num_errors++;
+            if(mismatch_msgs.size() < kMaxMismatchPrint)
+            {
+                std::ostringstream oss;
+                oss << "  Mismatch at " << i << ": GPU=" << gpu_val
+                    << ", Ref=" << ref_val << ", Diff=" << diff;
+                mismatch_msgs.push_back(oss.str());
+            }
+        }
+    }
+
+    bool pass = (num_errors == 0);
+    if(print_result)
+        std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
+
+    if(!pass)
+    {
+        for(const auto& msg : mismatch_msgs)
+            std::cout << msg << std::endl;
+        std::cout << label << ": max_abs_diff=" << max_diff
+                  << ", max_rel_diff=" << max_rel_diff
+                  << ", errors=" << num_errors << "/" << gpu_bhsd.mData.size() << std::endl;
+    }
+    return pass;
+}
+
+// When logits_soft_cap > 0, applies Gemma-style soft-cap pre-softmax (NO_BIAS only).
+template <typename T, typename DataTypeConfig>
+bool validate_vs_blocked_ref(
+    const ck_tile::HostTensor<T>& q_host,
+    const ck_tile::HostTensor<T>& k_host,
+    const ck_tile::HostTensor<T>& v_host,
+    const ck_tile::HostTensor<T>& output_host,
+    const ck_tile::HostTensor<uint8_t>& block_mask,
+    ck_tile::index_t batch,
+    ck_tile::index_t nhead,
+    ck_tile::index_t seqlen_q,
+    ck_tile::index_t hdim_v,
+    ck_tile::index_t block_size,
+    float scale,
+    int causal_type,
+    int window_left,
+    int window_right,
+    bool i_perm,
+    bool o_perm,
+    const std::string& label,
+    bool print_result     = true,
+    float logits_soft_cap = 0.0f)
+{
+    auto q_ref   = to_bhsd(q_host, i_perm);
+    auto k_ref   = to_bhsd(k_host, i_perm);
+    auto v_ref   = to_bhsd(v_host, i_perm);
+    auto gpu_out = to_bhsd(output_host, o_perm);
+    ck_tile::HostTensor<T> ref_out({batch, nhead, seqlen_q, hdim_v});
+    ck_tile::reference_blocked_attention<T, uint8_t>(
+        q_ref, k_ref, v_ref, block_mask, ref_out, block_size, block_size, scale,
+        causal_type, window_left, window_right,
+        /*logits_soft_cap=*/logits_soft_cap);
+    auto [rtol, atol] = get_error_tolerance<DataTypeConfig>();
+    return validate_tensors(gpu_out, ref_out, rtol, atol, label, print_result);
+}
+
+// Layout depends on rank:
+//   rank=0 → [1, 1,     sq, sk]   (broadcast across b/h)
+//   rank=1 → [1, h,     sq, sk]   (broadcast across b)
+//   rank=2 → [b, h,     sq, sk]   (per-batch, no broadcast)
+template <typename BiasT>
+inline ck_tile::HostTensor<BiasT>
+generate_random_bias(int rank,
+                     ck_tile::index_t batch,
+                     ck_tile::index_t nhead,
+                     ck_tile::index_t seqlen_q,
+                     ck_tile::index_t seqlen_k,
+                     uint32_t seed)
+{
+    const ck_tile::index_t b0 = (rank == 2) ? batch : 1;
+    const ck_tile::index_t b1 = (rank == 0) ? 1 : nhead;
+    ck_tile::HostTensor<BiasT> b({b0, b1, seqlen_q, seqlen_k});
+    // Small magnitude so bias doesn't dominate Q·K (same range).
+    ck_tile::FillUniformDistribution<BiasT>{-0.5f, 0.5f, seed}(b);
+    return b;
+}
+
+template <typename T, typename BiasT, typename DataTypeConfig>
+bool validate_vs_blocked_ref_with_bias(
+    const ck_tile::HostTensor<T>& q_host,
+    const ck_tile::HostTensor<T>& k_host,
+    const ck_tile::HostTensor<T>& v_host,
+    const ck_tile::HostTensor<T>& output_host,
+    const ck_tile::HostTensor<uint8_t>& block_mask,
+    const ck_tile::HostTensor<BiasT>& bias,
+    int bias_rank,
+    ck_tile::index_t batch,
+    ck_tile::index_t nhead,
+    ck_tile::index_t seqlen_q,
+    ck_tile::index_t hdim_v,
+    ck_tile::index_t block_size,
+    float scale,
+    int causal_type,
+    int window_left,
+    int window_right,
+    bool i_perm,
+    bool o_perm,
+    const std::string& label,
+    bool print_result = true)
+{
+    auto q_ref   = to_bhsd(q_host, i_perm);
+    auto k_ref   = to_bhsd(k_host, i_perm);
+    auto v_ref   = to_bhsd(v_host, i_perm);
+    auto gpu_out = to_bhsd(output_host, o_perm);
+    ck_tile::HostTensor<T> ref_out({batch, nhead, seqlen_q, hdim_v});
+    ck_tile::reference_blocked_attention<T, uint8_t, BiasT>(
+        q_ref, k_ref, v_ref, block_mask, ref_out, block_size, block_size, scale,
+        causal_type, window_left, window_right,
+        /*logits_soft_cap=*/0.0f, &bias, bias_rank);
+    auto [rtol, atol] = get_error_tolerance<DataTypeConfig>();
+    return validate_tensors(gpu_out, ref_out, rtol, atol, label, print_result);
+}
+
+// Holds bias buffer + alibi slope vector for RAII. Caller keeps the returned object
+// alive across the kernel launch (args.ptr aliases buf's device memory).
+template <typename BiasT>
+struct BiasSetup
+{
+    sparse_attn_bias_args     args;
+    std::optional<ck_tile::HostTensor<BiasT>> elementwise_host;
+    // unique_ptr keeps BiasSetup movable (DeviceMem has user-provided dtor only).
+    std::unique_ptr<ck_tile::DeviceMem> buf;
+    std::vector<float>   alibi_slopes_host;
+};
+
+template <typename BiasT>
+inline BiasSetup<BiasT> setup_bias(const bias_info& bi,
+                                   ck_tile::index_t batch,
+                                   ck_tile::index_t nhead,
+                                   ck_tile::index_t seqlen_q,
+                                   ck_tile::index_t seqlen_k,
+                                   int causal_type,
+                                   uint32_t seed,
+                                   const char* api_label)
+{
+    BiasSetup<BiasT> s;
+    if(bi.type == bias_enum::no_bias)
+        return s;
+
+    if(bi.type == bias_enum::elementwise_bias)
+    {
+        s.elementwise_host.emplace(generate_random_bias<BiasT>(
+            bi.rank_info, batch, nhead, seqlen_q, seqlen_k, seed));
+        s.buf = std::make_unique<ck_tile::DeviceMem>(
+            s.elementwise_host->get_element_space_size_in_bytes());
+        s.buf->ToDevice(s.elementwise_host->data());
+        s.args.type = static_cast<int>(bi.type);
+        s.args.rank = bi.rank_info;
+        s.args.ptr  = s.buf->GetDeviceBuffer();
+        s.args.stride_bias       = seqlen_k;
+        s.args.nhead_stride_bias = (bi.rank_info == 0) ? 0 : seqlen_q * seqlen_k;
+        s.args.batch_stride_bias = (bi.rank_info == 2) ? nhead * seqlen_q * seqlen_k : 0;
+        return s;
+    }
+
+    if(causal_type == 0)
+    {
+        std::cerr << "[" << api_label << "] alibi requires a causal mask (-mask=t/b).\n";
+        s.args.type = -1;
+        return s;
+    }
+    const auto base_slopes = ck_tile::get_alibi_slopes<float>(nhead);
+    const ck_tile::index_t outer = (bi.rank_info == 0 ? 1 : batch);
+    s.alibi_slopes_host.reserve(static_cast<size_t>(outer) * nhead);
+    for(ck_tile::index_t b = 0; b < outer; ++b)
+        s.alibi_slopes_host.insert(s.alibi_slopes_host.end(),
+                                   base_slopes.begin(), base_slopes.end());
+    s.buf = std::make_unique<ck_tile::DeviceMem>(s.alibi_slopes_host.size() * sizeof(float));
+    s.buf->ToDevice(s.alibi_slopes_host.data());
+    s.args.type = static_cast<int>(bi.type);
+    s.args.rank = bi.rank_info;
+    s.args.ptr  = s.buf->GetDeviceBuffer();
+    s.args.stride_bias       = (bi.rank_info == 0) ? 0 : nhead;
+    s.args.nhead_stride_bias = 0;
+    s.args.batch_stride_bias = 0;
+    return s;
+}
+
+// Slice elementwise bias [B_or_1, h_or_1, max_sq, max_sk] down to [1, h_or_1, sq, sk]
+// sub-region for group-mode per-batch validation.
+template <typename BiasT>
+inline ck_tile::HostTensor<BiasT> slice_elementwise_bias_to_b1(
+    const ck_tile::HostTensor<BiasT>& full_bias,
+    int bias_rank,
+    ck_tile::index_t b,
+    ck_tile::index_t nhead,
+    ck_tile::index_t sq,
+    ck_tile::index_t sk)
+{
+    const ck_tile::index_t h_dim = (bias_rank == 0) ? 1 : nhead;
+    const ck_tile::index_t bias_b_src = (bias_rank == 2) ? b : 0;
+    ck_tile::HostTensor<BiasT> sub({1, h_dim, sq, sk});
+    for(ck_tile::index_t h = 0; h < h_dim; ++h)
+        for(ck_tile::index_t q = 0; q < sq; ++q)
+            for(ck_tile::index_t k = 0; k < sk; ++k)
+                sub(0, h, q, k) = full_bias(bias_b_src, h, q, k);
+    return sub;
+}
+
+// Build the [1,h,sq,sk] dense bias matching ck_tile::Alibi VERTICAL output (slope[h] * k).
+// Always h-broadcast on the validator side regardless of CLI rank.
+template <typename BiasT>
+inline ck_tile::HostTensor<BiasT> alibi_to_dense(
+    const std::vector<float>& slopes_host,
+    ck_tile::index_t nhead,
+    ck_tile::index_t seqlen_q,
+    ck_tile::index_t seqlen_k)
+{
+    ck_tile::HostTensor<BiasT> dense({1, nhead, seqlen_q, seqlen_k});
+    for(ck_tile::index_t h = 0; h < nhead; ++h)
+    {
+        const float slope = slopes_host[static_cast<size_t>(h)];
+        for(ck_tile::index_t i = 0; i < seqlen_q; ++i)
+            for(ck_tile::index_t j = 0; j < seqlen_k; ++j)
+                dense(0, h, i, j) = static_cast<BiasT>(slope * static_cast<float>(j));
+    }
+    return dense;
+}
+
+inline ck_tile::HostTensor<uint8_t> generate_random_block_mask(
+    ck_tile::index_t batch,
+    ck_tile::index_t nhead,
+    ck_tile::index_t num_q_blocks,
+    ck_tile::index_t num_k_blocks,
+    float sparsity,
+    uint32_t seed,
+    bool ensure_diagonal = false)
+{
+    ck_tile::HostTensor<uint8_t> mask({batch, nhead, num_q_blocks, num_k_blocks});
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+
+    for(ck_tile::index_t b = 0; b < batch; ++b)
+        for(ck_tile::index_t h = 0; h < nhead; ++h)
+            for(ck_tile::index_t qb = 0; qb < num_q_blocks; ++qb)
+                for(ck_tile::index_t kb = 0; kb < num_k_blocks; ++kb)
+                {
+                    bool is_diag        = ensure_diagonal && (qb == kb && qb < num_k_blocks);
+                    mask(b, h, qb, kb)  = (is_diag || dist(rng) > sparsity) ? 1 : 0;
+                }
+    return mask;
+}
+
+inline std::vector<int32_t> to_seqstarts(const std::vector<int32_t>& seqlens)
+{
+    std::vector<int32_t> seqstarts(seqlens.size() + 1, 0);
+    for(size_t i = 0; i < seqlens.size(); ++i)
+        seqstarts[i + 1] = seqstarts[i] + seqlens[i];
+    return seqstarts;
+}
+
+// Swap-walk perturbation around seqlen_avg, clamped to [seqlen_min, seqlen_max].
+inline std::vector<int32_t> generate_seqlens_group(
+    int32_t batch,
+    int32_t seqlen_avg,
+    int32_t seqlen_min,
+    int32_t seqlen_max,
+    uint32_t seed)
+{
+    seqlen_min = std::max(int32_t{1}, seqlen_min);
+    if(seqlen_max <= 0)
+        seqlen_max = seqlen_avg;
+    seqlen_min = std::min(seqlen_min, seqlen_max);
+
+    std::vector<int32_t> seqlens(static_cast<size_t>(batch),
+                                 std::clamp(seqlen_avg, seqlen_min, seqlen_max));
+    if(batch < 2)
+        return seqlens;
+
+    std::mt19937 rng(seed);
+    std::uniform_int_distribution<size_t> idx_dist(0, static_cast<size_t>(batch) - 1);
+    std::uniform_int_distribution<size_t> step_dist(1, static_cast<size_t>(batch) - 1);
+    const size_t reps = static_cast<size_t>(seqlen_avg) * (static_cast<size_t>(batch) / 2);
+    for(size_t r = 0; r < reps; ++r)
+    {
+        const size_t dec = idx_dist(rng);
+        if(seqlens[dec] == seqlen_min)
+            continue;
+        const size_t inc = (dec + step_dist(rng)) % static_cast<size_t>(batch);
+        if(seqlens[inc] >= seqlen_max)
+            continue;
+        --seqlens[dec];
+        ++seqlens[inc];
+    }
+    return seqlens;
+}
+
+inline std::vector<int32_t> seqlens_to_blocks(const std::vector<int32_t>& seqlens,
+                                              ck_tile::index_t block_size)
+{
+    std::vector<int32_t> blocks(seqlens.size());
+    for(size_t i = 0; i < seqlens.size(); ++i)
+        blocks[i] = (seqlens[i] + block_size - 1) / block_size;
+    return blocks;
+}
+
+// Packed [H, sum_b(q_blocks[b] * k_blocks[b])] uint8_t, indexed via mask_batch_offsets.
+inline ck_tile::HostTensor<uint8_t> generate_random_block_mask_group(
+    const std::vector<int32_t>& q_blocks_per_b,
+    const std::vector<int32_t>& k_blocks_per_b,
+    ck_tile::index_t nhead,
+    float sparsity,
+    uint32_t seed,
+    bool ensure_diagonal,
+    std::vector<int32_t>& mask_batch_offsets_out)
+{
+    const auto batch = static_cast<int32_t>(q_blocks_per_b.size());
+    mask_batch_offsets_out.assign(static_cast<size_t>(batch + 1), 0);
+    for(int32_t b = 0; b < batch; ++b)
+    {
+        mask_batch_offsets_out[b + 1] =
+            mask_batch_offsets_out[b] + q_blocks_per_b[b] * k_blocks_per_b[b];
+    }
+    const int32_t per_head_size = mask_batch_offsets_out[batch];
+
+    ck_tile::HostTensor<uint8_t> mask({nhead, per_head_size});
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+
+    for(ck_tile::index_t h = 0; h < nhead; ++h)
+    {
+        for(int32_t b = 0; b < batch; ++b)
+        {
+            const int32_t qb_n  = q_blocks_per_b[b];
+            const int32_t kb_n  = k_blocks_per_b[b];
+            const int32_t base  = mask_batch_offsets_out[b];
+            for(int32_t qb = 0; qb < qb_n; ++qb)
+                for(int32_t kb = 0; kb < kb_n; ++kb)
+                {
+                    const bool is_diag = ensure_diagonal && (qb == kb);
+                    mask(h, base + qb * kb_n + kb) =
+                        (is_diag || dist(rng) > sparsity) ? 1 : 0;
+                }
+        }
+    }
+    return mask;
+}
+
+// Slice packed Q/K/V/O back to a B=1 sub-tensor for per-batch validation.
+template <typename T>
+ck_tile::HostTensor<T> slice_packed_to_b1(const ck_tile::HostTensor<T>& packed,
+                                          int32_t seq_start,
+                                          int32_t sq,
+                                          ck_tile::index_t nhead,
+                                          ck_tile::index_t hdim,
+                                          bool perm)
+{
+    auto out = perm ? ck_tile::HostTensor<T>({1, nhead, sq, hdim})
+                    : ck_tile::HostTensor<T>({1, sq, nhead, hdim});
+    if(perm)
+    {
+        for(ck_tile::index_t h = 0; h < nhead; ++h)
+            for(int32_t s = 0; s < sq; ++s)
+                for(ck_tile::index_t d = 0; d < hdim; ++d)
+                    out(0, h, s, d) = packed(0, h, seq_start + s, d);
+    }
+    else
+    {
+        for(int32_t s = 0; s < sq; ++s)
+            for(ck_tile::index_t h = 0; h < nhead; ++h)
+                for(ck_tile::index_t d = 0; d < hdim; ++d)
+                    out(0, s, h, d) = packed(0, seq_start + s, h, d);
+    }
+    return out;
+}
+
+// Slice packed jenga mask into a [1, H, q_blocks_b, k_blocks_b] sub-mask.
+inline ck_tile::HostTensor<uint8_t>
+slice_packed_mask_to_b1(const ck_tile::HostTensor<uint8_t>& packed_mask,
+                        int32_t batch_idx,
+                        const std::vector<int32_t>& q_blocks_per_b,
+                        const std::vector<int32_t>& k_blocks_per_b,
+                        const std::vector<int32_t>& mask_batch_offsets,
+                        ck_tile::index_t nhead)
+{
+    const int32_t qb_n = q_blocks_per_b[batch_idx];
+    const int32_t kb_n = k_blocks_per_b[batch_idx];
+    const int32_t base = mask_batch_offsets[batch_idx];
+    ck_tile::HostTensor<uint8_t> sub({1, nhead, qb_n, kb_n});
+    for(ck_tile::index_t h = 0; h < nhead; ++h)
+        for(int32_t qb = 0; qb < qb_n; ++qb)
+            for(int32_t kb = 0; kb < kb_n; ++kb)
+                sub(0, h, qb, kb) = packed_mask(h, base + qb * kb_n + kb);
+    return sub;
+}
+
+// Convert packed jenga-style mask into VSA's group LUT + valid_block_num format.
+// lut: int32 delta-encoded K-block indices, zero-padded per q-block row.
+// vbn: [H, sum_b(q_blocks[b])] int32 valid count per q-block.
+inline void block_map_to_lut_group(
+    const ck_tile::HostTensor<uint8_t>& packed_mask,
+    const std::vector<int32_t>& q_blocks_per_b,
+    const std::vector<int32_t>& k_blocks_per_b,
+    const std::vector<int32_t>& mask_batch_offsets,
+    const std::vector<int32_t>& seqstart_q_block_host,
+    ck_tile::HostTensor<int32_t>& lut_packed,
+    ck_tile::HostTensor<int32_t>& vbn_packed)
+{
+    const auto batch = static_cast<int32_t>(q_blocks_per_b.size());
+    const auto nhead = static_cast<ck_tile::index_t>(packed_mask.get_lengths()[0]);
+
+    for(ck_tile::index_t h = 0; h < nhead; ++h)
+    {
+        for(int32_t b = 0; b < batch; ++b)
+        {
+            const int32_t qb_n      = q_blocks_per_b[b];
+            const int32_t kb_n      = k_blocks_per_b[b];
+            const int32_t mask_base = mask_batch_offsets[b];
+            const int32_t vbn_base  = seqstart_q_block_host[b];
+            for(int32_t qb = 0; qb < qb_n; ++qb)
+            {
+                int32_t valid = 0;
+                int32_t prev  = -1;
+                for(int32_t kb = 0; kb < kb_n; ++kb)
+                {
+                    if(static_cast<float>(packed_mask(h, mask_base + qb * kb_n + kb)) > 0.5f)
+                    {
+                        lut_packed(h, mask_base + qb * kb_n + valid) =
+                            (prev < 0) ? kb : (kb - prev);
+                        prev = kb;
+                        ++valid;
+                    }
+                }
+                vbn_packed(h, vbn_base + qb) = valid;
+                for(int32_t i = valid; i < kb_n; ++i)
+                    lut_packed(h, mask_base + qb * kb_n + i) = 0;
+            }
+        }
+    }
+}
+
+inline void block_map_to_lut(const ck_tile::HostTensor<uint8_t>& block_map,
+                             ck_tile::HostTensor<int32_t>& lut,
+                             ck_tile::HostTensor<int32_t>& valid_block_num)
+{
+    auto lens                      = block_map.get_lengths();
+    ck_tile::index_t batch         = lens[0];
+    ck_tile::index_t nhead         = lens[1];
+    ck_tile::index_t num_q_blocks  = lens[2];
+    ck_tile::index_t num_k_blocks  = lens[3];
+
+    for(ck_tile::index_t b = 0; b < batch; ++b)
+        for(ck_tile::index_t h = 0; h < nhead; ++h)
+            for(ck_tile::index_t qb = 0; qb < num_q_blocks; ++qb)
+            {
+                ck_tile::index_t valid = 0;
+                ck_tile::index_t prev  = -1;
+                for(ck_tile::index_t kb = 0; kb < num_k_blocks; ++kb)
+                {
+                    if(static_cast<float>(block_map(b, h, qb, kb)) > 0.5f)
+                    {
+                        lut(b, h, qb, valid) = static_cast<int32_t>((prev < 0) ? kb : (kb - prev));
+                        prev                 = kb;
+                        valid++;
+                    }
+                }
+                valid_block_num(b, h, qb) = static_cast<int32_t>(valid);
+                for(ck_tile::index_t i = valid; i < num_k_blocks; ++i)
+                    lut(b, h, qb, i) = 0;
+            }
+}
+
+// Sparge mask-prediction helpers (block-pool / similarity / smooth_k / topk-cdf
+// selection) live in ck_tile/host/reference/reference_sparge_mask_prediction.hpp.
+
+// ---- Performance metrics ----
+inline std::size_t compute_sparse_attn_flop(
+    ck_tile::index_t batch,
+    ck_tile::index_t nhead,
+    ck_tile::index_t seqlen_q,
+    ck_tile::index_t seqlen_k,
+    ck_tile::index_t hdim_q,
+    ck_tile::index_t hdim_v,
+    float sparsity,
+    const mask_info& mask)
+{
+    std::size_t effective_area;
+    if(mask.type == mask_enum::no_mask)
+    {
+        effective_area = static_cast<std::size_t>(
+            static_cast<double>(seqlen_q) * seqlen_k * (1.0 - sparsity));
+    }
+    else
+    {
+        effective_area = static_cast<std::size_t>(
+            static_cast<double>(mask.get_unmaskarea()) * (1.0 - sparsity));
+    }
+    return static_cast<std::size_t>(batch) * nhead *
+           (2 * effective_area * hdim_q + 2 * effective_area * hdim_v);
+}
+
+template <typename T>
+std::size_t compute_sparse_attn_num_byte(
+    ck_tile::index_t batch,
+    ck_tile::index_t nhead,
+    ck_tile::index_t nhead_k,
+    ck_tile::index_t seqlen_q,
+    ck_tile::index_t seqlen_k,
+    ck_tile::index_t hdim_q,
+    ck_tile::index_t hdim_v,
+    float sparsity = 0.0f)
+{
+    // Q load + O store: full (Q axis is dense).
+    std::size_t num_byte = static_cast<std::size_t>(batch) * nhead *
+                           (sizeof(T) * seqlen_q * hdim_q + sizeof(T) * seqlen_q * hdim_v);
+    // K + V load: only the selected K-blocks (× (1 - sparsity)).
+    const auto kv_dense = static_cast<std::size_t>(batch) * nhead_k *
+                          (sizeof(T) * seqlen_k * hdim_q + sizeof(T) * seqlen_k * hdim_v);
+    num_byte += static_cast<std::size_t>(static_cast<double>(kv_dense) *
+                                          (1.0 - static_cast<double>(sparsity)));
+    return num_byte;
+}
+
+// Group variants — sum per-seq contribution rather than B * (avg seqlen).
+// mask_str is re-decoded per (sq, sk) so causal / sliding-window areas are exact even when
+// sequence lengths differ across the batch (e.g. decode-style with sq=1, sk=ctx).
+inline std::size_t compute_sparse_attn_flop_group(
+    ck_tile::index_t nhead,
+    const std::vector<int32_t>& seqlen_qs,
+    const std::vector<int32_t>& seqlen_ks,
+    ck_tile::index_t hdim_q,
+    ck_tile::index_t hdim_v,
+    float sparsity,
+    const std::string& mask_str)
+{
+    std::size_t total = 0;
+    for(size_t b = 0; b < seqlen_qs.size(); ++b)
+    {
+        const auto m = mask_info::decode(mask_str, seqlen_qs[b], seqlen_ks[b]);
+        const std::size_t mask_area =
+            (m.type == mask_enum::no_mask)
+                ? static_cast<std::size_t>(seqlen_qs[b]) * static_cast<std::size_t>(seqlen_ks[b])
+                : m.get_unmaskarea();
+        const auto area = static_cast<std::size_t>(
+            static_cast<double>(mask_area) * (1.0 - sparsity));
+        total += nhead * (2 * area * hdim_q + 2 * area * hdim_v);
+    }
+    return total;
+}
+
+template <typename T>
+std::size_t compute_sparse_attn_num_byte_group(
+    ck_tile::index_t nhead,
+    ck_tile::index_t nhead_k,
+    const std::vector<int32_t>& seqlen_qs,
+    const std::vector<int32_t>& seqlen_ks,
+    ck_tile::index_t hdim_q,
+    ck_tile::index_t hdim_v,
+    float sparsity)
+{
+    std::int64_t total_q = 0, total_k = 0;
+    for(auto v : seqlen_qs) total_q += v;
+    for(auto v : seqlen_ks) total_k += v;
+
+    std::size_t num_byte = static_cast<std::size_t>(total_q) * nhead *
+                           (sizeof(T) * hdim_q + sizeof(T) * hdim_v);
+    const auto kv_dense = static_cast<std::size_t>(total_k) * nhead_k *
+                          (sizeof(T) * hdim_q + sizeof(T) * hdim_v);
+    num_byte += static_cast<std::size_t>(static_cast<double>(kv_dense) *
+                                          (1.0 - static_cast<double>(sparsity)));
+    return num_byte;
+}
+
+inline void print_perf(double avg_time_ms,
+                       std::size_t flop,
+                       std::size_t num_byte)
+{
+    const float tflops     = static_cast<float>(flop) / 1.E9 / avg_time_ms;
+    const float gb_per_sec = static_cast<float>(num_byte) / 1.E6 / avg_time_ms;
+    std::cout << std::fixed << ", " << std::setprecision(3) << avg_time_ms << " ms, "
+              << std::setprecision(2) << tflops << " TFlops, "
+              << std::setprecision(2) << gb_per_sec << " GB/s" << std::flush;
+}
+
+// Format a length vector as `[s0,s1,...]`.
+inline std::string format_int_vec(const std::vector<int32_t>& v)
+{
+    std::ostringstream oss;
+    oss << "[";
+    for(size_t i = 0; i < v.size(); ++i)
+    {
+        if(i > 0) oss << ",";
+        oss << v[i];
+    }
+    oss << "]";
+    return oss.str();
+}
+
+// JSON summary line. Group mode includes seqlen_qs / seqlen_ks (empty in batch).
+// Written either to stdout (json_file empty) or appended to json_file (one line per call).
+inline void emit_json_summary(const std::string& json_file,
+                              const std::string& api,
+                              const std::string& mode,
+                              const std::string& prec,
+                              ck_tile::index_t batch,
+                              ck_tile::index_t nhead,
+                              ck_tile::index_t nhead_k,
+                              ck_tile::index_t seqlen_q,
+                              ck_tile::index_t seqlen_k,
+                              ck_tile::index_t hdim_q,
+                              ck_tile::index_t hdim_v,
+                              float sparsity,
+                              const std::string& mask_str,
+                              bool i_perm,
+                              bool o_perm,
+                              double latency_ms,
+                              std::size_t flop,
+                              std::size_t num_byte,
+                              bool has_validation,
+                              bool valid,
+                              float actual_sparsity, // < 0 if not requested
+                              const std::vector<int32_t>& seqlen_qs, // empty in batch
+                              const std::vector<int32_t>& seqlen_ks)
+{
+    const float tflops     = static_cast<float>(flop) / 1.E9 / latency_ms;
+    const float gb_per_sec = static_cast<float>(num_byte) / 1.E6 / latency_ms;
+
+    std::ostringstream oss;
+    oss << std::fixed;
+    oss << "{\"api\":\"" << api << "\","
+        << "\"mode\":\"" << mode << "\","
+        << "\"prec\":\"" << prec << "\","
+        << "\"batch\":" << batch << ","
+        << "\"nhead\":" << nhead << ","
+        << "\"nhead_k\":" << nhead_k << ","
+        << "\"seqlen_q\":" << seqlen_q << ","
+        << "\"seqlen_k\":" << seqlen_k << ","
+        << "\"hdim_q\":" << hdim_q << ","
+        << "\"hdim_v\":" << hdim_v << ","
+        << "\"sparsity\":" << std::setprecision(4) << sparsity << ","
+        << "\"mask_type\":\"" << mask_str << "\","
+        << "\"iperm\":" << (i_perm ? 1 : 0) << ","
+        << "\"operm\":" << (o_perm ? 1 : 0) << ","
+        << "\"latency_ms\":" << std::setprecision(4) << latency_ms << ","
+        << "\"tflops\":" << std::setprecision(2) << tflops << ","
+        << "\"gb_per_s\":" << std::setprecision(2) << gb_per_sec;
+    if(has_validation)
+        oss << ",\"valid\":" << (valid ? "true" : "false");
+    if(actual_sparsity >= 0.0f)
+        oss << ",\"actual_sparsity\":" << std::setprecision(4) << actual_sparsity;
+    if(!seqlen_qs.empty())
+        oss << ",\"seqlen_qs\":" << format_int_vec(seqlen_qs)
+            << ",\"seqlen_ks\":" << format_int_vec(seqlen_ks);
+    oss << "}";
+
+    if(json_file.empty())
+    {
+        std::cout << "JSON " << oss.str() << std::endl;
+    }
+    else
+    {
+        std::ofstream f(json_file, std::ios::app);
+        if(f)
+            f << oss.str() << "\n";
+    }
+}
+
+// ---- Main runner ----
+template <typename DataTypeConfig>
+sparse_attn_result sparse_attn_fwd_run(
+    const std::string& api,     // "jenga", "vsa", "sparge"
+    ck_tile::index_t batch,
+    ck_tile::index_t nhead,
+    ck_tile::index_t nhead_k,
+    ck_tile::index_t seqlen_q,
+    ck_tile::index_t seqlen_k,
+    ck_tile::index_t hdim_q,
+    ck_tile::index_t hdim_v,
+    float sparsity,
+    float simthreshold,
+    const std::string& mask_str,
+    bool attention_sink,
+    ck_tile::index_t block_size,
+    bool i_perm,
+    bool o_perm,
+    bool is_v_rowmajor,
+    uint32_t seed,
+    int do_validation,
+    float pvthreshd,
+    const std::string& sparge_mode,           // sparge only: "topk" or "cdf" — block-selection algorithm
+    bool perhead_test,                        // sparge only: synthesize per-head hyperparam pattern
+    const std::string& sparsity_per_head_csv, // sparge only: CSV per-Q-head sparsity; routed to topk/cdf field by sparge_mode
+    const std::string& sim_per_head_csv,
+    const std::string& pvthreshd_per_head_csv,
+    bool smooth_k,
+    bool print_sparsity,
+    const ck_tile::stream_config& stream_config,
+    sparse_attn_mode mode = sparse_attn_mode::batch,
+    bool json_out = false,
+    const std::string& json_file = std::string(),
+    const std::string& bias_str  = "n",
+    float scale_s_user = 0.0f,        // 0 ⇒ default 1/sqrt(d)
+    float logits_soft_cap_user = 0.0f) // 0 ⇒ disabled (Gemma-style: s = cap*tanh(s/cap))
+{
+    using T = typename FmhaSparseFwdTypeConfig<DataTypeConfig>::QDataType;
+
+    if(block_size != 128 || hdim_q != 128 || hdim_v != 128)
+    {
+        std::cout << ", not supported yet" << std::flush << std::endl;
+        return sparse_attn_result::skipped;
+    }
+
+    // group mode supported by all 3 APIs (jenga / vsa / sparge).
+
+    ck_tile::index_t num_q_blocks = (seqlen_q + block_size - 1) / block_size;
+    ck_tile::index_t num_k_blocks = (seqlen_k + block_size - 1) / block_size;
+    // Match wrapper's scale_s resolution: 0 ⇒ default 1/sqrt(d).
+    float scale                   = (scale_s_user != 0.0f)
+                                        ? scale_s_user
+                                        : 1.0f / std::sqrt(static_cast<float>(hdim_q));
+
+    // Decode mask
+    mask_info mask_decoded = mask_info::decode(mask_str, seqlen_q, seqlen_k);
+    int causal_type        = 0;
+    if(mask_decoded.type == mask_enum::mask_top_left)
+        causal_type = 1;
+    else if(mask_decoded.type == mask_enum::mask_bottom_right)
+        causal_type = 2;
+
+    std::cout << "[" << api << "] b=" << batch
+              << ", h=" << nhead << "(" << nhead_k << ")"
+              << ", s=" << seqlen_q << "x" << seqlen_k
+              << ", d=" << hdim_q << "(" << hdim_v << ")"
+              << ", sparsity=" << sparsity
+              << ", mask=" << mask_str
+              << ", sink=" << attention_sink
+              << ", perm=" << i_perm << "/" << o_perm << std::flush;
+
+    // Compute performance metrics
+    std::size_t flop     = compute_sparse_attn_flop(batch, nhead, seqlen_q, seqlen_k,
+                                                     hdim_q, hdim_v, sparsity, mask_decoded);
+    std::size_t num_byte = compute_sparse_attn_num_byte<T>(batch, nhead, nhead_k,
+                                                            seqlen_q, seqlen_k, hdim_q, hdim_v,
+                                                            sparsity);
+
+    // Create and initialize host tensors
+    ck_tile::HostTensor<T> q_host = make_qkv_tensor<T>(batch, nhead, seqlen_q, hdim_q, i_perm);
+    ck_tile::HostTensor<T> k_host = make_qkv_tensor<T>(batch, nhead_k, seqlen_k, hdim_q, i_perm);
+    ck_tile::HostTensor<T> v_host = make_qkv_tensor<T>(batch, nhead_k, seqlen_k, hdim_v, i_perm);
+    ck_tile::HostTensor<T> output_host =
+        o_perm ? ck_tile::HostTensor<T>({batch, nhead, seqlen_q, hdim_v})
+               : ck_tile::HostTensor<T>({batch, seqlen_q, nhead, hdim_v});
+
+    ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed}(q_host);
+    ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 1}(k_host);
+    ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 2}(v_host);
+
+    bool pass = true;
+    float ave_time = -1.0f;
+
+    // JSON-summary state (populated inside the per-API branches; emitted once at the end
+    // when -json=1 or -jsonfile is set). seqlen_*s stay empty in batch mode.
+    std::vector<int32_t> json_seqlen_qs;
+    std::vector<int32_t> json_seqlen_ks;
+    std::size_t          json_flop          = flop;
+    std::size_t          json_num_byte      = num_byte;
+    float                json_actual_sparsity = -1.0f;
+
+    if(api == "jenga" && mode == sparse_attn_mode::batch)
+    {
+        auto block_mask = generate_random_block_mask(
+            batch, nhead, num_q_blocks, num_k_blocks, sparsity, seed + 100, true);
+
+        // Phase 3 / CP3.3 bias plumbing — same shape as sparge.
+        using BiasT = typename FmhaSparseFwdTypeConfig<DataTypeConfig>::BiasDataType;
+        bias_info bi = bias_info::decode(bias_str);
+        auto bs = setup_bias<BiasT>(bi, batch, nhead, seqlen_q, seqlen_k,
+                                    causal_type, seed + 500, "jenga");
+        if(bs.args.type < 0)
+            return sparse_attn_result::failure;
+
+        try
+        {
+            ave_time = jenga_sparse_attention<T>(q_host, k_host, v_host, block_mask,
+                output_host, batch, nhead, nhead_k, seqlen_q, seqlen_k, hdim_q, hdim_v,
+                i_perm, o_perm, is_v_rowmajor, seqlen_q, seqlen_k, stream_config, mask_str,
+                bs.args, scale_s_user, logits_soft_cap_user);
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << "\nError: " << e.what() << std::endl;
+            return sparse_attn_result::failure;
+        }
+
+        if(ave_time < 0)
+        {
+            std::cout << ", not supported yet" << std::flush << std::endl;
+            return sparse_attn_result::skipped;
+        }
+        if(stream_config.time_kernel_)
+            print_perf(static_cast<double>(ave_time), flop, num_byte);
+
+        if(do_validation)
+        {
+            // jenga ignores -mask; reference must too, else it applies a causal cut
+            // the kernel never saw and reports false negatives.
+            if(bi.type == bias_enum::elementwise_bias)
+            {
+                pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                    q_host, k_host, v_host, output_host, block_mask,
+                    *bs.elementwise_host, bi.rank_info,
+                    batch, nhead, seqlen_q, hdim_v, block_size, scale,
+                    /*causal_type=*/0, /*window_left=*/-1, /*window_right=*/-1,
+                    i_perm, o_perm, "Jenga vs CPU ref");
+            }
+            else if(bi.type == bias_enum::alibi)
+            {
+                auto alibi_dense = alibi_to_dense<BiasT>(
+                    bs.alibi_slopes_host, nhead, seqlen_q, seqlen_k);
+                pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                    q_host, k_host, v_host, output_host, block_mask,
+                    alibi_dense, /*rank=*/1,
+                    batch, nhead, seqlen_q, hdim_v, block_size, scale,
+                    /*causal_type=*/0, /*window_left=*/-1, /*window_right=*/-1,
+                    i_perm, o_perm, "Jenga vs CPU ref");
+            }
+            else
+            {
+                pass = validate_vs_blocked_ref<T, DataTypeConfig>(
+                    q_host, k_host, v_host, output_host, block_mask,
+                    batch, nhead, seqlen_q, hdim_v, block_size, scale,
+                    /*causal_type=*/0, /*window_left=*/-1, /*window_right=*/-1,
+                    i_perm, o_perm, "Jenga vs CPU ref",
+                    /*print_result=*/true, logits_soft_cap_user);
+            }
+        }
+    }
+    else if(api == "jenga" && mode == sparse_attn_mode::group)
+    {
+        // ---- Generate per-seq lengths in [seqlen/2, seqlen] (-s acts as max) ----
+        const int32_t sq_min = std::max(int32_t{block_size}, seqlen_q / 2);
+        const int32_t sk_min = std::max(int32_t{block_size}, seqlen_k / 2);
+        // Midpoint avg so the swap-walk inside generate_seqlens_group has both directions
+        // available; passing avg=max would silently produce uniform [max,max,...] (every
+        // increment hits the cap and aborts), defeating the point of group-mode testing.
+        const int32_t sq_avg = (sq_min + seqlen_q) / 2;
+        const int32_t sk_avg = (sk_min + seqlen_k) / 2;
+        auto seqlen_qs = generate_seqlens_group(batch, sq_avg, sq_min, seqlen_q, seed + 300);
+        auto seqlen_ks = (seqlen_q == seqlen_k && sq_min == sk_min)
+                             ? seqlen_qs
+                             : generate_seqlens_group(batch, sk_avg, sk_min, seqlen_k, seed + 301);
+
+        const auto seqstart_q_host = to_seqstarts(seqlen_qs);
+        const auto seqstart_k_host = to_seqstarts(seqlen_ks);
+        const int32_t total_q = seqstart_q_host.back();
+        const int32_t total_k = seqstart_k_host.back();
+        const auto q_blocks    = seqlens_to_blocks(seqlen_qs, block_size);
+        const auto k_blocks    = seqlens_to_blocks(seqlen_ks, block_size);
+        const auto seqstart_q_block_host = to_seqstarts(q_blocks);
+
+        // ---- Allocate packed Q/K/V/O with B=1 + total_seqlen ----
+        auto q_packed = make_qkv_tensor<T>(1, nhead,   total_q, hdim_q, i_perm);
+        auto k_packed = make_qkv_tensor<T>(1, nhead_k, total_k, hdim_q, i_perm);
+        auto v_packed = make_qkv_tensor<T>(1, nhead_k, total_k, hdim_v, i_perm);
+        auto o_packed = o_perm ? ck_tile::HostTensor<T>({1, nhead, total_q, hdim_v})
+                               : ck_tile::HostTensor<T>({1, total_q, nhead, hdim_v});
+        ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed}(q_packed);
+        ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 1}(k_packed);
+        ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 2}(v_packed);
+
+        // ---- Fully packed mask + offset table ----
+        std::vector<int32_t> mask_batch_offsets;
+        auto mask_packed = generate_random_block_mask_group(
+            q_blocks, k_blocks, nhead, sparsity, seed + 100, true, mask_batch_offsets);
+
+        // ---- Recompute metrics on actual packed sizes ----
+        const std::size_t flop_g     = compute_sparse_attn_flop_group(
+            nhead, seqlen_qs, seqlen_ks, hdim_q, hdim_v, sparsity, mask_str);
+        const std::size_t num_byte_g = compute_sparse_attn_num_byte_group<T>(
+            nhead, nhead_k, seqlen_qs, seqlen_ks, hdim_q, hdim_v, sparsity);
+
+        // CP3.10: Jenga group + bias plumbing — all variants now supported.
+        using BiasT = typename FmhaSparseFwdTypeConfig<DataTypeConfig>::BiasDataType;
+        bias_info bi = bias_info::decode(bias_str);
+        auto bs = setup_bias<BiasT>(bi, batch, nhead, seqlen_q, seqlen_k,
+                                    causal_type, seed + 500, "jenga group");
+        if(bs.args.type < 0)
+            return sparse_attn_result::failure;
+
+        try
+        {
+            ave_time = jenga_sparse_attention<T>(
+                q_packed, k_packed, v_packed, mask_packed, o_packed,
+                batch, nhead, nhead_k,
+                /*seqlen_q=*/0, /*seqlen_k=*/0,
+                hdim_q, hdim_v,
+                i_perm, o_perm, is_v_rowmajor,
+                /*max_seqlen_q=*/seqlen_q, /*max_seqlen_k=*/0,
+                stream_config, mask_str, bs.args, scale_s_user, logits_soft_cap_user,
+                seqstart_q_host, seqstart_k_host,
+                seqstart_q_block_host, mask_batch_offsets);
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << "\nError: " << e.what() << std::endl;
+            return sparse_attn_result::failure;
+        }
+        if(ave_time < 0)
+        {
+            std::cout << ", not supported yet" << std::flush << std::endl;
+            return sparse_attn_result::skipped;
+        }
+        // Per-seq seqlens on the [api] line.
+        std::cout << ", sq:" << format_int_vec(seqlen_qs)
+                  << ", sk:" << format_int_vec(seqlen_ks) << std::flush;
+        if(stream_config.time_kernel_)
+            print_perf(static_cast<double>(ave_time), flop_g, num_byte_g);
+        json_seqlen_qs = seqlen_qs;
+        json_seqlen_ks = seqlen_ks;
+        json_flop      = flop_g;
+        json_num_byte  = num_byte_g;
+
+        // ---- Validate by slicing each sequence into a B=1 sub-batch and reusing the
+        //      blocked CPU reference. validate_vs_blocked_ref already accepts batch=1.
+        //      Per-sub-batch print suppressed; one combined valid:y/n at the end so the
+        //      output line shape matches batch mode. ----
+        if(do_validation)
+        {
+            pass = true;
+            for(int32_t b = 0; b < batch; ++b)
+            {
+                const int32_t sq = seqlen_qs[b];
+                const int32_t sk = seqlen_ks[b];
+                auto q_b = slice_packed_to_b1(q_packed, seqstart_q_host[b], sq, nhead,   hdim_q, i_perm);
+                auto k_b = slice_packed_to_b1(k_packed, seqstart_k_host[b], sk, nhead_k, hdim_q, i_perm);
+                auto v_b = slice_packed_to_b1(v_packed, seqstart_k_host[b], sk, nhead_k, hdim_v, i_perm);
+                auto o_b = slice_packed_to_b1(o_packed, seqstart_q_host[b], sq, nhead,   hdim_v, o_perm);
+                auto mask_b = slice_packed_mask_to_b1(
+                    mask_packed, b, q_blocks, k_blocks, mask_batch_offsets, nhead);
+                bool sub_pass;
+                if(bi.type == bias_enum::elementwise_bias)
+                {
+                    auto bias_b_sub = slice_elementwise_bias_to_b1<BiasT>(
+                        *bs.elementwise_host, bi.rank_info, b, nhead, sq, sk);
+                    sub_pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                        q_b, k_b, v_b, o_b, mask_b,
+                        bias_b_sub, bi.rank_info,
+                        /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
+                        /*causal_type=*/0, /*window_left=*/-1, /*window_right=*/-1,
+                        i_perm, o_perm,
+                        std::string("Jenga group+bias sub-batch ") + std::to_string(b),
+                        /*print_result=*/false);
+                }
+                else if(bi.type == bias_enum::alibi)
+                {
+                    auto alibi_dense = alibi_to_dense<BiasT>(
+                        bs.alibi_slopes_host, nhead, sq, sk);
+                    sub_pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                        q_b, k_b, v_b, o_b, mask_b,
+                        alibi_dense, /*rank=*/1,
+                        /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
+                        /*causal_type=*/0, /*window_left=*/-1, /*window_right=*/-1,
+                        i_perm, o_perm,
+                        std::string("Jenga group+alibi sub-batch ") + std::to_string(b),
+                        /*print_result=*/false);
+                }
+                else
+                {
+                    sub_pass = validate_vs_blocked_ref<T, DataTypeConfig>(
+                        q_b, k_b, v_b, o_b, mask_b,
+                        /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
+                        /*causal_type=*/0, /*window_left=*/-1, /*window_right=*/-1,
+                        i_perm, o_perm,
+                        std::string("Jenga group sub-batch ") + std::to_string(b),
+                        /*print_result=*/false, logits_soft_cap_user);
+                }
+                pass = pass && sub_pass;
+            }
+            std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
+        }
+    }
+    else if(api == "vsa" && mode == sparse_attn_mode::batch)
+    {
+        auto block_mask = generate_random_block_mask(
+            batch, nhead, num_q_blocks, num_k_blocks, sparsity, seed + 100, true);
+        ck_tile::HostTensor<int32_t> lut({batch, nhead, num_q_blocks, num_k_blocks});
+        ck_tile::HostTensor<int32_t> valid_block_num({batch, nhead, num_q_blocks});
+        block_map_to_lut(block_mask, lut, valid_block_num);
+
+        // Phase 3 / CP3.3 bias plumbing.
+        using BiasT = typename FmhaSparseFwdTypeConfig<DataTypeConfig>::BiasDataType;
+        bias_info bi = bias_info::decode(bias_str);
+        auto bs = setup_bias<BiasT>(bi, batch, nhead, seqlen_q, seqlen_k,
+                                    causal_type, seed + 500, "vsa");
+        if(bs.args.type < 0)
+            return sparse_attn_result::failure;
+
+        try
+        {
+            ave_time = vsa_sparse_attention<T>(q_host, k_host, v_host, lut, valid_block_num,
+                output_host, batch, nhead, nhead_k, seqlen_q, seqlen_k,
+                hdim_q, hdim_v, i_perm, o_perm, is_v_rowmajor, seqlen_q, seqlen_k,
+                stream_config, mask_str, bs.args, scale_s_user, logits_soft_cap_user);
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << "\nError: " << e.what() << std::endl;
+            return sparse_attn_result::failure;
+        }
+
+        if(ave_time < 0)
+        {
+            std::cout << ", not supported yet" << std::flush << std::endl;
+            return sparse_attn_result::skipped;
+        }
+        if(stream_config.time_kernel_)
+            print_perf(static_cast<double>(ave_time), flop, num_byte);
+
+        if(do_validation)
+        {
+            if(bi.type == bias_enum::elementwise_bias)
+            {
+                pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                    q_host, k_host, v_host, output_host, block_mask,
+                    *bs.elementwise_host, bi.rank_info,
+                    batch, nhead, seqlen_q, hdim_v, block_size, scale,
+                    causal_type, mask_decoded.left, mask_decoded.right,
+                    i_perm, o_perm, "VSA vs CPU ref");
+            }
+            else if(bi.type == bias_enum::alibi)
+            {
+                auto alibi_dense = alibi_to_dense<BiasT>(
+                    bs.alibi_slopes_host, nhead, seqlen_q, seqlen_k);
+                pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                    q_host, k_host, v_host, output_host, block_mask,
+                    alibi_dense, /*rank=*/1,
+                    batch, nhead, seqlen_q, hdim_v, block_size, scale,
+                    causal_type, mask_decoded.left, mask_decoded.right,
+                    i_perm, o_perm, "VSA vs CPU ref");
+            }
+            else
+            {
+                pass = validate_vs_blocked_ref<T, DataTypeConfig>(
+                    q_host, k_host, v_host, output_host, block_mask,
+                    batch, nhead, seqlen_q, hdim_v, block_size, scale,
+                    causal_type, mask_decoded.left, mask_decoded.right,
+                    i_perm, o_perm, "VSA vs CPU ref",
+                    /*print_result=*/true, logits_soft_cap_user);
+            }
+        }
+    }
+    else if(api == "vsa" && mode == sparse_attn_mode::group)
+    {
+        // VSA group: same scaffolding as the jenga branch above, then convert the
+        // packed jenga-style mask to VSA's packed (LUT, VBN).
+        const int32_t sq_min = std::max(int32_t{block_size}, seqlen_q / 2);
+        const int32_t sk_min = std::max(int32_t{block_size}, seqlen_k / 2);
+        const int32_t sq_avg = (sq_min + seqlen_q) / 2;  // see jenga branch for midpoint rationale
+        const int32_t sk_avg = (sk_min + seqlen_k) / 2;
+        auto seqlen_qs = generate_seqlens_group(batch, sq_avg, sq_min, seqlen_q, seed + 300);
+        auto seqlen_ks = (seqlen_q == seqlen_k && sq_min == sk_min)
+                             ? seqlen_qs
+                             : generate_seqlens_group(batch, sk_avg, sk_min, seqlen_k, seed + 301);
+
+        const auto seqstart_q_host = to_seqstarts(seqlen_qs);
+        const auto seqstart_k_host = to_seqstarts(seqlen_ks);
+        const int32_t total_q = seqstart_q_host.back();
+        const int32_t total_k = seqstart_k_host.back();
+        const auto q_blocks    = seqlens_to_blocks(seqlen_qs, block_size);
+        const auto k_blocks    = seqlens_to_blocks(seqlen_ks, block_size);
+        const auto seqstart_q_block_host = to_seqstarts(q_blocks);
+
+        auto q_packed = make_qkv_tensor<T>(1, nhead,   total_q, hdim_q, i_perm);
+        auto k_packed = make_qkv_tensor<T>(1, nhead_k, total_k, hdim_q, i_perm);
+        auto v_packed = make_qkv_tensor<T>(1, nhead_k, total_k, hdim_v, i_perm);
+        auto o_packed = o_perm ? ck_tile::HostTensor<T>({1, nhead, total_q, hdim_v})
+                               : ck_tile::HostTensor<T>({1, total_q, nhead, hdim_v});
+        ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed}(q_packed);
+        ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 1}(k_packed);
+        ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 2}(v_packed);
+
+        std::vector<int32_t> lut_batch_offsets;
+        auto mask_packed = generate_random_block_mask_group(
+            q_blocks, k_blocks, nhead, sparsity, seed + 100, true, lut_batch_offsets);
+
+        // Convert packed mask -> packed (LUT, VBN). LUT shares the mask layout; VBN is
+        // packed by seqstart_q_block.
+        const int32_t lut_total = lut_batch_offsets.back();
+        const int32_t vbn_total = seqstart_q_block_host.back();
+        ck_tile::HostTensor<int32_t> lut_packed({nhead, lut_total});
+        ck_tile::HostTensor<int32_t> vbn_packed({nhead, vbn_total});
+        block_map_to_lut_group(mask_packed, q_blocks, k_blocks,
+                               lut_batch_offsets, seqstart_q_block_host,
+                               lut_packed, vbn_packed);
+
+        const std::size_t flop_g     = compute_sparse_attn_flop_group(
+            nhead, seqlen_qs, seqlen_ks, hdim_q, hdim_v, sparsity, mask_str);
+        const std::size_t num_byte_g = compute_sparse_attn_num_byte_group<T>(
+            nhead, nhead_k, seqlen_qs, seqlen_ks, hdim_q, hdim_v, sparsity);
+
+        // CP3.9: VSA group + bias plumbing — all variants now supported.
+        using BiasT = typename FmhaSparseFwdTypeConfig<DataTypeConfig>::BiasDataType;
+        bias_info bi = bias_info::decode(bias_str);
+        auto bs = setup_bias<BiasT>(bi, batch, nhead, seqlen_q, seqlen_k,
+                                    causal_type, seed + 500, "vsa group");
+        if(bs.args.type < 0)
+            return sparse_attn_result::failure;
+
+        try
+        {
+            ave_time = vsa_sparse_attention<T>(
+                q_packed, k_packed, v_packed, lut_packed, vbn_packed, o_packed,
+                batch, nhead, nhead_k,
+                /*seqlen_q=*/0, /*seqlen_k=*/0,
+                hdim_q, hdim_v,
+                i_perm, o_perm, is_v_rowmajor,
+                /*max_seqlen_q=*/seqlen_q, /*max_seqlen_k=*/0,
+                stream_config, mask_str, bs.args, scale_s_user, logits_soft_cap_user,
+                seqstart_q_host, seqstart_k_host,
+                seqstart_q_block_host, lut_batch_offsets);
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << "\nError: " << e.what() << std::endl;
+            return sparse_attn_result::failure;
+        }
+        if(ave_time < 0)
+        {
+            std::cout << ", not supported yet" << std::flush << std::endl;
+            return sparse_attn_result::skipped;
+        }
+        std::cout << ", sq:" << format_int_vec(seqlen_qs)
+                  << ", sk:" << format_int_vec(seqlen_ks) << std::flush;
+        if(stream_config.time_kernel_)
+            print_perf(static_cast<double>(ave_time), flop_g, num_byte_g);
+        json_seqlen_qs = seqlen_qs;
+        json_seqlen_ks = seqlen_ks;
+        json_flop      = flop_g;
+        json_num_byte  = num_byte_g;
+
+        if(do_validation)
+        {
+            pass = true;
+            for(int32_t b = 0; b < batch; ++b)
+            {
+                const int32_t sq = seqlen_qs[b];
+                const int32_t sk = seqlen_ks[b];
+                auto q_b = slice_packed_to_b1(q_packed, seqstart_q_host[b], sq, nhead,   hdim_q, i_perm);
+                auto k_b = slice_packed_to_b1(k_packed, seqstart_k_host[b], sk, nhead_k, hdim_q, i_perm);
+                auto v_b = slice_packed_to_b1(v_packed, seqstart_k_host[b], sk, nhead_k, hdim_v, i_perm);
+                auto o_b = slice_packed_to_b1(o_packed, seqstart_q_host[b], sq, nhead,   hdim_v, o_perm);
+                auto mask_b = slice_packed_mask_to_b1(
+                    mask_packed, b, q_blocks, k_blocks, lut_batch_offsets, nhead);
+                bool sub_pass;
+                if(bi.type == bias_enum::elementwise_bias)
+                {
+                    auto bias_b_sub = slice_elementwise_bias_to_b1<BiasT>(
+                        *bs.elementwise_host, bi.rank_info, b, nhead, sq, sk);
+                    sub_pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                        q_b, k_b, v_b, o_b, mask_b,
+                        bias_b_sub, bi.rank_info,
+                        /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
+                        causal_type, mask_decoded.left, mask_decoded.right,
+                        i_perm, o_perm,
+                        std::string("VSA group+bias sub-batch ") + std::to_string(b),
+                        /*print_result=*/false);
+                }
+                else if(bi.type == bias_enum::alibi)
+                {
+                    auto alibi_dense = alibi_to_dense<BiasT>(
+                        bs.alibi_slopes_host, nhead, sq, sk);
+                    sub_pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                        q_b, k_b, v_b, o_b, mask_b,
+                        alibi_dense, /*rank=*/1,
+                        /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
+                        causal_type, mask_decoded.left, mask_decoded.right,
+                        i_perm, o_perm,
+                        std::string("VSA group+alibi sub-batch ") + std::to_string(b),
+                        /*print_result=*/false);
+                }
+                else
+                {
+                    sub_pass = validate_vs_blocked_ref<T, DataTypeConfig>(
+                        q_b, k_b, v_b, o_b, mask_b,
+                        /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
+                        causal_type, mask_decoded.left, mask_decoded.right,
+                        i_perm, o_perm,
+                        std::string("VSA group sub-batch ") + std::to_string(b),
+                        /*print_result=*/false, logits_soft_cap_user);
+                }
+                pass = pass && sub_pass;
+            }
+            std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
+        }
+    }
+    else if(api == "sparge" && mode == sparse_attn_mode::batch)
+    {
+        // -sparge_mode picks the algorithm; the unused field stays at 0.
+        // topK: deterministic 1 - sparsity ratio of K-blocks per Q-block.
+        // cdf:  greedy until cumulative softmax probability reaches 1 - sparsity.
+        if(sparge_mode != "topk" && sparge_mode != "cdf")
+        {
+            std::cerr << "error: -sparge_mode must be 'topk' or 'cdf', got '"
+                      << sparge_mode << "'\n";
+            return sparse_attn_result::failure;
+        }
+        const bool  mode_is_topk  = (sparge_mode == "topk");
+        const float scalar_topk   = mode_is_topk ? (1.0f - sparsity) : 0.0f;
+        const float scalar_cdf    = mode_is_topk ? 0.0f              : (1.0f - sparsity);
+        const float scalar_sim    = simthreshold;
+        const float scalar_pvthreshd = pvthreshd;
+
+        // Bias (Phase 1+2 sparge): decode + setup via shared helper.
+        using BiasT = typename FmhaSparseFwdTypeConfig<DataTypeConfig>::BiasDataType;
+        bias_info bi = bias_info::decode(bias_str);
+        auto bs = setup_bias<BiasT>(bi, batch, nhead, seqlen_q, seqlen_k,
+                                    causal_type, seed + 500, "sparge");
+        if(bs.args.type < 0)
+            return sparse_attn_result::failure;
+        sparse_attn_bias_args& bias_args = bs.args;
+
+        ck_tile::sparge_hyperparam_args hp;
+        hp.cdfthreshd        = scalar_cdf;
+        hp.topk               = scalar_topk;
+        hp.simthreshold      = scalar_sim;
+        hp.pvthreshd = scalar_pvthreshd;
+        hp.smooth_k           = smooth_k;
+
+        // Per-head buffers (RAII; outlive the kernel launch and feed CPU reference).
+        std::vector<float> h_cdf, h_topk, h_sim, h_pvthreshd;
+        ck_tile::DeviceMem buf_cdf, buf_topk, buf_sim, buf_pvthreshd;
+
+        // Parse -sparsity_per_head once, then convert (1 - sparsity[h]) into the field
+        // selected by -sparge_mode; the other field stays empty.
+        const std::vector<float> csv_sparsity_in = parse_csv_floats(sparsity_per_head_csv, "sparsity_per_head", nhead);
+        std::vector<float> csv_cdf, csv_topk;
+        if(!csv_sparsity_in.empty())
+        {
+            std::vector<float>& dst = mode_is_topk ? csv_topk : csv_cdf;
+            dst.resize(csv_sparsity_in.size());
+            for(size_t i = 0; i < csv_sparsity_in.size(); ++i)
+                dst[i] = 1.0f - csv_sparsity_in[i];
+        }
+        const std::vector<float> csv_sim    = parse_csv_floats(sim_per_head_csv,    "sim_per_head",    nhead);
+        const std::vector<float> csv_pvthreshd = parse_csv_floats(pvthreshd_per_head_csv, "pvthreshd_per_head", nhead);
+        const bool any_csv = !csv_sparsity_in.empty() ||
+                             !csv_sim.empty() || !csv_pvthreshd.empty();
+
+        if(perhead_test || any_csv)
+        {
+            if(nhead < 2 && perhead_test)
+            {
+                std::cerr << "error: -perhead_test=1 requires -h >= 2 (got " << nhead
+                          << "), aborting to avoid silent skip\n";
+                return sparse_attn_result::failure;
+            }
+
+            // Per-field precedence: CSV > -perhead_test synth > scalar.
+            auto fill_field = [&](std::vector<float>& dst,
+                                   const std::vector<float>& csv,
+                                   float scalar,
+                                   bool clamp_to_unit_interval) -> bool {
+                if(!csv.empty())
+                {
+                    dst = csv;
+                    return true;
+                }
+                if(perhead_test && (clamp_to_unit_interval ? scalar > 0.0f : scalar != 0.0f))
+                {
+                    dst.assign(static_cast<size_t>(nhead), 0.0f);
+                    constexpr float clamp_lo = 0.001f, clamp_hi = 0.999f;
+                    for(ck_tile::index_t h = 0; h < nhead; ++h)
+                    {
+                        const float scl = (nhead < 2)
+                            ? 1.0f
+                            : 0.8f + 0.4f * static_cast<float>(h) /
+                                         static_cast<float>(nhead - 1); // 0.8..1.2
+                        const float v = scalar * scl;
+                        dst[static_cast<size_t>(h)] =
+                            clamp_to_unit_interval ? std::clamp(v, clamp_lo, clamp_hi) : v;
+                    }
+                    return true;
+                }
+                return false;
+            };
+
+            const bool use_cdf    = fill_field(h_cdf,    csv_cdf,    scalar_cdf,    /*clamp=*/true);
+            const bool use_topk   = fill_field(h_topk,   csv_topk,   scalar_topk,   /*clamp=*/true);
+            const bool use_sim    = fill_field(h_sim,    csv_sim,    scalar_sim,    /*clamp=*/true);
+            const bool use_pvthreshd = fill_field(h_pvthreshd, csv_pvthreshd, scalar_pvthreshd, /*clamp=*/false);
+
+            if(use_cdf)
+            {
+                buf_cdf.Realloc(static_cast<size_t>(nhead) * sizeof(float));
+                buf_cdf.ToDevice(h_cdf.data());
+                hp.cdfthreshd_per_head_ptr = buf_cdf.GetDeviceBuffer();
+            }
+            if(use_topk)
+            {
+                buf_topk.Realloc(static_cast<size_t>(nhead) * sizeof(float));
+                buf_topk.ToDevice(h_topk.data());
+                hp.topk_per_head_ptr = buf_topk.GetDeviceBuffer();
+            }
+            if(use_sim)
+            {
+                buf_sim.Realloc(static_cast<size_t>(nhead) * sizeof(float));
+                buf_sim.ToDevice(h_sim.data());
+                hp.simthreshold_per_head_ptr = buf_sim.GetDeviceBuffer();
+            }
+            if(use_pvthreshd)
+            {
+                buf_pvthreshd.Realloc(static_cast<size_t>(nhead) * sizeof(float));
+                buf_pvthreshd.ToDevice(h_pvthreshd.data());
+                hp.pvthreshd_per_head_ptr = buf_pvthreshd.GetDeviceBuffer();
+            }
+        }
+
+        // Opt-in: requesting actual sparsity costs one extra hipMemcpy + host sum.
+        // Off path (default) reports TFlops with the input -sparsity threshold, which
+        // diverges from the realised ratio when CDF / sim / sink kick in.
+        float actual_sparsity = -1.0f;
+        try
+        {
+            ave_time = sparge_sparse_attention<T>(q_host, k_host, v_host, output_host,
+                batch, nhead, nhead_k, seqlen_q, seqlen_k, hdim_q, hdim_v,
+                i_perm, o_perm, is_v_rowmajor, hp, mask_str, attention_sink,
+                block_size, seqlen_q, seqlen_k,
+                print_sparsity ? &actual_sparsity : nullptr,
+                stream_config, bias_args, scale_s_user, logits_soft_cap_user);
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << "\nError: " << e.what() << std::endl;
+            return sparse_attn_result::failure;
+        }
+
+        if(ave_time < 0)
+        {
+            std::cout << ", not supported yet" << std::flush << std::endl;
+            return sparse_attn_result::skipped;
+        }
+        {
+            const bool have_actual = (actual_sparsity >= 0.0f);
+            const std::size_t flop_used = have_actual
+                ? compute_sparse_attn_flop(batch, nhead, seqlen_q, seqlen_k,
+                                           hdim_q, hdim_v, actual_sparsity, mask_decoded)
+                : flop;
+            const std::size_t num_byte_used = have_actual
+                ? compute_sparse_attn_num_byte<T>(batch, nhead, nhead_k,
+                                                  seqlen_q, seqlen_k, hdim_q, hdim_v,
+                                                  actual_sparsity)
+                : num_byte;
+            if(stream_config.time_kernel_)
+                print_perf(static_cast<double>(ave_time), flop_used, num_byte_used);
+            json_flop            = flop_used;
+            json_num_byte        = num_byte_used;
+            json_actual_sparsity = actual_sparsity;
+        }
+
+        if(print_sparsity && actual_sparsity >= 0.0f)
+            std::cout << ", sparsity=" << actual_sparsity << std::flush;
+
+        if(do_validation)
+        {
+            auto q_ref = to_bhsd(q_host, i_perm);
+            auto k_ref = to_bhsd(k_host, i_perm);
+
+            ck_tile::sparge_mask_prediction_params rp;
+            rp.cdfthreshd            = scalar_cdf;
+            rp.topk                   = scalar_topk;
+            rp.simthreshold          = scalar_sim;
+            rp.cdfthreshd_per_head   = h_cdf;    // empty when !perhead_test → CPU uses scalar
+            rp.topk_per_head          = h_topk;
+            rp.simthreshold_per_head = h_sim;
+            rp.causal_type            = causal_type;
+            rp.attention_sink         = attention_sink;
+            rp.window_left            = mask_decoded.left;
+            rp.window_right           = mask_decoded.right;
+            rp.smooth_k               = smooth_k;
+
+            auto cpu_mask = ck_tile::reference_sparge_mask_prediction<T>(
+                q_ref, k_ref, batch, nhead, nhead_k, seqlen_q, seqlen_k,
+                hdim_q, block_size, block_size, rp);
+
+            if(bi.type == bias_enum::elementwise_bias)
+            {
+                pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                    q_host, k_host, v_host, output_host, cpu_mask,
+                    *bs.elementwise_host, bi.rank_info,
+                    batch, nhead, seqlen_q, hdim_v, block_size, scale,
+                    causal_type, mask_decoded.left, mask_decoded.right,
+                    i_perm, o_perm, "Sparge+bias vs CPU ref");
+            }
+            else if(bi.type == bias_enum::alibi)
+            {
+                // Materialize alibi as an equivalent rank-1 elementwise bias tensor matching
+                // ck_tile::Alibi<>::update semantics. make_alibi_from_lr_mask uses VERTICAL
+                // mode for typical causal (window_left<0 && window_right==0):
+                //   bias[h, q, k] = slope[h] * k                         (VERTICAL)
+                //   bias[h, q, k] = -slope[h] * |q - k|                   (FROM_TOP_LEFT)
+                //   bias[h, q, k] = -slope[h] * |q + (sk-sq) - k|         (FROM_BOTTOM_RIGHT)
+                // -mask=t/b with default (left=-1, right=0) ⇒ VERTICAL.
+                ck_tile::HostTensor<BiasT> alibi_bias({1, nhead, seqlen_q, seqlen_k});
+                const bool is_vertical =
+                    (mask_decoded.left < 0 && mask_decoded.right == 0);
+                const ck_tile::index_t shift =
+                    (causal_type == 2) ? (seqlen_k - seqlen_q) : 0;
+                // Note: get_alibi_slopes returns positive values; matches what kernel
+                // passes to make_alibi_from_lr_mask (no host-side negation).
+                for(ck_tile::index_t h = 0; h < nhead; ++h)
+                {
+                    const float slope = bs.alibi_slopes_host[h];
+                    for(ck_tile::index_t q = 0; q < seqlen_q; ++q)
+                        for(ck_tile::index_t k = 0; k < seqlen_k; ++k)
+                        {
+                            // Replicate ck_tile::Alibi<>::update VERTICAL formula:
+                            //   shift_right_down = 0 (causal); current_zero_point = 0;
+                            //   position = sad(0, k+0) = k; pixel += slope * k.
+                            // For FROM_TOP_LEFT / FROM_BOTTOM_RIGHT (non-default) Alibi
+                            // negates slope and uses |q - (k + shift)|.
+                            float val;
+                            if(is_vertical)
+                                val = slope * static_cast<float>(k);
+                            else if(causal_type == 2)
+                                val = -slope * std::abs(static_cast<float>(
+                                    (q + shift) - static_cast<ck_tile::long_index_t>(k)));
+                            else
+                                val = -slope * std::abs(static_cast<float>(
+                                    static_cast<ck_tile::long_index_t>(q) -
+                                    static_cast<ck_tile::long_index_t>(k)));
+                            alibi_bias(0, h, q, k) = static_cast<BiasT>(val);
+                        }
+                }
+                pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                    q_host, k_host, v_host, output_host, cpu_mask,
+                    alibi_bias, /*rank=*/1,
+                    batch, nhead, seqlen_q, hdim_v, block_size, scale,
+                    causal_type, mask_decoded.left, mask_decoded.right,
+                    i_perm, o_perm, "Sparge+alibi vs CPU ref");
+            }
+            else
+            {
+                pass = validate_vs_blocked_ref<T, DataTypeConfig>(
+                    q_host, k_host, v_host, output_host, cpu_mask,
+                    batch, nhead, seqlen_q, hdim_v, block_size, scale,
+                    causal_type, mask_decoded.left, mask_decoded.right,
+                    i_perm, o_perm, "Sparge vs CPU ref",
+                    /*print_result=*/true, logits_soft_cap_user);
+            }
+        }
+    }
+    else if(api == "sparge" && mode == sparse_attn_mode::group)
+    {
+        // Sparge group: per-seq lengths -> packed Q/K/V/O -> dispatch (preprocess +
+        // mask + attention, all with cu_seqlens-aware packed workspace). Validation
+        // slices each sequence into a B=1 sub-batch and reuses the batch-mode combo
+        // (reference_sparge_mask_prediction + validate_vs_blocked_ref).
+        if(sparge_mode != "topk" && sparge_mode != "cdf")
+        {
+            std::cerr << "error: -sparge_mode must be 'topk' or 'cdf', got '"
+                      << sparge_mode << "'\n";
+            return sparse_attn_result::failure;
+        }
+        const bool  mode_is_topk  = (sparge_mode == "topk");
+        const float scalar_topk   = mode_is_topk ? (1.0f - sparsity) : 0.0f;
+        const float scalar_cdf    = mode_is_topk ? 0.0f              : (1.0f - sparsity);
+        const float scalar_sim    = simthreshold;
+        const float scalar_pvthreshd = pvthreshd;
+
+        ck_tile::sparge_hyperparam_args hp;
+        hp.cdfthreshd        = scalar_cdf;
+        hp.topk               = scalar_topk;
+        hp.simthreshold      = scalar_sim;
+        hp.pvthreshd = scalar_pvthreshd;
+        hp.smooth_k           = smooth_k;
+        // perhead_test / CSV per-head paths intentionally skipped in group MVP — keep the
+        // group surface area focused on cu_seqlens correctness, not per-head plumbing.
+        if(perhead_test ||
+           !sparsity_per_head_csv.empty() ||
+           !sim_per_head_csv.empty()  || !pvthreshd_per_head_csv.empty())
+        {
+            std::cerr << "[sparge group] -perhead_test / per-head CSV not yet supported; "
+                         "use scalar hyperparams.\n";
+            return sparse_attn_result::failure;
+        }
+
+        const int32_t sq_min = std::max(int32_t{block_size}, seqlen_q / 2);
+        const int32_t sk_min = std::max(int32_t{block_size}, seqlen_k / 2);
+        const int32_t sq_avg = (sq_min + seqlen_q) / 2;  // see jenga branch for midpoint rationale
+        const int32_t sk_avg = (sk_min + seqlen_k) / 2;
+        auto seqlen_qs = generate_seqlens_group(batch, sq_avg, sq_min, seqlen_q, seed + 300);
+        auto seqlen_ks = (seqlen_q == seqlen_k && sq_min == sk_min)
+                             ? seqlen_qs
+                             : generate_seqlens_group(batch, sk_avg, sk_min, seqlen_k, seed + 301);
+
+        const auto seqstart_q_host = to_seqstarts(seqlen_qs);
+        const auto seqstart_k_host = to_seqstarts(seqlen_ks);
+        const int32_t total_q = seqstart_q_host.back();
+        const int32_t total_k = seqstart_k_host.back();
+
+        auto q_packed = make_qkv_tensor<T>(1, nhead,   total_q, hdim_q, i_perm);
+        auto k_packed = make_qkv_tensor<T>(1, nhead_k, total_k, hdim_q, i_perm);
+        auto v_packed = make_qkv_tensor<T>(1, nhead_k, total_k, hdim_v, i_perm);
+        auto o_packed = o_perm ? ck_tile::HostTensor<T>({1, nhead, total_q, hdim_v})
+                               : ck_tile::HostTensor<T>({1, total_q, nhead, hdim_v});
+        ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed}(q_packed);
+        ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 1}(k_packed);
+        ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 2}(v_packed);
+
+        // CP3.8: group + bias all supported. ELEMENTWISE allocates a [B,h_or_1,max_sq,max_sk]
+        // tensor (sized at -s); per-batch slabs use [0:sq_b, 0:sk_b] sub-region.
+        // ALIBI's slope buffer is [1*nhead] or [b*nhead] — independent of seqlens.
+        using BiasT = typename FmhaSparseFwdTypeConfig<DataTypeConfig>::BiasDataType;
+        bias_info bi = bias_info::decode(bias_str);
+        auto bs = setup_bias<BiasT>(bi, batch, nhead, seqlen_q, seqlen_k,
+                                    causal_type, seed + 500, "sparge group");
+        if(bs.args.type < 0)
+            return sparse_attn_result::failure;
+
+        float actual_sparsity = -1.0f;
+        try
+        {
+            ave_time = sparge_sparse_attention<T>(
+                q_packed, k_packed, v_packed, o_packed,
+                batch, nhead, nhead_k,
+                /*seqlen_q=*/0, /*seqlen_k=*/0,
+                hdim_q, hdim_v,
+                i_perm, o_perm, is_v_rowmajor,
+                hp, mask_str, attention_sink,
+                block_size, /*max_seqlen_q=*/seqlen_q, /*max_seqlen_k=*/0,
+                print_sparsity ? &actual_sparsity : nullptr,
+                stream_config, bs.args, scale_s_user, logits_soft_cap_user,
+                seqlen_qs, seqlen_ks);
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << "\nError: " << e.what() << std::endl;
+            return sparse_attn_result::failure;
+        }
+        if(ave_time < 0)
+        {
+            std::cout << ", not supported yet" << std::flush << std::endl;
+            return sparse_attn_result::skipped;
+        }
+        std::cout << ", sq:" << format_int_vec(seqlen_qs)
+                  << ", sk:" << format_int_vec(seqlen_ks) << std::flush;
+        const auto eff_sparsity_for_metrics =
+            (actual_sparsity >= 0.0f) ? actual_sparsity : sparsity;
+        const std::size_t sparge_flop_g = compute_sparse_attn_flop_group(
+            nhead, seqlen_qs, seqlen_ks, hdim_q, hdim_v, eff_sparsity_for_metrics, mask_str);
+        const std::size_t sparge_num_byte_g = compute_sparse_attn_num_byte_group<T>(
+            nhead, nhead_k, seqlen_qs, seqlen_ks, hdim_q, hdim_v, eff_sparsity_for_metrics);
+        if(stream_config.time_kernel_)
+            print_perf(static_cast<double>(ave_time), sparge_flop_g, sparge_num_byte_g);
+        json_seqlen_qs       = seqlen_qs;
+        json_seqlen_ks       = seqlen_ks;
+        json_flop            = sparge_flop_g;
+        json_num_byte        = sparge_num_byte_g;
+        json_actual_sparsity = actual_sparsity;
+        if(print_sparsity && actual_sparsity >= 0.0f)
+            std::cout << ", sparsity=" << actual_sparsity << std::flush;
+
+        if(do_validation)
+        {
+            pass = true;
+            ck_tile::sparge_mask_prediction_params rp;
+            rp.cdfthreshd     = scalar_cdf;
+            rp.topk            = scalar_topk;
+            rp.simthreshold   = scalar_sim;
+            rp.causal_type     = causal_type;
+            rp.attention_sink  = attention_sink;
+            rp.window_left     = mask_decoded.left;
+            rp.window_right    = mask_decoded.right;
+            rp.smooth_k        = smooth_k;
+
+            for(int32_t b = 0; b < batch; ++b)
+            {
+                const int32_t sq = seqlen_qs[b];
+                const int32_t sk = seqlen_ks[b];
+                auto q_b = slice_packed_to_b1(q_packed, seqstart_q_host[b], sq, nhead,   hdim_q, i_perm);
+                auto k_b = slice_packed_to_b1(k_packed, seqstart_k_host[b], sk, nhead_k, hdim_q, i_perm);
+                auto v_b = slice_packed_to_b1(v_packed, seqstart_k_host[b], sk, nhead_k, hdim_v, i_perm);
+                auto o_b = slice_packed_to_b1(o_packed, seqstart_q_host[b], sq, nhead,   hdim_v, o_perm);
+
+                auto q_ref_b = to_bhsd(q_b, i_perm);
+                auto k_ref_b = to_bhsd(k_b, i_perm);
+                auto cpu_mask_b = ck_tile::reference_sparge_mask_prediction<T>(
+                    q_ref_b, k_ref_b, /*batch=*/1, nhead, nhead_k, sq, sk,
+                    hdim_q, block_size, block_size, rp);
+
+                bool sub_pass;
+                if(bi.type == bias_enum::elementwise_bias)
+                {
+                    auto bias_b_sub = slice_elementwise_bias_to_b1<BiasT>(
+                        *bs.elementwise_host, bi.rank_info, b, nhead, sq, sk);
+                    sub_pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                        q_b, k_b, v_b, o_b, cpu_mask_b,
+                        bias_b_sub, bi.rank_info,
+                        /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
+                        causal_type, mask_decoded.left, mask_decoded.right,
+                        i_perm, o_perm,
+                        std::string("Sparge group+bias sub-batch ") + std::to_string(b),
+                        /*print_result=*/false);
+                }
+                else if(bi.type == bias_enum::alibi)
+                {
+                    auto alibi_dense = alibi_to_dense<BiasT>(
+                        bs.alibi_slopes_host, nhead, sq, sk);
+                    sub_pass = validate_vs_blocked_ref_with_bias<T, BiasT, DataTypeConfig>(
+                        q_b, k_b, v_b, o_b, cpu_mask_b,
+                        alibi_dense, /*rank=*/1,
+                        /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
+                        causal_type, mask_decoded.left, mask_decoded.right,
+                        i_perm, o_perm,
+                        std::string("Sparge group+alibi sub-batch ") + std::to_string(b),
+                        /*print_result=*/false);
+                }
+                else
+                {
+                    sub_pass = validate_vs_blocked_ref<T, DataTypeConfig>(
+                        q_b, k_b, v_b, o_b, cpu_mask_b,
+                        /*batch=*/1, nhead, sq, hdim_v, block_size, scale,
+                        causal_type, mask_decoded.left, mask_decoded.right,
+                        i_perm, o_perm,
+                        std::string("Sparge group sub-batch ") + std::to_string(b),
+                        /*print_result=*/false, logits_soft_cap_user);
+                }
+                pass = pass && sub_pass;
+            }
+            std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
+        }
+    }
+    else
+    {
+        std::cerr << "Unknown API: " << api << std::endl;
+        return sparse_attn_result::failure;
+    }
+
+    if(!do_validation)
+        std::cout << std::flush << std::endl;
+
+    // ---- Optional JSON-Lines summary (one line per call). Goes to stdout (prefixed
+    //      "JSON ") or appended to json_file. Emitted regardless of validation outcome
+    //      so benchmark / sweep pipelines can keep the result. ----
+    if(json_out || !json_file.empty())
+    {
+        const std::string prec = std::is_same_v<T, ck_tile::bf16_t> ? "bf16" : "fp16";
+        emit_json_summary(json_file,
+                          api,
+                          mode == sparse_attn_mode::group ? "group" : "batch",
+                          prec,
+                          batch, nhead, nhead_k,
+                          seqlen_q, seqlen_k, hdim_q, hdim_v,
+                          sparsity, mask_str, i_perm, o_perm,
+                          static_cast<double>(ave_time),
+                          json_flop, json_num_byte,
+                          /*has_validation=*/static_cast<bool>(do_validation),
+                          pass,
+                          json_actual_sparsity,
+                          json_seqlen_qs, json_seqlen_ks);
+    }
+
+    return pass ? sparse_attn_result::success : sparse_attn_result::failure;
+}

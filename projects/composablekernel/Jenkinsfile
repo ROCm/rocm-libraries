@@ -601,6 +601,17 @@ def build_and_run_fmha(String arch){
     return cmd
 }
 
+def build_and_run_sparse_attn(String arch){
+    def cmd = """ cmake -G Ninja -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
+                -DGPU_TARGETS="${arch}" \
+                -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
+                -DCMAKE_HIP_COMPILER="${params.BUILD_COMPILER}" .. && \
+                ninja -j128 tile_example_sparse_attn_fwd && \
+                cd ../ &&
+                example/ck_tile/50_sparse_attn/script/run_full_test.sh "CI_${params.COMPILER_VERSION}" "${env.BRANCH_NAME}" "${NODE_NAME}" "${arch}" """
+    return cmd
+}
+
 def cmake_build(Map conf=[:]){
 
     def config_targets = conf.get("config_targets","check")
@@ -898,6 +909,18 @@ def cmake_build(Map conf=[:]){
             echo "could not locate the requested artifacts: ${err.getMessage()}. will skip the stashing."
         }
     }
+
+    if (params.RUN_CK_TILE_SPARSE_ATTN_TESTS){
+        try{
+            dir("projects/composablekernel"){
+            	archiveArtifacts "perf_sparse_attn_*.log"
+            	stash includes: "perf_sparse_attn_**.log", name: "perf_sparse_attn_log_${arch_name}"
+            }
+        }
+        catch(Exception err){
+            echo "could not locate the requested artifacts: ${err.getMessage()}. will skip the stashing."
+        }
+    }
 }
 
 def buildHipClangJob(Map conf=[:]){
@@ -1094,6 +1117,32 @@ def process_results(Map conf=[:]){
                         }
 
                     }
+                    if (params.RUN_CK_TILE_SPARSE_ATTN_TESTS){
+                        try{
+                            unstash "perf_sparse_attn_log_gfx942"
+                        }
+                        catch(Exception err){
+                            echo "could not locate the sparse_attn performance logs for gfx942: ${err.getMessage()}."
+                        }
+                        try{
+                            unstash "perf_sparse_attn_log_gfx90a"
+                        }
+                        catch(Exception err){
+                            echo "could not locate the sparse_attn performance logs for gfx90a: ${err.getMessage()}."
+                        }
+                        try{
+                            unstash "perf_sparse_attn_log_gfx950"
+                        }
+                        catch(Exception err){
+                            echo "could not locate the sparse_attn performance logs for gfx950: ${err.getMessage()}."
+                        }
+                        try{
+                            unstash "perf_sparse_attn_log_gfx1201"
+                        }
+                        catch(Exception err){
+                            echo "could not locate the sparse_attn performance logs for gfx1201: ${err.getMessage()}."
+                        }
+                    }
                     if (params.BUILD_INSTANCES_ONLY){
                         // unstash deb packages
                         try{
@@ -1265,7 +1314,7 @@ def getFaTestsCmds() {
 }
 
 //launch develop branch daily jobs
-CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 23 * * * % RUN_FULL_QA=true;RUN_CK_TILE_FMHA_TESTS=true;RUN_PERFORMANCE_TESTS=true;FORCE_CI=true
+CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 23 * * * % RUN_FULL_QA=true;RUN_CK_TILE_FMHA_TESTS=true;RUN_CK_TILE_SPARSE_ATTN_TESTS=true;RUN_PERFORMANCE_TESTS=true;FORCE_CI=true
                                               0 22 * * * % RUN_FULL_QA=true;DISABLE_DL_KERNELS=true;RUN_TILE_ENGINE_BASIC_TESTS=true;RUN_TILE_ENGINE_GEMM_TESTS=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
                                               0 21 * * * % RUN_GROUPED_CONV_LARGE_CASES_TESTS=true;hipTensor_test=true;BUILD_GFX101=false;BUILD_GFX908=false;BUILD_GFX942=true;BUILD_GFX950=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true;BUILD_PACKAGES=true
                                               0 19 * * * % BUILD_DOCKER=true;COMPILER_VERSION=develop;BUILD_COMPILER=/llvm-project/build/bin/clang++;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
@@ -1357,6 +1406,10 @@ pipeline {
             name: "RUN_CK_TILE_FMHA_TESTS",
             defaultValue: false,
             description: "Run the ck_tile FMHA tests (default: OFF)")
+        booleanParam(
+            name: "RUN_CK_TILE_SPARSE_ATTN_TESTS",
+            defaultValue: false,
+            description: "Run the ck_tile sparse attention tests (default: OFF)")
         booleanParam(
             name: "RUN_TILE_ENGINE_BASIC_TESTS",
             defaultValue: true,
@@ -1795,6 +1848,80 @@ pipeline {
                     environment{
                         setup_args = "NO_CK_BUILD"
                         execute_args = build_and_run_fmha("gfx1201")
+                    }
+                    steps{
+                        buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                        cleanWs()
+                    }
+                }
+            }
+        }
+        stage("Run CK_TILE_SPARSE_ATTN Tests")
+        {
+            when {
+                beforeAgent true
+                expression { env.SHOULD_RUN_CI.toBoolean() }
+            }
+            parallel
+            {
+                stage("Run CK_TILE_SPARSE_ATTN Tests on gfx90a")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_CK_TILE_SPARSE_ATTN_TESTS.toBoolean() }
+                    }
+                    agent{ label rocmnode("gfx90a") }
+                    environment{
+                        setup_args = "NO_CK_BUILD"
+                        execute_args = build_and_run_sparse_attn("gfx90a")
+                    }
+                    steps{
+                        buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                        cleanWs()
+                    }
+                }
+                stage("Run CK_TILE_SPARSE_ATTN Tests on gfx942")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_CK_TILE_SPARSE_ATTN_TESTS.toBoolean() }
+                    }
+                    agent{ label rocmnode("gfx942") }
+                    environment{
+                        setup_args = "NO_CK_BUILD"
+                        execute_args = build_and_run_sparse_attn("gfx942")
+                    }
+                    steps{
+                        buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                        cleanWs()
+                    }
+                }
+                stage("Run CK_TILE_SPARSE_ATTN Tests on gfx950")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_CK_TILE_SPARSE_ATTN_TESTS.toBoolean() }
+                    }
+                    agent{ label rocmnode("gfx950") }
+                    environment{
+                        setup_args = "NO_CK_BUILD"
+                        execute_args = build_and_run_sparse_attn("gfx950")
+                    }
+                    steps{
+                        buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                        cleanWs()
+                    }
+                }
+                stage("Run CK_TILE_SPARSE_ATTN Tests on gfx1201")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_CK_TILE_SPARSE_ATTN_TESTS.toBoolean() }
+                    }
+                    agent{ label rocmnode("gfx1201") }
+                    environment{
+                        setup_args = "NO_CK_BUILD"
+                        execute_args = build_and_run_sparse_attn("gfx1201")
                     }
                     steps{
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
