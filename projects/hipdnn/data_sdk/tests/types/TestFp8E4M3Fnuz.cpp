@@ -290,6 +290,22 @@ TEST(TestFp8E4M3Fnuz, NoNegativeZero)
     EXPECT_EQ(fp8_e4m3_fnuz(0.0f).data, static_cast<uint8_t>(0x00));
 }
 
+TEST(TestFp8E4M3Fnuz, NegateZeroProducesNaN)
+{
+    // FNUZ has no -0; negating zero flips the sign bit: 0x00 -> 0x80 = NaN
+    auto val = -fp8_e4m3_fnuz(0.0f);
+    EXPECT_TRUE(isnan(val));
+    EXPECT_EQ(val.data, static_cast<uint8_t>(0x80));
+}
+
+TEST(TestFp8E4M3Fnuz, NegateNaNProducesZero)
+{
+    // NaN (0x80) negated flips the sign bit: 0x80 -> 0x00 = zero
+    auto val = -fp8_e4m3_fnuz::from_bits(0x80);
+    EXPECT_EQ(static_cast<float>(val), 0.0f);
+    EXPECT_EQ(val.data, static_cast<uint8_t>(0x00));
+}
+
 TEST(TestFp8E4M3Fnuz, SingleNanEncoding)
 {
     // Float NaN must map to 0x80
