@@ -219,3 +219,4 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
+          - Exact: [128, 128, 2, 256] # batch=2
