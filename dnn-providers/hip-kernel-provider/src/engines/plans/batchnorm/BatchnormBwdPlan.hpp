@@ -105,31 +105,15 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    void compileSpatial(const IKernelCompiler& kernelCompiler,
-                        const hipDeviceProp_t& deviceProperties,
-                        const struct ProblemDims& dims);
-
-    void executeSpatial(const HipKernelHandle& handle,
-                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                        uint32_t numDeviceBuffers) const;
-
-    void executePerActivation(const HipKernelHandle& handle,
-                              const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                              uint32_t numDeviceBuffers) const;
-
     BatchnormBwdParams _params;
 
     std::unique_ptr<ICompiledProgram> _compiledProgram;
     std::vector<std::unique_ptr<IRunnableKernel>> _runnableKernels;
 
-    bool _isSpatialMode = true;
     bool _usesSavedStats = false;
     int _kernelVariant = -1;
     double _epsilon = 0.0;
     float _invInNhw = 0.0f;
-    unsigned int _batchCount = 0;
-    unsigned int _batchStride = 0;
-    unsigned int _inCstride = 0;
     float _activationAlpha = 0.0f;
     float _activationBeta = 0.0f;
 };

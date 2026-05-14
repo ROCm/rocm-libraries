@@ -140,9 +140,9 @@ struct FormatDef {
     std::vector<OperandFieldEntry> altFields;
 };
 
-// Cost override: when modifier matches (e.g. MatrixFmtData(FP4, FP4)), use (cycle, latency)
+// Cost override: when modifier matches (e.g. MatrixFmtModifiers(FP4, FP4)), use (cycle, latency)
 struct CostOverrideEntry {
-    std::string modifierType;       // e.g. "MatrixFmtData"
+    std::string modifierType;       // e.g. "MatrixFmtModifiers"
     std::vector<std::string> args;  // e.g. {"FP4", "FP4"}
     int cycle = 1;
     int latency = 1;
@@ -906,7 +906,7 @@ class DefTParser {
         return std::string::npos;
     }
 
-    // Helper: Parse .costOverrides = { { MatrixFmtData(FP4, FP4), 6, 24 }, ... }
+    // Helper: Parse .costOverrides = { { MatrixFmtModifiers(FP4, FP4), 6, 24 }, ... }
     void parseFieldCostOverrides(const std::string& block, std::vector<CostOverrideEntry>& out) {
         size_t pos = block.find(".costOverrides");
         if (pos == std::string::npos) return;
@@ -924,7 +924,7 @@ class DefTParser {
             size_t entryR = findMatchingBrace(content, entryL);
             if (entryR == std::string::npos) break;
             std::string entry = content.substr(entryL + 1, entryR - entryL - 1);
-            // entry is "MatrixFmtData(FP4, FP4), 6, 24"
+            // entry is "MatrixFmtModifiers(FP4, FP4), 6, 24"
             size_t sep = entry.find("),");
             if (sep == std::string::npos) {
                 entryStart = entryR + 1;
@@ -1175,27 +1175,32 @@ class InstructionCodeGen {
 
         out << "};\n\n";
 
-        // Emit cost overrides keyed by modifier (e.g. MatrixFmtData(a, b)); runtime uses for
+        // Emit cost overrides keyed by modifier (e.g. MatrixFmtModifiers(a, b)); runtime uses for
         // modifier-dependent cost
         std::vector<const InstructionDef*> withOverrides;
         for (const auto& inst : instructions_) {
             if (!inst.costOverrides.empty()) withOverrides.push_back(&inst);
         }
         if (!withOverrides.empty()) {
-            out << "// Cost overrides: when modifier matches (e.g. MatrixFmtData), use (cycle, "
-                   "latency). fmtA/fmtB: 0=FP4, 1=FP6, 2=FP8 (stinkytofu::MatrixFmt)\n";
+            out << "// Cost overrides: when modifier matches (e.g. MatrixFmtModifiers), use "
+                   "(cycle, latency).\n"
+                   "// fmtA/fmtB values match stinkytofu::MatrixFmt enum (LLVM "
+                   "WMMA::MatrixFMT).\n";
             out << "struct InstructionCostOverrideMatrixFmt { const char* mnemonic; uint8_t "
                    "fmtA; uint8_t fmtB; uint16_t cycle; uint16_t latency; };\n";
             out << "constexpr InstructionCostOverrideMatrixFmt " << arch_
                 << "_COST_OVERRIDES_MATRIX_FMT[] = {\n";
             for (const auto* inst : withOverrides) {
                 for (const auto& ov : inst->costOverrides) {
-                    if (ov.modifierType != "MatrixFmtData" || ov.args.size() < 2) continue;
+                    if (ov.modifierType != "MatrixFmtModifiers" || ov.args.size() < 2) continue;
+                    // Map .def format names to MatrixFmt enum values (LLVM WMMA::MatrixFMT)
                     auto toFmt = [](const std::string& s) -> int {
-                        if (s == "FP4") return 0;
-                        if (s == "FP6") return 1;
-                        if (s == "FP8") return 2;
-                        return 0;
+                        if (s == "FP8") return 0;
+                        if (s == "BF8") return 1;
+                        if (s == "FP6") return 2;
+                        if (s == "BF6") return 3;
+                        if (s == "FP4") return 4;
+                        return 0xFF;  // NONE
                     };
                     out << "    {\"" << inst->mnemonic << "\", " << toFmt(ov.args[0]) << ", "
                         << toFmt(ov.args[1]) << ", " << ov.cycle << ", " << ov.latency << "},\n";

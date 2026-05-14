@@ -18,24 +18,21 @@ import pytest
 import numpy as np
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     BPE, WAVESIZE, NUM_THREADS,
+    create_writer,
     init_rocisa,
     assemble_and_run,
     generate_kernel_asm,
     generate_load_params,
 )
 
-from Tensile.Components.Subtile.Kernel import (
-    TileInfo, AB_B16, ABTilePair,
-)
+from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment
 from rocisa.code import Module, TextBlock
-from rocisa.container import vgpr, sgpr
+from rocisa.container import sgpr
 from rocisa.instruction import SMovB32, SMovB64, SWaitCnt
-from rocisa.register import RegisterPool
-from rocisa.enum import RegisterType
-from types import SimpleNamespace
 
 
 # ---------------------------------------------------------------------------
@@ -191,62 +188,25 @@ def generate_export_all_waves_v2(ti, dest_vgprs):
     return "\n".join(lines)
 
 
-def _create_kernel_dict(cfg):
-    """Create a kernel dict for TileInfo construction."""
-    if ((cfg.mt_a // 16) % 2 == 0) and ((cfg.mt_b // 16) % 2 == 0):
-        wg = [2, 2]
-    elif ((cfg.mt_a // 16) % 2 != 0) and ((cfg.mt_b // 16) % 4 == 0):
-        wg = [1, 4]
-    elif ((cfg.mt_a // 16) % 4 == 0) and ((cfg.mt_b // 16) % 2 != 0):
-        wg = [4, 1]
-    else:
-        raise ValueError(f"Unsupported tile config: mt_a={cfg.mt_a}, mt_b={cfg.mt_b}")
-
-    return {
-        "MacroTileA": cfg.mt_a,
-        "MacroTileB": cfg.mt_b,
-        "_DepthUA": cfg.depth_u,
-        "_DepthUB": cfg.depth_u,
-        "MIWaveGroup": wg,
-        "WavefrontSize": WAVESIZE,
-        "MatrixInstM": 16,
-        "MatrixInstK": 32,
-    }
-
-
 def generate_gr_offset_kernel(cfg):
-    """Generate a kernel using TileInfo + geometry emit for GR offset computation."""
+    """Generate a kernel using graTileAssignment for GR offset computation."""
+    writer, kernel, tileInfoA, tileInfoB = create_writer(cfg)
     init_rocisa()
 
-    geometry = AB_B16
-    kernel = _create_kernel_dict(cfg)
-
-    writer = SimpleNamespace()
-    writer.vgprPool = RegisterPool(0, RegisterType.Vgpr, defaultPreventOverflow=False, printRP=False)
-    writer.sgprPool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False)
-    writer.sgprs = {}
-    writer.vgprPool.checkOut(1)  # v0 = Serial
-    writer.states = SimpleNamespace(
-        regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
-    )
-
-    ti = TileInfo(geometry, 'A', writer, kernel)
+    ti = tileInfoA
 
     # Reserve s0-s7 for hardware + kernarg
-    writer.sgprPool.checkOut(8)
-    stride_sgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+    writer.sgprPool.checkOut(12)
+    stride_sgpr = 10
     writer.sgprs["StrideA0I"] = stride_sgpr
-    writer.sgprs["StrideB1J"] = stride_sgpr
-
-    # Allocate GR offset registers via geometry dispatch
-    ti.gr.allocOffsetRegisters(ti, writer, kernel)
+    writer.sgprs["StrideB1J"] = 11
+    tileInfoA.allocOffsetRegisters(writer, kernel)
+    tileInfoB.allocOffsetRegisters(writer, kernel)
 
     writer.sgprs["SrdA"] = writer.sgprPool.checkOutAligned(4, 4, "SrdA", preventOverflow=False)
 
-    # Compute GR offsets via geometry emit dispatch
-    gra_module = ti.emitGlobalReadOffset(writer, kernel)
+    gra_module = graTileAssignment(writer, kernel, useSwizzling=True)
 
-    # Emit non-DTL buffer loads to VGPRs using the computed offsets
     gr_load_module, dest_vgprs = generate_gr_to_vgpr_loads_v2(writer, ti)
 
     export_asm = generate_export_all_waves_v2(ti, dest_vgprs)
@@ -323,7 +283,7 @@ def verify_gr_output(output_bytes, ti, kernel, dest_vgprs, mt, stride, debug=Fal
             all_tiles = set()
             for lane in range(WAVESIZE):
                 lane_data = block_data[lane * 8 : lane * 8 + 8]
-                lane_tiles = set(int(v) for v in lane_data if v != 0)
+                lane_tiles = set(int(v) for v in lane_data if v != 0 and not np.isnan(v))
                 if len(lane_tiles) > 1:
                     errors += 1
                     if errors <= 10 or debug:
@@ -347,7 +307,7 @@ def verify_gr_output(output_bytes, ti, kernel, dest_vgprs, mt, stride, debug=Fal
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestGrOffset:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.label)
@@ -381,10 +341,6 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--config", type=int, default=None, help="Config index")
     args = parser.parse_args()
-
-    if not HAS_HIP:
-        print("HIP not available")
-        sys.exit(1)
 
     config_list = CONFIGS if args.config is None else [CONFIGS[args.config]]
 

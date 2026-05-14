@@ -212,6 +212,7 @@ class GSUOff(GSU):
         module = Module("GSU Off graIncrements")
 
         tc = tP["tensorChar"]
+        tIdx: int = tP["idx"]
         dimIdx = kernel["ProblemType"]["IndicesSummation"][loopIdx] # dimension index
         loopChar = writer.states.indexChars[dimIdx]
         stride = writer.strideRef(tc, dimIdx)
@@ -231,7 +232,12 @@ class GSUOff(GSU):
                 module.add(VMovB32(dst=vgpr("GlobalReadIncs%s+%u+0"%(tc, 2*loopIdx)), src=sgpr(tmpSgpr+0)))
                 module.add(VMovB32(dst=vgpr("GlobalReadIncs%s+%u+1"%(tc, 2*loopIdx)), src=sgpr(tmpSgpr+1)))
         else:
-            module.add(self.graIncrementsCommon(writer, loopIdx, tc, stride, m))
+            if 'MXS' in tc and writer.isConstUnitStride(stride):
+                module.add(SMulI32(dst=sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx)), \
+                    src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=m, \
+                    comment="incr%s = Size%s*DepthU*Bpe (unrollIdx)"%(tc, INDEX_CHARS[tIdx])))
+            else:
+                module.add(self.graIncrementsCommon(writer, loopIdx, tc, stride, m))
 
         return module
 

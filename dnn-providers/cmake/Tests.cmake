@@ -323,21 +323,21 @@ function(add_tiered_test_target TARGET WORKING_DIR)
         COMMAND ${TARGET} --gtest_filter=Standard*
         WORKING_DIRECTORY ${WORKING_DIR})
     set_tests_properties(${TARGET}_standard PROPERTIES
-        LABELS "standard;comprehensive;full" TIMEOUT ${ARG_STANDARD_TIMEOUT}
+        LABELS "standard;comprehensive;full;slow" TIMEOUT ${ARG_STANDARD_TIMEOUT}
         FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
 
     add_test(NAME ${TARGET}_comprehensive
         COMMAND ${TARGET} --gtest_filter=Comprehensive*
         WORKING_DIRECTORY ${WORKING_DIR})
     set_tests_properties(${TARGET}_comprehensive PROPERTIES
-        LABELS "comprehensive;full" TIMEOUT ${ARG_COMPREHENSIVE_TIMEOUT}
+        LABELS "comprehensive;full;slow" TIMEOUT ${ARG_COMPREHENSIVE_TIMEOUT}
         FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
 
     add_test(NAME ${TARGET}_full
         COMMAND ${TARGET} --gtest_filter=Full*
         WORKING_DIRECTORY ${WORKING_DIR})
     set_tests_properties(${TARGET}_full PROPERTIES
-        LABELS "full" TIMEOUT ${ARG_FULL_TIMEOUT}
+        LABELS "full;slow" TIMEOUT ${ARG_FULL_TIMEOUT}
         FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
 
     # -- Install staging: smoke only --
