@@ -27,7 +27,7 @@ Building hipSPARSE from source
 ==============================
 
 It isn't necessary to build hipSPARSE from source because it's ready to use after installing
-the prebuilt packages, as described above.
+the prebuilt packages, as described in :doc:`Install hipSPARSE <./install>`.
 To build hipSPARSE from source, follow the instructions in this section.
 
 To compile and run hipSPARSE, the `AMD ROCm Platform <https://github.com/ROCm/ROCm>`_ is required.

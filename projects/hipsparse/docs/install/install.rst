@@ -9,7 +9,7 @@ Install hipSPARSE
 *****************
 
 Before you begin, verify that your system is supported. For more information,
-see :ref:`ROCm Core SDK components <rocm:release-components>`.
+see the :doc:`ROCm compatibilty matrix <rocm:compatibility/compatibility-matrix>`.
 
 For advanced workflows, source builds, or custom configurations, see
 :doc:`./build-linux` and :doc:`./build-windows`.
