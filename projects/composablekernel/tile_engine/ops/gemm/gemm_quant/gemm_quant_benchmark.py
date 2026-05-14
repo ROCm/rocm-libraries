@@ -44,30 +44,6 @@ class GemmQuantBenchmark(GemmBenchmark):
     def __init__(self, build_dir: str, verbose: bool = False):
         super().__init__(build_dir, verbose=verbose, name="benchmark_gemm_quant_")
 
-    def extract_kernel_info(self, kernel_path):
-        info = super().extract_kernel_info(kernel_path)
-
-        name = kernel_path.stem
-        parts = name[len(self.name) :].split("_")
-        if len(parts) >= 11:
-            info["profile"] = parts[2]
-            info["epilogue"] = parts[3]
-            info["scheduler"] = parts[4]
-            info["aq_group"] = parts[9]
-            info["bq_group"] = parts[10]
-            if parts[2].startswith("aquant"):
-                info["quant_mode"] = "AQuantGrouped"
-            elif parts[2].startswith("bquant"):
-                info["quant_mode"] = "BQuantGrouped"
-            elif parts[2] == "rowcol":
-                info["quant_mode"] = "RowColQuant"
-            elif parts[2] == "tensor":
-                info["quant_mode"] = "TensorQuant"
-            else:
-                info["quant_mode"] = "unknown"
-
-        return info
-
 
 def main():
     parser = argparse.ArgumentParser(description="Quant GEMM Kernel Benchmarking Tool")

@@ -27,189 +27,31 @@ get_abc_layouts = gemm_builder_module.get_abc_layouts
 
 
 class GemmQuantKernelBuilder(GemmKernelBuilder):
-    PROFILE_MAP = {
-        "aquantdecode": {
-            "quant_mode": "AQuantGrouped",
-            "scheduler": "interwave",
-            "validation_pipeline": "mem",
-            "apreshuffle_quant": False,
-            "bpreshuffle_quant": False,
-            "preshuffle_b": False,
-            "double_smem_buffer": False,
-        },
-        "aquantprefill": {
-            "quant_mode": "AQuantGrouped",
-            "scheduler": "intrawave",
-            "validation_pipeline": "mem",
-            "apreshuffle_quant": False,
-            "bpreshuffle_quant": False,
-            "preshuffle_b": False,
-            "double_smem_buffer": False,
-        },
-        "aquantpreshufflequant": {
-            "quant_mode": "AQuantGrouped",
-            "scheduler": "intrawave",
-            "validation_pipeline": "compv3",
-            "apreshuffle_quant": True,
-            "bpreshuffle_quant": False,
-            "preshuffle_b": False,
-            "double_smem_buffer": False,
-        },
-        "bquantdecode": {
-            "quant_mode": "BQuantGrouped",
-            "scheduler": "intrawave",
-            "validation_pipeline": "compv3",
-            "apreshuffle_quant": False,
-            "bpreshuffle_quant": False,
-            "preshuffle_b": False,
-            "double_smem_buffer": False,
-        },
-        "bquantprefill": {
-            "quant_mode": "BQuantGrouped",
-            "scheduler": "intrawave",
-            "validation_pipeline": "compv3",
-            "apreshuffle_quant": False,
-            "bpreshuffle_quant": False,
-            "preshuffle_b": False,
-            "double_smem_buffer": False,
-        },
-        "bquantpreshufflequant": {
-            "quant_mode": "BQuantGrouped",
-            "scheduler": "intrawave",
-            "validation_pipeline": "compv3",
-            "apreshuffle_quant": False,
-            "bpreshuffle_quant": True,
-            "preshuffle_b": False,
-            "double_smem_buffer": False,
-        },
-        "bquantpreshufflequantprefill": {
-            "quant_mode": "BQuantGrouped",
-            "scheduler": "intrawave",
-            "validation_pipeline": "compv3",
-            "apreshuffle_quant": False,
-            "bpreshuffle_quant": True,
-            "preshuffle_b": False,
-            "double_smem_buffer": False,
-        },
-        "rowcol": {
-            "quant_mode": "RowColQuant",
-            "scheduler": "intrawave",
-            "validation_pipeline": "compv3",
-            "apreshuffle_quant": False,
-            "bpreshuffle_quant": False,
-            "preshuffle_b": False,
-            "double_smem_buffer": False,
-        },
-        "tensor": {
-            "quant_mode": "TensorQuant",
-            "scheduler": "intrawave",
-            "validation_pipeline": "compv3",
-            "apreshuffle_quant": False,
-            "bpreshuffle_quant": False,
-            "preshuffle_b": False,
-            "double_smem_buffer": False,
-        },
-    }
+    def _build_kernel_name(self, tile_config, trait_combo):
+        pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = trait_combo
+        tile_str = self._format_tile_config(tile_config)
 
-    def _generate_trait_combinations(self):
-        trait_config = self.config["trait_config"]
-        quant_config = self.config["quant_config"]
+        return (
+            f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_{pipeline}_{epilogue}_"
+            f"{scheduler}_{str(pad_m).capitalize()}_{str(pad_n).capitalize()}_"
+            f"{str(pad_k).capitalize()}_{str(persistent).capitalize()}_{tile_str}"
+        )
 
-        profiles = trait_config.get("profile").get("values")
-        epilogues = trait_config.get("epilogue").get("values")
-        pad_m_values = trait_config.get("pad_m").get("values")
-        pad_n_values = trait_config.get("pad_n").get("values")
-        pad_k_values = trait_config.get("pad_k").get("values")
-        persistent_values = trait_config.get("persistent").get("values")
-        a_group_values = quant_config.get("a_group").get("values")
-        b_group_values = quant_config.get("b_group").get("values")
+    def _parse_trait_string(self, trait_string):
+        trait_parts = trait_string.split("_")
+        return (
+            trait_parts[0],  # pipeline
+            trait_parts[1],  # epilogue
+            trait_parts[2],  # scheduler
+            trait_parts[3] == "True",  # pad_m
+            trait_parts[4] == "True",  # pad_n
+            trait_parts[5] == "True",  # pad_k
+            trait_parts[6] == "True",  # persistent
+        )
 
-        combinations = []
-        for profile in profiles:
-            for epilogue in epilogues:
-                for pad_m in pad_m_values:
-                    for pad_n in pad_n_values:
-                        for pad_k in pad_k_values:
-                            for persistent in persistent_values:
-                                for a_group in a_group_values:
-                                    for b_group in b_group_values:
-                                        trait_combo = {
-                                            "profile": profile,
-                                            "epilogue": epilogue,
-                                            "scheduler": self.PROFILE_MAP[profile][
-                                                "scheduler"
-                                            ],
-                                            "pad_m": pad_m,
-                                            "pad_n": pad_n,
-                                            "pad_k": pad_k,
-                                            "persistent": persistent,
-                                            "a_group": a_group,
-                                            "b_group": b_group,
-                                        }
-                                        if self._is_supported_trait_combo(trait_combo):
-                                            combinations.append(trait_combo)
-        return combinations
-
-    def _is_supported_trait_combo(self, trait_combo):
-        profile = trait_combo["profile"]
-        epilogue = trait_combo["epilogue"]
-
-        if epilogue != "cshuffle":
-            return False
-
-        if trait_combo["persistent"]:
-            return False
-
-        if trait_combo["pad_m"] or trait_combo["pad_n"]:
-            return False
-
-        if trait_combo["pad_k"] is not True:
-            return False
-
-        if self.layout != "rcr":
-            return False
-
-        if profile.startswith("aquant"):
-            return (
-                trait_combo["a_group"] == "1x1x128"
-                and trait_combo["b_group"] == "1x1x1"
-            )
-
-        if profile.startswith("bquant"):
-            return (
-                trait_combo["a_group"] == "1x1x1"
-                and trait_combo["b_group"]
-                in ["1x1x128", "1x8x128", "1x32x128", "1x64x128", "1x128x128"]
-            )
-
-        return trait_combo["a_group"] == "1x1x1" and trait_combo["b_group"] == "1x1x1"
-
-    def _parse_quant_group(self, group_name):
-        return [int(dim) for dim in group_name.split("x")]
-
-    def _is_quant_configuration_valid(self, tile_config, trait_combo):
-        profile = trait_combo["profile"]
-        a_group_m, _, a_group_k = self._parse_quant_group(trait_combo["a_group"])
-        b_group_m, _, b_group_k = self._parse_quant_group(trait_combo["b_group"])
-
-        if tile_config["tile_m"] % a_group_m != 0 or tile_config["tile_k"] % a_group_k != 0:
-            return False
-
-        if tile_config["tile_m"] % b_group_m != 0 or tile_config["tile_k"] % b_group_k != 0:
-            return False
-
-        if profile.startswith("bquant") and b_group_k % tile_config["warp_tile_k"] != 0:
-            return False
-
-        return True
-
-    def _is_supported_configuration(self, tile_config, trait_combo):
-        profile_spec = self.PROFILE_MAP[trait_combo["profile"]]
-
-        if not self._is_quant_configuration_valid(tile_config, trait_combo):
-            return False
-
-        return self._validate_tile_config(
+    def _generate_kernel_instance(self, tile_config, trait_combo):
+        pipeline, _, scheduler, pad_m, pad_n, pad_k, _ = trait_combo
+        if not self._validate_tile_config(
             tile_config["tile_m"],
             tile_config["tile_n"],
             tile_config["tile_k"],
@@ -219,102 +61,15 @@ class GemmQuantKernelBuilder(GemmKernelBuilder):
             tile_config["warp_tile_m"],
             tile_config["warp_tile_n"],
             tile_config["warp_tile_k"],
-            profile_spec["validation_pipeline"],
-        )
-
-    def _build_trait_string(self, trait_combo):
-        parts = []
-        for key in [
-            "profile",
-            "epilogue",
-            "scheduler",
-            "pad_m",
-            "pad_n",
-            "pad_k",
-            "persistent",
-            "a_group",
-            "b_group",
-        ]:
-            parts.append(f"{key}={trait_combo[key]}")
-        return "__".join(parts)
-
-    def _parse_trait_string(self, trait_string):
-        trait_combo = {}
-        for part in trait_string.split("__"):
-            key, value = part.split("=", 1)
-            if key in ["pad_m", "pad_n", "pad_k", "persistent"]:
-                trait_combo[key] = value == "True"
-            else:
-                trait_combo[key] = value
-        return trait_combo
-
-    def _build_kernel_name(self, tile_config, trait_combo):
-        profile = trait_combo["profile"]
-        epilogue = trait_combo["epilogue"]
-        scheduler = trait_combo["scheduler"]
-        tile_str = self._format_tile_config(tile_config)
-
-        return (
-            f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_{profile}_{epilogue}_"
-            f"{scheduler}_{str(trait_combo['pad_m']).capitalize()}_"
-            f"{str(trait_combo['pad_n']).capitalize()}_"
-            f"{str(trait_combo['pad_k']).capitalize()}_"
-            f"{str(trait_combo['persistent']).capitalize()}_{trait_combo['a_group']}_"
-            f"{trait_combo['b_group']}_{tile_str}"
-        )
-
-    def _list_kernels(self):
-        tile_configs = self._iter_tile_config_candidates()
-        trait_combos = self._generate_trait_combinations()
-
-        kernel_list = []
-        for tile_config in tile_configs:
-            for trait_combo in trait_combos:
-                if not self._is_supported_configuration(tile_config, trait_combo):
-                    continue
-
-                kernel_list.append(
-                    {
-                        "name": self._build_kernel_name(tile_config, trait_combo),
-                        "tile_config": tile_config,
-                        "trait_combo": trait_combo,
-                    }
-                )
-
-        with open(
-            self.working_path / f"{self.kernel_name_prefix}_kernel_count.txt", "w"
-        ) as f:
-            f.write(str(len(kernel_list)))
-
-        with open(
-            self.working_path / f"{self.kernel_name_prefix}_kernel_list.txt", "w"
-        ) as f:
-            for kernel in kernel_list:
-                f.write(
-                    f"{kernel['name']}|{self._format_tile_config(kernel['tile_config'])}|"
-                    f"{self._build_trait_string(kernel['trait_combo'])}\n"
-                )
-
-        print(f"Listed {len(kernel_list)} kernel configurations")
-
-    def _group_to_type(self, group_string):
-        m, n, k = [int(dim) for dim in group_string.split("x")]
-        return f"ck_tile::QuantGroupShape<ck_tile::sequence<{m}, {n}, {k}>>"
-
-    def _generate_kernel_instance(self, tile_config, trait_combo):
-        if not self._is_supported_configuration(tile_config, trait_combo):
+            pipeline,
+        ):
             raise ValueError("Unsupported gemm_quant configuration")
 
-        profile = trait_combo["profile"]
-        profile_spec = self.PROFILE_MAP[profile]
         kernel_name = self._build_kernel_name(tile_config, trait_combo)
         k_block_per_cu = self.config.get("k_block_per_cu", 1)
 
         a_layout, b_layout, c_layout = get_abc_layouts(self.layout)
-        aq_layout = "ck_tile::tensor_layout::gemm::RowMajor"
-        bq_layout = "ck_tile::tensor_layout::gemm::ColumnMajor"
 
-        quant_mode = profile_spec["quant_mode"]
         q_dtype = "float"
 
         instance_code = f"""// Generated kernel instance for {kernel_name}
@@ -339,32 +94,22 @@ using AccDataType = float;
 using CDataType = ck_tile::half_t;
 
 using ALayout = {a_layout};
-using AQLayout = {aq_layout};
 using BLayout = {b_layout};
-using BQLayout = {bq_layout};
 using CLayout = {c_layout};
 
-using AQuantGroupSize = {self._group_to_type(trait_combo["a_group"])};
-using BQuantGroupSize = {self._group_to_type(trait_combo["b_group"])};
-
 constexpr const char* KERNEL_NAME = "{kernel_name}";
-constexpr const char* QUANT_MODE_NAME = "{quant_mode}";
-constexpr const char* QUANT_PROFILE_NAME = "{profile}";
-constexpr const char* AQ_GROUP_NAME = "{trait_combo["a_group"]}";
-constexpr const char* BQ_GROUP_NAME = "{trait_combo["b_group"]}";
 
 struct SelectedKernel {{
-    static constexpr auto QuantMode = ck_tile::QuantType::{quant_mode};
-    static constexpr auto Scheduler = ck_tile::GemmPipelineScheduler::{trait_combo["scheduler"].capitalize()};
+    static constexpr auto Scheduler = ck_tile::GemmPipelineScheduler::{scheduler.capitalize()};
 
-    static constexpr bool kPadM = {"true" if trait_combo["pad_m"] else "false"};
-    static constexpr bool kPadN = {"true" if trait_combo["pad_n"] else "false"};
-    static constexpr bool kPadK = {"true" if trait_combo["pad_k"] else "false"};
+    static constexpr bool kPadM = {"true" if pad_m else "false"};
+    static constexpr bool kPadN = {"true" if pad_n else "false"};
+    static constexpr bool kPadK = {"true" if pad_k else "false"};
     static constexpr bool TransposeC = false;
-    static constexpr bool APreshuffleQuant = {"true" if profile_spec["apreshuffle_quant"] else "false"};
-    static constexpr bool BPreshuffleQuant = {"true" if profile_spec["bpreshuffle_quant"] else "false"};
-    static constexpr bool PreshuffleB = {"true" if profile_spec["preshuffle_b"] else "false"};
-    static constexpr bool DoubleSmemBuffer = {"true" if profile_spec["double_smem_buffer"] else "false"};
+    static constexpr bool APreshuffleQuant = false;
+    static constexpr bool BPreshuffleQuant = false;
+    static constexpr bool PreshuffleB = false;
+    static constexpr bool DoubleSmemBuffer = false;
 
     static constexpr ck_tile::index_t M_Tile = {tile_config["tile_m"]};
     static constexpr ck_tile::index_t N_Tile = {tile_config["tile_n"]};
@@ -393,9 +138,9 @@ struct SelectedKernel {{
                                                         ALayout,
                                                         BLayout,
                                                         CLayout,
-                                                        QuantMode,
-                                                        AQLayout,
-                                                        BQLayout,
+                                                        ck_tile::QuantType::TensorQuant,
+                                                        ck_tile::tensor_layout::gemm::RowMajor,
+                                                        ck_tile::tensor_layout::gemm::ColumnMajor,
                                                         TransposeC,
                                                         DoubleSmemBuffer>;
 
@@ -406,12 +151,7 @@ struct SelectedKernel {{
                                                              GemmTraits,
                                                              void>;
 
-        using BaseGemmPipeline = std::conditional_t<
-            QuantMode == ck_tile::QuantType::AQuantGrouped && APreshuffleQuant,
-            ck_tile::BaseGemmPipelineAgBgCrCompV3<BaseProblem>,
-            std::conditional_t<QuantMode == ck_tile::QuantType::AQuantGrouped,
-                               ck_tile::BaseGemmPipelineAgBgCrMem<BaseProblem>,
-                               ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<BaseProblem>>>;
+        using BaseGemmPipeline = ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<BaseProblem>;
 
         const ck_tile::index_t k_split = ck_tile::integer_least_multiple(args.K, K_Tile);
         const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(k_split);
@@ -421,58 +161,20 @@ struct SelectedKernel {{
         const auto run = [&](const auto has_hot_loop_, const auto tail_number_) {{
             constexpr bool has_hot_loop_v = has_hot_loop_.value;
             constexpr auto tail_number_v = tail_number_.value;
-            constexpr auto b_cast_policy = ck_tile::CastPolicy::BeforeLDSWrite;
 
-            using PipelineProblem = std::conditional_t<
-                QuantMode == ck_tile::QuantType::RowColQuant || QuantMode == ck_tile::QuantType::TensorQuant,
-                ck_tile::GemmRowColTensorQuantPipelineProblem<ADataType,
-                                                              BDataType,
-                                                              AccDataType,
-                                                              AccDataType,
-                                                              GemmShape,
-                                                              GemmTraits,
-                                                              false,
-                                                              void,
-                                                              Scheduler,
-                                                              has_hot_loop_v,
-                                                              tail_number_v>,
-                std::conditional_t<
-                    QuantMode == ck_tile::QuantType::AQuantGrouped,
-                    ck_tile::GemmAQuantPipelineProblem<ADataType,
-                                                       AQDataType,
-                                                       BDataType,
-                                                       AccDataType,
-                                                       GemmShape,
-                                                       GemmTraits,
-                                                       AQuantGroupSize,
-                                                       false,
-                                                       void,
-                                                       Scheduler,
-                                                       has_hot_loop_v,
-                                                       tail_number_v>,
-                    ck_tile::GemmBQuantPipelineProblem<ADataType,
-                                                       BDataType,
-                                                       BQDataType,
-                                                       AccDataType,
-                                                       GemmShape,
-                                                       GemmTraits,
-                                                       BQuantGroupSize,
-                                                       void,
-                                                       Scheduler,
-                                                       has_hot_loop_v,
-                                                       tail_number_v,
-                                                       b_cast_policy>>>;
+            using PipelineProblem = ck_tile::GemmRowColTensorQuantPipelineProblem<ADataType,
+                                                                                  BDataType,
+                                                                                  AccDataType,
+                                                                                  AccDataType,
+                                                                                  GemmShape,
+                                                                                  GemmTraits,
+                                                                                  false,
+                                                                                  void,
+                                                                                  Scheduler,
+                                                                                  has_hot_loop_v,
+                                                                                  tail_number_v>;
 
-            using AQuantPipeline = std::conditional_t<APreshuffleQuant,
-                                                      ck_tile::AQuantGemmPipelineAgBgCrCompV3<PipelineProblem>,
-                                                      ck_tile::AQuantGemmPipelineAgBgCrMem<PipelineProblem>>;
-            using BQuantPipeline = ck_tile::BQuantGemmPipelineAgBgCrCompV3<PipelineProblem>;
-            using GemmPipeline = std::conditional_t<
-                QuantMode == ck_tile::QuantType::RowColQuant || QuantMode == ck_tile::QuantType::TensorQuant,
-                ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>,
-                std::conditional_t<QuantMode == ck_tile::QuantType::AQuantGrouped,
-                                   AQuantPipeline,
-                                   BQuantPipeline>>;
+            using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;
 
             using GemmEpilogue = ck_tile::CShuffleEpilogue<
                 ck_tile::CShuffleEpilogueProblem<typename PipelineProblem::ComputeDataType,
@@ -492,7 +194,10 @@ struct SelectedKernel {{
                                                  K_Warp_Tile,
                                                  false>>;
 
-            using Kernel = ck_tile::QuantGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue, QuantMode>;
+            using Kernel = ck_tile::QuantGemmKernel<TilePartitioner,
+                                                    GemmPipeline,
+                                                    GemmEpilogue,
+                                                    ck_tile::QuantType::TensorQuant>;
 
             auto kargs = Kernel::MakeKernelArgs(args);
             if(!Kernel::IsSupportedArgument(kargs))
