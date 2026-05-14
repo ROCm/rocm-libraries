@@ -231,6 +231,15 @@ TEST(TestFp8E5M2Fnuz, Underflow)
     // The exact midpoint 2^-18 rounds to zero (even mantissa tie-break)
     const fp8_e5m2_fnuz val6(3.814697265625e-06f);
     EXPECT_EQ(static_cast<float>(val6), 0.0f);
+
+    // Just above the midpoint rounds up to denorm_min = 2^-17
+    const fp8_e5m2_fnuz val7(1.5f * 3.814697265625e-06f);
+    EXPECT_EQ(val7.data, static_cast<uint8_t>(0x01));
+    EXPECT_EQ(static_cast<float>(val7), 7.62939453125e-06f);
+
+    const fp8_e5m2_fnuz val8(-1.5f * 3.814697265625e-06f);
+    EXPECT_EQ(val8.data, static_cast<uint8_t>(0x81));
+    EXPECT_EQ(static_cast<float>(val8), -7.62939453125e-06f);
 }
 
 // ============================================================================

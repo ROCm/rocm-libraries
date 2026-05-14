@@ -221,6 +221,12 @@ TEST(TestJson, Enum)
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     enumTestSuite(DataType::FLOAT, "float", "(hipdnn_flatbuffers_sdk::data_objects::DataType)");
+    enumTestSuite(DataType::FP8_E4M3_FNUZ,
+                  "fp8_e4m3_fnuz",
+                  "(hipdnn_flatbuffers_sdk::data_objects::DataType)");
+    enumTestSuite(DataType::FP8_E5M2_FNUZ,
+                  "fp8_e5m2_fnuz",
+                  "(hipdnn_flatbuffers_sdk::data_objects::DataType)");
     enumTestSuite(NodeAttributes::BatchnormInferenceAttributes,
                   "BatchnormInferenceAttributes",
                   "(for hipdnn_flatbuffers_sdk::data_objects::NodeAttributes)");
