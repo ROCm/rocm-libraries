@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -125,12 +125,13 @@ namespace rocsparse
         // Process diagonal
         if(row < mb && row == local_col && col_X < nrhs)
         {
+            const rocsparse_int safe_j = (j >= row_begin) ? j : row_begin;
             // Loop over rows of the BSR block
             for(int bi = block_dim - 1; bi >= 0; --bi)
             {
                 // Load diagonal matrix entry
                 const T diag = (diag_type == rocsparse_diag_type_non_unit)
-                                   ? bsr_val[BSR_IND(j, bi, bi, dir)]
+                                   ? bsr_val[BSR_IND(safe_j, bi, bi, dir)]
                                    : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
@@ -151,7 +152,7 @@ namespace rocsparse
                 for(int bj = lid; bj < bi; bj += WFSIZE)
                 {
                     X[(block_dim * row + bj) * ldx + col_X]
-                        -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
+                        -= val * bsr_val[BSR_IND(safe_j, bj, bi, dir)];
                 }
             }
         }
@@ -272,12 +273,13 @@ namespace rocsparse
         // Process diagonal
         if(row < mb && row == local_col && col_X < nrhs)
         {
+            const rocsparse_int safe_j = (j < row_end) ? j : row_end - 1;
             // Loop over rows of the BSR block
             for(int bi = 0; bi < block_dim; ++bi)
             {
                 // Load diagonal matrix entry
                 T diag = (diag_type == rocsparse_diag_type_non_unit)
-                             ? bsr_val[BSR_IND(j, bi, bi, dir)]
+                             ? bsr_val[BSR_IND(safe_j, bi, bi, dir)]
                              : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
@@ -298,7 +300,7 @@ namespace rocsparse
                 for(int bj = bi + lid + 1; bj < block_dim; bj += WFSIZE)
                 {
                     X[(block_dim * row + bj) * ldx + col_X]
-                        -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
+                        -= val * bsr_val[BSR_IND(safe_j, bj, bi, dir)];
                 }
             }
         }

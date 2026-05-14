@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -93,11 +93,10 @@ namespace rocsparse
             {
                 __syncthreads();
 
-                scsr_col_ind[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
-                                                   ? csr_col_ind[hipThreadIdx_x + j] - idx_base
-                                                   : -1;
-                scsr_val[hipThreadIdx_x]
-                    = (hipThreadIdx_x < row_end - j) ? csr_val[hipThreadIdx_x + j] : -1;
+                const I safe_idx = j + rocsparse::min(hipThreadIdx_x, row_end - j - 1);
+                scsr_col_ind[hipThreadIdx_x]
+                    = (hipThreadIdx_x < row_end - j) ? csr_col_ind[safe_idx] - idx_base : -1;
+                scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j) ? csr_val[safe_idx] : -1;
 
                 // Wait for preload to finish
                 __syncthreads();

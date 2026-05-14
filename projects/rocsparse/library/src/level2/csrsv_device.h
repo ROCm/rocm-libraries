@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -119,8 +119,9 @@ namespace rocsparse
             if(local_col < row)
             {
                 // Index into shared memory to query for done flag
-                const int local_done = rocsparse::spin_loop<SLEEP>(
-                    &local_done_array[local_col - first_row], __HIP_MEMORY_SCOPE_WORKGROUP);
+                const int safe_local_idx = (local_col >= first_row) ? local_col - first_row : 0;
+                const int local_done     = rocsparse::spin_loop<SLEEP>(
+                    &local_done_array[safe_local_idx], __HIP_MEMORY_SCOPE_WORKGROUP);
                 local_max = rocsparse::max(local_done, local_max);
             }
         }
