@@ -60,6 +60,11 @@ const MiopenConvDescriptor& ConvFwdParams::conv() const
     return _conv;
 }
 
+size_t ConvFwdParams::spatialDimCount() const
+{
+    return _spatialDimCount;
+}
+
 bool ConvFwdParams::validTensors() const
 {
     return _tensorsValid;
@@ -71,6 +76,26 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {
+    const size_t expectedDims = _params.spatialDimCount() + 2;
+    int wDimCount = 0;
+    int yDimCount = 0;
+    miopenGetTensorDescriptorSize(_params.w().tensorDescriptor(), &wDimCount);
+    miopenGetTensorDescriptorSize(_params.y().tensorDescriptor(), &yDimCount);
+    if(static_cast<size_t>(wDimCount) != expectedDims)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Weight tensor has " + std::to_string(wDimCount) + " dimensions, expected "
+                + std::to_string(expectedDims));
+    }
+    if(static_cast<size_t>(yDimCount) != expectedDims)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Output tensor has " + std::to_string(yDimCount) + " dimensions, expected "
+                + std::to_string(expectedDims));
+    }
+
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
