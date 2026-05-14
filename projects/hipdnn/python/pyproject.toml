@@ -67,6 +67,14 @@ hipdnn_frontend_DIR = "${hipdnn_frontend_DIR}"
 hipdnn_backend_DIR = "${hipdnn_backend_DIR}"
 hipdnn_data_sdk_DIR = "${hipdnn_data_sdk_DIR}"
 
+[tool.pytest.ini_options]
+testpaths = ["hipdnn_frontend/test"]
+addopts = "-v --tb=short"
+markers = [
+    "gpu: marks tests requiring GPU hardware",
+    "integration: marks integration tests that exercise full pipeline",
+]
+
 [tool.cibuildwheel]
 # Skip building for certain Python versions or platforms if needed
 skip = ["pp*", "cp36-*", "cp37-*"]
