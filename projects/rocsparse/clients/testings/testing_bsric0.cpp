@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -190,6 +190,7 @@ void testing_bsric0(const Arguments& arg)
 
     // Generate BSR matrix on host (or read from file)
     rocsparse_int nnzb;
+    rocsparse_seedrand();
     matrix_factory.init_bsr(
         hbsr_row_ptr, hbsr_col_ind, hbsr_val_1, direction, Mb, Nb, nnzb, block_dim, base);
     M = Mb * block_dim;

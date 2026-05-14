@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 
 #include "rocsparse.hpp"
 #include "rocsparse_enum.hpp"
+#include "rocsparse_random.hpp"
 #include "testing.hpp"
 #include <hip/hip_runtime.h>
 
@@ -274,6 +275,8 @@ void testing_csritilu0_ex(const Arguments& arg)
     // Create rocsparse handle
     rocsparse_local_handle handle;
     rocsparse_status       status;
+
+    rocsparse_seedrand();
 
     //
     // Initialize csr matrix.

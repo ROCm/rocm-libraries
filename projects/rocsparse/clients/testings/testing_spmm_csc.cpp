@@ -150,6 +150,7 @@ void testing_spmm_csc(const Arguments& arg)
     rocsparse_matrix_factory<A, I, J> matrix_factory(arg);
 
     I nnz_A;
+    rocsparse_seedrand();
     matrix_factory.init_csc(hcsc_col_ptr,
                             hcsc_row_ind,
                             hcsc_val,

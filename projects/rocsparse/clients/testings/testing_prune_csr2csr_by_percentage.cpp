@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -177,6 +177,7 @@ void testing_prune_csr2csr_by_percentage(const Arguments& arg)
 
     // Generate uncompressed CSR matrix on host (or read from file)
     rocsparse_int nnz_A = 0;
+    rocsparse_seedrand();
     matrix_factory.init_csr(h_csr_row_ptr_A, h_csr_col_ind_A, h_csr_val_A, M, N, nnz_A, csr_base_A);
 
     // Allocate device memory for input CSR matrix

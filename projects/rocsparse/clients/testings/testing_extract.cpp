@@ -261,6 +261,7 @@ static void init_csx(const Arguments&                   arg,
 {
     J m = arg.M;
     J n = arg.N;
+    rocsparse_seedrand();
     matrix_factory.init_csr(A, m, n, arg.baseA);
 }
 
@@ -271,6 +272,7 @@ static void init_csx(const Arguments&                   arg,
 {
     J m = arg.M;
     J n = arg.N;
+    rocsparse_seedrand();
     matrix_factory.init_csc(A, m, n, arg.baseA);
 }
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -63,6 +63,7 @@ void testing_coo2csr(const Arguments& arg)
 
     // Sample matrix
     int64_t coo_nnz;
+    rocsparse_seedrand();
     matrix_factory.init_coo(hcoo_row_ind, hcoo_col_ind, hcoo_val, M, N, coo_nnz, base);
 
     rocsparse_int nnz = rocsparse_convert_to_int(coo_nnz);

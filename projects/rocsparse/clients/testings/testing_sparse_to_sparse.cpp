@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1371,6 +1371,7 @@ spmat spmat_create_A(const Arguments& arg, rocsparse_format format, rocsparse_in
         J                                 M = arg.M;
         J                                 N = arg.N;
         rocsparse_matrix_factory<T, I, J> matrix_factory(arg);
+        rocsparse_seedrand();
         matrix_factory.init_csr(h, M, N, base);
         return spmat(h);
     }
@@ -1382,6 +1383,7 @@ spmat spmat_create_A(const Arguments& arg, rocsparse_format format, rocsparse_in
         J                                 N = arg.N;
         rocsparse_matrix_factory<T, J, J> matrix_factory(arg);
 
+        rocsparse_seedrand();
         matrix_factory.init_ell(h, M, N, base);
         return spmat(h);
     }
@@ -1392,6 +1394,7 @@ spmat spmat_create_A(const Arguments& arg, rocsparse_format format, rocsparse_in
         J                                 M = arg.M;
         J                                 N = arg.N;
         rocsparse_matrix_factory<T, I, J> matrix_factory(arg);
+        rocsparse_seedrand();
         matrix_factory.init_csc(h, M, N, base);
         return spmat(h);
     }
@@ -1402,6 +1405,7 @@ spmat spmat_create_A(const Arguments& arg, rocsparse_format format, rocsparse_in
         J                                 M = arg.M;
         J                                 N = arg.N;
         rocsparse_matrix_factory<T, J, J> matrix_factory(arg);
+        rocsparse_seedrand();
         matrix_factory.init_coo(h, M, N, base);
         return spmat(h);
     }
@@ -1414,6 +1418,7 @@ spmat spmat_create_A(const Arguments& arg, rocsparse_format format, rocsparse_in
         rocsparse_matrix_factory<T, I, J> matrix_factory(arg);
         J                                 row_block_dim = arg.block_dim;
         J                                 col_block_dim = arg.block_dim;
+        rocsparse_seedrand();
         matrix_factory.init_gebsr(h, Mb, Nb, row_block_dim, col_block_dim, arg.baseA);
         return spmat(h);
     }
@@ -1431,6 +1436,7 @@ spmat spmat_create_A(const Arguments& arg, rocsparse_format format, rocsparse_in
         J                                 M = arg.M;
         J                                 N = arg.N;
         rocsparse_matrix_factory<T, J, J> matrix_factory(arg);
+        rocsparse_seedrand();
         matrix_factory.init_coo_aos(h, M, N, base);
         return spmat(h);
     }

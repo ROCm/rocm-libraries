@@ -70,6 +70,7 @@ void testing_sptrsm_coo(const Arguments& arg)
     host_coo_matrix<T, I> hA;
 
     // Sample matrix
+    rocsparse_seedrand();
     matrix_factory.init_coo(hA, M, N, base);
 
     // Non-squared matrices are not supported

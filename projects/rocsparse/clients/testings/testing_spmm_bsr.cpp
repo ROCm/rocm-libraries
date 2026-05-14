@@ -161,6 +161,7 @@ void testing_spmm_bsr(const Arguments& arg)
     rocsparse_matrix_factory<A, I, J> matrix_factory(arg);
 
     I nnzb_A;
+    rocsparse_seedrand();
     matrix_factory.init_bsr(hbsr_row_ptr,
                             hbsr_col_ind,
                             hbsr_val,

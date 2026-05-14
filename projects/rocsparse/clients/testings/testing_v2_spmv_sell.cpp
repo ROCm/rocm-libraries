@@ -125,6 +125,7 @@ void testing_v2_spmv_sell(const Arguments& arg)
     // Allocate host memory for matrix
     host_sell_matrix<A, I, J> hA;
 
+    rocsparse_seedrand();
     matrix_factory.init_sell(hA, M, N, sell_slice_size, base);
 
     // Redefine matrix values

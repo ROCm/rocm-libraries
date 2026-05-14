@@ -196,6 +196,7 @@ void testing_spmm_batched_csc(const Arguments& arg)
     host_vector<A> hcsc_val_temp;
 
     I nnz_A;
+    rocsparse_seedrand();
     matrix_factory.init_csc(hcsc_col_ptr_temp,
                             hcsc_row_ind_temp,
                             hcsc_val_temp,

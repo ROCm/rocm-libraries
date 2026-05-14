@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -120,6 +120,7 @@ void testing_spsv_coo(const Arguments& arg)
 
     // Sample matrix
     int64_t nnz_A;
+    rocsparse_seedrand();
     matrix_factory.init_coo(hcoo_row_ind, hcoo_col_ind, hcoo_val, M, N, nnz_A, base);
 
     // Non-squared matrices are not supported

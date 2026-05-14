@@ -71,6 +71,7 @@ void testing_spgeam_csr_2(const Arguments& arg)
     // Init matrix A from the input rocsparse_matrix_init
     {
         rocsparse_matrix_factory<T, I, J> matrix_factory(arg, to_int, full_rank);
+        rocsparse_seedrand();
         matrix_factory.init_csr(hA, M, N, base_A);
     }
 

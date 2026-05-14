@@ -103,6 +103,7 @@ void testing_bsr2csr(const Arguments& arg)
     host_gebsr_matrix<T>   hA;
     device_gebsr_matrix<T> dA;
 
+    rocsparse_seedrand();
     matrix_factory.init_bsr(hA, dA, Mb, Nb, bsr_base);
 
     M = dA.mb * dA.row_block_dim;

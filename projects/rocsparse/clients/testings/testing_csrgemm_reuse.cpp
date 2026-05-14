@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -616,6 +616,7 @@ void testing_csrgemm_reuse(const Arguments& arg)
     //
     {
         rocsparse_matrix_factory<T> matrix_factory(arg, arg.timing ? false : true, full_rank);
+        rocsparse_seedrand();
         matrix_factory.init_csr(h_A, M, K, baseA);
 
         switch(scenario)

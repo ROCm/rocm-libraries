@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -206,6 +206,7 @@ void testing_bsrmv(const Arguments& arg)
     //
     host_gebsr_matrix<T>   hA(dir, mb, nb, 0, block_dim, block_dim, base);
     device_gebsr_matrix<T> dA;
+    rocsparse_seedrand();
     if(strcmp(arg.category, "stress"))
     {
         matrix_factory.init_bsr(hA, dA, mb, nb, base);

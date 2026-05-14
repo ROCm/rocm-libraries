@@ -511,6 +511,7 @@ void testing_sptrsv_csr(const Arguments& arg)
     {
         rocsparse_matrix_factory<T, I, J> matrix_factory(arg);
 
+        rocsparse_seedrand();
         matrix_factory.init_csr(hA);
     }
 

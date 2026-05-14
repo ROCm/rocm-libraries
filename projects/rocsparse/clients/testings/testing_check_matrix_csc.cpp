@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -86,6 +86,7 @@ void testing_check_matrix_csc(const Arguments& arg)
 
     // Generate (or load from file) CSC matrix
     rocsparse_int nnz;
+    rocsparse_seedrand();
     matrix_factory.init_csc(hcsc_col_ptr, hcsc_row_ind, hcsc_val, m, n, nnz, base);
 
     // CSC matrix on device
@@ -154,8 +155,6 @@ void testing_check_matrix_csc(const Arguments& arg)
         rocsparse_int temp;
         T             temp_val;
         rocsparse_int rng;
-
-        rocsparse_seedrand();
 
         rng  = random_generator_exact<rocsparse_int>(1, n - 1);
         temp = hcsc_col_ptr[rng];

@@ -267,6 +267,7 @@ void testing_csrsv(const Arguments& arg)
         static constexpr bool       to_int    = false;
         static constexpr bool       full_rank = true;
         rocsparse_matrix_factory<T> matrix_factory(arg, to_int, full_rank);
+        rocsparse_seedrand();
         matrix_factory.init_csr(hA, M, N);
     }
 

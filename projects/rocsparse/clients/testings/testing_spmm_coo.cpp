@@ -136,6 +136,7 @@ void testing_spmm_coo(const Arguments& arg)
     rocsparse_matrix_factory<A, I, I> matrix_factory(arg);
 
     int64_t nnz_A;
+    rocsparse_seedrand();
     matrix_factory.init_coo(hcoo_row_ind,
                             hcoo_col_ind,
                             hcoo_val,

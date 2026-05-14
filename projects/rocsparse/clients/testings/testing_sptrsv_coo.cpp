@@ -125,6 +125,7 @@ void testing_sptrsv_coo(const Arguments& arg)
     host_coo_matrix<T, I> hA;
     {
         rocsparse_matrix_factory<T, I, I> matrix_factory(arg);
+        rocsparse_seedrand();
         matrix_factory.init_coo(hA);
     }
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -81,6 +81,7 @@ void testing_coo2dense(const Arguments& arg)
     host_vector<T>             h_coo_val;
 
     int64_t coo_nnz = 0;
+    rocsparse_seedrand();
     matrix_factory.init_coo(h_coo_row_ind, h_coo_col_ind, h_coo_val, M, N, coo_nnz, arg.baseA);
 
     rocsparse_int nnz = rocsparse_convert_to_int(coo_nnz);

@@ -471,6 +471,7 @@ void testing_sptrsm_csr(const Arguments& arg)
     host_csr_matrix<T, I, J> hA;
 
     // Sample matrix
+    rocsparse_seedrand();
     matrix_factory.init_csr(hA, M, N, base);
 
     // Non-squared matrices are not supported

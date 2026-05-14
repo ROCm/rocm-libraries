@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -104,6 +104,7 @@ void testing_ellmv(const Arguments& arg)
 
     host_ell_matrix<T> hA;
 
+    rocsparse_seedrand();
     matrix_factory.init_ell(hA, M, N, base);
 
     host_dense_matrix<T> hx((trans == rocsparse_operation_none) ? N : M, 1);

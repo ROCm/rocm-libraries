@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -168,6 +168,7 @@ void testing_bsrgeam(const Arguments& arg)
     rocsparse_int hnnzb_C_2;
 
     // Sample A
+    rocsparse_seedrand();
     matrix_factory.init_bsr(
         hbsr_row_ptr_A, hbsr_col_ind_A, hbsr_val_A, dir, Mb, Nb, nnzb_A, block_dim, baseA);
 

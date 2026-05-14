@@ -195,6 +195,7 @@ void testing_spmm_batched_csr(const Arguments& arg)
     host_vector<A> hcsr_val_temp;
 
     I nnz_A;
+    rocsparse_seedrand();
     matrix_factory.init_csr(hcsr_row_ptr_temp,
                             hcsr_col_ind_temp,
                             hcsr_val_temp,

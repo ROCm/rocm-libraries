@@ -140,6 +140,7 @@ void testing_spmm_csr(const Arguments& arg)
     rocsparse_matrix_factory<A, I, J> matrix_factory(arg);
 
     I nnz_A;
+    rocsparse_seedrand();
     matrix_factory.init_csr(hcsr_row_ptr,
                             hcsr_col_ind,
                             hcsr_val,
