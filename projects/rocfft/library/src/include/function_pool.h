@@ -108,6 +108,9 @@ struct FFTKernel
 
     PartialPassParams pp_params;
 
+    std::optional<size_t> batch_low;
+    std::optional<size_t> batch_high;
+
     FFTKernel()                 = default;
     FFTKernel(const FFTKernel&) = default;
 
@@ -126,7 +129,9 @@ struct FFTKernel
               unsigned int                off_dim            = 0,
               unsigned int                pp_tpt             = 0,
               std::vector<unsigned int>&& pp_factors_curr    = std::vector<unsigned int>(),
-              std::vector<unsigned int>&& pp_factors_other   = std::vector<unsigned int>())
+              std::vector<unsigned int>&& pp_factors_other   = std::vector<unsigned int>(),
+              std::optional<size_t>&&     batch_low          = std::nullopt,
+              std::optional<size_t>&&     batch_high         = std::nullopt)
         : factors(factors)
         , transforms_per_block(tpb)
         , workgroup_size(wgs)
@@ -136,6 +141,8 @@ struct FFTKernel
         , direct_to_from_reg(direct_to_from_reg)
         , aot_rtc(aot_rtc)
         , pp_params(scheme, current_dim, off_dim, pp_tpt, pp_factors_curr, pp_factors_other)
+        , batch_low(batch_low)
+        , batch_high(batch_high)
     {
     }
 
@@ -147,6 +154,8 @@ struct FFTKernel
         , use_3steps_large_twd(config.use_3steps_large_twd)
         , half_lds(config.half_lds)
         , direct_to_from_reg(config.direct_to_from_reg)
+        , batch_low(config.batch_low)
+        , batch_high(config.batch_high)
     {
     }
 
@@ -160,6 +169,8 @@ struct FFTKernel
         config.half_lds              = half_lds;
         config.direct_to_from_reg    = direct_to_from_reg;
         config.factors               = factors;
+        config.batch_low             = batch_low;
+        config.batch_high            = batch_high;
 
         return config;
     }
@@ -217,6 +228,49 @@ class function_pool
         return best;
     }
 
+    PPFPKeyMap::const_iterator
+        find_pp_key_in_map(const PPFPKeyMap& fmap, const PPFMKey& key, const size_t& batch) const
+    {
+        // NOTE: The key to the kernels obtained from equal_range(key) are guaranteed to have
+        // non-overlapping batch ranges. So we can simply check if the input batch is within
+        // the range of the kernel. If the input batch is not within range but there is a kernel
+        // that matches the key and has no specified batch_low and batch_high, then we return
+        // the key to that kernel.
+        auto range = fmap.equal_range(key);
+        auto best  = fmap.end();
+        for(auto it = range.first; it != range.second; ++it)
+        {
+            if((it->second.kernel_config_1.batch_low != it->second.kernel_config_2.batch_low)
+               || (it->second.kernel_config_1.batch_high != it->second.kernel_config_2.batch_high))
+                throw std::runtime_error(
+                    "Batch low and high values for the two partial-pass kernels "
+                    "are not the same");
+
+            // get batch configuration from the pair
+            const auto batch_low  = it->second.kernel_config_1.batch_low;
+            const auto batch_high = it->second.kernel_config_1.batch_high;
+
+            // check if the input batch is within the range of the kernel
+            if((batch_low.has_value() || batch_high.has_value())
+               && ((batch_low.has_value() ? batch >= batch_low.value() : true)
+                   && (batch_high.has_value() ? batch <= batch_high.value() : true)))
+            {
+                // found exact match within the range
+                best = it;
+                break; // return the best kernel
+            }
+            else if(!batch_low.has_value() && !batch_high.has_value())
+            {
+                // currently the best match, but may need to check
+                // other kernels to see if there is an exact match
+                // within the range
+                best = it;
+            }
+        }
+
+        return best;
+    }
+
     template <typename TKey, typename TKeyPool>
     const TKey& get_actual_key(const TKey& key, TKeyPool& pool) const
     {
@@ -236,6 +290,28 @@ class function_pool
             key_copy.gcn_arch_name = generic_gcn_arch_name;
 
             auto it = find_key_in_map(pool, key_copy);
+            if(it != pool.end())
+                return it->second;
+            else
+                return key;
+        }
+    }
+
+    // retrieve a key with the correct kernel configs from a generic key
+    const PPFMKey&
+        get_actual_pp_key(const PPFMKey& key, PPFPKeyMap& pool, const size_t& batch) const
+    {
+        // First attempt an exact match with the given architecture in gcn_arch_name if possible
+        auto it = find_pp_key_in_map(pool, key, batch);
+        if(it != pool.end())
+            return it->second;
+        else
+        {
+            // If a match is not found, try it with the generic arch kernel
+            auto key_copy          = key;
+            key_copy.gcn_arch_name = generic_gcn_arch_name;
+
+            auto it = find_pp_key_in_map(pool, key_copy, batch);
             if(it != pool.end())
                 return it->second;
             else
@@ -297,9 +373,9 @@ public:
         return find_key_in_map(function_map, real_key) != function_map.end();
     }
 
-    bool has_function(const PPFMKey& key) const
+    bool has_function(const PPFMKey& key, const size_t& batch) const
     {
-        auto real_key = get_actual_key(key, def_pp_key_pool);
+        auto real_key = get_actual_pp_key(key, def_pp_key_pool, batch);
         return find_key_in_map(pp_function_map, real_key) != pp_function_map.end();
     }
 
@@ -345,9 +421,9 @@ public:
         return it->second;
     }
 
-    FFTKernel get_kernel(const PPFMKey& key, ComputeScheme scheme) const
+    FFTKernel get_kernel(const PPFMKey& key, const ComputeScheme& scheme, const size_t& batch) const
     {
-        auto real_key = get_actual_key(key, def_pp_key_pool);
+        auto real_key = get_actual_pp_key(key, def_pp_key_pool, batch);
         auto it       = find_key_in_map(pp_function_map, real_key);
         if(it == pp_function_map.end())
             throw std::out_of_range("kernel not found in partial-pass map");
