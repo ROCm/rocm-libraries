@@ -218,7 +218,7 @@ void hbrand(rocblas_int n, rocblas_int kl, rocblas_int ku, T* Aband, rocblas_int
     using S = decltype(std::real(T{}));
     std::uniform_real_distribution<S> dist(S(-1), S(1));
 
-    T const nan = std::numeric_limits<double>::quiet_NaN();
+    T const nan = T(std::numeric_limits<S>::quiet_NaN());
 
     if(n < 0 || kl < 0 || ku < 0 || ldab < kl + ku + 1)
         throw rocblas_status_invalid_size;
