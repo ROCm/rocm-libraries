@@ -140,50 +140,6 @@ class TestTritonLDS:
         assert result > 0
 
 
-class TestTritonWSParams:
-    """Tests for Triton work-stealing parameter selection.
-
-    select_triton_ws_params returns counters_per_xcd that scales INVERSELY
-    with tile count. Few tiles -> many counters (each XCD spreads the work-
-    stealing capability across the scarce work). Many tiles -> a single
-    counter per XCD suffices because there's plenty of work to claim.
-
-    Implementation thresholds (tiles -> counters): <=512: 8, <=1536: 4,
-    <=2048: 2, else: 1.
-    """
-
-    def test_few_tiles(self):
-        # 256x256 with 128x128 tiles -> 4 tiles -> high counters_per_xcd
-        result = origami.select_triton_ws_params(256, 256, 128, 128)
-        assert result.counters_per_xcd == 8
-        assert result.workgroup_mapping > 0
-
-    def test_many_tiles(self):
-        # 16384x16384 with 128x128 tiles -> 16384 tiles -> 1 counter
-        result = origami.select_triton_ws_params(16384, 16384, 128, 128)
-        assert result.counters_per_xcd == 1
-        assert result.workgroup_mapping > 0
-
-    def test_struct_fields(self):
-        result = origami.select_triton_ws_params(4096, 4096, 128, 128)
-        assert hasattr(result, "counters_per_xcd")
-        assert hasattr(result, "workgroup_mapping")
-
-
-class TestTritonHierarchicalSplit:
-    """Tests for Triton hierarchical split computation."""
-
-    def test_basic_split(self):
-        result = origami.compute_triton_hierarchical_split(4096, 4096, 128, 128, 8, 304)
-        assert result.local_per_xcd > 0
-        assert result.local_per_xcd + result.global_tiles > 0
-
-    def test_struct_fields(self):
-        result = origami.compute_triton_hierarchical_split(2048, 2048, 128, 128, 8, 304)
-        assert hasattr(result, "local_per_xcd")
-        assert hasattr(result, "global_tiles")
-
-
 def _make_sk_problem(m, n, k, batch=1, c_dtype=None):
     p = origami.problem_t()
     p.size = origami.dim3_t(m, n, k)
@@ -326,3 +282,101 @@ class TestTritonHeuristicOverlay:
         assert triton_lat > 0.0
         assert tensile_lat > 0.0
         assert triton_lat == pytest.approx(tensile_lat, rel=1e-12)
+
+
+def _make_default_configs_problem(a_dtype, b_dtype=None):
+    """Minimal problem_t carrying just the dtypes the heuristic gates on."""
+    p = origami.problem_t()
+    p.a_dtype = a_dtype
+    p.b_dtype = b_dtype if b_dtype is not None else a_dtype
+    return p
+
+
+class TestTritonDefaultConfigs:
+    """Tests for `get_triton_default_configs(problem, hardware)`.
+
+    The function returns a flat list of `config_t` whose `mt.{m,n,k}` covers
+    the architecture-aware tile candidate space. The narrower of
+    (problem.a_dtype, problem.b_dtype) drives per-arch gating.
+    """
+
+    def test_returns_nonempty_list(self):
+        problem = _make_default_configs_problem(origami.data_type_t.Half)
+        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        assert isinstance(configs, list)
+        assert len(configs) > 0
+        for c in configs:
+            assert isinstance(c, origami.config_t)
+            assert c.mt.m > 0 and c.mt.n > 0 and c.mt.k > 0
+
+    def test_default_range_bf16_gfx942(self):
+        # Default (>8-bit) range: MN in {16,32,64,128,256}, K in {16,32,64,128,256,512}.
+        # Cross-product = 5 * 5 * 6 = 150.
+        problem = _make_default_configs_problem(origami.data_type_t.BFloat16)
+        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        assert len(configs) == 5 * 5 * 6
+        ms = {c.mt.m for c in configs}
+        ns = {c.mt.n for c in configs}
+        ks = {c.mt.k for c in configs}
+        assert ms == {16, 32, 64, 128, 256}
+        assert ns == {16, 32, 64, 128, 256}
+        assert ks == {16, 32, 64, 128, 256, 512}
+
+    def test_gfx950_f8_excludes_mn16(self):
+        # gfx950 with <=8-bit narrow input: MN restricted to {32,64,128,256}.
+        problem = _make_default_configs_problem(origami.data_type_t.Float8)
+        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx950"])
+        assert len(configs) == 4 * 4 * 6
+        ms = {c.mt.m for c in configs}
+        ns = {c.mt.n for c in configs}
+        assert 16 not in ms and 16 not in ns
+        assert ms == {32, 64, 128, 256}
+        assert ns == {32, 64, 128, 256}
+
+    def test_gfx950_f4_excludes_mn16(self):
+        # Same gating applies for sub-byte (F4) on gfx950.
+        if not hasattr(origami.data_type_t, "Float4"):
+            pytest.skip("Float4 not available in this build")
+        problem = _make_default_configs_problem(origami.data_type_t.Float4)
+        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx950"])
+        ms = {c.mt.m for c in configs}
+        ns = {c.mt.n for c in configs}
+        assert 16 not in ms and 16 not in ns
+
+    def test_gfx942_f8_includes_mn512(self):
+        # gfx942 with 8-bit narrow input adds MN=512.
+        problem = _make_default_configs_problem(origami.data_type_t.Float8)
+        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        assert len(configs) == 6 * 6 * 6
+        ms = {c.mt.m for c in configs}
+        ns = {c.mt.n for c in configs}
+        assert 512 in ms and 512 in ns
+        # Default 16-MN entries are still present on gfx942 F8.
+        assert 16 in ms and 16 in ns
+
+    def test_narrow_dtype_drives_gating_asymmetric(self):
+        # Mixed precision: A=BF16 (16 bits), B=F8 (8 bits) → narrow = 8.
+        # On gfx942 the 8-bit narrow input must enable the 512 extension.
+        problem = _make_default_configs_problem(
+            origami.data_type_t.BFloat16, origami.data_type_t.Float8
+        )
+        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        ms = {c.mt.m for c in configs}
+        assert 512 in ms
+
+    def test_mt_only_mi_left_unset(self):
+        # The function only populates mt; mi is intentionally left at its
+        # default-constructed value. Callers are expected to fill mi in.
+        problem = _make_default_configs_problem(origami.data_type_t.Half)
+        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        default_mi = origami.config_t().mi
+        for c in configs:
+            assert c.mi.m == default_mi.m
+            assert c.mi.n == default_mi.n
+            assert c.mi.k == default_mi.k
+
+    def test_no_duplicate_configs(self):
+        problem = _make_default_configs_problem(origami.data_type_t.Half)
+        configs = origami.get_triton_default_configs(problem, HARDWARE["gfx942"])
+        seen = {(c.mt.m, c.mt.n, c.mt.k) for c in configs}
+        assert len(seen) == len(configs)

@@ -357,40 +357,19 @@ NB_MODULE(origami, m) {
         nanobind::arg("config"),
         "Check if a config's macro tile fits in LDS.");
 
-  // Triton-specific struct bindings
-  nanobind::class_<origami::triton_ws_params_t>(m, "triton_ws_params_t")
-      .def(nanobind::init<>())
-      .def_rw("counters_per_xcd", &origami::triton_ws_params_t::counters_per_xcd)
-      .def_rw("workgroup_mapping", &origami::triton_ws_params_t::workgroup_mapping);
-
-  nanobind::class_<origami::triton_hierarchical_split_t>(m, "triton_hierarchical_split_t")
-      .def(nanobind::init<>())
-      .def_rw("local_per_xcd", &origami::triton_hierarchical_split_t::local_per_xcd)
-      .def_rw("global_tiles", &origami::triton_hierarchical_split_t::global_tiles);
-
-  nanobind::class_<origami::triton_tile_ranges_t>(m, "triton_tile_ranges_t")
-      .def(nanobind::init<>())
-      .def_rw("block_mn", &origami::triton_tile_ranges_t::block_mn)
-      .def_rw("block_k", &origami::triton_tile_ranges_t::block_k);
-
-  // Triton primitive functions
-  m.def("select_triton_ws_params",
-        &origami::select_triton_ws_params,
-        "Select work-stealing parameters for Triton kernels");
-  m.def("compute_triton_hierarchical_split",
-        &origami::compute_triton_hierarchical_split,
-        "Compute hierarchical local/global tile split for Triton");
+  // Triton-target functions
   m.def("compute_triton_sk_grid",
         &origami::compute_triton_sk_grid,
         nanobind::arg("problem"),
         nanobind::arg("config"),
         nanobind::arg("hardware"),
         "Compute Triton-specific StreamK grid size from (problem, config, hardware)");
-  m.def("get_triton_default_tile_ranges",
-        &origami::get_triton_default_tile_ranges,
+  m.def("get_triton_default_configs",
+        &origami::get_triton_default_configs,
+        nanobind::arg("problem"),
         nanobind::arg("hardware"),
-        nanobind::arg("dtype_bits"),
-        "Get arch-specific default tile search ranges for Triton");
+        "Default Triton tile candidate configs (mt only) for (problem, hardware). "
+        "Caller is responsible for setting mi.");
   m.def("compute_mem_bw_from_occupancy",
         &origami::compute_mem_bw_from_occupancy,
         "Compute limited achievable memory bandwidth based on active CUs");

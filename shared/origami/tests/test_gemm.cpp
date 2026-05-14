@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include <set>
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -1209,6 +1211,113 @@ TEST_CASE("Triton: compute_triton_sk_grid - sub-byte C dtype", "[triton]") {
   config.target = origami::target_t::triton;
 
   REQUIRE(origami::compute_triton_sk_grid(problem, config, hardware) > 0);
+}
+
+TEST_CASE("Triton: get_triton_default_configs - default range BF16", "[triton]") {
+  // BF16 is a >8-bit dtype, so the default range applies on every arch:
+  //   MN in {16, 32, 64, 128, 256}, K in {16, 32, 64, 128, 256, 512}
+  //   |configs| = 5 * 5 * 6 = 150
+  auto hardware = make_hardware(942);
+
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::BFloat16;
+  problem.b_dtype = origami::data_type_t::BFloat16;
+
+  const auto configs = origami::get_triton_default_configs(problem, hardware);
+  REQUIRE(configs.size() == 5u * 5u * 6u);
+
+  std::set<size_t> ms, ns, ks;
+  for (const auto& c : configs) {
+    ms.insert(c.mt.m);
+    ns.insert(c.mt.n);
+    ks.insert(c.mt.k);
+  }
+  REQUIRE(ms == std::set<size_t>{16, 32, 64, 128, 256});
+  REQUIRE(ns == std::set<size_t>{16, 32, 64, 128, 256});
+  REQUIRE(ks == std::set<size_t>{16, 32, 64, 128, 256, 512});
+}
+
+TEST_CASE("Triton: get_triton_default_configs - gfx950 F8 excludes 16 MN", "[triton]") {
+  // gfx950 with <=8-bit narrow input restricts MN to {32, 64, 128, 256}
+  // (no 16-MN MFMA support for those dtypes). |configs| = 4 * 4 * 6 = 96.
+  auto hardware = make_hardware(950);
+
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::Float8;
+  problem.b_dtype = origami::data_type_t::Float8;
+
+  const auto configs = origami::get_triton_default_configs(problem, hardware);
+  REQUIRE(configs.size() == 4u * 4u * 6u);
+
+  for (const auto& c : configs) {
+    REQUIRE(c.mt.m != 16);
+    REQUIRE(c.mt.n != 16);
+  }
+}
+
+TEST_CASE("Triton: get_triton_default_configs - gfx942 F8 includes 512 MN", "[triton]") {
+  // gfx942 with 8-bit narrow input adds the 512 MN entry on top of the
+  // default range. |configs| = 6 * 6 * 6 = 216.
+  auto hardware = make_hardware(942);
+
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::Float8;
+  problem.b_dtype = origami::data_type_t::Float8;
+
+  const auto configs = origami::get_triton_default_configs(problem, hardware);
+  REQUIRE(configs.size() == 6u * 6u * 6u);
+
+  bool has_m512 = false, has_n512 = false, has_m16 = false, has_n16 = false;
+  for (const auto& c : configs) {
+    if (c.mt.m == 512) has_m512 = true;
+    if (c.mt.n == 512) has_n512 = true;
+    if (c.mt.m == 16)  has_m16  = true;
+    if (c.mt.n == 16)  has_n16  = true;
+  }
+  REQUIRE(has_m512);
+  REQUIRE(has_n512);
+  // Default 16-MN entries are still present on gfx942 F8 (only additive).
+  REQUIRE(has_m16);
+  REQUIRE(has_n16);
+}
+
+TEST_CASE("Triton: get_triton_default_configs - asymmetric dtypes use narrower",
+          "[triton]") {
+  // Mixed precision: A=BF16 (16 bits), B=F8 (8 bits). The narrower (8 bits)
+  // drives gating, so on gfx942 the 512 MN extension must kick in.
+  auto hardware = make_hardware(942);
+
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::BFloat16;
+  problem.b_dtype = origami::data_type_t::Float8;
+
+  const auto configs = origami::get_triton_default_configs(problem, hardware);
+  bool has_512 = false;
+  for (const auto& c : configs) {
+    if (c.mt.m == 512 || c.mt.n == 512) {
+      has_512 = true;
+      break;
+    }
+  }
+  REQUIRE(has_512);
+}
+
+TEST_CASE("Triton: get_triton_default_configs - mt only, mi left default", "[triton]") {
+  // Only mt.{m,n,k} is populated; mi is intentionally left at its
+  // default-constructed value. Callers must set mi per their selection policy.
+  auto hardware = make_hardware(942);
+
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::Half;
+  problem.b_dtype = origami::data_type_t::Half;
+
+  const origami::config_t default_cfg;
+  const auto              configs = origami::get_triton_default_configs(problem, hardware);
+  REQUIRE(!configs.empty());
+  for (const auto& c : configs) {
+    REQUIRE(c.mt.mnk() > 0);
+    REQUIRE(c.mi == default_cfg.mi);
+  }
 }
 
 TEST_CASE("GEMM: estimate_l2_hit and estimate_mall_hit unit test", "[gemm]") {

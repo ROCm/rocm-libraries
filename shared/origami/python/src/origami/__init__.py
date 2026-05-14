@@ -30,8 +30,6 @@ try:
         problem_t,
         hardware_t,
         context_t,
-        triton_ws_params_t,
-        triton_hierarchical_split_t,
         # Hardware functions
         get_hardware_for_device,
         get_hardware_for_arch,
@@ -71,12 +69,9 @@ try:
         select_reduction,
         select_workgroup_mapping,
         compute_number_of_output_tiles,
-        # Triton primitive functions
-        select_triton_ws_params,
-        compute_triton_hierarchical_split,
+        # Triton-target functions
         compute_triton_sk_grid,
-        get_triton_default_tile_ranges,
-        triton_tile_ranges_t,
+        get_triton_default_configs,
         # Reduction functions
         int_to_reduction_t,
     )
@@ -110,8 +105,6 @@ __all__ = [
     "problem_t",
     "hardware_t",
     "context_t",
-    "triton_ws_params_t",
-    "triton_hierarchical_split_t",
     # Hardware functions
     "get_hardware_for_device",
     "get_hardware_for_arch",
@@ -150,12 +143,9 @@ __all__ = [
     "select_reduction",
     "select_workgroup_mapping",
     "compute_number_of_output_tiles",
-    # Triton primitive functions
-    "select_triton_ws_params",
-    "compute_triton_hierarchical_split",
+    # Triton-target functions
     "compute_triton_sk_grid",
-    "get_triton_default_tile_ranges",
-    "triton_tile_ranges_t",
+    "get_triton_default_configs",
     # Reduction functions
     "int_to_reduction_t",
 ]

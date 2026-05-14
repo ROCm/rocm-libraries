@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <algorithm>
-#include <cmath>
 #include <vector>
 
 #include "origami/math.hpp"
@@ -12,47 +11,25 @@
 
 namespace origami {
 
-// Select work-stealing parameters for Triton.
-// Empirically tuned on MI300X via autotune sweeps.
-triton_ws_params_t select_triton_ws_params(size_t m, size_t n, size_t block_m, size_t block_n) {
-  const size_t grid_m     = math::safe_ceil_div(m, block_m);
-  const size_t num_tiles  = grid_m * math::safe_ceil_div(n, block_n);
+namespace {
 
-  int counters_per_xcd;
-  if (num_tiles <= 512)
-    counters_per_xcd = 8;
-  else if (num_tiles <= 1536)
-    counters_per_xcd = 4;
-  else if (num_tiles <= 2048)
-    counters_per_xcd = 2;
-  else
-    counters_per_xcd = 1;
+// ----- compute_triton_sk_grid heuristic constants -----
 
-  int wgm = std::min(static_cast<size_t>(8), grid_m);
+// Caller-side workspace cap (matches Tensile's StreamK budget).
+constexpr std::size_t kMaxWorkspaceBytes = 128ull * 1024 * 1024;
 
-  return {counters_per_xcd, wgm};
-}
+// Fractional grid candidates explored when tiles > N_CU.
+const std::vector<double> kFracs = {0.0, 0.5, 0.125, 0.2, 0.25, 1.0 / 3.0};
 
-// Compute optimal local/global tile split for hierarchical work-stealing.
-// Adaptive split based on tiles-per-CU density:
-//   <= 4 tiles/CU: 100% local (global counter overhead dominates)
-//   > 4 tiles/CU:  local_frac decreases linearly, floor at 50%
-triton_hierarchical_split_t compute_triton_hierarchical_split(
-    size_t m, size_t n, size_t block_m, size_t block_n,
-    size_t num_xcds, size_t n_cu) {
-  const size_t total = math::safe_ceil_div(m, block_m) * math::safe_ceil_div(n, block_n);
+// K-split factors explored when tiles < N_CU.
+const std::vector<std::size_t> kSplitFactors = {8, 6, 4, 3, 2, 1};
 
-  if (num_xcds == 0) num_xcds = 1;
-  const double tiles_per_cu =
-      static_cast<double>(total) / std::max(n_cu, static_cast<size_t>(1));
+// When the trailing partial wave on the n_cu mapping holds fewer than this
+// many tiles, fall back to prev_pow2(n_cu) so the workload distributes more
+// evenly. Empirically tuned on MI300X.
+constexpr std::size_t kSmallLastWaveTileCount = 128;
 
-  double local_frac = std::max(0.5, 1.0 - std::max(0.0, tiles_per_cu - 4.0) * 0.05);
-  size_t local = static_cast<size_t>(total * local_frac) / num_xcds;
-  if (local == 0) local = 1;
-  size_t global = total > (local * num_xcds) ? total - (local * num_xcds) : 0;
-
-  return {local, global};
-}
+}  // namespace
 
 // Compute Triton-specific StreamK grid size.
 //
@@ -68,41 +45,38 @@ triton_hierarchical_split_t compute_triton_hierarchical_split(
 //     (fixes a latent zero-divide for F4/F6 outputs).
 //   - Falls back to config.workspace_size_per_elem_c when the caller has
 //     populated it (matches Tensile semantics in streamk::grid_k_split_aware).
-size_t compute_triton_sk_grid(const problem_t&  problem,
-                              const config_t&   config,
-                              const hardware_t& hardware) {
-  const size_t n_cu = hardware.N_CU;
+std::size_t compute_triton_sk_grid(const problem_t&  problem,
+                                   const config_t&   config,
+                                   const hardware_t& hardware) {
+  const std::size_t n_cu = hardware.N_CU;
   if (n_cu == 0) return 0;
 
-  const size_t tiles = streamk::compute_number_of_output_tiles(
+  const std::size_t tiles = streamk::compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
   if (tiles == 0) return 0;
 
-  const size_t k_iters =
-      std::max(math::safe_ceil_div(problem.size.k, config.mt.k), static_cast<size_t>(1));
+  const std::size_t k_iters = std::max(math::safe_ceil_div(problem.size.k, config.mt.k),
+                                       static_cast<std::size_t>(1));
 
   // Per-tile workspace bytes. Prefer a caller-supplied value; otherwise derive
   // sub-byte-safely from problem.c_dtype.
-  size_t tile_ws = 0;
+  std::size_t tile_ws = 0;
   if (config.workspace_size_per_elem_c > 0) {
-    tile_ws = config.mt.m * config.mt.n * config.workspace_size_per_elem_c;
+    tile_ws = config.mt.mn() * config.workspace_size_per_elem_c;
   } else {
-    const size_t bits_c = static_cast<size_t>(datatype_to_bits(problem.c_dtype));
-    tile_ws =
-        math::safe_ceil_div(config.mt.m * config.mt.n * bits_c, static_cast<size_t>(8));
+    const std::size_t bits_c = datatype_to_bits(problem.c_dtype);
+    tile_ws                  = math::safe_ceil_div(config.mt.mn() * bits_c, std::size_t{8});
   }
 
-  static constexpr size_t kMaxWorkspace = 128ull * 1024 * 1024;
-
-  size_t sk_grid = tiles;
+  std::size_t sk_grid = tiles;
   if (tiles > n_cu) {
-    static const std::vector<double> kFracs = {0.0, 0.5, 0.125, 0.2, 0.25, 1.0 / 3.0};
-    if (size_t cand = streamk::pick_fractional_grid(tiles, n_cu, tile_ws, kMaxWorkspace, kFracs)) {
+    if (std::size_t cand = streamk::pick_fractional_grid(
+            tiles, n_cu, tile_ws, kMaxWorkspaceBytes, kFracs)) {
       sk_grid = cand;
     }
   } else if (tiles < n_cu) {
-    static const std::vector<size_t> kSplitFactors = {8, 6, 4, 3, 2, 1};
-    if (size_t split = streamk::pick_k_split(tiles, n_cu, k_iters, kSplitFactors, /*min_iters_per_cu=*/8)) {
+    if (std::size_t split = streamk::pick_k_split(
+            tiles, n_cu, k_iters, kSplitFactors, /*min_iters_per_cu=*/8)) {
       sk_grid = split;
     }
   }
@@ -110,12 +84,12 @@ size_t compute_triton_sk_grid(const problem_t&  problem,
   if (sk_grid == 0 || tiles % sk_grid != 0) sk_grid = tiles;
 
   // Triton-only last-wave compensation: when only a small partial wave
-  // (< 128 tiles) would land on the trailing CUs, fall back to the largest
-  // power-of-two grid <= n_cu so the workload distributes more evenly.
-  // No-op when n_cu is already a power of two.
+  // (< kSmallLastWaveTileCount tiles) would land on the trailing CUs, fall
+  // back to the largest power-of-two grid <= n_cu so the workload distributes
+  // more evenly. No-op when n_cu is already a power of two.
   if (tiles >= n_cu) {
-    const size_t remainder = tiles % n_cu;
-    if (remainder > 0 && remainder < 128) {
+    const std::size_t remainder = tiles % n_cu;
+    if (remainder > 0 && remainder < kSmallLastWaveTileCount) {
       sk_grid = math::prev_pow2(n_cu);
     }
   }
@@ -123,29 +97,47 @@ size_t compute_triton_sk_grid(const problem_t&  problem,
   return sk_grid;
 }
 
-// Get default Triton tile search ranges for the given architecture and dtype.
-triton_tile_ranges_t get_triton_default_tile_ranges(const hardware_t& hardware,
-                                                    size_t dtype_bits) {
-  std::vector<size_t> block_mn = {16, 32, 64, 128, 256};
-  std::vector<size_t> block_k  = {16, 32, 64, 128, 256, 512};
+// Default Triton tile candidate configs for the given problem and hardware.
+//
+// Architecture-aware cross-product of (block_m, block_n, block_k) candidates
+// expanded into a flat std::vector<config_t>. The MN range is gated by the
+// narrower of (problem.a_dtype, problem.b_dtype) per the MFMA shape support
+// matrix; the K range is the same for every (arch, dtype). Only mt is
+// populated (via dim3_t aggregate-init); the caller is responsible for
+// setting mi and any other config fields per its selection policy.
+std::vector<config_t> get_triton_default_configs(const problem_t&  problem,
+                                                 const hardware_t& hardware) {
+  const int narrow_bits =
+      std::min(datatype_to_bits(problem.a_dtype), datatype_to_bits(problem.b_dtype));
 
-  if (hardware.arch == hardware_t::architecture_t::gfx950) {
-    if (dtype_bits <= 8) {
-      // Restrict MN to >=32 for F8/F4 on gfx950; K range already covers
-      // {16..512} including 128 and 256, so no extra K entries are needed.
-      block_mn = {32, 64, 128, 256};
-    }
-  } else if (hardware.arch == hardware_t::architecture_t::gfx942) {
-    if (dtype_bits == 8) {
-      // 512 MN is genuinely additive on gfx942 F8; 128/256 K are already
-      // present in the default block_k range, so don't re-push them.
-      block_mn.push_back(512);
-    } else if (dtype_bits < 8) {
-      // F4/F6 unsupported on gfx942
-    }
+  std::vector<std::size_t> block_mn;
+  if (hardware.arch == hardware_t::architecture_t::gfx950 && narrow_bits <= 8) {
+    // gfx950 F8/F4: no 16-MN MFMA available for sub-16-bit inputs.
+    block_mn = {32, 64, 128, 256};
+  } else if (hardware.arch == hardware_t::architecture_t::gfx942 && narrow_bits == 8) {
+    // gfx942 F8: additive 512-MN MFMA available on top of the default range.
+    block_mn = {16, 32, 64, 128, 256, 512};
+  } else {
+    // Default search space. F4/F6 on gfx942 falls here; the dtype is not
+    // natively supported on gfx942 MFMA, so consumers should filter
+    // empirically downstream.
+    block_mn = {16, 32, 64, 128, 256};
   }
 
-  return {block_mn, block_k};
+  static const std::vector<std::size_t> block_k = {16, 32, 64, 128, 256, 512};
+
+  std::vector<config_t> configs;
+  configs.reserve(block_mn.size() * block_mn.size() * block_k.size());
+  for (std::size_t bm : block_mn) {
+    for (std::size_t bn : block_mn) {
+      for (std::size_t bk : block_k) {
+        config_t c;
+        c.mt = dim3_t{bm, bn, bk};
+        configs.push_back(c);
+      }
+    }
+  }
+  return configs;
 }
 
 }  // namespace origami
