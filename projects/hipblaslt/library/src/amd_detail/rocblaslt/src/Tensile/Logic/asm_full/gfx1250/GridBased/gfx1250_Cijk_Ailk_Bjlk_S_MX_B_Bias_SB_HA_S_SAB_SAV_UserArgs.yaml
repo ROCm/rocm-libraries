@@ -96,13 +96,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Ailk_Bjlk_S_MX_B_Bias_SB_HA_S_SAB_SAV_UserAkEnjvzu0t7uJyNaRf2MS4gILfHpg-BrQDMCCvrs7JBY=
     BufferLoad: true
     BufferStore: true
@@ -149,7 +146,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_S_MX_B_Bias_SB_HA_S_SAB_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB1_GSUAMB_GLS0_ISA1250_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA16_LPB16_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL0_PGR2_PLR0_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS0_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG16_2_1
