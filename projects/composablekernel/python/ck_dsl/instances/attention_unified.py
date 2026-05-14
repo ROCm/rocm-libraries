@@ -15,7 +15,12 @@ from typing import Dict, Optional, Tuple
 
 from ..core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
 from ..helpers.compile import compile_kernel
-from ..runtime.torch_module import launch_torch_kernel
+from ..runtime.launcher import (
+    KernelLauncher,
+    LaunchConfig,
+    PipelineLauncher,
+    WorkspacePool,
+)
 
 from ..helpers.attention import (
     Attention2DConfig,
@@ -36,7 +41,6 @@ from .attention_tiled_3d import (
     build_unified_attention_reduce_tiled,
     supports_tiled_3d,
 )
-from ..runtime.torch_module import empty_workspace
 
 
 @dataclass(frozen=True)
@@ -163,6 +167,7 @@ def supports_native_unified_attention_tiled(
         use_qq_bias=problem.use_qq_bias,
         use_fp8=problem.use_fp8,
         q_dtype=problem.q_dtype,
+        num_warps=_select_2d_num_warps(problem),
     )
 
 
@@ -205,6 +210,26 @@ def _cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     )
 
 
+def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
+    """Choose ``num_warps`` for the tiled 2D kernel.
+
+    The kernel supports `num_warps in {1, 2, 4}`. Multi-warp is correct
+    (each warp owns 16 rows of BLOCK_M and runs its own MFMA / softmax /
+    PV pipeline; there is no cross-warp reduction). However, empirical
+    benchmarking on MI355X shows that wider CTAs do not actually speed
+    up the inner KV loop for the workloads we care about, because each
+    wave's MFMA throughput is the limit and adding waves only shrinks
+    the grid. So we default to ``num_warps=1`` and keep the multi-warp
+    machinery in place for future split-N experiments.
+
+    Multi-warp lays out OK at correctness but not speed; if you change
+    this, run `python/ck_dsl/examples/attention/parity_unified_attention.py`
+    with `--paths 2d` and verify the 2D-vs-2D table still wins or at
+    least doesn't regress.
+    """
+    return 1
+
+
 def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     return (
         "tiled",
@@ -219,6 +244,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         bool(problem.softcap > 0),
         bool(problem.use_alibi),
         bool(problem.use_qq_bias),
+        _select_2d_num_warps(problem),
     )
 
 
@@ -237,6 +263,7 @@ def _tiled_spec_from_problem(
         use_alibi=problem.use_alibi,
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
+        num_warps=_select_2d_num_warps(problem),
     )
 
 
@@ -412,6 +439,7 @@ def _run_3d_tiled(
     alibi_slopes=None,
     qq_bias=None,
     qq_bias_stride_0: int = 0,
+    stream: int = 0,
 ):
     """Launch the tiled 3D segment + reduce kernels.
 
@@ -426,41 +454,32 @@ def _run_3d_tiled(
     import torch
 
     num_segments = _num_segments(problem)
-    key = _tiled_3d_cache_key(problem)
-    if key not in _ATTN_3D_TILED_CACHE:
-        seg_spec = _tiled_3d_spec_from_problem(problem)
-        reduce_spec = UnifiedAttentionReduceTiledSpec(
-            head_size=problem.head_size,
-            num_query_heads=problem.num_query_heads,
-            num_kv_heads=problem.num_kv_heads,
-            dtype=problem.dtype,
-            num_segments=num_segments,
-        )
-        seg_art = compile_kernel(
-            build_unified_attention_3d_tiled(seg_spec), capture_ir_text=False
-        )
-        red_art = compile_kernel(
-            build_unified_attention_reduce_tiled(reduce_spec), capture_ir_text=False
-        )
-        _ATTN_3D_TILED_CACHE[key] = (
-            seg_art.hsaco,
-            seg_art.kernel_name,
-            red_art.hsaco,
-            red_art.kernel_name,
-        )
-    seg_hsaco, seg_kname, red_hsaco, red_kname = _ATTN_3D_TILED_CACHE[key]
+    cache_key = _tiled_3d_cache_key(problem)
 
-    segm_output = empty_workspace(
+    # Lazily build (and cache) the PipelineLauncher + WorkspacePool for
+    # this problem shape. This single object owns: the compiled HSACO
+    # blobs, the loaded HIP module handles, the kernel function
+    # handles, and the segm_* workspace tensors. All five
+    # categories of lifetime / race / overhead bugs documented in
+    # ``ck_dsl/runtime/launcher.py`` are removed by construction; the
+    # only remaining per-call cost is packing args and issuing two
+    # ``hipModuleLaunchKernel`` calls on the caller's stream.
+    pipeline, pool = _get_3d_pipeline(problem, cache_key, num_segments)
+
+    segm_output = pool.get(
+        "segm_output",
         (problem.total_q, problem.num_query_heads, num_segments, problem.head_size),
         dtype=torch.float32,
         device=q.device,
     )
-    segm_max = empty_workspace(
+    segm_max = pool.get(
+        "segm_max",
         (problem.total_q, problem.num_query_heads, num_segments),
         dtype=torch.float32,
         device=q.device,
     )
-    segm_expsum = empty_workspace(
+    segm_expsum = pool.get(
+        "segm_expsum",
         (problem.total_q, problem.num_query_heads, num_segments),
         dtype=torch.float32,
         device=q.device,
@@ -471,7 +490,6 @@ def _run_3d_tiled(
     )
     total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
 
-    seg_sig = _3d_signature(problem.dtype)
     seg_vals = {
         "segm_output_ptr": segm_output,
         "segm_max_ptr": segm_max,
@@ -493,7 +511,6 @@ def _run_3d_tiled(
         "block_table_stride": int(bt_stride),
         "qq_bias_stride_0": int(qq_bias_stride_0),
     }
-    red_sig = _reduce_signature(problem.dtype)
     red_vals = {
         "output_ptr": out,
         "segm_output_ptr": segm_output,
@@ -501,73 +518,128 @@ def _run_3d_tiled(
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seqused_k,
     }
-    return _launch_3d_segment_then_reduce(
-        seg_hsaco=seg_hsaco,
-        seg_kname=seg_kname,
-        seg_sig=seg_sig,
-        seg_vals=seg_vals,
-        red_hsaco=red_hsaco,
-        red_kname=red_kname,
-        red_sig=red_sig,
-        red_vals=red_vals,
-        seg_grid=(
+    seg_cfg = LaunchConfig(
+        grid=(
             int(total_num_q_blocks),
             int(problem.num_kv_heads),
             int(num_segments),
         ),
-        red_grid=(int(problem.total_q), int(problem.num_query_heads), 1),
-        warmup=warmup,
-        attempts=attempts,
+        block=(64, 1, 1),
+    )
+    red_cfg = LaunchConfig(
+        grid=(int(problem.total_q), int(problem.num_query_heads), 1),
+        block=(64, 1, 1),
+    )
+    return pipeline(
+        [seg_vals, red_vals],
+        [seg_cfg, red_cfg],
+        stream=int(stream),
     )
 
 
-_HIP_RUNTIME = None
-_HIP_3D_MODULE_CACHE: Dict[Tuple, Tuple] = {}
+# Per-cache-key (pipeline, workspace_pool) pairs. Built lazily at first
+# dispatch for a given problem shape; reused across every subsequent
+# dispatch and every timing-loop iteration. This is the same shape as
+# CK Tile's `fmha_bwd_launcher` (one object per problem instance, owns
+# kernels + workspace, survives every launch).
+_3D_PIPELINES: Dict[Tuple, Tuple[PipelineLauncher, WorkspacePool]] = {}
+_2D_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
+_SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
 
 
-def _launch_3d_segment_then_reduce(
-    *,
-    seg_hsaco,
-    seg_kname,
-    seg_sig,
-    seg_vals,
-    red_hsaco,
-    red_kname,
-    red_sig,
-    red_vals,
-    seg_grid,
-    red_grid,
-    warmup: int,
-    attempts: int,
-):
-    """Run segment + reduce exactly once per AITER call.
+def _get_3d_pipeline(
+    problem: UnifiedAttentionProblem,
+    cache_key: Tuple,
+    num_segments: int,
+) -> Tuple[PipelineLauncher, WorkspacePool]:
+    if cache_key in _3D_PIPELINES:
+        return _3D_PIPELINES[cache_key]
+    if cache_key not in _ATTN_3D_TILED_CACHE:
+        seg_spec = _tiled_3d_spec_from_problem(problem)
+        reduce_spec = UnifiedAttentionReduceTiledSpec(
+            head_size=problem.head_size,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            dtype=problem.dtype,
+            num_segments=num_segments,
+        )
+        seg_art = compile_kernel(
+            build_unified_attention_3d_tiled(seg_spec), capture_ir_text=False
+        )
+        red_art = compile_kernel(
+            build_unified_attention_reduce_tiled(reduce_spec), capture_ir_text=False
+        )
+        _ATTN_3D_TILED_CACHE[cache_key] = (
+            seg_art.hsaco,
+            seg_art.kernel_name,
+            red_art.hsaco,
+            red_art.kernel_name,
+        )
+    seg_hsaco, seg_kname, red_hsaco, red_kname = _ATTN_3D_TILED_CACHE[cache_key]
+    seg_launcher = KernelLauncher(
+        hsaco=seg_hsaco,
+        kernel_name=seg_kname,
+        signature=_3d_signature(problem.dtype),
+        cache_key=("3d_seg",) + cache_key,
+    )
+    red_launcher = KernelLauncher(
+        hsaco=red_hsaco,
+        kernel_name=red_kname,
+        signature=_reduce_signature(problem.dtype),
+        cache_key=("3d_red",) + cache_key,
+    )
+    pipeline = PipelineLauncher([seg_launcher, red_launcher])
+    pool = WorkspacePool()
+    _3D_PIPELINES[cache_key] = (pipeline, pool)
+    return pipeline, pool
 
-    The outer benchmark harness already handles warmup/repeats, so we do not
-    add an inner loop here. Adding one would multiply the reported latency
-    by `attempts` relative to Triton's single-launch path. The returned
-    summary's `ms` is the elapsed wall time for this one (segment, reduce)
-    pair.
-    """
-    from ..runtime.hip_module import Runtime
-    from ..runtime.torch_module import TorchLaunchSummary, pack_args
 
-    global _HIP_RUNTIME
-    if _HIP_RUNTIME is None:
-        _HIP_RUNTIME = Runtime()
-    rt = _HIP_RUNTIME
-    cache_key = (id(seg_hsaco), id(red_hsaco))
-    if cache_key not in _HIP_3D_MODULE_CACHE:
-        mod_seg = rt.load_module(seg_hsaco)
-        fn_seg = mod_seg.get_function(seg_kname)
-        mod_red = rt.load_module(red_hsaco)
-        fn_red = mod_red.get_function(red_kname)
-        _HIP_3D_MODULE_CACHE[cache_key] = (mod_seg, fn_seg, mod_red, fn_red)
-    _, fn_seg, _, fn_red = _HIP_3D_MODULE_CACHE[cache_key]
-    args_seg = pack_args(seg_sig, seg_vals)
-    args_red = pack_args(red_sig, red_vals)
-    rt.launch(fn_seg, seg_grid, (64, 1, 1), args_seg)
-    rt.launch(fn_red, red_grid, (64, 1, 1), args_red)
-    return TorchLaunchSummary(ms=0.0, attempts=1)
+def _get_2d_launcher(
+    problem: UnifiedAttentionProblem,
+    cache_key: Tuple,
+) -> KernelLauncher:
+    if cache_key in _2D_LAUNCHERS:
+        return _2D_LAUNCHERS[cache_key]
+    if cache_key not in _ATTN_TILED_CACHE:
+        spec = _tiled_spec_from_problem(problem)
+        artifact = compile_kernel(
+            build_unified_attention_2d_tiled(spec), capture_ir_text=False
+        )
+        _ATTN_TILED_CACHE[cache_key] = (artifact.hsaco, artifact.kernel_name)
+    hsaco, kname = _ATTN_TILED_CACHE[cache_key]
+    launcher = KernelLauncher(
+        hsaco=hsaco,
+        kernel_name=kname,
+        signature=_attn_signature(
+            problem.dtype, include_bt_stride=True, include_qq_bias_stride=True
+        ),
+        cache_key=("2d",) + cache_key,
+    )
+    _2D_LAUNCHERS[cache_key] = launcher
+    return launcher
+
+
+def _get_scalar_launcher(
+    problem: UnifiedAttentionProblem,
+    cache_key: Tuple,
+) -> KernelLauncher:
+    if cache_key in _SCALAR_LAUNCHERS:
+        return _SCALAR_LAUNCHERS[cache_key]
+    if cache_key not in _ATTN_CACHE:
+        spec = UnifiedAttention2DSpec(problem=problem)
+        artifact = compile_kernel(
+            build_unified_attention_2d(spec), capture_ir_text=False
+        )
+        _ATTN_CACHE[cache_key] = (artifact.hsaco, artifact.kernel_name)
+    hsaco, kname = _ATTN_CACHE[cache_key]
+    launcher = KernelLauncher(
+        hsaco=hsaco,
+        kernel_name=kname,
+        signature=_attn_signature(problem.dtype, include_bt_stride=False),
+        cache_key=("scalar",) + cache_key,
+    )
+    _SCALAR_LAUNCHERS[cache_key] = launcher
+    return launcher
 
 
 def run_unified_attention_torch(
@@ -589,6 +661,7 @@ def run_unified_attention_torch(
     warmup: int = 0,
     attempts: int = 1,
     backend: str = "auto",
+    stream: int = 0,
 ):
     """Launch a CK DSL attention kernel on torch tensors.
 
@@ -603,6 +676,12 @@ def run_unified_attention_torch(
     is its first-axis stride (in elements). Both follow AITER's Triton
     semantics exactly and require the corresponding ``problem.use_alibi`` /
     ``problem.use_qq_bias`` flags to be set.
+
+    ``stream`` is the HIP stream handle (an `int`) to launch on. Pass
+    ``torch.cuda.current_stream().cuda_stream`` to make the launches
+    visible to ``torch.cuda.graph`` capture; this is how the parity
+    harness amortises the segment + reduce launch overhead in the 3D
+    path under a hipgraph.
     """
     bt_stride = (
         int(block_table.stride(0))
@@ -635,6 +714,7 @@ def run_unified_attention_torch(
                 alibi_slopes=alibi_slopes,
                 qq_bias=qq_bias,
                 qq_bias_stride_0=qq_bias_stride_0,
+                stream=int(stream),
             )
         if backend == "3d":
             raise NotImplementedError(reason_3d)
@@ -643,18 +723,7 @@ def run_unified_attention_torch(
         ok_t, reason_t = supports_native_unified_attention_tiled(problem)
         if ok_t:
             key = _tiled_cache_key(problem)
-            if key not in _ATTN_TILED_CACHE:
-                spec = _tiled_spec_from_problem(problem)
-                artifact = compile_kernel(
-                    build_unified_attention_2d_tiled(spec), capture_ir_text=False
-                )
-                _ATTN_TILED_CACHE[key] = (artifact.hsaco, artifact.kernel_name)
-            hsaco, kname = _ATTN_TILED_CACHE[key]
-            sig = _attn_signature(
-                problem.dtype,
-                include_bt_stride=True,
-                include_qq_bias_stride=True,
-            )
+            launcher = _get_2d_launcher(problem, key)
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -674,39 +743,39 @@ def run_unified_attention_torch(
                 qq_bias_stride_0=qq_bias_stride_0,
                 include_qq_bias_stride=True,
             )
-            # Total Q blocks upper-bound mirroring AITER.
+            # The dispatcher must compute the grid using the same BLOCK_Q
+            # the kernel uses (which depends on `num_warps`); a mismatch
+            # would launch the wrong number of CTAs and the kernel's
+            # q_block_local_idx -> qb_start_pos math would touch the
+            # wrong query positions.
+            num_warps = _select_2d_num_warps(problem)
+            block_m = 16 * num_warps
             block_q = (
-                16 // problem.num_queries_per_kv
-                if problem.num_queries_per_kv <= 16
+                block_m // problem.num_queries_per_kv
+                if problem.num_queries_per_kv <= block_m
                 else 1
             )
             total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
-            return launch_torch_kernel(
-                hsaco=hsaco,
-                kernel_name=kname,
-                signature=sig,
-                values=vals,
-                grid=(int(problem.num_kv_heads), int(total_num_q_blocks), 1),
-                block=(64, 1, 1),
-                warmup=warmup,
-                attempts=attempts,
+            threads_per_block = 64 * num_warps
+            return launcher(
+                vals,
+                config=LaunchConfig(
+                    grid=(int(problem.num_kv_heads), int(total_num_q_blocks), 1),
+                    block=(threads_per_block, 1, 1),
+                    stream=int(stream),
+                ),
             )
         if backend == "tiled":
             raise NotImplementedError(reason_t)
 
-    # Scalar fallback
+    # Scalar fallback. Uses the same KernelLauncher infrastructure as
+    # the tiled paths so module load + arg lifetime + stream resolution
+    # are handled by-construction.
     ok, reason = supports_native_unified_attention(problem)
     if not ok:
         raise NotImplementedError(reason)
     key = _cache_key(problem)
-    if key not in _ATTN_CACHE:
-        spec = UnifiedAttention2DSpec(problem=problem)
-        artifact = compile_kernel(
-            build_unified_attention_2d(spec), capture_ir_text=False
-        )
-        _ATTN_CACHE[key] = (artifact.hsaco, artifact.kernel_name)
-    hsaco, kname = _ATTN_CACHE[key]
-    sig = _attn_signature(problem.dtype, include_bt_stride=False)
+    launcher = _get_scalar_launcher(problem, key)
     vals = _attn_values(
         problem=problem,
         q=q,
@@ -722,19 +791,17 @@ def run_unified_attention_torch(
         bt_stride=bt_stride,
         include_bt_stride=False,
     )
-    return launch_torch_kernel(
-        hsaco=hsaco,
-        kernel_name=kname,
-        signature=sig,
-        values=vals,
-        grid=(
-            int(problem.total_q),
-            int(problem.num_query_heads),
-            int(problem.head_size),
+    return launcher(
+        vals,
+        config=LaunchConfig(
+            grid=(
+                int(problem.total_q),
+                int(problem.num_query_heads),
+                int(problem.head_size),
+            ),
+            block=(64, 1, 1),
+            stream=int(stream),
         ),
-        block=(64, 1, 1),
-        warmup=warmup,
-        attempts=attempts,
     )
 
 

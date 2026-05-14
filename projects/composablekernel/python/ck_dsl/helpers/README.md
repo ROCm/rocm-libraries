@@ -366,6 +366,66 @@ write_artifact(artifact, out_dir, manifest)
 For convolution: `make_conv_manifest(conv=[N, H, W, C, K, R, S,
 sH, sW, pH, pW, dH, dW], groups=..., cpg=..., kpg=..., ...)`.
 
+## Launching + workspace — `ck_dsl.runtime.launcher`
+
+For ops that talk directly to torch tensors (instead of going through
+the manifest runner), the canonical launch path is the launcher
+abstractions in `ck_dsl.runtime.launcher`. They capture the
+"compile-once, launch-many, workspace-survives-every-call" contract
+that CK Tile's `fmha_bwd_launcher`, FlyDSL's `_TorchReduceWrapper`,
+and Triton's `JITFunction` all share.
+
+```python
+from ck_dsl import compile_kernel
+from ck_dsl.runtime import (
+    KernelLauncher, PipelineLauncher, WorkspacePool, LaunchConfig,
+)
+
+# 1. Compile + load once per problem shape.
+artifact = compile_kernel(my_op_kernel(spec))
+launcher = KernelLauncher(
+    hsaco=artifact.hsaco,
+    kernel_name=artifact.kernel_name,
+    signature=my_op_signature(),       # the same dict-list shape
+                                       # `pack_args` expects
+    cache_key=("my_op", spec_tuple),   # for your dispatch cache
+)
+
+# 2. Optional: stash workspace tensors that outlive every call.
+pool = WorkspacePool()
+scratch = pool.get(
+    "scratch", (problem.M, problem.N), dtype=torch.float32, device=q.device,
+)
+
+# 3. Launch -- this is the entire hot path.
+launcher(
+    {"out_ptr": out, "in_ptr": q, "scratch_ptr": scratch, ...},
+    config=LaunchConfig(grid=(gx, gy, gz), block=(bx, 1, 1), stream=0),
+)
+# stream=0 is auto-resolved to torch.cuda.current_stream() so torch's
+# caching allocator sees the launch and won't reuse `scratch` mid-flight.
+```
+
+For multi-kernel pipelines (split-KV attention's seg+reduce, k-fixup
+GEMM, im2col+GEMM+col2im, ...) construct a `PipelineLauncher` whose
+stages share one stream:
+
+```python
+seg = KernelLauncher(hsaco=seg.hsaco, ..., cache_key=("seg",) + key)
+red = KernelLauncher(hsaco=red.hsaco, ..., cache_key=("red",) + key)
+pipeline = PipelineLauncher([seg, red])
+pipeline(
+    [seg_vals, red_vals], [seg_cfg, red_cfg], stream=int(stream),
+)
+```
+
+For numpy / manifest flows (no torch in scope), use `DeviceMem` (a
+RAII wrapper over `Runtime.alloc/free`) instead of `WorkspacePool`,
+and `time_launches(fn, warmup=..., iters=...)` for HIP-event timing.
+
+See `ck_dsl/instances/attention_unified.py::_get_3d_pipeline` and
+`::_get_2d_launcher` for the in-tree references.
+
 ## Roadmap
 
 Phase 1 (today):

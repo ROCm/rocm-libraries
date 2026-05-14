@@ -39,7 +39,13 @@ python/ck_dsl/
 ├── runtime/                  # in-process HSACO build + HIP module + launch
 │   ├── comgr.py              #   ctypes over libamd_comgr (HSACO build)
 │   ├── hip_module.py         #   ctypes over libamdhip64 (Runtime, Module,
-│   │                         #     Function, Event)
+│   │                         #     Function, Event); owns the per-stream
+│   │                         #     args-buffer keep-alive queue
+│   ├── torch_module.py       #   torch-tensor arg packing + resolve_stream
+│   │                         #     (back-compat launch_torch_kernel shim)
+│   ├── launcher.py           #   KernelLauncher / PipelineLauncher /
+│   │                         #     WorkspacePool / DeviceMem / time_launches
+│   │                         #     -- the canonical launch primitives
 │   └── __init__.py
 │
 ├── helpers/                  # high-level kernel-authoring helpers
@@ -352,8 +358,24 @@ for the full table and methodology.
 - f32 math, `exp2`, reciprocal, softcap, `sitofp`, fp8e4m3->f32, typed
   / masked loads (with OOB-safe index clamp), vector reductions, and
   runtime branches in `core/`.
-- torch-pointer launch + per-kernel HSACO module cache in
-  `runtime/torch_module.py` and `runtime/hip_module.py`.
+- Launcher abstractions in `runtime/launcher.py`: `KernelLauncher`
+  (one compiled HSACO + loaded HIP module + function entry, cached
+  per problem-shape), `PipelineLauncher` (multi-stage kernels on
+  one stream -- split-KV attention's seg+reduce, k-fixup GEMM, etc.),
+  `WorkspacePool` (long-lived torch workspace tensors), `DeviceMem`
+  (RAII over `hipMalloc/hipFree` for numpy / manifest flows), and
+  `time_launches` (the only event-creating timing primitive). These
+  capture what CK Tile's `fmha_bwd_launcher`, FlyDSL's
+  `_TorchReduceWrapper`, and Triton's `JITFunction` all do
+  structurally; see `runtime/__init__.py` for the rationale.
+- Args-buffer keep-alive queue (`Runtime._pending_args`) and stream
+  resolution (`resolve_stream`) in `runtime/hip_module.py` /
+  `runtime/torch_module.py` handle the
+  `HIP_LAUNCH_PARAM_BUFFER_POINTER` lifetime race and the torch
+  caching-allocator stream desync that previously surfaced as
+  intermittent `max_abs` drift in benchmark harnesses. See
+  [`ck/dsl/unified_attention_creative_results.md`](../../ck/dsl/unified_attention_creative_results.md)
+  for the investigation.
 - Attention helpers (`PagedKvDescriptor`, `OnlineSoftmaxState`, the
   AITER 2D / 3D config selectors) in `helpers/attention.py`.
 - Tiled MFMA kernels in `instances/attention_tiled_2d.py` and

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from .runtime.hip_module import Runtime
+from .runtime.launcher import time_launches
 
 
 @dataclass
@@ -74,20 +75,18 @@ def _load(manifest_path: Path, hsaco_path: Optional[Path]):
 def _launch_timed(
     rt: Runtime, fn, grid, block, args: bytes, warmup: int, iters: int
 ) -> float:
-    for _ in range(warmup):
-        rt.launch(fn, grid, block, args)
-    rt.sync()
-    e0 = rt.event()
-    e1 = rt.event()
-    e0.record()
-    for _ in range(iters):
-        rt.launch(fn, grid, block, args)
-    e1.record()
-    e1.synchronize()
-    total_ms = e0.elapsed_to(e1)
-    e0.destroy()
-    e1.destroy()
-    return total_ms / iters
+    """Time `iters` repeats of `rt.launch(fn, grid, block, args)` on
+    the default stream. Delegates to `ck_dsl.runtime.launcher.time_launches`
+    so the manifest runner and the in-tree Launcher abstraction share
+    one bench-timing path; see that function's docstring for the
+    correctness rationale (no per-call module reload, no module unload,
+    args buffer lifetime tracked by Runtime._pending_args).
+    """
+    return time_launches(
+        lambda: rt.launch(fn, grid, block, args),
+        warmup=warmup,
+        iters=iters,
+    )
 
 
 def _gemm_problem(

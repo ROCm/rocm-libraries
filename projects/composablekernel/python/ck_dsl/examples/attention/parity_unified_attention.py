@@ -322,6 +322,239 @@ def default_scenarios() -> List[Scenario]:
     ]
 
 
+def creative_scenarios() -> List[Scenario]:
+    """Exploratory sweep: corners we don't hit in the default 11 scenarios.
+
+    Covers long-context decode (up to 64K), tiny prefill, large prefill,
+    chunked prefill, varied GQA factors (MQA, num_kv_heads in {1, 4, 8}),
+    head_size=256 with bf16, block_size=64 + bf16, sliding-window
+    extremes, softcap+sw, ALiBi+sw, QQ-bias on chunked prefill, and the
+    full bias kitchen-sink (sliding + softcap + ALiBi).
+    """
+    return [
+        # --- long-context decode (stress the 3D split-KV pipeline) ---
+        Scenario(
+            name="creative_decode_8k",
+            seq_lens=[(1, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="creative_decode_32k",
+            seq_lens=[(1, 32768)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="creative_decode_64k_bf16_b64",
+            seq_lens=[(1, 65536)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=64,
+            dtype=torch.bfloat16,
+        ),
+        # --- big decode batch (varied kv per seq) ---
+        Scenario(
+            name="creative_decode_batch16",
+            seq_lens=[
+                (1, 512),
+                (1, 1024),
+                (1, 2048),
+                (1, 4096),
+                (1, 768),
+                (1, 1536),
+                (1, 3072),
+                (1, 6144),
+                (1, 384),
+                (1, 896),
+                (1, 1280),
+                (1, 2560),
+                (1, 200),
+                (1, 333),
+                (1, 444),
+                (1, 999),
+            ],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        # --- tiny + large prefill ---
+        Scenario(
+            name="creative_prefill_tiny",
+            seq_lens=[(4, 4)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="creative_prefill_512",
+            seq_lens=[(512, 512)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="creative_prefill_2k",
+            seq_lens=[(2048, 2048)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        # --- chunked prefill (q < kv, mid-context) ---
+        Scenario(
+            name="creative_chunk_prefill",
+            seq_lens=[(128, 2048), (256, 4096), (512, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        # --- GQA / MQA / wider heads ---
+        Scenario(
+            name="creative_gqa_h32_k4",
+            seq_lens=[(1, 4096), (1, 8192)],
+            num_query_heads=32,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="creative_mqa_h16_k1",
+            seq_lens=[(1, 4096), (1, 8192)],
+            num_query_heads=16,
+            num_kv_heads=1,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="creative_gqa_h64_k8",
+            seq_lens=[(1, 2048), (1, 4096)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        # --- head_size=256 with bf16 ---
+        Scenario(
+            name="creative_d256_bf16_decode",
+            seq_lens=[(1, 4096), (1, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+        ),
+        Scenario(
+            name="creative_d256_prefill",
+            seq_lens=[(128, 1024), (256, 2048)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            dtype=torch.float16,
+        ),
+        # --- bf16 + block_size=64 chunked prefill ---
+        Scenario(
+            name="creative_bf16_b64_chunk",
+            seq_lens=[(64, 2048), (128, 4096)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=64,
+            dtype=torch.bfloat16,
+        ),
+        # --- sliding-window extremes ---
+        Scenario(
+            name="creative_sw_short",
+            seq_lens=[(1, 4096), (1, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            sliding_window=64,
+        ),
+        Scenario(
+            name="creative_sw_large",
+            seq_lens=[(1, 16384), (1, 32768)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            sliding_window=4096,
+        ),
+        # --- ALiBi + sliding window ---
+        Scenario(
+            name="creative_alibi_sw",
+            seq_lens=[(1, 4096), (1, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            sliding_window=512,
+            use_alibi=True,
+        ),
+        # --- softcap + sliding ---
+        Scenario(
+            name="creative_softcap_sw",
+            seq_lens=[(1, 4096), (1, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            sliding_window=512,
+            softcap=30.0,
+        ),
+        # --- QQ-bias on chunked prefill ---
+        Scenario(
+            name="creative_qq_chunk",
+            seq_lens=[(128, 512), (256, 1024)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            use_qq_bias=True,
+            qq_bias_stride_0=512,
+        ),
+        # --- kitchen-sink: causal + sliding + softcap + ALiBi together ---
+        Scenario(
+            name="creative_kitchen_sink",
+            seq_lens=[(64, 2048), (32, 1024)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            sliding_window=256,
+            softcap=30.0,
+            use_alibi=True,
+        ),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Materialise inputs
 # ---------------------------------------------------------------------------
@@ -398,6 +631,25 @@ def make_inputs(s: Scenario, seed: int = 0):
 # ---------------------------------------------------------------------------
 
 
+def _time_call_loop(call_once, warmup: int, attempts: int):
+    """Standard event-timer: ``warmup`` untimed + ``attempts`` timed launches.
+
+    Returns mean per-call ms. The caller owns the output tensor and the
+    streaming context.
+    """
+    for _ in range(warmup):
+        call_once()
+    torch.cuda.synchronize()
+    t_start = torch.cuda.Event(enable_timing=True)
+    t_end = torch.cuda.Event(enable_timing=True)
+    t_start.record()
+    for _ in range(attempts):
+        call_once()
+    t_end.record()
+    t_end.synchronize()
+    return t_start.elapsed_time(t_end) / attempts
+
+
 def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
     """Run AITER's Triton `unified_attention` with the requested path forced."""
     output = torch.empty_like(data["query"])
@@ -429,17 +681,7 @@ def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
                 backend="triton",
             )
 
-        for _ in range(warmup):
-            call_once()
-        torch.cuda.synchronize()
-        t_start = torch.cuda.Event(enable_timing=True)
-        t_end = torch.cuda.Event(enable_timing=True)
-        t_start.record()
-        for _ in range(attempts):
-            call_once()
-        t_end.record()
-        t_end.synchronize()
-        ms = t_start.elapsed_time(t_end) / attempts
+        ms = _time_call_loop(call_once, warmup, attempts)
         return output, ms
     finally:
         _force_triton_path("auto")
@@ -448,8 +690,12 @@ def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
 def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
     """Run CK DSL `run_unified_attention_torch` with the requested path forced.
 
-    Uses the DSL's direct entry point (bypassing AITER's wrapper) so that the
-    path argument is honored exactly.
+    Uses the DSL's direct entry point (bypassing AITER's wrapper) so that
+    the path argument is honored exactly. The CK launches are placed on
+    torch's current stream (via `resolve_stream` inside the runtime) so
+    the torch caching allocator sees them and cannot recycle workspace
+    memory while a kernel is still pending -- the same invariant Triton
+    and AITER's paged-attention shim rely on.
     """
     import torch
     from ck_dsl.instances import (
@@ -487,6 +733,14 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
         num_sms=120,
     )
 
+    # Launch on torch's current stream so the torch caching allocator
+    # sees the kernel launches. Default HIP stream 0 is decoupled from
+    # torch's streams, which previously produced sporadic NaNs and
+    # illegal accesses after a 2D launch was followed by a 3D launch
+    # because torch would recycle workspace memory while a kernel was
+    # still pending on stream 0.
+    torch_stream = int(torch.cuda.current_stream().cuda_stream)
+
     def call_once():
         run_unified_attention_torch(
             problem=problem,
@@ -504,19 +758,10 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
             qq_bias=qq_bias,
             qq_bias_stride_0=qq_bias_stride_0,
             backend=_ck_backend(path),
+            stream=torch_stream,
         )
 
-    for _ in range(warmup):
-        call_once()
-    torch.cuda.synchronize()
-    t_start = torch.cuda.Event(enable_timing=True)
-    t_end = torch.cuda.Event(enable_timing=True)
-    t_start.record()
-    for _ in range(attempts):
-        call_once()
-    t_end.record()
-    t_end.synchronize()
-    ms = t_start.elapsed_time(t_end) / attempts
+    ms = _time_call_loop(call_once, warmup, attempts)
     return output, ms
 
 
@@ -598,6 +843,18 @@ def main() -> int:
         default="auto,2d,3d",
         help="comma-separated list of paths to run: auto, 2d, 3d",
     )
+    parser.add_argument(
+        "--set",
+        choices=("default", "creative", "all"),
+        default="default",
+        help=(
+            "Which scenario set to use. 'default' is the 11 production "
+            "scenarios; 'creative' is an exploratory sweep covering "
+            "long-context decode, GQA/MQA variants, head_size=256, "
+            "bf16, sliding window extremes, and bias combinations; "
+            "'all' is both."
+        ),
+    )
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
@@ -605,7 +862,13 @@ def main() -> int:
         return 1
     print("device:", torch.cuda.get_device_name(0))
 
-    scenarios = default_scenarios()
+    if args.set == "default":
+        scenarios = default_scenarios()
+    elif args.set == "creative":
+        scenarios = creative_scenarios()
+    else:  # all
+        scenarios = default_scenarios() + creative_scenarios()
+
     if args.scenario:
         wanted = set(args.scenario)
         scenarios = [s for s in scenarios if s.name in wanted]
