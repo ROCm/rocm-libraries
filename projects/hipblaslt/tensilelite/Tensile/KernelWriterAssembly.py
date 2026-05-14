@@ -2126,7 +2126,7 @@ class KernelWriterAssembly(KernelWriter):
         tmpVgprRes  = ContinuousRegister(tmpVgpr, 2)
         module.add(SMulI32(dst=sgpr(tmpSgpr.idx), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1")))
         if kernel["GlobalSplitU"] != 0:
-          module.add(SAndB32(dst=sgpr(tmpSgpr.idx+1), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+          module.add(SAndB32(dst=sgpr(tmpSgpr.idx+1), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SMulI32(dst=sgpr(tmpSgpr.idx), src0=sgpr(tmpSgpr.idx), src1=sgpr(tmpSgpr.idx+1)))
         module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr.idx, dReg="WorkGroup0", divReg=tmpSgpr.idx, rReg=tmpSgpr.idx+1,\
                                         tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False))
@@ -2336,7 +2336,7 @@ class KernelWriterAssembly(KernelWriter):
 
       moduleRegInit.add(SAndB32(dst=sgpr("StaggerU"), src0=sgpr(sgprPackedArgs), src1=hex(0xFFFF0000), comment="Restore StaggerU related vars"))
       moduleRegInit.add(SLShiftRightB32(dst=sgpr("StaggerU"), shiftHex=hex(16), src=sgpr("StaggerU")))
-      if kernel["GlobalSplitU"] != 0:
+      if kernel["GlobalSplitU"] != 0 or kernel["AdaptiveGemmNTAB"] != 0:
         moduleRegInit.add(SAndB32(dst=sgpr("GSU"), src0=sgpr(sgprPackedArgs), src1=hex(0xFFFF), comment="Restore GSUConfig and GSU"))
 
       # Commented the below condition since ArgType check is needed for General Batched GEMM
@@ -2690,7 +2690,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
         module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprB)))
         if kernel["GlobalSplitU"] != 0:
-          module.add(SAndB32(dst=sgpr(tmpSgprNumWG1), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+          module.add(SAndB32(dst=sgpr(tmpSgprNumWG1), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
         module.add(SAddU32(dst=sgpr(tmpSgprAccumTiles), src0=sgpr(tmpSgprAccumTiles), src1=sgpr(tmpSgprNumWG0)))
         # check wgIndex >= AccumTiles?
@@ -2721,7 +2721,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
         module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprB)))
         if kernel["GlobalSplitU"] != 0:
-          module.add(SAndB32(dst=sgpr(tmpSgprGSU), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+          module.add(SAndB32(dst=sgpr(tmpSgprGSU), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprGSU)))
         module.add(SAddU32(dst=sgpr(tmpSgprAccumTiles), src0=sgpr(tmpSgprAccumTiles), src1=sgpr(tmpSgprNumWG0)))
 
@@ -4998,7 +4998,7 @@ class KernelWriterAssembly(KernelWriter):
           gsuSgpr = tmpSgpr + 2
           du = kernel["_DepthU%s"%tc]
           duBpe = int(du * tP["bpeGR"])
-          module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+          module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(tmpSgpr), src1=duBpe, comment="GSU*_DepthUTc*Bpe"))
           module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
           module.add(SCMovB32(dst=sgpr(gsuSgpr), src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
@@ -5772,9 +5772,10 @@ class KernelWriterAssembly(KernelWriter):
   # Label after prefetches are launched.  This is present even if ShadowInit not
   # used.
   ##############################################################################
-  def openShadowInit(self):
+  def openShadowInit(self, kernel):
+    strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
     module = Module("openShadowInit")
-    module.add(Label("ShadowInitStart", ""))
+    module.add(Label("ShadowInitStart%s"%strNtab, ""))
     return module
 
   ##############################################################################
@@ -5783,6 +5784,7 @@ class KernelWriterAssembly(KernelWriter):
   # used.
   ##############################################################################
   def closeShadowInit(self, kernel):
+    strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
     module = Module("closeShadowInit")
     assert(self.states.doShadowInit and kernel["PrefetchGlobalRead"])
 
@@ -5790,9 +5792,9 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["SuppressNoLoadLoop"]:
       loopChar = self.states.indexChars[ \
           kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
-      lastIterEnd = Label("LoopEnd%s"%loopChar, "")
+      lastIterEnd = Label("LoopEnd%s%s"%(loopChar, strNtab), "")
     else:
-      lastIterEnd = Label("PrefetchGlobalLastIterEnd", "")
+      lastIterEnd = Label("PrefetchGlobalLastIterEnd%s"%strNtab, "")
 
     # This branch could potentially be very far e.g. > SIMM16
     module.addComment1("after InitC, skip to end of prefetch last iter if numIter==0")
@@ -7032,7 +7034,7 @@ class KernelWriterAssembly(KernelWriter):
 
     tmpVgpr = self.vgprPool.checkOut(2,"tmp")
     tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
-    module.add(SAndB32(dst=sgpr(remainder), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+    module.add(SAndB32(dst=sgpr(remainder), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
     module.add(scalarUInt32DivideAndRemainder(quotient, dividend, remainder, remainder, tmpVgprRes, wavewidth=kernel["WavefrontSize"]))
     self.vgprPool.checkIn(tmpVgpr)
 
@@ -7053,7 +7055,7 @@ class KernelWriterAssembly(KernelWriter):
 
     tmpVgpr = self.vgprPool.checkOut(2,"tmp")
     tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
-    module.add(SAndB32(dst=sgpr(remainder), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+    module.add(SAndB32(dst=sgpr(remainder), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
     module.add(scalarUInt32DivideAndRemainder(quotient, dividend, remainder, remainder, tmpVgprRes, wavewidth=kernel["WavefrontSize"]))
     self.vgprPool.checkIn(tmpVgpr)
 
@@ -7075,7 +7077,7 @@ class KernelWriterAssembly(KernelWriter):
   # 0 is outermost; self.states.unrollIdx is the unroll index.
   # -1 is tail loop (used only for the unroll loop)
   ##############################################################################
-  def calculateLoopNumIter(self, kernel, tPA, tPB, loopIdx, tailloopInNll=False, NLLindex=0):
+  def calculateLoopNumIter(self, kernel, tPA, tPB, loopIdx, tailloopInNll=False, NLLindex=0, remainPgr=0, nta=0, ntb=0):
     module = Module("calculateLoopNumIter")
 
     tailLoop = loopIdx < 0
@@ -7083,6 +7085,9 @@ class KernelWriterAssembly(KernelWriter):
       loopIdx = self.states.unrollIdx
     loopDim = kernel["ProblemType"]["IndicesSummation"][loopIdx]
     loopChar = self.states.indexChars[loopDim]
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
+    strNllSlot = "_remPGR%d" % remainPgr if remainPgr > 0 else ""
 
     ########################################
     # Tail Loop
@@ -7159,7 +7164,7 @@ class KernelWriterAssembly(KernelWriter):
             self.releaseStreamKConstSgpr(sIpt)
             module.add(SCMovB32(dst=loopCounter, src=0, comment="This WG not completing tile"))
           module.add(SCmpEQU32(src0=loopCounter, src1=0, comment="numIter%s == 0"%loopChar))
-          EndOfTailLoopInNLLLabel = Label("TailLoopInNLLEnd%s"%(loopChar), "" )
+          EndOfTailLoopInNLLLabel = Label("TailLoopInNLLEnd%s%s%s%s"%(loopChar, strNta, strNtb, strNllSlot), "" )
           module.add(SCBranchSCC1(labelName=EndOfTailLoopInNLLLabel.getLabelName(), comment="skip TailLoopInNLL code"))
 
           maxUnit = self.states.tailloopInNllmaxUnit
@@ -7169,7 +7174,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(SCBranchSCC1(labelName=EndOfTailLoopInNLLLabel.getLabelName(), comment="skip TailLoopInNLL code and use TailLoop"))
           if kernel["GlobalSplitU"] != 0:
             # skip tailloopInNll code if GSU>1
-            module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SCmpGtU32(src0=sgpr(tmpSgpr+2), src1=1, comment="GSU > 1 ?"))
             module.add(SCBranchSCC1(labelName=EndOfTailLoopInNLLLabel.getLabelName(), comment="skip TailLoopInNLL code and use TailLoop"))
 
@@ -7284,7 +7289,9 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Open Loop
   ##############################################################################
-  def openLoop(self, kernel, tPA, tPB, loopIdx, noLabelGen=False, beginLabelOnly=False, beforeInitCIter=False):
+  def openLoop(self, kernel, tPA, tPB, loopIdx, noLabelGen=False, beginLabelOnly=False, beforeInitCIter=False, nta=0, ntb=0):
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
     module = Module("openLoop")
 
     if bool(kernel["ProblemType"]["MXBlockA"]) ^ bool(kernel["ProblemType"]["MXBlockB"]):
@@ -7305,9 +7312,11 @@ class KernelWriterAssembly(KernelWriter):
     loopChar = self.states.indexChars[ \
         kernel["ProblemType"]["IndicesSummation"][loopIdx]]
     if not tailLoop and not noLabelGen and not beginLabelOnly:
-      module.add(Label("openLoop%s"%loopChar, ""))
-    loopLabelBegin = Label("%sLoopBegin%s"%("Tail" if tailLoop else "", loopChar), "", alignment=16 )
-    loopLabelEnd = Label("%sLoopEnd%s"%("Tail" if tailLoop else "", loopChar), "" )
+      module.add(Label("openLoop%s%s%s"%(loopChar, strNta, strNtb), ""))
+    bStrNta = "" if tailLoop else strNta
+    bStrNtb = "" if tailLoop else strNtb
+    loopLabelBegin = Label("%sLoopBegin%s%s%s"%("Tail" if tailLoop else "", loopChar, bStrNta, bStrNtb), "", alignment=16 )
+    loopLabelEnd = Label("%sLoopEnd%s%s%s"%("Tail" if tailLoop else "", loopChar, bStrNta, bStrNtb), "" )
 
     if beginLabelOnly and not beforeInitCIter:
       # generate only beginLabel, then, return
@@ -7347,7 +7356,7 @@ class KernelWriterAssembly(KernelWriter):
               src0=loopCounter, \
               src1=hex(endCounter-1), \
               comment="LoopCounter%s < EndCounter"%(loopChar) ))
-          toPGR1 = Label.getFormatting(self.labels.getName("toPGR1"))
+          toPGR1 = Label.getFormatting(self.labels.getName("toPGR1%s%s"%(strNta, strNtb)))
           module.add(SCBranchSCC1(labelName=toPGR1, comment="PGR=2 but only 1 loop, toPGR1"))
         if kernel["PrefetchGlobalRead"] >= 3:
           # early exit 1 (2<=loopCounter<=PGR-1) to second NGLL (no need GR Inc)
@@ -7357,7 +7366,7 @@ class KernelWriterAssembly(KernelWriter):
               src1=hex(endCounter), \
               comment="LoopCounter%s <= EndCounter"%(loopChar) ))
           remainPgr = endCounter - 1
-          jumpLabel = Label("NoGlobalLoadLoop_%d"%remainPgr, "")
+          jumpLabel = Label("NoGlobalLoadLoop_%d%s%s"%(remainPgr, strNta, strNtb), "")
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
           # early exit 2 (loopCounter==PGR) to first NGLL (need GR Inc)
@@ -7367,7 +7376,7 @@ class KernelWriterAssembly(KernelWriter):
               src1=hex(endCounter), \
               comment="LoopCounter%s <= EndCounter"%(loopChar) ))
           remainPgr = endCounter - 1
-          jumpLabel = Label("NoGlobalLoadLoop_%d"%remainPgr, "")
+          jumpLabel = Label("NoGlobalLoadLoop_%d%s%s"%(remainPgr, strNta, strNtb), "")
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
         else:
@@ -7379,7 +7388,7 @@ class KernelWriterAssembly(KernelWriter):
           jumpLabel = loopLabelEnd
           if kernel["PrefetchGlobalRead"]==2 and (not kernel["SuppressNoLoadLoop"]) and kernel["ExpandPointerSwap"]:
             # PGR=2 and EPS and no SuppressNoLoadLoop case, need to jump to EvenExit
-            jumpLabel = Label("LoopEnd%s_evenexit"%(loopChar), "" )
+            jumpLabel = Label("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb), "" )
 
         if kernel["ClusterBarrier"]:
           # jump to label_skipClusterWaitInitC not label_LoopBeginL
@@ -7455,7 +7464,10 @@ class KernelWriterAssembly(KernelWriter):
   # Close Loop
   # finalLoop : final unroll loop
   ##############################################################################
-  def closeLoop(self, kernel, tPA, tPB, loopIdx, finalLoop, emitEndLabelOnly=False, oddLabel=False, skipCondJumpCounter=-1, NLLindexLast=False):
+  def closeLoop(self, kernel, tPA, tPB, loopIdx, finalLoop, emitEndLabelOnly=False, oddLabel=False, skipCondJumpCounter=-1, NLLindexLast=False, remainPgr=0, nta=0, ntb=0):
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
+    strNllSlot = "_remPGR%d" % remainPgr if remainPgr > 0 else ""
     module = Module("closeLoop")
     if emitEndLabelOnly:
       loopIdx = self.states.unrollIdx
@@ -7542,10 +7554,10 @@ class KernelWriterAssembly(KernelWriter):
     else: # not tailloop
       loopChar = self.states.indexChars[ \
           kernel["ProblemType"]["IndicesSummation"][loopIdx]]
-      loopLabelBegin = Label("LoopBegin%s"%(loopChar), "" )
-      loopLabelEnd = Label("LoopEnd%s"%(loopChar), "" )
-      loopLabelEndOddExit = Label("LoopEnd%s_oddexit"%(loopChar), "unroll loop odditer exit" )
-      loopLabelEndEvenExit = Label("LoopEnd%s_evenexit"%(loopChar), "unroll loop eveniter exit" )
+      loopLabelBegin = Label("LoopBegin%s%s%s"%(loopChar, strNta, strNtb), "" )
+      loopLabelEnd = Label("LoopEnd%s%s%s"%(loopChar, strNta, strNtb), "" )
+      loopLabelEndOddExit = Label("LoopEnd%s_oddexit%s%s"%(loopChar, strNta, strNtb), "unroll loop odditer exit" )
+      loopLabelEndEvenExit = Label("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb), "unroll loop eveniter exit" )
       loopCounter = self.loopCounter(kernel, loopIdx)
       module.addComment1("closeLoop loop%s finalLoop=%d tailLoop=%d" % (loopChar, finalLoop, tailLoop))
 
@@ -7734,7 +7746,7 @@ class KernelWriterAssembly(KernelWriter):
                   comment="End of tailloopInNll. Jump to the end of TailLoop"))
         if NLLindexLast:
           # end of tailloopInNll label (NLLindex==NLLnum-1 only)
-          EndOfTailLoopInNLLLabel = Label("TailLoopInNLLEnd%s"%(loopChar), "" )
+          EndOfTailLoopInNLLLabel = Label("TailLoopInNLLEnd%s%s%s%s"%(loopChar, strNta, strNtb, strNllSlot), "" )
           module.add(EndOfTailLoopInNLLLabel)
 
       if needTailEndCode:
@@ -7813,7 +7825,9 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # End Summation
   ##############################################################################
-  def endSummation(self, kernel, tPA, tPB, noSkipLoad = True, label = None, isOptNLL = False):
+  def endSummation(self, kernel, tPA, tPB, noSkipLoad = True, label = None, isOptNLL = False, nta=0, ntb=0):
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
     module = Module("endSummation")
 
     module.add(Label((self.labels.getUniqueNamePrefix("Summation_End") if label is None else label), ""))
@@ -7860,7 +7874,8 @@ class KernelWriterAssembly(KernelWriter):
         if lastRegTag in keptSgprs:
           continue
         if (lastRegTag not in self.states.nonPostLoopSgpr) and (spool[i].status == RegisterPool.Status.InUse):
-          if label == "Summation_End_OptNLL":
+          optNLLPrefix = "Summation_End_OptNLL%s%s"%(strNta, strNtb)
+          if isinstance(label, str) and label.startswith(optNLLPrefix):
             self.undefineSgpr(regTag)
           else:
             module.add(self.undefineSgpr(regTag))
@@ -7916,7 +7931,7 @@ class KernelWriterAssembly(KernelWriter):
       if noSkipLoad and kernel["GlobalSplitU"] != 0:
         gsuLabel = Label(label=self.labels.getNameInc("GSU"), comment="")
         with self.allocTmpSgpr(1) as tmpSgprGSU:
-          module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+          module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         if (kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel'):
           module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))
@@ -9478,7 +9493,11 @@ class KernelWriterAssembly(KernelWriter):
   # or in the PAP code.
   # isOptNLL : this is for the store-interleaved NLL optimization
   ##############################################################################
-  def openSumAtLeastUnroll(self, kernel, prefetch, isOptNLL, isNGLL=False, NLLindex=0, NLLnum=1, tailloopInNll=False):
+  def openSumAtLeastUnroll(self, kernel, prefetch, isOptNLL, isNGLL=False, NLLindex=0, NLLnum=1, tailloopInNll=False, remainPgr=0, nta=0, ntb=0):
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
+    # Disambiguate labels per remainPgr (PGR>=3) so kernelBody's outer loop does not redefine them.
+    strNllSlot = "_remPGR%d" % remainPgr if remainPgr > 0 else ""
     isLongBranch = False
     if kernel["EnableMatrixInstruction"] and kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
       acclen = getAccToArchLen(kernel)
@@ -9493,7 +9512,10 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["StorePriorityOpt"]:
           module.add(SSetPrior(prior=0, comment="optimization store"))
         if self.states.doShadowInit:
-          shadowName = Label.getFormatting("ShadowInitStart")
+          # openShadowInit emits a single ShadowInitStart label (suffix _NTA0_NTB0 when AGNTAB=1)
+          # shared by every NT body, so the branch target must use the canonical suffix.
+          strShadowNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
+          shadowName = Label.getFormatting("ShadowInitStart%s"%strShadowNtab)
           module.add(SCBranchSCC1(labelName=shadowName, \
               comment="skip to ShadowInitStart iter b/c numIter==0"))
         else:
@@ -9503,18 +9525,18 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["SuppressNoLoadLoop"]:
             loopChar = self.states.indexChars[ \
                 kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
-            lastIterEnd = Label("LoopEnd%s"%loopChar, "")
+            lastIterEnd = Label("LoopEnd%s%s%s"%(loopChar, strNta, strNtb), "")
             module.add(SCBranchSCC1(labelName=lastIterEnd.getLabelName(), \
                        comment="skip to unrollLoop end loop%s iter b/c numIter==0" % loopChar))
           else:
-            lastIterEnd = Label("PrefetchGlobalLastIterEnd", "")
+            lastIterEnd = Label("PrefetchGlobalLastIterEnd%s%s"%(strNta, strNtb), "")
             # use positive offset only long jump
             with self.allocTmpSgpr(3) as tmpSgprInfo:
               module.add(self.longBranchScc1(lastIterEnd, posNeg=1, tmpSgprInfo=tmpSgprInfo))
 
     else:
       if isOptNLL and NLLindex==0:
-        skipOptNLL = Label("OptNLL_End", "")
+        skipOptNLL = Label("OptNLL_End%s%s%s"%(strNta, strNtb, strNllSlot), "")
         with self.allocTmpSgpr(4) as tmpSgprInfo:
           tmpSgpr = tmpSgprInfo.idx
           placeHolder="skipOptNLL_placeholder" if self.states.FactorDim == 3 else None
@@ -9642,7 +9664,7 @@ class KernelWriterAssembly(KernelWriter):
         if tailloopInNll:
           # tailloopInNll case, add "_TI_" to avoid duplicated label
           OptOrOrd += "_TI_"
-        loopLabel2ndNLL = Label("%sNLL_second"%(OptOrOrd), "second %s NoLoadLoop entry"%OptOrOrd )
+        loopLabel2ndNLL = Label("%sNLL_second%s%s"%(OptOrOrd, strNta, strNtb), "second %s NoLoadLoop entry"%OptOrOrd )
         # NLL + double buffer (NLLnum==2) case (PGR1/2), we need to generate 2 NLL (first and second buffer)
         if NLLindex == 0:
           # first NLL, jump to second code if OrigLoopCounter is odd
@@ -9654,7 +9676,10 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
-  def closeSumAtLeastUnroll(self, kernel, tPA, tPB, prefetch, isOptNLL, isNGLL, isNotLast=False, tailloopInNll=False, remainPgr=0):
+  def closeSumAtLeastUnroll(self, kernel, tPA, tPB, prefetch, isOptNLL, isNGLL, isNotLast=False, tailloopInNll=False, remainPgr=0, nta=0, ntb=0):
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
+    strNllSlot = "_remPGR%d" % remainPgr if remainPgr > 0 else ""
     module = Module("closeSumAtLeastUnroll")
     if not prefetch:
       if isNGLL:
@@ -9671,7 +9696,7 @@ class KernelWriterAssembly(KernelWriter):
           # Also, we need to decrement loop counter for PGR>=3 and remainPgr>=2 for early exit in NGLL
           module.add(SSubU32(dst=loopCounter, src0=loopCounter, src1=1, comment="dec counter%s"%(loopChar)))
 
-        toPGR1 = Label(self.labels.getName("toPGR1"), "")
+        toPGR1 = Label(self.labels.getName("toPGR1%s%s"%(strNta, strNtb)), "")
         if kernel["PrefetchGlobalRead"]-1 > remainPgr >= 2:
           # generate early exit in NGLL (no need for the first NGLL(remainPgr==PGR-1))
           module.add(SCmpEQU32(
@@ -9686,7 +9711,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(toPGR1)
       else:
         suffix = "OptNLL" if isOptNLL else "OrdNLL"
-        toPGR1end = Label(self.labels.getName("toPGR1end_%s"%suffix), "")
+        toPGR1end = Label(self.labels.getName("toPGR1end_%s%s%s%s"%(suffix, strNta, strNtb, strNllSlot)), "")
         if isNotLast:
           module.add(SBranch(labelName=toPGR1end.getLabelName(), comment="Branch to toPGR1end"))
         else:
@@ -9694,10 +9719,10 @@ class KernelWriterAssembly(KernelWriter):
             # generate toPGR1end label except for tailloopInNll case
             module.add(toPGR1end)
           if isOptNLL:
-              endSumLabel = "Summation_End_OptNLL"
+              endSumLabel = "Summation_End_OptNLL%s%s%s"%(strNta, strNtb, strNllSlot)
 
               module.addComment0("Stores for OptNLL")
-              module.add(self.endSummation(kernel, tPA, tPB, False, endSumLabel, isOptNLL))
+              module.add(self.endSummation(kernel, tPA, tPB, False, endSumLabel, isOptNLL, nta=nta, ntb=ntb))
 
               # dot2: WaveSplitK reduction for opt NLL
               if kernel["NumWaveSplitK"] > 1:
@@ -9717,12 +9742,12 @@ class KernelWriterAssembly(KernelWriter):
               self.cleanupGlobalWrite(kernel)
               module.addSpaceLine()
               module.add(self.functionEnd(kernel, addLabel=False))
-              module.add(Label("OptNLL_End", ""))
+              module.add(Label("OptNLL_End%s%s%s"%(strNta, strNtb, strNllSlot), ""))
 
           else:
             if not tailloopInNll:
               # generate PrefetchGlobalLastIterEnd label except for tailloopInNll case
-              module.add(Label("PrefetchGlobalLastIterEnd", ""))
+              module.add(Label("PrefetchGlobalLastIterEnd%s%s%s"%(strNta, strNtb, strNllSlot), ""))
 
     # swap back vgpr pool if any
     def swapBackGprPool(gprPool, savedGprPool, isNotLast):
@@ -12997,7 +13022,10 @@ class KernelWriterAssembly(KernelWriter):
             bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) if kernel["_GlobalAccumulation"] == 'MultipleBuffer' and mat =="C" else bpe
             bpe = sgpr(sgprBpe) if sgprBpe else log2(bpe)  # sgprBpe cannot be 0
             if(kernel["GlobalSplitU"] != 0):
-              module.add(SAndB32(dst=sgpr(tmpS1), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+              # AdaptiveGemmNTAB v>=3 narrows GSU to bits 0..11 (0x0FFF) so
+              # bits 12/13 can carry NTA/NTB. Use gsuMaskHex(kernel) so a
+              # hard-coded 0x3FFF does not pull NT bits into the GSU compare.
+              module.add(SAndB32(dst=sgpr(tmpS1), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
             # These are constant across all workitems, just add to the SRD:
             if us:
               if i == 0:
@@ -13295,7 +13323,7 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["GlobalSplitU"] != 0:
         gsuLabel = Label(label=self.labels.getNameInc("GSU"), comment="")
         with self.allocTmpSgpr(1) as tmpSgprGSU:
-          module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+          module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))
       if kernel["ProblemType"]["UseE"]:
@@ -13372,7 +13400,9 @@ class KernelWriterAssembly(KernelWriter):
     ArgTypeCheckLabel = Label(label="ArgTypeCheck"+ch, comment="Check if ArgType is for General Batched GEMM for "+ch)
     if(((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) and kernel["GlobalSplitU"] != 0):
       with self.allocTmpSgpr(1) as tmpSgprGSU:
-        module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+        # Use gsuMaskHex so AdaptiveGemmNTAB v>=3 narrows the GSU field to
+        # bits 0..11 and the NT bits (12/13) do not contaminate this compare.
+        module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
         module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         module.add(SCBranchSCC1(labelName=ArgTypeCheckLabel.getLabelName(), comment="Handling General Batched GEMM SRD initialization"))
         if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and ch == "D")):
@@ -13461,7 +13491,7 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["GlobalSplitU"] != 0:
         gsuLabel = Label(label=self.labels.getNameInc("GSU"), comment="")
         with self.allocTmpSgpr(1) as tmpSgprGSU:
-          module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+          module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))
       if kernel["ProblemType"]["UseE"]:
@@ -14672,7 +14702,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if split == 1"))
       else:
         with self.allocTmpSgpr(1) as tmpSgprGSU:
-          module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+          module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
           module.add(self.longBranchScc1(label=gsuLabel, posNeg=1, comment="long branch if GSU == 1"))
@@ -17550,7 +17580,9 @@ class KernelWriterAssembly(KernelWriter):
     module.addSpaceLine()
     return module
 
-  def simdSpecDispatch(self, kernel, numCodePath):
+  def simdSpecDispatch(self, kernel, numCodePath, nta=0, ntb=0):
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
     module = Module()
 
     loopLabelBegin = []
@@ -17559,19 +17591,19 @@ class KernelWriterAssembly(KernelWriter):
     loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
 
     if numCodePath == 1:
-      module.add(Label("LoopBegin%s_0"%(loopChar), "" ))
-      module.add(MacroInstruction(name="MAINLOOP", args=[0]))
-      module.add(SCBranchSCC0(labelName="label_LoopBegin%s_0"%(loopChar), comment="" ))
-      module.add(Label("LoopEnd%s"%(loopChar), "" ))
+      module.add(Label("LoopBegin%s_0%s%s"%(loopChar, strNta, strNtb), "" ))
+      module.add(MacroInstruction(name="MAINLOOP%s%s"%(strNta, strNtb), args=[0]))
+      module.add(SCBranchSCC0(labelName="label_LoopBegin%s_0%s%s"%(loopChar, strNta, strNtb), comment="" ))
+      module.add(Label("LoopEnd%s%s%s"%(loopChar, strNta, strNtb), "" ))
       return module
 
 
     module.addComment0("SIMD specialized dispatch")
 
     for l in range(numCodePath):
-      loopLabelBegin.append(Label("LoopBegin%s_%u"%(loopChar, l), "", alignment=16))
-      loopLabelSkipBegin.append(Label("LoopSkipBegin%s_%u"%(loopChar, l), "" ))
-    loopLabelEnd = Label("LoopEnd%s"%(loopChar), "" )
+      loopLabelBegin.append(Label("LoopBegin%s_%u%s%s"%(loopChar, l, strNta, strNtb), "", alignment=16))
+      loopLabelSkipBegin.append(Label("LoopSkipBegin%s_%u%s%s"%(loopChar, l, strNta, strNtb), "" ))
+    loopLabelEnd = Label("LoopEnd%s%s%s"%(loopChar, strNta, strNtb), "" )
 
     tmpSgpr = self.sgprPool.checkOut(1)
     numbits = 1 if numCodePath == 2 else 2
@@ -17592,7 +17624,7 @@ class KernelWriterAssembly(KernelWriter):
     for l in range(numCodePath):
       module.addComment0("SIMD %u code-path"%l)
       module.add(loopLabelBegin[l])
-      module.add(MacroInstruction(name="MAINLOOP", args=[l]))
+      module.add(MacroInstruction(name="MAINLOOP%s%s"%(strNta, strNtb), args=[l]))
       module.add(SCBranchSCC0(labelName=loopLabelBegin[l].getLabelName(), comment="" ))
       tmpSgpr1 = self.sgprPool.checkOutAligned(2, 2)
       sgprPC = ContinuousRegister(tmpSgpr1, 3)

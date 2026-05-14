@@ -35,7 +35,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB96, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB192, FlatLoadB32, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
-  MFMAInstruction, MXMFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
+  MFMAInstruction, MXMFMAInstruction, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SEndpgm, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, SLShiftRightB32, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, \
   Instruction
@@ -3014,7 +3014,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # No Load Loop Body
   ##############################################################################
   def noLoadLoopBody( self, kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=0, NLLnum=1, \
-                      useTailloopInNll=False, remainPgr=0):
+                      useTailloopInNll=False, remainPgr=0, nta=0, ntb=0):
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
     UnrollLoopSwapGlobalReadOrder = kernel["UnrollLoopSwapGlobalReadOrder"]
     if kernel["DirectToLdsA"] and kernel["DirectToLdsB"] and kernel["PrefetchGlobalRead"] >= 2:
       # DTLA+DTLB code case, NGLL code is exactly same and no need to consider UnrollLoopSwapGlobalReadOrder
@@ -3023,10 +3025,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module = Module()
       if isNGLL:
         module.addComment0("Code-path 0, useGR=0, usePLR=1, useGRInc=1, useLoop = 0")
-        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,1,1,0]))
+        module.add(MacroInstruction(name="MAINLOOP%s%s"%(strNta, strNtb), args=[0,0,1,1,0]))
       else:
         module.addComment0("Code-path 0, useGR=0, usePLR=0, useGRInc=0, useLoop = 0")
-        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,0,0,0]))
+        module.add(MacroInstruction(name="MAINLOOP%s%s"%(strNta, strNtb), args=[0,0,0,0,0]))
       return module
     module = Module("noLoadLoopBody")
     expand = kernel["ExpandPointerSwap"]
@@ -3529,7 +3531,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if useTailloopInNll:
         finalLoop = (u == kernel["LoopIters"] - 1)
         NLLindexLast = (NLLindex == NLLnum - 1)
-        module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -2, finalLoop, skipCondJumpCounter=u, NLLindexLast=NLLindexLast))
+        module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -2, finalLoop, skipCondJumpCounter=u, NLLindexLast=NLLindexLast, remainPgr=remainPgr, nta=nta, ntb=ntb))
 
     return module
 
@@ -3539,7 +3541,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   #
   # isOptNLL : the NLL is to be optimized for the alpha=1 and non-edge case
   ##############################################################################
-  def noLoadLoop( self, kernel, tensorParametersA, tensorParametersB, isOptNLL, isNGLL, pack, packPre, NLLindex=0, NLLnum=1, useTailloopInNll=False, remainPgr=0):
+  def noLoadLoop( self, kernel, tensorParametersA, tensorParametersB, isOptNLL, isNGLL, pack, packPre, NLLindex=0, NLLnum=1, useTailloopInNll=False, remainPgr=0, nta=0, ntb=0):
     module = Module("noLoadLoop")
     LoopNameComment = "NoGlobalLoadLoop" if isNGLL else "NoLoadLoop"
     if useTailloopInNll:
@@ -3556,7 +3558,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     PGR = kernel["PrefetchGlobalRead"]
     if PGR >= 3 and isNGLL:
       # PGR>=3 case, add a label for early exit destination
-      LabelNGLL = Label("NoGlobalLoadLoop_%d"%remainPgr, "")
+      strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+      strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
+      LabelNGLL = Label("NoGlobalLoadLoop_%d%s%s"%(remainPgr, strNta, strNtb), "")
       module.add(LabelNGLL)
       # PGR>=3 and NGLL case, we need GR inc code only at the first NGLL (remainPgr = PGR - 2)
       # Later, we need to make it empty to avoid generating unnecessary inc code
@@ -3615,10 +3619,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # re-calculate loop counter for tailloopInNll
     if useTailloopInNll:
-      module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, -1, tailloopInNll=True, NLLindex=NLLindex))
+      module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, -1, tailloopInNll=True, NLLindex=NLLindex, remainPgr=remainPgr, nta=nta, ntb=ntb))
 
     openSum = self.openSumAtLeastUnroll(kernel, prefetch=False, isOptNLL=isOptNLL, isNGLL=isNGLL, NLLindex=NLLindex, NLLnum=NLLnum, \
-                                        tailloopInNll=useTailloopInNll)
+                                        tailloopInNll=useTailloopInNll, remainPgr=remainPgr, nta=nta, ntb=ntb)
     module.add(openSum)
 
     if not self.states.numItersPLR and not kernel["UseCustomMainLoopSchedule"]:
@@ -3639,17 +3643,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.ldsBarrierTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsBarrierTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
     # generate no Load Loop Body code
     module.add(self.noLoadLoopBody(kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=NLLindex, \
-                                   NLLnum=NLLnum, useTailloopInNll=useTailloopInNll, remainPgr=remainPgr))
+                                   NLLnum=NLLnum, useTailloopInNll=useTailloopInNll, remainPgr=remainPgr, nta=nta, ntb=ntb))
 
     if self.do["executeToLoopEnd"] and isOptNLL:
       module.add(self.functionEnd(kernel, addLabel=False))
 
     # Close code is necessary for both first and last (NGLL case(=NLLfirst) needs label)
     module.add(self.closeSumAtLeastUnroll(kernel, tensorParametersA, tensorParametersB, prefetch=False, isOptNLL=isOptNLL, isNGLL=isNGLL, \
-                                          isNotLast=(NLLindex<(NLLnum-1)), tailloopInNll=useTailloopInNll, remainPgr=remainPgr))
+                                          isNotLast=(NLLindex<(NLLnum-1)), tailloopInNll=useTailloopInNll, remainPgr=remainPgr, nta=nta, ntb=ntb))
 
     if self.states.FactorDim == 3:
-      self.updateBranchPlaceHolder(module, ["skipOptNLL_placeholder", "skipOptNLL_scc1_placeholder"] , ["OptNLL_End", "OptNLL_End"], ["SCBranchSCC0", "SCBranchSCC1"])
+      strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+      strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
+      strNllSlot = "_remPGR%d" % remainPgr if remainPgr > 0 else ""
+      optNllEnd = "OptNLL_End%s%s%s"%(strNta, strNtb, strNllSlot)
+      self.updateBranchPlaceHolder(module, ["skipOptNLL_placeholder", "skipOptNLL_scc1_placeholder"] , [optNllEnd, optNllEnd], ["SCBranchSCC0", "SCBranchSCC1"])
     return module
 
   ##############################################################################
@@ -3658,7 +3666,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # dsWriteBA is to do ds_write B first.
   # grBA is to do buffer_load B first.
   ##############################################################################
-  def _loopBody( self, kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, firstIter=False, dsWriteBA=False, grBA=False, isDTVGRSecondBuf=False, skipClose=False, initCIter=False):
+  def _loopBody( self, kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, firstIter=False, dsWriteBA=False, grBA=False, isDTVGRSecondBuf=False, skipClose=False, initCIter=False, nta=0, ntb=0 ):
     module = Module("loopBody")
     expand = kernel["ExpandPointerSwap"]
     # initialize SubTileIdx
@@ -4396,9 +4404,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                                    LRCodeAAllIters, PackCodeAAllIters, LRCodeBAllIters, PackCodeBAllIters, \
                                                    LRSwapAAllIters, LRSwapBAllIters, self.codes.globalReadA, self.codes.globalReadB, \
                                                    LWSwapAAllIters, LWSwapBAllIters, MfmaCodeAllIters, \
-                                                   self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, False))
+                                                   self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, False, nta=nta, ntb=ntb), \
+                                                   nta=nta, ntb=ntb)
       module.add(optSchedule)
-      module.add(self.simdSpecDispatch(kernel, numCodePath))
+      module.add(self.simdSpecDispatch(kernel, numCodePath, nta=nta, ntb=ntb))
 
     # close unrolled loop
     endStr = ""
@@ -4413,16 +4422,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     oddLabel = (lc == 0 and loopCopies == 2)
     if not skipClose and not kernel["UseCustomMainLoopSchedule"]:
         if not initCIter:
-          module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop, oddLabel=oddLabel))
+          module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop, oddLabel=oddLabel, nta=nta, ntb=ntb))
         elif loopCopies >= 2:
           # initC(lc=0) + multi-copy (EPS loopCopies=2 / HalfPLR loopCopies=3)
           # initC(lc=0) -> (lc=1) -> (lc=0 in EPS / lc=2 in HalfPLR) -> ...
-          module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop=False, oddLabel=(loopCopies == 2)))
+          module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop=False, oddLabel=(loopCopies == 2), nta=nta, ntb=ntb))
           module.add(SBranch(label_unrolledLoop_lc1.getLabelName()))
         else:
           # initC (no EPS, no HalfPLR): closeLoop(finalLoop=False) does dec + exit-check
-          module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop=False, oddLabel=False))
-
+          module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop=False, oddLabel=False, nta=nta, ntb=ntb))
     return module
 
   ##############################################################################
@@ -4466,6 +4474,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.vgprPool.checkIn(lane4)
     return module
 
+  ##############################################################################
+  # GSU bit-mask helper (introduced for AdaptiveGemmNTAB)
+  ##############################################################################
+  def gsuMaskHex(self, kernel):
+    # GSU bit width depends on InternalArgsSupport.version:
+    #   v <  3: GSU is bits 0..13 (mask 0x3FFF)
+    #   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF) so bits 12/13
+    #           can carry NTA / NTB for AdaptiveGemmNTAB.
+    isp = kernel.get("InternalSupportParams", {})
+    version = isp.get("KernArgsVersion", 0) if isp else 0
+    return hex(0x0FFF) if version >= 3 else hex(0x3FFF)
 
   ##############################################################################
   # Kernel Body - Subtiled version
@@ -4532,7 +4551,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # TODOBS: globalWriteWorkGroupInit can be emitted here or later on, check..
     if self.states.doShadowInit:
-      #module.add(self.openShadowInit())
+      #module.add(self.openShadowInit(kernel))
       # SrdD/SrdC are used starting now, remove from sgpr pool
       self.removeSgprVarFromPool("SrdD")
       self.removeSgprVarFromPool("SrdC")
@@ -4863,7 +4882,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["PrefetchGlobalRead"]:
       if self.states.doShadowInit:
-        module.add(self.openShadowInit())
+        module.add(self.openShadowInit(kernel))
         # SrdD/SrdC are used starting now, remove from sgpr pool
         self.removeSgprVarFromPool("SrdD")
         self.removeSgprVarFromPool("SrdC")
@@ -5179,145 +5198,132 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # force to generate 2 loop bodies
       loopCopies = 2
 
-    # open unrolled summation loop
-    module.addComment2("Unrolled Loop(s) - Begin")
-    if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
-      module.add(SBarrier(comment="TDM PGR=0: prime barrier before loop"))
-    module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False, beforeInitCIter=initCIterWmma))
+    def _kernelBody(pack, packPre, nta, ntb):
+      strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+      strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
+      # open unrolled summation loop
+      module.addComment2("Unrolled Loop(s) - Begin")
+      if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
+        module.add(SBarrier(comment="TDM PGR=0: prime barrier before loop"))
+      module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False, beforeInitCIter=initCIterWmma, nta=nta, ntb=ntb))
 
-    #init C with wmma(mfma) instead of v_mov, then jump to unrolled loop iter1
-    if initCIterWmma:
-      temp_states = deepcopy(self.states)
-      temp_kernel = deepcopy(kernel)
-      temp_A = deepcopy(tensorParametersA)
-      temp_B = deepcopy(tensorParametersB)
-      temp_pack = deepcopy(pack)
-      temp_packPre = deepcopy(packPre)
-      module.add(self._loopBody( temp_kernel, temp_A, temp_B, temp_pack, temp_packPre, 0, loopCopies, 0==(loopCopies-1), \
-                                 isDTVGRSecondBuf=isDTV, initCIter=initCIterWmma))
-      module.add(self.openLoop( temp_kernel, temp_A, temp_B, self.states.unrollIdx, beginLabelOnly=True))
-      self.states = temp_states
- 
-    loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
+      #init C with wmma(mfma) instead of v_mov, then jump to unrolled loop iter1
+      if initCIterWmma:
+        temp_states = deepcopy(self.states)
+        temp_kernel = deepcopy(kernel)
+        temp_A = deepcopy(tensorParametersA)
+        temp_B = deepcopy(tensorParametersB)
+        temp_pack = deepcopy(pack)
+        temp_packPre = deepcopy(packPre)
+        module.add(self._loopBody( temp_kernel, temp_A, temp_B, temp_pack, temp_packPre, 0, loopCopies, 0==(loopCopies-1), \
+                                   isDTVGRSecondBuf=isDTV, initCIter=initCIterWmma, nta=nta, ntb=ntb))
+        module.add(self.openLoop( temp_kernel, temp_A, temp_B, self.states.unrollIdx, beginLabelOnly=True, nta=nta, ntb=ntb))
+        self.states = temp_states
 
-    loop = Module("loopBody")
-    if needSecondLoop and kernel["PrefetchGlobalRead"] >= 2:
-      # force to generate 2 loop bodies (PGR2 only)
-      # TODO: unify 2 loop bodies code generation with else case
+      loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop%s%s"%(strNta, strNtb), "" )
 
-      # second LW buffer check for UnrollLoopSwapGlobalReadOrder
-      dsWriteBA = True if isULSGRO else False
-      # second GR buffer check for DTV
-      isDTVGRSecondBuf = True if isDTV else False
-      loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, 0, loopCopies, False , dsWriteBA=dsWriteBA, isDTVGRSecondBuf=isDTVGRSecondBuf, skipClose=True))
+      loop = Module("loopBody")
+      if needSecondLoop and kernel["PrefetchGlobalRead"] >= 2:
+        # force to generate 2 loop bodies (PGR2 only)
+        # TODO: unify 2 loop bodies code generation with else case
 
-      # loop counter decrement
-      loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
-      loop.add(SSubU32(dst=loopCounter, src0=loopCounter, \
-                         src1=1, \
-                         comment="dec counterL"))
-      endCounter = kernel["PrefetchGlobalRead"]
-      loop.add(SCmpLeU32(src0=loopCounter, \
-                           src1=hex(endCounter), \
-                          comment="counteL<=%d"%endCounter))
-      loop.add(SCBranchSCC1(labelName=loopLabelToNoGRloopAfterABLoop.getLabelName(), comment="exit LoopL" ))
-      # grBA check for UnrollLoopSwapGlobalReadOrder
-      grBA = True if isULSGRO else False
-      loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, 1, loopCopies, True , grBA=grBA))
-    else:
-      for lc in range(0, loopCopies):
+        # second LW buffer check for UnrollLoopSwapGlobalReadOrder
+        dsWriteBA = True if isULSGRO else False
         # second GR buffer check for DTV
-        isDTVGRSecondBuf = True if isDTV and lc == 0 else False
-        # loop body code generation
-        finalLoop = lc == loopCopies - 1
-        loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, isDTVGRSecondBuf=isDTVGRSecondBuf ))
-        if self.states.numItersPLR == 0 and not finalLoop:
-          # swap LDS read buffer
-          self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsReadTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+        isDTVGRSecondBuf = True if isDTV else False
+        loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, \
+                                 0, loopCopies, False, \
+                                 dsWriteBA=dsWriteBA, isDTVGRSecondBuf=isDTVGRSecondBuf, \
+                                 skipClose=True, nta=nta, ntb=ntb))
 
-    module.add(loop)
+        # loop counter decrement
+        loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
+        loop.add(SSubU32(dst=loopCounter, src0=loopCounter, \
+                           src1=1, \
+                           comment="dec counterL"))
+        endCounter = kernel["PrefetchGlobalRead"]
+        loop.add(SCmpLeU32(src0=loopCounter, \
+                             src1=hex(endCounter), \
+                            comment="counteL<=%d"%endCounter))
+        loop.add(SCBranchSCC1(labelName=loopLabelToNoGRloopAfterABLoop.getLabelName(), comment="exit LoopL" ))
+        # grBA check for UnrollLoopSwapGlobalReadOrder
+        grBA = True if isULSGRO else False
+        loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, \
+                                 1, loopCopies, True, \
+                                 grBA=grBA, nta=nta, ntb=ntb))
+      else:
+        for lc in range(0, loopCopies):
+          # second GR buffer check for DTV
+          isDTVGRSecondBuf = True if isDTV and lc == 0 else False
+          # loop body code generation
+          finalLoop = lc == loopCopies - 1
+          loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, isDTVGRSecondBuf=isDTVGRSecondBuf, nta=nta, ntb=ntb ))
+          if self.states.numItersPLR == 0 and not finalLoop:
+            # swap LDS read buffer
+            self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsReadTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
 
-    if kernel["ExpertSchedulingMode"] > 0:
-      module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
-    if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
-      module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="disable expert scheduling mode = 0"))
-    module.addComment1("Before NLL: Check VGPR.checkin for INT8 LW")
+      module.add(loop)
 
-    # swap local write, read again before noLoadLoop if PrefetchGlobalRead and DirectToLds is enabled
-    # In DirectToLds enabled case, local write address is necessary for prefetch global read (for m0).
-    # However, even exit with DirectToLds will not pass with this code (limitation).
-    if kernel["PrefetchGlobalRead"] and kernel["ExpandPointerSwap"]:
-      # local write for next iter, used to have local writes here
-      if(kernel["DirectToLdsA"]):
-        module.addComment1("local write swap offsets a")
-        module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
-      if ("MX" in tensorParametersA) and (kernel["DirectToLdsMXSA"]):
-        module.addComment1("local write swap offsets mxsa")
-        module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
-      if ("MX" in tensorParametersB) and (kernel["DirectToLdsMXSB"]):
-        module.addComment1("local write swap offsets mxsb")
-        module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
-      if(kernel["DirectToLdsB"]):
-        module.addComment1("local write swap offsets b")
-        module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
-      # swap ldsDirectToLDSTokenIdx
-      self.states.ldsDirectToLDSTokenIdx = \
-          self.states.memTokenLdsBuffer1 if self.states.ldsDirectToLDSTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+      if kernel["ExpertSchedulingMode"] > 0:
+        module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
+      if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
+        module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="disable expert scheduling mode = 0"))
+      module.addComment1("Before NLL: Check VGPR.checkin for INT8 LW")
 
-    for remainPgr in range(kernel["PrefetchGlobalRead"]-1, 0, -1) if not kernel["SuppressNoLoadLoop"] else []:
-      # NGLL code generation for PGR>=2
-      NGLLindex = 0
-      NGLLnum = 2 if needSecondNGLL else 1
-      if needSecondNGLL:
-        # generate extra NGLL for second GR buffer
+      # swap local write, read again before noLoadLoop if PrefetchGlobalRead and DirectToLds is enabled
+      # In DirectToLds enabled case, local write address is necessary for prefetch global read (for m0).
+      # However, even exit with DirectToLds will not pass with this code (limitation).
+      if kernel["PrefetchGlobalRead"] and kernel["ExpandPointerSwap"]:
+        # local write for next iter, used to have local writes here
+        if(kernel["DirectToLdsA"]):
+          module.addComment1("local write swap offsets a")
+          module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
+        if ("MX" in tensorParametersA) and (kernel["DirectToLdsMXSA"]):
+          module.addComment1("local write swap offsets mxsa")
+          module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+        if ("MX" in tensorParametersB) and (kernel["DirectToLdsMXSB"]):
+          module.addComment1("local write swap offsets mxsb")
+          module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
+        if(kernel["DirectToLdsB"]):
+          module.addComment1("local write swap offsets b")
+          module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
+        # swap ldsDirectToLDSTokenIdx
+        self.states.ldsDirectToLDSTokenIdx = \
+            self.states.memTokenLdsBuffer1 if self.states.ldsDirectToLDSTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+
+      for remainPgr in range(kernel["PrefetchGlobalRead"]-1, 0, -1) if not kernel["SuppressNoLoadLoop"] else []:
+        # NGLL code generation for PGR>=2
+        NGLLindex = 0
+        NGLLnum = 2 if needSecondNGLL else 1
+        if needSecondNGLL:
+          # generate extra NGLL for second GR buffer
+          module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=True, pack=pack, packPre=packPre, \
+                                     NLLindex=NGLLindex, NLLnum=NGLLnum, remainPgr=remainPgr, nta=nta, ntb=ntb))
+          module.add(loopLabelToNoGRloopAfterABLoop)
+          if kernel["ExpertSchedulingMode"] > 0:
+            module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
+          NGLLindex += 1
+        elif isULSGRO and not isULSGROForNGLL and remainPgr == kernel["PrefetchGlobalRead"]-1:
+          # generate loopLabelToNoGRloopAfterABLoop at first iteration of remainPgr
+          # This is to jump to the same NGLL from even and odd main loop
+          module.add(loopLabelToNoGRloopAfterABLoop)
         module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=True, pack=pack, packPre=packPre, \
-                                   NLLindex=NGLLindex, NLLnum=NGLLnum, remainPgr=remainPgr))
-        module.add(loopLabelToNoGRloopAfterABLoop)
-        if kernel["ExpertSchedulingMode"] > 0:
-          module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
-        NGLLindex += 1
-      elif isULSGRO and not isULSGROForNGLL and remainPgr == kernel["PrefetchGlobalRead"]-1:
-        # generate loopLabelToNoGRloopAfterABLoop at first iteration of remainPgr
-        # This is to jump to the same NGLL from even and odd main loop
-        module.add(loopLabelToNoGRloopAfterABLoop)
-      module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=True, pack=pack, packPre=packPre, \
-                                 NLLindex=NGLLindex, NLLnum=NGLLnum, remainPgr=remainPgr))
+                                   NLLindex=NGLLindex, NLLnum=NGLLnum, remainPgr=remainPgr, nta=nta, ntb=ntb))
 
-    # This "NoLoad" loop is a copy of the unroll loop but with global loads + LDS writes removed
-    # doShadowInit is required since this pushes up the store SRD initialization before the NLL
-    # OptNLL only allowed for single summation index  - for multiple summation we (currently)
-    # execute the NLL inside each unroll iteration not just once at the end.
-    if kernel["PrefetchGlobalRead"]:
-      if not kernel["SuppressNoLoadLoop"]:
-        if self.states.tailloopInNll:
-          # deepCopy packCode for tailloopInNll
-          backupPack = deepcopy(pack)
-          backupPackPre = deepcopy(packPre)
-        NeedNLLOddEven  = isDTV # need odd+even NLL for 2 buffers (PGR1/2)
-        NLLnum = 2 if NeedNLLOddEven else 1
-        gsuComponent = Component.GSU.find(self)
-        module.add(gsuComponent.noLoadLoop(self, kernel, tensorParametersA, tensorParametersB, pack, packPre))
-        for NLLindex in range(0, NLLnum):
-          self.saveLocalPointers(kernel, tensorParametersA, tensorParametersB)
-          # copy pack
-          if NLLindex == NLLnum - 1 or (self.states.packDTVA or self.states.packDTVB or self.states.convDTVA or self.states.convDTVB):
-            # last NLL or  pack DTV case, no deep copy for pack
-            # pack code for local prefetch is generated in noLoadLoopBody and used for DTV even
-            deepCopyPack = pack
-            deepCopyPackPre = packPre
-          else:
-            # deepCopy packCode for OptNLL noLoadLoop
-            deepCopyPack = deepcopy(pack)
-            deepCopyPackPre = deepcopy(packPre)
-          module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, \
-                                     NLLindex=NLLindex, NLLnum=NLLnum, useTailloopInNll=self.states.tailloopInNll))
-          self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
-
-        if self.states.tailloopInNll:
-          # tailloopInNll case, generate another set of NoLoadLoop for tailloopInNll not applicable case
-          # restore backup for pack code
-          pack = backupPack
-          packPre = backupPackPre
+      # This "NoLoad" loop is a copy of the unroll loop but with global loads + LDS writes removed
+      # doShadowInit is required since this pushes up the store SRD initialization before the NLL
+      # OptNLL only allowed for single summation index  - for multiple summation we (currently)
+      # execute the NLL inside each unroll iteration not just once at the end.
+      if kernel["PrefetchGlobalRead"]:
+        if not kernel["SuppressNoLoadLoop"]:
+          if self.states.tailloopInNll:
+            # deepCopy packCode for tailloopInNll
+            backupPack = deepcopy(pack)
+            backupPackPre = deepcopy(packPre)
+          NeedNLLOddEven  = isDTV # need odd+even NLL for 2 buffers (PGR1/2)
+          NLLnum = 2 if NeedNLLOddEven else 1
+          gsuComponent = Component.GSU.find(self)
+          module.add(gsuComponent.noLoadLoop(self, kernel, tensorParametersA, tensorParametersB, pack, packPre, nta=nta, ntb=ntb))
           for NLLindex in range(0, NLLnum):
             self.saveLocalPointers(kernel, tensorParametersA, tensorParametersB)
             # copy pack
@@ -5330,8 +5336,117 @@ class KernelWriter(metaclass=abc.ABCMeta):
               # deepCopy packCode for OptNLL noLoadLoop
               deepCopyPack = deepcopy(pack)
               deepCopyPackPre = deepcopy(packPre)
-            module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum))
+            module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, \
+                                       NLLindex=NLLindex, NLLnum=NLLnum, useTailloopInNll=self.states.tailloopInNll, nta=nta, ntb=ntb))
             self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
+
+          if self.states.tailloopInNll:
+            # tailloopInNll case, generate another set of NoLoadLoop for tailloopInNll not applicable case
+            # restore backup for pack code
+            pack = backupPack
+            packPre = backupPackPre
+            for NLLindex in range(0, NLLnum):
+              self.saveLocalPointers(kernel, tensorParametersA, tensorParametersB)
+              # copy pack
+              if NLLindex == NLLnum - 1 or (self.states.packDTVA or self.states.packDTVB or self.states.convDTVA or self.states.convDTVB):
+                # last NLL or  pack DTV case, no deep copy for pack
+                # pack code for local prefetch is generated in noLoadLoopBody and used for DTV even
+                deepCopyPack = pack
+                deepCopyPackPre = packPre
+              else:
+                # deepCopy packCode for OptNLL noLoadLoop
+                deepCopyPack = deepcopy(pack)
+                deepCopyPackPre = deepcopy(packPre)
+              module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum, nta=nta, ntb=ntb))
+              self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
+
+    if kernel["AdaptiveGemmNTAB"] == 0:
+      _kernelBody(pack, packPre, 0, 0)
+    else:
+      # AdaptiveGemmNTAB: dispatch is decided host-side and forwarded via
+      # internalArg0 bits 12 (NTA) and 13 (NTB). Host clears those bits when
+      # the chosen NT value would be 0, and only sets them after compressing
+      # GSU into bits 0..11. Requires InternalArgsSupport.version >= 3, which
+      # codegen guarantees by bumping KernArgsVersion when AdaptiveGemmNTAB!=0.
+      originalNta = tensorParametersA["NonTemporal"]
+      originalNtb = tensorParametersB["NonTemporal"]
+
+      ntCombos = [[0, 0], [0, 4], [4, 0], [4, 4]]
+      ntLabels = [Label("LoopBody_NTA{}_NTB{}".format(nta, ntb), "") for nta, ntb in ntCombos]
+      ntLabelDone = Label("LoopBody_NTA_NTB_Done", "")
+
+      # Bit layout in sgpr("GSU") (== internalArg0 low 16b):
+      #   bit 12 -> NTA (1 means use NTA=4)
+      #   bit 13 -> NTB (1 means use NTB=4)
+      kNtaMask  = 0x1000
+      kNtbMask  = 0x2000
+      kBothMask = 0x3000
+
+      module.addComment1("AdaptiveGemmNTAB: 4-way bit-based dispatch from internalArg0")
+
+      with self.allocTmpSgpr(1) as tmpNtBitsInfo:
+        tmpNtBits = tmpNtBitsInfo.idx
+        # Extract both NT bits then dispatch on the 4 combos.
+        # ntCombos order: [0,0]=idx0, [0,4]=idx1, [4,0]=idx2, [4,4]=idx3
+        # Use long branches because each kernelBody is large (>128KB possible).
+        module.add(SAndB32(dst=sgpr(tmpNtBits), src0=sgpr("GSU"),
+                           src1=hex(kBothMask), comment="extract NTA|NTB bits"))
+        module.add(SCmpEQU32(src0=sgpr(tmpNtBits), src1=hex(kBothMask),
+                             comment="NTA=4 && NTB=4 ?"))
+        module.add(self.longBranchScc1(ntLabels[3], 1, comment="-> NTA4_NTB4"))
+        module.add(SCmpEQU32(src0=sgpr(tmpNtBits), src1=hex(kNtbMask),
+                             comment="NTB=4 only ?"))
+        module.add(self.longBranchScc1(ntLabels[1], 1, comment="-> NTA0_NTB4"))
+        module.add(SCmpEQU32(src0=sgpr(tmpNtBits), src1=hex(kNtaMask),
+                             comment="NTA=4 only ?"))
+        module.add(self.longBranchScc1(ntLabels[2], 1, comment="-> NTA4_NTB0"))
+        # Fall through to ntLabels[0] (NTA0_NTB0)
+
+      # _kernelBody() mutates self.states (ldsWriteTokenIdx,
+      # setMemTokenInsts, localReadDoCnt*, ...), the pack/packPre dicts
+      # and the tensorParameters dicts as a side-effect of codegen.
+      # Because only one body executes at runtime but all are emitted
+      # back-to-back, we must checkpoint this state before the first
+      # body and restore it before every subsequent body, otherwise the
+      # later bodies are generated from a corrupted starting state
+      # (e.g. wrong LDS swap buffer / local-read offsets) and produce
+      # garbage at runtime.
+      stateSnap   = deepcopy(self.states.__dict__)
+      packSnap    = deepcopy(pack)
+      packPreSnap = deepcopy(packPre)
+      tPASnap     = deepcopy(tensorParametersA)
+      tPBSnap     = deepcopy(tensorParametersB)
+
+      def _restoreNtabState():
+        # pack / packPre are lists of Module objects; tensorParameters*
+        # are dicts. Rebuild contents in-place so that references held
+        # by callers remain valid.
+        self.states.__dict__.clear()
+        self.states.__dict__.update(deepcopy(stateSnap))
+        pack[:]    = deepcopy(packSnap)
+        packPre[:] = deepcopy(packPreSnap)
+        tensorParametersA.clear(); tensorParametersA.update(deepcopy(tPASnap))
+        tensorParametersB.clear(); tensorParametersB.update(deepcopy(tPBSnap))
+
+      for idx, (nta, ntb) in enumerate(ntCombos):
+        if idx > 0:
+          _restoreNtabState()
+        module.add(ntLabels[idx])
+        tensorParametersA["NonTemporal"] = nta
+        tensorParametersB["NonTemporal"] = ntb
+        _kernelBody(pack, packPre, nta, ntb)
+        # All paths but the last one need to skip the rest. Use long
+        # branches everywhere because each kernelBody can easily exceed
+        # the +/-128KB reach of a short s_branch.
+        if idx < len(ntCombos) - 1:
+          with self.allocTmpSgpr(3) as tmpSgprInfo:
+            module.add(SLongBranchPositive(ntLabelDone, tmpSgprInfo,
+                                           comment="long jump to NTAB done"))
+
+      module.add(ntLabelDone)
+
+      tensorParametersA["NonTemporal"] = originalNta
+      tensorParametersB["NonTemporal"] = originalNtb
 
     if self.states.actualSummationLoops>1 and self.states.staggerUCode:
       module.addComment1("remove stagger offsets")
@@ -8572,7 +8687,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("GSUSync", 1)
       self.states.numSgprAddressGSUSync += 1
 
-    if kernel["GlobalSplitU"] != 0:
+    if kernel["GlobalSplitU"] != 0 or kernel["AdaptiveGemmNTAB"] != 0:
       self.defineSgpr("GSU", 1)  # Can't move to the front because of the preload arguments
 
     # Collect SGPRs to allocate via the deferred interleaved loop.
@@ -9311,7 +9426,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # Calculate Loop Num Iter
   ##############################################################################
   @abc.abstractmethod
-  def calculateLoopNumIter(self, kernel, tPA, tPB, loopIdx, tailloopInNll=False, NLLindex=0):
+  def calculateLoopNumIter(self, kernel, tPA, tPB, loopIdx, tailloopInNll=False, NLLindex=0, remainPgr=0, nta=0, ntb=0):
     return ""
 
 
@@ -9320,7 +9435,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # Top of shadow init code
   ##############################################################################
   @abc.abstractmethod
-  def openShadowInit(self):
+  def openShadowInit(self, kernel):
     return ""
 
   ##############################################################################
@@ -9350,7 +9465,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # loopIdx<0 : tail loop
   ##############################################################################
   @abc.abstractmethod
-  def openLoop(self, kernel, tPA, tPB, loopIdx, noLabelGen, beginLabelOnly):
+  def openLoop(self, kernel, tPA, tPB, loopIdx, noLabelGen=False, beginLabelOnly=False, nta=0, ntb=0):
     return ""
 
   ##############################################################################
@@ -9359,25 +9474,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def closeLoop(self, kernel, tPA, tPB, loopIdx, \
                 finalLoop, emitEndLabelOnly=False, oddLabel=False, \
-                skipCondJumpCounter=-1, NLLlast=False):
+                skipCondJumpCounter=-1, NLLindexLast=False, \
+                remainPgr=0, nta=0, ntb=0):
     return ""
 
   ##############################################################################
   # End Summation
   ##############################################################################
   @abc.abstractmethod
-  def endSummation(self, kernel, tPA, tPB, noSkipLoad = True, label = None, isOptNLL = False):
+  def endSummation(self, kernel, tPA, tPB, noSkipLoad = True, label = None, isOptNLL = False, nta=0, ntb=0):
     return ""
 
   ##############################################################################
   # At Least 1 Unroll
   ##############################################################################
   @abc.abstractmethod
-  def openSumAtLeastUnroll(self, kernel, prefetch, isOptNLL, isNGLL=False, NLLindex=0, NLLnum=1, NLLindexLast=False):
+  def openSumAtLeastUnroll(self, kernel, prefetch, isOptNLL, isNGLL=False, NLLindex=0, NLLnum=1, tailloopInNll=False, remainPgr=0, nta=0, ntb=0):
     return ""
 
   @abc.abstractmethod
-  def closeSumAtLeastUnroll(self, kernel, tPA, tPB, prefetch, isOptNLL, isNGLL, isNotLast=False, remainPgr=0):
+  def closeSumAtLeastUnroll(self, kernel, tPA, tPB, prefetch, isOptNLL, isNGLL, isNotLast=False, tailloopInNll=False, remainPgr=0, nta=0, ntb=0):
     return ""
 
   ##############################################################################
@@ -9559,7 +9675,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # SIMD Specialized Dispatch
   ##############################################################################
   @abc.abstractmethod
-  def simdSpecDispatch(self, kernel, numCodePath):
+  def simdSpecDispatch(self, kernel, numCodePath, nta=0, ntb=0):
     return ""
 
   ##############################################################################

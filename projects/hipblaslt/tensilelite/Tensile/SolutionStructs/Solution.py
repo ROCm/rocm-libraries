@@ -1494,6 +1494,12 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Either GSU or StreamK must be enabled")
       return
 
+    if state.get("AdaptiveGemmNTAB", 0) != 0:
+      # KernArgsVersion >= 3 is required so internalArg0
+      # reserves bits 12/13 for the NTA/NTB selector.
+      if state["InternalSupportParams"]["KernArgsVersion"] < 3:
+        state["InternalSupportParams"]["KernArgsVersion"] = 3
+
     if state["StreamK"] != 0:
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
