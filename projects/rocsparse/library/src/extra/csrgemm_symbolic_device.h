@@ -59,6 +59,7 @@ namespace rocsparse
                                                              bool                 add)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
@@ -584,6 +585,7 @@ namespace rocsparse
                                                 bool                 add)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
                       "HASHSIZE must be a power of two.");
@@ -739,6 +741,7 @@ namespace rocsparse
                                                    bool                 add)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
                       "HASHSIZE must be a power of two.");

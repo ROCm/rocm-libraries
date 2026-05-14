@@ -54,6 +54,7 @@ namespace rocsparse
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
 
         const int lid = hipThreadIdx_x & (WF_SIZE - 1);
@@ -126,6 +127,7 @@ namespace rocsparse
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
 
         const int lid = hipThreadIdx_x & (WF_SIZE - 1);
@@ -251,6 +253,7 @@ namespace rocsparse
     {
         static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
                       "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WG_SIZE == 0, "BLOCKSIZE must be a multiple of WG_SIZE.");
 
         __shared__ T partialSums[BLOCKSIZE];
@@ -952,6 +955,7 @@ namespace rocsparse
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
 
         const int tid = hipThreadIdx_x;

@@ -47,6 +47,7 @@ namespace rocsparse
                                    rocsparse_direction  dir)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
 
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
@@ -178,6 +179,7 @@ namespace rocsparse
                                    rocsparse_direction  dir)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
 
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
@@ -310,6 +312,7 @@ namespace rocsparse
                                   rocsparse_direction  dir)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static_assert(WFSIZE % BSRDIM == 0, "WFSIZE must be a multiple of BSRDIM.");
 
@@ -478,6 +481,7 @@ namespace rocsparse
                                   rocsparse_direction  dir)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static_assert(WFSIZE % BSRDIM == 0, "WFSIZE must be a multiple of BSRDIM.");
 

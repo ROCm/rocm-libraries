@@ -70,6 +70,7 @@ namespace rocsparse
 
         // Each wavefront treats one row/column.
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static_assert(WFSIZE % NTHREADS_PER_DOTPRODUCT == 0,
                       "WFSIZE must be a multiple of NTHREADS_PER_DOTPRODUCT.");
@@ -190,6 +191,7 @@ namespace rocsparse
         static_assert(NTHREADS_PER_GROUP > 0
                           && (NTHREADS_PER_GROUP & (NTHREADS_PER_GROUP - 1)) == 0,
                       "NTHREADS_PER_GROUP must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % NTHREADS_PER_GROUP == 0,
                       "BLOCKSIZE must be a multiple of NTHREADS_PER_GROUP.");
 

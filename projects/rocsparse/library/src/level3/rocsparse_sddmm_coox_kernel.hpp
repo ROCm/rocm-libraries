@@ -69,6 +69,7 @@ namespace rocsparse
         //
         // Each group treats one row / column
         //
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % NTHREADS_PER_DOTPRODUCT == 0,
                       "BLOCKSIZE must be a multiple of NTHREADS_PER_DOTPRODUCT.");
 

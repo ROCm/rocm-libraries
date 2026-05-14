@@ -45,6 +45,7 @@ namespace rocsparse
                                   rocsparse_diag_type  diag_type,
                                   rocsparse_direction  dir)
     {
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % NCOLS == 0, "BLOCKSIZE must be a multiple of NCOLS.");
         static_assert((BLOCKSIZE / NCOLS) > 0
                           && ((BLOCKSIZE / NCOLS) & ((BLOCKSIZE / NCOLS) - 1)) == 0,
@@ -197,6 +198,7 @@ namespace rocsparse
                                   rocsparse_diag_type  diag_type,
                                   rocsparse_direction  dir)
     {
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % NCOLS == 0, "BLOCKSIZE must be a multiple of NCOLS.");
         static_assert((BLOCKSIZE / NCOLS) > 0
                           && ((BLOCKSIZE / NCOLS) & ((BLOCKSIZE / NCOLS) - 1)) == 0,

@@ -39,6 +39,7 @@ namespace rocsparse
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
         rocsparse_int tid = hipThreadIdx_x;
         rocsparse_int bid = hipBlockIdx_x;
@@ -93,6 +94,7 @@ namespace rocsparse
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
         rocsparse_int tid = hipThreadIdx_x;
         rocsparse_int bid = hipBlockIdx_x;
@@ -179,6 +181,7 @@ namespace rocsparse
                                 rocsparse_int* __restrict__ csr_col_ind_C,
                                 T tol)
     {
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % SEGMENT_SIZE == 0,
                       "BLOCKSIZE must be a multiple of SEGMENT_SIZE.");
         static_assert(WF_SIZE % SEGMENT_SIZE == 0, "WF_SIZE must be a multiple of SEGMENT_SIZE.");

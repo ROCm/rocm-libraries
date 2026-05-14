@@ -97,6 +97,7 @@ namespace rocsparse
     {
         static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
                       "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WG_SIZE == 0, "BLOCKSIZE must be a multiple of WG_SIZE.");
 
         __shared__ T           partial_sums[BLOCKSIZE];

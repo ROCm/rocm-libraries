@@ -67,6 +67,7 @@ namespace rocsparse
                 const floating_data_t<T>* __restrict__ nrm0)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static constexpr uint32_t nid  = BLOCKSIZE / WFSIZE;
         const J                   lid  = hipThreadIdx_x & (WFSIZE - 1);

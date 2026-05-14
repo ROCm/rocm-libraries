@@ -220,6 +220,7 @@ namespace rocsparse
                                                         rocsparse_index_base idx_base)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
 
         J left = left_init;
@@ -278,6 +279,7 @@ namespace rocsparse
                                                     rocsparse_index_base idx_base)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
 
         static constexpr uint32_t NNZ_PER_BLOCK = NNZ_PER_THREAD * BLOCKSIZE;
