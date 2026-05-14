@@ -27,7 +27,7 @@
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
 TEST_ROUTINE_WITH_CONFIG(spmv_sell,
                          generic,
-                         hipsparse_test_config_ijt,
+                         hipsparse_test_config_ijabct_spmv,
                          arg.M,
                          arg.N,
                          arg.slice_size,

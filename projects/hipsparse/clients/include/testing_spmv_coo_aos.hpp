@@ -39,22 +39,25 @@
 
 using namespace hipsparse_test;
 
-template <typename I, typename T>
+template <typename I, typename A, typename X, typename Y, typename T>
 void testing_spmv_coo_aos_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION > 10010 && CUDART_VERSION < 12000) \
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1 && CUDART_VERSION < 12000))
 
-    int64_t              m         = 100;
-    int64_t              n         = 100;
-    int64_t              nnz       = 100;
-    int64_t              safe_size = 100;
-    float                alpha     = 0.6;
-    float                beta      = 0.2;
-    hipsparseOperation_t transA    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-    hipsparseIndexBase_t idxBase   = HIPSPARSE_INDEX_BASE_ZERO;
-    hipsparseIndexType_t idxType   = HIPSPARSE_INDEX_32I;
-    hipDataType          dataType  = HIP_R_32F;
+    int64_t              m           = 100;
+    int64_t              n           = 100;
+    int64_t              nnz         = 100;
+    int64_t              safe_size   = 100;
+    T                    alpha       = make_DataType<T>(0.6);
+    T                    beta        = make_DataType<T>(0.2);
+    hipsparseOperation_t transA      = HIPSPARSE_OPERATION_NON_TRANSPOSE;
+    hipsparseIndexBase_t idxBase     = HIPSPARSE_INDEX_BASE_ZERO;
+    hipsparseIndexType_t idxType     = HIPSPARSE_INDEX_32I;
+    hipDataType          aType       = getDataType<A>();
+    hipDataType          xType       = getDataType<X>();
+    hipDataType          yType       = getDataType<Y>();
+    hipDataType          computeType = getDataType<T>();
 
 #if(!defined(CUDART_VERSION))
     hipsparseSpMVAlg_t alg = HIPSPARSE_MV_ALG_DEFAULT;
@@ -70,84 +73,87 @@ void testing_spmv_coo_aos_bad_arg(const Arguments& argus)
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
 
     auto dind_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
-    auto dval_managed = hipsparse_unique_ptr{device_malloc(sizeof(float) * safe_size), device_free};
-    auto dx_managed   = hipsparse_unique_ptr{device_malloc(sizeof(float) * safe_size), device_free};
-    auto dy_managed   = hipsparse_unique_ptr{device_malloc(sizeof(float) * safe_size), device_free};
+    auto dval_managed = hipsparse_unique_ptr{device_malloc(sizeof(A) * safe_size), device_free};
+    auto dx_managed   = hipsparse_unique_ptr{device_malloc(sizeof(X) * safe_size), device_free};
+    auto dy_managed   = hipsparse_unique_ptr{device_malloc(sizeof(Y) * safe_size), device_free};
     auto dbuf_managed = hipsparse_unique_ptr{device_malloc(sizeof(char) * safe_size), device_free};
 
-    int*   dind = (int*)dind_managed.get();
-    float* dval = (float*)dval_managed.get();
-    float* dx   = (float*)dx_managed.get();
-    float* dy   = (float*)dy_managed.get();
-    void*  dbuf = (void*)dbuf_managed.get();
+    int*  dind = (int*)dind_managed.get();
+    A*    dval = (A*)dval_managed.get();
+    X*    dx   = (X*)dx_managed.get();
+    Y*    dy   = (Y*)dy_managed.get();
+    void* dbuf = (void*)dbuf_managed.get();
 
     // SpMV structures
-    hipsparseSpMatDescr_t A;
+    hipsparseSpMatDescr_t matA;
     hipsparseDnVecDescr_t x, y;
 
     size_t bsize;
 
     // Create SpMV structures
     verify_hipsparse_status_success(
-        hipsparseCreateCooAoS(&A, m, n, nnz, dind, dval, idxType, idxBase, dataType), "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&x, n, dx, dataType), "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, m, dy, dataType), "success");
+        hipsparseCreateCooAoS(&matA, m, n, nnz, dind, dval, idxType, idxBase, aType), "success");
+    verify_hipsparse_status_success(hipsparseCreateDnVec(&x, n, dx, xType), "success");
+    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, m, dy, yType), "success");
 
     // SpMV buffer
-    verify_hipsparse_status_invalid_handle(
-        hipsparseSpMV_bufferSize(nullptr, transA, &alpha, A, x, &beta, y, dataType, alg, &bsize));
+    verify_hipsparse_status_invalid_handle(hipsparseSpMV_bufferSize(
+        nullptr, transA, &alpha, matA, x, &beta, y, computeType, alg, &bsize));
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpMV_bufferSize(handle, transA, nullptr, A, x, &beta, y, dataType, alg, &bsize),
+        hipsparseSpMV_bufferSize(
+            handle, transA, nullptr, matA, x, &beta, y, computeType, alg, &bsize),
         "Error: alpha is nullptr");
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpMV_bufferSize(
-            handle, transA, &alpha, nullptr, x, &beta, y, dataType, alg, &bsize),
+            handle, transA, &alpha, nullptr, x, &beta, y, computeType, alg, &bsize),
         "Error: A is nullptr");
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpMV_bufferSize(
-            handle, transA, &alpha, A, nullptr, &beta, y, dataType, alg, &bsize),
+            handle, transA, &alpha, matA, nullptr, &beta, y, computeType, alg, &bsize),
         "Error: x is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpMV_bufferSize(handle, transA, &alpha, A, x, nullptr, y, dataType, alg, &bsize),
+        hipsparseSpMV_bufferSize(
+            handle, transA, &alpha, matA, x, nullptr, y, computeType, alg, &bsize),
         "Error: beta is nullptr");
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpMV_bufferSize(
-            handle, transA, &alpha, A, x, &beta, nullptr, dataType, alg, &bsize),
+            handle, transA, &alpha, matA, x, &beta, nullptr, computeType, alg, &bsize),
         "Error: y is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpMV_bufferSize(handle, transA, &alpha, A, x, &beta, y, dataType, alg, nullptr),
+        hipsparseSpMV_bufferSize(
+            handle, transA, &alpha, matA, x, &beta, y, computeType, alg, nullptr),
         "Error: bsize is nullptr");
 
     // SpMV
     verify_hipsparse_status_invalid_handle(
-        hipsparseSpMV(nullptr, transA, &alpha, A, x, &beta, y, dataType, alg, dbuf));
+        hipsparseSpMV(nullptr, transA, &alpha, matA, x, &beta, y, computeType, alg, dbuf));
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpMV(handle, transA, nullptr, A, x, &beta, y, dataType, alg, dbuf),
+        hipsparseSpMV(handle, transA, nullptr, matA, x, &beta, y, computeType, alg, dbuf),
         "Error: alpha is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpMV(handle, transA, &alpha, nullptr, x, &beta, y, dataType, alg, dbuf),
+        hipsparseSpMV(handle, transA, &alpha, nullptr, x, &beta, y, computeType, alg, dbuf),
         "Error: A is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpMV(handle, transA, &alpha, A, nullptr, &beta, y, dataType, alg, dbuf),
+        hipsparseSpMV(handle, transA, &alpha, matA, nullptr, &beta, y, computeType, alg, dbuf),
         "Error: x is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpMV(handle, transA, &alpha, A, x, nullptr, y, dataType, alg, dbuf),
+        hipsparseSpMV(handle, transA, &alpha, matA, x, nullptr, y, computeType, alg, dbuf),
         "Error: beta is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpMV(handle, transA, &alpha, A, x, &beta, nullptr, dataType, alg, dbuf),
+        hipsparseSpMV(handle, transA, &alpha, matA, x, &beta, nullptr, computeType, alg, dbuf),
         "Error: y is nullptr");
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpMV(handle, transA, &alpha, A, x, &beta, nullptr, dataType, alg, nullptr),
+        hipsparseSpMV(handle, transA, &alpha, matA, x, &beta, nullptr, computeType, alg, nullptr),
         "Error: dbuf is nullptr");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
+    verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "success");
 #endif
 }
 
-template <typename I, typename T>
+template <typename I, typename A, typename X, typename Y, typename T>
 void testing_spmv_coo_aos(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000))
@@ -160,9 +166,12 @@ void testing_spmv_coo_aos(Arguments argus)
     hipsparseSpMVAlg_t   alg      = argus.spmv_alg;
     std::string          filename = argus.filename;
 
-    // Index and data type
-    hipsparseIndexType_t typeI = getIndexType<I>();
-    hipDataType          typeT = getDataType<T>();
+    // Index and data types
+    hipsparseIndexType_t typeI       = getIndexType<I>();
+    hipDataType          aType       = getDataType<A>();
+    hipDataType          xType       = getDataType<X>();
+    hipDataType          yType       = getDataType<Y>();
+    hipDataType          computeType = getDataType<T>();
 
     // hipSPARSE handle
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
@@ -171,7 +180,7 @@ void testing_spmv_coo_aos(Arguments argus)
     // Host structures
     std::vector<I> hrow_ptr;
     std::vector<I> hcol_ind;
-    std::vector<T> hval;
+    std::vector<A> hval;
 
     // Initial Data on CPU
     srand(12345ULL);
@@ -181,7 +190,7 @@ void testing_spmv_coo_aos(Arguments argus)
         generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base));
 
     // Redefine sparse matrix values
-    hipsparseInit<T>(hval, hval.size(), 1);
+    hipsparseInit<A>(hval, hval.size(), 1);
 
     std::vector<I> hind(2 * nnz);
 
@@ -195,13 +204,13 @@ void testing_spmv_coo_aos(Arguments argus)
         }
     }
 
-    std::vector<T> hx(n);
-    std::vector<T> hy_1(m);
-    std::vector<T> hy_2(m);
-    std::vector<T> hy_gold(m);
+    std::vector<X> hx(n);
+    std::vector<Y> hy_1(m);
+    std::vector<Y> hy_2(m);
+    std::vector<Y> hy_gold(m);
 
-    hipsparseInit<T>(hx, 1, n);
-    hipsparseInit<T>(hy_1, 1, m);
+    hipsparseInit<X>(hx, 1, n);
+    hipsparseInit<Y>(hy_1, 1, m);
 
     // copy vector is easy in STL; hy_gold = hx: save a copy in hy_gold which will be output of CPU
     hy_2    = hy_1;
@@ -209,44 +218,45 @@ void testing_spmv_coo_aos(Arguments argus)
 
     // allocate memory on device
     auto dind_managed    = hipsparse_unique_ptr{device_malloc(sizeof(I) * 2 * nnz), device_free};
-    auto dval_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz), device_free};
-    auto dx_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * n), device_free};
-    auto dy_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * m), device_free};
-    auto dy_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * m), device_free};
+    auto dval_managed    = hipsparse_unique_ptr{device_malloc(sizeof(A) * nnz), device_free};
+    auto dx_managed      = hipsparse_unique_ptr{device_malloc(sizeof(X) * n), device_free};
+    auto dy_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(Y) * m), device_free};
+    auto dy_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(Y) * m), device_free};
     auto d_alpha_managed = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
     auto d_beta_managed  = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
 
     I* dind    = (I*)dind_managed.get();
-    T* dval    = (T*)dval_managed.get();
-    T* dx      = (T*)dx_managed.get();
-    T* dy_1    = (T*)dy_1_managed.get();
-    T* dy_2    = (T*)dy_2_managed.get();
+    A* dval    = (A*)dval_managed.get();
+    X* dx      = (X*)dx_managed.get();
+    Y* dy_1    = (Y*)dy_1_managed.get();
+    Y* dy_2    = (Y*)dy_2_managed.get();
     T* d_alpha = (T*)d_alpha_managed.get();
     T* d_beta  = (T*)d_beta_managed.get();
 
     // copy data from CPU to device
     CHECK_HIP_ERROR(hipMemcpy(dind, hind.data(), sizeof(I) * 2 * nnz, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * n, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * m, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * m, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(A) * nnz, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(X) * n, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(Y) * m, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(Y) * m, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t A;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCooAoS(&A, m, n, nnz, dind, dval, typeI, idx_base, typeT));
+    hipsparseSpMatDescr_t matA;
+    CHECK_HIPSPARSE_ERROR(
+        hipsparseCreateCooAoS(&matA, m, n, nnz, dind, dval, typeI, idx_base, aType));
 
     // Create dense vectors
     hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, n, dx, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, n, dx, xType));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, yType));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, yType));
 
     // Query SpMV buffer
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseSpMV_bufferSize(
-        handle, transA, &h_alpha, A, x, &h_beta, y1, typeT, alg, &bufferSize));
+        handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, &bufferSize));
 
     void* buffer;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
@@ -255,20 +265,20 @@ void testing_spmv_coo_aos(Arguments argus)
     {
         // HIPSPARSE pointer mode host
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-        CHECK_HIPSPARSE_ERROR(
-            hipsparseSpMV(handle, transA, &h_alpha, A, x, &h_beta, y1, typeT, alg, buffer));
+        CHECK_HIPSPARSE_ERROR(hipsparseSpMV(
+            handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, buffer));
 
         // HIPSPARSE pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
         CHECK_HIPSPARSE_ERROR(
-            hipsparseSpMV(handle, transA, d_alpha, A, x, d_beta, y2, typeT, alg, buffer));
+            hipsparseSpMV(handle, transA, d_alpha, matA, x, d_beta, y2, computeType, alg, buffer));
 
         // copy output from device to CPU
-        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(Y) * m, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(Y) * m, hipMemcpyDeviceToHost));
 
         // Host SpMV
-        host_coomv_aos(
+        host_coomv_aos<I, A, X, Y, T>(
             m, nnz, h_alpha, hind.data(), hval.data(), hx.data(), h_beta, hy_gold.data(), idx_base);
 
         unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
@@ -285,8 +295,8 @@ void testing_spmv_coo_aos(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(
-                hipsparseSpMV(handle, transA, &h_alpha, A, x, &h_beta, y1, typeT, alg, buffer));
+            CHECK_HIPSPARSE_ERROR(hipsparseSpMV(
+                handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, buffer));
         }
 
         double gpu_time_used = get_time_us();
@@ -294,14 +304,15 @@ void testing_spmv_coo_aos(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(
-                hipsparseSpMV(handle, transA, &h_alpha, A, x, &h_beta, y1, typeT, alg, buffer));
+            CHECK_HIPSPARSE_ERROR(hipsparseSpMV(
+                handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, buffer));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
         double gflop_count = spmv_gflop_count(m, nnz, h_beta != make_DataType<T>(0.0));
-        double gbyte_count = coomv_gbyte_count<T>(m, n, nnz, h_beta != make_DataType<T>(0.0));
+        double gbyte_count
+            = coomv_gbyte_count<A, X, Y, I>(m, n, nnz, h_beta != make_DataType<T>(0.0));
 
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
@@ -329,7 +340,7 @@ void testing_spmv_coo_aos(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
+    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));

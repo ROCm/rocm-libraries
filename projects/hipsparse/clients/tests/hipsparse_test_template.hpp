@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -113,6 +113,25 @@ namespace
                       << hipsparse_datatype2string(arg.compute_type);
                     break;
                 }
+                case hipsparse_test_dispatch_enum::ijabct_spmv:
+                {
+                    s << hipsparse_indextype2string(arg.index_type_I) << '_'
+                      << hipsparse_indextype2string(arg.index_type_J) << '_'
+                      << hipsparse_datatype2string(arg.a_type) << '_'
+                      << hipsparse_datatype2string(arg.x_type) << '_'
+                      << hipsparse_datatype2string(arg.y_type) << '_'
+                      << hipsparse_datatype2string(arg.compute_type);
+                    break;
+                }
+                case hipsparse_test_dispatch_enum::iabct_spmv:
+                {
+                    s << hipsparse_indextype2string(arg.index_type_I) << '_'
+                      << hipsparse_datatype2string(arg.a_type) << '_'
+                      << hipsparse_datatype2string(arg.x_type) << '_'
+                      << hipsparse_datatype2string(arg.y_type) << '_'
+                      << hipsparse_datatype2string(arg.compute_type);
+                    break;
+                }
                 }
 
                 // Check if this is bad_arg
@@ -198,6 +217,72 @@ namespace
                          T,
                          typename std::enable_if<check_t::template is_valid_type<I, J, T>()>::type>
             : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, J, T>
+        {
+        };
+
+        struct test : hipsparse_test_template<ROUTINE>::template test_proxy<test, test_call>
+        {
+        };
+    };
+
+    template <hipsparse_test_enum::value_type ROUTINE>
+    struct hipsparse_test_ijabct_spmv_template
+    {
+        using check_t = hipsparse_test_check<ROUTINE>;
+
+        template <typename I      = int32_t,
+                  typename J      = int32_t,
+                  typename A      = float,
+                  typename X      = float,
+                  typename Y      = float,
+                  typename T      = float,
+                  typename ENABLE = void>
+        struct test_call : hipsparse_test_invalid
+        {
+        };
+
+        template <typename I, typename J, typename A, typename X, typename Y, typename T>
+        struct test_call<
+            I,
+            J,
+            A,
+            X,
+            Y,
+            T,
+            typename std::enable_if<check_t::template is_valid_type<I, J, A, X, Y, T>()>::type>
+            : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, J, A, X, Y, T>
+        {
+        };
+
+        struct test : hipsparse_test_template<ROUTINE>::template test_proxy<test, test_call>
+        {
+        };
+    };
+
+    template <hipsparse_test_enum::value_type ROUTINE>
+    struct hipsparse_test_iabct_spmv_template
+    {
+        using check_t = hipsparse_test_check<ROUTINE>;
+
+        template <typename I      = int32_t,
+                  typename A      = float,
+                  typename X      = float,
+                  typename Y      = float,
+                  typename T      = float,
+                  typename ENABLE = void>
+        struct test_call : hipsparse_test_invalid
+        {
+        };
+
+        template <typename I, typename A, typename X, typename Y, typename T>
+        struct test_call<
+            I,
+            A,
+            X,
+            Y,
+            T,
+            typename std::enable_if<check_t::template is_valid_type<I, A, X, Y, T>()>::type>
+            : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, A, X, Y, T>
         {
         };
 
