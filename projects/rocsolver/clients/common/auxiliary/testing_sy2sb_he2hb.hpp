@@ -182,10 +182,10 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     double err;
     *max_err = 0;
     err = norm_error('F', kd + 1, n, ldab, hAband[0], hAbandRes[0] + kd - 1);
-    *max_err = std::max<I>(err, *max_err);
+    *max_err = rocblas_max_nan(err, *max_err);
 
     err = norm_error('F', 1, n - kd, 1, hTau[0], hTauRes[0]);
-    *max_err = std::max<I>(err, *max_err);
+    *max_err = rocblas_max_nan(err, *max_err);
 }
 
 //------------------------------------------------------------------------------
