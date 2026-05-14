@@ -2430,8 +2430,6 @@ class Solution(collections.abc.Mapping):
         if ldsPadA == -1:
           if isMX and (state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeA"].isFloat4()):
             ldsPadA = 0
-          elif state["TDMInst"] and state["LdsBlockSizePerPadA"] == 0:
-            ldsPadA = 0
           else:
             if not state["UnrollMajorLDSA"]:
               if state["EnableMatrixInstruction"]:
@@ -2464,8 +2462,6 @@ class Solution(collections.abc.Mapping):
 
         if ldsPadB == -1:
           if isMX and (state["ProblemType"]["DataTypeB"].is6bitFloat() or state["ProblemType"]["DataTypeB"].isFloat4()):
-            ldsPadB = 0
-          elif state["TDMInst"] and state["LdsBlockSizePerPadB"] == 0:
             ldsPadB = 0
           else:
             if not state["UnrollMajorLDSB"]:
