@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -245,7 +245,8 @@ template<typename T,
          unsigned int            ItemsPerThread,
          memory_operation_method MemOp,
          typename CustomOp>
-__global__ __launch_bounds__(BlockSize) void operation_kernel(T* input, T* output, CustomOp op)
+__global__ __launch_bounds__(BlockSize)
+void operation_kernel(T* input, T* output, CustomOp op)
 {
     using mem_op     = memory_operation<MemOp>;
     using load_type  = hipcub::BlockLoad<T, BlockSize, ItemsPerThread, mem_op::load_type>;
@@ -270,169 +271,153 @@ __global__ __launch_bounds__(BlockSize) void operation_kernel(T* input, T* outpu
     store_type(storage.store).Store(output + offset, items);
 }
 
+inline const char* get_name(memory_operation_method method)
+{
+    switch(method)
+    {
+        case memory_operation_method::direct: return "direct";
+        case memory_operation_method::striped: return "striped";
+        case memory_operation_method::vectorize: return "vectorize";
+        case memory_operation_method::transpose: return "transpose";
+        case memory_operation_method::warp_transpose: return "warp_transpose";
+    }
+
+    return "unknown memory operation method";
+}
+
+inline const char* get_name(kernel_operation method)
+{
+    switch(method)
+    {
+        case kernel_operation::no_operation: return "no_operation";
+        case kernel_operation::block_scan: return "block_scan";
+        case kernel_operation::custom_operation: return "custom_operation";
+        case kernel_operation::atomics_no_collision: return "atomics_no_collision";
+        case kernel_operation::atomics_inter_block_collision:
+            return "atomics_inter_block_collision";
+        case kernel_operation::atomics_inter_warp_collision: return "atomics_inter_warp_collision";
+    }
+
+    return "unknown kernel operation method";
+}
+
 template<typename T,
          unsigned int            BlockSize,
          unsigned int            ItemsPerThread,
          memory_operation_method MemOp,
          kernel_operation        KernelOp = no_operation>
-void run_benchmark(benchmark::State& state, size_t size, const hipStream_t stream)
+class device_memory_benchmark : public primbench::benchmark_interface
 {
-    const size_t   grid_size = size / (BlockSize * ItemsPerThread);
-    std::vector<T> input
-        = benchmark_utils::get_random_data<T>(size,
-                                              benchmark_utils::generate_limits<T>::min(),
-                                              benchmark_utils::generate_limits<T>::max());
-
-    T* d_input;
-    T* d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    operation<KernelOp, T, ItemsPerThread, BlockSize> selected_operation;
-
-    // Warm-up
-    for(size_t i = 0; i < 10; i++)
+    primbench::json meta() const override
     {
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(operation_kernel<T, BlockSize, ItemsPerThread, MemOp>),
-                           dim3(grid_size),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_output,
-                           selected_operation);
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    const unsigned int batch_size = 10;
-    for(auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(operation_kernel<T, BlockSize, ItemsPerThread, MemOp>),
-                dim3(grid_size),
-                dim3(BlockSize),
-                0,
-                stream,
-                d_input,
-                d_output,
-                selected_operation);
-        }
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
+        return primbench::json{}
+            .add("algo", "device_memory")
+            .add("subalgo", get_name(MemOp))
+            .add("data_type", primbench::name<T>())
+            .add("items_per_thread", ItemsPerThread)
+            .add("kernel_op", get_name(KernelOp))
+            .add("block_size", BlockSize);
     }
 
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
+    void run(primbench::state& state) override
+    {
+        const size_t size   = state.size;
+        const auto&  stream = state.stream;
 
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
+        const size_t   grid_size = size / size_t(BlockSize * ItemsPerThread);
+        std::vector<T> input
+            = benchmark_utils::get_random_data<T>(size,
+                                                  benchmark_utils::generate_limits<T>::min(),
+                                                  benchmark_utils::generate_limits<T>::max());
 
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-}
+        T* d_input;
+        T* d_output;
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+        HIP_CHECK(hipDeviceSynchronize());
 
-template<typename T>
-void run_benchmark_memcpy(benchmark::State& state, size_t size, const hipStream_t stream)
+        operation<KernelOp, T, ItemsPerThread, BlockSize> selected_operation;
+
+        state.set_items(size);
+        state.add_writes<T>(size);
+
+        state.run(
+            [&]
+            {
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(operation_kernel<T, BlockSize, ItemsPerThread, MemOp>),
+                    dim3(grid_size),
+                    dim3(BlockSize),
+                    0,
+                    stream,
+                    d_input,
+                    d_output,
+                    selected_operation);
+            });
+
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+    }
+};
+
+template<typename T, size_t Size>
+class memcpy_benchmark : public primbench::benchmark_interface
 {
-    // Allocate device buffers
-    // Note: since this benchmark only tests memcpy performance between device
-    // buffers, we don't really need to copy data into these from the host -
-    // whatever happens to be in memory will suffice.
-    T* d_input;
-    T* d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-
-    // Warm-up
-    for(size_t i = 0; i < 10; i++)
+    primbench::json meta() const override
     {
-        HIP_CHECK(hipMemcpy(d_output, d_input, size * sizeof(T), hipMemcpyDeviceToDevice));
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    const unsigned int batch_size = 10;
-    for(auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            HIP_CHECK(hipMemcpy(d_output, d_input, size * sizeof(T), hipMemcpyDeviceToDevice));
-        }
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
+        return primbench::json{}
+            .add("algo", "device_memory")
+            .add("subalgo", "memcpy")
+            .add("data_type", primbench::name<T>())
+            .add("size", Size);
     }
 
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
+    void run(primbench::state& state) override
+    {
+        // Allocate device buffers
+        // Note: since this benchmark only tests memcpy performance between device
+        // buffers, we don't really need to copy data into these from the host -
+        // whatever happens to be in memory will suffice.
+        T* d_input;
+        T* d_output;
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), Size * sizeof(T)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), Size * sizeof(T)));
+        HIP_CHECK(hipDeviceSynchronize());
 
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items(Size);
+        state.add_writes<T>(Size);
 
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-}
+        state.run(
+            [&] {
+                HIP_CHECK(hipMemcpy(d_output, d_input, Size * sizeof(T), hipMemcpyDeviceToDevice));
+            });
 
-#define CREATE_BENCHMARK_IPT(METHOD, OPERATION, T, SIZE, BS, IPT)                             \
-    benchmarks.push_back(benchmark::RegisterBenchmark(                                        \
-        std::string("device_memory<method:" #METHOD ",operation:" #OPERATION ",data_type:" #T \
-                    ",size:" #SIZE ",block_size:" #BS ",items_per_thread:" #IPT ">.")         \
-            .c_str(),                                                                         \
-        [=](benchmark::State& state)                                                          \
-        { run_benchmark<T, BS, IPT, METHOD, OPERATION>(state, SIZE, stream); }));
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+    }
+};
 
-#define CREATE_BENCHMARK_MEMCPY(T, SIZE)                                               \
-    benchmarks.push_back(benchmark::RegisterBenchmark(                                 \
-        std::string("device_memory_memcpy<data_type:" #T ",size:" #SIZE ">.").c_str(), \
-        [=](benchmark::State& state) { run_benchmark_memcpy<T>(state, SIZE, stream); }));
+#define CREATE_BENCHMARK_IPT(METHOD, OPERATION, T, SIZE, BS, IPT) \
+    executor.queue<device_memory_benchmark<T, BS, IPT, METHOD, OPERATION>>()
+
+#define CREATE_BENCHMARK_MEMCPY(T, SIZE) executor.queue<memcpy_benchmark<T, SIZE>>()
 
 // clang-format off
 #define CREATE_BENCHMARK_BLOCK_SIZE(MEM_OP, OP, TYPE, SIZE, BLOCK_SIZE) \
-    CREATE_BENCHMARK_IPT(MEM_OP, OP, TYPE, SIZE, BLOCK_SIZE, 1)         \
-    CREATE_BENCHMARK_IPT(MEM_OP, OP, TYPE, SIZE, BLOCK_SIZE, 2)         \
-    CREATE_BENCHMARK_IPT(MEM_OP, OP, TYPE, SIZE, BLOCK_SIZE, 4)         \
+    CREATE_BENCHMARK_IPT(MEM_OP, OP, TYPE, SIZE, BLOCK_SIZE, 1);         \
+    CREATE_BENCHMARK_IPT(MEM_OP, OP, TYPE, SIZE, BLOCK_SIZE, 2);         \
+    CREATE_BENCHMARK_IPT(MEM_OP, OP, TYPE, SIZE, BLOCK_SIZE, 4);         \
     CREATE_BENCHMARK_IPT(MEM_OP, OP, TYPE, SIZE, BLOCK_SIZE, 8)
 
 #define CREATE_BENCHMARK_MEM_OP(MEM_OP, OP, TYPE, SIZE) \
     CREATE_BENCHMARK_BLOCK_SIZE(MEM_OP, OP, TYPE, SIZE, 256)
 
 #define CREATE_BENCHMARK(OP, TYPE, SIZE)               \
-    CREATE_BENCHMARK_MEM_OP(direct, OP, TYPE, SIZE)    \
-    CREATE_BENCHMARK_MEM_OP(striped, OP, TYPE, SIZE)   \
-    CREATE_BENCHMARK_MEM_OP(vectorize, OP, TYPE, SIZE) \
-    CREATE_BENCHMARK_MEM_OP(transpose, OP, TYPE, SIZE) \
+    CREATE_BENCHMARK_MEM_OP(direct, OP, TYPE, SIZE);    \
+    CREATE_BENCHMARK_MEM_OP(striped, OP, TYPE, SIZE);   \
+    CREATE_BENCHMARK_MEM_OP(vectorize, OP, TYPE, SIZE); \
+    CREATE_BENCHMARK_MEM_OP(transpose, OP, TYPE, SIZE); \
     CREATE_BENCHMARK_MEM_OP(warp_transpose, OP, TYPE, SIZE)
 // clang-format on
 
@@ -444,57 +429,22 @@ constexpr unsigned int megabytes(unsigned int size)
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
+    primbench::settings settings;
+    settings.min_gpu_ms_per_batch = 100;
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const int trials = parser.get<int>("trials");
-
-    std::cout << "benchmark_device_memory" << std::endl;
-
-    // HIP
-    hipStream_t     stream = 0; // default
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
+    primbench::executor executor(argc, argv, settings);
 
     // Simple memory copy from device to device, not running a kernel
-    CREATE_BENCHMARK_MEMCPY(int, megabytes<int>(128))
+    CREATE_BENCHMARK_MEMCPY(int, megabytes<int>(128));
 
     // clang-format off
-    CREATE_BENCHMARK(no_operation,                  int, megabytes<int>(128))
-    CREATE_BENCHMARK(block_scan,                    int, megabytes<int>(128))
-    CREATE_BENCHMARK(custom_operation,              int, megabytes<int>(128))
-    CREATE_BENCHMARK(atomics_no_collision,          int, megabytes<int>(128))
-    CREATE_BENCHMARK(atomics_inter_block_collision, int, megabytes<int>(128))
-    CREATE_BENCHMARK(atomics_inter_warp_collision,  int, megabytes<int>(128))
+    CREATE_BENCHMARK(no_operation,                  int, megabytes<int>(128));
+    CREATE_BENCHMARK(block_scan,                    int, megabytes<int>(128));
+    CREATE_BENCHMARK(custom_operation,              int, megabytes<int>(128));
+    CREATE_BENCHMARK(atomics_no_collision,          int, megabytes<int>(128));
+    CREATE_BENCHMARK(atomics_inter_block_collision, int, megabytes<int>(128));
+    CREATE_BENCHMARK(atomics_inter_warp_collision,  int, megabytes<int>(128));
     // clang-format on
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-
-    return 0;
+    executor.run();
 }
