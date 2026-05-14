@@ -46,26 +46,28 @@ This includes rocFFT and hipFFT.
 
    .. code-block:: shell-session
 
-      amdrocm-fft<dev/devel><rocm_version>-<llvm_target>
+      amdrocm-fft<-dev/-devel><rocm_version><-llvm_target>
 
    Where:
 
-   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
-     suffix to install the latest available version.
-
-   * ``<dev/devel>`` specifies whether to the install library files and
+   * ``<-dev/-devel>`` specifies whether to the install library files and
      headers. Omit this suffix to only install runtime packages.
 
      * ``-dev`` is used on Debian-based distributions, including Ubuntu.
 
      * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
+   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+     suffix to install the latest available version.
+
    * ``<llvm_target>`` (starting with ``gfx``) is used if you are installing
      for a single AMD GPU architecture. Omit this to install for all
      architectures at the cost of disk space.
 
-   For example, to install the latest FFT development package release for
-   supported GPU architectures:
+   For example: ``amdrocm-fft-dev7.13-gfx950``
+
+   Use the following command to install the latest FFT development package
+   release for supported GPU architectures:
 
    .. tab-set::
 
