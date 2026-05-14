@@ -56,6 +56,26 @@ setup_venv() {
 
 setup_venv
 
+# Expand bundled short flags (e.g. -cdi → -c -d -i) so legacy CI/Docker and
+# install-host-style invocations match the one-flag-at-a-time parser below.
+# Only letters that are standalone short options in this wrapper (no bundled
+# value); flags that take values (-a, -l, …) must remain separate tokens.
+declare -a _hipsparselt_norm=()
+while (($# > 0)); do
+    _a="$1"
+    if [[ "$_a" =~ ^-([cdigrknh]+)$ ]] && (( ${#BASH_REMATCH[1]} >= 2 )); then
+        _bundle="${BASH_REMATCH[1]}"
+        for ((_i = 0; _i < ${#_bundle}; _i++)); do
+            _hipsparselt_norm+=("-${_bundle:_i:1}")
+        done
+    else
+        _hipsparselt_norm+=("$_a")
+    fi
+    shift
+done
+set -- "${_hipsparselt_norm[@]}"
+unset _a _bundle _i _hipsparselt_norm
+
 INVOKE_ARGS=""
 EXTRA_ARGS=""
 
@@ -67,6 +87,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: ./install.sh [options]"
             echo ""
             echo "  -h, --help                 Show this help"
+            echo "  Combined short flags such as -cdi are expanded to -c -d -i (legacy Docker/CI)."
             echo "  -i, --install              Install after build (package + distro install)"
             echo "  -d, --dependencies         Install build dependencies"
             echo "  -c, --clients              Build library clients / tests / benchmarks"
