@@ -69,9 +69,9 @@ struct conv_igemm_dynamic_xdlops_nhwc_bf16_test : public conv2d_test_base<T, Tes
     }
 };
 
-using GPU_Conv_IGEMM_DYNAMIC_XDLOPS_NHWC_BF16 = conv_igemm_dynamic_xdlops_nhwc_bf16_test<bfloat16>;
+using GPU_Conv_IGEMM_DYNAMIC_XDLOPS_NHWC_BFP16 = conv_igemm_dynamic_xdlops_nhwc_bf16_test<bfloat16>;
 
-TEST_P(GPU_Conv_IGEMM_DYNAMIC_XDLOPS_NHWC_BF16, TestBFloat16)
+TEST_P(GPU_Conv_IGEMM_DYNAMIC_XDLOPS_NHWC_BFP16, TestBFloat16)
 {
     if(IsTestSupportedForDevice(get_handle()))
     {
@@ -91,7 +91,7 @@ TEST_P(GPU_Conv_IGEMM_DYNAMIC_XDLOPS_NHWC_BF16, TestBFloat16)
 
 #define INSTANTIATE_MIOPEN_BFLOAT16_TEST_SUITES(id, ...) \
     INSTANTIATE_MIOPEN_TEST_SUITES(                      \
-        id, GPU_Conv_IGEMM_DYNAMIC_XDLOPS_NHWC_BF16, bfloat16, __VA_ARGS__)
+        id, GPU_Conv_IGEMM_DYNAMIC_XDLOPS_NHWC_BFP16, bfloat16, __VA_ARGS__)
 
 // fwd
 INSTANTIATE_MIOPEN_BFLOAT16_TEST_SUITES(0,
