@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -102,9 +102,7 @@ namespace rocsparse
                     // the row dimension of B — this access is harmless even when clamped
                     // because safe_row stays within [0, col_block_dim-1].
                     rocsparse_int safe_row = (tidx + y) < col_block_dim ? (tidx + y) : 0;
-                    T             row_mask = (tidx + y) < col_block_dim
-                                                ? static_cast<T>(1)
-                                                : static_cast<T>(0);
+                    T row_mask = (tidx + y) < col_block_dim ? static_cast<T>(1) : static_cast<T>(0);
                     T col_mask = col_in_range ? static_cast<T>(1) : static_cast<T>(0);
 
                     if(trans_B == rocsparse_operation_none)
@@ -121,10 +119,8 @@ namespace rocsparse
                     // Same clamping pattern for bsr_val (shared_A).
                     // Threads where (tidx+x) >= row_block_dim or (tidy+y) >= col_block_dim
                     // are out of the block — clamp indices and mask the result to zero.
-                    rocsparse_int safe_tidx_x
-                        = (tidx + x) < row_block_dim ? (tidx + x) : 0;
-                    rocsparse_int safe_tidy_y
-                        = (tidy + y) < col_block_dim ? (tidy + y) : 0;
+                    rocsparse_int safe_tidx_x = (tidx + x) < row_block_dim ? (tidx + x) : 0;
+                    rocsparse_int safe_tidy_y = (tidy + y) < col_block_dim ? (tidy + y) : 0;
                     T a_mask = ((tidx + x) < row_block_dim && (tidy + y) < col_block_dim)
                                    ? static_cast<T>(1)
                                    : static_cast<T>(0);

@@ -80,9 +80,9 @@ namespace rocsparse
 
             const bool k_valid = (k < row_end);
             const I    safe_k  = k_valid ? k : row_start;
-            const J my_col = k_valid
-                                 ? csr_col_ind[safe_k + columns_values_batch_stride_A * batch] - idx_base
-                                 : 0;
+            const J    my_col
+                = k_valid ? csr_col_ind[safe_k + columns_values_batch_stride_A * batch] - idx_base
+                          : 0;
             const T my_val = k_valid ? static_cast<T>(rocsparse::conj_val(
                                  csr_val[safe_k + columns_values_batch_stride_A * batch], conj_A))
                                      : static_cast<T>(0);
@@ -471,8 +471,8 @@ namespace rocsparse
         {
             const I k = j + lid;
 
-            const bool k_valid = (k < row_end);
-            const I    safe_k  = k_valid ? k : row_start;
+            const bool    k_valid = (k < row_end);
+            const I       safe_k  = k_valid ? k : row_start;
             const int64_t my_col
                 = k_valid
                       ? ldb
@@ -647,11 +647,10 @@ namespace rocsparse
             const bool k_valid = (k < row_end);
             const I    safe_k  = k_valid ? k : row_start;
 
-            const J c = k_valid
-                            ? (rocsparse::nontemporal_load(csr_col_ind + safe_k
-                                                           + columns_values_batch_stride_A * batch)
-                               - idx_base)
-                            : 0;
+            const J c = k_valid ? (rocsparse::nontemporal_load(
+                                       csr_col_ind + safe_k + columns_values_batch_stride_A * batch)
+                                   - idx_base)
+                                : 0;
 
             const T v = k_valid ? static_cast<T>(rocsparse::conj_val(
                             rocsparse::nontemporal_load(csr_val + safe_k

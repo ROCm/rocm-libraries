@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -96,9 +96,9 @@ namespace rocsparse
                     else
                     {
                         shared_B[BSR_BLOCK_DIM * tidy + tidx]
-                            = is_B_valid
-                                  ? dense_B[global_col + ldb * (block_dim * safe_B_col + safe_B_row)]
-                                  : static_cast<B>(0);
+                            = is_B_valid ? dense_B[global_col
+                                                   + ldb * (block_dim * safe_B_col + safe_B_row)]
+                                         : static_cast<B>(0);
                     }
 
                     const bool is_A_valid = ((tidx + x) < block_dim && (tidy + y) < block_dim);
@@ -108,18 +108,16 @@ namespace rocsparse
                     if(direction == rocsparse_direction_row)
                     {
                         shared_A[BSR_BLOCK_DIM * tidy + tidx]
-                            = is_A_valid
-                                  ? bsr_val[block_dim * block_dim * k + block_dim * safe_A_x
-                                            + safe_A_y]
-                                  : static_cast<A>(0);
+                            = is_A_valid ? bsr_val[block_dim * block_dim * k + block_dim * safe_A_x
+                                                   + safe_A_y]
+                                         : static_cast<A>(0);
                     }
                     else
                     {
                         shared_A[BSR_BLOCK_DIM * tidy + tidx]
-                            = is_A_valid
-                                  ? bsr_val[block_dim * block_dim * k + block_dim * safe_A_y
-                                            + safe_A_x]
-                                  : static_cast<A>(0);
+                            = is_A_valid ? bsr_val[block_dim * block_dim * k + block_dim * safe_A_y
+                                                   + safe_A_x]
+                                         : static_cast<A>(0);
                     }
 
                     __syncthreads();

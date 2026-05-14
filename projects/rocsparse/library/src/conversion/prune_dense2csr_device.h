@@ -66,7 +66,7 @@ namespace rocsparse
         {
             for(rocsparse_int k = 0; k < 4; ++k)
             {
-                const bool        row_valid = (ind + k * DIM_X < m);
+                const bool          row_valid = (ind + k * DIM_X < m);
                 const rocsparse_int safe_row  = row_valid ? (ind + k * DIM_X) : 0;
                 for(rocsparse_int j = 0; j < 4; ++j)
                 {
@@ -82,18 +82,16 @@ namespace rocsparse
         {
             for(rocsparse_int k = 0; k < 4; ++k)
             {
-                const bool        row_valid = (ind + k * DIM_X < m);
+                const bool          row_valid = (ind + k * DIM_X < m);
                 const rocsparse_int safe_row  = row_valid ? (ind + k * DIM_X) : 0;
                 for(rocsparse_int j = 0; j < 4; ++j)
                 {
-                    const bool        col_valid = (col + j < n);
+                    const bool          col_valid = (col + j < n);
                     const rocsparse_int safe_col  = col_valid ? (col + j) : 0;
                     if(col_valid && row_valid)
                     {
-                        res_A[k] += (rocsparse::abs(A[safe_row + safe_col * lda])
-                                     > threshold)
-                                        ? 1
-                                        : 0;
+                        res_A[k]
+                            += (rocsparse::abs(A[safe_row + safe_col * lda]) > threshold) ? 1 : 0;
                     }
                 }
             }

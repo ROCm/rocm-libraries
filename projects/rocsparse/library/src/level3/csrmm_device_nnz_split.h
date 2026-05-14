@@ -86,8 +86,7 @@ namespace rocsparse
                                               csr_row_ptr);
         }
         col_ind = rocsparse::nontemporal_load(&csr_col_ind[safe_nnz_idx]) - idx_base;
-        val     = alpha
-              * conj_val(rocsparse::nontemporal_load(&csr_val[safe_nnz_idx]), conj_A);
+        val     = alpha * conj_val(rocsparse::nontemporal_load(&csr_val[safe_nnz_idx]), conj_A);
         if(!nnz_valid)
         {
             col_ind = 0;
@@ -219,8 +218,8 @@ namespace rocsparse
         J col_ind = 0;
         T val     = static_cast<T>(0);
 
-        const bool nnz_valid = (BLOCKSIZE * bid + tid < nnz);
-        const I safe_nnz_idx = nnz_valid ? (BLOCKSIZE * bid + tid) : 0;
+        const bool nnz_valid    = (BLOCKSIZE * bid + tid < nnz);
+        const I    safe_nnz_idx = nnz_valid ? (BLOCKSIZE * bid + tid) : 0;
 
         if(nnz_valid)
         {
@@ -231,8 +230,7 @@ namespace rocsparse
                                               csr_row_ptr);
         }
         col_ind = rocsparse::nontemporal_load(&csr_col_ind[safe_nnz_idx]) - idx_base;
-        val     = alpha
-              * conj_val(rocsparse::nontemporal_load(&csr_val[safe_nnz_idx]), conj_A);
+        val     = alpha * conj_val(rocsparse::nontemporal_load(&csr_val[safe_nnz_idx]), conj_A);
         if(!nnz_valid)
         {
             col_ind = 0;
@@ -490,8 +488,8 @@ namespace rocsparse
         J col = 0;
         T val = static_cast<T>(0);
 
-        const bool nnz_valid2 = ((BLOCKSIZE * bid + tid) < nnz);
-        const I safe_nnz_idx2 = nnz_valid2 ? (BLOCKSIZE * bid + tid) : 0;
+        const bool nnz_valid2    = ((BLOCKSIZE * bid + tid) < nnz);
+        const I    safe_nnz_idx2 = nnz_valid2 ? (BLOCKSIZE * bid + tid) : 0;
 
         if(nnz_valid2)
         {
@@ -626,8 +624,8 @@ namespace rocsparse
         J col = 0;
         T val = static_cast<T>(0);
 
-        const bool nnz_valid3 = ((BLOCKSIZE * bid + tid) < nnz);
-        const I safe_nnz_idx3 = nnz_valid3 ? (BLOCKSIZE * bid + tid) : 0;
+        const bool nnz_valid3    = ((BLOCKSIZE * bid + tid) < nnz);
+        const I    safe_nnz_idx3 = nnz_valid3 ? (BLOCKSIZE * bid + tid) : 0;
 
         if(nnz_valid3)
         {

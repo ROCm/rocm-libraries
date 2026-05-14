@@ -62,8 +62,10 @@ namespace rocsparse
 
         const bool    gid_valid = (gid < nnz);
         const int64_t safe_gid  = gid_valid ? gid : 0;
-        const I row = gid_valid ? rocsparse::nontemporal_load(coo_row_ind + safe_gid) - idx_base : 0;
-        const I col = gid_valid ? rocsparse::nontemporal_load(coo_col_ind + safe_gid) - idx_base : 0;
+        const I       row
+            = gid_valid ? rocsparse::nontemporal_load(coo_row_ind + safe_gid) - idx_base : 0;
+        const I col
+            = gid_valid ? rocsparse::nontemporal_load(coo_col_ind + safe_gid) - idx_base : 0;
         const T val = gid_valid ? static_cast<T>(rocsparse::nontemporal_load(coo_val + safe_gid))
                                 : static_cast<T>(0);
 
