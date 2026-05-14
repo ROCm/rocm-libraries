@@ -83,7 +83,6 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - WavefrontSize: [32]
         - TDMInst: [3]
-        - AssertSummationElementMultiple: [ 32 ]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -149,7 +148,6 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - WavefrontSize: [32]
         - TDMInst: [3]
-        - AssertSummationElementMultiple: [ 32 ]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -215,7 +213,6 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - WavefrontSize: [32]
         - TDMInst: [3]
-        - AssertSummationElementMultiple: [ 16 ]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
