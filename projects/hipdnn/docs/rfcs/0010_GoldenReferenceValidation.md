@@ -356,6 +356,8 @@ The golden data format is **reference-source-agnostic**. Any tool that produces 
 
 The runner is a **base class** (`IntegrationGraphGoldenReferenceVerificationHarness`) with three concrete subclasses: `TestCpuReferenceUsingGoldenValues` (CPU reference executor), `TestGpuReferenceUsingGoldenValues` (GPU reference executor), and `IntegrationGpuGoldenReferenceEngineValidation` (GPU plugin). The base class owns discovery, loading, tolerance lookup, and comparison. Each subclass overrides the execution step. Neither subclass knows what operation a bundle contains until it loads the graph JSON at runtime.
 
+The CPU and GPU reference subclasses validate the reference executors themselves against golden data. The engine subclass validates the engine. All three share the same base class and the same bundles — only the execution step differs.
+
 ##### How it works
 
 For a **full bundle** (`.json` + `.bin` files):
@@ -617,21 +619,21 @@ Comparison testing can confirm that two implementations agree, not that either i
 
 The following architectural forks were considered during design. Each records the rationale for the chosen path.
 
-- **Per-tensor `.bin` files vs. single archive (npz / HDF5 / zip).** A single archive per bundle would simplify "share = one file" and reduce filesystem entry counts, but trades off transparent diff/inspection and tool-agnostic readability. *Why we chose per-tensor `.bin`: ...*
+- **Per-tensor `.bin` files vs. single archive (npz / HDF5 / zip).** A single archive per bundle would simplify "share = one file" and reduce filesystem entry counts, but trades off transparent diff/inspection and tool-agnostic readability. *Why we chose per-tensor `.bin`: individual files are inspectable with standard tools (hexdump, NumPy `fromfile`), diffable in reviews, and independently fetchable by DVC. The "share one folder" workflow is simple enough.*
 
 - **Raw `.bin` files vs. self-describing tensor formats (safetensors, NumPy `.npy`).** Self-describing formats embed dtype, shape, and strides in a header, making each file independently interpretable. Our `.bin` files are raw data — all metadata lives in the graph JSON. *Why we chose raw `.bin`: the graph JSON already carries dtype, dims, and strides for every tensor. A self-describing format would duplicate that metadata and add an external dependency without clear benefit. The existing `LoadGraphAndTensors` loader already handles this format.*
 
-- **JSON graph + binary tensors vs. single FlatBuffers binary that embeds tensor data.** A unified binary would eliminate the JSON<->binary integrity surface, but costs human readability of the graph definition. *Why we chose split format: ...*
+- **JSON graph + binary tensors vs. single FlatBuffers binary that embeds tensor data.** A unified binary would eliminate the JSON<->binary integrity surface, but costs human readability of the graph definition. *Why we chose split format: the graph JSON is human-readable and diffable in PRs, which matters for review and debugging. Binary tensor data changes frequently; the graph definition changes rarely. Splitting them lets DVC track the large binaries while the graph stays in git.*
 
-- **Recursive auto-discovery vs. explicit index manifest.** A manifest (e.g., `bundles.toml` listing every bundle) makes test sets explicit and detects accidental drops/removes, but adds a step to the "drop a folder, done" workflow. *Why we chose auto-discovery: ...*
+- **Recursive auto-discovery vs. explicit index manifest.** A manifest (e.g., `bundles.toml` listing every bundle) makes test sets explicit and detects accidental drops/removes, but adds a step to the "drop a folder, done" workflow. *Why we chose auto-discovery: "drop files, run tests" is the primary workflow. A manifest adds a maintenance step and a failure mode (manifest out of sync with disk). Accidental deletions are caught by code review and DVC history.*
 
-- **Graph-derived test names vs. path-derived test names.** Path-derived names are stable against graph edits but break the customer-bundle workflow (test name encodes folder path the customer chose). Graph-derived names are stable against folder reorganization but can collide. *Why we chose graph-derived: ...*
+- **Graph-derived test names vs. path-derived test names.** Path-derived names are stable against graph edits but break the customer-bundle workflow (test name encodes folder path the customer chose). Graph-derived names are stable against folder reorganization but can collide. *Why we chose graph-derived: the test name should describe the computation, not an arbitrary folder path. Customer-submitted bundles get meaningful names regardless of where they are dropped. Collisions are detected at discovery time with a clear error.*
 
-- **DVC vs. Git LFS vs. pre-staged CI artifact.** DVC is already in the repo for other large assets; LFS is more universal but adds a new dependency; a pre-staged artifact decouples test latency from data fetch but loses content-addressing. *Why we chose DVC: ...*
+- **DVC vs. Git LFS vs. pre-staged CI artifact.** DVC is already in the repo for other large assets; LFS is more universal but adds a new dependency; a pre-staged artifact decouples test latency from data fetch but loses content-addressing. *Why we chose DVC: already in the repo for other large assets, content-addressing provides integrity guarantees, and selective fetch by path avoids pulling data for operations not under test.*
 
 - **Per-test checksum verification vs. DVC content-addressing.** Per-tensor SHA-256 checksums stored in JSON would catch corruption at any stage, but DVC already content-addresses every tracked file. *Why we chose DVC: already in the repo, no extra metadata to maintain, and tensor size validation at load time catches the practical failure modes (truncation, wrong file).*
 
-- **Tier as top-level folder vs. tier as bundle metadata.** Folder-as-tier maps cleanly to `ctest -L`, but moving a bundle between tiers requires `git mv`. Metadata-as-tier keeps location stable but requires reading every JSON to build the tier list. *Why we chose folder-as-tier: ...*
+- **Tier as top-level folder vs. tier as bundle metadata.** Folder-as-tier maps cleanly to `ctest -L`, but moving a bundle between tiers requires `git mv`. Metadata-as-tier keeps location stable but requires reading every JSON to build the tier list. *Why we chose folder-as-tier: maps directly to `ctest -L` without reading any JSON, matches how the rest of the integration suite assigns tiers, and makes tier membership visible in the directory listing.*
 
 ---
 
