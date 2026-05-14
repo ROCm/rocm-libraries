@@ -67,7 +67,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       repository: ROCm/TheRock
       ref: rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
-      external_repo_config: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
@@ -84,7 +84,7 @@ jobs:
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
-      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+      external_repo: ${{ needs.setup.outputs.external_repo }}
       repository: ROCm/TheRock
       ref: rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     permissions:
@@ -106,7 +106,7 @@ jobs:
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
-      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+      external_repo: ${{ needs.setup.outputs.external_repo }}
       repository: ROCm/TheRock
       ref: rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     permissions:
