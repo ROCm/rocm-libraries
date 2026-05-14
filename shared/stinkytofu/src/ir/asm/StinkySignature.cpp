@@ -424,8 +424,7 @@ std::string SignatureKernelDescriptor::toString() const {
     kStr += kdIndent + ".amdhsa_float_denorm_mode_16_64 3\n";
 
     if (numSgprPreload > 0) {
-        kStr +=
-            kdIndent + ".amdhsa_user_sgpr_count " + std::to_string(numSgprPreload + 2) + "\n";
+        kStr += kdIndent + ".amdhsa_user_sgpr_count " + std::to_string(numSgprPreload + 2) + "\n";
         kStr += kdIndent + ".amdhsa_user_sgpr_kernarg_preload_length " +
                 std::to_string(numSgprPreload) + "\n";
         kStr += kdIndent + ".amdhsa_user_sgpr_kernarg_preload_offset 0\n";
