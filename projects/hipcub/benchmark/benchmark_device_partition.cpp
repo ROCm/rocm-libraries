@@ -50,9 +50,10 @@ private:
 };
 } // namespace
 
-template<typename T, typename F, T Threshold>
+template<typename T, typename F, int Threshold>
 class flagged_benchmark : public primbench::benchmark_interface
 {
+private:
     primbench::json meta() const override
     {
         return primbench::json{}
@@ -68,7 +69,7 @@ class flagged_benchmark : public primbench::benchmark_interface
         const size_t size   = state.size;
         const auto&  stream = state.stream;
 
-        const auto select_op = LessOp<T>{Threshold};
+        const auto select_op = LessOp<T>{T(Threshold)};
         const auto input
             = benchmark_utils::get_random_data<T>(size, static_cast<T>(0), static_cast<T>(100));
 
@@ -125,9 +126,10 @@ class flagged_benchmark : public primbench::benchmark_interface
     }
 };
 
-template<typename T, T Threshold>
+template<typename T, int Threshold>
 class predicate_benchmark : public primbench::benchmark_interface
 {
+private:
     primbench::json meta() const override
     {
         return primbench::json{}
@@ -152,7 +154,7 @@ class predicate_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_num_selected_output, sizeof(unsigned int)));
 
-        const auto select_op = LessOp<T>{Threshold};
+        const auto select_op = LessOp<T>{T(Threshold)};
 
         // Allocate temporary storage
         void*  d_temp_storage     = nullptr;
@@ -191,9 +193,10 @@ class predicate_benchmark : public primbench::benchmark_interface
     }
 };
 
-template<typename T, T SmallThreshold, T LargeThreshold>
+template<typename T, int SmallThreshold, int LargeThreshold>
 class threeway_benchmark : public primbench::benchmark_interface
 {
+private:
     primbench::json meta() const override
     {
         return primbench::json{}
@@ -223,8 +226,8 @@ class threeway_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMalloc(&d_unselected_output, input.size() * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_num_selected_output, 2 * sizeof(unsigned int)));
 
-        const auto select_first_part_op  = LessOp<T>{SmallThreshold};
-        const auto select_second_part_op = LessOp<T>{LargeThreshold};
+        const auto select_first_part_op  = LessOp<T>{T(SmallThreshold)};
+        const auto select_second_part_op = LessOp<T>{T(LargeThreshold)};
 
         // Allocate temporary storage
         void*  d_temp_storage     = nullptr;
