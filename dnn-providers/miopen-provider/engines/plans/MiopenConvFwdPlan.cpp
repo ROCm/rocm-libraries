@@ -153,7 +153,10 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
                 "Convolution Fwd: Performing algorithm selection (first execution)");
 
             bool traceEnabled = HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED();
-            int requestCount = traceEnabled ? 10 : 1;
+            // Find dedupes by algorithm class (ShrinkToFind10Results in
+            // projects/miopen/src/ocl/convolutionocl.cpp:238), so it returns at most one
+            // entry per value of miopenConvFwdAlgorithm_t (5 enumerators).
+            int requestCount = traceEnabled ? 5 : 1;
 
             std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
             int returnedAlgoCount;
