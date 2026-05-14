@@ -27,6 +27,7 @@
 #include <cctype>
 #include <climits>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -53,27 +54,30 @@ namespace {
 
 using SymbolTable = std::unordered_map<std::string, int>;
 
-/// Evaluate a simple arithmetic expression composed of symbol names, integers,
-/// and +/- operators (no precedence beyond left-to-right, no parens needed for
-/// the patterns TensileLite emits). Returns nullopt if any token is unresolvable.
+/// Evaluate a simple arithmetic expression composed of integer literals,
+/// symbol names (resolved via \p syms), unary +/-, and binary + - * /.
+/// Multiplicative operators bind tighter than additive (standard precedence);
+/// no parentheses are supported (TensileLite never emits them in offsets).
+/// Returns nullopt if any token is unresolvable or the expression is malformed.
+///
+/// Grammar:
+///   expr   ::= term  (('+' | '-') term  )*
+///   term   ::= factor (('*' | '/') factor)*
+///   factor ::= ('+' | '-')? (NUMBER | IDENTIFIER)
 std::optional<int> evalExpr(const std::string& expr, const SymbolTable& syms) {
-    // Tokenize on +/- boundaries (keeping sign attached to numbers)
-    int result = 0;
-    int sign = 1;
     size_t i = 0;
-    size_t n = expr.size();
+    const size_t n = expr.size();
 
     auto skipWS = [&]() {
         while (i < n && (expr[i] == ' ' || expr[i] == '\t')) ++i;
     };
 
-    while (i < n) {
+    // Parse a single factor (signed atom: number or identifier).
+    auto parseFactor = [&]() -> std::optional<int> {
         skipWS();
-        if (i >= n) break;
-
-        // Optional leading sign for first token is handled by sign = 1/−1
+        if (i >= n) return std::nullopt;
+        int sign = 1;
         if (expr[i] == '+') {
-            sign = 1;
             ++i;
             skipWS();
         } else if (expr[i] == '-') {
@@ -81,31 +85,56 @@ std::optional<int> evalExpr(const std::string& expr, const SymbolTable& syms) {
             ++i;
             skipWS();
         }
-
         if (i >= n) return std::nullopt;
-
-        // Read token: digits or identifier characters
-        size_t start = i;
+        const size_t start = i;
         if (std::isdigit(static_cast<unsigned char>(expr[i]))) {
             while (i < n && std::isdigit(static_cast<unsigned char>(expr[i]))) ++i;
-            int val = std::stoi(expr.substr(start, i - start));
-            result += sign * val;
-        } else if (std::isalpha(static_cast<unsigned char>(expr[i])) || expr[i] == '_') {
+            return sign * std::stoi(expr.substr(start, i - start));
+        }
+        if (std::isalpha(static_cast<unsigned char>(expr[i])) || expr[i] == '_') {
             while (i < n && (std::isalnum(static_cast<unsigned char>(expr[i])) || expr[i] == '_'))
                 ++i;
             std::string name = expr.substr(start, i - start);
             auto it = syms.find(name);
             if (it == syms.end()) return std::nullopt;
-            result += sign * it->second;
-        } else {
-            return std::nullopt;
+            return sign * it->second;
         }
-        sign = 1;  // default next sign is positive unless we see +/-
+        return std::nullopt;
+    };
+
+    // Parse a term: factor (('*' | '/') factor)*
+    std::function<std::optional<int>()> parseTerm = [&]() -> std::optional<int> {
+        auto lhs = parseFactor();
+        if (!lhs) return std::nullopt;
+        while (true) {
+            skipWS();
+            if (i >= n || (expr[i] != '*' && expr[i] != '/')) break;
+            char op = expr[i++];
+            auto rhs = parseFactor();
+            if (!rhs) return std::nullopt;
+            if (op == '*') {
+                lhs = *lhs * *rhs;
+            } else {
+                if (*rhs == 0) return std::nullopt;  // div by zero
+                lhs = *lhs / *rhs;
+            }
+        }
+        return lhs;
+    };
+
+    // Parse the full expression: term (('+' | '-') term)*
+    auto lhs = parseTerm();
+    if (!lhs) return std::nullopt;
+    while (true) {
         skipWS();
-        // Next must be + or - or end
-        if (i < n && expr[i] != '+' && expr[i] != '-') return std::nullopt;
+        if (i >= n) break;
+        if (expr[i] != '+' && expr[i] != '-') return std::nullopt;
+        char op = expr[i++];
+        auto rhs = parseTerm();
+        if (!rhs) return std::nullopt;
+        lhs = (op == '+') ? *lhs + *rhs : *lhs - *rhs;
     }
-    return result;
+    return lhs;
 }
 
 /// Trim leading and trailing whitespace from a string in-place.
@@ -601,7 +630,8 @@ std::string inferModKeyFromFields(const FieldMap& fields) {
 /// uses this signal to bail out to TEXTBLOCK pass-through so the entire
 /// line round-trips verbatim instead of silently dropping the unmodelled
 /// modifier.
-bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* hwInstDesc) {
+bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* hwInstDesc,
+                    const SymbolTable& syms) {
     const std::string& mnemonic = inst.opcodeStr;
     bool isWaitcnt = (mnemonic == "s_waitcnt");
 
@@ -679,15 +709,27 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
                 // value via `atoi` (see ModifierSerializer's `getInt`),
                 // which would silently truncate to the first integer.
                 // Drain the remainder of the expression so the lexer
-                // stays in sync, mark the line as unrepresentable, and
-                // let the caller fall back to TEXTBLOCK so the source
-                // expression round-trips verbatim. (gatherArithExprSuffix
-                // is a no-op when the next token is not an operator or
-                // signed-literal continuation, so simple `offset:0` /
-                // `offset:32` are unaffected.)
+                // stays in sync, then evaluate it to a single integer
+                // using the symbol table (handles literal-only chains
+                // like `8704*2` and symbol-bearing chains like
+                // `vgprBase+0`). On evaluation failure, mark the line
+                // unrepresentable and let the caller fall back to
+                // TEXTBLOCK so the source expression round-trips
+                // verbatim. (gatherArithExprSuffix is a no-op when the
+                // next token is not an operator or signed-literal
+                // continuation, so simple `offset:0` / `offset:32` are
+                // unaffected.)
                 std::string folded = gatherArithExprSuffix(lexer, val);
-                if (folded != val) sawUnrepresentable = true;
-                fields[tok] = std::move(folded);
+                if (folded != val) {
+                    if (auto evaluated = evalExpr(folded, syms)) {
+                        fields[tok] = std::to_string(*evaluated);
+                    } else {
+                        sawUnrepresentable = true;
+                        fields[tok] = std::move(folded);
+                    }
+                } else {
+                    fields[tok] = std::move(folded);
+                }
                 sawAnyModifier = true;
             } else if (vk == TokenKind::Identifier) {
                 // `key:Identifier` modifiers (e.g. `matrix_a_fmt:MATRIX_FMT_FP8`,
@@ -949,7 +991,7 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
     // modifier on a microcode format that has no namespace mapped above),
     // bail to TEXTBLOCK pass-through so the line round-trips verbatim
     // instead of dropping the unmodelled modifier on emission.
-    if (!parseModifiers(lexer, *inst, hwInstDesc)) {
+    if (!parseModifiers(lexer, *inst, hwInstDesc, syms)) {
         return nullptr;
     }
 
