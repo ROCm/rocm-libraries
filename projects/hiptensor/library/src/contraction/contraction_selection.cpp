@@ -5659,7 +5659,35 @@ namespace hiptensor
                                  const uint64_t                  workspaceSize)
     {
         if(typeA == HIPTENSOR_R_16F && typeB == HIPTENSOR_R_16F && typeD == NONE_TYPE
-           && typeE == HIPTENSOR_R_16F && computeType == HIPTENSOR_COMPUTE_DESC_32F)
+           && typeE == HIPTENSOR_R_16F && computeType == HIPTENSOR_COMPUTE_DESC_16F)
+        {
+            return ActorCriticSelectionUnaryOps<_Float16,
+                                                _Float16,
+                                                _Float16,
+                                                _Float16,
+                                                ContractionOpId_t::SCALE,
+                                                _Float16>::selectWinner(winner,
+                                                                        candidates,
+                                                                        typeA,
+                                                                        a_ms_ks_lengths,
+                                                                        a_ms_ks_strides,
+                                                                        a_ms_ks_modes,
+                                                                        typeB,
+                                                                        b_ns_ks_lengths,
+                                                                        b_ns_ks_strides,
+                                                                        b_ns_ks_modes,
+                                                                        typeD,
+                                                                        d_ms_ns_lengths,
+                                                                        d_ms_ns_strides,
+                                                                        d_ms_ns_modes,
+                                                                        typeE,
+                                                                        e_ms_ns_lengths,
+                                                                        e_ms_ns_strides,
+                                                                        e_ms_ns_modes,
+                                                                        workspaceSize);
+        }
+        else if(typeA == HIPTENSOR_R_16F && typeB == HIPTENSOR_R_16F && typeD == NONE_TYPE
+                && typeE == HIPTENSOR_R_16F && computeType == HIPTENSOR_COMPUTE_DESC_32F)
         {
             return ActorCriticSelectionUnaryOps<_Float16,
                                                 _Float16,
@@ -5685,6 +5713,34 @@ namespace hiptensor
                                                                      e_ms_ns_strides,
                                                                      e_ms_ns_modes,
                                                                      workspaceSize);
+        }
+        else if(typeA == HIPTENSOR_R_16F && typeB == HIPTENSOR_R_16F && typeD == HIPTENSOR_R_16F
+                && typeE == HIPTENSOR_R_16F && computeType == HIPTENSOR_COMPUTE_DESC_16F)
+        {
+            return ActorCriticSelectionUnaryOps<_Float16,
+                                                _Float16,
+                                                _Float16,
+                                                _Float16,
+                                                ContractionOpId_t::BILINEAR,
+                                                _Float16>::selectWinner(winner,
+                                                                        candidates,
+                                                                        typeA,
+                                                                        a_ms_ks_lengths,
+                                                                        a_ms_ks_strides,
+                                                                        a_ms_ks_modes,
+                                                                        typeB,
+                                                                        b_ns_ks_lengths,
+                                                                        b_ns_ks_strides,
+                                                                        b_ns_ks_modes,
+                                                                        typeD,
+                                                                        d_ms_ns_lengths,
+                                                                        d_ms_ns_strides,
+                                                                        d_ms_ns_modes,
+                                                                        typeE,
+                                                                        e_ms_ns_lengths,
+                                                                        e_ms_ns_strides,
+                                                                        e_ms_ns_modes,
+                                                                        workspaceSize);
         }
         else if(typeA == HIPTENSOR_R_16F && typeB == HIPTENSOR_R_16F && typeD == HIPTENSOR_R_16F
                 && typeE == HIPTENSOR_R_16F && computeType == HIPTENSOR_COMPUTE_DESC_32F)
@@ -5715,6 +5771,34 @@ namespace hiptensor
                                                                      workspaceSize);
         }
         else if(typeA == HIPTENSOR_R_16BF && typeB == HIPTENSOR_R_16BF && typeD == NONE_TYPE
+                && typeE == HIPTENSOR_R_16BF && computeType == HIPTENSOR_COMPUTE_DESC_16BF)
+        {
+            return ActorCriticSelectionUnaryOps<hip_bfloat16,
+                                                hip_bfloat16,
+                                                hip_bfloat16,
+                                                hip_bfloat16,
+                                                ContractionOpId_t::SCALE,
+                                                hip_bfloat16>::selectWinner(winner,
+                                                                            candidates,
+                                                                            typeA,
+                                                                            a_ms_ks_lengths,
+                                                                            a_ms_ks_strides,
+                                                                            a_ms_ks_modes,
+                                                                            typeB,
+                                                                            b_ns_ks_lengths,
+                                                                            b_ns_ks_strides,
+                                                                            b_ns_ks_modes,
+                                                                            typeD,
+                                                                            d_ms_ns_lengths,
+                                                                            d_ms_ns_strides,
+                                                                            d_ms_ns_modes,
+                                                                            typeE,
+                                                                            e_ms_ns_lengths,
+                                                                            e_ms_ns_strides,
+                                                                            e_ms_ns_modes,
+                                                                            workspaceSize);
+        }
+        else if(typeA == HIPTENSOR_R_16BF && typeB == HIPTENSOR_R_16BF && typeD == NONE_TYPE
                 && typeE == HIPTENSOR_R_16BF && computeType == HIPTENSOR_COMPUTE_DESC_32F)
         {
             return ActorCriticSelectionUnaryOps<hip_bfloat16,
@@ -5741,6 +5825,34 @@ namespace hiptensor
                                                                      e_ms_ns_strides,
                                                                      e_ms_ns_modes,
                                                                      workspaceSize);
+        }
+        else if(typeA == HIPTENSOR_R_16BF && typeB == HIPTENSOR_R_16BF && typeD == HIPTENSOR_R_16BF
+                && typeE == HIPTENSOR_R_16BF && computeType == HIPTENSOR_COMPUTE_DESC_16BF)
+        {
+            return ActorCriticSelectionUnaryOps<hip_bfloat16,
+                                                hip_bfloat16,
+                                                hip_bfloat16,
+                                                hip_bfloat16,
+                                                ContractionOpId_t::BILINEAR,
+                                                hip_bfloat16>::selectWinner(winner,
+                                                                            candidates,
+                                                                            typeA,
+                                                                            a_ms_ks_lengths,
+                                                                            a_ms_ks_strides,
+                                                                            a_ms_ks_modes,
+                                                                            typeB,
+                                                                            b_ns_ks_lengths,
+                                                                            b_ns_ks_strides,
+                                                                            b_ns_ks_modes,
+                                                                            typeD,
+                                                                            d_ms_ns_lengths,
+                                                                            d_ms_ns_strides,
+                                                                            d_ms_ns_modes,
+                                                                            typeE,
+                                                                            e_ms_ns_lengths,
+                                                                            e_ms_ns_strides,
+                                                                            e_ms_ns_modes,
+                                                                            workspaceSize);
         }
         else if(typeA == HIPTENSOR_R_16BF && typeB == HIPTENSOR_R_16BF && typeD == HIPTENSOR_R_16BF
                 && typeE == HIPTENSOR_R_16BF && computeType == HIPTENSOR_COMPUTE_DESC_32F)

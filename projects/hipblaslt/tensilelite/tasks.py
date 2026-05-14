@@ -4,14 +4,38 @@
 from invoke.tasks import task
 import os
 import shlex
+import subprocess
+import sys
 
 
 def _cmake_bool(value):
     return "ON" if value else "OFF"
 
+
+def _detect_rocm():
+    """Detect ROCm installation path.
+
+    Priority: ROCM_PATH env > rocm-sdk path --root > /opt/rocm.
+    """
+    env_path = os.environ.get("ROCM_PATH")
+    if env_path:
+        return env_path
+
+    import shutil
+    if shutil.which("rocm-sdk"):
+        try:
+            result = subprocess.check_output(
+                ["rocm-sdk", "path", "--root"], stderr=subprocess.DEVNULL
+            ).decode().strip()
+            if result:
+                return result
+        except subprocess.CalledProcessError:
+            pass
+
+    return "/opt/rocm"
+
+
 def detect_gpu_arch():
-    import subprocess
-    import sys
     try:
         result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
         if result.returncode == 0:
@@ -33,6 +57,28 @@ def detect_gpu_arch():
 @task
 def get_gpu_arch(c):
     print(detect_gpu_arch())
+
+@task(
+    help={
+        "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
+    }
+)
+def rocisa(c, rocisa_dir=None):
+    """Install rocisa as an editable pip package.
+
+    Run once after cloning, or after changes to rocisa's pyproject.toml or
+    CMakeLists.txt. C++ source changes do not require re-running this task —
+    the staleness check in rocisa/__init__.py will catch them and tell you to
+    rebuild with cmake.
+    """
+    import pathlib
+
+    src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else pathlib.Path(__file__).parent / "rocisa"
+    rocm = _detect_rocm()
+    cmake_args = f"-DROCM_PATH={rocm} -DROCISA_INCLUDE_BUILD_INFO=ON"
+    env = dict(os.environ, CMAKE_ARGS=cmake_args)
+    c.run(f"pip install -e {shlex.quote(str(src))}", env=env)
+
 
 @task(
     help={
@@ -61,6 +107,11 @@ def build_client(
     bundle_python_deps=False,
     enable_rocprof=False,
 ):
+    """Build the tensilelite-client C++ executable.
+
+    To run Tensile after building, use: Tensile/bin/Tensile <args>
+    rocisa must be installed separately via: invoke rocisa
+    """
 
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
@@ -72,6 +123,16 @@ def build_client(
     if rocm_path:
         cmake_c_compiler = os.path.join(rocm_path, "bin", "amdclang")
         cmake_cxx_compiler = os.path.join(rocm_path, "bin", "amdclang++")
+
+        for compiler in (cmake_c_compiler, cmake_cxx_compiler):
+            try:
+                subprocess.run([compiler, "--version"], capture_output=True, timeout=5, check=True)
+            except FileNotFoundError:
+                print(f"Error: compiler not found at {compiler}", file=sys.stderr)
+                return
+            except subprocess.SubprocessError as e:
+                print(f"Error: compiler check failed for {compiler}: {e}", file=sys.stderr)
+                return
 
     if clean and os.path.exists(build_dir):
         c.run(f"rm -rf {shlex.quote(build_dir)}")

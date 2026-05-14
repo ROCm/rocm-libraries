@@ -16,6 +16,7 @@ from codegen.config_loader import (
     _parse_frontend_tensors,
     _parse_infer_properties,
     _parse_validation,
+    _reject_deprecated_keys,
     _validate_config,
     load_config,
     validate_for_mode,
@@ -206,7 +207,10 @@ class TestTensorFieldParsing:
 
     def test_tensor_field_frontend_getter(self, convolution_fwd_config):
         x = convolution_fwd_config.tensor_fields[0]
-        assert x.frontend_getter == "get_x()"
+        # Phase 2 cleanup removed tensor_fields[].frontend_getter from
+        # convolution_fwd.yaml; the parser must tolerate its absence and
+        # leave the field at its default empty string.
+        assert x.frontend_getter == ""
 
     def test_optional_tensor_field(self, pointwise_config):
         in_1 = next(tf for tf in pointwise_config.tensor_fields if tf.name == "in_1")
@@ -296,6 +300,37 @@ class TestTensorArrayFieldParsing:
     def test_tensor_array_required_default(self, batchnorm_config):
         taf = batchnorm_config.tensor_array_fields[0]
         assert taf.required is False
+
+
+class TestExtraDataTypeFieldParsing:
+    """Verify extra_data_type_fields are parsed correctly (mma_core_mode on SDPA)."""
+
+    def test_sdpa_has_extra_data_type_field(self, sdpa_config):
+        assert len(sdpa_config.extra_data_type_fields) == 1
+
+    def test_sdpa_extra_data_type_name(self, sdpa_config):
+        edt = sdpa_config.extra_data_type_fields[0]
+        assert edt.name == "mma_core_mode"
+
+    def test_sdpa_extra_data_type_attr(self, sdpa_config):
+        edt = sdpa_config.extra_data_type_fields[0]
+        assert edt.attr_name == "HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT"
+
+    def test_sdpa_extra_data_type_sentinel(self, sdpa_config):
+        edt = sdpa_config.extra_data_type_fields[0]
+        assert edt.sentinel == "DataType::NOT_SET"
+
+    def test_sdpa_extra_data_type_member_access(self, sdpa_config):
+        """SdpaAttributes exposes mma_core_mode as a public member."""
+        edt = sdpa_config.extra_data_type_fields[0]
+        assert edt.frontend_uses_member_access is True
+        assert edt.frontend_member_name == "mma_core_mode"
+
+    def test_other_configs_have_no_extra_data_type_fields(
+        self, convolution_fwd_config, matmul_config
+    ):
+        assert convolution_fwd_config.extra_data_type_fields == []
+        assert matmul_config.extra_data_type_fields == []
 
 
 class TestTestDataParsing:
@@ -537,6 +572,36 @@ class TestParseInferProperties:
         assert result.reference_input == ""
         assert result.dimension_formula == ""
 
+    def test_strategy_broadcast_is_silently_accepted(self):
+        """Documents the intentional silent fall-through for non-stub,
+        non-match_input strategy values.
+
+        ``broadcast`` and ``custom`` were proposed strategy values that
+        never got implementation in the templates. Rather than break
+        configs that still set them, the loader stores the raw string and
+        the templates fall through to the ``stub`` branch. This test pins
+        that behavior so a future contributor doesn't accidentally tighten
+        it without updating the docs.
+        """
+        result = _parse_infer_properties({"strategy": "broadcast"})
+        assert result.strategy == "broadcast"  # stored verbatim, not rejected
+        result = _parse_infer_properties({"strategy": "custom"})
+        assert result.strategy == "custom"
+
+    @pytest.mark.parametrize("garbage", ["", "not-a-strategy", "STUB", "stub  "])
+    def test_strategy_garbage_value_is_silently_accepted(self, garbage):
+        """Pins the same silent-pass behavior for arbitrary garbage values.
+
+        The loader does NOT validate the strategy string against a known
+        allowlist — anything that isn't ``stub`` or ``match_input`` falls
+        through to the ``stub`` template branch. This is the same contract
+        as broadcast/custom; we pin garbage values explicitly so a future
+        contributor who tightens validation has to update both this and
+        the broadcast pin (and the docs in CLAUDE.md's "Removed" table).
+        """
+        result = _parse_infer_properties({"strategy": garbage})
+        assert result.strategy == garbage  # stored verbatim, not rejected
+
 
 class TestParseValidation:
     """Test _parse_validation() behavior."""
@@ -548,22 +613,38 @@ class TestParseValidation:
         raw = {
             "required_input_tensors": ["x", "w"],
             "required_input_dims": ["x"],
-            "dim_consistency_checks": [{"a": "b"}],
             "custom_checks": ["check something"],
         }
         result = _parse_validation(raw)
         assert isinstance(result, ValidationConfig)
         assert result.required_input_tensors == ["x", "w"]
         assert result.required_input_dims == ["x"]
-        assert len(result.dim_consistency_checks) == 1
         assert result.custom_checks == ["check something"]
 
     def test_defaults_applied(self):
         result = _parse_validation({})
         assert result.required_input_tensors == []
         assert result.required_input_dims == []
-        assert result.dim_consistency_checks == []
         assert result.custom_checks == []
+
+    def test_dim_consistency_checks_is_rejected(self):
+        """validation.dim_consistency_checks is rejected by the centralized
+        deprecated-key driver alongside the data_fields and tensor_fields
+        keys.
+        """
+        op = {
+            "name": "TestOp",
+            "validation": {
+                "required_input_tensors": ["x"],
+                "dim_consistency_checks": ["x.dim == y.dim"],
+            },
+        }
+        with pytest.raises(ConfigError) as excinfo:
+            _reject_deprecated_keys(op)
+        msg = str(excinfo.value)
+        assert "dim_consistency_checks" in msg
+        assert "custom_checks" in msg
+        assert "TestOp" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -709,6 +790,242 @@ class TestValidateConfigWarnings:
         captured = capsys.readouterr()
         assert "test_alt_enum_value" in captured.err
 
+    @pytest.mark.parametrize("value", [True, False, None, ""])
+    def test_data_field_frontend_getter_returns_optional_is_rejected(self, value):
+        """data_fields[].frontend_getter_returns_optional is rejected on
+        key-presence, not value-truthiness. Setting it to ``False`` or
+        ``None`` still raises — the contract is that the key must not
+        appear at all.
+        """
+        op = {
+            "name": "TestOp",
+            "data_fields": [
+                {
+                    "name": "legacy_optional_field",
+                    "frontend_getter_returns_optional": value,
+                }
+            ],
+        }
+        with pytest.raises(ConfigError) as excinfo:
+            _reject_deprecated_keys(op)
+        msg = str(excinfo.value)
+        assert "frontend_getter_returns_optional" in msg
+        assert "fbs_optional" in msg
+        assert "legacy_optional_field" in msg
+        assert "TestOp" in msg
+
+    def test_data_field_without_frontend_getter_returns_optional_passes(self):
+        """No error when frontend_getter_returns_optional is absent."""
+        op = {"name": "TestOp", "data_fields": [{"name": "plain_field"}]}
+        # Should not raise.
+        _reject_deprecated_keys(op)
+
+    # --- Phase 0.3: mode_sentinel auto-detect warning ---
+
+    def test_mode_field_no_sentinel_emits_auto_default_warning(self, capsys):
+        """A mode field whose enum_def has no sentinel and no mode_sentinel set
+        triggers a one-line auto-default warning so the author can opt into
+        ``mode_sentinel: none`` explicitly."""
+        from codegen.models import EnumDef, EnumValue
+
+        ed = EnumDef(
+            values=[EnumValue(name="ADD", value=0), EnumValue(name="MUL", value=1)]
+        )
+        config = make_minimal_config(
+            data_fields=[
+                make_data_field(
+                    name="my_unsentineled_mode",
+                    type="mode",
+                    enum_def=ed,
+                    mode_sentinel=None,
+                    backend_setter="setMyMode",
+                    backend_getter="getMyMode",
+                    backend_type_name="HIPDNN_TYPE_MY_MODE",
+                    test_enum_value="ADD",
+                    test_backend_value="HIPDNN_ADD",
+                    test_alt_enum_value="MUL",
+                    frontend_inverse_converter="fromMyMode",
+                )
+            ]
+        )
+        _validate_config(config)
+        captured = capsys.readouterr()
+        assert "my_unsentineled_mode" in captured.err
+        assert "mode_sentinel" in captured.err
+
+    def test_mode_field_with_explicit_mode_sentinel_no_auto_default_warning(
+        self, capsys
+    ):
+        """Setting mode_sentinel explicitly silences the auto-default warning."""
+        from codegen.models import EnumDef, EnumValue
+
+        ed = EnumDef(values=[EnumValue(name="ADD", value=0)])
+        config = make_minimal_config(
+            data_fields=[
+                make_data_field(
+                    name="silent_mode",
+                    type="mode",
+                    enum_def=ed,
+                    mode_sentinel="none",
+                    backend_setter="setSilent",
+                    backend_getter="getSilent",
+                    backend_type_name="HIPDNN_TYPE_SILENT_MODE",
+                    test_enum_value="ADD",
+                    test_backend_value="HIPDNN_ADD",
+                    test_alt_enum_value="ADD",
+                    frontend_inverse_converter="fromSilent",
+                )
+            ]
+        )
+        _validate_config(config)
+        captured = capsys.readouterr()
+        assert "auto-defaulted to mode_sentinel" not in captured.err
+
+    # --- C5 restoration: tensor_fields[].frontend_getter is honored again ---
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("get_legacy()", "get_legacy"),
+            ("get_legacy", "get_legacy"),
+            ("", ""),
+            (None, ""),
+        ],
+    )
+    def test_tensor_fields_frontend_getter_accepted(self, tmp_path, raw, expected):
+        """C5: tensor_fields[].frontend_getter is honored as an accessor
+        override and stored on the model with the trailing ``()`` stripped.
+        Also accepts bare names, empty strings, and missing keys.
+        """
+        yaml_content = f"""
+operation:
+  name: "TestOp"
+  class_name: "TestOpDescriptor"
+  fbs_table: "TestOpAttributes"
+  fbs_generated_header: "test_op_attributes_generated.h"
+  has_compute_data_type: false
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X"
+      required: true
+"""
+        if raw is not None:
+            yaml_content += f'      frontend_getter: "{raw}"\n'
+        yaml_content += """  test_data:
+    tensor_uids: { x: 1 }
+    tensor_configs:
+      x: { dims: [1], strides: [1] }
+"""
+        config_path = tmp_path / "test_op.yaml"
+        config_path.write_text(yaml_content)
+        config = load_config(str(config_path))
+        assert config.tensor_fields[0].frontend_getter == expected
+
+    def test_tensor_fields_frontend_getter_rejects_internal_parens(self, tmp_path):
+        """A frontend_getter expression with internal parens (e.g.,
+        ``get_x().nested()``) is malformed — the loader rejects it instead
+        of silently accepting a value that won't render correctly."""
+        yaml_content = """
+operation:
+  name: "TestOp"
+  class_name: "TestOpDescriptor"
+  fbs_table: "TestOpAttributes"
+  fbs_generated_header: "test_op_attributes_generated.h"
+  has_compute_data_type: false
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X"
+      required: true
+      frontend_getter: "get_x().nested()"
+  test_data:
+    tensor_uids: { x: 1 }
+    tensor_configs:
+      x: { dims: [1], strides: [1] }
+"""
+        config_path = tmp_path / "bad.yaml"
+        config_path.write_text(yaml_content)
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(str(config_path))
+        assert "frontend_getter" in str(excinfo.value)
+
+    def test_tensor_fields_without_frontend_getter_passes(self):
+        """No error when tensor_fields[].frontend_getter is absent."""
+        op = {"name": "TestOp", "tensor_fields": [{"name": "x"}]}
+        # Should not raise — only data_fields[].frontend_getter_returns_optional
+        # and validation.dim_consistency_checks remain hard-rejected.
+        _reject_deprecated_keys(op)
+
+    # --- C5: tensor_field → frontend resolution hard-rejection ---
+
+    def test_unresolved_tensor_field_raises(self):
+        """A tensor_field that doesn't match any frontend input/output and
+        carries no ``frontend_getter`` override raises a ``ConfigError``
+        naming the operation, the unresolved tensor_field, and the
+        available frontend tensors. Promotes the historical Risk-R4
+        soft-warn to a hard reject so the silent ``attributes.()`` packer
+        bug can't ship."""
+        config = make_minimal_config(
+            tensor_fields=[
+                make_tensor_field(
+                    name="orphan", fbs_field="orphan_uid", attr_suffix="O"
+                ),
+            ],
+            frontend=make_frontend_config(
+                inputs=[make_frontend_tensor_config(name="input_0")],
+                outputs=[make_frontend_tensor_config(name="output_0", enum_value=1)],
+            ),
+            test_data=make_test_data(tensor_uids={"orphan": 1}),
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _validate_config(config)
+        msg = str(excinfo.value)
+        assert "TestOp" in msg
+        assert "orphan" in msg
+        assert "input_0" in msg
+        assert "output_0" in msg
+        assert "frontend_getter" in msg
+
+    def test_unresolved_tensor_field_with_override_passes(self):
+        """A tensor_field that does not match any frontend input/output is
+        accepted when it carries a ``frontend_getter`` override. The
+        synthetic FrontendTensorConfig populates the resolution map."""
+        config = make_minimal_config(
+            tensor_fields=[
+                make_tensor_field(
+                    name="orphan",
+                    fbs_field="orphan_uid",
+                    attr_suffix="O",
+                    frontend_getter="get_orphan",
+                ),
+            ],
+            frontend=make_frontend_config(
+                inputs=[make_frontend_tensor_config(name="input_0")],
+                outputs=[make_frontend_tensor_config(name="output_0", enum_value=1)],
+            ),
+            test_data=make_test_data(tensor_uids={"orphan": 1}),
+        )
+        # Should not raise.
+        _validate_config(config)
+
+    def test_backend_only_config_emits_no_warning(self, capsys):
+        """Configs without any frontend wiring (no inputs and no outputs)
+        skip the resolution check entirely — backend-only configs are
+        intentional and must stay quiet."""
+        config = make_minimal_config(
+            tensor_fields=[
+                make_tensor_field(
+                    name="orphan", fbs_field="orphan_uid", attr_suffix="O"
+                ),
+            ],
+            frontend=make_frontend_config(inputs=[], outputs=[]),
+            test_data=make_test_data(tensor_uids={"orphan": 1}),
+        )
+        _validate_config(config)
+        err = capsys.readouterr().err
+        assert "no matching frontend input/output" not in err
+
 
 # ---------------------------------------------------------------------------
 # Task 2B.7: validate_for_mode()
@@ -721,9 +1038,8 @@ class TestValidateForMode:
     def test_non_frontend_mode_is_noop(self):
         """Non-frontend modes return without validation."""
         config = make_minimal_config()
-        # Backend, lift-only: no error even with empty frontend
+        # Backend: no error even with empty frontend
         validate_for_mode(config, "backend")
-        validate_for_mode(config, "lift-only")
 
     def test_frontend_mode_empty_inputs_raises(self):
         """Frontend mode with empty inputs raises ConfigError."""
@@ -863,3 +1179,30 @@ class TestLoadConfigErrors:
         config_file.write_text("operation:\n")
         with pytest.raises(ConfigError, match="operation"):
             load_config(config_file)
+
+    def test_invalid_mode_sentinel_value_is_rejected(self, tmp_path):
+        """A mode_sentinel value outside {'required', 'optional', 'none'} is
+        rejected at load time. Catches typos like ``"sometimes"`` before
+        they reach template rendering, where they would silently fall
+        through the finalize-check branch.
+        """
+        config_file = tmp_path / "bad_sentinel.yaml"
+        config_file.write_text(
+            "operation:\n"
+            '  name: "Test"\n'
+            '  class_name: "TestDescriptor"\n'
+            '  fbs_table: "TestTable"\n'
+            '  fbs_generated_header: "test_generated.h"\n'
+            "  has_compute_data_type: false\n"
+            "  data_fields:\n"
+            '    - name: "my_mode"\n'
+            '      fbs_field: "my_mode"\n'
+            '      attr_name: "HIPDNN_ATTR_TEST_MODE"\n'
+            '      type: "mode"\n'
+            '      mode_sentinel: "sometimes"\n'
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(config_file)
+        msg = str(excinfo.value)
+        assert "mode_sentinel" in msg
+        assert "sometimes" in msg

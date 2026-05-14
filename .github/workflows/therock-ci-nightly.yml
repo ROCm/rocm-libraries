@@ -18,7 +18,9 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       linux_projects: ${{ steps.linux_projects.outputs.linux_projects }}
+      linux_build_runs_on: ${{ steps.linux_projects.outputs.build_runs_on }}
       windows_projects: ${{ steps.windows_projects.outputs.windows_projects }}
+      windows_build_runs_on: ${{ steps.windows_projects.outputs.build_runs_on }}
       test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
@@ -35,7 +37,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: dc88ae1f34e0ac09d46f0147df82c1184abd6ae4 # 2026-04-22
+          ref: 482ff586c261379e1132cf776f122e1d0972a8a0 # 2026-05-11 commit
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -63,16 +65,12 @@ jobs:
         run: |
           python .github/scripts/therock_configure_ci.py
 
-      - name: Fetch Linux targets for build and test
-        env:
-          THEROCK_PACKAGE_PLATFORM: "linux"
-          # TODO(geomin12): Allow dynamic values of AMDGPU_FAMILIES, with opt-in options
-          AMDGPU_FAMILIES: "gfx94X, gfx950"
-          # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
-          ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
-          LOAD_TEST_RUNNERS_FROM_VAR: true
+      # TODO(#7170): Remove hard-coded targets after testing is stabilized and switch back to fetch_package_targets.py
+      # Temporary: Hard-code Linux targets for 2-GPU runner testing
+      - name: Set Linux targets for build and test
         id: configure_linux
-        run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
+        run: |
+          echo 'package_targets=[{"amdgpu_family": "gfx94X-dcgpu", "test_machine": "linux-gfx942-2gpu-core42-ossci-rocm"}, {"amdgpu_family": "gfx950-dcgpu", "test_machine": ""}]' >> "$GITHUB_OUTPUT"
 
       - name: Fetch Windows targets for build and test
         env:
@@ -105,6 +103,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
+      build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
 
   therock-ci-windows:
     name: Windows (${{ matrix.projects.projects_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
@@ -126,6 +125,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
+      build_runs_on: ${{ needs.setup.outputs.windows_build_runs_on }}
 
   therock_ci_nightly_summary:
     name: TheRock CI Nightly Summary

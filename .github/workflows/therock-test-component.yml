@@ -70,7 +70,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: dc88ae1f34e0ac09d46f0147df82c1184abd6ae4 # 2026-04-22
+          ref: 482ff586c261379e1132cf776f122e1d0972a8a0 # 2026-05-11 commit
 
       - name: Configure git for long paths on Windows
         if: ${{ runner.os == 'Windows' }}
@@ -110,17 +110,16 @@ jobs:
           # Run test and capture output (still display to console)
           ${{ fromJSON(inputs.component).test_script }} 2>&1 | tee ./test_logs/test_output.log
 
-      - name: Notify MIOpen Teams Channel on Failure
-        # Channel name "MIOpen CI Reporting"
-        if: ${{ contains(fromJSON(inputs.component).job_name, 'miopen') && failure() && !github.event.pull_request.head.repo.fork }}
+      - name: Notify Teams Channel on Failure
+        if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
         run: |
           python3 rocm-libraries/.github/scripts/notify_teams.py \
-            --project miopen \
             --failure-stage test \
             --log-path ./test_logs/test_output.log \
-            --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            --webhook-urls '{"miopen":"${{ secrets.MIOPEN_CI_WEBHOOK_URL }}","hipdnn":"${{ secrets.HIPDNN_CI_WEBHOOK_URL }}"}' \
             --pr-number "${{ github.event.pull_request.number }}" \
             --pr-title "${{ github.event.pull_request.title }}" \
+            --component-name "${{ fromJSON(inputs.component).job_name }}" \
             --job-name "${{ fromJSON(inputs.component).job_name }} (shard ${{ matrix.shard }}/${{ fromJSON(inputs.component).total_shards }})"
 
       # GitHub's 'Complete job' step is unaware of launched executables

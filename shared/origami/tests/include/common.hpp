@@ -44,7 +44,7 @@ inline int portable_setenv(const char* name, const char* value, int overwrite) {
 }
 
 // List of GPU architectures to test
-inline const std::vector<int> test_architectures = {942, 950};
+inline const std::vector<int> test_architectures = {942, 950, 1250};
 
 // Helper function to construct problem_t
 inline origami::problem_t make_problem(size_t m,
@@ -134,6 +134,12 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
     compute_clock_ghz          = 1.2;
     parallel_mi_cu             = 1;
     mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
+  } else if(gpu_arch == 1250) {
+    // TODO: using gfx950 placeholders for most fields, update lds_capacity and l2_capacity later
+    auto hw = make_hardware(950);
+    hw.arch = origami::hardware_t::architecture_t::gfx1250;
+    hw.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
+    return hw;
   }
 
   const std::string gpu_arch_str = "gfx" + std::to_string(gpu_arch);

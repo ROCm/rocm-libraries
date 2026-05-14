@@ -4,6 +4,28 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(stinkytofu)
+
+set(STINKYTOFU_VERSION "0.1.0")
+string(REPLACE "." ";" _ver_list ${STINKYTOFU_VERSION})
+list(GET _ver_list 0 STINKYTOFU_VERSION_MAJOR)
+list(GET _ver_list 1 STINKYTOFU_VERSION_MINOR)
+list(GET _ver_list 2 STINKYTOFU_VERSION_PATCH)
+
+find_package(ROCmCMakeBuildTools QUIET CONFIG)
+set(STINKYTOFU_VERSION_TWEAK "")
+if(ROCmCMakeBuildTools_FOUND)
+    include(ROCMSetupVersion)
+    rocm_get_git_commit_tag(STINKYTOFU_VERSION_TWEAK)
+else()
+    message(WARNING "ROCmCMakeBuildTools not found — version TWEAK (git hash) will be empty.")
+endif()
+message(STATUS "StinkyTofu version: ${STINKYTOFU_VERSION} (${STINKYTOFU_VERSION_TWEAK})")
+
+configure_file(
+    include/stinkytofu/Version.h.in
+    ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h
+    @ONLY)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -21,8 +43,19 @@ endforeach()
 
 add_compile_options(-fno-rtti -fno-exceptions)
 
-# set variable of the top level source directory to STINKYTOFU_TOP_DIR
-set(STINKYTOFU_TOP_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+# Hide all symbols by default; only STINKYTOFU_EXPORT symbols are visible.
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
+# On Windows, DLLs must be next to executables at runtime. Place all
+# binaries in a single directory so tools/tests find stinkytofu.dll.
+if(WIN32)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
+
+set(STINKYTOFU_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(STINKYTOFU_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" PARENT_SCOPE)
 
 ##===----------------------------------------------------------------------===##
 # Architectures
@@ -65,6 +98,17 @@ if(TARGET _rocisa)
 endif()
 
 ##===----------------------------------------------------------------------===##
+# Warning flags (single source of truth for all stinkytofu targets)
+##===----------------------------------------------------------------------===##
+option(STINKYTOFU_ENABLE_WERROR "Treat warnings as errors" OFF)
+add_library(stinkytofu-warnings INTERFACE)
+target_compile_options(stinkytofu-warnings INTERFACE -Wall)
+if(STINKYTOFU_ENABLE_WERROR)
+    target_compile_options(stinkytofu-warnings INTERFACE
+        -Werror -Wno-error=deprecated-declarations -Wno-error=comment)
+endif()
+
+##===----------------------------------------------------------------------===##
 # Hardware library and tablegen tools
 ##===----------------------------------------------------------------------===##
 # Add subdirectories first to define gfxisa, tablegen, and tablegen_generated targets
@@ -94,19 +138,20 @@ set(STINKYTOFU_GENERATED_SOURCES
 # Mark generated files so CMake knows they will be created during build
 set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED TRUE)
 
-# TODO: Windows requires explicit __declspec(dllexport) on every symbol for
-# shared libraries with lld-link. Build as static on Windows temporarily until
-# all public API is properly annotated with STINKYTOFU_EXPORT.
-if(WIN32)
-    add_library(stinkytofu STATIC ${STINKYTOFU_GENERATED_SOURCES})
+option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+add_library(stinkytofu ${STINKYTOFU_GENERATED_SOURCES})
+target_link_libraries(stinkytofu PRIVATE stinkytofu-warnings)
+set_target_properties(stinkytofu PROPERTIES
+    VERSION "${STINKYTOFU_VERSION_MAJOR}.${STINKYTOFU_VERSION_MINOR}.${STINKYTOFU_VERSION_PATCH}"
+    SOVERSION "${STINKYTOFU_VERSION_MAJOR}")
+if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
-else()
-    add_library(stinkytofu SHARED ${STINKYTOFU_GENERATED_SOURCES})
 endif()
 target_include_directories(stinkytofu
     PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include> # For generated files
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+        $<INSTALL_INTERFACE:include/stinkytofu>
     PRIVATE
         # Make the generated files' directories available to the library
         # This allows source files to #include the generated .inc files
@@ -121,7 +166,9 @@ target_include_directories(stinkytofu
 add_dependencies(stinkytofu tablegen_generated)
 
 # dladdr() used in IntrinsicRegistry.cpp requires -ldl
-target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS})
+# Threads required for std::call_once (separate libpthread on glibc < 2.34)
+find_package(Threads REQUIRED)
+target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 
 # Add source files from src/ subdirectory
 add_subdirectory(src)
@@ -161,12 +208,37 @@ add_subdirectory(tools)
 # Install targets
 ##===----------------------------------------------------------------------===##
 
-# Install the stinkytofu library
-install(TARGETS stinkytofu
+# Install the stinkytofu library and export targets for find_package().
+install(TARGETS stinkytofu stinkytofu-warnings
+    EXPORT stinkytofu-targets
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin
 )
+install(EXPORT stinkytofu-targets
+    FILE stinkytofu-targets.cmake
+    NAMESPACE stinkytofu::
+    DESTINATION lib/cmake/stinkytofu
+)
+
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    cmake/stinkytofuConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfig.cmake
+    INSTALL_DESTINATION lib/cmake/stinkytofu
+)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
+    VERSION "${STINKYTOFU_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
+    DESTINATION lib/cmake/stinkytofu
+)
+# Build-tree export so find_package() works without installing.
+export(TARGETS stinkytofu stinkytofu-warnings NAMESPACE stinkytofu:: FILE stinkytofuConfig.cmake)
 
 # Install public header files with stinkytofu/ namespace
 # Exclude ir/python/ (Python-specific, internal headers)
@@ -180,4 +252,8 @@ install(DIRECTORY include/
 install(FILES
     ${PROJECT_BINARY_DIR}/stinkytofu/ir/logical/LogicalInstructions_generated.hpp
     DESTINATION include/stinkytofu/ir/logical
+)
+install(FILES
+    ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h
+    DESTINATION include/stinkytofu
 )
