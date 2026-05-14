@@ -11,7 +11,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find Python and nanobind
-find_package(Python COMPONENTS Interpreter Development REQUIRED)
+find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+
+if(NOT COMMAND hipdnn_add_dependency)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Dependencies.cmake")
+endif()
 
 hipdnn_add_dependency(tsl-robin-map VERSION ${HIPDNN_TSL_ROBIN_MAP_VERSION})
 hipdnn_add_dependency(nanobind VERSION ${HIPDNN_NANOBIND_VERSION})
@@ -76,6 +80,8 @@ else()
                 -w \"\${_wheel_dir}\"
                 \"${CMAKE_CURRENT_SOURCE_DIR}\"
                 -C \"cmake.define.CMAKE_PREFIX_PATH=\${CMAKE_INSTALL_PREFIX}\"
+                -C \"cmake.define.nanobind_DIR=${nanobind_DIR}\"
+                -C \"cmake.define.tsl-robin-map_DIR=${tsl-robin-map_DIR}\"
             RESULT_VARIABLE _result
         )
         if(_result)
