@@ -3,7 +3,7 @@
 This document outlines the development roadmap for hipDNN, a comprehensive graph-based deep learning library for AMD GPUs. For current operation support details, refer to the [Operation Support documentation](./OperationSupport.md).
 
 > [!NOTE]
-> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements. The hipDNN team will endevor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
+> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements. The hipDNN team will endeavor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
 >
 > ✅ = Done
 >
@@ -45,31 +45,43 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ## P1 ~ Q2 2026 (Current milestone)
 
-**Focus:** PyTorch integration, more operations, basic engine selection heuristic & core improvements
+**Focus:** SDPA forward path, GEMM with MX low-precision data types, client auto-tuning, performance-testing CI, and a generated support matrix.
 
 ### PyTorch
-- **PyTorch integration for opt-in hipDNN backend** ⏳(Early Q2)
+- **PyTorch integration for opt-in hipDNN backend** ⏳
+
+### SDPA
+- First-wave SDPA forward kernels callable end-to-end through the graph API ⏳
+- Overridable tensor shapes (required for variable sequence lengths) ⏳
+- Note: backward-pass production quality and SDPA feature-flag gating tracked in later quarters
 
 ### GEMM
 - **hipBLASLt plugin expanded operation & datatype support** ⏳
+- MX GEMMs through the hipBLASLt provider plugin ⏳
+- Documented constraints surfaced for graph builders (alignment, batch, epilogues)
 
-### SDPA
-- Limited SDPA provided by Fusilli, CK & ASM ⏳
+### Auto-tuning
+- **Client auto-tuning API** ⏳
+- Build N alternative execution plans for a single graph ⏳
+- Sampling run that ranks plans by wall-time and selects a winner ⏳
+- Export auto-tuning result to a config file for reuse across runs ⏳
 
-### Normalization
-- Adding new **HIP kernel provider plugin** to expand normalization support ⏳
-- Expanded operation API & coverage to support Layernorm & RMS ⏳
-- Expanded layout & datatype coverage for batchnorm
+### Benchmarking & performance testing
+- **Benchmarking & performance Python tools** ⏳
+- Installable as wheels
+- Set up CICD for the project
+
+### Support matrix
+- Integration tests emit structured pass/fail per op × datatype × engine × architecture ✅
+- Generation step produces a human-readable support matrix from those results ✅
+- Matrix published as a regular CI artifact ⏳
 
 ### Heuristics
-- Heuristic plugin API
-- **Initial heuristic plugin**
+- **Engine selection config file support** ⏳
 
 ### Core
-- Plugin SDK utilities to streamline plugin development for new providers ⏳
-- Benchmarking & performance python tools ⏳
-- Python API wrappers ⏳
-- **Client auto-tuning API**
+- Kernel engine tagging & filtering ✅
+  - Behavioral notes for filtering ✅
 
 ## P2 ~ Q3 2026
 
@@ -77,15 +89,24 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### SDPA
 - Wider SDPA support
+- **CK SDPA plugin for hipDNN** — Composable Kernel-backed SDPA provider plugin
 
 ### Heuristics
-- **Heuristics Plug-in implementation** Phase 2 (Refining and expanding heuristic capabilities)
+- Heuristic plugin API
+- Plugin architecture ⏳
+- **Phase 1 heuristic plugin: providing heuristic engine selection for limited architectures**
+
+### Normalization
+- Expanded LayerNorm & RMSNorm kernel coverage in the HIP kernel provider
+- Expanded layout & datatype coverage for batchnorm
 
 ### Core
 - Add **hipRTC & caching support** to plugin SDK (Empowers plugin developers, and standardizes caching of artifacts)
 - Kernel engine tagging & filtering
-  - Behavioral & numeric notes for filtering
+  - Numeric notes for filtering
   - Client API to enable filtering
+- Python API wrappers (general availability beyond POC)
+- Plugin SDK utility expansion to further streamline new-provider development
 
 
 ## P3 ~ Q4 2026 & beyond
@@ -97,7 +118,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Additional JIT graph support for operations
 - Improve general operational support for operations:
   - Additional layout support
-  - Additional data-type support
+  - Additional datatype support
 
 ### More framework integrations
 - Currently discussing timelines for various framework integrations. Roadmap will be updated as they are defined.

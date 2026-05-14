@@ -225,9 +225,9 @@ struct HwInstDesc {
     uint16_t issue = 0;
     uint16_t latency = 0;
 
-    // per-cycle VALU co-issue bitmask: bit i = 1 means VALU can co-issue at cycle i
+    // per-cycle VALU co-issue window: bit i = 1 means VALU can co-issue at cycle i
     // after this instruction is issued (used for matrix instructions).
-    uint16_t coIssueMask = 0;
+    uint16_t coIssueWindow = 0;
 
     // mnemonic string for the instruction.
     const char* mnemonic = nullptr;
