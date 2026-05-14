@@ -815,7 +815,15 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         mt               = kernel["MacroTile%u" % tile01]
         if ("MXS" in tc):
            subTc = tc[3]
-           strideTile = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+           # MX scale LDS tile-stride, gated by MXScaleFormat:
+           #   - Swizzled (HostPreSwizzle/InMemorySwizzle): MatrixInstK/MXBlock (= MX-unit)
+           #   - NoSwizzle (canonical):                      _DepthU_MXS (= K-scales per M)
+           mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+           isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+           if isMxSwizzled:
+              strideTile = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+           else:
+              strideTile = kernel["_DepthU%s"%tc] + LdsPad if umlds else 1
         elif enableLDSTr:
            strideTile = 4
         else:

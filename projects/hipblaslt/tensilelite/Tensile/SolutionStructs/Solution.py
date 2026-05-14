@@ -1670,10 +1670,9 @@ class Solution(collections.abc.Mapping):
     packedC0 = len(state["PackedC0IdxChars"])>1
     packedC1 = len(state["PackedC1IdxChars"])>1
 
-    # gfx1250 MX layout requires TDMInst
-    if not state["TDMInst"] and state["ISA"] == (12, 5, 0) and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
-      reject(state, printRejectionReason, "MX layout requires TDMInst on gfx1250")
-      return
+    # MX scale layout + transport are validated by the MXLoadInst /
+    # MXScaleFormat derivation below (search for "MX scale layout & transport
+    # derivation").
 
     bufferLoad = state["BufferLoad"] and state["KernelLanguage"] == "Assembly"
     if not bufferLoad:
@@ -2036,6 +2035,98 @@ class Solution(collections.abc.Mapping):
       if not isaInfoMap[isa].asmCaps["HasTDM"]:
         reject(state, printRejectionReason, "This arch does not support TDM")
         return
+
+    # --- MX scale layout & transport derivation -------------------------------
+    # MXLoadInst selects the load transport for A/MXSA + B/MXSB:
+    #   "TDM"        -> tensor_load_to_lds (requires HasTDM cap)
+    #   "BufferLoad" -> buffer_load_*
+    #   "GlobalLoad" -> reserved; rejected here for now
+    # MXScaleFormat selects the in-device MX scale layout:
+    #   "NoSwizzle"       -> plain row/column layout (buffer_load consumable)
+    #   "InMemorySwizzle" -> swizzled in device memory (TDM-populated)
+    #   "HostPreSwizzle"  -> pre-swizzled by the host (gfx950 subtile)
+    # Both parameters accept the sentinel "Auto" (the default) which triggers
+    # conditional defaulting below. The two are linked by a small set of
+    # compatibility rules enforced below.
+    hasMXBlock     = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
+    hasMxSwizCap   = bool(isaInfoMap[isa].archCaps.get("HasMXScaleSwizzle", False))
+    isGfx950       = state["ISA"] == (9, 5, 0)
+
+    # MXLoadInst default: TDM iff TDMInst != 0; otherwise BufferLoad.
+    if state["MXLoadInst"] == "Auto":
+      state["MXLoadInst"] = "TDM" if state["TDMInst"] != 0 else "BufferLoad"
+
+    # GlobalLoad is reserved for a future flat/global_load MX path.
+    if state["MXLoadInst"] == "GlobalLoad":
+      reject(state, printRejectionReason, "MXLoadInst=GlobalLoad not implemented yet")
+      return
+
+    # Transport-vs-cap.
+    if state["MXLoadInst"] == "TDM" and not isaInfoMap[isa].asmCaps["HasTDM"]:
+      reject(state, printRejectionReason, "MXLoadInst=TDM requires asmCaps.HasTDM")
+      return
+
+    # TDMInst must agree with MXLoadInst so downstream enableTDMA/B is consistent.
+    # When MXLoadInst=TDM and TDMInst=0, promote TDMInst to 3 (A and B), which
+    # honors the "both-or-none" invariant on TDMInst. Disagreements are rejected.
+    if state["MXLoadInst"] == "TDM" and state["TDMInst"] == 0:
+      state["TDMInst"] = 3
+    elif state["MXLoadInst"] != "TDM" and state["TDMInst"] != 0:
+      reject(state, printRejectionReason,
+             "MXLoadInst=%s is incompatible with TDMInst=%d" % (state["MXLoadInst"], state["TDMInst"]))
+      return
+
+    # MXScaleFormat default:
+    #   MXLoadInst=TDM            -> InMemorySwizzle
+    #   MX on gfx950 + BufferLoad -> HostPreSwizzle (gfx950's only swizzling mode)
+    #   otherwise                 -> NoSwizzle (canonical)
+    if state["MXScaleFormat"] == "Auto":
+      if state["MXLoadInst"] == "TDM":
+        state["MXScaleFormat"] = "InMemorySwizzle"
+      elif hasMXBlock and isGfx950:
+        state["MXScaleFormat"] = "HostPreSwizzle"
+      else:
+        state["MXScaleFormat"] = "NoSwizzle"
+
+    # Cap guard: any swizzled format requires HasMXScaleSwizzle.
+    if state["MXScaleFormat"] in ("InMemorySwizzle", "HostPreSwizzle") and not hasMxSwizCap:
+      reject(state, printRejectionReason,
+             "MXScaleFormat=%s requires archCaps.HasMXScaleSwizzle" % state["MXScaleFormat"])
+      return
+
+    # Format-vs-transport. These compatibility rules apply only when MX scales
+    # are present; without MX scales MXScaleFormat is a don't-care.
+    if hasMXBlock:
+      if state["MXScaleFormat"] == "InMemorySwizzle" and state["MXLoadInst"] != "TDM":
+        reject(state, printRejectionReason,
+               "MXScaleFormat=InMemorySwizzle requires MXLoadInst=TDM "
+               "(in-memory MX scale swizzling is not supported with %s)" % state["MXLoadInst"])
+        return
+      if state["MXScaleFormat"] == "HostPreSwizzle" and state["MXLoadInst"] != "BufferLoad":
+        reject(state, printRejectionReason,
+               "MXScaleFormat=HostPreSwizzle requires MXLoadInst=BufferLoad")
+        return
+      if state["MXScaleFormat"] == "HostPreSwizzle" and not isGfx950:
+        reject(state, printRejectionReason,
+               "MXScaleFormat=HostPreSwizzle is only implemented on the gfx950 host pipeline")
+        return
+      if state["MXLoadInst"] == "TDM" and state["MXScaleFormat"] != "InMemorySwizzle":
+        reject(state, printRejectionReason,
+               "MXLoadInst=TDM currently always produces MXScaleFormat=InMemorySwizzle "
+               "(got %s)" % state["MXScaleFormat"])
+        return
+      # gfx1250 MX layout requires TDMInst, except for the StreamK-only
+      # BufferLoad + NoSwizzle path which has been validated end-to-end.
+      # StreamK!=0 also implies GSU is forced to 0 (see line ~1378), so this
+      # also excludes the unvalidated GSU-only NoSwizzle path. This reject
+      # subsumes the prior standalone "NoSwizzle requires StreamK" check.
+      if state["ISA"] == (12, 5, 0) and not state["TDMInst"] and state["StreamK"] == 0:
+        reject(state, printRejectionReason,
+               "MX layout requires TDMInst on gfx1250 (TDMInst=0 is only "
+               "permitted with StreamK; the non-StreamK NoSwizzle path is "
+               "not yet supported)")
+        return
+    # --------------------------------------------------------------------------
 
     tdmInst: int = state["TDMInst"]
     state["enableTDMA"] = bool(tdmInst & 0x01)

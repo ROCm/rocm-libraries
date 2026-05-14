@@ -4184,14 +4184,19 @@ class KernelWriterAssembly(KernelWriter):
     moduleLoadStridedBatch = Module("computeLoadSrd-StridedBatch")
     use64bShadowLimit = self.states.use64bShadowLimitMX if tc in ["MXSA", "MXSB"] else self.states.use64bShadowLimit
     isgfx950 = kernel["ISA"][:2] == (9, 5)
-    isgfx950mx = isgfx950 and ("MXS" in tc)
+    # An MX scale tensor uses the swizzled SRD-limit math when MXScaleFormat
+    # selects a swizzled layout: HostPreSwizzle (gfx950) or InMemorySwizzle
+    # (gfx1250 TDM-populated). NoSwizzle MX scales fall through to the
+    # standard tensor2dSize SRD math.
+    mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+    isMxSwizzledScaleLayout = ("MXS" in tc) and mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
     # UseSubtileImpl uses a tile-boundary fixed Srd+2 for both MX scale and data A/B.
     # This avoids 32-bit overflow when computing the full tensor2dSize (N*K or M*K > 2^32).
     useSubtile = bool(kernel.get("UseSubtileImpl"))
     useFixedSrd2 = useSubtile
     isPreShuffledAB = tc in ("A", "B") and kernel["ProblemType"].get("SwizzleTensor%s" % tc, False)
-    isSwizzledSubtile = (isgfx950mx or isPreShuffledAB) and useSubtile
-    if isgfx950mx:
+    isSwizzledSubtile = (isMxSwizzledScaleLayout or isPreShuffledAB) and useSubtile
+    if isMxSwizzledScaleLayout:
       useFixedSrd2 = True
       tcab = "A" if tc == "MXSA" else "B"
       mxBlock = kernel["ProblemType"]["MXBlock%s"%tcab]
@@ -4311,7 +4316,7 @@ class KernelWriterAssembly(KernelWriter):
                 module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=1, comment="numLine = min - 1 (0-based index)"))
                 module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), \
                           strideF, comment="numLine * stride"))
-                if isgfx950mx:
+                if isMxSwizzledScaleLayout:
                   module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr(stmp+0), src1=extra_bytes, comment="buffer_load limit for %s"%tc))
                 else:
                   # (numLine * stride + DepthU) * bpe  -- mirrors scale path structure
@@ -12064,11 +12069,29 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["EnableMatrixInstruction"]:
         if kernel["UnrollMajorLDS%s" % tc]:
           if tc in ("MXSA", "MXSB"):
-            inc = kernel["MacroTile%s"%tP["tensorChar"]] * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA,self.states.numReadsIterCoalescedMXSB)
+            # Tail-loop K-step between MFMA-K sub-iterations for MX scales,
+            # gated by MXScaleFormat:
+            #   - Swizzled (HostPreSwizzle/InMemorySwizzle): MT * mxUnit * bpeDS,
+            #     scaled by matrixInstK (M-blocks interleaved on K).
+            #   - NoSwizzle (canonical): mxUnit * bpeDS; mxUnit already encodes
+            #     the per-K-scale stride and is not multiplied by matrixInstK.
+            subTc = tc[3]
+            mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlock%s" % subTc]
+            mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+            isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+            if isMxSwizzled:
+              inc = kernel["MacroTile%s"%tP["tensorChar"]] * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA,self.states.numReadsIterCoalescedMXSB)
+              comment = " (bpeDS)"
+              inc *= matrixInstK
+            else:
+              inc = mxUnit * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
+              comment = " (mxUnit*bpeDS)"
           else:
             inc = tP["bpeDS"] * max(self.states.numReadsIterCoalescedA, self.states.numReadsIterCoalescedB)
-          comment = " (bpeDS)"
-        inc *= matrixInstK
+            comment = " (bpeDS)"
+            inc *= matrixInstK
+        else:
+          inc *= matrixInstK
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 2 and tc == "B") or (kernel["ProblemType"]["Sparse"] == 1 and tc == "A"):
             inc //= 2
@@ -12118,7 +12141,20 @@ class KernelWriterAssembly(KernelWriter):
           if "MXS" in tc:
             subTc = tc[3]
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-            offsetInc = kernel["MacroTile%s"%tP["tensorChar"]] * mxUnit
+            # K-step between MFMA-K sub-iterations for MX scales:
+            #   - Swizzled (HostPreSwizzle/InMemorySwizzle):
+            #       MT * mxUnit (M-blocks interleaved on K)
+            #   - NoSwizzle (canonical), LDS layout follows UnrollMajorLDS<tc>:
+            #       UMLDS=1 (K-major LDS):  mxUnit (K-scales contiguous per M)
+            #       UMLDS=0 (M-major LDS):  (MT + LdsPad) * mxUnit (step over M-row, mxUnit K-scales)
+            mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+            isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+            if isMxSwizzled:
+              offsetInc = kernel["MacroTile%s"%tP["tensorChar"]] * mxUnit
+            elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
+              offsetInc = mxUnit
+            else:
+              offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * mxUnit
           elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             if tc in ("MXSA", "MXSB"):
               offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)

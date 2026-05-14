@@ -2629,7 +2629,29 @@ namespace TensileLite
                     bool preswizzledAlready = (isMXSA && m_mxPreswizzledA)
                                              || (isMXSB && m_mxPreswizzledB);
 
-                    if (m_isMXPreswizzleArch && preswizzledAlready)
+                    // The picked solution dictates the in-device MX scale layout via
+                    // problemType.mxScaleFormat (mirrors the MXScaleFormat solution
+                    // parameter): 0=NoSwizzle, 1=HostPreSwizzle, 2=InMemorySwizzle.
+                    // Sentinel -1 means "no solution selected yet" (e.g. the first
+                    // prepareGPUInputs call per problem, before solution iteration);
+                    // in that case the path below uses the arch-driven default
+                    // (gfx950 host preswizzle, otherwise K-swizzle).
+                    int kernelMxScaleFormat = -1;
+                    if (m_currentSolution != nullptr)
+                        kernelMxScaleFormat = m_currentSolution->problemType.mxScaleFormat;
+
+                    if (kernelMxScaleFormat == 0)
+                    {
+                        // NoSwizzle: kernel reads scales in canonical row/column
+                        // layout (buffer_load_* path). Upload cpuInput.valid as-is,
+                        // no K-swizzle, no padding permute.
+                        ptr = copyInputBuffers(desc,
+                                               p.gpuInput.valid.get(),
+                                               p.cpuInput.valid.get(),
+                                               p.maxElements,
+                                               hipMemcpyHostToDevice);
+                    }
+                    else if (m_isMXPreswizzleArch && preswizzledAlready)
                     {
                         // gfx950 subtile: preswizzle was applied by initializeMXDataForFP4 and
                         // gpuInput.valid was already populated — use it as-is.
