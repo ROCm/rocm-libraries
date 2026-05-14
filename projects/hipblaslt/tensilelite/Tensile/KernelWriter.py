@@ -2456,7 +2456,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         localReadsMXSA = 0 if ((not kernel["ProblemType"]["MXBlockA"]) or kernel["DirectToVgprMXSA"]) else self.states.numReadsPerIterMXSA * skipReadsIterMXSA
         localReadsMXSB = 0 if ((not kernel["ProblemType"]["MXBlockB"]) or kernel["DirectToVgprMXSB"]) else self.states.numReadsPerIterMXSB * skipReadsIterMXSB
         localReadsMetadata = self.states.numReadsPerIterMetadata * skipReadsIterMetadata if hasMetadata else 0
-        # HalfPLR WA
+        # HalfPLR: only half of ds_read is issued before wmma
         localReadsA = localReadsA // 2 if kernel["HalfPLRA"] else localReadsA
         localReadsB = localReadsB // 2 if kernel["HalfPLRB"] else localReadsB
         localReads += (localReadsA + localReadsB + localReadsMXSA + localReadsMXSB + localReadsMetadata)
