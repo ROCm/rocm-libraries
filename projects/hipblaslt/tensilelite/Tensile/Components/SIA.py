@@ -565,6 +565,9 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
                 # TODO: For the 1-wave case, schedule B's TDM load independently for better tensor load balance.
                 deferMod.addComment1("Global Read B (TDM deferred after LDS swap)")
                 deferMod.add(tdmLoadModB)
+            # TODO: Once metadata TDM issueLoad is embedded inside globalReadDo(), globalReadMetadata
+            # will be empty and this block can be removed. Until then, apply _splitTdmLoad so the
+            # metadata TensorLoadToLds is deferred to tdmLoadIter together with A and B.
             if kernel["ProblemType"]["Sparse"]:
                 imod.addComment1("Global Read Metadata")
                 imod.add(writer.codes.globalReadMetadata)
@@ -816,9 +819,6 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
         imod.add(writer.codes.localWriteMXSB)
         imod.addComment1("local write B")
         imod.add(writer.codes.localWriteB)
-        # if kernel["ProblemType"]["Sparse"]:
-        #     imod.addComment1("local write Metadata")
-        #     imod.add(writer.codes.localWriteMetadata)
 
         if kernel["PrefetchGlobalRead"] == 2 and writer.codes.perIterLocalWriteCodeNGLL is not None: # TODO: check condition
             # do we need a module here? That would prevent these from being scheduled
@@ -834,9 +834,6 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
             imod.add(writer.codes.localWriteMXSB)
             imod.addComment1("local write B")
             imod.add(writer.codes.localWriteB)
-            # if kernel["ProblemType"]["Sparse"]:
-            #     imod.addComment1("local write Metadata")
-            #     imod.add(writer.codes.localWriteMetadata)
 
 def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
     #################
@@ -854,7 +851,6 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
         lenMXSA = len(list(writer.codes.globalReadMXSA.middle.items()))
         lenMXSB = len(list(writer.codes.globalReadMXSB.middle.items()))
         lenB    = len(list(writer.codes.globalReadB.middle.items()))
-        
 
         lenAFooter    = len(list(writer.codes.globalReadA.footer.items()))
         lenMXSAFooter = len(list(writer.codes.globalReadMXSA.footer.items()))

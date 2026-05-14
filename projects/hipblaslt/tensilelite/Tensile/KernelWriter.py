@@ -641,13 +641,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     globalReadIncACode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementA")
     globalReadIncBCode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementB")
-    # globalReadIncMetadataCode = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementMetadata") if 'globalReadIncrementMetadata' in actualItems else None
 
     if skipGlobalReadInc:
       globalReadIncACode  = Module()
       globalReadIncBCode  = Module()
-      # if globalReadIncMetadataCode:
-      #   globalReadIncMetadataCode = Module()
 
     siaComponent = Component.SIA.find(self)
     if siaComponent:
@@ -2423,7 +2420,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         localReadsB = 0 if kernel["DirectToVgprB"] else self.states.numReadsPerIterB * skipReadsIterB * readFactorB
         localReadsMXSA = 0 if ((not kernel["ProblemType"]["MXBlockA"]) or kernel["DirectToVgprMXSA"]) else self.states.numReadsPerIterMXSA * skipReadsIterMXSA
         localReadsMXSB = 0 if ((not kernel["ProblemType"]["MXBlockB"]) or kernel["DirectToVgprMXSB"]) else self.states.numReadsPerIterMXSB * skipReadsIterMXSB
-        # sparse metadata local-reads must be accounted for in dscnt; otherwise s_wait_dscnt is overly strict.
         localReadsMetadata = self.states.numReadsPerIterMetadata * skipReadsIterMetadata if hasMetadata else 0
         localReads += (localReadsA + localReadsB + localReadsMXSA + localReadsMXSB + localReadsMetadata)
         # some of localReads is interleaved after waitcnt in SIA3
@@ -3674,7 +3670,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.codes.globalReadIncrements = self.globalReadIncrementAB(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, 0)
     globalReadIncACode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementA")
     globalReadIncBCode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementB")
-    globalReadIncMetadataCode = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementMetadata") if kernel["enableTDMMetadata"] and kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] else None
 
     if not kernel["NoLdsWriteCode"]:
       self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)
@@ -4144,7 +4139,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               LWSwapAAllIters.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
               LWSwapBAllIters.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
           # Swap offsets Metadata
-          if kernel["enableTDMMetadata"] and not kernel["DirectToVgprSparseMetadata"]:
+          if kernel["enableTDMMetadata"]:
               pointerLWCode.addComment1("tdm swap offsets metadata")
               pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tPM))
           # Swap local write memory token
@@ -4762,7 +4757,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("local write swap b")
         module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
       # Swap Metadata
-      if kernel["enableTDMMetadata"] and not kernel["DirectToVgprSparseMetadata"]:
+      if kernel["enableTDMMetadata"]:
           module.addComment1("TDM swap lds metadata")
           module.add(self.tdmSwapLdsOffset(kernel, tPM))
       # swap local write memory token

@@ -9386,12 +9386,6 @@ class KernelWriterAssembly(KernelWriter):
       #   self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB["MX"], prefetchIndex)
       if "MX" in tPA and "MX" in tPB:
         incCodeB.add(self.tdmIncrementABWaveSperated(kernel, tPA["MX"], tPB["MX"]))
-      # # TDM increment for metadata, non-separated
-      # if tdmMetadata:
-      #   tPM = tPA["tpsMetadata"] if tPA != None and tPA["is_sparse"] else tPB["tpsMetadata"] if tPB != None and tPB["is_sparse"] else None
-      #   if tPM != None:
-      #     incCodeMetadata = imod.add(Module("globalReadIncrementMetadata"))
-      #     incCodeMetadata.add(self.tdmIncrementAB(kernel, tPM))
       return imod
 
     incCodeA = imod.add(Module("globalReadIncrementA"))
@@ -9410,13 +9404,6 @@ class KernelWriterAssembly(KernelWriter):
         incCodeB.add(self.tdmIncrementAB(kernel, tPB))
       if "MX" in tPB and not tdmB:
         self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB["MX"], prefetchIndex)
-
-    # # TDM increment for metadata, non-separated
-    # if tdmMetadata and not kernel["DirectToVgprSparseMetadata"]:
-    #   tPM = tPA["tpsMetadata"] if tPA != None and tPA["is_sparse"] else tPB["tpsMetadata"] if tPB != None and tPB["is_sparse"] else None
-    #   if tPM != None:
-    #     incCodeMetadata = imod.add(Module("globalReadIncrementMetadata"))
-    #     incCodeMetadata.add(self.tdmIncrementAB(kernel, tPM))
     return imod
 
   ##############################################################################
@@ -10329,6 +10316,12 @@ class KernelWriterAssembly(KernelWriter):
         imod.middle.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=hex(clearMask),
                          comment="Reset TDM LDS swap bit for tail loop"))
       imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", None, None))
+      # TODO: Embed metadata TDM issueLoad here (mirrors non-TDM pattern where globalReadBody(tP["tpsMetadata"])
+      # is called after globalReadBody(tP) for the sparse tensor). This would allow _splitTdmLoad in SIA.py
+      # to extract and defer both A and metadata TDM loads together, eliminating the separate globalReadMetadata
+      # module and the special-case handling in noSchedGlobalRead.
+      # if kernel["enableTDMMetadata"] and tP["is_sparse"]:
+      #     imod.middle.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
       if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
         ldsIncSgprName = "tdmABLdsSplitIncs" if numWaves > 1 else f"tdm{tc}LdsSplitIncs"
         globalIncSgprName = "tdmABGlobalSplitIncs" if numWaves > 1 else f"tdm{tc}GlobalSplitIncs"
@@ -10366,6 +10359,12 @@ class KernelWriterAssembly(KernelWriter):
           imod.middle.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=hex(clearMask),
                            comment="Reset TDM LDS swap bit for tail loop"))
         imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", None, None))
+        # TODO: Embed metadata TDM issueLoad here (mirrors non-TDM pattern where globalReadBody(tP["tpsMetadata"])
+        # is called after globalReadBody(tP) for the sparse tensor). This would allow _splitTdmLoad in SIA.py
+        # to extract and defer both B and metadata TDM loads together, eliminating the separate globalReadMetadata
+        # module and the special-case handling in noSchedGlobalRead.
+        # if kernel["enableTDMMetadata"] and tP["is_sparse"]:
+        #     imod.middle.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
         if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
           ldsIncSgprName = f"tdm{tc}LdsSplitIncs"
           globalIncSgprName = f"tdm{tc}GlobalSplitIncs"
