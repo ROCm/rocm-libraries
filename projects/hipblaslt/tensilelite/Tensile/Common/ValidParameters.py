@@ -26,6 +26,7 @@ import math
 from functools import lru_cache
 
 from .Architectures import SUPPORTED_ISA
+from .Types import IsaVersion
 
 ################################################################################
 # Enumerate Valid Solution Parameters
@@ -63,7 +64,7 @@ validMacroTileSides = [
     768,
 ]
 validMacroTiles = []
-validISA = [(0, 0, 0)]
+validISA = [IsaVersion(0, 0, 0)]
 validISA.extend(SUPPORTED_ISA)
 for i in validMacroTileSides:
     for j in validMacroTileSides:
@@ -996,6 +997,31 @@ validParameters = { # we need to make sure this matches develop
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
     "TDMSplit": [False, True],
+    # In-device layout of the MX scale tensors (MXSA/MXSB).
+    # User-facing values:
+    #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default
+    #                      unless TDMInst != 0, in which case InMemorySwizzle is the default).
+    #   "HostPreSwizzle":  scales pre-swizzled on the host (gfx950 subtile pipeline);
+    #                      requires MXLoadInst="BufferLoad" and gfx950 host pipeline.
+    #   "InMemorySwizzle": scales swizzled in device memory by TDM;
+    #                      requires MXLoadInst="TDM".
+    # Internal sentinel (do NOT use in yamls):
+    #   "Auto":            triggers conditional defaulting in Solution.assignDerivedParameters.
+    #                      The defaultBenchmarkCommonParameters entry is "Auto" so the
+    #                      derivation fires; users should write one of the concrete values above.
+    # Codegen + rejection logic combine MXScaleFormat with MXLoadInst and
+    # archCaps["HasMXScaleSwizzle"].
+    "MXScaleFormat": ["Auto", "NoSwizzle", "HostPreSwizzle", "InMemorySwizzle"],
+    # How A/MXSA and B/MXSB are loaded from VRAM to LDS.
+    # User-facing values:
+    #   "TDM":         tensor_load_to_lds (requires asmCaps["HasTDM"]; today always implies
+    #                  InMemorySwizzle MX scale layout).
+    #   "BufferLoad":  buffer_load_* (compatible with NoSwizzle or HostPreSwizzle MX scale layouts).
+    #   "GlobalLoad":  reserved for a future flat/global_load MX path; rejected for now.
+    # Internal sentinel (do NOT use in yamls):
+    #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
+    #                  TDM iff TDMInst != 0, otherwise BufferLoad.
+    "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
 }
 
 newMIValidParameters = {

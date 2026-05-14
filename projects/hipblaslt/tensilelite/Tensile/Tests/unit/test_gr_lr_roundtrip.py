@@ -17,7 +17,8 @@ import pytest
 import numpy as np
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     BPE, WAVESIZE, NUM_THREADS,
     create_writer,
@@ -447,7 +448,7 @@ def print_grid_diff(label, actual, expected):
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestGrLrRoundtrip:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.label)
@@ -497,10 +498,6 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=int, default=None,
                         help="Config index to test (default: all)")
     args = parser.parse_args()
-
-    if not HAS_HIP:
-        print("HIP not available - cannot run GPU test")
-        sys.exit(1)
 
     wave_list = [0, 1, 2, 3] if args.wave == "all" else [int(args.wave)]
     config_list = CONFIGS if args.config is None else [CONFIGS[args.config]]

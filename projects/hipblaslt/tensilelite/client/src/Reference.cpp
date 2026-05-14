@@ -1102,6 +1102,11 @@ namespace TensileLite
                 return rejectFast("XFloat32");
             }
 
+            if(problem.mxBlockA() > 0 || problem.mxBlockB() > 0)
+            {
+                return rejectFast("MX_block");
+            }
+
             auto isSupportedOutputType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Half
                        || t == rocisa::DataType::BFloat16;
