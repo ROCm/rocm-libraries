@@ -1307,3 +1307,756 @@ class TestSchedulePositionOrdering:
         c = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=10)
         assert a < b < c
         assert c > b > a
+
+
+# ----------------------------------------------------------------------------
+# gfx1151 (RDNA 3.5) WMMA schedule tests
+# ----------------------------------------------------------------------------
+# These cover the schedules defined at the bottom of CustomSchedule.py.
+# Coverage goals:
+#   - dispatcher: hasCustomSchedule picks a gfx1151 schedule for gfx1151 kernels
+#     and does NOT mis-dispatch CDNA 4 kernels to a gfx1151 schedule.
+#   - predicate  : non-TN kernels and non-16bit dtypes are not routed to
+#     TN-only fp16/bf16 gfx1151 schedules.
+#   - validator  : the RDNA 3.5 profile hook is a no-op; every pass runs
+#     under the dialect-aware validator (CMSValidatorDialect.py), so
+#     `isValid` returns True with full coverage.
+
+from Tensile.Components.CustomSchedule import _apply_rdna35_wmma_profile
+import Tensile.Components.CMSValidator as cmsv
+from Tensile.Components.CMSValidatorDialect import (
+    RDNA35_WMMA_DIALECT,
+    CDNA4_DIALECT,
+    UnsupportedKernelError,
+    resolve_dialect,
+)
+
+
+def _gfx1151_base_kernel():
+    """Canonical gfx1151 kernel shell (MT / tile params filled in per case)."""
+    dt = _mock_dtype(is_16bit=True, num_bytes=2)
+    return {
+        "UseCustomMainLoopSchedule": True,
+        "EnableMatrixInstruction": True,
+        "UnrollLoopSwapGlobalReadOrder": False,
+        "ISA": IsaVersion(11, 5, 1),
+        "WavefrontSize": 32,
+        "ProblemType": {
+            "DataType": dt, "DataTypeA": dt, "DataTypeB": dt,
+            "TransposeA": True, "TransposeB": False,
+            "TLUA": False, "TLUB": False,
+        },
+        "MacroTile0": 0, "MacroTile1": 0, "DepthU": 32,
+        "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+        "DirectToLds": 0, "DtlPlusLdsBuf": False,
+        "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8,
+        "LocalReadVectorWidthA": 16, "LocalReadVectorWidthB": 16,
+        "WaveSeparateGlobalReadA": 0, "WaveSeparateGlobalReadB": 0,
+        "Use64bShadowLimit": 1,
+        "MatrixInstruction": [16, 16, 16, 1],
+        "MIWaveGroup": [2, 2],
+        "LDSTrInst": False, "TransposeLDS": 1,
+        "ForceUnrollSubIter": False,
+        "SwapGlobalReadOrder": False,
+        "UsePLRPack": False,
+        "UseF32XEmulation": False,
+        "MIWaveTileA": 1, "MIWaveTileB": 1,
+        "1LDSBuffer": 0,
+    }
+
+
+# Tile parameters for a representative subset of gfx1151 schedules.
+# Format: (MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK)
+#   MIK=matrixInstK (16 for the bulk of fp16 tiles, 128 for the 16x16x128 case).
+GFX1151_TILES = [
+    # Production PGR=1 PLR=0 schedules (PLR>=1 is rejected by the
+    # _reject_ldsb1_with_plr_prefetch correctness gate).
+    (128, 96,  32, 1, 0, [2, 2], 4, 3, 16),
+    (128, 128, 32, 1, 0, [2, 2], 4, 4, 16),
+    (128, 64,  64, 1, 0, [2, 2], 4, 2, 16),
+    (96,  96,  64, 1, 0, [2, 2], 3, 3, 16),
+    (64,  128, 64, 1, 0, [1, 4], 4, 2, 16),
+    (128, 112, 64, 1, 0, [4, 1], 2, 7, 16),
+    (112, 128, 64, 1, 0, [1, 4], 7, 2, 16),
+]
+
+
+class TestCustomScheduleGfx1151:
+    """Tests for gfx1151 (RDNA 3.5) WMMA schedules."""
+
+    # ---- Dispatcher / predicate ----
+
+    def test_dispatch_gfx1151_TN_16bit(self):
+        """A TN fp16 gfx1151 kernel should pick up a gfx1151 schedule."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "MacroTile0": 128, "MacroTile1": 96, "DepthU": 32,
+            "PrefetchGlobalRead": 1, "PrefetchLocalRead": 0,
+            "MIWaveTileA": 4, "MIWaveTileB": 3,
+            "1LDSBuffer": 1,
+        })
+        has, info = hasCustomSchedule(k)
+        assert has
+        assert isinstance(info, ScheduleInfo)
+
+    def test_non_TN_does_not_dispatch(self):
+        """gfx1151 schedules in this commit are TN-only; NN kernels must not match."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "ProblemType": {"TransposeA": False, "TransposeB": False},
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+        })
+        has, info = hasCustomSchedule(k)
+        assert not has
+        assert info is None
+
+    def test_cdna4_isa_does_not_dispatch_to_gfx1151(self):
+        """A CDNA 4 (gfx950) kernel must not match a gfx1151-registered tile."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "ISA": IsaVersion(9, 5, 0),
+            "WavefrontSize": 64,
+            "DirectToLds": 1,
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+        })
+        has, info = hasCustomSchedule(k)
+        assert not has
+
+    def test_fp32_does_not_dispatch_to_16bit_gfx1151(self):
+        """The 16-bit gfx1151 schedules must not match a fp32 kernel."""
+        k = _gfx1151_base_kernel()
+        dt32 = _mock_dtype(is_16bit=False, is_8bit=False, num_bytes=4)
+        update_kernel(k, {
+            "ProblemType": {
+                "DataType": dt32, "DataTypeA": dt32, "DataTypeB": dt32,
+            },
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+        })
+        has, info = hasCustomSchedule(k)
+        assert not has
+
+    # ---- Schedule shape ----
+
+    @pytest.mark.parametrize("MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK", GFX1151_TILES)
+    def test_schedule_shape(self, MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK):
+        """Each gfx1151 tile produces a well-formed ScheduleInfo."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "MacroTile0": MT0, "MacroTile1": MT1, "DepthU": DU,
+            "PrefetchGlobalRead": PGR, "PrefetchLocalRead": PLR,
+            "MatrixInstruction": [16, 16, MIK, 1],
+            "MIWaveGroup": MIWG, "MIWaveTileA": WTA, "MIWaveTileB": WTB,
+            "1LDSBuffer": 1,
+        })
+        has, info = hasCustomSchedule(k)
+        assert has, f"no schedule dispatched for MT{MT0}x{MT1}x{DU}"
+        assert isinstance(info, ScheduleInfo)
+        assert info.numMfma > 0
+        assert info.numCodePaths >= 1
+        assert "SYNC" in info.optSchedule
+
+    # ---- Validator coverage (this is the whole point of the helper) ----
+
+    @pytest.mark.parametrize("MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK", GFX1151_TILES)
+    def test_validator_passes_with_granular_disables(
+            self, MT0, MT1, DU, PGR, PLR, MIWG, WTA, WTB, MIK):
+        """Structural validator passes must still run and succeed on gfx1151."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "MacroTile0": MT0, "MacroTile1": MT1, "DepthU": DU,
+            "PrefetchGlobalRead": PGR, "PrefetchLocalRead": PLR,
+            "MatrixInstruction": [16, 16, MIK, 1],
+            "MIWaveGroup": MIWG, "MIWaveTileA": WTA, "MIWaveTileB": WTB,
+            "1LDSBuffer": 1,
+        })
+        has, info = hasCustomSchedule(k)
+        assert has
+        valid, msg = isValid(info, {"kernel": k})
+        assert valid, f"MT{MT0}x{MT1}x{DU}: isValid said: {msg}"
+
+    @staticmethod
+    def _empty_schedule_info():
+        return ScheduleInfo(numCodePaths=1, numMfma=1, optSchedule={}, syncCode=[],
+                            nglshift=0, nllshift=0)
+
+    def test_profile_hook_is_no_op(self):
+        """_apply_rdna35_wmma_profile disables no validator passes.
+
+        All hazard passes are dialect-aware via ``RDNA35_WMMA_DIALECT``
+        and run on every gfx1151 schedule.
+        ``VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS`` is dialect-aware
+        (strict equality on CDNA 4, divisibility on RDNA 3.5), so no
+        per-schedule opt-out is needed. The hook is retained as a
+        uniform attach point across the registered
+        ``_get_schedule_*_gfx1151`` functions for any future profile
+        tweak, but currently performs no opt-outs.
+        """
+        info = self._empty_schedule_info()
+        _apply_rdna35_wmma_profile(info)
+        for pass_id in cmsv.ValidatorPass:
+            reason = info.reasonForDisablingValidationPass(pass_id)
+            assert reason is None, (
+                f"{pass_id.name} was unexpectedly disabled by the RDNA 3.5 "
+                f"profile hook (reason: {reason!r}). The hook is a no-op "
+                f"now that every pass has hw-verified RDNA 3.5 semantics."
+            )
+
+    def test_dialect_is_rdna35_for_gfx1151_kernel(self):
+        """resolve_dialect must return the RDNA 3.5 WMMA dialect for gfx1151."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+        })
+        assert resolve_dialect(k) is RDNA35_WMMA_DIALECT
+
+    def test_dialect_is_cdna4_for_gfx950_kernel(self):
+        """resolve_dialect must return the CDNA 4 dialect for a gfx950 kernel."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "ISA": IsaVersion(9, 5, 0),
+            "WavefrontSize": 64,
+            "DirectToLds": 1,
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+        })
+        assert resolve_dialect(k) is CDNA4_DIALECT
+
+    # ---- TF32 pack-graph guard --------------------------------------------
+    #
+    # The pack_graph fields on RDNA35_WMMA_DIALECT are copied from CDNA 4
+    # for forward compatibility only; they have never been hw-calibrated
+    # on gfx1151. An RDNA 3.5 kernel that sets ``UseF32XEmulation`` or
+    # ``UseMFMAF32XEmulation`` would consult those uncalibrated values in
+    # ``add_pack_constraints``. The guard in ``resolve_dialect`` makes
+    # this code path unreachable: it raises
+    # ``UnsupportedKernelError`` so codegen aborts with a loud
+    # diagnostic rather than emitting a silently-uncalibrated schedule.
+
+    def test_rdna35_tf32_emulation_is_rejected(self):
+        """resolve_dialect must reject RDNA 3.5 kernels with UseF32XEmulation."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+            "UseF32XEmulation": True,
+        })
+        with pytest.raises(UnsupportedKernelError) as excinfo:
+            resolve_dialect(k)
+        msg = str(excinfo.value)
+        assert "TF32" in msg or "F32XEmulation" in msg, (
+            f"Expected the guard message to cite the uncalibrated pack-graph, got: {msg!r}"
+        )
+
+    def test_rdna35_mfma_tf32_emulation_is_rejected(self):
+        """resolve_dialect must reject RDNA 3.5 kernels with UseMFMAF32XEmulation."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+            "UseMFMAF32XEmulation": True,
+        })
+        with pytest.raises(UnsupportedKernelError):
+            resolve_dialect(k)
+
+    def test_cdna4_tf32_emulation_is_allowed(self):
+        """The pack-graph guard only fires for RDNA 3.5; CDNA 4 kernels
+        must continue to validate under TF32 emulation since the CDNA 4
+        pack-graph is the calibrated source of those constants.
+        """
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "ISA": IsaVersion(9, 5, 0),
+            "WavefrontSize": 64,
+            "DirectToLds": 1,
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "UseF32XEmulation": True,
+            "UseMFMAF32XEmulation": True,
+        })
+        assert resolve_dialect(k) is CDNA4_DIALECT
+
+    def test_rdna35_without_tf32_emulation_resolves(self):
+        """Default RDNA 3.5 kernels (no TF32 emulation) still resolve to
+        RDNA35_WMMA_DIALECT - the guard must not fire for the production
+        BF16/FP16 HHS path."""
+        k = _gfx1151_base_kernel()
+        update_kernel(k, {
+            "MacroTile0": 96, "MacroTile1": 128, "DepthU": 32,
+            "MIWaveTileA": 3, "MIWaveTileB": 4,
+            "UseF32XEmulation": False,
+        })
+        assert resolve_dialect(k) is RDNA35_WMMA_DIALECT
+
+
+# ----------------------------------------------------------------------------
+# gfx1151 authored-stream-length checks
+# ----------------------------------------------------------------------------
+# `verify_correct_number_of_instructions` compares each authored stream's
+# length against `len(idMap[name])` produced by KernelWriter at codegen
+# time. We cannot run the full KernelWriter pipeline from a unit test, so
+# this class instead checks ISA-agnostic invariants every well-formed
+# gfx1151 schedule must satisfy:
+#
+#   1. Every mfmaIndex is in [-1, numMfma - 1].
+#   2. For sub-iteration streams (`LRA<i>`, `LRB<i>`, `PackA<i>`,
+#      `PackB<i>`) all sub-iterations of the same prefix have the same
+#      length. This mirrors the per-sub-iter uniformity the KernelWriter
+#      emits for gfx1151 wave32 WMMA.
+#   3. len(GRA) == len(LWA) and len(GRB) == len(LWB) -- the VGPRs
+#      populated by GR<X> drain through LW<X>, so the two streams must
+#      have the same cardinality.
+#
+# Any deeper miscalibration (e.g. GRIncA cluster-size drift vs wave32
+# idMap) surfaces at build time in `schedule_cms` through the live
+# `isValid` call once `VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS` is
+# re-enabled for the gfx1151 profile, and is exercised end-to-end by a
+# rebuild + benchmark pass.
+
+
+def _collect_gfx1151_schedule_metadata():
+    """Return the CMSKernelInfo entries whose schedule function targets gfx1151."""
+    from Tensile.Components.CustomSchedule import _SCHEDULE_METADATA
+    return [m for m in _SCHEDULE_METADATA if "_gfx1151" in m.name]
+
+
+def _gfx1151_kernel_for_metadata(meta):
+    """Build a kernel dict that `hasCustomSchedule` will dispatch to `meta`."""
+    k = _gfx1151_base_kernel()
+    mi = list(meta.MatrixInstruction)
+    miwg = list(meta.MIWaveGroup)
+    update_kernel(k, {
+        "ProblemType": {"TransposeA": meta.TransposeA, "TransposeB": meta.TransposeB},
+        "MacroTile0": meta.MacroTile0,
+        "MacroTile1": meta.MacroTile1,
+        "DepthU": meta.DepthU,
+        "PrefetchGlobalRead": meta.PrefetchGlobalRead,
+        "PrefetchLocalRead": meta.PrefetchLocalRead,
+        "DirectToLds": int(meta.DirectToLds),
+        "DtlPlusLdsBuf": bool(meta.DtlPlusLdsBuf),
+        "WaveSeparateGlobalReadA": meta.WaveSeparateGlobalReadA,
+        "WaveSeparateGlobalReadB": meta.WaveSeparateGlobalReadB,
+        "GlobalReadVectorWidthA": meta.GlobalReadVectorWidthA,
+        "GlobalReadVectorWidthB": meta.GlobalReadVectorWidthB,
+        "LocalReadVectorWidthA": meta.LocalReadVectorWidth,
+        "LocalReadVectorWidthB": meta.LocalReadVectorWidth,
+        "MatrixInstruction": mi,
+        "MIWaveGroup": miwg,
+        "MIWaveTileA": max(1, meta.MacroTile0 // (mi[0] * miwg[0])),
+        "MIWaveTileB": max(1, meta.MacroTile1 // (mi[1] * miwg[1])),
+        "LDSTrInst": meta.LDSTrInst,
+        "TransposeLDS": meta.TransposeLDS,
+    })
+    return k
+
+
+def _gfx1151_metadata_ids():
+    """Build a stable id list for pytest parameter printing."""
+    metas = _collect_gfx1151_schedule_metadata()
+    return [m.name for m in metas]
+
+
+class TestGfx1151StreamLengthAudit:
+    """Audit wave32 idMap-shaped invariants for gfx1151 schedules."""
+
+    @pytest.mark.parametrize(
+        "meta",
+        _collect_gfx1151_schedule_metadata(),
+        ids=_gfx1151_metadata_ids(),
+    )
+    def test_indices_in_valid_mfma_range(self, meta):
+        """Every authored mfmaIndex must be in [-1, numMfma - 1]."""
+        k = _gfx1151_kernel_for_metadata(meta)
+        has, info = hasCustomSchedule(k)
+        assert has, f"{meta.name}: no schedule dispatched for {meta.MacroTile0}x{meta.MacroTile1}x{meta.DepthU}"
+        numMfma = info.numMfma
+        for key, paths in info.optSchedule.items():
+            if key == "SYNC":
+                continue
+            for code_path_idx, path in enumerate(paths):
+                for pos, idx in enumerate(path):
+                    assert -1 <= idx <= numMfma - 1, (
+                        f"{meta.name}: {key}[{code_path_idx}][{pos}]={idx} out of "
+                        f"range [-1, {numMfma - 1}]"
+                    )
+
+    @pytest.mark.parametrize(
+        "meta",
+        _collect_gfx1151_schedule_metadata(),
+        ids=_gfx1151_metadata_ids(),
+    )
+    def test_per_subiter_stream_lengths_uniform(self, meta):
+        """LR<A,B><i> / Pack<A,B><i> must have the same length across all sub-iters."""
+        k = _gfx1151_kernel_for_metadata(meta)
+        has, info = hasCustomSchedule(k)
+        assert has
+        groups = {"LRA": [], "LRB": [], "PackA": [], "PackB": []}
+        for key, paths in info.optSchedule.items():
+            for prefix in groups:
+                if key.startswith(prefix) and key[len(prefix):].isdigit():
+                    for code_path_idx, path in enumerate(paths):
+                        groups[prefix].append((key, code_path_idx, len(path)))
+                    break
+        for prefix, entries in groups.items():
+            by_path = {}
+            for key, cpi, length in entries:
+                by_path.setdefault(cpi, []).append((key, length))
+            for cpi, per_sub in by_path.items():
+                lengths = {length for _, length in per_sub}
+                if len(lengths) > 1:
+                    detail = ", ".join(f"{key}={length}" for key, length in per_sub)
+                    raise AssertionError(
+                        f"{meta.name}: code-path {cpi} has non-uniform per-sub-iter "
+                        f"{prefix} lengths: {detail}"
+                    )
+
+    @pytest.mark.parametrize(
+        "meta",
+        _collect_gfx1151_schedule_metadata(),
+        ids=_gfx1151_metadata_ids(),
+    )
+    def test_gr_and_lw_same_cardinality(self, meta):
+        """len(GR<X>) must equal len(LW<X>); both drain the same VGPR buffer."""
+        k = _gfx1151_kernel_for_metadata(meta)
+        has, info = hasCustomSchedule(k)
+        assert has
+        opt = info.optSchedule
+        for suffix in ("A", "B"):
+            gr_key, lw_key = f"GR{suffix}", f"LW{suffix}"
+            if gr_key not in opt or lw_key not in opt:
+                continue
+            for cpi, (gr_path, lw_path) in enumerate(zip(opt[gr_key], opt[lw_key])):
+                assert len(gr_path) == len(lw_path), (
+                    f"{meta.name} code-path {cpi}: "
+                    f"len({gr_key})={len(gr_path)} != len({lw_key})={len(lw_path)}"
+                )
+
+
+# ----------------------------------------------------------------------------
+# Negative-hazard matrix for the gfx1151 validator passes
+# ----------------------------------------------------------------------------
+#
+# Each test here has a positive counterpart (schedule passes, hazard absent)
+# and a negative counterpart (schedule fails, hazard present). Coverage:
+#
+#   D1 VERIFY_SCC_OVERLAP                   direct call, RDNA35 dialect
+#   D2 VERIFY_ASCENDING_ORDER               direct call, both dialects
+#   D3 VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS direct call, divisibility +
+#                                           strict-equality path (post-C1)
+#   D4 ADD_GR_NOT_TOO_EARLY_CONSTRAINTS     dialect flag gate
+#                                           (on CDNA 4, off RDNA 3.5)
+#   D5 ADD_LOCAL_READ_CONSTRAINTS           dialect flag gate (on both)
+#   D7 ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS  dialect flag gate
+#                                           (on CDNA 4, off RDNA 3.5)
+#
+# (D6 is the C2 TF32 emulation guard; covered by
+# ``test_rdna35_tf32_emulation_is_rejected`` above.)
+#
+# Structural-check negatives (D1/D2/D3) are tested by calling the validator
+# functions directly with synthetic ScheduleInfo objects. This avoids
+# building the full Timeline pipeline, which is exercised end-to-end by
+# ``TestCustomScheduleGfx1151.test_structural_checks_pass`` for every
+# gfx1151 schedule.
+#
+# Timeline-based pass gate tests (D4/D5/D7) assert the
+# ``ValidatorDialect`` flag that selects whether the pass runs on each
+# architecture. The registered gfx1151 schedules exercise the passes
+# end-to-end in ``test_structural_checks_pass``; the flag-level
+# assertions below pin the gate so a future regression can't silently
+# re-enable a pass that was deliberately flag-gated off on RDNA 3.5.
+
+from Tensile.Components.CMSValidator import (
+    verify_scc_overlap,
+    verify_ascending_order,
+    verify_correct_number_of_instructions,
+)
+
+
+def _rdna35_kernel_for_scc_test(shadow_limit: int = 1, miwave_tile: int = 4):
+    """Build a gfx1151 kernel wired for a direct verify_scc_overlap call.
+
+    ``verify_scc_overlap`` needs only ``kernel['DirectToLds']`` and
+    ``kernel['Use64bShadowLimit']`` plus the dialect; the dialect
+    supplies the (3,2,2,2) / (3,2,1) cluster shape for RDNA 3.5.
+    """
+    k = _gfx1151_base_kernel()
+    update_kernel(k, {
+        "MIWaveTileA": miwave_tile, "MIWaveTileB": miwave_tile,
+        "MacroTile0": 64, "MacroTile1": 64, "DepthU": 32,
+        "Use64bShadowLimit": shadow_limit,
+    })
+    return k
+
+
+def _sched_info(optSchedule, *, num_mfma=32, num_code_paths=1):
+    """Minimal ScheduleInfo for structural-check tests."""
+    return ScheduleInfo(
+        numCodePaths=num_code_paths,
+        numMfma=num_mfma,
+        optSchedule=optSchedule,
+        syncCode=[],
+        nglshift=0,
+        nllshift=0,
+    )
+
+
+class TestGfx1151ValidatorNegativeHazards:
+    """Per-pass negative+positive tests for the gfx1151 validator.
+
+    Pairs of positive/negative tests that pin the behavioral contract of
+    each re-enabled validator pass on the RDNA 3.5 dialect.
+    """
+
+    # ---- D1 -----------------------------------------------------------------
+
+    def test_d1_scc_overlap_rdna35_clean_schedule_passes(self):
+        """Clean GRIncA/GRIncB with LWSA/LWSB outside all SCC intervals: pass."""
+        k = _rdna35_kernel_for_scc_test(shadow_limit=1, miwave_tile=4)
+        opt = {
+            "SYNC": [0],
+            "GRIncA": [[0, 0, 1, 1, 2, 2, 3, 3, 4]],
+            "GRIncB": [[5, 5, 6, 6, 7, 7, 8, 8, 9]],
+            # On RDNA 3.5 GRA/GRB are skipped by verify_scc_overlap
+            # (check_gr_m0_updates_when_dtl=False + DTL=0). Include them
+            # anyway to assert the pass does ignore them.
+            "GRA": [[2, 3]],
+            "GRB": [[6, 7]],
+            "LWSA": [[31]],
+            "LWSB": [[31]],
+        }
+        sched = _sched_info(opt)
+        ok, msg = verify_scc_overlap(
+            sched,
+            {"kernel": k, "dialect": RDNA35_WMMA_DIALECT},
+            code_path=0,
+        )
+        assert ok, f"RDNA35 clean schedule failed unexpectedly: {msg}"
+
+    def test_d1_scc_overlap_rdna35_lwsa_inside_grinca_interval_fails(self):
+        """Landing LWSA inside a GRIncA SCC cluster must be rejected."""
+        k = _rdna35_kernel_for_scc_test(shadow_limit=1, miwave_tile=4)
+        # GRIncA cluster-0 interval spans [0, 1] (s_cmp_eq + 2x s_cselect).
+        # Put LWSA at idx=1 (inside cluster-0) -- since LWSA is declared
+        # AFTER GRIncA in optSchedule, inInterval uses lhsGt=False so
+        # indices equal to the interval min (0) fail, and we can
+        # additionally place LWSA exactly between the two GRIncA
+        # instructions at indices 0 and 1.
+        opt = {
+            "SYNC": [0],
+            "GRIncA": [[0, 0, 1, 2, 2, 3, 3, 4, 4]],
+            "GRIncB": [[5, 5, 6, 7, 7, 8, 8, 9, 9]],
+            "LWSA": [[0]],  # hits GRIncA cluster 0 (indices 0..1)
+            "LWSB": [[31]],
+        }
+        sched = _sched_info(opt)
+        ok, msg = verify_scc_overlap(
+            sched,
+            {"kernel": k, "dialect": RDNA35_WMMA_DIALECT},
+            code_path=0,
+        )
+        assert not ok
+        assert "LWSA" in msg and "GRIncA" in msg and "SCC" in msg, (
+            f"Unexpected failure message: {msg}"
+        )
+
+    def test_d1_scc_overlap_rdna35_skips_gra_grb_when_dtl0(self):
+        """On RDNA 3.5 (DTL=0, check_gr_m0_updates_when_dtl=False), GRA
+        and GRB are not subject to the SCC-cluster check. A GRA index
+        that would fail on CDNA 4 DTL=1 must pass on RDNA 3.5.
+        """
+        k = _rdna35_kernel_for_scc_test(shadow_limit=1, miwave_tile=4)
+        opt = {
+            "SYNC": [0],
+            "GRIncA": [[0, 0, 1, 1, 2, 2, 3, 3, 4]],
+            "GRIncB": [[5, 5, 6, 6, 7, 7, 8, 8, 9]],
+            # GRA inside GRIncA cluster 0 -- would fail on CDNA 4 DTL=1
+            # (see test_gr_simple in test_ValidateSCCoverlap.py), but
+            # RDNA 3.5 DTL=0 skips this check.
+            "GRA": [[0, 11]],
+            "GRB": [[12, 13]],
+            "LWSA": [[31]],
+            "LWSB": [[31]],
+        }
+        sched = _sched_info(opt)
+        ok, msg = verify_scc_overlap(
+            sched,
+            {"kernel": k, "dialect": RDNA35_WMMA_DIALECT},
+            code_path=0,
+        )
+        assert ok, (
+            f"RDNA 3.5 must skip GRA/GRB SCC overlap check (DTL=0, "
+            f"check_gr_m0_updates_when_dtl=False); got: {msg}"
+        )
+
+    # ---- D2 -----------------------------------------------------------------
+
+    def test_d2_ascending_order_monotone_passes(self):
+        """Monotone-non-decreasing GRIncA sequence passes.
+
+        Note: verify_ascending_order iterates optSchedule.keys() and calls
+        ``schedule_get`` on each, so we must not include ``SYNC`` (whose
+        value is an int, not a list of ints). The SCC-overlap pass has
+        an internal exception for SYNC; verify_ascending_order does not.
+        """
+        k = _rdna35_kernel_for_scc_test(shadow_limit=1)
+        opt = {
+            "GRIncA": [[0, 0, 1, 1, 2, 2, 3, 3, 4]],
+            "GRIncB": [[5, 5, 6, 6, 7, 7, 8, 8, 9]],
+            "LWSA": [[31]], "LWSB": [[31]],
+        }
+        sched = _sched_info(opt)
+        ok, msg = verify_ascending_order(
+            sched,
+            {"kernel": k, "dialect": RDNA35_WMMA_DIALECT},
+            code_path=0,
+        )
+        assert ok, f"Monotone schedule failed: {msg}"
+
+    def test_d2_ascending_order_out_of_order_fails(self):
+        """Out-of-order GRIncA index must be rejected."""
+        k = _rdna35_kernel_for_scc_test(shadow_limit=1)
+        opt = {
+            "GRIncA": [[0, 0, 2, 1, 2, 2, 3, 3, 4]],
+            "GRIncB": [[5, 5, 6, 6, 7, 7, 8, 8, 9]],
+            "LWSA": [[31]], "LWSB": [[31]],
+        }
+        sched = _sched_info(opt)
+        ok, msg = verify_ascending_order(
+            sched,
+            {"kernel": k, "dialect": RDNA35_WMMA_DIALECT},
+            code_path=0,
+        )
+        assert not ok
+        assert "Non-descending-order rule failed" in msg and "GRIncA" in msg, (
+            f"Unexpected failure message: {msg}"
+        )
+
+    def test_d2_ascending_order_is_dialect_agnostic(self):
+        """The same hazard must fire under CDNA 4 (no ISA-specific logic)."""
+        k = create_base_kernel()
+        opt = {
+            "GRIncA": [[0, 1, 0]],
+        }
+        sched = _sched_info(opt, num_mfma=8)
+        ok, _ = verify_ascending_order(
+            sched,
+            {"kernel": k, "dialect": CDNA4_DIALECT},
+            code_path=0,
+        )
+        assert not ok
+
+    # ---- D3 -----------------------------------------------------------------
+
+    def test_d3_count_rdna35_divisible_passes(self):
+        """RDNA 3.5: idmap_len that's a multiple of authored_len passes
+        (authored slots represent uniform packs of ops)."""
+        opt = {"LRA0": [[0, 4]]}  # authored_len = 2
+        sched = _sched_info(opt, num_mfma=8)
+        id_map = {"LRA0": list(range(8))}  # idmap_len = 8; 8 % 2 == 0
+        ok, msg = verify_correct_number_of_instructions(
+            sched,
+            {"kernel": {}, "dialect": RDNA35_WMMA_DIALECT, "idMap": id_map},
+            code_path=0,
+        )
+        assert ok, f"Divisible stream lengths must pass on RDNA 3.5: {msg}"
+
+    def test_d3_count_rdna35_non_divisible_fails(self):
+        """RDNA 3.5: authored length that does not evenly divide idmap
+        length must be rejected with a remainder diagnostic."""
+        opt = {"LRA0": [[0, 2, 4]]}  # authored_len = 3
+        sched = _sched_info(opt, num_mfma=8)
+        id_map = {"LRA0": list(range(8))}  # 8 % 3 == 2
+        ok, msg = verify_correct_number_of_instructions(
+            sched,
+            {"kernel": {}, "dialect": RDNA35_WMMA_DIALECT, "idMap": id_map},
+            code_path=0,
+        )
+        assert not ok
+        assert "does not evenly divide" in msg and "remainder 2" in msg, (
+            f"Expected divisibility diagnostic, got: {msg}"
+        )
+
+    def test_d3_count_rdna35_zero_authored_fails(self):
+        """RDNA 3.5: zero authored slots with non-empty idmap is a
+        structural bug (would divide by zero otherwise)."""
+        opt = {"LRA0": [[]]}
+        sched = _sched_info(opt, num_mfma=8)
+        id_map = {"LRA0": list(range(4))}
+        ok, msg = verify_correct_number_of_instructions(
+            sched,
+            {"kernel": {}, "dialect": RDNA35_WMMA_DIALECT, "idMap": id_map},
+            code_path=0,
+        )
+        assert not ok
+        assert "0 authored slots" in msg
+
+    def test_d3_count_cdna4_strict_equality_passes(self):
+        """CDNA 4: strict equality required -- same-length schedule passes."""
+        opt = {"LRA0": [[0, 2, 4, 6]]}
+        sched = _sched_info(opt, num_mfma=8)
+        id_map = {"LRA0": list(range(4))}  # equal
+        ok, msg = verify_correct_number_of_instructions(
+            sched,
+            {"kernel": {}, "dialect": CDNA4_DIALECT, "idMap": id_map},
+            code_path=0,
+        )
+        assert ok, f"Strict-equality passes on CDNA 4: {msg}"
+
+    def test_d3_count_cdna4_strict_equality_fails_on_divisible_mismatch(self):
+        """CDNA 4: a schedule that passes RDNA 3.5 divisibility (8 % 2 == 0)
+        must still FAIL on CDNA 4 under strict equality (2 != 8). This
+        pins the dialect split so neither side can silently adopt the
+        other's invariant."""
+        opt = {"LRA0": [[0, 4]]}  # authored_len = 2
+        sched = _sched_info(opt, num_mfma=8)
+        id_map = {"LRA0": list(range(8))}  # idmap_len = 8
+        ok, msg = verify_correct_number_of_instructions(
+            sched,
+            {"kernel": {}, "dialect": CDNA4_DIALECT, "idMap": id_map},
+            code_path=0,
+        )
+        assert not ok
+        assert "2 instructions" in msg and "8 instructions" in msg
+
+    # ---- D4 / D5 / D7 : dialect flag gates ---------------------------------
+
+    def test_d4_gr_not_too_early_is_flag_gated_off_on_rdna35(self):
+        """ADD_GR_NOT_TOO_EARLY_CONSTRAINTS has two flag-gated paths; the
+        RDNA 3.5 dialect disables both (DTL=0 has no same-block LDS
+        reuse, no same-loop GRInc->GR ordering requirement). CDNA 4
+        keeps both on."""
+        assert RDNA35_WMMA_DIALECT.gr_must_start_after_lr0s is False
+        assert RDNA35_WMMA_DIALECT.gr_must_follow_grinc_in_same_loop is False
+        assert CDNA4_DIALECT.gr_must_start_after_lr0s is True
+        assert CDNA4_DIALECT.gr_must_follow_grinc_in_same_loop is True
+
+    def test_d5_local_read_constraints_is_active_on_rdna35(self):
+        """ADD_LOCAL_READ_CONSTRAINTS is not flag-gated; both dialects
+        run the same pass but with dialect-specific LR consumer offsets.
+        The (1, 2) half-offsets hold for all registered gfx1151
+        schedules; this assertion pins the dialect values so a future
+        edit can't silently drift them."""
+        assert RDNA35_WMMA_DIALECT.lr0_consumer_half_offset == 1
+        assert RDNA35_WMMA_DIALECT.lr1_consumer_half_offset == 2
+        assert CDNA4_DIALECT.lr0_consumer_half_offset == 1
+        assert CDNA4_DIALECT.lr1_consumer_half_offset == 2
+
+    def test_d7_gr_finish_before_lr_is_flag_gated_off_on_rdna35(self):
+        """ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS encodes the CDNA 4 DTL=1
+        "GR writes the LDS block next-iter LR1 reads" invariant. RDNA
+        3.5 DTL=0 decouples GR (buffer_load -> VGPRs) from the LDS fill
+        that drives LR1 (a separate LocalWrite stream with its own
+        handshake), so the constraint is gated off there."""
+        assert RDNA35_WMMA_DIALECT.gr_finish_before_lr is False
+        assert CDNA4_DIALECT.gr_finish_before_lr is True
+
+    def test_flag_matrix_is_consistent_with_timing_dialect(self):
+        """Sanity: the RDNA 3.5 dialect must match the C1/C2/C3
+        calibration decisions: stream_length_strict_equality=False (C1),
+        plus the three flag-gates above. A single-dialect regression
+        that accidentally flips any of these is a validator soundness
+        bug that every gfx1151 schedule would be affected by."""
+        assert RDNA35_WMMA_DIALECT.stream_length_strict_equality is False
+        assert CDNA4_DIALECT.stream_length_strict_equality is True
+

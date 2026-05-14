@@ -2815,11 +2815,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["UseCustomMainLoopSchedule"]:
       module = Module()
       if isNGLL:
-        module.addComment0("Code-path 0, useGR=0, usePLR=1, useGRInc=1, useLoop = 0")
-        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,1,1,0]))
+        # NGLL: useGR=0 (no new buffer_load), useLW=1 (flush last G2L into LDS)
+        module.add(SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1,
+                            comment="drain in-flight GR before NGLL LWs"))
+        module.addComment0("Code-path 0, useGR=0, usePLR=1, useGRInc=1, useLoop = 0, useLW=1")
+        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,1,1,0,1]))
       else:
-        module.addComment0("Code-path 0, useGR=0, usePLR=0, useGRInc=0, useLoop = 0")
-        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,0,0,0]))
+        # OptNLL/OrdNLL: useGR=0, useLW=0 (LDS already holds final K-tile)
+        module.addComment0("Code-path 0, useGR=0, usePLR=1, useGRInc=0, useLoop = 0, useLW=0")
+        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,1,0,0,0]))
       return module
     module = Module("noLoadLoopBody")
     expand = kernel["ExpandPointerSwap"]
