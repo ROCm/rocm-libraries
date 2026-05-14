@@ -30,7 +30,8 @@ dependencies = [
 ]
 
 [project.scripts]
-dnn-benchmark = "dnn_benchmarking.cli.main:main"
+dnn-benchmark       = "dnn_benchmarking.cli.main:main"
+dnn-convert-shapes  = "dnn_benchmarking.tools.convert_miopen_shapes:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]

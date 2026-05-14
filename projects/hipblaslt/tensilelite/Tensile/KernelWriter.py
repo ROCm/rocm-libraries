@@ -45,7 +45,7 @@ from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
-from .Components.SubtileBasedKernel import *
+from .Components.Subtile.Kernel import *
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType
 from .AsmMemoryInstruction import MemoryInstruction
@@ -91,7 +91,7 @@ class MatrixInfo:
   startVgprValuPackTemp: int     = -1
 
   numSgprStrides: int            = -1
-  tileInfo: TileInfo = field(init=False)
+  tileInfo: object = field(init=False)  # TileInfo for all tile types
 
 
 
@@ -124,6 +124,7 @@ class ABMatrixInfo(MatrixInfo):
   useDirect32XEmulationNext: bool = False
   numVgprEmu: int                = -1
   startVgprCvt: int              = -1
+  tmpVgprCvtSub: int             = -1  # per-tensor temp VGPR for XF32 cvt+sub residual
 
   gNLCPermBlock: int             = -1
   gNLCPerpStride: int            = -1
@@ -245,8 +246,6 @@ class StateValues:
   unifiedVgprRegs: bool                  = False
   useAtomicAdd: bool                     = False
   serializedStore: bool                  = False
-
-  scheduleInfo: ScheduleInfo             = field(init=False)
 
   a: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
   b: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
@@ -2529,8 +2528,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tdmInited: bool = False
 
     # TODO: This can probably be moved later, after setupnewtile
-    if not tdmA:
-      module.add(self.removeGRSrdVariableSgprsFromPool(kernel))
+    # Always release GR-related SGPRs from the pool. regardless of whether
+    # it is a TDM or non-TDM kernel.
+    module.add(self.removeGRSrdVariableSgprsFromPool(kernel))
 
     # tile assignments
     if not kernel["UseSubtileImpl"]:
@@ -2730,7 +2730,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.graAddresses(kernel, tensorParametersB))
 
       # workgroup SGPRs no longer needed
-      if not tdmA:
+      if not tdmA or prod(kernel["MIWaveGroup"]) < 2:
         module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
 
       # Final offsets A(MXSA)
@@ -2950,37 +2950,46 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # initialize SubTileIdx
     self.states.SubTileIdx = 1 if self.states.numItersPLR and kernel["numSubTiles"] else 0
 
+    if isNGLL:
+      self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
+
     for uIdx in range(0, kernel["LoopIters"]):
       u = uIdx % kernel["LoopIters"]    #   u: index in compute loop (in contrast to the notion of global read loop)
       isLastLoop = not isNGLL
       if u == 0:
         if not isLastLoop:
-          # For UnrollLoopSwapGlobalReadOrder == 1 or DirectToVgprA/B, we will have 2 NGLLs,
-          # One with local write A then B and another with B then A.
-          if dsWriteBA == True:
-            # In the current scheduling, we always schedule lwa first then lwb second.
-            # Put B in lwa code can easily change the order.
-            self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersB, swapAB=1)
-            if "MX" in tensorParametersB:
-              self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersB["MX"], swapAB=1)
+          if not kernel["NoLdsWriteCode"]:
+            # For UnrollLoopSwapGlobalReadOrder == 1 or DirectToVgprA/B, we will have 2 NGLLs,
+            # One with local write A then B and another with B then A.
+            if dsWriteBA == True:
+              # In the current scheduling, we always schedule lwa first then lwb second.
+              # Put B in lwa code can easily change the order.
+              self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersB, swapAB=1)
+              if "MX" in tensorParametersB:
+                self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersB["MX"], swapAB=1)
+              else:
+                self.codes.localWriteMXSA = Module()
+              if "MX" in tensorParametersA:
+                self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersA["MX"], swapAB=1)
+              else:
+                self.codes.localWriteMXSB = Module()
+              self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersA, swapAB=1)
             else:
-              self.codes.localWriteMXSA = Module()
-            if "MX" in tensorParametersA:
-              self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersA["MX"], swapAB=1)
-            else:
-              self.codes.localWriteMXSB = Module()
-            self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersA, swapAB=1)
+              self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)  # local write in loopcnt N targets data for loopcnt N+1
+              if "MX" in tensorParametersA:
+                self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])  # local write in loopcnt N targets data for loopcnt N+1
+              else:
+                self.codes.localWriteMXSA = Module()
+              if "MX" in tensorParametersB:
+                self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
+              else:
+                self.codes.localWriteMXSB = Module()
+              self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB)
           else:
-            self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)  # local write in loopcnt N targets data for loopcnt N+1
-            if "MX" in tensorParametersA:
-              self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])  # local write in loopcnt N targets data for loopcnt N+1
-            else:
-              self.codes.localWriteMXSA = Module()
-            if "MX" in tensorParametersB:
-              self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
-            else:
-              self.codes.localWriteMXSB = Module()
-            self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB)
+            self.codes.localWriteA = Module()
+            self.codes.localWriteMXSA = Module()
+            self.codes.localWriteMXSB = Module()
+            self.codes.localWriteB = Module()
           # unrolled loop: global read A, B
           # DirectToVgprA + PGR2: we need DTVA GR in NGLL
           if kernel["DirectToVgprA"]:
@@ -3008,9 +3017,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.codes.localWriteMXSA = Module()
           self.codes.localWriteMXSB = Module()
 
-        if not isNGLL or kernel["ExpandPointerSwap"] or UnrollLoopSwapGlobalReadOrder or isDTVAB or \
+        callMakeSchedule = not isNGLL or kernel["ExpandPointerSwap"] or UnrollLoopSwapGlobalReadOrder or isDTVAB or \
           (kernel["PrefetchGlobalRead"] >= 3 and isNGLL) or \
-          (self.states.doPackPreSchedulingNextLoop and isNGLL):
+          (self.states.doPackPreSchedulingNextLoop and isNGLL)
+        if callMakeSchedule:
           # PAP would have GlobalRead and GlobalInc, but no localWrite
           # Get the perIterGlobalReadCode code for PAP (if PAP=On), else would be empty
           skipGlobalReadInc = False
@@ -3019,6 +3029,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
             skipGlobalReadInc = remainPgr < kernel["PrefetchGlobalRead"] - 1
           self.makeSchedule(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, skipGlobalReadInc=skipGlobalReadInc, lastLoop=NLLlast, isNGLL=isNGLL)
           module.add(self.codes.unrollLoopHeader)
+
+        if isNGLL and not callMakeSchedule:
+          globalReadIncACode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementA")
+          globalReadIncBCode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementB")
+          self.codes.perIterGlobalRead[u].addComment1("Global Read IncA")
+          self.codes.perIterGlobalRead[u].add(globalReadIncACode)
+          self.codes.perIterGlobalRead[u].addComment1("Global Read IncB")
+          self.codes.perIterGlobalRead[u].add(globalReadIncBCode)
 
       # which loop iteration to reset the LRO,
       # note if PLR=0, isResetLroIter is False for all u
@@ -3232,13 +3250,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
               waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, remainPgr-1, -1, -1, "wait for global reads with lds"))
             syncCode.add(self._syncThreads(kernel, "noLoadLoop sync LDS%u"%(self.states.ldsBarrierTokenIdx), memoryToken=[self.states.ldsBarrierTokenIdx]))
 
-          if isSwapAndResetLwoIter and not kernel["NoLdsWriteCode"]: # ResetLroIter
+          if isSwapAndResetLwoIter:
             # local write for next iter, used to have local writes here
             # Swap offsets A(MXSA)
             if kernel["enableTDMA"]:
               pointerLWCode.addComment1("tdm swap offsets a")
               pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersA))
-            else:
+            elif not kernel["NoLdsWriteCode"]:
               pointerLWCode.addComment1("local write swap offsets a")
               pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
 
@@ -3246,7 +3264,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               pointerLWCode.addComment1("local write swap offsets mxsa")
               if kernel["enableTDMA"]:
                 pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersA["MX"]))
-              else:
+              elif not kernel["NoLdsWriteCode"]:
                 pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
             # Swap offsets B(MXSB)
             if "MX" in tensorParametersB:
@@ -3254,14 +3272,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
               #TODO: TDM refactor
               if kernel["enableTDMA"] and kernel["enableTDMB"] and prod(kernel["MIWaveGroup"]) == 1:
                 pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"]))
-              elif not kernel["enableTDMB"]:
+              elif not kernel["enableTDMB"] and not kernel["NoLdsWriteCode"]:
                 pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
             if kernel["enableTDMB"]:
               #TODO: TDM refactor
               if prod(kernel["MIWaveGroup"]) == 1:
                 pointerLWCode.addComment1("tdm swap offsets b")
                 pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB))
-            else:
+            elif not kernel["NoLdsWriteCode"]:
               pointerLWCode.addComment1("local write swap offsets b")
               pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
             # Swap local write memory token
@@ -3303,6 +3321,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             pointerLRCode.addComment1("local read init pointers metadata")
             pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tPM))
+
+      elif kernel["enableTDMA"] and kernel["enableTDMB"]:
+        if isSwapLroIter: # ResetLroIter
+          # Swap, reset, or increment the LRO:
+          # force internalPointerSwap = False in NGLL case
+          internalPointerSwap = False
+          pointerLRCode.addComment1("local read swap offsets a")
+          pointerLRCode.addComment1("isSwapLroIter = %d"%(isSwapLroIter))
+          pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersA))
+          if kernel["ProblemType"]["MXBlockA"]:
+            pointerLRCode.addComment1("local read swap offsets mxsa")
+            pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersA["MX"]))
+          if kernel["ProblemType"]["MXBlockB"]:
+            pointerLRCode.addComment1("local read swap offsets mxsb")
+            pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersB["MX"]))
+          pointerLRCode.addComment1("local read swap offsets b")
+          pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersB))
+          if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+            pointerLRCode.addComment1("local read swap offsets metadata")
+            pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tPM))
 
       # we initiate dscnt to 0, then assigning it correct value in makeSubIterSchedule()
       waitCode = self._wait(kernel, tensorParametersA, tensorParametersB, \
@@ -3350,8 +3388,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
         tP = tensorParametersA if kernel["ProblemType"]["BiasSrc"] == "A" else tensorParametersB
         macIterCode.add(self.exclasses.biasSumUnroll.loopSum(self, kernel, tP, u, kernel["InnerUnroll"]))
-      if(isNGLL and kernel["ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2):
-            self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
       subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], \
                       module, NLLlast, tailloopInNll=useTailloopInNll, isNLLorNGLL=True)
@@ -3462,8 +3498,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "10wait for global read"))
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "4wait for local write"))
-      module.add(self._syncThreads(kernel, "Wait GR->LW done, sync LDS%u"%self.states.ldsWriteTokenIdx, memoryToken=[self.states.ldsWriteTokenIdx]))
-
+      module.add(self._syncThreads(kernel, "wait for local write done, sync LDS%u"%self.states.ldsBarrierTokenIdx, memoryToken=[self.states.ldsBarrierTokenIdx]))
+      # swap barrier token, locked by OptNll
+      if not isOptNLL:
+        self.states.ldsBarrierTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsBarrierTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+    elif kernel["enableTDMA"] and kernel["enableTDMB"]:
+      module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for tensor load to finish"))
+      module.add(self._syncThreads(kernel, "wait for tensor load done, sync LDS%u"%self.states.ldsBarrierTokenIdx, memoryToken=[self.states.ldsBarrierTokenIdx]))
+      # swap barrier token
+      if not isOptNLL:
+        self.states.ldsBarrierTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsBarrierTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
     # generate no Load Loop Body code
     module.add(self.noLoadLoopBody(kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=NLLindex, \
                                    NLLnum=NLLnum, useTailloopInNll=useTailloopInNll, remainPgr=remainPgr))
@@ -3500,7 +3544,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "11wait for global read"))
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 1, 0, -1, "1wait for local write"))
-      module.add(self._syncThreads(kernel, "4sync for global read, PGR->LW needs sync LDS0", memoryToken=[self.states.ldsBarrierTokenIdx]))
+      module.add(self._syncThreads(kernel, "4sync for global read, PGR->LW needs sync LDS%u"%(self.states.ldsBarrierTokenIdx), memoryToken=[self.states.ldsBarrierTokenIdx]))
+      # swap barrier token
+      self.states.ldsBarrierTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsBarrierTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+    elif kernel["PrefetchGlobalRead"] and kernel["enableTDMA"] and kernel["enableTDMB"]:
+      module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for tensor load to finish"))
+      module.add(self._syncThreads(kernel, "wait for tensor load to finish, PGR->LW needs sync LDS%u"%(self.states.ldsBarrierTokenIdx), memoryToken=[self.states.ldsBarrierTokenIdx]))
       # swap barrier token
       self.states.ldsBarrierTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsBarrierTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
 
@@ -4296,73 +4345,43 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Allocate registers for GR/LR
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-      if tileInfo != None:
-        tileInfo.allocOffsetRegisters(self, kernel)
-        module.addComment("Allocating v%s for %s GR"%(str(tileInfo.sharedVgprGROffset), tileInfo.tc))
-        module.addComment("Allocating v%s for %s LR"%(str(tileInfo.sharedVgprLROffset), tileInfo.tc))
-        module.addComment("Allocating v%s for %s LR Swap"%(str(tileInfo.sharedVgprLROffsetSwap), tileInfo.tc))
-
-    for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-      if tileInfo != None:
-        for st in tileInfo.localSubtiles:
-          # Print out, only if register is allocated
-          if len(tileInfo.localSubtilesRegister):
-            linearId = tileInfo.localSubtiles.index(st)
-            sId0, sId1 = tileInfo.getLocalSubtileIdFromLinearId(linearId)
-            regstr = 's' if st.useSgpr else 'v'
-            module.addComment0("Using %s%s for %s GR, subtile: [%u, %u]"%(\
-                               tileInfo.tc, \
-                               regstr, str(tileInfo.localSubtilesRegister[st.regListId]), sId0, sId1))
-
+      if tileInfo is None:
+        continue
+      tileInfo.allocOffsetRegisters(self, kernel)
+      module.addComment("Allocating v%s for %s GR"%(str(tileInfo.sharedVgprGROffset), tileInfo.tc))
+      module.addComment("Allocating v%s for %s LR"%(str(tileInfo.sharedVgprLROffset), tileInfo.tc))
+      module.addComment("Allocating v%s for %s LR Swap"%(str(tileInfo.sharedVgprLROffsetSwap), tileInfo.tc))
 
     module.add(graTileAssignment(self, kernel))
     module.add(lraTileAssignment(self, kernel))
-
     module.add(localReadDTLInitCommonSwapVgpr(self, kernel))
-
     module.add(graTileAssignmentScaleSwizzled(self, kernel))
     module.add(lraTileAssignmentScaleSwizzled(self, kernel))
 
-
     module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
-    # Allocate registers for VGPR tiles
+    # Allocate registers for VGPR tiles (PGR=2 delegates to SubtileBasedScheduler)
     pgr = kernel["PrefetchGlobalRead"]
     if pgr != 2:
-      # PGR=2: A/B vgprTiles are allocated by SubtileBasedLogicalScheduler in mainLoop
-      # TMP HACK to still use legacy path for PGR=0
-      for tileInfo in [atileInfo, btileInfo]:
-        tileInfo.allocVgprTileRegisters(self, kernel)
+      # PGR=2: A/B vgprTiles are allocated by LogicalScheduler in mainLoop
+      for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
+        if tileInfo is not None:
+          tileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
-      for tileInfo in [mxsatileInfo, mxsbtileInfo]:
-        if tileInfo:
-          tileInfo.allocVgprTileRegisters(self, kernel)
-
-    for tileInfo in [dtileInfo]:
-        tileInfo.allocVgprTileRegisters(self, kernel)
-
-
+    dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
     module.add(initVgprTilesToZero(self, kernel, dtileInfo))
 
     if pgr != 2:
-      self.states.scheduleInfo = ScheduleInfo(atileInfo, btileInfo)
       for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-        if tileInfo:
+        if tileInfo is not None and isinstance(getattr(tileInfo, 'vgprTiles', None), list):
           for vtiles in tileInfo.vgprTiles:
-            regStr = "Vgpr" if vtiles.regList.regPool == self.vgprPool else "Agpr" # shouldn't this only be vgpr pool?
+            regStr = "Vgpr" if vtiles.regList.pool == self.vgprPool else "Agpr"
             module.addComment("%ss used for %s mma tile %u: %s"%(regStr, tileInfo.tc, tileInfo.vgprTiles.index(vtiles), str(vtiles)))
 
-    for tileInfo in [dtileInfo]:
-      if tileInfo:
-        for vtiles in tileInfo.vgprTiles:
-          regStr = "Vgpr" if vtiles.regList.regPool == self.vgprPool else "Agpr" # shouldn't this only be vgpr pool?
-          module.addComment("%ss used for %s mma tile %u: %s"%(regStr, tileInfo.tc, tileInfo.vgprTiles.index(vtiles), str(vtiles)))
-
-
-    vtmp = self.vgprPool.checkOut(1)
-    module.addComment("Checking out %u"%vtmp)
-    self.vgprPool.checkIn(vtmp)
+    for vtiles in dtileInfo.vgprTiles:
+      regStr = "Vgpr" if vtiles.regList.pool == self.vgprPool else "Agpr"
+      module.addComment("%ss used for %s mma tile %u: %s"%(regStr, dtileInfo.tc, dtileInfo.vgprTiles.index(vtiles), str(vtiles)))
 
     if self.do["executeToPrefetchEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
@@ -4370,18 +4389,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
     #module.add(preLoop(self, kernel))
     module.add(mainLoop(self, kernel))
 
-    # Deallocate registers used for GR/LR offsets
+    # Deallocate offset registers
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-      if tileInfo != None:
-        tileInfo.deallocOffsetRegisters(self, kernel)
+      if tileInfo is None:
+        continue
+      tileInfo.deallocOffsetRegisters(self, kernel)
 
     # For subtile kernels, free SGPRs that were only needed during the main loop
     if kernel["UseSubtileImpl"]:
-      module.add(self.undefineSubtileMainLoopSgprs(kernel))
       # Remove SrdWS from the free pool before defineSgprIdx calls below,
       # otherwise checkOutAligned can grab registers overlapping SrdWS.
       if not self.states.doShadowInit and kernel["StreamK"] and kernel["StreamKAtomic"] == 0:
         self.removeSgprVarFromPool("SrdWS")
+
+      result = self.undefineSubtileMainLoopSgprs(kernel)
+      if result is not None:
+        module.add(result)
       # Immediately allocate permanent SGPRs for subtile M/N guards.
       # Must be done here (before endSummation) so they get indices from
       # the freshly-freed swap/LocalWriteBaseAddr range.
@@ -4394,9 +4417,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Deallocate registers used for VGPR A/B/MXS tiles
     if pgr != 2:
-      for tileInfo in [atileInfo, btileInfo,mxsatileInfo, mxsbtileInfo]:
-        if tileInfo:
-          tileInfo.deallocVgprTileRegisters(self, kernel)
+      for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
+        if tileInfo is not None and isinstance(getattr(tileInfo, 'vgprTiles', None), list):
+          tileInfo.deallocVgprTileRegisters_legacy(self, kernel)
 
     # Start of post-loop code
     if 1:
@@ -4441,7 +4464,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.vgprPool.checkIn(self.states.c.startVgprValu)
 
     # Deallocate registers used for C/D tiles after store code instructions are emitted
-    dtileInfo.deallocVgprTileRegisters(self, kernel)
+    dtileInfo.deallocVgprTileRegisters_legacy(self, kernel)
 
     hasDeferredGSU0 = deferredGSU0 and len(deferredGSU0.items()) > 0
     hasDeferredFixup = hasattr(self.states, 'deferredFixupModule') and self.states.deferredFixupModule is not None
@@ -4928,6 +4951,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # open unrolled summation loop
     module.addComment2("Unrolled Loop(s) - Begin")
+    if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
+      module.add(SBarrier(comment="TDM PGR=0: prime barrier before loop"))
     module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False))
 
     loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
@@ -4963,11 +4988,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # loop body code generation
         finalLoop = lc == loopCopies - 1
         loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, isDTVGRSecondBuf=isDTVGRSecondBuf ))
+        if self.states.numItersPLR == 0 and not finalLoop:
+          # swap LDS read buffer
+          self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsReadTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+
     module.add(loop)
 
     if kernel["ExpertSchedulingMode"] > 0:
       module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
-
+    if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
+      module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="disable expert scheduling mode = 0"))
     module.addComment1("Before NLL: Check VGPR.checkin for INT8 LW")
 
     # swap local write, read again before noLoadLoop if PrefetchGlobalRead and DirectToLds is enabled
@@ -5217,6 +5247,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if (kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False)) and not kernel["1LDSBuffer"]:
         module.add(self._syncThreads(kernel, "Barrier before tail TDM loads (WAR hazard with NLL LDS reads)"))
 
+      if kernel["enableTDMA"] and kernel["enableTDMB"]:
+        if prod(kernel["MIWaveGroup"]) > 1:
+          module.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+          if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+            module.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, tensorParametersA["MX"], \
+                                                                   tensorParametersB["MX"]))
+        else:
+          module.add(self.resetTDMDescriptorForTail(kernel, tensorParametersA))
+          module.add(self.resetTDMDescriptorForTail(kernel, tensorParametersB))
+          if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+            module.add(self.resetTDMDescriptorForTail(kernel, tensorParametersA["MX"]))
+            module.add(self.resetTDMDescriptorForTail(kernel, tensorParametersB["MX"]))
+
       # reset memToken for tail loop
       self.states.ldsWriteTokenIdx = self.states.memTokenLdsBuffer0
       self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
@@ -5431,16 +5474,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # tail: re-init local read addresses
       if kernel["PrefetchGlobalRead"]:
-        module.addComment1("Tail: local read reset offsets a")
-        module.add(self.localReadResetOffsets(kernel, tensorParametersA))
-        if kernel["ProblemType"]["MXBlockA"]:
-          module.addComment1("Tail: local read reset offsets mxsa")
-          module.add(self.localReadResetOffsets(kernel, tensorParametersA["MX"]))
-        if kernel["ProblemType"]["MXBlockB"]:
-          module.addComment1("Tail: local read reset offsets mxsb")
-          module.add(self.localReadResetOffsets(kernel, tensorParametersB["MX"]))
-        module.addComment1("Tail: local read reset offsets b")
-        module.add(self.localReadResetOffsets(kernel, tensorParametersB))
+        if kernel["ScheduleIterAlg"] != 0:
+          module.addComment1("Tail: local read reset offsets a")
+          module.add(self.localReadResetOffsets(kernel, tensorParametersA))
+          if kernel["ProblemType"]["MXBlockA"]:
+            module.addComment1("Tail: local read reset offsets mxsa")
+            module.add(self.localReadResetOffsets(kernel, tensorParametersA["MX"]))
+          if kernel["ProblemType"]["MXBlockB"]:
+            module.addComment1("Tail: local read reset offsets mxsb")
+            module.add(self.localReadResetOffsets(kernel, tensorParametersB["MX"]))
+          module.addComment1("Tail: local read reset offsets b")
+          module.add(self.localReadResetOffsets(kernel, tensorParametersB))
 
         module.addComment1("Tail: local read init pointers a")
         module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA))
@@ -5745,12 +5789,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Run StinkyTofu conversion for supported architectures
     t0_start = time.perf_counter()
-    if globalParameters["StinkyTofuOptLevel"] is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
+    stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
+    if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
       print2(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
 
       moduleKernelBody.body.setParent()
-
-      stinky_opt_level = int(globalParameters.get("StinkyTofuOptLevel") or 0)
 
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
@@ -5888,6 +5931,30 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 
+    def selectGRSubtileShape(tc):
+      """Select GR subtile shape based on wave cooperation level.
+
+      The GR tile shape represents the effective coverage per GR load round.
+      When multiple waves cooperate on a single GR load (waves_coop >= 4),
+      the GR tile expands from (1,2) to (2,2) MMA tiles.
+
+      For A: waves_coop = numWaves / MIWaveGroup[0]
+      For B: waves_coop = numWaves / MIWaveGroup[1]
+
+      Wave config → GR shape:
+        1x4 WG: A=(2,2), B=(1,2)   — A has 4 cooperating waves
+        4x1 WG: A=(1,2), B=(2,2)   — B has 4 cooperating waves
+        2x2 WG: A=(1,2), B=(1,2)   — 2 cooperating waves each
+        1x1 WG: A=(1,2), B=(1,2)   — 1 wave each
+
+      LR subtile shape is always (1,2) regardless of wave config.
+      """
+      mi = kernel["MIWaveGroup"]
+      numWaves = mi[0] * mi[1]
+      wg_idx = 0 if tc == 'A' else 1
+      wg_m = mi[wg_idx]
+      waves_coop = numWaves // wg_m
+      return (2, 2) if waves_coop >= 4 else (1, 2)
 
     def initSubTileInfo(tc):
       tileMap = {
@@ -5898,9 +5965,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
         'MXSB' : self.states.mxsb,
       }
       matrixInfo = tileMap[tc]
-      matrixInfo.tileInfo = TileInfo(tc, kernel)
-      tileInfo = matrixInfo.tileInfo
-      #print(tileInfo)
+      if tc == 'D':
+        geometry = selectDGeometry(kernel)
+        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
+      elif tc in ('A', 'B'):
+        grShape = selectGRSubtileShape(tc)
+        matrixInfo.grSubtileShape = grShape
+        geometry = selectABGeometry(kernel, tc)
+        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
+      elif tc in ('MXSA', 'MXSB'):
+        geometry = selectMXScaleGeometry(kernel, tc)
+        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
 
 
     if kernel["UseSubtileImpl"]:
@@ -5916,12 +5991,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.ldsStartOffsetA = 0
       aTileInfo = self.states.a.tileInfo
       bTileInfo = self.states.b.tileInfo
-      numASubtiles = aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1]
-      numBSubtiles = bTileInfo.globalSubtileGrid[0] * bTileInfo.globalSubtileGrid[1]
+      numASubtiles = int(aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1])
+      numBSubtiles = int(bTileInfo.globalSubtileGrid[0] * bTileInfo.globalSubtileGrid[1])
       readSize = 2*aTileInfo.subtileSize
       # Align A and B sizes to readSize for DTL 2xsubtile reads
-      sizeA = ((numASubtiles * aTileInfo.subtileSize + readSize-1) // readSize) * readSize
-      sizeB = ((numBSubtiles * bTileInfo.subtileSize + readSize-1) // readSize) * readSize
+      sizeA = int(((numASubtiles * aTileInfo.subtileSize + readSize-1) // readSize) * readSize)
+      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + readSize-1) // readSize) * readSize)
       self.ldsStartOffsetB = sizeA
       sizeMXSA = 0
       sizeMXSB = 0
@@ -6158,16 +6233,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numVgprBufferPackMXSB = 1
 
     if kernel["UnrollMajorLDSA"]:
-      divider = 2 if (kernel["ProblemType"]["Sparse"] == 1) and (kernel["MIInputPerThread"] * kernel["ProblemType"]["MacDataTypeA"].numBytes() <= 16) else 1
-      self.states.lrvwUnrollA = kernel["LocalReadVectorWidthA"] // divider
+      self.states.lrvwUnrollA = kernel["LocalReadVectorWidthA"]
     else:
       self.states.lrvwUnrollA = 1
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.lrvwUnrollMXSA = 1
 
     if kernel["UnrollMajorLDSB"]:
-      divider = 2 if (kernel["ProblemType"]["Sparse"] == 2) and (kernel["MIInputPerThread"] * kernel["ProblemType"]["MacDataTypeB"].numBytes() <= 16) else 1
-      self.states.lrvwUnrollB = kernel["LocalReadVectorWidthB"] // divider
+      self.states.lrvwUnrollB = kernel["LocalReadVectorWidthB"]
     else:
       self.states.lrvwUnrollB = 1
     if kernel["ProblemType"]["MXBlockB"]:
@@ -7923,6 +7996,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
 
+      # Per-tensor temp VGPRs for XF32 cvt+sub residual computation.
+      # A and B each get a dedicated temp so that _interleavePackAB can
+      # safely interleave their residual sequences without clobbering.
+      if kernel["UseF32XEmulation"] and not kernel["UseMFMAF32XEmulation"] and not kernel["UseDot2F32XEmulation"]:
+        self.states.a.tmpVgprCvtSub = vgprIdx
+        vgprIdx += 1
+        self.states.b.tmpVgprCvtSub = vgprIdx
+        vgprIdx += 1
+
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
       self.states.startVgprSerial = vgprIdx
@@ -8458,6 +8540,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numReadsPerUnrollMetadata //= kernel["numSubTiles"]
 
       factorSubIterB = kernel["numSubTiles"]
+
       if kernel["UnrollMajorLDSB"] or kernel["enableLDSTrB"]:
         self.states.numReadsPerUnrollB = ceil(tensorParametersB["bpe"] * kernel["MIInputPerThreadB"] / int(tensorParametersB["localReadInstruction"].blockWidth * 4))
       else:
@@ -9445,6 +9528,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     assert False, "Should be overrided"
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def resetTDMDescriptorForTail(self, kernel, tP) -> Module:
+    assert False, "Should be overrided"
+
+  def resetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
 ##############################################################################

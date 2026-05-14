@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -51,4 +51,20 @@ struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::ijt
     using filter = typename hipsparse_test_ijt_template<ROUTINE>::test;
     template <typename... P>
     using caller = typename hipsparse_test_ijt_template<ROUTINE>::template test_call<P...>;
+};
+
+template <hipsparse_test_enum::value_type ROUTINE>
+struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::ijabct_spmv>
+{
+    using filter = typename hipsparse_test_ijabct_spmv_template<ROUTINE>::test;
+    template <typename... P>
+    using caller = typename hipsparse_test_ijabct_spmv_template<ROUTINE>::template test_call<P...>;
+};
+
+template <hipsparse_test_enum::value_type ROUTINE>
+struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::iabct_spmv>
+{
+    using filter = typename hipsparse_test_iabct_spmv_template<ROUTINE>::test;
+    template <typename... P>
+    using caller = typename hipsparse_test_iabct_spmv_template<ROUTINE>::template test_call<P...>;
 };

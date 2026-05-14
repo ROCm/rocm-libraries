@@ -427,6 +427,87 @@ inline T make_DataType(double real, double imag = 0.0)
 }
 
 /* ============================================================================================ */
+/*! \brief testing_cast<T>(U) — convert a scalar of type \p U to compute type \p T.
+ *
+ * For most numeric type pairs this is just a static_cast. The specializations
+ * below handle the cases needed by the SpMV mixed-regular real and
+ * mixed-regular complex precisions:
+ *   - real (float / double) promoted to complex with imaginary part zero
+ *   - hipComplex promoted to hipDoubleComplex
+ *   - hipDoubleComplex narrowed to hipComplex
+ * which the HIP_vector_type-based complex types do not support natively via
+ * static_cast (a real-to-complex static_cast would broadcast (v, v)).
+ */
+template <typename T, typename U>
+struct testing_cast_impl
+{
+    static inline T apply(const U& v)
+    {
+        return static_cast<T>(v);
+    }
+};
+
+template <>
+struct testing_cast_impl<hipComplex, float>
+{
+    static inline hipComplex apply(float v)
+    {
+        return make_hipFloatComplex(v, 0.0f);
+    }
+};
+
+template <>
+struct testing_cast_impl<hipComplex, double>
+{
+    static inline hipComplex apply(double v)
+    {
+        return make_hipFloatComplex(static_cast<float>(v), 0.0f);
+    }
+};
+
+template <>
+struct testing_cast_impl<hipDoubleComplex, float>
+{
+    static inline hipDoubleComplex apply(float v)
+    {
+        return make_hipDoubleComplex(static_cast<double>(v), 0.0);
+    }
+};
+
+template <>
+struct testing_cast_impl<hipDoubleComplex, double>
+{
+    static inline hipDoubleComplex apply(double v)
+    {
+        return make_hipDoubleComplex(v, 0.0);
+    }
+};
+
+template <>
+struct testing_cast_impl<hipDoubleComplex, hipComplex>
+{
+    static inline hipDoubleComplex apply(hipComplex v)
+    {
+        return make_hipDoubleComplex(static_cast<double>(v.x), static_cast<double>(v.y));
+    }
+};
+
+template <>
+struct testing_cast_impl<hipComplex, hipDoubleComplex>
+{
+    static inline hipComplex apply(hipDoubleComplex v)
+    {
+        return make_hipFloatComplex(static_cast<float>(v.x), static_cast<float>(v.y));
+    }
+};
+
+template <typename T, typename U>
+inline T testing_cast(const U& v)
+{
+    return testing_cast_impl<T, U>::apply(v);
+}
+
+/* ============================================================================================ */
 /*! \brief mult */
 template <typename T>
 inline T testing_mult(T p, T q)
@@ -477,13 +558,17 @@ inline T testing_fma(T p, T q, T r)
 template <>
 inline hipComplex testing_fma(hipComplex p, hipComplex q, hipComplex r)
 {
-    return hipCfmaf(p, q, r);
+    float re = std::fmaf(-p.y, q.y, std::fmaf(p.x, q.x, r.x));
+    float im = std::fmaf(p.x, q.y, std::fmaf(p.y, q.x, r.y));
+    return make_hipComplex(re, im);
 }
 
 template <>
 inline hipDoubleComplex testing_fma(hipDoubleComplex p, hipDoubleComplex q, hipDoubleComplex r)
 {
-    return hipCfma(p, q, r);
+    double re = std::fma(-p.y, q.y, std::fma(p.x, q.x, r.x));
+    double im = std::fma(p.x, q.y, std::fma(p.y, q.x, r.y));
+    return make_hipDoubleComplex(re, im);
 }
 
 /* ============================================================================================ */
@@ -516,6 +601,26 @@ static inline float testing_conj(float x)
 }
 
 static inline double testing_conj(double x)
+{
+    return x;
+}
+
+static inline int8_t testing_conj(int8_t x)
+{
+    return x;
+}
+
+static inline int32_t testing_conj(int32_t x)
+{
+    return x;
+}
+
+static inline hipsparseFloat16 testing_conj(hipsparseFloat16 x)
+{
+    return x;
+}
+
+static inline hipsparseBfloat16 testing_conj(hipsparseBfloat16 x)
 {
     return x;
 }
@@ -886,6 +991,22 @@ template <typename I>
 static void read_mtx_value(std::istringstream& is, I& row, I& col, double& val)
 {
     is >> row >> col >> val;
+}
+
+template <typename I>
+static void read_mtx_value(std::istringstream& is, I& row, I& col, hipsparseFloat16& val)
+{
+    float v;
+    is >> row >> col >> v;
+    val = hipsparseFloat16(v);
+}
+
+template <typename I>
+static void read_mtx_value(std::istringstream& is, I& row, I& col, hipsparseBfloat16& val)
+{
+    float v;
+    is >> row >> col >> v;
+    val = hipsparseBfloat16(v);
 }
 
 template <typename I>
@@ -3152,7 +3273,7 @@ void host_bsrxmv(hipsparseDirection_t dir,
     }
 }
 
-template <typename T, typename I, typename J>
+template <typename T, typename I, typename J, typename A, typename X, typename Y = T>
 inline void host_sellmv(hipsparseOperation_t trans,
                         J                    M,
                         J                    N,
@@ -3162,10 +3283,10 @@ inline void host_sellmv(hipsparseOperation_t trans,
                         T                    alpha,
                         const I*             sell_slice_offsets,
                         const J*             sell_col_ind,
-                        const T*             sell_val,
-                        const T*             x,
+                        const A*             sell_val,
+                        const X*             x,
                         T                    beta,
-                        T*                   y,
+                        Y*                   y,
                         hipsparseIndexBase_t base)
 {
     bool conj = (trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
@@ -3186,7 +3307,8 @@ inline void host_sellmv(hipsparseOperation_t trans,
                 J col       = sell_col_ind[j] - base;
                 if(col >= 0)
                 {
-                    sums[local_row] = testing_fma(sell_val[j], x[col], sums[local_row]);
+                    sums[local_row] = testing_fma(
+                        testing_cast<T>(sell_val[j]), static_cast<T>(x[col]), sums[local_row]);
                 }
             }
 
@@ -3198,11 +3320,13 @@ inline void host_sellmv(hipsparseOperation_t trans,
                 {
                     if(beta != make_DataType<T>(0))
                     {
-                        y[row] = testing_fma(beta, y[row], testing_mult(alpha, sums[local_row]));
+                        T yr   = static_cast<T>(y[row]);
+                        yr     = testing_fma(beta, yr, testing_mult(alpha, sums[local_row]));
+                        y[row] = static_cast<Y>(yr);
                     }
                     else
                     {
-                        y[row] = testing_mult(alpha, sums[local_row]);
+                        y[row] = static_cast<Y>(testing_mult(alpha, sums[local_row]));
                     }
                 }
             }
@@ -3213,7 +3337,9 @@ inline void host_sellmv(hipsparseOperation_t trans,
         // Scale y with beta
         for(J i = 0; i < N; ++i)
         {
-            y[i] = testing_mult(y[i], beta);
+            T yi = static_cast<T>(y[i]);
+            yi   = testing_mult(yi, beta);
+            y[i] = static_cast<Y>(yi);
         }
 
         // Transposed SpMV
@@ -3226,17 +3352,20 @@ inline void host_sellmv(hipsparseOperation_t trans,
             {
                 J row = slice_size * slice + j % slice_size;
                 J col = sell_col_ind[j] - base;
-                T val = testing_conj(sell_val[j], conj);
+                T val = conj ? testing_cast<T>(testing_conj(sell_val[j]))
+                             : testing_cast<T>(sell_val[j]);
                 if(col >= 0)
                 {
-                    y[col] = testing_fma(testing_mult(alpha, val), x[row], y[col]);
+                    T yc   = static_cast<T>(y[col]);
+                    yc     = testing_fma(testing_mult(alpha, val), static_cast<T>(x[row]), yc);
+                    y[col] = static_cast<Y>(yc);
                 }
             }
         }
     }
 }
 
-template <typename I, typename J, typename T>
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
 inline void host_csrmv(hipsparseOperation_t trans,
                        J                    M,
                        J                    N,
@@ -3244,10 +3373,10 @@ inline void host_csrmv(hipsparseOperation_t trans,
                        T                    alpha,
                        const I*             csr_row_ptr,
                        const J*             csr_col_ind,
-                       const T*             csr_val,
-                       const T*             x,
+                       const A*             csr_val,
+                       const X*             x,
                        T                    beta,
-                       T*                   y,
+                       Y*                   y,
                        hipsparseIndexBase_t base)
 {
     if(trans == HIPSPARSE_OPERATION_NON_TRANSPOSE)
@@ -3288,9 +3417,9 @@ inline void host_csrmv(hipsparseOperation_t trans,
                 {
                     if(j + k < row_end)
                     {
-                        sum[k] = testing_fma(testing_mult(alpha, csr_val[j + k]),
-                                             x[csr_col_ind[j + k] - base],
-                                             sum[k]);
+                        const T av = testing_cast<T>(csr_val[j + k]);
+                        const T xv = static_cast<T>(x[csr_col_ind[j + k] - base]);
+                        sum[k]     = testing_fma(testing_mult(alpha, av), xv, sum[k]);
                     }
                 }
             }
@@ -3305,11 +3434,13 @@ inline void host_csrmv(hipsparseOperation_t trans,
 
             if(beta == make_DataType<T>(0.0))
             {
-                y[i] = sum[0];
+                y[i] = static_cast<Y>(sum[0]);
             }
             else
             {
-                y[i] = testing_fma(beta, y[i], sum[0]);
+                T yi = static_cast<T>(y[i]);
+                yi   = testing_fma(beta, yi, sum[0]);
+                y[i] = static_cast<Y>(yi);
             }
         }
     }
@@ -3320,7 +3451,7 @@ inline void host_csrmv(hipsparseOperation_t trans,
         {
             for(J i = 0; i < N; ++i)
             {
-                y[i] = make_DataType<T>(0.0);
+                y[i] = static_cast<Y>(make_DataType<T>(0.0));
             }
         }
         else
@@ -3328,7 +3459,9 @@ inline void host_csrmv(hipsparseOperation_t trans,
             // Scale y with beta
             for(J i = 0; i < N; ++i)
             {
-                y[i] = testing_mult(beta, y[i]);
+                T yi = static_cast<T>(y[i]);
+                yi   = testing_mult(beta, yi);
+                y[i] = static_cast<Y>(yi);
             }
         }
 
@@ -3337,16 +3470,18 @@ inline void host_csrmv(hipsparseOperation_t trans,
         {
             I row_begin = csr_row_ptr[i] - base;
             I row_end   = csr_row_ptr[i + 1] - base;
-            T row_val   = testing_mult(alpha, x[i]);
+            T row_val   = testing_mult(alpha, static_cast<T>(x[i]));
 
             for(I j = row_begin; j < row_end; ++j)
             {
                 J col = csr_col_ind[j] - base;
                 T val = (trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE)
-                            ? testing_conj(csr_val[j])
-                            : csr_val[j];
+                            ? testing_cast<T>(testing_conj(csr_val[j]))
+                            : testing_cast<T>(csr_val[j]);
 
-                y[col] = testing_fma(val, row_val, y[col]);
+                T yc   = static_cast<T>(y[col]);
+                yc     = testing_fma(val, row_val, yc);
+                y[col] = static_cast<Y>(yc);
             }
         }
     }
@@ -7314,12 +7449,21 @@ hipsparseIndexType_t getIndexType()
 template <typename T>
 hipDataType getDataType()
 {
-    return (typeid(T) == typeid(int8_t)) ? HIP_R_8I
-           : (typeid(T) == typeid(float))
-               ? HIP_R_32F
-               : ((typeid(T) == typeid(double))
-                      ? HIP_R_64F
-                      : ((typeid(T) == typeid(hipComplex) ? HIP_C_32F : HIP_C_64F)));
+    if(typeid(T) == typeid(int8_t))
+        return HIP_R_8I;
+    if(typeid(T) == typeid(int32_t))
+        return HIP_R_32I;
+    if(typeid(T) == typeid(hipsparseFloat16))
+        return HIP_R_16F;
+    if(typeid(T) == typeid(hipsparseBfloat16))
+        return HIP_R_16BF;
+    if(typeid(T) == typeid(float))
+        return HIP_R_32F;
+    if(typeid(T) == typeid(double))
+        return HIP_R_64F;
+    if(typeid(T) == typeid(hipComplex))
+        return HIP_C_32F;
+    return HIP_C_64F;
 }
 
 /* ============================================================================================ */
@@ -7361,7 +7505,7 @@ void host_hybmv(int                  m,
 
                 if(col >= 0 && col < n)
                 {
-                    sum = sum + testing_mult(ell_val[idx], x[col]);
+                    sum = testing_fma(ell_val[idx], x[col], sum);
                 }
                 else
                 {
@@ -7371,7 +7515,7 @@ void host_hybmv(int                  m,
 
             if(beta != zero)
             {
-                y[i] = testing_mult(beta, y[i]) + testing_mult(alpha, sum);
+                y[i] = testing_fma(alpha, sum, testing_mult(beta, y[i]));
             }
             else
             {
@@ -7395,23 +7539,23 @@ void host_hybmv(int                  m,
             int row = coo_row_ind[i] - idx_base;
             int col = coo_col_ind[i] - idx_base;
 
-            y[row] = y[row] + testing_mult(alpha, testing_mult(coo_val[i], x[col]));
+            y[row] = testing_fma(alpha, testing_mult(coo_val[i], x[col]), y[row]);
         }
     }
 }
 
 /* ============================================================================================ */
 /*! \brief  Host coomv (COO matrix-vector multiplication) */
-template <typename I, typename T>
+template <typename I, typename A, typename X, typename Y, typename T>
 void host_coomv(I                    m,
                 I                    nnz,
                 T                    alpha,
                 const I*             coo_row_ind,
                 const I*             coo_col_ind,
-                const T*             coo_val,
-                const T*             x,
+                const A*             coo_val,
+                const X*             x,
                 T                    beta,
-                T*                   y,
+                Y*                   y,
                 hipsparseIndexBase_t idx_base)
 {
 #ifdef _OPENMP
@@ -7419,28 +7563,33 @@ void host_coomv(I                    m,
 #endif
     for(I i = 0; i < m; ++i)
     {
-        y[i] = testing_mult(beta, y[i]);
+        T yi = static_cast<T>(y[i]);
+        yi   = testing_mult(beta, yi);
+        y[i] = static_cast<Y>(yi);
     }
 
     for(I i = 0; i < nnz; ++i)
     {
-        y[coo_row_ind[i] - idx_base] = testing_fma(testing_mult(alpha, coo_val[i]),
-                                                   x[coo_col_ind[i] - idx_base],
-                                                   y[coo_row_ind[i] - idx_base]);
+        const I row = coo_row_ind[i] - idx_base;
+        const I col = coo_col_ind[i] - idx_base;
+        T       yi  = static_cast<T>(y[row]);
+        yi          = testing_fma(
+            testing_mult(alpha, testing_cast<T>(coo_val[i])), static_cast<T>(x[col]), yi);
+        y[row] = static_cast<Y>(yi);
     }
 }
 
 /* ============================================================================================ */
 /*! \brief  Host coomv_aos (COO AoS matrix-vector multiplication) */
-template <typename I, typename T>
+template <typename I, typename A, typename X, typename Y, typename T>
 void host_coomv_aos(I                    m,
                     I                    nnz,
                     T                    alpha,
                     const I*             coo_ind,
-                    const T*             coo_val,
-                    const T*             x,
+                    const A*             coo_val,
+                    const X*             x,
                     T                    beta,
-                    T*                   y,
+                    Y*                   y,
                     hipsparseIndexBase_t idx_base)
 {
 #ifdef _OPENMP
@@ -7448,14 +7597,19 @@ void host_coomv_aos(I                    m,
 #endif
     for(I i = 0; i < m; ++i)
     {
-        y[i] = testing_mult(beta, y[i]);
+        T yi = static_cast<T>(y[i]);
+        yi   = testing_mult(beta, yi);
+        y[i] = static_cast<Y>(yi);
     }
 
     for(I i = 0; i < nnz; ++i)
     {
-        y[coo_ind[2 * i] - idx_base] = testing_fma(testing_mult(alpha, coo_val[i]),
-                                                   x[coo_ind[2 * i + 1] - idx_base],
-                                                   y[coo_ind[2 * i] - idx_base]);
+        const I row = coo_ind[2 * i] - idx_base;
+        const I col = coo_ind[2 * i + 1] - idx_base;
+        T       yi  = static_cast<T>(y[row]);
+        yi          = testing_fma(
+            testing_mult(alpha, testing_cast<T>(coo_val[i])), static_cast<T>(x[col]), yi);
+        y[row] = static_cast<Y>(yi);
     }
 }
 
@@ -7735,7 +7889,7 @@ void host_axpyi(I nnz, T alpha, const T* x_val, const I* x_ind, T* y, hipsparseI
 {
     for(I i = 0; i < nnz; ++i)
     {
-        y[x_ind[i] - idx_base] = y[x_ind[i] - idx_base] + testing_mult(alpha, x_val[i]);
+        y[x_ind[i] - idx_base] = testing_fma(alpha, x_val[i], y[x_ind[i] - idx_base]);
     }
 }
 

@@ -23,6 +23,7 @@
 
 #include "stinkytofu/serialization/asm/PatternParser.hpp"
 
+#include <bit>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -791,7 +792,7 @@ IntrinsicInstruction PatternParser::parseIntrinsicInstruction() {
             // Hex literal - parse as uint32_t and reinterpret as float
             std::string hexText = std::string(lexer.consume().text);
             uint32_t bits = std::stoul(hexText, nullptr, 16);
-            float value = *reinterpret_cast<float*>(&bits);
+            float value = std::bit_cast<float>(bits);
             inst.operands.push_back(IntrinsicOperand::hexLiteral(static_cast<double>(value)));
             skipNewlines();
 
