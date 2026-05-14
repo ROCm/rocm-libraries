@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,7 @@ Tests:
   M: [50]
   N: [84]
   alpha: [2.0]
-  alphai: [0.0]
+  alphai: [-0.5]
   beta: [1.0]
   betai: [0.0]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
@@ -59,7 +59,7 @@ Tests:
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
-  betai: [0.0]
+  betai: [1.0]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 

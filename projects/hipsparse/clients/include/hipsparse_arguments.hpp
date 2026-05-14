@@ -38,9 +38,21 @@
 #include "hipsparse_datatype2string.hpp"
 
 template <typename T>
-static T convert_alpha_beta(double r, double i)
+inline T convert_alpha_beta(double r, double i)
 {
     return static_cast<T>(r);
+}
+
+template <>
+inline hipComplex convert_alpha_beta<hipComplex>(double r, double i)
+{
+    return make_hipFloatComplex(static_cast<float>(r), static_cast<float>(i));
+}
+
+template <>
+inline hipDoubleComplex convert_alpha_beta<hipDoubleComplex>(double r, double i)
+{
+    return make_hipDoubleComplex(r, i);
 }
 
 struct Arguments

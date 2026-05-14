@@ -65,6 +65,10 @@ protected:
 
     void runGraphTest([[maybe_unused]] float tolerance, const TensorLayout& layout)
     {
+        // Known failures under MIOPEN_FIND_ENFORCE=4 (exhaustive tuning) on degenerate spatial
+        // dims (e.g. [2,3,1,1], [32,3,1,14]): exhaustive search selects a kernel with numerical
+        // accuracy issues on 1-element spatial dimensions. Not an ASAN error. Root cause is in
+        // MIOpen kernel selection for degenerate shapes.
         namespace fe = hipdnn_frontend;
 
         const auto& [bnTestCase, activTestCase] = this->GetParam();

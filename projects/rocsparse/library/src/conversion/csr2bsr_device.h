@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -71,6 +71,7 @@ namespace rocsparse
         I row_end   = (row < m && r < block_dim) ? csr_row_ptr[row + 1] - csr_base : 0;
 
         I block_row_begin = (block_row < mb) ? bsr_row_ptr[block_row] - bsr_base : 0;
+        I block_row_end   = (block_row < mb) ? bsr_row_ptr[block_row + 1] - bsr_base : 0;
 
         I next_k = row_begin;
 
@@ -120,7 +121,7 @@ namespace rocsparse
             next_k = rocsparse::shfl(index_k, (WFSIZE / BLOCKDIM) - 1, (WFSIZE / BLOCKDIM));
 
             int offset = 0;
-            if(table[wid])
+            if(table[wid] && block_row < mb && block_row_begin < block_row_end)
             {
                 bsr_col_ind[block_row_begin] = chunk_begin + bsr_base;
 
