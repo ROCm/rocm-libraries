@@ -466,6 +466,18 @@ concept SpecifiesDlFwdBlockTransfer = requires {
     { T::transfer.b } -> DlBlockTransferDescriptor4D;
 };
 
+template <typename T>
+concept SpecifiesDlBwdBlockTransfer = requires {
+    { T::transfer.a } -> DlBlockTransferDescriptor5D;
+    { T::transfer.b } -> DlBlockTransferDescriptor5D;
+};
+
+// Concept to check if algorithm specifies DL C thread transfer
+template <typename T>
+concept SpecifiesDlEpilogue = requires {
+    { T::transfer.c } -> DlEpilogueDescriptor;
+};
+
 // Concept to detect StreamK configuration in a tile algorithm descriptor.
 template <typename T>
 concept StreamKDescriptor = requires(T t) {
