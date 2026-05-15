@@ -25,11 +25,11 @@
 
 Run from any working directory:
 
-    python3 shared/rocisa_stinkytofu_adaptor/tests/test_register.py
+    python3 projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_register.py
 
 Or with pytest if available:
 
-    pytest shared/rocisa_stinkytofu_adaptor/tests/test_register.py
+    pytest projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_register.py
 
 The tests assert behaviors that Tensile's KernelWriter implicitly depends on
 (AMDGPU ABI, byte-for-byte parity with rocisa's allocator, etc.). Treat any
@@ -49,9 +49,9 @@ from contextlib import redirect_stdout
 # Self-contained sys.path bootstrap so the test runs without any install /
 # editable-mode setup. The ``rocisa_stinkytofu_adaptor`` Python package
 # lives at:
-#     shared/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/
+#     projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/
 # This file lives at:
-#     shared/rocisa_stinkytofu_adaptor/tests/test_register.py
+#     projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_register.py
 # So the package's parent directory (where ``import
 # rocisa_stinkytofu_adaptor`` resolves) is one level up.
 # ---------------------------------------------------------------------------

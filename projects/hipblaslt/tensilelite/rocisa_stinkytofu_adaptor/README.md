@@ -1,8 +1,8 @@
 # rocisa_stinkytofu_adaptor
 
 A transient Python shim that lets Tensilelite (`projects/hipblaslt/tensilelite/`)
-talk to the [stinkytofu](../stinkytofu/) Python binding (`_stinkytofu.so`) while
-pretending to be the older `rocisa` package.
+talk to the [stinkytofu](../../../../shared/stinkytofu/) Python binding
+(`_stinkytofu.so`) while pretending to be the older `rocisa` package.
 
 ## What
 
@@ -18,14 +18,20 @@ unset) keeps the original native bindings.
 export ROCISA_BACKEND=stinkytofu
 ```
 
-## Why this lives outside `shared/stinkytofu/`
+## Why this lives next to `tensilelite/rocisa/` (and not under `shared/stinkytofu/`)
 
 This package is a *consumer* of the stinkytofu Python binding, not part of
-stinkytofu itself. Keeping it as a sibling of `shared/stinkytofu/` (rather
-than nested inside `shared/stinkytofu/python_module/`) makes that direction
-of dependency explicit and avoids the import-shadow trap where a sibling
-`stinkytofu/` source directory would otherwise hide the user-built
-`_stinkytofu.so` on `sys.path`.
+stinkytofu itself. Two consequences drive the placement:
+
+* **Dependency direction is one-way**: tensilelite → adapter →
+  (native rocisa | stinkytofu). `shared/stinkytofu/` must stay neutral
+  for any future consumer; it does not need to know that a rocisa-shaped
+  adapter exists. Putting the adapter under `shared/stinkytofu/` would
+  invert that direction.
+* **Lifecycle is tensilelite-local**: when KernelWriter eventually calls
+  stinkytofu directly, this folder gets deleted with no impact on
+  `shared/stinkytofu/`. Sibling-of-rocisa makes it visually obvious it is
+  the "alternative backend" to `tensilelite/rocisa/`.
 
 ## Scope
 
@@ -36,7 +42,7 @@ of dependency explicit and avoids the import-shadow trap where a sibling
 ## Layout
 
 ```text
-shared/rocisa_stinkytofu_adaptor/
+projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/
 ├── rocisa_stinkytofu_adaptor/        # Python package
 │   ├── __init__.py                   # rocIsa / IsaInfo singletons
 │   ├── base.py / caps.py / enum.py   # real implementations
@@ -57,15 +63,15 @@ managed by the rocisa dispatcher.
 ## Running the tests
 
 ```bash
-python3 shared/rocisa_stinkytofu_adaptor/tests/test_register.py
-python3 shared/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
+python3 projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_register.py
+python3 projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
 ```
 
 Each test self-bootstraps `sys.path`, so no install / `PYTHONPATH` setup
 is required. With pytest:
 
 ```bash
-pytest shared/rocisa_stinkytofu_adaptor/tests/
+pytest projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/
 ```
 
 ## Smoke check (stinkytofu backend wired in)

@@ -25,11 +25,11 @@
 
 Run from any working directory:
 
-    python3 shared/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
+    python3 projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
 
 Or with pytest if available:
 
-    pytest shared/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
+    pytest projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
 
 These tests pin down the offset-bookkeeping contract that Tensile's
 KernelWriterAssembly relies on (``self.argLoader.getOffset()`` is read
@@ -47,9 +47,9 @@ import unittest
 # Self-contained sys.path bootstrap so the test runs without any install /
 # editable-mode setup. The ``rocisa_stinkytofu_adaptor`` Python package
 # lives at:
-#     shared/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/
+#     projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/
 # This file lives at:
-#     shared/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
+#     projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
 # So the package's parent directory (where ``import
 # rocisa_stinkytofu_adaptor`` resolves) is one level up.
 # ---------------------------------------------------------------------------

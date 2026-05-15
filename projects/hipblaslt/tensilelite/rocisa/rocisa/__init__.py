@@ -99,25 +99,38 @@ def _load_stinkytofu_adapter() -> bool:
     whether that is acceptable).
     """
 
-    # Locate ``<repo_root>/shared/rocisa_stinkytofu_adaptor`` by walking up
-    # from this file until we hit an ancestor containing it. The adapter
-    # is a sibling of ``shared/stinkytofu/`` on purpose — it is a *consumer*
-    # of the stinkytofu Python binding, not part of stinkytofu itself.
+    # Locate ``<repo_root>/projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor``
+    # by walking up from this file until we find an ancestor whose basename
+    # is ``projects``; the adapter then lives at
+    # ``<that_parent>/projects/hipblaslt/tensilelite/<_ADAPTER_PKG>/``.
+    #
+    # The adapter is a sibling of ``tensilelite/rocisa/`` on purpose — it is
+    # a *consumer* of the stinkytofu Python binding (a tensilelite-internal
+    # alternative backend), not a piece of ``shared/stinkytofu/`` itself.
+    # Sibling-of-rocisa keeps ``ROCISA_BACKEND=stinkytofu`` purely a
+    # tensilelite concern.
+    #
+    # Works for both the source tree (``<repo>/projects/hipblaslt/
+    # tensilelite/rocisa/rocisa/__init__.py``) and CMake-staged copies
+    # under ``<repo>/projects/hipblaslt/tensilelite/<build_dir>/tensilelite/
+    # rocisa/rocisa/__init__.py`` because in either case walking up from
+    # ``__file__`` eventually hits the ``projects`` directory.
     repo_root = None
     cur = os.path.dirname(os.path.abspath(__file__))
+    adapter_rel = os.path.join("projects", "hipblaslt", "tensilelite", _ADAPTER_PKG)
     while True:
         parent = os.path.dirname(cur)
         if parent == cur:  # reached filesystem root
             break
         if os.path.basename(cur) == "projects":
             candidate = parent
-            if os.path.isdir(os.path.join(candidate, "shared", _ADAPTER_PKG)):
+            if os.path.isdir(os.path.join(candidate, adapter_rel)):
                 repo_root = candidate
                 break
         cur = parent
     if repo_root is None:
         return False
-    adapter_parent = os.path.join(repo_root, "shared", _ADAPTER_PKG)
+    adapter_parent = os.path.join(repo_root, adapter_rel)
 
     if not os.path.isdir(os.path.join(adapter_parent, _ADAPTER_PKG)):
         return False

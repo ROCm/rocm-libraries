@@ -29,12 +29,14 @@ What this file is:
     ``projects/hipblaslt/tensilelite/rocisa/rocisa/__init__.py``);
     reserved for ``gfx1250`` today.
 
-    Lives at ``shared/rocisa_stinkytofu_adaptor/`` as a sibling of
-    ``shared/stinkytofu/`` — intentionally outside the stinkytofu source
-    tree because this is a *consumer* of stinkytofu's Python binding,
-    not part of stinkytofu itself. Transient: planned to be deleted /
-    drastically shrunk once gfx1250 KernelWriter is rewritten against a
-    real stinkytofu service API.
+    Lives at ``projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/``
+    as a sibling of ``projects/hipblaslt/tensilelite/rocisa/`` —
+    intentionally a tensilelite-internal alternative backend rather than
+    a piece of ``shared/stinkytofu/``, because this is a *consumer* of
+    stinkytofu's Python binding (the dependency direction is
+    tensilelite → adapter → stinkytofu, never the other way). Transient:
+    planned to be deleted / drastically shrunk once gfx1250 KernelWriter
+    is rewritten against a real stinkytofu service API.
 
 What it does (real):
     - ``IsaInfo`` — asm/arch/reg/bug caps holder; picklable.
