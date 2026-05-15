@@ -26,7 +26,7 @@ from .analytical import (
     list_unsupported_node_types,
 )
 from .gpu_smi import GpuSmiProbe, is_amdsmi_available
-from .host import RusageDelta, RusageProbe, host_memory_snapshot, is_psutil_available
+from .host import CpuTimeDelta, CpuTimeProbe, host_memory_snapshot, is_psutil_available
 from .machine_info import collect_machine_info
 
 __all__ = [
@@ -36,8 +36,8 @@ __all__ = [
     "list_unsupported_node_types",
     "GpuSmiProbe",
     "is_amdsmi_available",
-    "RusageDelta",
-    "RusageProbe",
+    "CpuTimeDelta",
+    "CpuTimeProbe",
     "host_memory_snapshot",
     "is_psutil_available",
     "collect_machine_info",

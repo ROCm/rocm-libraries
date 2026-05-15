@@ -21,8 +21,8 @@ from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
 from ..execution.timing import Timer
 from ..metrics import (
+    CpuTimeProbe,
     GpuSmiProbe,
-    RusageProbe,
     compute_flops,
     compute_io_bytes,
     derive_throughputs,
@@ -367,7 +367,7 @@ def run_graph_all_providers(
 
 def _collect_basic_metrics_post_loop(
     result: ProviderEngineResult,
-    rusage_probe: Optional[RusageProbe],
+    cpu_time_probe: Optional[CpuTimeProbe],
     benchmark_iters: int,
     analytical_flops: Optional[int],
     analytical_flops_partial: bool,
@@ -381,17 +381,17 @@ def _collect_basic_metrics_post_loop(
     keeping is otherwise just a long sequence of conditionals on
     intermediate results.
     """
-    if rusage_probe is not None and rusage_probe.delta is not None:
+    if cpu_time_probe is not None and cpu_time_probe.delta is not None:
         # Per-iter microseconds is the interpretable unit: the loop
         # total is dominated by Python dispatch cost, and per-iter
         # lets users compare directly against the kernel mean (also
         # reported per-iter).
         iters = max(benchmark_iters, 1)
         result.cpu_user_time_per_iter_us = (
-            rusage_probe.delta.user_time_ms * 1000.0 / iters
+            cpu_time_probe.delta.user_time_ms * 1000.0 / iters
         )
         result.cpu_kernel_time_per_iter_us = (
-            rusage_probe.delta.kernel_time_ms * 1000.0 / iters
+            cpu_time_probe.delta.kernel_time_ms * 1000.0 / iters
         )
 
     # Analytical totals were computed once at the graph level; propagate
@@ -401,6 +401,10 @@ def _collect_basic_metrics_post_loop(
     result.analytical_flops_partial = analytical_flops_partial
     result.analytical_io_bytes = analytical_io_bytes
 
+    # Derived throughputs use the *arithmetic mean* of post-warmup kernel
+    # timings — no trimming, no outlier rejection. A single noisy iter
+    # (context switch, thermal throttle) skews the headline number; for
+    # tighter signal use gpu_kernel_stats.min_ms or p95_ms.
     kernel_mean = (
         result.gpu_kernel_stats.mean_ms if result.gpu_kernel_stats is not None else None
     )
@@ -476,20 +480,20 @@ def _run_single_provider_engine(
 
             # Wrap the timed loop with always-on host probes when basic
             # tier is enabled. The probes are designed to be no-cost on
-            # the GPU side: rusage is read-only kernel calls before/after
-            # the loop, and the amdsmi snapshot fires once after the
-            # benchmark returns. Failures inside probes are swallowed
-            # and surface as None fields on the result.
-            rusage_probe = RusageProbe() if metrics_basic else None
-            if rusage_probe is not None:
-                rusage_probe.__enter__()
+            # the GPU side: CPU-time sampling is two read-only kernel
+            # calls before/after the loop, and the amdsmi snapshot fires
+            # once after the benchmark returns. Failures inside probes
+            # are swallowed and surface as None fields on the result.
+            cpu_time_probe = CpuTimeProbe() if metrics_basic else None
+            if cpu_time_probe is not None:
+                cpu_time_probe.__enter__()
             try:
                 bench_result = executor.benchmark(
                     handle, variant_pack, graph_name=graph_name
                 )
             finally:
-                if rusage_probe is not None:
-                    rusage_probe.__exit__(None, None, None)
+                if cpu_time_probe is not None:
+                    cpu_time_probe.__exit__(None, None, None)
 
             result.e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
             if bench_result.has_kernel_timings:
@@ -500,7 +504,7 @@ def _run_single_provider_engine(
             if metrics_basic:
                 _collect_basic_metrics_post_loop(
                     result=result,
-                    rusage_probe=rusage_probe,
+                    cpu_time_probe=cpu_time_probe,
                     benchmark_iters=config.benchmark_iters,
                     analytical_flops=analytical_flops,
                     analytical_flops_partial=analytical_flops_partial,

@@ -23,11 +23,12 @@ from dnn_benchmarking.metrics._diagnostic import reset as _reset_warns
 @pytest.fixture(autouse=True)
 def _reset_warn_state():
     _reset_warns()
-    # GpuSmiProbe caches an init flag at the class level — reset for
-    # test isolation.
-    gpu_smi.GpuSmiProbe._initialised = False
+    # AmdsmiSession caches an init flag and a handle map; the module
+    # holds a singleton instance. Drop both for test isolation so each
+    # test exercises a fresh init / handle-resolution path.
+    gpu_smi._reset_default_session_for_tests()
     yield
-    gpu_smi.GpuSmiProbe._initialised = False
+    gpu_smi._reset_default_session_for_tests()
     _reset_warns()
 
 
@@ -199,3 +200,48 @@ class TestIsAmdsmiAvailable:
     def test_returns_false_without_module(self):
         with patch.dict(sys.modules, {"amdsmi": None}):
             assert gpu_smi.is_amdsmi_available() is False
+
+
+class TestSessionInjection:
+    """Exercise the AmdsmiSession DI seam — no sys.modules patching."""
+
+    def test_probe_uses_injected_session(self):
+        # Build a fake session whose module/handle methods return our
+        # fakes directly, bypassing the real amdsmi import path.
+        fake_module = _build_fake_amdsmi()
+        fake_handle = "stub-handle"
+
+        class _FakeSession:
+            def module(self) -> Any:
+                return fake_module
+
+            def handle(self, _device_index: int) -> Any:
+                return fake_handle
+
+        snap = gpu_smi.GpuSmiProbe(session=_FakeSession()).snapshot()
+        assert snap["vram_used_mb"] == pytest.approx(1024.0)
+        assert snap["power_w"] == pytest.approx(250.0)
+
+    def test_probe_returns_empty_when_session_module_is_none(self):
+        class _NullSession:
+            def module(self) -> Any:
+                return None
+
+            def handle(self, _device_index: int) -> Any:
+                return None
+
+        snap = gpu_smi.GpuSmiProbe(session=_NullSession()).snapshot()
+        for v in snap.values():
+            assert v is None
+
+    def test_session_handle_caches_per_device_index(self):
+        fake = _build_fake_amdsmi(handles=["h0", "h1"])
+        with patch.dict(sys.modules, {"amdsmi": fake}):
+            session = gpu_smi.AmdsmiSession()
+            assert session.handle(0) == "h0"
+            # Replace the handles fn to confirm the cached path doesn't
+            # call back into amdsmi a second time.
+            fake.amdsmi_get_processor_handles = lambda: (_ for _ in ()).throw(
+                AssertionError("should not be called twice")
+            )
+            assert session.handle(0) == "h0"

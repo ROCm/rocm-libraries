@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Tests for metrics.host (rusage probe + host memory snapshot)."""
+"""Tests for metrics.host (CPU time probe + host memory snapshot)."""
 
 import resource
 import sys
@@ -29,11 +29,11 @@ def _fake_rusage(utime: float, stime: float):
     return obj
 
 
-class TestRusageProbe:
+class TestCpuTimeProbe:
     def test_delta_in_milliseconds(self):
         samples = [_fake_rusage(0.0, 0.0), _fake_rusage(0.1, 0.05)]
         with patch.object(resource, "getrusage", side_effect=samples):
-            with host.RusageProbe() as probe:
+            with host.CpuTimeProbe() as probe:
                 pass
         assert probe.delta is not None
         assert probe.delta.user_time_ms == pytest.approx(100.0)
@@ -41,7 +41,7 @@ class TestRusageProbe:
 
     def test_failure_in_start_yields_none_delta(self):
         with patch.object(resource, "getrusage", side_effect=OSError("denied")):
-            with host.RusageProbe() as probe:
+            with host.CpuTimeProbe() as probe:
                 pass
         assert probe.delta is None
 
@@ -56,7 +56,7 @@ class TestRusageProbe:
             return value
 
         with patch.object(resource, "getrusage", side_effect=_side):
-            with host.RusageProbe() as probe:
+            with host.CpuTimeProbe() as probe:
                 pass
         assert probe.delta is None
 

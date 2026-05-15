@@ -1,11 +1,12 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Host-side probes: CPU rusage and host memory snapshot.
+"""Host-side probes: CPU time delta and host memory snapshot.
 
-``RusageProbe`` is a context manager that diffs ``resource.getrusage``
-across a block. ``host_memory_snapshot`` returns process RSS and host
-RAM availability via ``psutil`` if installed. Both degrade gracefully:
+``CpuTimeProbe`` is a context manager that diffs ``resource.getrusage``
+across a block to produce user/kernel CPU time consumed by the calling
+process. ``host_memory_snapshot`` returns process RSS and host RAM
+availability via ``psutil`` if installed. Both degrade gracefully:
 on any failure they yield ``None`` values rather than raising.
 """
 
@@ -17,7 +18,7 @@ from ._diagnostic import warn_once
 
 
 @dataclass
-class RusageDelta:
+class CpuTimeDelta:
     """CPU time consumed by the calling process between two probe samples.
 
     Attributes:
@@ -29,25 +30,25 @@ class RusageDelta:
     kernel_time_ms: float
 
 
-class RusageProbe:
+class CpuTimeProbe:
     """Context manager that measures CPU user/kernel time over a block.
 
     Usage::
 
-        with RusageProbe() as probe:
+        with CpuTimeProbe() as probe:
             do_work()
-        delta = probe.delta  # RusageDelta or None on failure
+        delta = probe.delta  # CpuTimeDelta or None on failure
     """
 
     def __init__(self) -> None:
         self._start: Optional[Any] = None
-        self.delta: Optional[RusageDelta] = None
+        self.delta: Optional[CpuTimeDelta] = None
 
-    def __enter__(self) -> "RusageProbe":
+    def __enter__(self) -> "CpuTimeProbe":
         try:
             self._start = resource.getrusage(resource.RUSAGE_SELF)
         except (OSError, ValueError) as e:
-            warn_once("rusage", f"start sample failed: {e}")
+            warn_once("cpu_time", f"start sample failed: {e}")
             self._start = None
         return self
 
@@ -57,9 +58,9 @@ class RusageProbe:
         try:
             end = resource.getrusage(resource.RUSAGE_SELF)
         except (OSError, ValueError) as e:
-            warn_once("rusage", f"end sample failed: {e}")
+            warn_once("cpu_time", f"end sample failed: {e}")
             return
-        self.delta = RusageDelta(
+        self.delta = CpuTimeDelta(
             user_time_ms=(end.ru_utime - self._start.ru_utime) * 1000.0,
             kernel_time_ms=(end.ru_stime - self._start.ru_stime) * 1000.0,
         )
