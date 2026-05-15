@@ -31,7 +31,7 @@
 | Norm | norm_reduce | ❌ | | ❌ | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
 | Norm | rmsnorm2d<br>example: 10_rmsnorm2d/ | ❌ | | ❌ | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
 | Pooling | pooling<br>example: 36_pooling/ | ❌ | | | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
-| Pooling | pooling_bwd<br>engine: pooling_bwd/<br>example: 53_pooling_bwd/ | ❌ | | | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
+| Pooling | pooling_bwd [9]<br>engine: pooling_bwd/<br>example: 53_pooling_bwd/ | ✅ | | ✅ | | | | | | | | | ✅ | ✅ | ✅ | ✅ |
 | Quant | smoothquant<br>example: 12_smoothquant/ | ❌ | | ❌ | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
 
 **Legend:**
@@ -50,6 +50,7 @@
 - [6] **streamk_gemm:** Builder and default configs support all 4 layouts, but CMake defaults to `rcr` only. Building others requires `-DGEMM_STREAMK_LAYOUT="rcr;rrr;ccr;crr"`.
 - [7] **streamk_gemm:** CK Tile kernels have no arch-specific guards; tile engine filtering is pending validation for gfx950/gfx1201.
 - [8] **multi_reduce2d:** CK Tile's reduce example supports bf16 input but the tile engine only configures fp16. The reduce kernel adapts to wave32/wave64 at runtime via `is_wave32()`.
+- [9] **pooling_bwd:** CK Tile kernels and tile-engine configs cover fp16, bf16, and fp32 (fp32 has no dedicated column in this matrix). CMake defaults the tile-engine build to `fp16;bf16;fp32`; override with `-DPOOLING_BWD_DATATYPE="..."`. The kernel does not use matrix layouts (pure 1D scatter), so the rcr/rrr/ccr/crr columns are not applicable.
 - Reduce operations do not use matrix layouts.
 
 **Layout codes:** Each layout code specifies the memory layout of tensors A, B, and C as row-major (r) or column-major (c). For example, `rcr` means A is row-major, B is column-major, and C is row-major. For gemm_multi_d, the instance builder uses 4-character codes (e.g., `rcrr`) where the 4th character specifies the D tensor layout; in the table above, the 3-character A/B/C portion is shown since the D layout is always row-major (r) for all supported configurations.

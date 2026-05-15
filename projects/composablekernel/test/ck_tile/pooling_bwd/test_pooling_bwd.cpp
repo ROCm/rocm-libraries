@@ -168,13 +168,14 @@ class TestCkTilePoolingBwd : public ::testing::Test
         const ck_tile::long_index_t dout_length =
             static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
-        if(dout_length % BwdKernel::kVectorSize != 0 || din_length % BwdKernel::kVectorSize != 0)
-        {
-            return true;
-        }
-
-        const std::size_t workspace_bytes = BwdKernel::GetWorkSpaceSize(
-            ck_tile::PoolBwdHostArgs{nullptr, nullptr, nullptr, nullptr, dout_length, din_length});
+        const std::size_t workspace_bytes =
+            BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 dout_length,
+                                                                 din_length,
+                                                                 kHasOverlap});
 
         ck_tile::DeviceMem workspace_buf(workspace_bytes);
 
@@ -184,18 +185,20 @@ class TestCkTilePoolingBwd : public ::testing::Test
             static_cast<DInDataType*>(din_buf.GetDeviceBuffer()),
             workspace_bytes > 0 ? workspace_buf.GetDeviceBuffer() : nullptr,
             dout_length,
-            din_length};
-        auto bwd_kargs = BwdKernel::MakeKernelArgs(bwd_host_args);
+            din_length,
+            kHasOverlap};
 
-        if(!BwdKernel::IsSupportedArgument(bwd_kargs))
+        if(!BwdKernel::IsSupportedArgument(bwd_host_args))
         {
             return true;
         }
 
+        auto bwd_kargs = BwdKernel::MakeKernelArgs(bwd_host_args);
+
         constexpr ck_tile::index_t kBwdBlockPerCu = 1;
         const ck_tile::index_t bwd_block_size     = BwdKernel::BlockSize();
         auto stream                               = ck_tile::stream_config{nullptr, false, 0};
-        const ck_tile::index_t bwd_grid_size      = BwdKernel::CalculateGridSize(stream);
+        const ck_tile::index_t bwd_grid_size = BwdKernel::CalculateGridSize(stream, dout_length);
 
         auto memset_din = [&](const ck_tile::stream_config& s) {
             HIP_CHECK_ERROR(
@@ -218,8 +221,13 @@ class TestCkTilePoolingBwd : public ::testing::Test
                 ck_tile::PoolBwdCastKernel<float, DInDataType, kBlockSize, kVectorSize>;
             auto cast_host_args = ck_tile::PoolBwdCastHostArgs{
                 workspace_buf.GetDeviceBuffer(), din_buf.GetDeviceBuffer(), din_length};
-            auto cast_kargs                       = CastKernel::MakeKernelArgs(cast_host_args);
-            const ck_tile::index_t cast_grid_size = CastKernel::CalculateGridSize(stream);
+            if(!CastKernel::IsSupportedArgument(cast_host_args))
+            {
+                return true;
+            }
+            auto cast_kargs = CastKernel::MakeKernelArgs(cast_host_args);
+            const ck_tile::index_t cast_grid_size =
+                CastKernel::CalculateGridSize(stream, din_length);
 
             ck_tile::launch_kernel(
                 stream,
@@ -354,13 +362,14 @@ class TestCkTilePoolingBwd : public ::testing::Test
         const ck_tile::long_index_t dout_length =
             static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
-        if(dout_length % BwdKernel::kVectorSize != 0 || din_length % BwdKernel::kVectorSize != 0)
-        {
-            return true;
-        }
-
-        const std::size_t workspace_bytes = BwdKernel::GetWorkSpaceSize(
-            ck_tile::PoolBwdHostArgs{nullptr, nullptr, nullptr, nullptr, dout_length, din_length});
+        const std::size_t workspace_bytes =
+            BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 dout_length,
+                                                                 din_length,
+                                                                 kHasOverlap});
 
         ck_tile::DeviceMem workspace_buf(workspace_bytes);
 
@@ -370,18 +379,20 @@ class TestCkTilePoolingBwd : public ::testing::Test
             static_cast<DInDataType*>(din_buf.GetDeviceBuffer()),
             workspace_bytes > 0 ? workspace_buf.GetDeviceBuffer() : nullptr,
             dout_length,
-            din_length};
-        auto bwd_kargs = BwdKernel::MakeKernelArgs(bwd_host_args);
+            din_length,
+            kHasOverlap};
 
-        if(!BwdKernel::IsSupportedArgument(bwd_kargs))
+        if(!BwdKernel::IsSupportedArgument(bwd_host_args))
         {
             return true;
         }
 
+        auto bwd_kargs = BwdKernel::MakeKernelArgs(bwd_host_args);
+
         constexpr ck_tile::index_t kBwdBlockPerCu = 1;
         const ck_tile::index_t bwd_block_size     = BwdKernel::BlockSize();
         auto stream                               = ck_tile::stream_config{nullptr, false, 0};
-        const ck_tile::index_t bwd_grid_size      = BwdKernel::CalculateGridSize(stream);
+        const ck_tile::index_t bwd_grid_size = BwdKernel::CalculateGridSize(stream, dout_length);
 
         auto memset_din = [&](const ck_tile::stream_config& s) {
             HIP_CHECK_ERROR(
@@ -404,8 +415,13 @@ class TestCkTilePoolingBwd : public ::testing::Test
                 ck_tile::PoolBwdCastKernel<float, DInDataType, kBlockSize, kVectorSize>;
             auto cast_host_args = ck_tile::PoolBwdCastHostArgs{
                 workspace_buf.GetDeviceBuffer(), din_buf.GetDeviceBuffer(), din_length};
-            auto cast_kargs                       = CastKernel::MakeKernelArgs(cast_host_args);
-            const ck_tile::index_t cast_grid_size = CastKernel::CalculateGridSize(stream);
+            if(!CastKernel::IsSupportedArgument(cast_host_args))
+            {
+                return true;
+            }
+            auto cast_kargs = CastKernel::MakeKernelArgs(cast_host_args);
+            const ck_tile::index_t cast_grid_size =
+                CastKernel::CalculateGridSize(stream, din_length);
 
             ck_tile::launch_kernel(
                 stream,

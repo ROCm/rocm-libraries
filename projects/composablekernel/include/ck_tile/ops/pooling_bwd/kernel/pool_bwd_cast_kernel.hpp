@@ -38,7 +38,10 @@ struct PoolBwdCastKernel
     using SrcDataType = remove_cvref_t<SrcDataType_>;
     using DstDataType = remove_cvref_t<DstDataType_>;
 
-    static constexpr index_t kBlockSize  = BlockSize_;
+    static constexpr index_t kBlockSize = BlockSize_;
+    // See note on kVectorSize in PoolBwdKernel: this is the number of
+    // consecutive elements processed by each thread per grid-stride pass, not
+    // a hardware-vector width.
     static constexpr index_t kVectorSize = VectorSize_;
 
     static_assert(kVectorSize == 1 || kVectorSize == 2 || kVectorSize == 4,
@@ -51,15 +54,35 @@ struct PoolBwdCastKernel
         return PoolBwdCastKernelArgs{host_args.p_src, host_args.p_dst, host_args.length};
     }
 
-    CK_TILE_HOST static index_t CalculateGridSize(const stream_config& s)
+    CK_TILE_HOST static index_t CalculateGridSize(const stream_config& s, long_index_t length)
     {
         const index_t num_cu = get_available_compute_units(s);
-        return num_cu > 0 ? num_cu : 1;
+        const index_t cu_cap = num_cu > 0 ? num_cu : 1;
+
+        const long_index_t work_per_block =
+            static_cast<long_index_t>(kBlockSize) * static_cast<long_index_t>(kVectorSize);
+        const long_index_t work_blocks =
+            work_per_block > 0 ? (length + work_per_block - 1) / work_per_block : 1;
+
+        const long_index_t capped =
+            work_blocks < static_cast<long_index_t>(cu_cap) ? work_blocks : cu_cap;
+
+        return capped > 0 ? static_cast<index_t>(capped) : 1;
     }
 
-    CK_TILE_HOST static bool IsSupportedArgument(const PoolBwdCastKernelArgs& kargs)
+    CK_TILE_HOST static bool IsSupportedArgument(const PoolBwdCastHostArgs& host_args)
     {
-        return kargs.length % kVectorSize == 0;
+        if(host_args.length < 0)
+        {
+            return false;
+        }
+        if(host_args.length > 0 && (host_args.p_src == nullptr || host_args.p_dst == nullptr))
+        {
+            return false;
+        }
+        // The scalar tail loop in operator() handles unaligned lengths, so no
+        // alignment constraint is enforced here.
+        return true;
     }
 
     CK_TILE_DEVICE void operator()(PoolBwdCastKernelArgs kargs) const
@@ -82,6 +105,12 @@ struct PoolBwdCastKernel
                 p_dst[flat]             = type_convert<DstDataType>(p_src[flat]);
             }
             i += step;
+        }
+
+        // Scalar tail loop for unaligned remainders.
+        for(long_index_t j = i; j < total; ++j)
+        {
+            p_dst[j] = type_convert<DstDataType>(p_src[j]);
         }
     }
 };

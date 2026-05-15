@@ -30,6 +30,15 @@
                 "pad_d_left": 0, "pad_d_right": 0,
                 "pad_h_left": 0, "pad_h_right": 0,
                 "pad_w_left": 0, "pad_w_right": 0
+            },
+            {
+                "N": 1, "D": 8, "H": 8, "W": 8, "C": 32,
+                "Z": 3, "Y": 3, "X": 3,
+                "stride_d": 1, "stride_h": 1, "stride_w": 1,
+                "dilation_d": 1, "dilation_h": 1, "dilation_w": 1,
+                "pad_d_left": 1, "pad_d_right": 1,
+                "pad_h_left": 1, "pad_h_right": 1,
+                "pad_w_left": 1, "pad_w_right": 1
             }
         ]
     },

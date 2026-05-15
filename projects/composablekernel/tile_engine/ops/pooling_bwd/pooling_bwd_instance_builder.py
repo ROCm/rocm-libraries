@@ -96,7 +96,7 @@ class PoolingBwdKernelBuilder:
     def _get_dtype_string(self):
         return get_dtype_string(self.datatype)
 
-    def _generate_kernel_instance(self, tile_config, trait_combo, is_header=True):
+    def _generate_kernel_instance(self, tile_config, trait_combo):
         pooling_dim, has_overlap = trait_combo
 
         kernel_name = (
@@ -131,9 +131,9 @@ class PoolingBwdKernelBuilder:
             )
             window_rank = 3
 
-        pragma_line = "#pragma once\n" if is_header else ""
         instance_code = f"""// Generated kernel instance for {kernel_name}
-{pragma_line}
+#pragma once
+
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
@@ -167,21 +167,24 @@ struct SelectedKernel {{
                                                 BwdShape,
                                                 kHasOverlap>;
     using BwdKernel  = ck_tile::PoolBwdKernel<BwdProblem>;
-    using CastKernel = ck_tile::PoolBwdCastKernel<float, DInDataType, kBlockSize, kVectorSize>;
+    using CastKernel = ck_tile::PoolBwdCastKernel<float,
+                                                  DInDataType,
+                                                  BwdKernel::kBlockSize,
+                                                  BwdKernel::kVectorSize>;
 
     static float launch(ck_tile::PoolBwdHostArgs& args,
                         const ck_tile::stream_config& stream) {{
         constexpr ck_tile::index_t kBlockPerCu = 1;
         const ck_tile::index_t kBlockSizeRt   = BwdKernel::BlockSize();
 
-        auto kernel_args = BwdKernel::MakeKernelArgs(args);
-
-        if(!BwdKernel::IsSupportedArgument(kernel_args)) {{
+        if(!BwdKernel::IsSupportedArgument(args)) {{
             throw std::runtime_error(
                 std::string("Unsupported arguments for pooling bwd kernel: ") + KERNEL_NAME);
         }}
 
-        const ck_tile::index_t kGridSize = BwdKernel::CalculateGridSize(stream);
+        auto kernel_args = BwdKernel::MakeKernelArgs(args);
+
+        const ck_tile::index_t kGridSize = BwdKernel::CalculateGridSize(stream, args.dout_length);
 
         if(stream.log_level_ > 0) {{
             std::cout << "Launching pooling-bwd kernel: " << KERNEL_NAME << "\\n"
@@ -203,8 +206,14 @@ struct SelectedKernel {{
             ck_tile::PoolBwdCastHostArgs cast_host_args{{args.p_workspace,
                                                         args.p_din,
                                                         args.din_length}};
+            if(!CastKernel::IsSupportedArgument(cast_host_args)) {{
+                throw std::runtime_error(
+                    std::string("Unsupported arguments for pooling bwd cast kernel: ") +
+                    KERNEL_NAME);
+            }}
             auto cast_kargs = CastKernel::MakeKernelArgs(cast_host_args);
-            const ck_tile::index_t cast_grid_size = CastKernel::CalculateGridSize(stream);
+            const ck_tile::index_t cast_grid_size =
+                CastKernel::CalculateGridSize(stream, args.din_length);
 
             return ck_tile::launch_kernel(
                 stream,
@@ -361,8 +370,9 @@ def main():
     parser.add_argument(
         "--datatype",
         required=True,
-        choices=["fp8", "fp16", "bf16", "fp32"],
-        help="Data type",
+        choices=["fp16", "bf16", "fp32"],
+        help="Data type (must stay in sync with SUPPORTED_DATATYPES "
+        "in pooling_bwd_validation_utils.py)",
     )
     parser.add_argument("--config_json", help="Configuration JSON file")
     parser.add_argument(

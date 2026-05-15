@@ -18,24 +18,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Datatype helpers
 # ---------------------------------------------------------------------------
+#
+# This list intentionally tracks the datatypes that the bwd kernel, the tile
+# engine's instance builder, and the CK Tile pooling_bwd tests all actually
+# cover. fp8/bf8/fp64 are not yet exercised end-to-end (no host test, no
+# forward index encoding validation), so they are NOT advertised here. Add
+# them only after corresponding tests land.
 
 ELEMENT_SIZE_MAP = {
-    "fp8": 1,
-    "bf8": 1,
-    "int8": 1,
     "fp16": 2,
     "bf16": 2,
     "fp32": 4,
-    "fp64": 8,
 }
 
 DTYPE_STRING_MAP = {
-    "fp8": "ck_tile::fp8_t",
-    "bf8": "ck_tile::bf8_t",
     "fp16": "ck_tile::fp16_t",
     "bf16": "ck_tile::bf16_t",
     "fp32": "float",
-    "fp64": "double",
 }
 
 SUPPORTED_DATATYPES = list(DTYPE_STRING_MAP.keys())

@@ -13,24 +13,30 @@
 template <typename DOutDataType,
           typename DInDataType,
           typename ComputeDataType,
-          typename IndexDataType>
+          typename IndexDataType,
+          ck_tile::index_t Y_  = 2,
+          ck_tile::index_t X_  = 2,
+          ck_tile::index_t Sy_ = 2,
+          ck_tile::index_t Sx_ = 2,
+          ck_tile::index_t Py_ = 0,
+          ck_tile::index_t Px_ = 0>
 bool run()
 {
     constexpr ck_tile::index_t N  = 2;
     constexpr ck_tile::index_t H  = 32;
     constexpr ck_tile::index_t W  = 32;
     constexpr ck_tile::index_t C  = 32;
-    constexpr ck_tile::index_t Y  = 2;
-    constexpr ck_tile::index_t X  = 2;
-    constexpr ck_tile::index_t Sy = 2;
-    constexpr ck_tile::index_t Sx = 2;
+    constexpr ck_tile::index_t Y  = Y_;
+    constexpr ck_tile::index_t X  = X_;
+    constexpr ck_tile::index_t Sy = Sy_;
+    constexpr ck_tile::index_t Sx = Sx_;
     constexpr ck_tile::index_t Dy = 1;
     constexpr ck_tile::index_t Dx = 1;
 
-    constexpr ck_tile::index_t LeftPy  = 0;
-    constexpr ck_tile::index_t LeftPx  = 0;
-    constexpr ck_tile::index_t RightPy = 0;
-    constexpr ck_tile::index_t RightPx = 0;
+    constexpr ck_tile::index_t LeftPy  = Py_;
+    constexpr ck_tile::index_t LeftPx  = Px_;
+    constexpr ck_tile::index_t RightPy = Py_;
+    constexpr ck_tile::index_t RightPx = Px_;
 
     constexpr ck_tile::index_t Ys = (Y - 1) * Dy + 1;
     constexpr ck_tile::index_t Xs = (X - 1) * Dx + 1;
@@ -132,33 +138,34 @@ bool run()
     const ck_tile::long_index_t dout_length =
         static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
-    ck_tile::DeviceMem workspace_buf(BwdKernel::GetWorkSpaceSize(
-        ck_tile::PoolBwdHostArgs{nullptr, nullptr, nullptr, nullptr, dout_length, din_length}));
+    ck_tile::DeviceMem workspace_buf(BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{
+        nullptr, nullptr, nullptr, nullptr, dout_length, din_length, kHasOverlap}));
 
     auto bwd_host_args = ck_tile::PoolBwdHostArgs{
         static_cast<DOutDataType*>(dout_buf.GetDeviceBuffer()),
         static_cast<IndexDataType*>(indices_buf.GetDeviceBuffer()),
         static_cast<DInDataType*>(din_buf.GetDeviceBuffer()),
         BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{
-            nullptr, nullptr, nullptr, nullptr, dout_length, din_length}) > 0
+            nullptr, nullptr, nullptr, nullptr, dout_length, din_length, kHasOverlap}) > 0
             ? workspace_buf.GetDeviceBuffer()
             : nullptr,
         dout_length,
-        din_length};
+        din_length,
+        kHasOverlap};
 
-    auto bwd_kargs = BwdKernel::MakeKernelArgs(bwd_host_args);
-
-    if(!BwdKernel::IsSupportedArgument(bwd_kargs))
+    if(!BwdKernel::IsSupportedArgument(bwd_host_args))
     {
         std::cerr << "ERROR: backward pool kernel arguments are not supported." << std::endl;
         return false;
     }
 
+    auto bwd_kargs = BwdKernel::MakeKernelArgs(bwd_host_args);
+
     constexpr ck_tile::index_t kBwdBlockPerCu = 1;
     const ck_tile::index_t bwd_block_size     = BwdKernel::BlockSize();
 
     auto stream              = ck_tile::stream_config{nullptr, false, 0};
-    const auto bwd_grid_size = BwdKernel::CalculateGridSize(stream);
+    const auto bwd_grid_size = BwdKernel::CalculateGridSize(stream, dout_length);
 
     auto memset_din = [&](const ck_tile::stream_config& s) {
         HIP_CHECK_ERROR(hipMemsetAsync(din_buf.GetDeviceBuffer(),
@@ -176,11 +183,24 @@ bool run()
                                            s.stream_id_));
         };
 
-        using CastKernel    = ck_tile::PoolBwdCastKernel<float, DInDataType, 256, 4>;
+        // Match the bwd kernel's element-grouping so divisibility constraints
+        // and grid sizing stay in lockstep across the two kernels.
+        using CastKernel = ck_tile::PoolBwdCastKernel<float,
+                                                      DInDataType,
+                                                      BwdKernel::kBlockSize,
+                                                      BwdKernel::kVectorSize>;
         auto cast_host_args = ck_tile::PoolBwdCastHostArgs{
             workspace_buf.GetDeviceBuffer(), din_buf.GetDeviceBuffer(), din_length};
-        auto cast_kargs                       = CastKernel::MakeKernelArgs(cast_host_args);
-        const ck_tile::index_t cast_grid_size = CastKernel::CalculateGridSize(stream);
+
+        if(!CastKernel::IsSupportedArgument(cast_host_args))
+        {
+            std::cerr << "ERROR: pool bwd cast kernel arguments are not supported." << std::endl;
+            return false;
+        }
+
+        auto cast_kargs = CastKernel::MakeKernelArgs(cast_host_args);
+        const ck_tile::index_t cast_grid_size =
+            CastKernel::CalculateGridSize(stream, din_length);
 
         ck_tile::launch_kernel(
             stream,
@@ -204,7 +224,11 @@ bool run()
     ck_tile::reference_pool_bwd<DOutDataType, IndexDataType, ComputeDataType, DInDataType>(
         h_dout, h_indices, h_din_ref);
 
-    bool pass = ck_tile::check_err(h_din, h_din_ref, "Error: incorrect dx", 1e-5, 1e-5);
+    // Tolerances follow the dtype: fp32 path is bit-exact w.r.t. reference,
+    // fp16/bf16 cast at the epilogue introduces ~1e-2 absolute error.
+    const double rtol = std::is_same_v<DInDataType, float> ? 1e-5 : 1e-2;
+    const double atol = std::is_same_v<DInDataType, float> ? 1e-5 : 1e-2;
+    bool pass         = ck_tile::check_err(h_din, h_din_ref, "Error: incorrect dx", rtol, atol);
 
     std::cout << "N=" << N << " H=" << H << " W=" << W << " C=" << C << " Y=" << Y << " X=" << X
               << " Sy=" << Sy << " Sx=" << Sx << " has_overlap=" << kHasOverlap
@@ -213,4 +237,14 @@ bool run()
     return pass;
 }
 
-int main() { return run<float, float, float, ck_tile::index_t>() ? 0 : -1; }
+int main()
+{
+    bool ok = true;
+    // fp32 / no-overlap: scalar set path (Y=2, Sy=2, no padding).
+    ok &= run<float, float, float, ck_tile::index_t>();
+    // fp16 / overlap: exercises the fp32 workspace + atomic add + cast kernel
+    // path, which is the most subtle code path in the backward pipeline.
+    // Y=3, Sy=1, pad=1 gives a real window overlap.
+    ok &= run<ck_tile::half_t, ck_tile::half_t, float, ck_tile::index_t, 3, 3, 1, 1, 1, 1>();
+    return ok ? 0 : -1;
+}

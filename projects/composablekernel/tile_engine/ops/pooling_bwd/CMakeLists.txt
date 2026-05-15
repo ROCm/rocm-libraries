@@ -7,7 +7,7 @@
 # Generates individual benchmark executables for max-pool backward kernels.
 # ============================================================================
 
-set(POOLING_BWD_DATATYPE "fp16;fp32" CACHE STRING "List of datatypes for Pooling Bwd (semicolon-separated)")
+set(POOLING_BWD_DATATYPE "fp16;bf16;fp32" CACHE STRING "List of datatypes for Pooling Bwd (semicolon-separated)")
 set(POOLING_BWD_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
 option(ENABLE_CCACHE_POOLING_BWD "Enable ccache for pooling bwd ops compilation" OFF)
 

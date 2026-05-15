@@ -23,8 +23,6 @@
 #include "ck_tile/ops/pooling_bwd.hpp"
 #include "ck_tile/host/reference/reference_pool.hpp"
 #include "ck_tile/host/reference/reference_pool_bwd.hpp"
-#include "pooling_bwd_common.hpp"
-#include "pooling_bwd_benchmark.hpp"
 
 template <int PoolDim>
 static int benchmark_pooling_bwd(int argc, char* argv[])
@@ -169,8 +167,28 @@ static int benchmark_pooling_bwd(int argc, char* argv[])
         const ck_tile::long_index_t dout_length =
             static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
-        const std::size_t workspace_bytes = SelectedKernel::BwdKernel::GetWorkSpaceSize(
-            ck_tile::PoolBwdHostArgs{nullptr, nullptr, nullptr, nullptr, dout_length, din_length});
+        const bool has_overlap =
+            ((Y - 1) * Dy + 1) > Sy || ((X - 1) * Dx + 1) > Sx;
+
+        // Allow the SelectedKernel to report an unsupported configuration
+        // (e.g. wrong overlap flavor) by skipping verification instead of
+        // launching with mismatched semantics.
+        if(SelectedKernel::kHasOverlap != has_overlap)
+        {
+            std::cerr << "Skipping benchmark: kernel has_overlap="
+                      << SelectedKernel::kHasOverlap << " does not match problem has_overlap="
+                      << has_overlap << std::endl;
+            return 0;
+        }
+
+        const std::size_t workspace_bytes =
+            SelectedKernel::BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{nullptr,
+                                                                                 nullptr,
+                                                                                 nullptr,
+                                                                                 nullptr,
+                                                                                 dout_length,
+                                                                                 din_length,
+                                                                                 has_overlap});
         ck_tile::DeviceMem d_workspace(workspace_bytes);
 
         ck_tile::PoolBwdHostArgs bwd_host_args{d_dout.GetDeviceBuffer(),
@@ -179,7 +197,8 @@ static int benchmark_pooling_bwd(int argc, char* argv[])
                                                workspace_bytes > 0 ? d_workspace.GetDeviceBuffer()
                                                                    : nullptr,
                                                dout_length,
-                                               din_length};
+                                               din_length,
+                                               has_overlap};
 
         ck_tile::stream_config stream{nullptr, true, log_level, warmup, repeat};
 
@@ -211,8 +230,10 @@ static int benchmark_pooling_bwd(int argc, char* argv[])
             ck_tile::reference_pool_bwd<DOutDataType, IndexDataType, ComputeDataType, DInDataType>(
                 h_dout, h_indices, h_din_ref);
 
+            const double rtol = std::is_same_v<DInDataType, float> ? 1e-5 : 1e-2;
+            const double atol = std::is_same_v<DInDataType, float> ? 1e-5 : 1e-2;
             const bool pass =
-                ck_tile::check_err(h_din, h_din_ref, "Error: Incorrect dx", 1e-2, 1e-2);
+                ck_tile::check_err(h_din, h_din_ref, "Error: Incorrect dx", rtol, atol);
             std::cout << "  Verification: " << (pass ? "PASS" : "FAIL") << std::endl;
         }
 
@@ -374,8 +395,25 @@ static int benchmark_pooling_bwd(int argc, char* argv[])
         const ck_tile::long_index_t dout_length =
             static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
-        const std::size_t workspace_bytes = SelectedKernel::BwdKernel::GetWorkSpaceSize(
-            ck_tile::PoolBwdHostArgs{nullptr, nullptr, nullptr, nullptr, dout_length, din_length});
+        const bool has_overlap =
+            ((Z - 1) * Dz + 1) > Sz || ((Y - 1) * Dy + 1) > Sy || ((X - 1) * Dx + 1) > Sx;
+
+        if(SelectedKernel::kHasOverlap != has_overlap)
+        {
+            std::cerr << "Skipping benchmark: kernel has_overlap="
+                      << SelectedKernel::kHasOverlap << " does not match problem has_overlap="
+                      << has_overlap << std::endl;
+            return 0;
+        }
+
+        const std::size_t workspace_bytes =
+            SelectedKernel::BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{nullptr,
+                                                                                 nullptr,
+                                                                                 nullptr,
+                                                                                 nullptr,
+                                                                                 dout_length,
+                                                                                 din_length,
+                                                                                 has_overlap});
         ck_tile::DeviceMem d_workspace(workspace_bytes);
 
         ck_tile::PoolBwdHostArgs bwd_host_args{d_dout.GetDeviceBuffer(),
@@ -384,7 +422,8 @@ static int benchmark_pooling_bwd(int argc, char* argv[])
                                                workspace_bytes > 0 ? d_workspace.GetDeviceBuffer()
                                                                    : nullptr,
                                                dout_length,
-                                               din_length};
+                                               din_length,
+                                               has_overlap};
 
         ck_tile::stream_config stream{nullptr, true, log_level, warmup, repeat};
 
@@ -416,8 +455,10 @@ static int benchmark_pooling_bwd(int argc, char* argv[])
             ck_tile::reference_pool_bwd<DOutDataType, IndexDataType, ComputeDataType, DInDataType>(
                 h_dout, h_indices, h_din_ref);
 
+            const double rtol = std::is_same_v<DInDataType, float> ? 1e-5 : 1e-2;
+            const double atol = std::is_same_v<DInDataType, float> ? 1e-5 : 1e-2;
             const bool pass =
-                ck_tile::check_err(h_din, h_din_ref, "Error: Incorrect dx", 1e-2, 1e-2);
+                ck_tile::check_err(h_din, h_din_ref, "Error: Incorrect dx", rtol, atol);
             std::cout << "  Verification: " << (pass ? "PASS" : "FAIL") << std::endl;
         }
 

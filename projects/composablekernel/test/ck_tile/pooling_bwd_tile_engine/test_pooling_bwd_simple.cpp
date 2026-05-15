@@ -50,6 +50,30 @@ struct PoolBwdTestParams3D
 #include POOLING_BWD_TEST_PARAMS_HPP
 #endif
 
+// Dtype-aware verification tolerances. Defined once at file scope so both the
+// 2D and 3D test branches can reuse them.
+static double pool_bwd_rtol_for_dtype()
+{
+    if constexpr(std::is_same_v<DInDataType, float>)
+        return 1e-5;
+    else if constexpr(std::is_same_v<DInDataType, ck_tile::half_t> ||
+                      std::is_same_v<DInDataType, ck_tile::bf16_t>)
+        return 1e-2;
+    else
+        return 1e-1;
+}
+
+static double pool_bwd_atol_for_dtype()
+{
+    if constexpr(std::is_same_v<DInDataType, float>)
+        return 1e-5;
+    else if constexpr(std::is_same_v<DInDataType, ck_tile::half_t> ||
+                      std::is_same_v<DInDataType, ck_tile::bf16_t>)
+        return 1e-2;
+    else
+        return 1e-1;
+}
+
 #if POOLING_BWD_DIM_VALUE == 2
 
 class PoolingBwdTileEngineTest2D : public ::testing::TestWithParam<PoolBwdTestParams2D>
@@ -181,7 +205,8 @@ TEST_P(PoolingBwdTileEngineTest2D, BasicFunctionality)
         static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
     const std::size_t workspace_bytes = SelectedKernel::BwdKernel::GetWorkSpaceSize(
-        ck_tile::PoolBwdHostArgs{nullptr, nullptr, nullptr, nullptr, dout_length, din_length});
+        ck_tile::PoolBwdHostArgs{
+            nullptr, nullptr, nullptr, nullptr, dout_length, din_length, problem_overlap});
     ck_tile::DeviceMem d_workspace(workspace_bytes);
 
     ck_tile::PoolBwdHostArgs bwd_host_args{d_dout.GetDeviceBuffer(),
@@ -190,13 +215,14 @@ TEST_P(PoolingBwdTileEngineTest2D, BasicFunctionality)
                                            workspace_bytes > 0 ? d_workspace.GetDeviceBuffer()
                                                                : nullptr,
                                            dout_length,
-                                           din_length};
+                                           din_length,
+                                           problem_overlap};
 
-    ck_tile::stream_config stream_config{nullptr, false, 0, 0, 1, false, false, 1};
+    ck_tile::stream_config stream{nullptr, false, 0, 0, 1, false, false, 1};
 
     try
     {
-        SelectedKernel::launch(bwd_host_args, stream_config);
+        SelectedKernel::launch(bwd_host_args, stream);
     }
     catch(const std::exception& e)
     {
@@ -214,7 +240,8 @@ TEST_P(PoolingBwdTileEngineTest2D, BasicFunctionality)
     ck_tile::reference_pool_bwd<DOutDataType, IndexDataType, ComputeDataType, DInDataType>(
         h_dout, h_indices, h_din_ref);
 
-    const bool pass = ck_tile::check_err(h_din, h_din_ref, "Error: Incorrect dx", 1e-2, 1e-2);
+    const bool pass = ck_tile::check_err(
+        h_din, h_din_ref, "Error: Incorrect dx", pool_bwd_rtol_for_dtype(), pool_bwd_atol_for_dtype());
     EXPECT_TRUE(pass) << "Pooling bwd verification failed for " << KERNEL_NAME;
 }
 
@@ -372,7 +399,8 @@ TEST_P(PoolingBwdTileEngineTest3D, BasicFunctionality)
         static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
     const std::size_t workspace_bytes = SelectedKernel::BwdKernel::GetWorkSpaceSize(
-        ck_tile::PoolBwdHostArgs{nullptr, nullptr, nullptr, nullptr, dout_length, din_length});
+        ck_tile::PoolBwdHostArgs{
+            nullptr, nullptr, nullptr, nullptr, dout_length, din_length, problem_overlap});
     ck_tile::DeviceMem d_workspace(workspace_bytes);
 
     ck_tile::PoolBwdHostArgs bwd_host_args{d_dout.GetDeviceBuffer(),
@@ -381,13 +409,14 @@ TEST_P(PoolingBwdTileEngineTest3D, BasicFunctionality)
                                            workspace_bytes > 0 ? d_workspace.GetDeviceBuffer()
                                                                : nullptr,
                                            dout_length,
-                                           din_length};
+                                           din_length,
+                                           problem_overlap};
 
-    ck_tile::stream_config stream_config{nullptr, false, 0, 0, 1, false, false, 1};
+    ck_tile::stream_config stream{nullptr, false, 0, 0, 1, false, false, 1};
 
     try
     {
-        SelectedKernel::launch(bwd_host_args, stream_config);
+        SelectedKernel::launch(bwd_host_args, stream);
     }
     catch(const std::exception& e)
     {
@@ -405,7 +434,8 @@ TEST_P(PoolingBwdTileEngineTest3D, BasicFunctionality)
     ck_tile::reference_pool_bwd<DOutDataType, IndexDataType, ComputeDataType, DInDataType>(
         h_dout, h_indices, h_din_ref);
 
-    const bool pass = ck_tile::check_err(h_din, h_din_ref, "Error: Incorrect dx", 1e-2, 1e-2);
+    const bool pass = ck_tile::check_err(
+        h_din, h_din_ref, "Error: Incorrect dx", pool_bwd_rtol_for_dtype(), pool_bwd_atol_for_dtype());
     EXPECT_TRUE(pass) << "Pooling bwd 3D verification failed for " << KERNEL_NAME;
 }
 
