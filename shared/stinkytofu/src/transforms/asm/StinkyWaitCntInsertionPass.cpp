@@ -355,7 +355,6 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     /// Collect prior DS reads/atomics whose MemTokenData tokens overlap @p writer's.
     /// Scans @p localState (current block) and each predecessor's exit state to
     /// surface the WAR-on-LDS hazard that the SSA def-use chain does not encode.
-    /// Skips @p writer itself (a ds_write is in @p pendingDSOps by this point).
     std::unordered_set<StinkyInstruction*> collectLdsWarDependencies(
         StinkyInstruction* writer, BasicBlock& bb, const PendingMemOpTracker& localState) {
         std::unordered_set<StinkyInstruction*> warDeps;
@@ -409,15 +408,10 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                 continue;
             }
 
-            if (localState.recordDSOperation(inst)) {
-                dsState.recordNewOp();
-            }
-            if (localState.recordBufferOperation(inst)) {
-                bufferState.recordNewOp();
-            }
-
-            // Barrier with overlapping MemTokenData forces s_wait_dscnt 0 (see doc:
-            // "Barrier token conflict handling").
+            // Barrier with overlapping MemTokenData forces s_wait_dscnt 0 (see doc: section
+            // "Barrier token conflict handling"). Barriers are never DS / buffer ops,
+            // so the tail recording at the bottom of this loop body is a no-op for
+            // them; the explicit continue here keeps the existing semantics.
             if (isBarrier(*inst)) {
                 if (auto* memTokenData = inst->getModifier<MemTokenData>()) {
                     if (hasTokenOverlap(localState.activeDSTokens, memTokenData->tokens)) {
@@ -435,34 +429,50 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             });
 
             // WAR-on-LDS: an LDS writer (tensor_load_to_lds / ds_write) must wait
-            // for prior token-overlapping DS reads to drain.
+            // for prior token-overlapping DS reads to drain. Run this before the
+            // tail recording so that the writer is not yet in pendingDSOps, which
+            // makes the count-based wait value match hardware semantics: the wait
+            // executes before the writer issues, so the queue at wait-time excludes
+            // the writer.
             if (isLdsWriterWithTokens(*inst)) {
                 auto warDeps = collectLdsWarDependencies(inst, bb, localState);
                 memOpDependencies.insert(warDeps.begin(), warDeps.end());
             }
 
-            if (memOpDependencies.empty()) {
-                continue;
+            if (!memOpDependencies.empty()) {
+                // Compute waits against the pre-consumer queue. For DS-op / buffer-op
+                // consumers, this gives the correct dlcnt / vlcnt because the wait
+                // executes before the consumer is issued.
+                auto dsResult = computeWaitValueForCounter(
+                    localState.pendingDSCount(), localState, memOpDependencies, dsState,
+                    [](const PendingMemOpTracker& tracker, StinkyInstruction* src) {
+                        return tracker.pendingDSCountFrom(src);
+                    });
+                if (dsResult.second && dsState.needsNewWait(dsResult.first)) {
+                    waits.emplace_back(inst, WaitCountSpec(dsResult.first, WaitCountSpec::kUnused));
+                    dsState.recordEmittedWait(dsResult.first);
+                }
+
+                auto bufferResult = computeWaitValueForCounter(
+                    localState.pendingBufferCount(), localState, memOpDependencies, bufferState,
+                    [](const PendingMemOpTracker& tracker, StinkyInstruction* src) {
+                        return tracker.pendingBufferCountFrom(src);
+                    });
+                if (bufferResult.second && bufferState.needsNewWait(bufferResult.first)) {
+                    waits.emplace_back(inst,
+                                       WaitCountSpec(WaitCountSpec::kUnused, bufferResult.first));
+                    bufferState.recordEmittedWait(bufferResult.first);
+                }
             }
 
-            auto dsResult = computeWaitValueForCounter(
-                localState.pendingDSCount(), localState, memOpDependencies, dsState,
-                [](const PendingMemOpTracker& tracker, StinkyInstruction* src) {
-                    return tracker.pendingDSCountFrom(src);
-                });
-            if (dsResult.second && dsState.needsNewWait(dsResult.first)) {
-                waits.emplace_back(inst, WaitCountSpec(dsResult.first, WaitCountSpec::kUnused));
-                dsState.recordEmittedWait(dsResult.first);
+            // Tail recording: after any wait for this instruction has been emitted,
+            // push inst onto the trackers so future iterations and the block exit
+            // state see it as in-flight.
+            if (localState.recordDSOperation(inst)) {
+                dsState.recordNewOp();
             }
-
-            auto bufferResult = computeWaitValueForCounter(
-                localState.pendingBufferCount(), localState, memOpDependencies, bufferState,
-                [](const PendingMemOpTracker& tracker, StinkyInstruction* src) {
-                    return tracker.pendingBufferCountFrom(src);
-                });
-            if (bufferResult.second && bufferState.needsNewWait(bufferResult.first)) {
-                waits.emplace_back(inst, WaitCountSpec(WaitCountSpec::kUnused, bufferResult.first));
-                bufferState.recordEmittedWait(bufferResult.first);
+            if (localState.recordBufferOperation(inst)) {
+                bufferState.recordNewOp();
             }
         }
 

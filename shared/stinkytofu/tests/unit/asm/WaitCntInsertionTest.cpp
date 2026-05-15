@@ -1112,12 +1112,10 @@ st.func @test_lds_war_disjoint_tokens() {
  *   v[4:5] = ds_load_b64 v10           tokens=[0]
  *   ds_store_b64 v100, v[20:21]        tokens=[0]    (LDS writer)
  *
- * Unlike tensor_load_to_lds, ds_store IS a DS op and is appended to
- * pendingDSOps before the wait is computed (queue: [r0, r1, r2, ds_store]).
- * The WAR scan adds r0, r1, r2 to memOpDependencies (writer self-skip).
- * computeWaitValueForCounter then picks min(count - 1) = 1: r0, r1, r2 are
- * flushed by the wait, with the just-recorded ds_store accounted for as
- * the one remaining queued op (it issues immediately after the wait).
+ * Recording is now deferred until after the wait is emitted, so the WAR scan
+ * and the DS-counter computation both see the queue WITHOUT ds_store. The
+ * youngest conflicting read r2 sits at pendingDSCountFrom(r2) = 1, giving
+ * wait = count - 1 = 0: all three reads drain before ds_store issues.
  */
 TEST_F(WaitCntInsertionTest, LdsWarBeforeDsStore) {
     std::string irString = R"(
@@ -1143,10 +1141,10 @@ st.func @test_lds_war_ds_store() {
     SWaitCntData* waitBeforeWriter = findWaitCntBefore(entryBB, dsStore);
     ASSERT_NE(waitBeforeWriter, nullptr)
         << "Pass must insert s_wait_dscnt before ds_store (WAR-on-LDS, symmetric writer)";
-    EXPECT_EQ(waitBeforeWriter->dlcnt, 1)
-        << "ds_store is itself in pendingDSOps; the youngest conflicting reader r2 "
-           "has count=2 -> wait = count - 1 = 1, leaving the writer as the single "
-           "remaining queued op when it issues";
+    EXPECT_EQ(waitBeforeWriter->dlcnt, 0)
+        << "ds_store is recorded after the wait is emitted; the youngest conflicting "
+           "reader r2 has count=1 -> wait = count - 1 = 0, draining all three reads "
+           "before the writer issues";
     EXPECT_EQ(waitBeforeWriter->vlcnt, -1);
     EXPECT_EQ(waitBeforeWriter->vscnt, -1);
     EXPECT_EQ(waitBeforeWriter->dscnt, -1);
@@ -1154,4 +1152,48 @@ st.func @test_lds_war_ds_store() {
 
     EXPECT_EQ(countWaitCnt(entryBB), 1);
     EXPECT_EQ(countTensorWaitCnt(entryBB), 0);
+}
+
+/**
+ * @brief ds_store with a regular RAW DS dep -> wait drains the producer.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10
+ *   ds_store_b64 v100, v[0:1]   (data sourced from the prior ds_load via def-use)
+ *
+ * Locks in the side-benefit of deferring DS recording: ds_store is itself a DS
+ * op, but its wait should still drain the prior ds_load that produced v[0:1].
+ * With the recording deferral, pendingDSCountFrom(ds_load) = 1 at wait time, so
+ * the algorithm emits s_wait_dscnt 0 (was 1 before the fix).
+ */
+TEST_F(WaitCntInsertionTest, DsStoreWithRawDsLoadDep) {
+    std::string irString = R"(
+st.func @test_ds_store_raw_ds_load() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.ds_store_b64"(v100, v[0:1]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* dsStore = findNthInst(entryBB, GFX::ds_store_b64, 0);
+    ASSERT_NE(dsStore, nullptr);
+
+    SWaitCntData* waitBeforeWriter = findWaitCntBefore(entryBB, dsStore);
+    ASSERT_NE(waitBeforeWriter, nullptr)
+        << "Pass must insert s_wait_dscnt before ds_store that consumes ds_load data";
+    EXPECT_EQ(waitBeforeWriter->dlcnt, 0)
+        << "Recording deferral: queue at wait time = [ds_load]; count-1 = 0";
+    EXPECT_EQ(waitBeforeWriter->vlcnt, -1);
+    EXPECT_EQ(waitBeforeWriter->vscnt, -1);
+    EXPECT_EQ(waitBeforeWriter->dscnt, -1);
+    EXPECT_EQ(waitBeforeWriter->kmcnt, -1);
+
+    EXPECT_EQ(countWaitCnt(entryBB), 1);
 }

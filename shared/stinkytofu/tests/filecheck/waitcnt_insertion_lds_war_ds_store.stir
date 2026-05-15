@@ -1,0 +1,26 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): WAR-on-LDS with a ds_store writer.
+# Three ds_load_b64 with token 0 are followed by a ds_store_b64 with token 0.
+# DS recording is deferred until after the wait is emitted, so the WAR scan
+# and the DS-counter computation see the queue without ds_store. The youngest
+# token-0 reader sits at count = 1, giving wait = count - 1 = 0; all three
+# prior reads drain before the writer issues.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_war_ds_store
+# CHECK: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 0
+# CHECK-NEXT: ds_store_b64
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_lds_war_ds_store() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[4:5] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b64"(v100, v[20:21]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
