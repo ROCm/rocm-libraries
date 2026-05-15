@@ -228,13 +228,17 @@ class ImplicitGemmConvSpec:
         return mfma_atom("f16", self.warp_tile_m, self.warp_tile_n, self.warp_tile_k)
 
     def kernel_name(self) -> str:
+        from ..helpers.spec import kernel_name_join
+
         p = self.problem
-        return (
-            f"{self.name}_{p.short()}_t{self.tile_m}x{self.tile_n}x{self.tile_k}"
-            f"_w{self.warp_m}x{self.warp_n}"
-            f"_a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}"
-            f"_{self.pipeline}_{self.epilogue}"
-            f"{'_async' if self.async_dma else ''}"
+        return kernel_name_join(
+            self.name,
+            p.short(),
+            f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
+            f"w{self.warp_m}x{self.warp_n}",
+            f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
+            f"{self.pipeline}_{self.epilogue}",
+            flags={"async": self.async_dma},
         )
 
     def validate(self) -> None:
@@ -543,6 +547,37 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
     b_rsrc = b.buffer_rsrc(Bp, B_bytes)
     d_rsrc = b.buffer_rsrc(D, D_bytes)
 
+    # CK Tile-style wrappers over the buffer rsrcs: every load through
+    # ``A_buf_view`` / ``B_buf_view`` emits ``raw_ptr_buffer_load_vN``
+    # via :meth:`TensorView.load_vec_at`, with the descriptor's
+    # ``valid`` predicate driving the OOB-sentinel trick uniformly.
+    from ..helpers.tensor_view import (
+        BufferResource as _BufferResource,
+        TensorDescriptor as _TensorDescriptor,
+        TensorView as _TensorView,
+    )
+
+    _A_buf_view = _TensorView(
+        base=_BufferResource(rsrc=a_rsrc, soffset=c0, num_bytes=0),
+        desc=_TensorDescriptor.packed((1,), F16),
+        addr_space="buffer",
+    )
+    _B_buf_view = _TensorView(
+        base=_BufferResource(rsrc=b_rsrc, soffset=c0, num_bytes=0),
+        desc=_TensorDescriptor.packed((1,), F16),
+        addr_space="buffer",
+    )
+    _A_lds_view = _TensorView(
+        base=None,  # rebound per-call below via ``A_dst`` argument
+        desc=_TensorDescriptor.packed((spec.tile_m, spec.tile_k), F16),
+        addr_space="lds",
+    )
+    _B_lds_view = _TensorView(
+        base=None,
+        desc=_TensorDescriptor.packed((spec.tile_n, spec.tile_k), F16),
+        addr_space="lds",
+    )
+
     # Descriptor callbacks shared by both sync and async paths.
     # `(row, col)` are in the (tile_local M, tile_local K halves)
     # coordinate system. The descriptor returns
@@ -617,9 +652,27 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
             b_slot.issue(b, tid=tid, rsrc=b_rsrc, descriptor=b_descriptor)
             return
 
-        # Sync path: register-staged DRAM -> LDS.
-        oob_sentinel = b.const_i32((1 << 31) - 1)
-        c_half_bytes = b.const_i32(2)
+        # Sync path: register-staged DRAM -> LDS, driven by the
+        # CK Tile-style buffer view. The descriptor's ``valid``
+        # predicate gates the load via :meth:`load_vec_at(mask=...)`,
+        # which routes False lanes to the OOB sentinel so the
+        # hardware buffer-load returns 0 (the canonical padding-aware
+        # idiom). LDS stores go through :meth:`store_vec` on a per-
+        # call LDS view rebound to ``A_dst`` / ``B_dst``.
+        from ..helpers.tensor_view import TileWindow as _TileWindow
+
+        A_lds_view = _TensorView(base=A_dst, desc=_A_lds_view.desc, addr_space="lds")
+        B_lds_view = _TensorView(base=B_dst, desc=_B_lds_view.desc, addr_space="lds")
+        A_lds_tile = _TileWindow(
+            view=A_lds_view,
+            lengths=(spec.tile_m, spec.tile_k),
+            origin=(c0, c0),
+        )
+        B_lds_tile = _TileWindow(
+            view=B_lds_view,
+            lengths=(spec.tile_n, spec.tile_k),
+            origin=(c0, c0),
+        )
 
         for e in range(a_vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
@@ -627,19 +680,14 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
             col_v = b.mod(vec_idx, c_block_k_div_vec)
             a_col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
             a_off_elems, a_valid = a_descriptor(b, a_row, a_col)
-            a_off_bytes = b.mul(a_off_elems, c_half_bytes)
-            safe_off = (
-                b.select(a_valid, a_off_bytes, oob_sentinel)
-                if a_valid is not None
-                else a_off_bytes
-            )
             if load_vec == 1:
-                a_val = b.buffer_load_f16(a_rsrc, safe_off, c0)
-                b.smem_store_f16(A_dst, [a_row, a_col], a_val)
+                a_val = _A_buf_view.load_scalar_at(b, a_off_elems, mask=a_valid)
+                A_lds_tile.store_scalar(b, a_row, a_col, value=a_val)
             else:
-                dwords = load_vec // 2
-                a_vec = b.buffer_load_vN_f16(a_rsrc, safe_off, c0, dwords)
-                b.smem_store_vN_f16(A_dst, [a_row, a_col], a_vec, load_vec)
+                a_vec = _A_buf_view.load_vec_at(
+                    b, a_off_elems, n=load_vec, mask=a_valid
+                )
+                A_lds_tile.store_vec(b, a_row, a_col, value=a_vec, n=load_vec)
 
         for e in range(b_vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
@@ -647,19 +695,14 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
             col_v = b.mod(vec_idx, c_block_k_div_vec)
             b_col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
             b_off_elems, b_valid = b_descriptor(b, b_row, b_col)
-            b_off_bytes = b.mul(b_off_elems, c_half_bytes)
-            safe_b_off = (
-                b.select(b_valid, b_off_bytes, oob_sentinel)
-                if b_valid is not None
-                else b_off_bytes
-            )
             if load_vec == 1:
-                b_val = b.buffer_load_f16(b_rsrc, safe_b_off, c0)
-                b.smem_store_f16(B_dst, [b_row, b_col], b_val)
+                b_val = _B_buf_view.load_scalar_at(b, b_off_elems, mask=b_valid)
+                B_lds_tile.store_scalar(b, b_row, b_col, value=b_val)
             else:
-                dwords = load_vec // 2
-                b_vec = b.buffer_load_vN_f16(b_rsrc, safe_b_off, c0, dwords)
-                b.smem_store_vN_f16(B_dst, [b_row, b_col], b_vec, load_vec)
+                b_vec = _B_buf_view.load_vec_at(
+                    b, b_off_elems, n=load_vec, mask=b_valid
+                )
+                B_lds_tile.store_vec(b, b_row, b_col, value=b_vec, n=load_vec)
 
     def emit_mfma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
@@ -769,6 +812,8 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
             double_buffer=double_buffer,
             wait_vmcnt=True,
             sync_after_wait=True,
+            sync_before_issue=True,
+            overlap_vmcnt=True,
         )
 
         def issue_load(it: int, buf_pair):
@@ -783,6 +828,7 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
             initial_state=[v for _, v in accs],
             issue_load=issue_load,
             compute=compute,
+            schedule=schedule,
         )
 
     # ---- epilogue ----

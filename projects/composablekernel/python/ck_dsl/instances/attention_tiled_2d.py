@@ -121,16 +121,24 @@ class UnifiedAttention2DTiledSpec:
         return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
 
     def kernel_name(self) -> str:
-        sink = "_sinks" if self.use_sinks else ""
-        sw = f"_sw{self.sliding_window}" if self.sliding_window > 0 else ""
-        sc = "_softcap" if self.has_softcap else ""
-        al = "_alibi" if self.use_alibi else ""
-        qb = "_qqb" if self.use_qq_bias else ""
-        nw = f"_w{self.num_warps}" if self.num_warps != 1 else ""
-        return (
-            f"ck_dsl_uattn2d_tiled_d{self.head_size}_b{self.block_size}_"
-            f"h{self.num_query_heads}kv{self.num_kv_heads}_{self.dtype}"
-            f"{sink}{sw}{sc}{al}{qb}{nw}"
+        from ..helpers.spec import kernel_name_join
+
+        # Value-carrying optionals (sw{N}, w{N}) become plain
+        # conditional strings; kernel_name_join drops empty ones.
+        # Value-less flags go through the `flags=` map so they get
+        # rendered in iteration order with leading underscores.
+        return kernel_name_join(
+            "ck_dsl_uattn2d_tiled",
+            f"d{self.head_size}",
+            f"b{self.block_size}",
+            f"h{self.num_query_heads}kv{self.num_kv_heads}",
+            self.dtype,
+            "" if not self.use_sinks else "sinks",
+            f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
+            "softcap" if self.has_softcap else "",
+            "alibi" if self.use_alibi else "",
+            "qqb" if self.use_qq_bias else "",
+            f"w{self.num_warps}" if self.num_warps != 1 else "",
         )
 
 

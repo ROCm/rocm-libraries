@@ -312,68 +312,79 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
 
 
 def _3d_signature(dtype: str):
-    ty = "ptr<f16, global>" if dtype == "fp16" else "ptr<bf16, global>"
-    return [
-        {"name": "segm_output_ptr", "type": "ptr<f32, global>"},
-        {"name": "segm_max_ptr", "type": "ptr<f32, global>"},
-        {"name": "segm_expsum_ptr", "type": "ptr<f32, global>"},
-        {"name": "query_ptr", "type": ty},
-        {"name": "key_cache_ptr", "type": ty},
-        {"name": "value_cache_ptr", "type": ty},
-        {"name": "sink_ptr", "type": ty},
-        {"name": "block_tables_ptr", "type": "ptr<i32, global>"},
-        {"name": "seq_lens_ptr", "type": "ptr<i32, global>"},
-        {"name": "alibi_slopes_ptr", "type": "ptr<f32, global>"},
-        {"name": "qq_bias_ptr", "type": "ptr<f32, global>"},
-        {"name": "query_start_len_ptr", "type": "ptr<i32, global>"},
-        {"name": "scale", "type": "f32"},
-        {"name": "k_scale", "type": "f32"},
-        {"name": "v_scale", "type": "f32"},
-        {"name": "softcap", "type": "f32"},
-        {"name": "num_seqs", "type": "i32"},
-        {"name": "block_table_stride", "type": "i32"},
-        {"name": "qq_bias_stride_0", "type": "i32"},
-    ]
+    from ..helpers.spec import SignatureBuilder
+
+    io_dtype = "f16" if dtype == "fp16" else "bf16"
+    return (
+        SignatureBuilder()
+        .ptr("segm_output_ptr", "f32")
+        .ptr("segm_max_ptr", "f32")
+        .ptr("segm_expsum_ptr", "f32")
+        .ptr("query_ptr", io_dtype)
+        .ptr("key_cache_ptr", io_dtype)
+        .ptr("value_cache_ptr", io_dtype)
+        .ptr("sink_ptr", io_dtype)
+        .ptr("block_tables_ptr", "i32")
+        .ptr("seq_lens_ptr", "i32")
+        .ptr("alibi_slopes_ptr", "f32")
+        .ptr("qq_bias_ptr", "f32")
+        .ptr("query_start_len_ptr", "i32")
+        .scalar("scale", "f32")
+        .scalar("k_scale", "f32")
+        .scalar("v_scale", "f32")
+        .scalar("softcap", "f32")
+        .scalar("num_seqs", "i32")
+        .scalar("block_table_stride", "i32")
+        .scalar("qq_bias_stride_0", "i32")
+        .build()
+    )
 
 
 def _reduce_signature(dtype: str):
-    ty = "ptr<f16, global>" if dtype == "fp16" else "ptr<bf16, global>"
-    return [
-        {"name": "output_ptr", "type": ty},
-        {"name": "segm_output_ptr", "type": "ptr<f32, global>"},
-        {"name": "segm_max_ptr", "type": "ptr<f32, global>"},
-        {"name": "segm_expsum_ptr", "type": "ptr<f32, global>"},
-        {"name": "seq_lens_ptr", "type": "ptr<i32, global>"},
-    ]
+    from ..helpers.spec import SignatureBuilder
+
+    io_dtype = "f16" if dtype == "fp16" else "bf16"
+    return (
+        SignatureBuilder()
+        .ptr("output_ptr", io_dtype)
+        .ptr("segm_output_ptr", "f32")
+        .ptr("segm_max_ptr", "f32")
+        .ptr("segm_expsum_ptr", "f32")
+        .ptr("seq_lens_ptr", "i32")
+        .build()
+    )
 
 
 def _attn_signature(
     dtype: str, *, include_bt_stride: bool, include_qq_bias_stride: bool = False
 ):
-    ty = "ptr<f16, global>" if dtype == "fp16" else "ptr<bf16, global>"
-    sig = [
-        {"name": "output_ptr", "type": ty},
-        {"name": "query_ptr", "type": ty},
-        {"name": "key_cache_ptr", "type": ty},
-        {"name": "value_cache_ptr", "type": ty},
-        {"name": "sink_ptr", "type": ty},
-        {"name": "block_tables_ptr", "type": "ptr<i32, global>"},
-        {"name": "seq_lens_ptr", "type": "ptr<i32, global>"},
-        {"name": "alibi_slopes_ptr", "type": "ptr<f32, global>"},
-        {"name": "qq_bias_ptr", "type": "ptr<f32, global>"},
-        {"name": "query_start_len_ptr", "type": "ptr<i32, global>"},
-        {"name": "scale", "type": "f32"},
-        {"name": "k_scale", "type": "f32"},
-        {"name": "v_scale", "type": "f32"},
-        {"name": "out_scale", "type": "f32"},
-        {"name": "softcap", "type": "f32"},
-        {"name": "num_seqs", "type": "i32"},
-    ]
+    from ..helpers.spec import SignatureBuilder
+
+    io_dtype = "f16" if dtype == "fp16" else "bf16"
+    sb = (
+        SignatureBuilder()
+        .ptr("output_ptr", io_dtype)
+        .ptr("query_ptr", io_dtype)
+        .ptr("key_cache_ptr", io_dtype)
+        .ptr("value_cache_ptr", io_dtype)
+        .ptr("sink_ptr", io_dtype)
+        .ptr("block_tables_ptr", "i32")
+        .ptr("seq_lens_ptr", "i32")
+        .ptr("alibi_slopes_ptr", "f32")
+        .ptr("qq_bias_ptr", "f32")
+        .ptr("query_start_len_ptr", "i32")
+        .scalar("scale", "f32")
+        .scalar("k_scale", "f32")
+        .scalar("v_scale", "f32")
+        .scalar("out_scale", "f32")
+        .scalar("softcap", "f32")
+        .scalar("num_seqs", "i32")
+    )
     if include_bt_stride:
-        sig.append({"name": "block_table_stride", "type": "i32"})
+        sb.scalar("block_table_stride", "i32")
     if include_qq_bias_stride:
-        sig.append({"name": "qq_bias_stride_0", "type": "i32"})
-    return sig
+        sb.scalar("qq_bias_stride_0", "i32")
+    return sb.build()
 
 
 def _attn_values(
@@ -868,13 +879,22 @@ class UnifiedAttention2DSpec:
         )
 
     def kernel_name(self) -> str:
+        from ..helpers.spec import kernel_name_join
+
         p = self.problem
-        return (
-            f"{self.name}_q{p.total_q}_h{p.num_query_heads}_kv{p.num_kv_heads}"
-            f"_d{p.head_size}_b{p.block_size}_{p.dtype}"
-            f"{'_sink' if p.use_sinks else ''}"
-            f"{'_sw' if p.sliding_window > 0 else ''}"
-            f"{'_softcap' if p.softcap > 0 else ''}"
+        return kernel_name_join(
+            self.name,
+            f"q{p.total_q}",
+            f"h{p.num_query_heads}",
+            f"kv{p.num_kv_heads}",
+            f"d{p.head_size}",
+            f"b{p.block_size}",
+            p.dtype,
+            flags={
+                "sink": p.use_sinks,
+                "sw": p.sliding_window > 0,
+                "softcap": p.softcap > 0,
+            },
         )
 
 
@@ -1095,10 +1115,18 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
     num_segments: int = 8
 
     def kernel_name(self) -> str:
+        from ..helpers.spec import kernel_name_join
+
         p = self.problem
-        return (
-            f"{self.name}_q{p.total_q}_h{p.num_query_heads}_kv{p.num_kv_heads}"
-            f"_d{p.head_size}_b{p.block_size}_seg{self.num_segments}_{p.dtype}"
+        return kernel_name_join(
+            self.name,
+            f"q{p.total_q}",
+            f"h{p.num_query_heads}",
+            f"kv{p.num_kv_heads}",
+            f"d{p.head_size}",
+            f"b{p.block_size}",
+            f"seg{self.num_segments}",
+            p.dtype,
         )
 
 
@@ -1258,8 +1286,17 @@ class UnifiedAttentionReduceSpec:
         return F16 if self.problem.dtype == "fp16" else BF16
 
     def kernel_name(self) -> str:
+        from ..helpers.spec import kernel_name_join
+
         p = self.problem
-        return f"{self.name}_q{p.total_q}_h{p.num_query_heads}_d{p.head_size}_seg{self.num_segments}_{p.dtype}"
+        return kernel_name_join(
+            self.name,
+            f"q{p.total_q}",
+            f"h{p.num_query_heads}",
+            f"d{p.head_size}",
+            f"seg{self.num_segments}",
+            p.dtype,
+        )
 
 
 def build_unified_attention_reduce(spec: UnifiedAttentionReduceSpec) -> KernelDef:

@@ -80,6 +80,62 @@ authoring surface; the kernel-shape layer (`atoms`, `geometry`,
 authoring surface. Both lower to the same `ck_dsl.core.ir` builder, so
 mixing them in one kernel is fine.
 
+### Instance coverage
+
+Every kernel-building file in `ck_dsl/instances/` uses helpers from at
+least one of the two layers; bigger kernels (`gemm_universal`,
+`conv_implicit_gemm`) blend both. The current matrix:
+
+| Instance | tensor_view | sweep | io | reduction | spec | distribution | GEMM-shape |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `elementwise.py`         | yes | -   | yes | -   | yes | -  | - |
+| `layernorm2d.py`         | yes | yes | yes | yes | yes | -  | - |
+| `rmsnorm2d.py`           | yes | yes | yes | yes | yes | -  | - |
+| `reduce.py`              | yes | yes | yes | yes | yes | -  | - |
+| `transpose.py`           | yes | -   | yes | -   | yes | -  | - |
+| `gemm_universal.py`      | yes | -   | -   | -   | yes | -  | `MfmaAtom` |
+| `batched_gemm.py`        | -   | -   | -   | -   | yes | -  | (wraps `gemm_universal`) |
+| `grouped_gemm.py`        | -   | -   | -   | -   | yes | -  | (wraps `gemm_universal`) |
+| `conv_implicit_gemm.py`  | yes (buffer) | - | - | - | yes | - | `AsyncTileLoader`, `WarpGrid`, `CoalescedTileLoader`, `CShuffleEpilogue`, `MfmaAtom` |
+| `conv_direct_grouped.py` | -   | -   | -   | -   | yes | -  | - |
+| `attention_unified.py`   | -   | -   | -   | -   | yes | -  | - |
+| `attention_tiled_2d.py`  | -   | -   | -   | -   | yes | -  | - |
+| `attention_tiled_3d.py`  | -   | -   | -   | -   | yes | -  | - |
+
+The "spec" column (kernel_name_join, SignatureBuilder, ceil_div_grid,
+IOSpecRule/validate_io) is now uniform across all 13 instances. The
+"tensor_view" column now covers the GEMM and implicit-GEMM-conv
+families too, after adding the buffer-view feature (`BufferResource`
++ `addr_space="buffer"` + `load_*_at` / `store_*_at` flat-offset
+methods with the `mask=` OOB-sentinel idiom). Attention still
+intentionally uses raw IR for its per-warp `ds_bpermute` softmax
+butterfly; that pattern is not a memory access and so doesn't fit
+the `TensorView` surface.
+
+#### Buffer-view feature surface (new)
+
+For bounds-checked AMDGPU buffer ops (the canonical lever for
+padding-aware conv, attention K-tail handling, and last-tile epilogue
+safety):
+
+| API | Purpose |
+| --- | --- |
+| `BufferResource` | The 128-bit AMDGPU buffer descriptor + soffset wrapper |
+| `make_buffer_resource(b, ptr, num_bytes)` | Builds the rsrc once per buffer |
+| `make_buffer_view(rsrc, shape, dtype, strides=...)` | A `TensorView` in `addr_space="buffer"` |
+| `view.load_vec_at(b, elem_off, n, mask=...)` | Flat-offset vector load with OOB-zero mask |
+| `view.load_scalar_at(b, elem_off, mask=...)` | Flat-offset scalar load with OOB-zero mask |
+| `view.store_vec_at(b, elem_off, value, n, mask=...)` | Flat-offset vector store; False mask drops the store |
+| `view.store_scalar_at(b, elem_off, value, mask=...)` | Flat-offset scalar store |
+| `view.async_load_lds_at(b, lds_ptr, elem_off, dwords=..., mask=...)` | Async DRAM→LDS via `raw_ptr_buffer_load_lds` (compv4-style pipelines) |
+
+`mask=` works by replacing a False lane's byte offset with
+``INT32_MAX``, which the buffer rsrc's bounds check turns into a
+silent OOB read/write — no software masking needed. The
+`view.buffer` accessor gives typed access to the underlying
+`BufferResource` and raises `TypeError` when the view is not in
+buffer space.
+
 CK Tile parity (which C++ name maps to which Python helper):
 
 | CK Tile C++ | DSL helper |
@@ -87,6 +143,11 @@ CK Tile parity (which C++ name maps to which Python helper):
 | `make_naive_tensor_descriptor_packed(shape)` | `TensorDescriptor.packed(shape, dtype)` or `make_naive_tensor_descriptor_packed(shape, dtype)` |
 | `make_tensor_view<addr_space::global>(ptr, desc)` | `make_global_view(ptr, shape, dtype)` |
 | `make_tensor_view<addr_space::lds>(...)` | `make_lds_view(b, dtype=..., shape=...)` |
+| `make_tensor_view<addr_space::buffer>(rsrc, desc)` | `make_buffer_view(rsrc, shape, dtype)` |
+| AMDGPU `llvm.amdgcn.make.buffer.rsrc.p1` | `make_buffer_resource(b, ptr, num_bytes=...)` |
+| `buffer_load_dwordN` / `raw_ptr_buffer_load` | `view.load_vec_at(b, elem_off, n, mask=...)` |
+| `buffer_store_dwordN` | `view.store_vec_at(b, elem_off, value, n, mask=...)` |
+| `raw_ptr_buffer_load_lds` (async DMA) | `view.async_load_lds_at(b, lds_ptr, elem_off, dwords=...)` |
 | `make_naive_tensor_view_packed<...>(ptr, shape)` | `make_naive_tensor_view_packed(ptr, shape, dtype)` |
 | `make_tile_window(view, lengths, origin)` | `make_tile_window(view, lengths, origin)` (or `view.tile(...)`) |
 | `tile_window.set_window_origin(origin)` | `tile.move_to(*origin)` / `tile.shift_by(b, *deltas)` |
@@ -427,35 +488,96 @@ if a swizzle is needed, express it in the consumer's LDS read math.
 
 ## Scheduling and Software Pipelines
 
-`SchedulePolicy` centralizes scheduler hint masks:
+CK Tile distinguishes two complementary scheduling modes; this repo
+exposes both through `SchedulePolicy`:
+
+* **Intrawave** — within one wave's instruction stream, interleave
+  MFMA / DS_READ groups via `__builtin_amdgcn_sched_group_barrier` so
+  the AMDGPU post-RA scheduler keeps the MFMA pipe fed while ds_reads
+  for the next sub-tile are still streaming. Picked by
+  `pipeline='intrawave'`, `'compv3'`, or `'compv4'`.
+
+* **Interwave (ping-pong)** — across waves in the same workgroup, use
+  `s_setprio(1)` at the start of every MFMA group and `s_setprio(0)`
+  after, so the dispatcher arbitrates in favor of waves that are
+  computing instead of waves that are blocked on `buffer_load` /
+  `buffer_load_lds`. Picked by `pipeline='interwave'` /
+  `'pingpong'` / `'async_dma'` (the async-DMA scheduler defaults to
+  interwave because that is what overlaps DRAM→LDS bandwidth with
+  MFMA throughput in a multi-wave block).
 
 ```python
 from ck_dsl import SchedulePolicy
 
-policy = SchedulePolicy.for_pipeline("compv4")
-policy.emit_prologue(b)
-policy.emit_after_mfma_step(b, ds_read_count=2, mfma_count=4)
+# Intrawave only (single-buffer compute pipeline).
+intra = SchedulePolicy.for_pipeline("compv4")          # mode="intrawave"
+
+# Interwave ping-pong (double-buffer async-DMA pipeline).
+inter = SchedulePolicy.for_pipeline("interwave")        # mode="interwave"
+
+intra.emit_prologue(b)
+# Inside the MFMA k-loop body:
+intra.emit_after_mfma_step(b, ds_read_count=2, mfma_count=4)
+
+# In a software-pipelined ping-pong: SoftwarePipeline.run_ping_pong
+# will call inter.emit_compute_prologue / _epilogue around each
+# `compute(it, ...)` invocation so MFMA-heavy waves take dispatch
+# priority while neighbours are still in flight on VMEM.
 ```
 
-`SoftwarePipeline` builds a static prologue / steady-state pipeline:
+`SoftwarePipeline` builds the prologue / steady-state ping-pong:
 
 ```python
 from ck_dsl import SoftwarePipeline
 
-pipe = SoftwarePipeline(num_iters=K_iters, double_buffer=True,
-                        wait_vmcnt=True, sync_after_wait=True)
+pipe = SoftwarePipeline(
+    num_iters=K_iters,
+    double_buffer=True,
+    wait_vmcnt=True,
+    sync_after_wait=True,
+    sync_before_issue=True,   # ABA-hazard guard between iters
+    overlap_vmcnt=True,       # vmcnt(1) keeps next load in flight
+)
 final_accs = pipe.run_ping_pong(
     b,
     buffers=[(A_smem, B_smem), (A_smem2, B_smem2)],
     initial_state=accs,
     issue_load=lambda it, bufs: emit_load_phase(it, *bufs),
     compute=lambda it, bufs, state: emit_mfma_phase(bufs[0], bufs[1], state),
+    schedule=inter,           # adds setprio bookends around compute
 )
 ```
 
+Key invariants the helper guarantees:
+
+1. **ABA hazard guard.** Before re-issuing an async load into a buffer
+   that was just consumed, a workgroup-wide LDS-only barrier
+   (`b.sync_lds_only()`, the canonical `block_sync_lds` pattern) drains
+   the previous iter's ds_reads. Without this, slow waves' ds_reads can
+   race with fast waves' writes against the same LDS slot. (`compute(it)`
+   reads `buffers[it&1]`; `issue_load(it+2)` writes the same slot two
+   iters later — that's the ABA window.) Disabled with
+   `sync_before_issue=False` for kernels that prove the hazard cannot
+   fire.
+
+2. **Real overlap, not just a fence.** `overlap_vmcnt=True` rewrites the
+   per-iter VMEM drain from the blunt `vmcnt(0)` (drains everything)
+   to `vmcnt(1)` (drains only the *previous* outstanding async load),
+   so the load for iter `it+1` keeps streaming while `compute(it)`
+   issues its ds_reads + MFMAs. The trailing barrier is also
+   downgraded from `b.sync()` to `b.sync_lds_only()` so the in-flight
+   VMEM isn't drained by the workgroup-wide fence.
+
+3. **Wave-level ping-pong.** When a `schedule` is passed and
+   `schedule.mode == 'interwave'`, the helper wraps every `compute(...)`
+   call in `s_setprio(high)` / `s_setprio(low)`. Pairs with `overlap_vmcnt=True`
+   so that the dispatcher actively prefers MFMA-doing waves over
+   load-issuing waves.
+
 This keeps the async DMA machinery reusable: the kernel supplies the
-descriptor-specific `emit_load_phase` and `emit_mfma_phase`; the helper owns
-ping-pong ordering and `s_waitcnt(vmcnt=0)` placement.
+descriptor-specific `emit_load_phase` and `emit_mfma_phase`; the helper
+owns ping-pong ordering, vmcnt/lgkmcnt arithmetic, and the wave-prio
+bookends.
 
 ## Epilogues — `helpers/epilogues.py`
 

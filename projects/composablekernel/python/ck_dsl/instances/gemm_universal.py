@@ -63,6 +63,7 @@ from ..core.ir import (
     PtrType,
     Value,
 )
+from ..helpers.tensor_view import make_global_view, make_tile_window
 
 
 # ---------------------------------------------------------------------
@@ -174,18 +175,22 @@ class UniversalGemmSpec:
             )
 
     def kernel_name(self) -> str:
+        from ..helpers.spec import kernel_name_join
+
         t = self.tile
         tr = self.trait
-        return (
-            f"{self.name}"
-            f"_t{t.tile_m}x{t.tile_n}x{t.tile_k}"
-            f"_w{t.warp_m}x{t.warp_n}x{t.warp_k}"
-            f"_wt{t.warp_tile_m}x{t.warp_tile_n}x{t.warp_tile_k}"
-            f"_{tr.pipeline}_{tr.scheduler}_{tr.epilogue}"
-            f"{'_pad' if any([tr.pad_m, tr.pad_n, tr.pad_k]) else ''}"
-            f"{'_pers' if tr.persistent else ''}"
-            f"{'_bat' if self.batched else ''}"
-        ).replace("/", "_")
+        return kernel_name_join(
+            self.name,
+            f"t{t.tile_m}x{t.tile_n}x{t.tile_k}",
+            f"w{t.warp_m}x{t.warp_n}x{t.warp_k}",
+            f"wt{t.warp_tile_m}x{t.warp_tile_n}x{t.warp_tile_k}",
+            f"{tr.pipeline}_{tr.scheduler}_{tr.epilogue}",
+            flags={
+                "pad": any([tr.pad_m, tr.pad_n, tr.pad_k]),
+                "pers": tr.persistent,
+                "bat": self.batched,
+            },
+        )
 
 
 # ---------------------------------------------------------------------
@@ -444,37 +449,87 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
     c_load_vec = b.const_i32(load_vec)
     c_block_k_div_vec = b.const_i32(block_k // load_vec)
 
+    # CK Tile-style data views. The A and B global tensors are
+    # modelled as 3D views ``(batch, M_or_N, K)`` with element strides
+    # ``(1, K, 1)``. The batch dim's stride of 1 lets us pre-compute
+    # ``batch_off_a`` (in elements) once per CTA and pass it as the
+    # batch-axis origin; the descriptor's offset formula then yields
+    #
+    #   offset = batch_off_a + (block_m_off + local_row) * K
+    #          + (k_off + local_col)
+    #
+    # which matches the prior hand-rolled IR byte-for-byte after
+    # constant folding. ``batch_off_a == 0`` in non-batched mode, so
+    # the lowered IR collapses to the unchanged 2D form.
+    a_view = make_global_view(A, shape=(1, 1, 1), dtype=F16, strides=(1, K, 1))
+    b_view = make_global_view(Bp, shape=(1, 1, 1), dtype=F16, strides=(1, K, 1))
+    # LDS views are 2D packed (block_m, block_k) / (block_n, block_k).
+    from ..helpers.tensor_view import TensorDescriptor, TensorView
+
+    a_lds_view = TensorView(
+        base=A_smem,
+        desc=TensorDescriptor.packed((block_m, block_k), F16),
+        addr_space="lds",
+    )
+    b_lds_view = TensorView(
+        base=B_smem,
+        desc=TensorDescriptor.packed((block_n, block_k), F16),
+        addr_space="lds",
+    )
+
     def emit_load_phase(A_dst: Value, B_dst: Value, k_off: Value) -> None:
-        """Coalesced global -> LDS copy for one K tile (using the
-        current value of `k_off` as the inner K offset)."""
+        """Coalesced global -> LDS copy for one K tile.
+
+        Driven by :class:`TileWindow`: the A/B global views carry the
+        ``(1, K, 1)`` descriptor; the per-call ``k_off`` shifts each
+        tile's column origin. ``batch_off_a`` / ``batch_off_b`` ride
+        in the batch-axis origin and the descriptor's `mul-by-1`
+        folds away in LLVM, yielding identical lowered IR to the
+        pre-helpers version.
+        """
+        a_global_tile = make_tile_window(
+            a_view,
+            lengths=(1, block_m, block_k),
+            origin=(batch_off_a, block_m_off, k_off),
+        )
+        b_global_tile = make_tile_window(
+            b_view,
+            lengths=(1, block_n, block_k),
+            origin=(batch_off_b, block_n_off, k_off),
+        )
+        a_lds_tile = make_tile_window(
+            a_lds_view,
+            lengths=(block_m, block_k),
+            origin=(b.const_i32(0), b.const_i32(0)),
+        )
+        b_lds_tile = make_tile_window(
+            b_lds_view,
+            lengths=(block_n, block_k),
+            origin=(b.const_i32(0), b.const_i32(0)),
+        )
+
         for e in range(a_vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             row = b.div(vec_idx, c_block_k_div_vec)
             col_v = b.mod(vec_idx, c_block_k_div_vec)
             col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            a_row = b.add(block_m_off, row)
-            a_k = b.add(k_off, col)
-            a_off = b.add(batch_off_a, b.add(b.mul(a_row, K), a_k))
             if load_vec == 1:
-                a_val = b.global_load_f16(A, a_off)
-                b.smem_store_f16(A_dst, [row, col], a_val)
+                a_val = a_global_tile.load_scalar(b, b.const_i32(0), row, col)
+                a_lds_tile.store_scalar(b, row, col, value=a_val)
             else:
-                a_val = b.global_load_vN_f16(A, a_off, load_vec)
-                b.smem_store_vN_f16(A_dst, [row, col], a_val, load_vec)
+                a_val = a_global_tile.load_vec(b, b.const_i32(0), row, col, n=load_vec)
+                a_lds_tile.store_vec(b, row, col, value=a_val, n=load_vec)
         for e in range(b_vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             row = b.div(vec_idx, c_block_k_div_vec)
             col_v = b.mod(vec_idx, c_block_k_div_vec)
             col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            b_row = b.add(block_n_off, row)
-            b_k = b.add(k_off, col)
-            b_off = b.add(batch_off_b, b.add(b.mul(b_row, K), b_k))
             if load_vec == 1:
-                b_val = b.global_load_f16(Bp, b_off)
-                b.smem_store_f16(B_dst, [row, col], b_val)
+                b_val = b_global_tile.load_scalar(b, b.const_i32(0), row, col)
+                b_lds_tile.store_scalar(b, row, col, value=b_val)
             else:
-                b_val = b.global_load_vN_f16(Bp, b_off, load_vec)
-                b.smem_store_vN_f16(B_dst, [row, col], b_val, load_vec)
+                b_val = b_global_tile.load_vec(b, b.const_i32(0), row, col, n=load_vec)
+                b_lds_tile.store_vec(b, row, col, value=b_val, n=load_vec)
 
     def emit_mfma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]

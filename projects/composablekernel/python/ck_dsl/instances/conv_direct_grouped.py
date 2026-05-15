@@ -169,11 +169,16 @@ class DirectConv16cSpec:
         return self.problem.KH
 
     def kernel_name(self) -> str:
+        from ..helpers.spec import kernel_name_join
+
         p = self.problem
-        return (
-            f"{self.name}_{p.short()}_bq{self.block_q}_bg{self.block_groups}"
-            f"_{'db' if self.double_buffer else 'sb'}"
-            f"{'_k32' if self.fold_k32 else ''}"
+        return kernel_name_join(
+            self.name,
+            p.short(),
+            f"bq{self.block_q}",
+            f"bg{self.block_groups}",
+            "db" if self.double_buffer else "sb",
+            flags={"k32": self.fold_k32},
         )
 
     def validate(self) -> None:
@@ -602,8 +607,12 @@ class DirectConv4cSpec:
         return (self.block_groups // 16) * self.wave_size
 
     def kernel_name(self) -> str:
+        from ..helpers.spec import kernel_name_join
+
         p = self.problem
-        return f"{self.name}_{p.short()}_bq{self.block_q}_bg{self.block_groups}"
+        return kernel_name_join(
+            self.name, p.short(), f"bq{self.block_q}", f"bg{self.block_groups}"
+        )
 
     def validate(self) -> None:
         p = self.problem

@@ -968,6 +968,19 @@ class _Lowerer:
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
         self._current().emit("  call void @llvm.amdgcn.s.barrier()")
 
+    def _op_tile_sync_lds_only(self, op: Op) -> None:
+        # Workgroup barrier that drains LDS (lgkmcnt) but NOT VMEM (vmcnt).
+        # Used by the async-DMA ping-pong pipeline: an outstanding
+        # raw_ptr_buffer_load_lds (VMEM) for the *next* iter must keep
+        # streaming while we wait on the *previous* iter's ds_reads.
+        # Draining vmcnt here would defeat the whole point of the
+        # overlap. Matches CK Tile's ``block_sync_lds``.
+        mask = _encode_waitcnt_gfx9_10(vmcnt=-1, expcnt=-1, lgkmcnt=0)
+        self._need("s.waitcnt")
+        self._need("s.barrier")
+        self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
+        self._current().emit("  call void @llvm.amdgcn.s.barrier()")
+
     def _op_tile_s_waitcnt(self, op: Op) -> None:
         # See ck_dsl/_ir.py:s_waitcnt for the encoding contract.
         self._need("s.waitcnt")

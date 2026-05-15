@@ -143,10 +143,13 @@ from .sweep import (
     sweep_row_chunks,
 )
 from .tensor_view import (
+    BufferResource,
     TensorCoordinate,
     TensorDescriptor,
     TensorView,
     TileWindow,
+    make_buffer_resource,
+    make_buffer_view,
     make_global_view,
     make_lds_view,
     make_naive_tensor_descriptor_packed,
@@ -209,10 +212,13 @@ __all__ = [
     "make_gemm_manifest",
     "write_artifact",
     # CK Tile-inspired tensor abstractions
+    "BufferResource",
     "TensorCoordinate",
     "TensorDescriptor",
     "TensorView",
     "TileWindow",
+    "make_buffer_resource",
+    "make_buffer_view",
     "make_global_view",
     "make_lds_view",
     "make_naive_tensor_descriptor_packed",

@@ -398,6 +398,16 @@ class _Lowerer:
     def _op_tile_sync(self, op: Op) -> None:
         self._emit("__syncthreads();")
 
+    def _op_tile_sync_lds_only(self, op: Op) -> None:
+        # Drain LDS counter (lgkmcnt) but leave VMEM in flight, then
+        # the workgroup barrier. Same encoding as ``block_sync_lds`` in
+        # ``ck_tile/core/arch/arch.hpp``. Used by the async-DMA
+        # ping-pong pipeline so the next iter's ``buffer_load_lds``
+        # keeps streaming across this barrier.
+        mask = _encode_waitcnt_gfx9_10(vmcnt=-1, expcnt=-1, lgkmcnt=0)
+        self._emit(f"__builtin_amdgcn_s_waitcnt({mask});")
+        self._emit("__syncthreads();")
+
     def _op_tile_s_waitcnt(self, op: Op) -> None:
         vm = int(op.attrs.get("vmcnt", -1))
         lk = int(op.attrs.get("lgkmcnt", -1))

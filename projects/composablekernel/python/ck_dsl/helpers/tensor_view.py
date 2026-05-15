@@ -60,7 +60,7 @@ Composition with existing helpers:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Literal, Optional, Sequence, Tuple, Union
 
 from ..core.ir import IRBuilder, Type, Value
 
@@ -74,10 +74,13 @@ either, with the offset code path picking the right multiplier."""
 
 
 __all__ = [
+    "BufferResource",
     "TensorCoordinate",
     "TensorDescriptor",
     "TensorView",
     "TileWindow",
+    "make_buffer_resource",
+    "make_buffer_view",
     "make_global_view",
     "make_lds_view",
     "make_naive_tensor_descriptor_packed",
@@ -194,7 +197,85 @@ class TensorDescriptor:
 # ---------------------------------------------------------------------
 
 
-AddrSpace = Literal["global", "lds"]
+AddrSpace = Literal["global", "lds", "buffer"]
+
+
+# ---------------------------------------------------------------------
+# BufferResource — AMDGPU 128-bit buffer descriptor
+# ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BufferResource:
+    """An AMDGPU buffer-resource descriptor used by the bounds-checked
+    ``raw_ptr_buffer_load`` / ``raw_ptr_buffer_store`` family.
+
+    Buffer ops differ from plain ``global_load`` in three important
+    ways:
+
+    1. Out-of-range ``voffset``\\s **silently return 0** (loads) or
+       are **silently dropped** (stores). This is the canonical
+       AMDGPU lever for tail-safe loads in conv kernels with padding,
+       attention K-tail handling, and GEMM's last-tile epilogue.
+    2. The base pointer is wrapped in a 128-bit resource descriptor
+       (``rsrc``, an opaque ``<4 x i32>``) constructed once per
+       buffer via ``b.buffer_rsrc(ptr, num_bytes)``.
+    3. ``voffset`` is in **bytes**, not elements, so the descriptor
+       layer multiplies the element offset by the per-element size
+       before issuing the op.
+
+    Use :func:`make_buffer_resource` to build one. Once a buffer
+    resource exists, wrap it in a :class:`TensorView` via
+    :func:`make_buffer_view` to get the standard load/store API.
+    """
+
+    rsrc: Value
+    """The 128-bit buffer descriptor (``<4 x i32>``)."""
+
+    soffset: Value
+    """A scalar byte offset added to every load/store; typically
+    :func:`IRBuilder.const_i32(0)`. Non-zero lets one rsrc serve
+    several waves with disjoint sub-regions."""
+
+    num_bytes: int = 0
+    """The size of the underlying buffer in bytes. Informational
+    today; kept so a future ``BufferResource`` could carry validity
+    metadata for assertions."""
+
+
+def make_buffer_resource(
+    b: IRBuilder,
+    ptr: Value,
+    *,
+    num_bytes: Value,
+    soffset: Optional[Value] = None,
+) -> BufferResource:
+    """Build a :class:`BufferResource` from a raw global pointer.
+
+    ``num_bytes`` is the total size of the buffer in bytes; OOB
+    ``voffset``\\s above this size yield 0 on loads and are dropped
+    on stores. The default ``soffset`` is ``const_i32(0)`` so the
+    full ``voffset`` arithmetic drives the load address.
+    """
+    rsrc = b.buffer_rsrc(ptr, num_bytes)
+    if soffset is None:
+        soffset = b.const_i32(0)
+    n = int(num_bytes) if isinstance(num_bytes, int) else 0
+    return BufferResource(rsrc=rsrc, soffset=soffset, num_bytes=n)
+
+
+def _dtype_elem_bytes(dtype: Type) -> int:
+    """Bytes per element for the dtypes we currently support."""
+    name = dtype.name
+    if name in ("f16", "bf16"):
+        return 2
+    if name == "f32":
+        return 4
+    if name == "i32":
+        return 4
+    if name == "i64":
+        return 8
+    raise NotImplementedError(f"buffer-space load/store not wired for dtype {name}")
 
 
 @dataclass(frozen=True)
@@ -208,13 +289,30 @@ class TensorView:
     indices; the view collapses them to a flat element offset.
     """
 
-    base: Value
+    base: Any
+    """For ``addr_space in {"global", "lds"}``: the pointer (an SSA
+    :class:`Value`). For ``addr_space == "buffer"``: the
+    :class:`BufferResource` describing the bounds-checked region."""
+
     desc: TensorDescriptor
     addr_space: AddrSpace = "global"
 
     @property
     def dtype(self) -> Type:
         return self.desc.dtype
+
+    @property
+    def buffer(self) -> BufferResource:
+        """Typed accessor for the buffer descriptor (raises if the view
+        is not in ``addr_space="buffer"``)."""
+        if self.addr_space != "buffer":
+            raise TypeError(
+                f"TensorView.buffer requires addr_space='buffer', got "
+                f"{self.addr_space!r}"
+            )
+        if not isinstance(self.base, BufferResource):
+            raise TypeError("buffer TensorView's base must be a BufferResource")
+        return self.base
 
     @property
     def shape(self) -> Tuple[int, ...]:
@@ -253,6 +351,15 @@ class TensorView:
             raise NotImplementedError(
                 f"LDS scalar load not yet wired for dtype {self.dtype.name}"
             )
+        if self.addr_space == "buffer":
+            rsrc = self.buffer
+            byte_off = b.mul(off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+            if self.dtype.name == "f16":
+                return b.buffer_load_f16(rsrc.rsrc, byte_off, rsrc.soffset)
+            raise NotImplementedError(
+                f"buffer scalar load not yet wired for dtype {self.dtype.name} "
+                "(only f16 is exposed by the IR builder today)"
+            )
         # global
         if self.dtype.name == "f16":
             return b.global_load_f16(self.base, off)
@@ -280,6 +387,18 @@ class TensorView:
             raise NotImplementedError(
                 f"LDS scalar store not yet wired for dtype {self.dtype.name}"
             )
+        if self.addr_space == "buffer":
+            rsrc = self.buffer
+            byte_off = b.mul(
+                self.desc.offset(b, indices),
+                b.const_i32(_dtype_elem_bytes(self.dtype)),
+            )
+            if self.dtype.name == "f16":
+                b.buffer_store_f16(rsrc.rsrc, byte_off, rsrc.soffset, value)
+                return
+            raise NotImplementedError(
+                f"buffer scalar store not yet wired for dtype {self.dtype.name}"
+            )
         off = self.desc.offset(b, indices)
         b.global_store(self.base, off, value)
 
@@ -287,7 +406,9 @@ class TensorView:
 
     def load_vec(self, b: IRBuilder, indices: Sequence[Value], n: int) -> Value:
         """Vectorised load of ``n`` consecutive elements starting at
-        ``indices``. Supports ``n in {2, 4, 8}`` for f16/bf16."""
+        ``indices``. Supports ``n in {2, 4, 8}`` for f16/bf16 (global &
+        LDS); buffer ops use ``dwords = n // 2`` for f16 and support
+        ``n in {2, 4, 8}`` accordingly."""
         if self.addr_space == "lds":
             if self.dtype.name in ("f16", "bf16"):
                 return b.smem_load_vN(self.base, *indices, dtype=self.dtype, n=n)
@@ -295,6 +416,21 @@ class TensorView:
                 return b.smem_load_vN_f32(self.base, *indices, n=n)
             raise NotImplementedError(
                 f"LDS vec load not yet wired for dtype {self.dtype.name}"
+            )
+        if self.addr_space == "buffer":
+            rsrc = self.buffer
+            elem_off = self.desc.offset(b, indices)
+            byte_off = b.mul(elem_off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+            if self.dtype.name == "f16":
+                if n not in (2, 4, 8):
+                    raise ValueError(
+                        f"buffer load f16 supports n in {{2, 4, 8}} (got {n})"
+                    )
+                return b.buffer_load_vN_f16(
+                    rsrc.rsrc, byte_off, rsrc.soffset, dwords=n // 2
+                )
+            raise NotImplementedError(
+                f"buffer vec load not yet wired for dtype {self.dtype.name}"
             )
         off = self.desc.offset(b, indices)
         if self.dtype.name in ("f16", "bf16"):
@@ -314,8 +450,225 @@ class TensorView:
         if self.addr_space == "lds":
             b.smem_store_vN(self.base, list(indices), value, n)
             return
+        if self.addr_space == "buffer":
+            rsrc = self.buffer
+            elem_off = self.desc.offset(b, indices)
+            byte_off = b.mul(elem_off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+            if self.dtype.name == "f16":
+                if n not in (2, 4, 8):
+                    raise ValueError(
+                        f"buffer store f16 supports n in {{2, 4, 8}} (got {n})"
+                    )
+                b.buffer_store_vN_f16(
+                    rsrc.rsrc, byte_off, rsrc.soffset, value, dwords=n // 2
+                )
+                return
+            raise NotImplementedError(
+                f"buffer vec store not yet wired for dtype {self.dtype.name}"
+            )
         off = self.desc.offset(b, indices)
         b.global_store_vN(self.base, off, value, n)
+
+    # ---- flat-offset variants (skip the descriptor) ----
+    #
+    # These are useful when the caller already has a flat element offset
+    # (e.g. from a ``ck_dsl.transforms.TensorDescriptor`` with named
+    # coords + a transform DAG) and just wants to issue the load/store
+    # in the right address space. They also support the ``mask=`` kwarg
+    # for buffer-space loads where the AMDGPU OOB-zero behaviour is the
+    # padding-aware load mechanism: when ``mask`` is False on a lane,
+    # the byte offset is replaced by an out-of-range sentinel so the
+    # hardware returns 0 (loads) or drops the access (stores).
+
+    _OOB_SENTINEL = (1 << 31) - 1
+    """The byte offset substituted into a buffer op when a lane's mask
+    is False. Any value beyond the rsrc's ``num_bytes`` works; we use
+    ``INT32_MAX`` so the silent OOB-zero / drop is unambiguous."""
+
+    def load_vec_at(
+        self,
+        b: IRBuilder,
+        elem_off: Value,
+        n: int,
+        *,
+        mask: Optional[Value] = None,
+    ) -> Value:
+        """Vectorised load at a precomputed flat element offset.
+
+        Skips the descriptor's offset arithmetic, which is useful when
+        the caller has a rich-descriptor offset (e.g. an implicit-GEMM
+        conv's (m, k) -> NHWC mapping) and just wants to issue the
+        load.
+
+        ``mask`` is an optional i1 :class:`Value`. When provided **and**
+        the view is in ``addr_space="buffer"``, lanes where ``mask`` is
+        False have their byte offset replaced by an OOB sentinel so
+        the hardware returns 0 (the padding-aware load idiom). For
+        other address spaces, a mask raises :class:`NotImplementedError`
+        until we add software-side masking.
+        """
+        if mask is not None and self.addr_space != "buffer":
+            raise NotImplementedError(
+                f"mask= requires addr_space='buffer' (got {self.addr_space!r}); "
+                "software masking for global/lds is not yet wired"
+            )
+        if self.addr_space == "buffer":
+            rsrc = self.buffer
+            byte_off = b.mul(elem_off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+            if mask is not None:
+                byte_off = b.select(mask, byte_off, b.const_i32(self._OOB_SENTINEL))
+            if self.dtype.name == "f16":
+                if n not in (2, 4, 8):
+                    raise ValueError(
+                        f"buffer load_vec_at f16 supports n in {{2, 4, 8}} (got {n})"
+                    )
+                return b.buffer_load_vN_f16(
+                    rsrc.rsrc, byte_off, rsrc.soffset, dwords=n // 2
+                )
+            raise NotImplementedError(
+                f"buffer load_vec_at not wired for dtype {self.dtype.name}"
+            )
+        if self.dtype.name in ("f16", "bf16"):
+            return b.global_load_vN(self.base, elem_off, self.dtype, n)
+        raise NotImplementedError(
+            f"load_vec_at not wired for {self.addr_space}/{self.dtype.name}"
+        )
+
+    def load_scalar_at(
+        self,
+        b: IRBuilder,
+        elem_off: Value,
+        *,
+        mask: Optional[Value] = None,
+    ) -> Value:
+        """Scalar load at a precomputed flat element offset.
+
+        Same ``mask=`` semantics as :meth:`load_vec_at`.
+        """
+        if mask is not None and self.addr_space != "buffer":
+            raise NotImplementedError(
+                f"mask= requires addr_space='buffer' (got {self.addr_space!r})"
+            )
+        if self.addr_space == "buffer":
+            rsrc = self.buffer
+            byte_off = b.mul(elem_off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+            if mask is not None:
+                byte_off = b.select(mask, byte_off, b.const_i32(self._OOB_SENTINEL))
+            if self.dtype.name == "f16":
+                return b.buffer_load_f16(rsrc.rsrc, byte_off, rsrc.soffset)
+            raise NotImplementedError(
+                f"buffer load_scalar_at not wired for dtype {self.dtype.name}"
+            )
+        if self.dtype.name == "f16":
+            return b.global_load_f16(self.base, elem_off)
+        if self.dtype.name == "bf16":
+            return b.global_load_bf16(self.base, elem_off)
+        return b.global_load(self.base, elem_off, dtype=self.dtype)
+
+    def store_vec_at(
+        self,
+        b: IRBuilder,
+        elem_off: Value,
+        value: Value,
+        n: int,
+        *,
+        mask: Optional[Value] = None,
+    ) -> None:
+        """Vectorised store at a precomputed flat element offset.
+
+        Same ``mask=`` semantics as :meth:`load_vec_at`: a False mask
+        in buffer-space drops the store via OOB; in other spaces a
+        mask is currently unsupported.
+        """
+        if mask is not None and self.addr_space != "buffer":
+            raise NotImplementedError(
+                f"mask= requires addr_space='buffer' (got {self.addr_space!r})"
+            )
+        if self.addr_space == "buffer":
+            rsrc = self.buffer
+            byte_off = b.mul(elem_off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+            if mask is not None:
+                byte_off = b.select(mask, byte_off, b.const_i32(self._OOB_SENTINEL))
+            if self.dtype.name == "f16":
+                if n not in (2, 4, 8):
+                    raise ValueError(
+                        f"buffer store_vec_at f16 supports n in {{2, 4, 8}} (got {n})"
+                    )
+                b.buffer_store_vN_f16(
+                    rsrc.rsrc, byte_off, rsrc.soffset, value, dwords=n // 2
+                )
+                return
+            raise NotImplementedError(
+                f"buffer store_vec_at not wired for dtype {self.dtype.name}"
+            )
+        b.global_store_vN(self.base, elem_off, value, n)
+
+    def store_scalar_at(
+        self,
+        b: IRBuilder,
+        elem_off: Value,
+        value: Value,
+        *,
+        mask: Optional[Value] = None,
+    ) -> None:
+        """Scalar store at a precomputed flat element offset."""
+        if mask is not None and self.addr_space != "buffer":
+            raise NotImplementedError(
+                f"mask= requires addr_space='buffer' (got {self.addr_space!r})"
+            )
+        if self.addr_space == "buffer":
+            rsrc = self.buffer
+            byte_off = b.mul(elem_off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+            if mask is not None:
+                byte_off = b.select(mask, byte_off, b.const_i32(self._OOB_SENTINEL))
+            if self.dtype.name == "f16":
+                b.buffer_store_f16(rsrc.rsrc, byte_off, rsrc.soffset, value)
+                return
+            raise NotImplementedError(
+                f"buffer store_scalar_at not wired for dtype {self.dtype.name}"
+            )
+        b.global_store(self.base, elem_off, value)
+
+    # ---- async DRAM -> LDS (compv4-style pipelines) ----
+
+    def async_load_lds_at(
+        self,
+        b: IRBuilder,
+        lds_ptr: Value,
+        elem_off: Value,
+        *,
+        dwords: int,
+        mask: Optional[Value] = None,
+    ) -> None:
+        """``raw_ptr_buffer_load_lds`` analogue with the same idioms.
+
+        Emits an asynchronous DRAM-to-LDS copy via the AMDGPU async-DMA
+        path. The view must be ``addr_space="buffer"``; the destination
+        LDS pointer is supplied as ``lds_ptr`` (an i64 LDS address, as
+        produced by :func:`ck_dsl.core.ir.IRBuilder.smem_alloc` after
+        ``ptrtoint`` or via the addr-arithmetic helpers).
+
+        ``dwords`` must be 1, 3, or 4 (gfx950 constraint -- 4, 12, or
+        16 bytes per lane). Completion is signalled via the VMEM
+        counter; the caller must emit an ``s_waitcnt(vmcnt=0)`` before
+        reading the destination LDS.
+
+        For the full lane-contiguous + descriptor-driven flow, see
+        :class:`ck_dsl.helpers.loads.AsyncTileLoader`, which composes
+        this primitive with a per-wave slot allocator.
+        """
+        if self.addr_space != "buffer":
+            raise TypeError(
+                "async_load_lds_at requires addr_space='buffer'; got "
+                f"{self.addr_space!r}"
+            )
+        rsrc = self.buffer
+        byte_off = b.mul(elem_off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+        if mask is not None:
+            byte_off = b.select(mask, byte_off, b.const_i32(self._OOB_SENTINEL))
+        b.async_buffer_load_lds(
+            rsrc.rsrc, lds_ptr, byte_off, rsrc.soffset, dwords=dwords
+        )
 
     # ---- compute-promoting variants ----
 
@@ -563,6 +916,36 @@ def make_global_view(
     else:
         desc = TensorDescriptor.with_strides(shape, strides, dtype)
     return TensorView(base=base, desc=desc, addr_space="global")
+
+
+def make_buffer_view(
+    rsrc: BufferResource,
+    shape: Sequence[int],
+    dtype: Type,
+    *,
+    strides: Optional[Sequence[StrideElem]] = None,
+) -> TensorView:
+    """``make_tensor_view<addr_space_enum::buffer>(rsrc, desc)`` analogue.
+
+    Wraps a :class:`BufferResource` (constructed via
+    :func:`make_buffer_resource`) as a :class:`TensorView` in
+    ``addr_space="buffer"``. Reads / writes through this view emit
+    ``raw_ptr_buffer_load`` / ``raw_ptr_buffer_store`` IR ops, which
+    silently return 0 (resp. drop) for out-of-range indices -- the
+    canonical AMDGPU bounds-safe load family used by conv kernels
+    with padding, attention K-tail handling, and the GEMM last-tile
+    epilogue.
+
+    ``strides`` defaults to packed row-major. The element dtype is
+    today restricted to ``f16`` because the IR builder only exposes
+    ``buffer_load_vN_f16`` etc.; lifting this is a straightforward
+    extension once a use case lands.
+    """
+    if strides is None:
+        desc = TensorDescriptor.packed(shape, dtype)
+    else:
+        desc = TensorDescriptor.with_strides(shape, strides, dtype)
+    return TensorView(base=rsrc, desc=desc, addr_space="buffer")
 
 
 def make_lds_view(

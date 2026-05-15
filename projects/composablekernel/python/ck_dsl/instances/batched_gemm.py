@@ -98,25 +98,27 @@ def build_batched_gemm(spec: BatchedGemmSpec) -> KernelDef:
 
 
 def batched_gemm_signature(spec: BatchedGemmSpec):
-    return [
-        {"name": "A", "type": "ptr<f16, global>"},
-        {"name": "B", "type": "ptr<f16, global>"},
-        {"name": "C", "type": "ptr<f16, global>"},
-        {"name": "M", "type": "i32"},
-        {"name": "N", "type": "i32"},
-        {"name": "K", "type": "i32"},
-        {"name": "stride_a", "type": "i32"},
-        {"name": "stride_b", "type": "i32"},
-        {"name": "stride_c", "type": "i32"},
-    ]
+    from ..helpers.spec import SignatureBuilder
+
+    return (
+        SignatureBuilder()
+        .ptr("A", "f16")
+        .ptr("B", "f16")
+        .ptr("C", "f16")
+        .scalar("M", "i32")
+        .scalar("N", "i32")
+        .scalar("K", "i32")
+        .scalar("stride_a", "i32")
+        .scalar("stride_b", "i32")
+        .scalar("stride_c", "i32")
+        .build()
+    )
 
 
 def batched_gemm_grid(
     batch: int, m: int, n: int, spec: BatchedGemmSpec
 ) -> Tuple[int, int, int]:
+    from ..helpers.spec import ceil_div_grid
+
     t = spec.tile
-    return (
-        (n + t.tile_n - 1) // t.tile_n,
-        (m + t.tile_m - 1) // t.tile_m,
-        batch,
-    )
+    return ceil_div_grid((n, t.tile_n), (m, t.tile_m), (batch, 1))

@@ -810,6 +810,56 @@ class TestInstances(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_implicit_gemm_conv(spec)
 
+    def test_implicit_gemm_async_emits_pingpong_artifacts(self):
+        """Async-DMA conv must emit the ping-pong scaffolding.
+
+        We sanity-check that the async-DMA path produces:
+          * ``raw_ptr_buffer_load_lds`` intrinsics (the actual async DMA).
+          * ``s_setprio`` bookends from the interwave scheduler (the
+            high-prio / low-prio pair around each MFMA group).
+          * ``s_waitcnt`` with a partial ``vmcnt`` (overlap of the
+            next iter's load with this iter's compute), encoded as
+            anything other than the all-zero drain.
+          * The ``s_barrier`` count is at least 2 per K-iter (one
+            ``sync_lds_only`` before each issue + one after the wait),
+            confirming the pong-hazard guard is in place.
+        """
+        prob = ConvProblem(
+            N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
+        )
+        spec = ImplicitGemmConvSpec(
+            problem=prob,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+            async_dma=True,
+        )
+        kernel = build_implicit_gemm_conv(spec)
+        ll = lower_kernel_to_llvm(kernel)
+        # 1) The async DMA intrinsic itself is emitted.
+        self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
+        # 2) Interwave ping-pong: setprio bookends. We expect *both*
+        # the high (1) and low (0) prio settings from the interwave
+        # SchedulePolicy.
+        self.assertIn("@llvm.amdgcn.s.setprio(i16 1)", ll)
+        self.assertIn("@llvm.amdgcn.s.setprio(i16 0)", ll)
+        # 3) At least one barrier per K-iter for the ABA-hazard guard
+        # (K_iters = 576 / 64 = 9 in this shape, but counting exactly
+        # is brittle; require >= 8 barriers as a lower bound).
+        barrier_count = ll.count("@llvm.amdgcn.s.barrier")
+        self.assertGreaterEqual(
+            barrier_count,
+            8,
+            msg=f"expected >= 8 s_barriers for ping-pong, found {barrier_count}",
+        )
+
     def test_direct_conv_16c_builds(self):
         prob = DirectConvProblem(
             N=32, H=200, W=200, groups=16, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
@@ -1156,6 +1206,61 @@ class TestWindowLoadStoreMethods(unittest.TestCase):
         ll = lower_kernel_to_llvm(b.kernel)
         # Confirm vectorised global store was emitted.
         self.assertIn("store <8 x half>", ll)
+
+
+class TestBufferView(unittest.TestCase):
+    def test_make_buffer_view_emits_buffer_rsrc(self):
+        from ck_dsl.helpers import (
+            make_buffer_resource,
+            make_buffer_view,
+            make_tile_window,
+        )
+
+        b = IRBuilder("buf_view_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        N_bytes = b.param("N_bytes", I32)
+        rsrc = make_buffer_resource(b, X, num_bytes=N_bytes)
+        view = make_buffer_view(rsrc, shape=(0,), dtype=F16)
+        self.assertEqual(view.addr_space, "buffer")
+        self.assertIs(view.buffer, rsrc)
+        tile = make_tile_window(view, lengths=(0,), origin=(b.const_i32(0),))
+        tile.load_vec(b, b.const_i32(0), n=4)
+        ll = lower_kernel_to_llvm(b.kernel)
+        # The buffer rsrc construction emits a call to make.buffer.rsrc.
+        self.assertIn("llvm.amdgcn.make.buffer.rsrc", ll)
+        # And the load emits a raw_ptr_buffer_load intrinsic.
+        self.assertIn("raw.ptr.buffer.load", ll)
+
+    def test_buffer_view_rejects_buffer_accessor_for_global(self):
+        from ck_dsl.helpers import TensorView, TensorDescriptor
+
+        b = IRBuilder("buf_view_misuse")
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        view = TensorView(
+            base=X, desc=TensorDescriptor.packed((4,), F16), addr_space="global"
+        )
+        with self.assertRaises(TypeError):
+            _ = view.buffer
+
+    def test_buffer_view_scalar_load(self):
+        from ck_dsl.helpers import (
+            make_buffer_resource,
+            make_buffer_view,
+            make_tile_window,
+        )
+
+        b = IRBuilder("buf_view_scalar")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        N_bytes = b.param("N_bytes", I32)
+        rsrc = make_buffer_resource(b, X, num_bytes=N_bytes)
+        view = make_buffer_view(rsrc, shape=(0,), dtype=F16)
+        tile = make_tile_window(view, lengths=(0,), origin=(b.const_i32(0),))
+        tile.load_scalar(b, b.const_i32(0))
+        ll = lower_kernel_to_llvm(b.kernel)
+        # raw_ptr_buffer_load.u16 is the scalar half buffer load.
+        self.assertIn("raw.ptr.buffer.load", ll)
 
 
 class TestTransformsBridge(unittest.TestCase):

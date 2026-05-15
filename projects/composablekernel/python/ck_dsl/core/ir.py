@@ -1053,6 +1053,21 @@ class IRBuilder:
     def sync(self) -> None:
         self._op("tile.sync")
 
+    def sync_lds_only(self) -> None:
+        """Workgroup barrier that drains LDS ops but NOT VMEM.
+
+        Emits ``s_waitcnt lgkmcnt(0)`` followed by ``s_barrier`` — the
+        canonical CK Tile ``block_sync_lds`` pattern. Use this in
+        async-DMA pipelines where an in-flight ``raw_ptr_buffer_load_lds``
+        (a VMEM op) must keep streaming while the consumer waits for
+        prior ``ds_read``/``ds_write`` to settle.
+
+        Versus :meth:`sync`: this skips ``vmcnt(0)`` so the next iter's
+        async load stays in flight across the barrier, which is the
+        whole point of the ping-pong overlap.
+        """
+        self._op("tile.sync_lds_only")
+
     def s_waitcnt(
         self, *, vmcnt: int = -1, lgkmcnt: int = -1, expcnt: int = -1
     ) -> None:

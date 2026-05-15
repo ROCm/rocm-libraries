@@ -127,14 +127,18 @@ def build_grouped_gemm(spec: GroupedGemmSpec) -> KernelDef:
 
 
 def grouped_gemm_signature(spec: GroupedGemmSpec):
-    return [
-        {"name": "A", "type": "ptr<f16, global>"},
-        {"name": "B", "type": "ptr<f16, global>"},
-        {"name": "C", "type": "ptr<f16, global>"},
-        {"name": "M", "type": "i32"},
-        {"name": "N", "type": "i32"},
-        {"name": "K", "type": "i32"},
-    ]
+    from ..helpers.spec import SignatureBuilder
+
+    return (
+        SignatureBuilder()
+        .ptr("A", "f16")
+        .ptr("B", "f16")
+        .ptr("C", "f16")
+        .scalar("M", "i32")
+        .scalar("N", "i32")
+        .scalar("K", "i32")
+        .build()
+    )
 
 
 class GroupedGemmLauncher:
