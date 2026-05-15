@@ -29,7 +29,28 @@
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
+#include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
+#include <vector>
+
+namespace
+{
+    bool& host_side_fill_kernel_state()
+    {
+        static bool enable = false;
+        return enable;
+    }
+}
+
+void set_host_side_fill_kernel_state(bool enable)
+{
+    host_side_fill_kernel_state() = enable;
+}
+
+bool host_side_fill_kernel()
+{
+    return host_side_fill_kernel_state();
+}
 
 template <typename T, typename F>
 __global__ void fill_kernel(T* A, size_t size, size_t offset, F f)
@@ -52,6 +73,19 @@ void fill_batch(T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batc
         size_64    = size_64 / type::packed_size;
     }
     constexpr size_t c_i32_max = size_t(std::numeric_limits<int32_t>::max());
+    if(host_side_fill_kernel())
+    {
+        for(size_t offset = 0; offset < size_64; offset += c_i32_max)
+        {
+            size_t size = std::min(size_64 - offset, c_i32_max);
+            std::vector<T> h(size);
+            for(size_t k = 0; k < size; k++)
+                h[k] = f(offset + k);
+            CHECK_HIP_ERROR(hipMemcpy(
+                A + offset, h.data(), size * sizeof(T), hipMemcpyHostToDevice));
+        }
+        return;
+    }
     for(size_t offset = 0; offset < size_64; offset += c_i32_max)
     {
         size_t size       = std::min(size_64 - offset, c_i32_max);
@@ -62,7 +96,7 @@ void fill_batch(T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batc
     CHECK_HIP_ERROR(hipGetLastError());
 }
 
-__device__ uint32_t pseudo_random_device(size_t idx)
+__host__ __device__ uint32_t pseudo_random_device(size_t idx)
 {
     // Numerical Recipes ranqd1, Chapter 7.1, ?An Even Quicker Generator, Eq. 7.1.6. parameters from Knuth and H. W. Lewis
     auto s = idx * 1664525 + 1013904223;
@@ -77,35 +111,35 @@ __device__ uint32_t pseudo_random_device(size_t idx)
 
 /*! \brief  generate a random number in range [1,2,3,4,5,6,7,8,9,10] */
 template <typename T>
-__device__ T random_int(size_t idx)
+__host__ __device__ T random_int(size_t idx)
 {
     return T(pseudo_random_device(idx) % 10 + 1.f);
 }
 
 /*! \brief  generate a random number in range [-2,-1,0,1,2] */
 template <>
-__device__ hipblasLtHalf random_int<hipblasLtHalf>(size_t idx)
+__host__ __device__ hipblasLtHalf random_int<hipblasLtHalf>(size_t idx)
 {
     return hipblasLtHalf(pseudo_random_device(idx) % 5 - 2.f);
 }
 
 /*! \brief  generate a random number in range [-2,-1,0,1,2] */
 template <>
-__device__ hip_bfloat16 random_int<hip_bfloat16>(size_t idx)
+__host__ __device__ hip_bfloat16 random_int<hip_bfloat16>(size_t idx)
 {
     return hip_bfloat16(pseudo_random_device(idx) % 5 - 2.f);
 }
 
 /*! \brief  generate a random number in range [1,2,3] */
 template <>
-__device__ int8_t random_int<int8_t>(size_t idx)
+__host__ __device__ int8_t random_int<int8_t>(size_t idx)
 {
     return pseudo_random_device(idx) % 3 + 1;
 }
 
 /*! \brief  generate a random number in range [-4,-3,-2,-1,0,1,2,3,4] */
 template <>
-__device__ hipblaslt_f4x2 random_int<hipblaslt_f4x2>(size_t idx)
+__host__ __device__ hipblaslt_f4x2 random_int<hipblaslt_f4x2>(size_t idx)
 {
     auto r0 = static_cast<int>(pseudo_random_device(2 * idx) % 9) - 4;
     auto r1 = static_cast<int>(pseudo_random_device(2 * idx + 1) % 9) - 4;
@@ -114,7 +148,7 @@ __device__ hipblaslt_f4x2 random_int<hipblaslt_f4x2>(size_t idx)
 
 /*! \brief  generate a random number in range [-7, -6, ..., 7] */
 template <>
-__device__ hipblaslt_f6x16 random_int<hipblaslt_f6x16>(size_t idx)
+__host__ __device__ hipblaslt_f6x16 random_int<hipblaslt_f6x16>(size_t idx)
 {
     using type               = hipblaslt_f6x16;
     int r[type::packed_size] = {0};
@@ -142,7 +176,7 @@ __device__ hipblaslt_f6x16 random_int<hipblaslt_f6x16>(size_t idx)
 
 /*! \brief  generate a random number in range [-28, -27, ..., 28] */
 template <>
-__device__ hipblaslt_bf6x16 random_int<hipblaslt_bf6x16>(size_t idx)
+__host__ __device__ hipblaslt_bf6x16 random_int<hipblaslt_bf6x16>(size_t idx)
 {
     using type               = hipblaslt_bf6x16;
     int r[type::packed_size] = {0};
@@ -170,7 +204,7 @@ __device__ hipblaslt_bf6x16 random_int<hipblaslt_bf6x16>(size_t idx)
 
 /*! \brief  generate a random number in range [2^-3,2^-2,2^-1,2^0,]2^1,2^2,2^3]] */
 template <>
-__device__ hipblaslt_e8 random_int<hipblaslt_e8>(size_t idx)
+__host__ __device__ hipblaslt_e8 random_int<hipblaslt_e8>(size_t idx)
 {
     hipblaslt_e8 val;
     val.data = ((pseudo_random_device(idx) % 7 - 3) + 127);
@@ -179,7 +213,7 @@ __device__ hipblaslt_e8 random_int<hipblaslt_e8>(size_t idx)
 
 /*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
 template <typename T>
-__device__ T random_hpl(size_t idx)
+__host__ __device__ T random_hpl(size_t idx)
 {
     auto r = pseudo_random_device(idx);
     return T(double(r) / double(std::numeric_limits<decltype(r)>::max()) - 0.5);
@@ -187,7 +221,7 @@ __device__ T random_hpl(size_t idx)
 
 /*! \brief  generate a random number in [-1.0,1.0] doubles  */
 template <>
-__device__ int8_t random_hpl(size_t idx)
+__host__ __device__ int8_t random_hpl(size_t idx)
 {
     auto r = pseudo_random_device(idx);
     auto v = nearbyint(double(r) / double(std::numeric_limits<decltype(r)>::max()) * 2. - 1.);
@@ -196,7 +230,7 @@ __device__ int8_t random_hpl(size_t idx)
 
 /*! \brief  generate a random number in [0.,1.0]  */
 template <typename T>
-__device__ T uniform_01(size_t idx)
+__host__ __device__ T uniform_01(size_t idx)
 {
     auto r = pseudo_random_device(idx);
     return T(double(r) / double(std::numeric_limits<decltype(r)>::max()));
@@ -204,7 +238,7 @@ __device__ T uniform_01(size_t idx)
 
 /*! \brief  generate a random number in [0.,1.0]  */
 template <>
-__device__ int8_t uniform_01(size_t idx)
+__host__ __device__ int8_t uniform_01(size_t idx)
 {
     auto r = pseudo_random_device(idx);
     auto v = nearbyint(double(r) / double(std::numeric_limits<decltype(r)>::max()));
@@ -213,7 +247,7 @@ __device__ int8_t uniform_01(size_t idx)
 
 /*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
 template <>
-__device__ hipblaslt_f4x2 random_hpl(size_t idx)
+__host__ __device__ hipblaslt_f4x2 random_hpl(size_t idx)
 {
     constexpr auto cvt_max_ui32_to_double
         = static_cast<double>(std::numeric_limits<uint32_t>::max());
@@ -224,7 +258,7 @@ __device__ hipblaslt_f4x2 random_hpl(size_t idx)
 
 /*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
 template <>
-__device__ hipblaslt_f6x16 random_hpl(size_t idx)
+__host__ __device__ hipblaslt_f6x16 random_hpl(size_t idx)
 {
     using type                          = hipblaslt_f6x16;
     double         r[type::packed_size] = {0.0};
@@ -256,7 +290,7 @@ __device__ hipblaslt_f6x16 random_hpl(size_t idx)
 
 /*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
 template <>
-__device__ hipblaslt_bf6x16 random_hpl(size_t idx)
+__host__ __device__ hipblaslt_bf6x16 random_hpl(size_t idx)
 {
     using type                          = hipblaslt_bf6x16;
     double         r[type::packed_size] = {0.0};
@@ -288,53 +322,57 @@ __device__ hipblaslt_bf6x16 random_hpl(size_t idx)
 
 /*! \brief  generate a random number in range [2^-3,2^-2,2^-1,2^0,]2^1,2^2,2^3]] */
 template <>
-__device__ hipblaslt_e8 random_hpl<hipblaslt_e8>(size_t idx)
+__host__ __device__ hipblaslt_e8 random_hpl<hipblaslt_e8>(size_t idx)
 {
     hipblaslt_e8 val;
     val.data = ((pseudo_random_device(idx) % 7 - 3) + 127);
     return val;
 }
 
+__host__ __device__ inline double
+    trig_float_calc(size_t k, size_t M, size_t N, size_t lda, size_t stride)
+{
+    auto b = k / stride;
+    auto j = (k - b * stride) / lda;
+    auto i = (k - b * stride) - j * lda;
+    constexpr double two_pi = 6.28318530717958647692528676655900577;
+    return fmod(double(i + j * M + b * M * N), two_pi);
+}
+
 /*! \brief  generate a float value using trig function (e.g., sin or cos) based on logical 3D index. */
 template <typename T, typename Func>
-__device__ T
+__host__ __device__ T
     trig_float(size_t idx, size_t M, size_t N, size_t lda, size_t stride, Func func)
 {
-    auto calc = [&](size_t k) {
-        auto b = k / stride;
-        auto j = (k - b * stride) / lda;
-        auto i = (k - b * stride) - j * lda;
-        return fmod(double(i + j * M + b * M * N), 2 * M_PI);
-    };
-
     if constexpr(std::is_same_v<T, hipblaslt_f4x2>)
-        return hipblaslt_f4x2(func(calc(2 * idx)), func(calc(2 * idx + 1)));
+        return hipblaslt_f4x2(func(trig_float_calc(2 * idx, M, N, lda, stride)),
+                              func(trig_float_calc(2 * idx + 1, M, N, lda, stride)));
     else if constexpr(std::is_same_v<T, hipblaslt_f6x16> || std::is_same_v<T, hipblaslt_bf6x16>)
     {
         using type = T;
-        return T(func(calc(type::packed_size * idx)),
-                 func(calc(type::packed_size * idx + 1)),
-                 func(calc(type::packed_size * idx + 2)),
-                 func(calc(type::packed_size * idx + 3)),
-                 func(calc(type::packed_size * idx + 4)),
-                 func(calc(type::packed_size * idx + 5)),
-                 func(calc(type::packed_size * idx + 6)),
-                 func(calc(type::packed_size * idx + 7)),
-                 func(calc(type::packed_size * idx + 8)),
-                 func(calc(type::packed_size * idx + 9)),
-                 func(calc(type::packed_size * idx + 10)),
-                 func(calc(type::packed_size * idx + 11)),
-                 func(calc(type::packed_size * idx + 12)),
-                 func(calc(type::packed_size * idx + 13)),
-                 func(calc(type::packed_size * idx + 14)),
-                 func(calc(type::packed_size * idx + 15)));
+        return T(func(trig_float_calc(type::packed_size * idx, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 1, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 2, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 3, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 4, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 5, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 6, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 7, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 8, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 9, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 10, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 11, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 12, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 13, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 14, M, N, lda, stride)),
+                 func(trig_float_calc(type::packed_size * idx + 15, M, N, lda, stride)));
     }
     else
-        return T(func(calc(idx)));
+        return T(func(trig_float_calc(idx, M, N, lda, stride)));
 }
 
 template <typename T>
-__device__ T norm_dist(uint32_t base_seed, size_t idx)
+__host__ __device__ T norm_dist(uint32_t base_seed, size_t idx)
 {
     hipblaslt_norm_dist::XorwowState state;
     hipblaslt_norm_dist::init_xorwow(&state, base_seed + idx); // Unique seed per thread
@@ -342,7 +380,7 @@ __device__ T norm_dist(uint32_t base_seed, size_t idx)
 }
 
 template <>
-__device__ hipblaslt_f4x2 norm_dist(uint32_t base_seed, size_t idx)
+__host__ __device__ hipblaslt_f4x2 norm_dist(uint32_t base_seed, size_t idx)
 {
     float r0 = norm_dist<float>(base_seed, 2 * idx);
     float r1 = norm_dist<float>(base_seed, 2 * idx + 1);
@@ -351,7 +389,7 @@ __device__ hipblaslt_f4x2 norm_dist(uint32_t base_seed, size_t idx)
 
 
 template <>
-__device__ hipblaslt_f6x16 norm_dist(uint32_t base_seed, size_t idx)
+__host__ __device__ hipblaslt_f6x16 norm_dist(uint32_t base_seed, size_t idx)
 {
     using type                 = hipblaslt_f6x16;
     float r[type::packed_size] = {0.f};
@@ -378,7 +416,7 @@ __device__ hipblaslt_f6x16 norm_dist(uint32_t base_seed, size_t idx)
 }
 
 template <>
-__device__ hipblaslt_bf6x16 norm_dist(uint32_t base_seed, size_t idx)
+__host__ __device__ hipblaslt_bf6x16 norm_dist(uint32_t base_seed, size_t idx)
 {
     using type                 = hipblaslt_bf6x16;
     float r[type::packed_size] = {0.f};
@@ -433,7 +471,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
             std::array<T, 100> rand_nans;
             for(auto& r : rand_nans)
                 r = T(hipblaslt_nan_rng());
-            fill_batch(A, M, N, lda, stride, batch_count, [rand_nans](size_t idx) -> T {
+            fill_batch(A, M, N, lda, stride, batch_count, [rand_nans] __host__ __device__ (size_t idx)
+                                                     -> T {
                 return rand_nans[pseudo_random_device(idx) % rand_nans.size()];
             });
         }
@@ -444,7 +483,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
         {
         case hipblaslt_initialization::rand_int:
             if(abc == ABC_dims::A || abc == ABC_dims::C)
-                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+                fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                     return random_int<T>(idx);
                 });
             else if(abc == ABC_dims::B)
@@ -477,36 +516,40 @@ void hipblaslt_init_device(ABC_dims                 abc,
             {
                 stride = std::max(lda * N, stride);
                 if(abc == ABC_dims::A || abc == ABC_dims::C)
-                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
-                        auto b = idx / stride;
-                        auto j = (idx - b * stride) / lda;
-                        auto i = (idx - b * stride) - j * lda;
-                        return T(sin(double(i + j * M + b * M * N)));
-                    });
+                    fill_batch(A, M, N, lda, stride, batch_count,
+                               [M, N, stride, lda] __host__ __device__ (size_t idx) -> T {
+                                   auto b = idx / stride;
+                                   auto j = (idx - b * stride) / lda;
+                                   auto i = (idx - b * stride) - j * lda;
+                                   return T(sin(double(i + j * M + b * M * N)));
+                               });
                 else if(abc == ABC_dims::B)
-                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
-                        auto b = idx / stride;
-                        auto j = (idx - b * stride) / lda;
-                        auto i = (idx - b * stride) - j * lda;
-                        return T(cos(double(i + j * M + b * M * N)));
-                    });
+                    fill_batch(A, M, N, lda, stride, batch_count,
+                               [M, N, stride, lda] __host__ __device__ (size_t idx) -> T {
+                                   auto b = idx / stride;
+                                   auto j = (idx - b * stride) / lda;
+                                   auto i = (idx - b * stride) - j * lda;
+                                   return T(cos(double(i + j * M + b * M * N)));
+                               });
             }
             else
             {
                 if(abc == ABC_dims::A || abc == ABC_dims::C)
-                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
-                        auto j = idx / lda;
-                        auto b = (idx - j * lda) / stride;
-                        auto i = (idx - j * lda) - b * stride;
-                        return T(sin(double(i + j * M + b * M * N)));
-                    });
+                    fill_batch(A, M, N, lda, stride, batch_count,
+                               [M, N, stride, lda] __host__ __device__ (size_t idx) -> T {
+                                   auto j = idx / lda;
+                                   auto b = (idx - j * lda) / stride;
+                                   auto i = (idx - j * lda) - b * stride;
+                                   return T(sin(double(i + j * M + b * M * N)));
+                               });
                 else if(abc == ABC_dims::B)
-                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
-                        auto j = idx / lda;
-                        auto b = (idx - j * lda) / stride;
-                        auto i = (idx - j * lda) - b * stride;
-                        return T(cos(double(i + j * M + b * M * N)));
-                    });
+                    fill_batch(A, M, N, lda, stride, batch_count,
+                               [M, N, stride, lda] __host__ __device__ (size_t idx) -> T {
+                                   auto j = idx / lda;
+                                   auto b = (idx - j * lda) / stride;
+                                   auto i = (idx - j * lda) - b * stride;
+                                   return T(cos(double(i + j * M + b * M * N)));
+                               });
             }
             break;
         case hipblaslt_initialization::hpl:
@@ -516,15 +559,15 @@ void hipblaslt_init_device(ABC_dims                 abc,
             break;
         case hipblaslt_initialization::special:
             if(abc == ABC_dims::A)
-                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+                fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                     return T(hipblasLtHalf(65280.0));
                 });
             else if(abc == ABC_dims::B)
-                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+                fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                     return T(hipblasLtHalf(0.0000607967376708984375));
                 });
             else if(abc == ABC_dims::C)
-                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+                fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                     return T(pseudo_random_device(idx) % 10 + 1.f);
                 });
             break;
@@ -543,15 +586,14 @@ void hipblaslt_init_device(ABC_dims                 abc,
             {
                 std::random_device rd;
                 auto base_seed = rd(); // Get a random seed for each run
-                fill_batch(A, M, N, lda, stride, batch_count, [base_seed] __device__ (size_t idx) -> T {
-                    hipblaslt_norm_dist::XorwowState state;
-                    hipblaslt_norm_dist::init_xorwow(&state, base_seed + idx); // Unique seed per thread
-                    return T(hipblaslt_norm_dist::box_muller_normal(&state));
-                });
+                fill_batch(A, M, N, lda, stride, batch_count,
+                           [base_seed] __host__ __device__ (size_t idx) -> T {
+                               return norm_dist<T>(base_seed, idx);
+                           });
                 break;
             }
         case hipblaslt_initialization::uniform_01:
-            fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+            fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                 return uniform_01<T>(idx);
             });
             break;
