@@ -12,6 +12,11 @@ project(hipdnn_samples VERSION 0.1.0 LANGUAGES C CXX)
 include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 
+# Sanitizer support - inherit from parent build when BUILD_ADDRESS_SANITIZER is set
+option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Sanitizers.cmake)
+
 set(HIPDNN_SAMPLE_NO_RTTI_OPTIONS
     $<$<CXX_COMPILER_ID:MSVC>:/GR->
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
@@ -237,6 +242,7 @@ ExternalProject_Add(example_engine_plugin
         "-Dhiprtc_DIR:PATH=${hiprtc_DIR}"
         "-Dflatbuffers_DIR:PATH=${flatbuffers_DIR}"
         "-Dnlohmann_json_DIR:PATH=${nlohmann_json_DIR}"
+        "-DBUILD_ADDRESS_SANITIZER:BOOL=${BUILD_ADDRESS_SANITIZER}"
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS}
     CMAKE_ARGS
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS}

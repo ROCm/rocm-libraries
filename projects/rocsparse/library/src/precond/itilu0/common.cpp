@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -80,6 +80,8 @@ namespace rocsparse
                        floating_data_t<T>* __restrict__ nrm_,
                        const floating_data_t<T>* __restrict__ nrm0_)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
         int    tid = hipThreadIdx_x;
         size_t gid = tid + BLOCKSIZE * hipBlockIdx_x;
 
@@ -119,6 +121,8 @@ namespace rocsparse
                             floating_data_t<T>* __restrict__ nrm_,
                             const floating_data_t<T>* __restrict__ nrm0_)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
         const uint32_t tid = hipThreadIdx_x;
         const uint32_t gid = tid + BLOCKSIZE * hipBlockIdx_x;
 

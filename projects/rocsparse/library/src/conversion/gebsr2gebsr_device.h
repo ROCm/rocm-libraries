@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,10 @@ namespace rocsparse
                                      rocsparse_int row_block_dim_C,
                                      rocsparse_int col_block_dim_C)
     {
+        static_assert(WF_SEGMENT_SIZE > 0 && (WF_SEGMENT_SIZE & (WF_SEGMENT_SIZE - 1)) == 0,
+                      "WF_SEGMENT_SIZE must be a power of two.");
+        static_assert(BLOCK_SIZE % WF_SEGMENT_SIZE == 0,
+                      "BLOCK_SIZE must be a multiple of WF_SEGMENT_SIZE.");
         constexpr rocsparse_int SEGMENTS_PER_BLOCK = (BLOCK_SIZE / WF_SEGMENT_SIZE);
 
         rocsparse_int block_id = hipBlockIdx_x;
@@ -142,6 +146,10 @@ namespace rocsparse
                                  rocsparse_int row_block_dim_C,
                                  rocsparse_int col_block_dim_C)
     {
+        static_assert(WF_SEGMENT_SIZE > 0 && (WF_SEGMENT_SIZE & (WF_SEGMENT_SIZE - 1)) == 0,
+                      "WF_SEGMENT_SIZE must be a power of two.");
+        static_assert(BLOCK_SIZE % WF_SEGMENT_SIZE == 0,
+                      "BLOCK_SIZE must be a multiple of WF_SEGMENT_SIZE.");
         constexpr rocsparse_int SEGMENTS_PER_BLOCK = (BLOCK_SIZE / WF_SEGMENT_SIZE);
 
         rocsparse_int block_id = hipBlockIdx_x;

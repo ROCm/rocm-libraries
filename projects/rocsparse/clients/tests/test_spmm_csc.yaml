@@ -52,7 +52,7 @@ Tests:
 - name: spmm_csc
   category: quick
   function: spmm_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *double_only_precisions
   M: [300]
   N: [223]
@@ -69,7 +69,7 @@ Tests:
 - name: spmm_csc
   category: quick
   function: spmm_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions_complex_real
   M: [300]
   N: [300]
@@ -86,7 +86,7 @@ Tests:
 - name: spmm_csc_file
   category: quick
   function: spmm_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *double_only_precisions
   M: 1
   N: [64]
@@ -105,7 +105,7 @@ Tests:
 - name: spmm_csc_file
   category: quick
   function: spmm_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions
   M: 1
   N: [256]
@@ -124,7 +124,7 @@ Tests:
 - name: spmm_csc_file
   category: quick
   function: spmm_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *double_only_precisions
   M: 1
   N: [128]
@@ -164,7 +164,7 @@ Tests:
 - name: spmm_csc_file
   category: quick
   function: spmm_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions_complex
   M: 1
   N: [7]
@@ -182,7 +182,7 @@ Tests:
 - name: spmm_csc
   category: quick
   function: spmm_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *int8_int8_int32_int32_abct_precision
   M: [300]
   N: [219]
@@ -202,7 +202,7 @@ Tests:
 - name: spmm_csc
   category: quick
   function: spmm_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *int8_int8_float32_float32_abct_precision
   M: [300]
   N: [300]

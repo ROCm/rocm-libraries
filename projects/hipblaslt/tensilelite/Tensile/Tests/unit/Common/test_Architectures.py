@@ -45,6 +45,12 @@ VALID_LOGIC_FILE_CONTENT = """- {MinimumRequiredVersion: 4.33.0}
 - [Device 75a2]
 """
 
+VALID_LOGIC_FILE_CONTENT_WITH_SCALAR_VERSION = """- MinimumRequiredVersion: 4.33.0
+- gfx950 
+- gfx950
+- [Device 75a2]
+"""
+
 VALID_LOGIC_FILE_WITH_CU = """- {MinimumRequiredVersion: 4.33.0}
 - aquavanjaram
 - {Architecture: gfx942, CUCount: 228}
@@ -102,6 +108,15 @@ def test_extractArchInfo_success(mock_logic_file):
     assert result.DeviceIds == {"id=75a2"}
     assert result.CUCount is None
 
+def test_extractArchInfo_with_scalar_version():
+    with patch("builtins.open", mock_open(read_data=VALID_LOGIC_FILE_CONTENT_WITH_SCALAR_VERSION)):
+        result = _extractArchInfo("dummy.yaml")
+    assert isinstance(result, ArchInfo)
+    assert result.Name == "gfx950"
+    assert result.Gfx == "gfx950"
+    assert result.DeviceIds == {"id=75a2"}
+    assert result.CUCount is None
+
 def test_extractArchInfo_with_cu_count(mock_logic_file_with_cu):
     result = _extractArchInfo("dummy.yaml")
     assert isinstance(result, ArchInfo)
@@ -113,6 +128,26 @@ def test_extractArchInfo_with_cu_count(mock_logic_file_with_cu):
 def test_extractArchInfo_with_invalid_version(mock_logic_file_invalid_version):
     with pytest.raises(LogicFileError):
         _extractArchInfo("dummy.yaml")
+
+
+# Negative coverage for the relaxed `MinimumRequiredVersion` regex: the loosened
+# pattern must still reject near-miss forms so callers can rely on the field
+# actually being present.
+@pytest.mark.parametrize(
+    "first_line",
+    [
+        "- MinimumRequiredVersion 4.33.0\n",   # missing colon after key
+        "-MinimumRequiredVersion: 4.33.0\n",   # missing space after dash
+        "- {MinimumRequired: 4.33.0}\n",       # wrong key
+        "MinimumRequiredVersion: 4.33.0\n",    # missing list dash
+        "- # MinimumRequiredVersion: 4.33.0\n",  # commented out
+    ],
+)
+def test_extractArchInfo_rejects_minimum_required_version_near_misses(first_line):
+    content = first_line + "- gfx950\n- gfx950\n- [Device 75a0]\n"
+    with patch("builtins.open", mock_open(read_data=content)):
+        with pytest.raises(LogicFileError):
+            _extractArchInfo("dummy.yaml")
 
 def test_extractArchInfo_with_invalid_arch(mock_logic_file_invalid_arch):
     with pytest.raises(LogicFileError):
