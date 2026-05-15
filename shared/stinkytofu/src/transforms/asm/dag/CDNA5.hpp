@@ -373,12 +373,12 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
         wmmaQueue.pop();
     }
 
-    // Decay DS latency for the WMMA's own issue cycle before resetting the timeline.
-    advanceTime(node->inst->issueCycles);
-
     activeCoIssueWindow_ = node->inst->hwInstDesc->coIssueWindow;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
+    // Advance by WMMA issue cycles after opening a new timeline window.
+    // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA issue.
+    advanceTime(node->inst->issueCycles);
 
     wmmaIssueConfig.issuedCount--;
 
@@ -675,14 +675,24 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         int pickKind = -1;
         findSmallestPickableNonWmma(&smallestPickable, &pickKind);
 
-        bool programOrderOk = hasWMMAInRegion_ ||
-                              (smallestPickable == nullptr || bestWMMA->id < smallestPickable->id);
-
         const bool blockWmmaForLoopHeadBalance =
             deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
-
-        if (bestLatency <= 0 && programOrderOk && !blockWmmaForLoopHeadBalance) {
+        // Hard gate: while the previous WMMA latency window is still active,
+        // do not issue another WMMA if any non-WMMA work is pickable.
+        const bool blockWmmaForActiveWindow =
+            (coIssueCyclePos_ < activeWmmaLatency_) && (smallestPickable != nullptr);
+        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
+                             << " bestLatency=" << bestLatency
+                             << " blockLoopHead=" << blockWmmaForLoopHeadBalance
+                             << " blockActiveWindow=" << blockWmmaForActiveWindow
+                             << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
+                             << (smallestPickable ? std::to_string(smallestPickable->id)
+                                                  : std::string("none"))
+                             << "\n");
+        if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow) {
             DAGNode* node = pickOneFromWMMA(bestWMMA);
+            PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B picked WMMA dagId=" << node->id
+                                 << "\n");
             return node;
         }
     }
@@ -695,8 +705,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
         findSmallestPickableNonWmma(&smallestPickable, &pickKind);
-
         if (smallestPickable != nullptr) {
+            PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase C picked non-WMMA dagId="
+                                 << smallestPickable->id << " kind=" << pickKind << "\n");
             return popNonWmmaByKind(pickKind);
         }
 
