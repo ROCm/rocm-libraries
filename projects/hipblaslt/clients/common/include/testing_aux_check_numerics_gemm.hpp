@@ -40,8 +40,12 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <iostream>
 #include <limits>
 #include <mutex>
+#include <sstream>
+#include <streambuf>
+#include <string>
 #include <vector>
 
 inline void testing_aux_check_numerics_gemm(const Arguments& arg)
@@ -59,6 +63,7 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY");
         unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM");
         unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL");
+        unsetenv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST");
     };
 
     // Sentinel for "no NaN injection" -- the loop is 1-indexed so call_ids
@@ -208,9 +213,11 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     run_scenario(/*total=*/4, /*inject_at=*/1, &reported);
     EXPECT_EQ(reported, 1u);
 
-    // SCAN_EVERY=5 samples calls 5,10,...; injecting at #7 (NOT sampled)
-    // should yield 0 -- documented "miss" case in the sample. Catches a
-    // regression that flips the modulus check.
+    // SCAN_EVERY=5 samples calls 5,10,...; with that modulus, call #7 is
+    // NOT in the sampled set, so injecting NaN at #7 reaches D undetected
+    // and the next sampled call (#10) writes a clean output that
+    // overwrites it -- documented "miss" case in the sample. Catches a
+    // regression that flips the modulus check (e.g. `% N == 1`).
     reset_env();
     setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
     setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "5", 1);
@@ -264,6 +271,125 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
     run_scenario(/*total=*/6, /*inject_at=*/kNoInjection, &reported);
     EXPECT_EQ(reported, 0u);
+
+    // RAII redirect of std::cerr -> ostringstream for the lifetime of one
+    // run_scenario call, so we can assert on the CHECK_NUMERICS log output.
+    // The CHECK_NUMERICS log helper writes to get_logger_os() and falls
+    // through to &std::cerr when the singleton's log_os is null (the
+    // default when HIPBLASLT_LOG_LEVEL is unset, the typical CI config).
+    // If HIPBLASLT_LOG_FILE is set in the environment, the helper bypasses
+    // std::cerr entirely and these log assertions will fail loudly --
+    // documented and acceptable; reproducible CI runs should not set it.
+    struct CerrCapture
+    {
+        std::ostringstream oss;
+        std::streambuf*    prev;
+        CerrCapture()
+            : prev(std::cerr.rdbuf(oss.rdbuf()))
+        {
+        }
+        ~CerrCapture()
+        {
+            std::cerr.rdbuf(prev);
+        }
+        std::string str() const
+        {
+            return oss.str();
+        }
+    };
+
+    // Counts non-overlapping occurrences of `needle` in `hay`.
+    auto count_substr = [](const std::string& hay, const std::string& needle) {
+        size_t n = 0, pos = 0;
+        while((pos = hay.find(needle, pos)) != std::string::npos)
+        {
+            ++n;
+            pos += needle.size();
+        }
+        return n;
+    };
+
+    // STOP_ON_FIRST=1: NaN at #3 trips the host-peek auto-drain on a
+    // later call; the device flag is sticky so the on-demand drain still
+    // reports 3. The per-call hipStreamSynchronize in run_scenario is what
+    // makes #3's atomicCAS host-visible to the peek.
+    //
+    // Behavioral coverage of the new auto-drain log path:
+    //   1. Exactly one "auto-drain on host peek" log line (CAS-elect dedup
+    //      in scan_D's host-peek block).
+    //   2. That line must reference call #3 (the injected first-NaN id).
+    //   3. The on-demand drain that follows must NOT re-emit a duplicate
+    //      log line for the same NaN (drain helper's CAS-elect on
+    //      short_circuit suppresses the second log).
+    {
+        reset_env();
+        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        setenv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST", "1", 1);
+
+        std::string captured_log;
+        {
+            CerrCapture cap;
+            run_scenario(/*total=*/8, /*inject_at=*/3, &reported);
+            captured_log = cap.str();
+        }
+
+        EXPECT_EQ(reported, 3u);
+        EXPECT_EQ(count_substr(captured_log, "auto-drain on host peek"), 1u)
+            << "expected exactly one auto-drain log line; captured:\n"
+            << captured_log;
+        EXPECT_NE(captured_log.find("call #3"), std::string::npos)
+            << "auto-drain log should reference the first-NaN call id (#3); captured:\n"
+            << captured_log;
+        // Both on-demand drain (hipblasLtCheckNumericsDrain) and handle
+        // teardown drain (~handle dtor) call the drain helper with
+        // short_circuit_out non-null; the CAS-elect must suppress both
+        // duplicate log emissions for the same first-NaN event.
+        EXPECT_EQ(count_substr(captured_log, "on-demand drain"), 0u)
+            << "drain helper must suppress the duplicate on-demand log; captured:\n"
+            << captured_log;
+        EXPECT_EQ(count_substr(captured_log, "handle teardown"), 0u)
+            << "drain helper must suppress the duplicate teardown log; captured:\n"
+            << captured_log;
+    }
+
+    // STOP_ON_FIRST=1 + SCAN_EVERY=2: covers the under-tested interaction
+    // where the host-peek path runs under sampling. Calls 2,4,6,... are
+    // sampled; injecting NaN at #4 (sampled) trips the auto-drain on a
+    // later call. The bisect-hint branch in the log helper fires when
+    // every>1 -- this case ensures the auto-drain path correctly threads
+    // scan_every into the log line and the sticky drain still reports 4.
+    {
+        reset_env();
+        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        setenv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST", "1", 1);
+        setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "2", 1);
+
+        std::string captured_log;
+        {
+            CerrCapture cap;
+            run_scenario(/*total=*/10, /*inject_at=*/4, &reported);
+            captured_log = cap.str();
+        }
+
+        EXPECT_EQ(reported, 4u);
+        EXPECT_EQ(count_substr(captured_log, "auto-drain on host peek"), 1u)
+            << "expected exactly one auto-drain log line under SCAN_EVERY=2; captured:\n"
+            << captured_log;
+        EXPECT_NE(captured_log.find("call #4"), std::string::npos)
+            << "auto-drain log should reference call #4; captured:\n"
+            << captured_log;
+        EXPECT_NE(captured_log.find("scan_every=2"), std::string::npos)
+            << "auto-drain log should thread the effective scan_every; captured:\n"
+            << captured_log;
+        EXPECT_EQ(count_substr(captured_log, "on-demand drain"), 0u)
+            << "drain helper must suppress the duplicate on-demand log under "
+               "sampling; captured:\n"
+            << captured_log;
+        EXPECT_EQ(count_substr(captured_log, "handle teardown"), 0u)
+            << "drain helper must suppress the duplicate teardown log under "
+               "sampling; captured:\n"
+            << captured_log;
+    }
 
     reset_env();
 }

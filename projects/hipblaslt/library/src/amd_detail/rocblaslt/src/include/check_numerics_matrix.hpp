@@ -208,42 +208,27 @@ inline rocblaslt_status hipblaslt_check_numerics_output_D(hipStream_t stream,
     }
 }
 
-// Drain helper: device-wide sync, read the flag, reset it (unless STOP_ON_FIRST
-// has fired -- the slot is sticky so re-drains keep returning the first id),
-// and log the per-window result. Returns the first NaN call_id (0 = none).
-// Errors swallowed: a benign drain failure must not take down the matmul stream.
-inline uint32_t hipblaslt_drain_check_numerics_window(uint32_t* d_flag,
-                                                     hipblaslt_check_numerics_mode mode,
-                                                     uint32_t    window_lo,
-                                                     uint32_t    window_hi,
-                                                     uint32_t    scan_every,
-                                                     uint32_t    scan_from,
-                                                     uint32_t    scan_until,
-                                                     const char* label,
-                                                     bool                   stop_on_first,
-                                                     std::atomic<bool>*     short_circuit_out)
+// Pure logging helper -- emits the standard CHECK_NUMERICS log line for a
+// given h_flag value (0 = no NaN observed). Shared by both the drain helper
+// (which obtains h_flag via sync+memcpy from the device flag) and scan_D's
+// auto-drain path on STOP_ON_FIRST host-peek (which already has h_flag from
+// the mapped flag and must NOT issue a sync on the matmul hot path).
+inline void hipblaslt_log_check_numerics_window(uint32_t                       h_flag,
+                                                hipblaslt_check_numerics_mode  mode,
+                                                uint32_t                       window_lo,
+                                                uint32_t                       window_hi,
+                                                uint32_t                       scan_every,
+                                                uint32_t                       scan_from,
+                                                uint32_t                       scan_until,
+                                                const char*                    label,
+                                                bool                           stop_on_first)
 {
-    if(!d_flag)
-        return 0u;
-
-    uint32_t h_flag = 0;
-    static_cast<void>(hipDeviceSynchronize());
-    static_cast<void>(hipMemcpy(&h_flag, d_flag, sizeof(uint32_t), hipMemcpyDeviceToHost));
-
-    // Sticky on STOP_ON_FIRST after the first NaN: don't reset, and trip the
-    // cross-call short-circuit so subsequent scan_D calls bail immediately.
-    const bool sticky = stop_on_first && h_flag != 0u;
-    if(!sticky)
-        static_cast<void>(hipMemset(d_flag, 0, sizeof(uint32_t)));
-    if(sticky && short_circuit_out)
-        short_circuit_out->store(true, std::memory_order_release);
-
     const bool log_anything = (mode
                                & (hipblaslt_check_numerics_mode_info
                                   | hipblaslt_check_numerics_mode_warn))
                               != 0;
     if(!log_anything)
-        return h_flag;
+        return;
 
     const uint32_t every_eff = scan_every ? scan_every : 1u;
     // Effective window: clamp the requested window to what the SCAN_FROM/UNTIL
@@ -302,6 +287,55 @@ inline uint32_t hipblaslt_drain_check_numerics_window(uint32_t* d_flag,
                   << " Re-run with HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY=1 to confirm";
         *sink << ")." << std::endl;
     }
+}
+
+// Drain helper: device-wide sync, read the flag, reset it (unless STOP_ON_FIRST
+// has fired -- the slot is sticky so re-drains keep returning the first id),
+// and log the per-window result. Returns the first NaN call_id (0 = none).
+// Errors swallowed: a benign drain failure must not take down the matmul stream.
+inline uint32_t hipblaslt_drain_check_numerics_window(uint32_t* d_flag,
+                                                     hipblaslt_check_numerics_mode mode,
+                                                     uint32_t    window_lo,
+                                                     uint32_t    window_hi,
+                                                     uint32_t    scan_every,
+                                                     uint32_t    scan_from,
+                                                     uint32_t    scan_until,
+                                                     const char* label,
+                                                     bool                   stop_on_first,
+                                                     std::atomic<bool>*     short_circuit_out)
+{
+    if(!d_flag)
+        return 0u;
+
+    uint32_t h_flag = 0;
+    static_cast<void>(hipDeviceSynchronize());
+    static_cast<void>(hipMemcpy(&h_flag, d_flag, sizeof(uint32_t), hipMemcpyDeviceToHost));
+
+    // Sticky on STOP_ON_FIRST after the first NaN: don't reset, and trip the
+    // cross-call short-circuit so subsequent scan_D calls bail immediately.
+    const bool sticky = stop_on_first && h_flag != 0u;
+    if(!sticky)
+        static_cast<void>(hipMemset(d_flag, 0, sizeof(uint32_t)));
+
+    // CAS-elect logger to avoid double-emission when the scan_D host-peek
+    // auto-drain has already logged this same first-NaN event. Only the
+    // path that flips short_circuit false->true is the canonical logger;
+    // any other path observing short_circuit already true skips the log
+    // line. Restricted to the sticky case: in non-STOP_ON_FIRST mode the
+    // device flag is reset on every drain and per-window logging remains
+    // the documented behavior.
+    bool should_log = true;
+    if(sticky && short_circuit_out)
+    {
+        bool expected = false;
+        should_log    = short_circuit_out->compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel);
+    }
+
+    if(should_log)
+        hipblaslt_log_check_numerics_window(h_flag, mode, window_lo, window_hi,
+                                            scan_every, scan_from, scan_until,
+                                            label, stop_on_first);
     return h_flag;
 }
 
@@ -331,22 +365,46 @@ inline rocblaslt_status hipblaslt_check_numerics_scan_D(rocblaslt_handle handle,
     if(!handle || !handle->check_numerics)
         return rocblaslt_status_success;
 
-    // STOP_ON_FIRST short-circuit. Sticky bypass first; then a best-effort
-    // host load of the mapped flag.
-    //
-    // The host load uses ACQUIRE for compiler-visibility only -- it does NOT
-    // establish host<->device happens-before. On PCIe-attached parts the
-    // device-side atomicCAS may not become host-visible until the next
-    // stream/device sync. So this is best-effort early termination; the next
-    // explicit drain (or handle teardown) is guaranteed to observe the flag.
+    // STOP_ON_FIRST short-circuit. Sticky bypass first.
     if(handle->check_numerics_short_circuit.load(std::memory_order_acquire))
         return rocblaslt_status_success;
 
+    // Best-effort host peek of the mapped flag. RELAXED is sufficient: the
+    // load does NOT establish host<->device happens-before -- on PCIe parts
+    // the device-side atomicCAS may not become host-visible until the next
+    // stream/device sync. A miss here just means the next explicit drain
+    // (or handle teardown) will observe the flag instead.
     if(handle->check_numerics_stop_on_first && handle->check_numerics_flag_host)
     {
-        if(__atomic_load_n(handle->check_numerics_flag_host, __ATOMIC_ACQUIRE) != 0u)
+        const uint32_t h_flag
+            = __atomic_load_n(handle->check_numerics_flag_host, __ATOMIC_RELAXED);
+        if(h_flag != 0u)
         {
-            handle->check_numerics_short_circuit.store(true, std::memory_order_release);
+            // CAS-elect a single logger thread. The winner emits the
+            // auto-drain log line directly from the mapped flag (no
+            // hipDeviceSynchronize on the matmul hot path); losers fall
+            // through to the shared `return` below, then bail on the
+            // sticky short_circuit check on their next call. The shared
+            // return is intentional -- both winner and loser exit through
+            // the same line so neither path leaks into scan_D's normal
+            // scanning code path after the short-circuit fires.
+            bool expected = false;
+            if(handle->check_numerics_short_circuit.compare_exchange_strong(
+                   expected, true, std::memory_order_acq_rel))
+            {
+                const uint32_t window_hi
+                    = handle->check_numerics_call_id.load(std::memory_order_relaxed);
+                hipblaslt_log_check_numerics_window(
+                    h_flag,
+                    handle->check_numerics,
+                    1u,
+                    window_hi,
+                    handle->check_numerics_scan_every,
+                    handle->check_numerics_scan_from,
+                    handle->check_numerics_scan_until,
+                    "auto-drain on host peek",
+                    true);
+            }
             return rocblaslt_status_success;
         }
     }
@@ -370,8 +428,6 @@ inline uint32_t hipblaslt_check_numerics_drain_handle(rocblaslt_handle handle)
         return 0u;
     const uint32_t window_hi
         = handle->check_numerics_call_id.load(std::memory_order_relaxed);
-    // Pin the calling thread to the handle's device for the drain (the public
-    // entry may be called from any thread).
     int prev_device = -1;
     static_cast<void>(hipGetDevice(&prev_device));
     if(prev_device != handle->device)
