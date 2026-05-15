@@ -30,11 +30,13 @@ import yaml
 import sys
 import time
 import itertools
+import pandas as pd
 
 from copy import deepcopy
 from joblib import Parallel, delayed
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
+from tabulate import tabulate
 
 from Tensile import CUSTOM_KERNEL_PATH, SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
@@ -56,7 +58,7 @@ from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
 from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
-        BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
+        BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2, elineno
 from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
 from Tensile.Common.TimingInstrumentation import timing_context
@@ -470,6 +472,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
     totalBenchmarkSteps = len(benchmarkProcess)
     resultsFileBaseFinal = None
+    errorsFileBaseFinal = None
 
     print1("# NumBenchmarkSteps: {}".format(totalBenchmarkSteps))
     print1("")
@@ -501,9 +504,12 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         shortNamePath = ensurePath(groupNamePath / shortName)
         stepBaseDir = shortNamePath
         resultsFileBase = os.path.normpath(shortNamePath / ".." / "Data" / shortName)
+        errorsFileBase = os.path.normpath(shortNamePath / "build")
 
         if benchmarkStep.isFinal():
             resultsFileBaseFinal = resultsFileBase
+            errorsFileBaseFinal = errorsFileBase
+
         resultsFileName = resultsFileBase + ".csv"
         solutionsFileName = resultsFileBase + ".yaml"
 
@@ -662,7 +668,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         print1("{}\n# {}\n# {}: End - {:.3f}s\n{}\n" \
                 .format(HR, groupName, shortName, elapsedTime, HR))
 
-    return (resultsFileBaseFinal, benchmarkTestFails)
+    return (resultsFileBaseFinal, errorsFileBaseFinal, benchmarkTestFails)
 
 
 def main(
@@ -691,6 +697,15 @@ def main(
 
     benchmarkDataPath = ensurePath(outputPath / BENCHMARK_DATA_DIR)
 
+    def _cleanupDataFrame(df: pd.DataFrame) -> pd.DataFrame:
+        # Remove a row if all entries in it match the header names, indicating
+        # empty headers logged multiple times in the CSV.
+        df = df[~(df== pd.Series(df.columns, index=df.columns)).all(axis=1)]
+        return df
+
+    errorsDataFrame: pd.DataFrame = pd.DataFrame()
+    errorFiles = []
+
     totalTestFails = 0
     for benchmarkProblemTypeConfig in config:
         problemTypeConfig = benchmarkProblemTypeConfig[0]
@@ -708,6 +723,8 @@ def main(
             # results files will be named
             newResultsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.csv" \
                     .format(str(problemTypeObj), idx, csvSuffix) )
+            newErrorsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}_errors.csv" \
+                    .format(str(problemTypeObj), idx, csvSuffix) )
             newSolutionsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.yaml" \
                     .format(str(problemTypeObj), idx, csvSuffix) )
             newGranularityFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.gsp" \
@@ -719,7 +736,7 @@ def main(
 
                 # benchmark problem size group
                 benchmarkProblemsPath = ensurePath(outputPath / BENCHMARK_PROBLEMS_DIR)
-                (resultsFileBaseFinal, benchmarkErrors) = \
+                (resultsFileBaseFinal, errorsFileBaseFinal, benchmarkErrors) = \
                         _benchmarkProblemType(
                             problemTypeConfig,
                             sizeGroupConfig,
@@ -751,6 +768,12 @@ def main(
                     resultsFileName = resultsFileBase + ".csv"
                     solutionsFileName = resultsFileBase + ".yaml"
                     granularityFileName = resultsFileBase + "_Granularity.csv"
+
+                    if benchmarkErrors:
+                        errorsFileName = os.path.join(errorsFileBaseFinal, "errors.csv")
+                        shutil.copy(errorsFileName, newErrorsFileName)
+                        errorFiles.append(newErrorsFileName)
+
                     shutil.copy(resultsFileName, newResultsFileName)
                     shutil.copy(solutionsFileName, newSolutionsFileName)
                     if os.path.isfile(granularityFileName):
@@ -761,6 +784,21 @@ def main(
 
     # Print summary of any parameter type mismatches found during ProblemType creation
     printTypeMismatchSummary()
+
+    # Process error files into a dataframe and tabulate it.
+    if totalTestFails:
+        for errorFile in errorFiles:
+            errDf = pd.read_csv(errorFile)
+            _cleanupDataFrame(errDf)
+            errorsDataFrame = pd.concat([errorsDataFrame, errDf], axis=0)
+
+        errorSummaryFileName = "cum_error_summary.csv"
+        errorsDataFrame.to_csv(f"{errorSummaryFileName}", index=False)
+    
+        print("BenchmarkProcess: Encountered {} errors.".format(totalTestFails))
+        print(tabulate(errorsDataFrame, headers='keys', tablefmt='psql'))
+
+        print(f"Error summary written to {errorSummaryFileName}")
 
     if globalParameters["ExitOnFails"] and totalTestFails:
         sys.exit(1)
