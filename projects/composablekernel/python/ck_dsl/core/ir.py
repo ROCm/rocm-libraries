@@ -1586,6 +1586,7 @@ class IRBuilder:
         iter_args: Sequence[Tuple[str, Value]],
         iv_name: str = "k0",
         unroll: bool = False,
+        elide_trailing_barrier: bool = True,
     ) -> "_ForBuilder":
         """Create a scf.for loop with iteration arguments.
 
@@ -1598,6 +1599,9 @@ class IRBuilder:
             unroll: Loop unrolling hint (default: False)
                 - False: emit normal loop
                 - True: fully unroll if trip count is compile-time constant
+            elide_trailing_barrier: Phase 4 optimization (default: True)
+                - True: automatically elide trailing sync() in non-final iterations
+                - False: preserve all barriers (for manually optimized kernels)
         """
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
@@ -1619,6 +1623,7 @@ class IRBuilder:
                 "iter_args": iter_meta,
                 "num_iter_args": len(iter_args),
                 "unroll": unroll,
+                "elide_trailing_barrier": elide_trailing_barrier,
             },
             results=results,
             regions=[body],

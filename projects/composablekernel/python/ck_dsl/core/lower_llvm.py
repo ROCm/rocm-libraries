@@ -1049,6 +1049,12 @@ class _Lowerer:
         )
 
     def _op_tile_sync(self, op: Op) -> None:
+        # Phase 4a: Check if this is the trailing sync to elide
+        elide_info = getattr(self, "_unroll_elide_sync_op", None)
+        if elide_info and elide_info['op'] is op:
+            # Skip this specific barrier (trailing sync in non-final iteration)
+            return
+
         # AMDGPU's ``s_barrier`` only synchronises waves -- it does NOT
         # wait for outstanding ``ds_write`` / ``ds_read`` instructions
         # to drain. Without an explicit ``s_waitcnt lgkmcnt(0)`` the
@@ -1591,6 +1597,22 @@ class _Lowerer:
     # control flow
 
     def _op_scf_for(self, op: Op) -> None:
+        """Lower scf.for to LLVM IR.
+
+        Checks for 'unroll' hint and constant bounds to decide between
+        unrolled (straight-line) or normal (loop) lowering.
+        """
+        unroll = op.attrs.get("unroll", False)
+        lower, upper, step = op.operands[:3]
+
+        # Check if we should unroll
+        if unroll and self._is_constant(lower) and self._is_constant(upper) and self._is_constant(step):
+            self._lower_unrolled_for(op)
+        else:
+            self._lower_normal_for(op)
+
+    def _lower_normal_for(self, op: Op) -> None:
+        """Lower scf.for to normal LLVM loop (header, body, latch, exit)."""
         num_iter = int(op.attrs.get("num_iter_args", 0))
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
@@ -1673,6 +1695,143 @@ class _Lowerer:
             ll_ty = _llvm_type_from_name(meta["type"])
             exit_blk.emit(
                 f"  {result.name} = bitcast {ll_ty} {meta['name']} to {ll_ty}"
+            )
+
+    def _lower_unrolled_for(self, op: Op) -> None:
+        """Lower scf.for to unrolled straight-line code (no control flow).
+
+        Emits loop body N times inline, where N is the compile-time trip count.
+        This eliminates loop overhead and enables better instruction scheduling.
+
+        Strategy: Create synthetic SSA values for IV and iter args for each iteration,
+        lower the body region which references these values, collect yielded values,
+        and use them as inputs for the next iteration.
+        """
+        # Extract loop parameters
+        num_iter = int(op.attrs.get("num_iter_args", 0))
+        lower, upper, step = op.operands[:3]
+        iter_inits = op.operands[3 : 3 + num_iter]
+        iter_meta = op.attrs.get("iter_args", [])
+        iv_name = op.attrs["iv"]
+
+        # Evaluate constant bounds
+        lower_val = self._eval_constant(lower)
+        upper_val = self._eval_constant(upper)
+        step_val = self._eval_constant(step)
+
+        # Calculate trip count
+        trip_count = (upper_val - lower_val) // step_val
+
+        # Track current LLVM values of iteration variables
+        # Start with init values (these are the LLVM operand strings)
+        current_iter_values: Dict[str, str] = {}
+        for meta, init in zip(iter_meta, iter_inits):
+            current_iter_values[meta["name"]] = self._operand(init)
+
+        # Create a fake op to hold IV and iter arg SSA values for each iteration
+        # We'll temporarily replace the original op in each Value's op field
+        from ck_dsl.core.ir import Value, Op
+
+        # Find the Value objects for IV and iter args
+        # These are created when the scf.for was built and stored in the op
+        iv_value_obj = None
+        iter_value_objs: List[Value] = []
+
+        # The IV and iter arg Values are referenced by ops in the body region
+        # We need to find them by scanning the region
+        for body_op in op.regions[0].ops:
+            if hasattr(body_op, 'operands'):
+                for operand in body_op.operands:
+                    if operand.name == iv_name and operand.op == op:
+                        iv_value_obj = operand
+                    for meta in iter_meta:
+                        if operand.name == meta["name"] and operand.op == op:
+                            if operand not in iter_value_objs:
+                                iter_value_objs.append(operand)
+
+        # Phase 4a: Detect if loop body has trailing sync() that could be elided
+        # Only if elide_trailing_barrier flag is True
+        elide_enabled = op.attrs.get("elide_trailing_barrier", True)
+        trailing_sync_op = None
+        if elide_enabled:
+            body_ops = list(op.regions[0].ops)
+            if len(body_ops) >= 2:
+                second_last_op = body_ops[-2]
+                if second_last_op.name == "tile.sync":
+                    trailing_sync_op = second_last_op
+
+        # Unroll: emit loop body trip_count times
+        for iteration in range(trip_count):
+            # Compute induction variable value for this iteration
+            iv_value = lower_val + iteration * step_val
+            iv_const_name = self._fresh("iv_const")
+            iv_ty = _llvm_type(lower.type)
+            self._current().emit(f"  {iv_const_name} = add {iv_ty} 0, {iv_value}")
+
+            # Temporarily change the Value.name fields to unique names for this iteration
+            iteration_suffix = f".unroll{iteration}"
+
+            # Collect all Values that need renaming (IV, iter args, and all op results)
+            values_to_rename: List[Tuple[Value, str]] = []
+
+            # Rename IV
+            if iv_value_obj is not None:
+                values_to_rename.append((iv_value_obj, iv_value_obj.name))
+                iv_value_obj.name = iv_const_name
+
+            # Rename iter args
+            for val_obj in iter_value_objs:
+                values_to_rename.append((val_obj, val_obj.name))
+                # Find corresponding meta to get current value
+                for meta in iter_meta:
+                    if val_obj.name == meta["name"]:
+                        val_obj.name = current_iter_values[meta["name"]]
+                        break
+
+            # Rename all op results in the body to have unique names
+            for body_op in op.regions[0].ops:
+                if len(body_op.results) > 0:
+                    for result in body_op.results:
+                        values_to_rename.append((result, result.name))
+                        base_name = result.name.lstrip('%')
+                        result.name = f"%{base_name}{iteration_suffix}"
+
+            # Phase 4a: Mark trailing sync for elision in non-final iterations
+            is_final_iteration = (iteration == trip_count - 1)
+            if trailing_sync_op and not is_final_iteration:
+                # Mark this specific op to be skipped
+                self._unroll_elide_sync_op = {'op': trailing_sync_op}
+            else:
+                self._unroll_elide_sync_op = None
+
+            # Lower the body region - it will now produce unique LLVM SSA names
+            self._yield_stack.append([])
+            self.lower_region(op.regions[0])
+            yielded = self._yield_stack.pop()
+
+            # Clear elision marker
+            self._unroll_elide_sync_op = None
+
+            # Restore all original names
+            for val_obj, saved_name in values_to_rename:
+                val_obj.name = saved_name
+
+            # Verify yield count
+            if len(yielded) != num_iter:
+                raise RuntimeError(
+                    f"scf.for expected {num_iter} yielded values, got {len(yielded)}"
+                )
+
+            # Update iteration variables with yielded values for next iteration
+            for meta, yld in zip(iter_meta, yielded):
+                current_iter_values[meta["name"]] = yld
+
+        # After all iterations, bind results to final iter var values
+        for meta, result in zip(iter_meta, op.results):
+            ll_ty = _llvm_type_from_name(meta["type"])
+            final_val = current_iter_values[meta["name"]]
+            self._current().emit(
+                f"  {result.name} = bitcast {ll_ty} {final_val} to {ll_ty}"
             )
 
     def _op_scf_if(self, op: Op) -> None:
