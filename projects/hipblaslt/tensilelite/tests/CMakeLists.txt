@@ -22,34 +22,22 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AlmostEqual_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestData.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
-)
-
-target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/include")
-
-target_link_libraries(tensilelite-tests
-    PUBLIC
-        tensilelite::tensilelite-host
-    PRIVATE
-        hip::device
-        ${CMAKE_DL_LIBS}
-        ${hipblaslt_msgpack_target}
+        "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
 )
 
 # MasterSolutionLibraryMapping_test exercises TensileLite::LoadLibraryMapping,
@@ -62,6 +50,18 @@ if(NOT HIPBLASLT_ENABLE_YAML)
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
     )
 endif()
+
+target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/include")
+
+target_link_libraries(tensilelite-tests
+    PUBLIC
+        tensilelite::tensilelite-host
+    PRIVATE
+        hip::device
+        ${CMAKE_DL_LIBS}
+        ${hipblaslt_msgpack_target}
+)
 
 if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
     target_sources(tensilelite-tests
