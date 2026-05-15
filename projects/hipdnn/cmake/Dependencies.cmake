@@ -249,12 +249,10 @@ endfunction()
 
 # Fetches tsl-robin-map
 function(_fetch_tsl-robin-map VERSION HASH)
-    _determine_git_tag(v v1.4.1)
-
     fetchcontent_declare(
         tsl-robin-map
         GIT_REPOSITORY https://github.com/Tessil/robin-map.git
-        GIT_TAG ${GIT_TAG}
+        GIT_TAG v${VERSION}
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
@@ -267,14 +265,12 @@ endfunction()
 
 # Fetches nanobind
 function(_fetch_nanobind VERSION HASH)
-    _determine_git_tag(v v2.12.0)
-
     set(NB_USE_SUBMODULE_DEPS OFF)
 
     fetchcontent_declare(
         nanobind
         GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-        GIT_TAG ${GIT_TAG}
+        GIT_TAG v${VERSION}
     )
 
     fetchcontent_makeavailable(nanobind)
