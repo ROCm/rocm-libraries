@@ -2,12 +2,8 @@
 # SPDX-License-Identifier:  MIT
 
 [build-system]
-requires = [
-    "scikit-build-core>=0.4.3",
-    "nanobind>=2.12.0",
-    "cmake>=3.18",
-]
-build-backend = "scikit_build_core.build"
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
 
 [project]
 name = "hipdnn-frontend"
@@ -42,28 +38,11 @@ dev = [
     "numpy",
 ]
 
-[tool.scikit-build]
-# Specify the CMake source directory
-cmake.source-dir = "."
-# Build directory
-build-dir = "build"
-# Minimum CMake version
-cmake.minimum-version = "3.18"
-# Build type
-cmake.build-type = "Release"
-# Where the Python module will be installed
-wheel.install-dir = "hipdnn_frontend"
-# Package data
-wheel.packages = ["hipdnn_frontend"]
+[tool.hatch.build.targets.wheel]
+packages = ["hipdnn_frontend"]
 
-[tool.scikit-build.cmake.define]
-CMAKE_PREFIX_PATH = "${CMAKE_PREFIX_PATH}"
-
-hip_DIR = "${hip_DIR}"
-hipdnn_frontend_DIR = "${hipdnn_frontend_DIR}"
-hipdnn_backend_DIR = "${hipdnn_backend_DIR}"
-hipdnn_data_sdk_DIR = "${hipdnn_data_sdk_DIR}"
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
 
 [tool.cibuildwheel]
-# Skip building for certain Python versions or platforms if needed
 skip = ["pp*", "cp36-*", "cp37-*"]

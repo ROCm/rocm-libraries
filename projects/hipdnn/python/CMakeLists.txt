@@ -64,34 +64,32 @@ target_link_libraries(hipdnn_frontend_python PRIVATE hipdnn_frontend hipdnn_back
 # Installation
 # ============================================================================
 
-# SKBUILD is set by scikit-build-core when building a wheel.
-if(DEFINED SKBUILD)
-    # pip install . / pip wheel . → scikit-build-core packages the extension into a wheel
-    install(TARGETS hipdnn_frontend_python DESTINATION .)
-else()
-    # cmake --install → calls pip wheel to build .whl, stages it in share/hipdnn/wheels/
-    install(CODE "
-        set(_wheel_dir \"\${CMAKE_INSTALL_PREFIX}/share/hipdnn/wheels\")
-        file(MAKE_DIRECTORY \"\${_wheel_dir}\")
+install(TARGETS hipdnn_frontend_python
+    LIBRARY DESTINATION lib/hipdnn_python_staging
+)
 
-        message(STATUS \"Building hipdnn-frontend wheel\")
-        execute_process(
-            COMMAND \"${Python_EXECUTABLE}\" -m pip wheel --no-deps
-                -w \"\${_wheel_dir}\"
-                \"${CMAKE_CURRENT_SOURCE_DIR}\"
-                -C \"cmake.define.CMAKE_PREFIX_PATH=\${CMAKE_INSTALL_PREFIX}\"
-                -C \"cmake.define.nanobind_DIR=${nanobind_DIR}\"
-                -C \"cmake.define.tsl-robin-map_DIR=${tsl-robin-map_DIR}\"
-                -C \"cmake.define.FETCHCONTENT_SOURCE_DIR_NANOBIND=${nanobind_SOURCE_DIR}\"
-                -C \"cmake.define.FETCHCONTENT_SOURCE_DIR_TSL-ROBIN-MAP=${tsl-robin-map_SOURCE_DIR}\"
-                -C \"cmake.define.hip_DIR=${hip_DIR}\"
-                -C \"cmake.define.AMDDeviceLibs_DIR=${AMDDeviceLibs_DIR}\"
-                -C \"cmake.define.amd_comgr_DIR=${amd_comgr_DIR}\"
-                -C \"cmake.define.hsa-runtime64_DIR=${hsa-runtime64_DIR}\"
-            RESULT_VARIABLE _result
-        )
-        if(_result)
-            message(FATAL_ERROR \"Failed to build hipdnn-frontend wheel\")
-        endif()
-    ")
-endif()
+install(CODE "
+    set(_staging \"\${CMAKE_INSTALL_PREFIX}/lib/hipdnn_python_staging\")
+    set(_wheel_dir \"\${CMAKE_INSTALL_PREFIX}/share/hipdnn/wheels\")
+    file(MAKE_DIRECTORY \"\${_wheel_dir}\")
+
+    file(GLOB _so_files \"\${_staging}/hipdnn_frontend_python*.so\")
+    list(LENGTH _so_files _so_count)
+    if(_so_count EQUAL 0)
+        message(FATAL_ERROR \"No hipdnn_frontend_python .so found in \${_staging}\")
+    endif()
+    list(GET _so_files 0 _so_path)
+
+    message(STATUS \"Assembling hipdnn-frontend wheel from \${_so_path}\")
+    execute_process(
+        COMMAND \"${Python_EXECUTABLE}\"
+            \"${CMAKE_CURRENT_SOURCE_DIR}/scripts/assemble_wheel.py\"
+            --so-path \"\${_so_path}\"
+            --package-dir \"${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend\"
+            --output-dir \"\${_wheel_dir}\"
+        RESULT_VARIABLE _result
+    )
+    if(_result)
+        message(FATAL_ERROR \"Failed to assemble hipdnn-frontend wheel\")
+    endif()
+")
