@@ -167,28 +167,21 @@ static int benchmark_pooling_bwd(int argc, char* argv[])
         const ck_tile::long_index_t dout_length =
             static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
-        const bool has_overlap =
-            ((Y - 1) * Dy + 1) > Sy || ((X - 1) * Dx + 1) > Sx;
+        const bool has_overlap = ((Y - 1) * Dy + 1) > Sy || ((X - 1) * Dx + 1) > Sx;
 
         // Allow the SelectedKernel to report an unsupported configuration
         // (e.g. wrong overlap flavor) by skipping verification instead of
         // launching with mismatched semantics.
         if(SelectedKernel::kHasOverlap != has_overlap)
         {
-            std::cerr << "Skipping benchmark: kernel has_overlap="
-                      << SelectedKernel::kHasOverlap << " does not match problem has_overlap="
-                      << has_overlap << std::endl;
+            std::cerr << "Skipping benchmark: kernel has_overlap=" << SelectedKernel::kHasOverlap
+                      << " does not match problem has_overlap=" << has_overlap << std::endl;
             return 0;
         }
 
         const std::size_t workspace_bytes =
-            SelectedKernel::BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{nullptr,
-                                                                                 nullptr,
-                                                                                 nullptr,
-                                                                                 nullptr,
-                                                                                 dout_length,
-                                                                                 din_length,
-                                                                                 has_overlap});
+            SelectedKernel::BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{
+                nullptr, nullptr, nullptr, nullptr, dout_length, din_length, has_overlap});
         ck_tile::DeviceMem d_workspace(workspace_bytes);
 
         ck_tile::PoolBwdHostArgs bwd_host_args{d_dout.GetDeviceBuffer(),
@@ -400,20 +393,14 @@ static int benchmark_pooling_bwd(int argc, char* argv[])
 
         if(SelectedKernel::kHasOverlap != has_overlap)
         {
-            std::cerr << "Skipping benchmark: kernel has_overlap="
-                      << SelectedKernel::kHasOverlap << " does not match problem has_overlap="
-                      << has_overlap << std::endl;
+            std::cerr << "Skipping benchmark: kernel has_overlap=" << SelectedKernel::kHasOverlap
+                      << " does not match problem has_overlap=" << has_overlap << std::endl;
             return 0;
         }
 
         const std::size_t workspace_bytes =
-            SelectedKernel::BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{nullptr,
-                                                                                 nullptr,
-                                                                                 nullptr,
-                                                                                 nullptr,
-                                                                                 dout_length,
-                                                                                 din_length,
-                                                                                 has_overlap});
+            SelectedKernel::BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{
+                nullptr, nullptr, nullptr, nullptr, dout_length, din_length, has_overlap});
         ck_tile::DeviceMem d_workspace(workspace_bytes);
 
         ck_tile::PoolBwdHostArgs bwd_host_args{d_dout.GetDeviceBuffer(),

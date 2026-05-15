@@ -185,10 +185,8 @@ bool run()
 
         // Match the bwd kernel's element-grouping so divisibility constraints
         // and grid sizing stay in lockstep across the two kernels.
-        using CastKernel = ck_tile::PoolBwdCastKernel<float,
-                                                      DInDataType,
-                                                      BwdKernel::kBlockSize,
-                                                      BwdKernel::kVectorSize>;
+        using CastKernel = ck_tile::
+            PoolBwdCastKernel<float, DInDataType, BwdKernel::kBlockSize, BwdKernel::kVectorSize>;
         auto cast_host_args = ck_tile::PoolBwdCastHostArgs{
             workspace_buf.GetDeviceBuffer(), din_buf.GetDeviceBuffer(), din_length};
 
@@ -198,9 +196,8 @@ bool run()
             return false;
         }
 
-        auto cast_kargs = CastKernel::MakeKernelArgs(cast_host_args);
-        const ck_tile::index_t cast_grid_size =
-            CastKernel::CalculateGridSize(stream, din_length);
+        auto cast_kargs                       = CastKernel::MakeKernelArgs(cast_host_args);
+        const ck_tile::index_t cast_grid_size = CastKernel::CalculateGridSize(stream, din_length);
 
         ck_tile::launch_kernel(
             stream,

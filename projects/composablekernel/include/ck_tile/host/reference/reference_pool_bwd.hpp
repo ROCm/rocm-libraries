@@ -33,10 +33,10 @@ CK_TILE_HOST void reference_pool_bwd(const HostTensor<DOutDataType>& dout,
                                      const HostTensor<IndexDataType>& indices,
                                      HostTensor<DInDataType>& din)
 {
-    static_assert(
-        std::is_same_v<ComputeDataType, float>,
-        "reference_pool_bwd currently accumulates in float and only supports ComputeDataType=float. "
-        "Pass ComputeDataType=float to keep the reference deterministic.");
+    static_assert(std::is_same_v<ComputeDataType, float>,
+                  "reference_pool_bwd currently accumulates in float and only supports "
+                  "ComputeDataType=float. "
+                  "Pass ComputeDataType=float to keep the reference deterministic.");
 
     const std::size_t din_length  = din.get_element_space_size();
     const std::size_t dout_length = dout.get_element_space_size();

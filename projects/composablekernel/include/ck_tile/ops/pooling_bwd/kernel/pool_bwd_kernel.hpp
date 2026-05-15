@@ -89,8 +89,7 @@ struct PoolBwdKernel
                                  host_args.din_length};
     }
 
-    CK_TILE_HOST static index_t CalculateGridSize(const stream_config& s,
-                                                  long_index_t dout_length)
+    CK_TILE_HOST static index_t CalculateGridSize(const stream_config& s, long_index_t dout_length)
     {
         const index_t num_cu = get_available_compute_units(s);
         const index_t cu_cap = num_cu > 0 ? num_cu : 1;

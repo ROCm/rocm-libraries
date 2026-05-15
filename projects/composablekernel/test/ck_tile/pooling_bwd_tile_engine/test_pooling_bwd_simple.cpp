@@ -204,8 +204,8 @@ TEST_P(PoolingBwdTileEngineTest2D, BasicFunctionality)
     const ck_tile::long_index_t dout_length =
         static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
-    const std::size_t workspace_bytes = SelectedKernel::BwdKernel::GetWorkSpaceSize(
-        ck_tile::PoolBwdHostArgs{
+    const std::size_t workspace_bytes =
+        SelectedKernel::BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{
             nullptr, nullptr, nullptr, nullptr, dout_length, din_length, problem_overlap});
     ck_tile::DeviceMem d_workspace(workspace_bytes);
 
@@ -240,8 +240,11 @@ TEST_P(PoolingBwdTileEngineTest2D, BasicFunctionality)
     ck_tile::reference_pool_bwd<DOutDataType, IndexDataType, ComputeDataType, DInDataType>(
         h_dout, h_indices, h_din_ref);
 
-    const bool pass = ck_tile::check_err(
-        h_din, h_din_ref, "Error: Incorrect dx", pool_bwd_rtol_for_dtype(), pool_bwd_atol_for_dtype());
+    const bool pass = ck_tile::check_err(h_din,
+                                         h_din_ref,
+                                         "Error: Incorrect dx",
+                                         pool_bwd_rtol_for_dtype(),
+                                         pool_bwd_atol_for_dtype());
     EXPECT_TRUE(pass) << "Pooling bwd verification failed for " << KERNEL_NAME;
 }
 
@@ -398,8 +401,8 @@ TEST_P(PoolingBwdTileEngineTest3D, BasicFunctionality)
     const ck_tile::long_index_t dout_length =
         static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
-    const std::size_t workspace_bytes = SelectedKernel::BwdKernel::GetWorkSpaceSize(
-        ck_tile::PoolBwdHostArgs{
+    const std::size_t workspace_bytes =
+        SelectedKernel::BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{
             nullptr, nullptr, nullptr, nullptr, dout_length, din_length, problem_overlap});
     ck_tile::DeviceMem d_workspace(workspace_bytes);
 
@@ -434,8 +437,11 @@ TEST_P(PoolingBwdTileEngineTest3D, BasicFunctionality)
     ck_tile::reference_pool_bwd<DOutDataType, IndexDataType, ComputeDataType, DInDataType>(
         h_dout, h_indices, h_din_ref);
 
-    const bool pass = ck_tile::check_err(
-        h_din, h_din_ref, "Error: Incorrect dx", pool_bwd_rtol_for_dtype(), pool_bwd_atol_for_dtype());
+    const bool pass = ck_tile::check_err(h_din,
+                                         h_din_ref,
+                                         "Error: Incorrect dx",
+                                         pool_bwd_rtol_for_dtype(),
+                                         pool_bwd_atol_for_dtype());
     EXPECT_TRUE(pass) << "Pooling bwd 3D verification failed for " << KERNEL_NAME;
 }
 

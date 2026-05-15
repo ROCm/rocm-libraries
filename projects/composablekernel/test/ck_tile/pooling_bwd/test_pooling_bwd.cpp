@@ -168,14 +168,8 @@ class TestCkTilePoolingBwd : public ::testing::Test
         const ck_tile::long_index_t dout_length =
             static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
-        const std::size_t workspace_bytes =
-            BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 dout_length,
-                                                                 din_length,
-                                                                 kHasOverlap});
+        const std::size_t workspace_bytes = BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{
+            nullptr, nullptr, nullptr, nullptr, dout_length, din_length, kHasOverlap});
 
         ck_tile::DeviceMem workspace_buf(workspace_bytes);
 
@@ -362,14 +356,8 @@ class TestCkTilePoolingBwd : public ::testing::Test
         const ck_tile::long_index_t dout_length =
             static_cast<ck_tile::long_index_t>(h_dout.get_element_space_size());
 
-        const std::size_t workspace_bytes =
-            BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 dout_length,
-                                                                 din_length,
-                                                                 kHasOverlap});
+        const std::size_t workspace_bytes = BwdKernel::GetWorkSpaceSize(ck_tile::PoolBwdHostArgs{
+            nullptr, nullptr, nullptr, nullptr, dout_length, din_length, kHasOverlap});
 
         ck_tile::DeviceMem workspace_buf(workspace_bytes);
 
