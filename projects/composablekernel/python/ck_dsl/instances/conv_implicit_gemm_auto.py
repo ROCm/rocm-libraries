@@ -755,7 +755,7 @@ def build_implicit_gemm_conv_auto(spec: ImplicitGemmConvSpec) -> KernelDef:
         with for_op as (k0, iter_vars):
             # Load phase: global load → LDS write
             emit_load_phase(k0, A_smem, B_smem)
-            b.sync()  # Barrier after LDS writes (required in all iterations)
+            b.sync_lds_only()  # Only wait for LDS, let VMEM keep streaming
 
             # MFMA phase: LDS read → MFMA execute
             new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
