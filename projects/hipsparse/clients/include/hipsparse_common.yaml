@@ -275,6 +275,15 @@ C precisions complex and real: &double_only_precisions_complex_real
   - *double_precision
   - *double_precision_complex
 
+C precisions scatter: &scatter_precisions
+  - *int8_precision
+  - *half_precision
+  - *bfloat16_precision
+  - *single_precision
+  - *double_precision
+  - *single_precision_complex
+  - *double_precision_complex
+
 C precisions axpby mixed: &axpby_mixed_precisions
   - *float16_float32_axpby_precision
   - *bfloat16_float32_axpby_precision

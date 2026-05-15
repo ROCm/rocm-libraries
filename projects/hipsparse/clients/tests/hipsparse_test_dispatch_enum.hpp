@@ -30,6 +30,7 @@ struct hipsparse_test_dispatch_enum
         t,
         it,
         ijt,
+        scatter,
         gather,
         axpby,
         ijabct_spmv,

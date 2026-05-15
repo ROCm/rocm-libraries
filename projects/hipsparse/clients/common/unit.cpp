@@ -25,6 +25,8 @@
 
 #include <algorithm>
 #include <hip/hip_runtime_api.h>
+#include <hipsparse-bfloat16.h>
+#include <hipsparse-float16.h>
 #include <hipsparse.h>
 #include <limits>
 

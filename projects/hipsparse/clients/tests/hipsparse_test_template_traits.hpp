@@ -54,11 +54,11 @@ struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::ijt
 };
 
 template <hipsparse_test_enum::value_type ROUTINE>
-struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::axpby>
+struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::scatter>
 {
-    using filter = typename hipsparse_test_axpby_template<ROUTINE>::test;
+    using filter = typename hipsparse_test_scatter_template<ROUTINE>::test;
     template <typename... P>
-    using caller = typename hipsparse_test_axpby_template<ROUTINE>::template test_call<P...>;
+    using caller = typename hipsparse_test_scatter_template<ROUTINE>::template test_call<P...>;
 };
 
 template <hipsparse_test_enum::value_type ROUTINE>
@@ -67,6 +67,14 @@ struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::gat
     using filter = typename hipsparse_test_gather_template<ROUTINE>::test;
     template <typename... P>
     using caller = typename hipsparse_test_gather_template<ROUTINE>::template test_call<P...>;
+};
+
+template <hipsparse_test_enum::value_type ROUTINE>
+struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::axpby>
+{
+    using filter = typename hipsparse_test_axpby_template<ROUTINE>::test;
+    template <typename... P>
+    using caller = typename hipsparse_test_axpby_template<ROUTINE>::template test_call<P...>;
 };
 
 template <hipsparse_test_enum::value_type ROUTINE>

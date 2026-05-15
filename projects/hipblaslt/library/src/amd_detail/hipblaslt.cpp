@@ -26,7 +26,9 @@
 
 #include "hipblaslt/hipblaslt.h"
 #include "UserDrivenTuningParser.hpp"
+#include "check_numerics_matrix.hpp"
 #include "exceptions.hpp"
+#include "handle.h"
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
 
@@ -188,6 +190,21 @@ try
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_destroy((const rocblaslt_handle)handle));
     rocblaslt::Debug::Instance().markerStop();
     return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle, uint32_t* first_nan_call_id)
+try
+{
+    if(handle == nullptr)
+        return HIPBLAS_STATUS_NOT_INITIALIZED;
+    const uint32_t first_nan = hipblaslt_check_numerics_drain_handle((rocblaslt_handle)handle);
+    if(first_nan_call_id)
+        *first_nan_call_id = first_nan;
+    return HIPBLAS_STATUS_SUCCESS;
 }
 catch(...)
 {

@@ -61,6 +61,16 @@ struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::ijt>
 };
 
 template <>
+struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::scatter>
+{
+    template <template <typename...> class TEST>
+    static auto dispatch(const Arguments& arg)
+    {
+        return hipsparse_scatter_dispatch<TEST>(arg);
+    }
+};
+
+template <>
 struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::axpby>
 {
     template <template <typename...> class TEST>
