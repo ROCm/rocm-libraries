@@ -27,8 +27,7 @@ Prerequisites for Microsoft Windows
    * A ROCm-enabled platform. For more information, see :ref:`ROCm Core SDK components <rocm:release-components>`.
    * A compatible version of `hipblas-common <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common>`_.
    * A compatible version of :doc:`rocBLAS <rocblas:index>`.
-   * For full functionality, a compatible version of :doc:`rocSOLVER <rocsolver:index>` and its :doc:`rocSPARSE <rocsparse:index>`
-     and :doc:`rocPRIM <rocprim:index>` dependencies.
+   * For full functionality, a compatible version of :doc:`rocSOLVER <rocsolver:index>` and its dependencies.
    * hipBLAS is supported on the same Windows versions and toolchains that HIP SDK supports.
 
 * hipBLAS does not support the cuBLAS backend on Windows.

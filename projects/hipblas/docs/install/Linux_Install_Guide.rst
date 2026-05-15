@@ -22,15 +22,14 @@ For a list of installation prerequisites, see :doc:`hipBLAS prerequisites <prere
 Prerequisites for Linux
 =========================
 
-The hipBLAS prerequisites are different than the :doc:`rocBLAS <rocblas:index>` and NVIDIA CUDA `cuBLAS <https://developer.nvidia.com/cublas>`_ backend prerequisites.
+The hipBLAS prerequisites are different than the :doc:`rocBLAS <rocblas:index>` and NVIDIA CUDA cuBLAS backend prerequisites. See the cuBLAS documentation for NVIDIA installation procedures.
 
 *  The prerequisites required to use the rocBLAS backend with AMD components are as follows:
 
    * A ROCm-enabled platform. For more information, see :ref:`ROCm Core SDK components <rocm:release-components>`.
    * A compatible version of `hipblas-common <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common>`_.
    * A compatible version of rocBLAS.
-   * For full functionality, optionally install a compatible version of :doc:`rocSOLVER <rocsolver:index>` and its :doc:`rocSPARSE <rocsparse:index>`
-     and :doc:`rocPRIM <rocprim:index>` dependencies.
+   * For full functionality, optionally install a compatible version of :doc:`rocSOLVER <rocsolver:index>` and its dependencies.
 
 *  The prerequisites required to use the cuBLAS backend with NVIDIA components are as follows:
 
