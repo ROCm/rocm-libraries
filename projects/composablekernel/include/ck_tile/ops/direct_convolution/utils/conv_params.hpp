@@ -92,6 +92,10 @@ struct Conv2dParams
 
     int channels_per_group() const { return c_tot / groups; }
     int filters_per_group() const { return k_tot / groups; }
+
+    // True for standard (non-grouped) convolution: G=1 with C > 32.
+    // These cases require C-reduction across multiple MFMA iterations.
+    bool is_non_grouped() const { return groups == 1 && channels_per_group() > 32; }
 };
 
 

@@ -58,3 +58,16 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<78, direct_c
 // Additional cyclic shift instances for 32-channel kernels.
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<82, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<83, direct_conv::Version::v2>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Non-grouped (standard) convolution — 32c MFMA with C-reduction
+// G=1, C > 32, K > 32. Dgrad configs: 3 (direct DRAM) + 3 (LDS epilogue)
+////////////////////////////////////////////////////////////////////////
+// Dgrad, direct DRAM epilogue — configs 0-2 (waves 8, 4, 2)
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<0, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<1, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<2, direct_conv::Version::v1>, SIGNATURE>);
+// Dgrad, LDS-staged epilogue — configs 6-8 (waves 8, 4, 2)
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<6, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<7, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<8, direct_conv::Version::v1>, SIGNATURE>);

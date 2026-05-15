@@ -364,6 +364,25 @@ struct InputLoader
                                + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
         __builtin_memcpy(&input_reg, base + mfma_lds_offsets[slice], sizeof(input_reg));
     }
+
+    // Read from a specific C-section of the input LDS (for non-grouped conv C-reduction).
+    //
+    // In non-grouped conv, the input LDS holds BLOCK_C = waves_per_wg/2 * 32 channels.
+    // Within each c_block, each wave iterates over all C-sections (c_local = 0..c_local_max),
+    // reading from section c_local rather than the wave's own section.
+    //
+    // c_section_delta_elements: (c_local - wave_group) * 32 — the signed offset in fp16
+    // elements from the wave's own C-section to the target c_local section.
+    __device__ __forceinline__ void read_from_lds_at_section(
+        InputType& input_reg, int slice, int lds_buffer_index,
+        int c_section_delta_elements) const
+    {
+        const ElementType* base = reinterpret_cast<const ElementType*>(input_lds_ptr)
+                               + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
+        __builtin_memcpy(&input_reg,
+                         base + mfma_lds_offsets[slice] + c_section_delta_elements,
+                         sizeof(input_reg));
+    }
 };
 
 } // namespace direct_conv
