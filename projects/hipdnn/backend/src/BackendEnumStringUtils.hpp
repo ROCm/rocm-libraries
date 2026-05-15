@@ -80,6 +80,10 @@ inline const char* hipdnnGetDataTypeString(hipdnnDataType_t type)
         return "HIPDNN_DATA_FP8_E4M3";
     case HIPDNN_DATA_FP8_E5M2:
         return "HIPDNN_DATA_FP8_E5M2";
+    case HIPDNN_DATA_FP8_E4M3_FNUZ:
+        return "HIPDNN_DATA_FP8_E4M3_FNUZ";
+    case HIPDNN_DATA_FP8_E5M2_FNUZ:
+        return "HIPDNN_DATA_FP8_E5M2_FNUZ";
     case HIPDNN_DATA_FP8_E8M0:
         return "HIPDNN_DATA_FP8_E8M0";
     case HIPDNN_DATA_FP4_E2M1:
