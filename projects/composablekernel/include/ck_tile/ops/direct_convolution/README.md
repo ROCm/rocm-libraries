@@ -55,10 +55,6 @@ utils/                                   — utilities for kernel implementation
   detail.hpp                             — static_for / dispatch compile-time helpers
 ```
 
-## Testing
-
-The unit and integration tests are located in directory `projects/composablekernel/test/ck_tile/direct_conv`.
-
 ## Documentation
 
 Detailed documentation is available at `projects/composablekernel/docs/direct_convolution`:
@@ -124,6 +120,7 @@ cmake                                                                           
 
 ## Testing
 
+The unit and integration tests are located in directory `projects/composablekernel/test/ck_tile/direct_conv`.
 The entry point is CMake target `ck_tile_direct_conv_tests` that runs all CK Tile direct convolution tests.
 Run the target with command 
 
@@ -141,3 +138,12 @@ ninja -j32 ckProfiler
 ```
 
 If you have also the implicit GEMM instances enabled, use more threads (64 or 128).
+
+## Performance testing
+
+There is a [python script](../../../../script/test_direct_conv.py) that runs a set of fwd/bwd data [cases](../../../../script/direct_conv_test_cases.txt).
+This can be used to verify that all instances produce correct results as wel as for testing performance regresion/improvement after refactoring. 
+When the coverage of the CK Tile direct convs is expanded, more cases should be added.
+
+For running the performance script, it might be beneficial to build without the implicit GEMM instances as they are expected to be slower for the cases 
+where direct convolution is applicable.

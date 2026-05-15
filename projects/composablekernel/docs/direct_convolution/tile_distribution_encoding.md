@@ -45,6 +45,15 @@ tile_distribution_encoding<
 >
 ```
 
+| Parameter | Type | Controls | Convention |
+|---|---|---|---|
+| `RsLengths` | `sequence<...>` | Replication factor lengths | Usually `sequence<>` (empty) |
+| `HsLengthss` | `tuple<seq<...>, ...>` | Factor lengths per X dimension | Outer factor first in each seq |
+| `Ps2RHssMajor` | `tuple<seq<...>, ...>` | RH major indices owned by each P | One inner seq per P dimension |
+| `Ps2RHssMinor` | `tuple<seq<...>, ...>` | RH minor indices owned by each P | Parallel to Major; outer factor listed first |
+| `Ys2RHsMajor` | `sequence<...>` | RH major index owned by each Y | One element per Y dimension |
+| `Ys2RHsMinor` | `sequence<...>` | RH minor index owned by each Y | Parallel to Major |
+
 **Naming convention**: the double "ss" follows the CK Tile convention of pluralizing with "s" twice when the type is a *tuple of sequences*. `HsLengths` would be the factor lengths for a single X dimension (e.g. `seq<4, 8>`); `HsLengthss` is the collection of those, one per X dimension (e.g. `tuple<seq<1>, seq<4,8>, seq<16>>`). The same pattern applies to `Ps2RHssMajor` / `Ps2RHssMinor` (tuple of sequences, one per P dimension), while `Ys2RHsMajor` / `Ys2RHsMinor` are plain sequences (one entry per Y dimension).
 
 ---
@@ -232,7 +241,11 @@ H[1][0] = warp_id % NUM_WAVES = warp_id       (warp_id ∈ [0, NUM_WAVES))
 H[1][1] = (lane_id / BLOCK_C8) % LANES_PER_ROW = lane_id / BLOCK_C8
 H[2][0] = (lane_id / 1)        % BLOCK_C8      = lane_id % BLOCK_C8
 ```
-Total range of lane_id must be `LANES_PER_ROW * BLOCK_C8 = 64`.
+We have constraint `LANES_PER_ROW * BLOCK_C8 = 64`. Taking into account that `lane_id ∈ [0, 64)`, we have 
+
+```
+lane_id / BLOCK_C8  ∈  [0, LANES_PER_ROW) → (lane_id / BLOCK_C8) % LANES_PER_ROW = lane_id / BLOCK_C8
+```
 
 **Step 3** — For each X dimension, collect all its H sub-dimension indices. The X coordinate is the mixed-radix sum where strides come from `HsLengthss[i]`:
 
@@ -259,7 +272,7 @@ For each Y combination, the H (or R) factor it controls takes the current Y valu
 
 ---
 
-## 6. Concrete Example: Input DRAM Distribution
+## 6. Input DRAM loading
 
 From `grouped_conv_descriptors.hpp`, `Input::MakeDramReadTileDistribution()`:
 
@@ -302,8 +315,8 @@ P[1] = lane_id:
     Ps2RHssMajor[1] = seq<2, 3>    Ps2RHssMinor[1] = seq<1, 0>
     → controls (RH_major=2, RH_minor=1) [outer] and (RH_major=3, RH_minor=0) [inner]
     → factor sizes: LANES_PER_ROW (outer) and BLOCK_C8 (inner)
-    → H[X[1]][1] = lane_id / BLOCK_C8
-    → H[X[2]][0] = lane_id % BLOCK_C8
+    → H[1][1] = lane_id / BLOCK_C8
+    → H[2][0] = lane_id % BLOCK_C8
 ```
 
 ### Y Mapping
@@ -324,13 +337,84 @@ X[2] = l % BLOCK_C8                         (channel group)
 X[3] = y                                    (fp16 sub-element, 0..7)
 ```
 
-The LDS offset is: `X[1] * BLOCK_C8 * 8 + X[2] * 8 + X[3]`
+### DRAM Descriptor
 
-which simplifies to `(w * LANES_PER_ROW * BLOCK_C8 + l) * 8 + y` — each lane's base is at `lane_flat_idx * 8`, giving perfectly coalesced `global_load_lds` writes.
+The DRAM descriptor (from `Input::MakeDramReadDescriptor`) presents the input activation tensor as a 4D view with shape `[hi_padded, wi_padded, BLOCK_C8, 8]` and strides derived from the actual NHWC memory layout:
+
+```cpp
+make_naive_tensor_descriptor(
+    make_tuple(hi_padded, wi_padded, BLOCK_C8, 8),
+    make_tuple(wi * C_total,         // stride along H: skip one full row
+               C_total,              // stride along W: skip one full channel count
+               8,                    // stride along BLOCK_C8 group: 8 fp16 elements
+               1))                   // stride along fp16 sub-element: contiguous
+```
+
+The input tensor is in **NHWC** layout, so element `(h, w, c)` is at flat offset `h * wi * C_total + w * C_total + c`. The descriptor only *indexes* `BLOCK_C8 * 8` channels at a time (one channel tile), but the W stride must be `C_total` — the full channel count — because moving from `(h, w, c)` to `(h, w+1, c)` always skips all `C_total` channels regardless of tile size.
+
+The kernel covers the full channel dimension by iterating over channel tiles and advancing the base pointer by `BLOCK_C8 * 8` fp16 elements per iteration:
+
+```
+C_total = (number of channel tile iterations) * BLOCK_C8 * 8
+```
+
+Each iteration uses a fresh descriptor with the same strides but a new base pointer — the descriptor itself always describes exactly `BLOCK_C8 * 8` channels.
+
+The tile distribution above maps each thread to a `[1, 1, 1, 8]` sub-tile of this descriptor — i.e., 8 contiguous fp16 values from a single `(hi, wi, c8_group)` location.
+
+### LDS Descriptor
+
+The LDS write descriptor (from `Input::MakeLdsWriteDescriptor`) is a contiguous 4D layout with shape `[1, BLOCK_W, BLOCK_C8, 8]` and row-major strides:
+
+```cpp
+make_naive_tensor_descriptor(
+    make_tuple(1, BLOCK_W, BLOCK_C8, 8),
+    make_tuple(BLOCK_W * BLOCK_C8 * 8,   // outer trivial dimension
+               BLOCK_C8 * 8,             // stride along W
+               8,                        // stride along BLOCK_C8 group
+               1))                       // stride along fp16 sub-element
+```
+
+The flat offset of a logical element `(X[0], X[1], X[2], X[3])` into this LDS buffer is therefore:
+
+```
+offset = X[0] * (BLOCK_W * BLOCK_C8 * 8)
+       + X[1] * (BLOCK_C8 * 8)
+       + X[2] * 8
+       + X[3]
+```
+
+Since `X[0] = 0` always (it is the trivial size-1 dimension), this reduces to:
+
+```
+offset = X[1] * BLOCK_C8 * 8 + X[2] * 8 + X[3]
+```
+
+### LDS Offset Simplification
+
+Substituting the coordinate expressions for thread `(warp_id=w, lane_id=l)` at `Y[1]=y`:
+
+```
+offset = (w * LANES_PER_ROW + l/BLOCK_C8) * BLOCK_C8 * 8
+       + (l % BLOCK_C8) * 8
+       + y
+       = w * LANES_PER_ROW * BLOCK_C8 * 8
+       + (l/BLOCK_C8) * BLOCK_C8 * 8
+       + (l % BLOCK_C8) * 8
+       + y
+       = w * LANES_PER_ROW * BLOCK_C8 * 8
+       + l * 8                           ← (l/BLOCK_C8)*BLOCK_C8 + l%BLOCK_C8 = l
+       + y
+       = (w * LANES_PER_ROW * BLOCK_C8 + l) * 8 + y
+```
+
+The key step uses the Euclidean identity `(l/BLOCK_C8)*BLOCK_C8 + l%BLOCK_C8 = l`, which reassembles the two parts of `lane_id` that were split by the P[1] unmerge.
+
+The result `(w * LANES_PER_ROW * BLOCK_C8 + l) * 8 + y` shows that each lane `l` within a warp `w` occupies a unique slot at stride 8 — so all 64 lanes write to non-overlapping, stride-8 addresses, giving perfectly coalesced `global_load_lds` writes.
 
 ---
 
-## 7. Concrete Example: Weight DRAM Distribution
+## 7. Weight DRAM loading
 
 From `grouped_conv_descriptors.hpp`, `Weight::MakeDramReadTileDistribution()`:
 
@@ -367,7 +451,7 @@ Each thread owns one contiguous 128-bit (8×fp16) row. Sub-elements are iterated
 
 ### 8.1 Align the innermost H factor with the load granularity
 
-The last (innermost) factor of each X dimension should match the hardware load width. For fp16 with 128-bit loads: **inner factor = 8**. This ensures Y[last] strides over contiguous elements with no gaps.
+The last (innermost) factor of each X dimension should match the hardware load width. For fp16/bf16 with 128-bit loads: **inner factor = 8**. This ensures Y[last] strides over contiguous elements with no gaps.
 
 ### 8.2 Map lane_id to contiguous memory
 
@@ -379,7 +463,7 @@ For coalesced global loads, `lane_id` should control the unit-stride (innermost)
 
 - P selects a unique starting position per thread.
 - Y drives per-thread iteration. If an H factor is covered by Y, every thread visits every value of that factor — effectively unrolling a loop over those elements.
-- If a factor appears in `HsLengthss` but nothing in `Ps2RHss` or `Ys2RHs` points to it, it is unreachable (silent bug — data is silently skipped).
+- If a factor appears in `HsLengthss` but nothing in `Ps2RHss` or `Ys2RHs` points to it, it is unreachable. This results to a situation where data is silently skipped.
 
 ### 8.4 Factor coverage must be complete
 
@@ -413,20 +497,7 @@ If the innermost stride lands multiple lanes on the same LDS bank (every 4 bytes
 
 ---
 
-## 9. Summary Table
-
-| Parameter | Type | Controls | Key Convention |
-|---|---|---|---|
-| `RsLengths` | `sequence<...>` | Replication factor lengths | Usually `sequence<>` (empty) |
-| `HsLengthss` | `tuple<seq<...>, ...>` | Factor lengths per X dimension | Outer factor first in each seq |
-| `Ps2RHssMajor` | `tuple<seq<...>, ...>` | RH major indices owned by each P | One inner seq per P dimension |
-| `Ps2RHssMinor` | `tuple<seq<...>, ...>` | RH minor indices owned by each P | Parallel to Major; outer factor listed first |
-| `Ys2RHsMajor` | `sequence<...>` | RH major index owned by each Y | One element per Y dimension |
-| `Ys2RHsMinor` | `sequence<...>` | RH minor index owned by each Y | Parallel to Major |
-
----
-
-## 10. Quick Construction Checklist
+## 10. Tile distribution encoding construction checklist
 
 1. **Define X dimensions**: identify the tensor's logical shape and decide how many X dims it has (often: rows, cols, channel_groups, sub_elements).
 2. **Factor each X**: fill `HsLengthss`, putting the warp-level factor outermost and the sub-element factor innermost. Every factor must be a power of two.

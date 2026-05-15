@@ -8,11 +8,6 @@ Note that the original HIP conv project uses notation
 - NHWC input
 - KRSC weights
 - NPQK output
-where as we use notation
-- NHWC input
-- KYXC weights
-- NHWK output
-that is, we refer to filter as YX (as opposed to RS) and output is reffer to as HW (as opposed to PQ).
 
 ## Development environment
 
@@ -26,5 +21,5 @@ We should update this documentation as we go.
 
 ## Supported device architectures
 
-The original HIP conv target `gfx942` device architecture. One of the goals of this project is to extend the coverage to `gfx942`.
+The original HIP conv target `gfx950` device architecture. One of the goals of this project is to extend the coverage to `gfx942`.
 
