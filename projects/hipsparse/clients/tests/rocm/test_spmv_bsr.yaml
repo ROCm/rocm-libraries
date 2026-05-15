@@ -32,6 +32,23 @@ Tests:
   function: spmv_bsr
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
+  M: [800]
+  N: [804]
+  block_dim: [16]
+  alpha: [1.0]
+  alphai: [1.0]
+  beta: [1.0]
+  betai: [1.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT]
+
+- name: spmv_bsr
+  category: quick
+  function: spmv_bsr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
   M: [500]
   N: [804]
   block_dim: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
@@ -42,7 +59,7 @@ Tests:
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
-  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT]
+  spmv_alg: [HIPSPARSE_SPMV_BSR_ALG1]
 
 # Pre-checkin
 - name: spmv_bsr_bad_arg
@@ -66,7 +83,7 @@ Tests:
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
-  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT]
+  spmv_alg: [HIPSPARSE_SPMV_BSR_ALG1]
   filename: [nos1,
              nos2,
              nos3,
@@ -90,7 +107,7 @@ Tests:
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   dirA: [HIPSPARSE_DIRECTION_ROW]
-  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT]
+  spmv_alg: [HIPSPARSE_SPMV_BSR_ALG1]
   filename: [scircuit,
              shipsec1]
 
@@ -109,5 +126,5 @@ Tests:
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
   dirA: [HIPSPARSE_DIRECTION_COLUMN]
-  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT]
+  spmv_alg: [HIPSPARSE_SPMV_BSR_ALG1]
   filename: [Chebyshev4]

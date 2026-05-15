@@ -43,19 +43,19 @@ template <typename I, typename J, typename T>
 void testing_spmv_bsr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
-    int64_t              mb        = 10;
-    int64_t              nb        = 10;
-    int64_t              nnzb      = 10;
-    int64_t              block_dim = 2;
-    int64_t              safe_size = 100;
-    float                alpha     = 0.6;
-    float                beta      = 0.2;
-    hipsparseOperation_t transA    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-    hipsparseIndexBase_t idxBase   = HIPSPARSE_INDEX_BASE_ZERO;
-    hipsparseDirection_t blockDir  = HIPSPARSE_DIRECTION_ROW;
-    hipsparseIndexType_t idxType   = HIPSPARSE_INDEX_32I;
-    hipDataType          dataType  = HIP_R_32F;
-    hipsparseSpMVAlg_t   alg       = HIPSPARSE_MV_ALG_DEFAULT;
+    int64_t              mb         = 10;
+    int64_t              nb         = 10;
+    int64_t              nnzb       = 10;
+    int64_t              blockDim   = 2;
+    int64_t              safe_size  = 100;
+    float                alpha      = 0.6;
+    float                beta       = 0.2;
+    hipsparseOperation_t transA     = HIPSPARSE_OPERATION_NON_TRANSPOSE;
+    hipsparseIndexBase_t idxBase    = HIPSPARSE_INDEX_BASE_ZERO;
+    hipsparseOrder_t blockOrder     = HIPSPARSE_ORDER_ROW;
+    hipsparseIndexType_t idxType    = HIPSPARSE_INDEX_32I;
+    hipDataType          dataType   = HIP_R_32F;
+    hipsparseSpMVAlg_t   alg        = HIPSPARSE_MV_ALG_DEFAULT;
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
@@ -85,19 +85,20 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
                                                        mb,
                                                        nb,
                                                        nnzb,
-                                                       blockDir,
-                                                       block_dim,
+                                                       blockDim,
+                                                       blockDim,
                                                        dptr,
                                                        dcol,
                                                        dval,
                                                        idxType,
                                                        idxType,
                                                        idxBase,
-                                                       dataType),
+                                                       dataType,
+                                                       blockOrder),
                                     "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&x, nb * block_dim, dx, dataType),
+    verify_hipsparse_status_success(hipsparseCreateDnVec(&x, nb * blockDim, dx, dataType),
                                     "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, mb * block_dim, dy, dataType),
+    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, mb * blockDim, dy, dataType),
                                     "success");
 
     // SpMV buffer
@@ -176,7 +177,7 @@ void testing_spmv_bsr(Arguments argus)
 #if(!defined(CUDART_VERSION))
     J                    m         = argus.M;
     J                    n         = argus.N;
-    J                    block_dim = argus.block_dim;
+    J                    blockDim  = argus.block_dim;
     T                    h_alpha   = make_DataType<T>(argus.alpha);
     T                    h_beta    = make_DataType<T>(argus.beta);
     hipsparseOperation_t transA    = argus.transA;
@@ -185,13 +186,16 @@ void testing_spmv_bsr(Arguments argus)
     hipsparseSpMVAlg_t   alg       = argus.spmv_alg;
     std::string          filename  = argus.filename;
 
+    hipsparseOrder_t blockOrder
+        = (block_dir == HIPSPARSE_DIRECTION_ROW) ? HIPSPARSE_ORDER_ROW : HIPSPARSE_ORDER_COL;
+
     // BSR SpMV on the rocSPARSE backend only currently supports non-transpose.
     if(transA != HIPSPARSE_OPERATION_NON_TRANSPOSE)
     {
         return;
     }
 
-    if(block_dim < 1)
+    if(blockDim < 1)
     {
         return;
     }
@@ -223,8 +227,8 @@ void testing_spmv_bsr(Arguments argus)
     // Convert the CSR matrix to BSR on the host. The helper expects int-based
     // row/column arrays, so temporarily project the CSR index arrays through
     // int vectors when I/J are not already int.
-    J mb = (m + block_dim - 1) / block_dim;
-    J nb = (n + block_dim - 1) / block_dim;
+    J mb = (m + blockDim - 1) / blockDim;
+    J nb = (n + blockDim - 1) / blockDim;
 
     std::vector<int> hcsr_row_ptr_int(hcsr_row_ptr.size());
     std::vector<int> hcol_ind_int(hcol_ind.size());
@@ -245,7 +249,7 @@ void testing_spmv_bsr(Arguments argus)
     host_csr_to_bsr<T>(block_dir,
                        static_cast<int>(m),
                        static_cast<int>(n),
-                       static_cast<int>(block_dim),
+                       static_cast<int>(blockDim),
                        nnzb_int,
                        idx_base,
                        hcsr_row_ptr_int,
@@ -271,8 +275,8 @@ void testing_spmv_bsr(Arguments argus)
     }
 
     // BSR matrix dimensions in terms of scalar rows/cols.
-    J x_size = nb * block_dim;
-    J y_size = mb * block_dim;
+    J x_size = nb * blockDim;
+    J y_size = mb * blockDim;
 
     std::vector<T> hx(x_size);
     std::vector<T> hy_1(y_size);
@@ -289,8 +293,8 @@ void testing_spmv_bsr(Arguments argus)
     auto dbsr_row_ptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(I) * (mb + 1)), device_free};
     auto dbsr_col_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(J) * nnzb), device_free};
-    auto dbsr_val_managed     = hipsparse_unique_ptr{
-        device_malloc(sizeof(T) * nnzb * block_dim * block_dim), device_free};
+    auto dbsr_val_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnzb * blockDim * blockDim), device_free};
     auto dx_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * x_size), device_free};
     auto dy_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * y_size), device_free};
     auto dy_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * y_size), device_free};
@@ -311,10 +315,8 @@ void testing_spmv_bsr(Arguments argus)
         hipMemcpy(dbsr_row_ptr, hbsr_row_ptr.data(), sizeof(I) * (mb + 1), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(
         hipMemcpy(dbsr_col_ind, hbsr_col_ind.data(), sizeof(J) * nnzb, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dbsr_val,
-                              hbsr_val.data(),
-                              sizeof(T) * nnzb * block_dim * block_dim,
-                              hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(
+        dbsr_val, hbsr_val.data(), sizeof(T) * nnzb * blockDim * blockDim, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * x_size, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * y_size, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * y_size, hipMemcpyHostToDevice));
@@ -327,15 +329,16 @@ void testing_spmv_bsr(Arguments argus)
                                              mb,
                                              nb,
                                              nnzb,
-                                             block_dir,
-                                             block_dim,
+                                             blockDim,
+                                             blockDim,
                                              dbsr_row_ptr,
                                              dbsr_col_ind,
                                              dbsr_val,
                                              typeI,
                                              typeJ,
                                              idx_base,
-                                             typeT));
+                                             typeT,
+                                             blockOrder));
 
     // Create dense vectors
     hipsparseDnVecDescr_t x, y1, y2;
@@ -381,7 +384,7 @@ void testing_spmv_bsr(Arguments argus)
                       hbsr_row_ptr_int.data(),
                       hbsr_col_ind_int.data(),
                       hbsr_val.data(),
-                      static_cast<int>(block_dim),
+                      static_cast<int>(blockDim),
                       hx.data(),
                       h_beta,
                       hy_gold.data(),
@@ -416,11 +419,11 @@ void testing_spmv_bsr(Arguments argus)
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
-        double gflop_count = spmv_gflop_count(static_cast<J>(mb * block_dim),
-                                              static_cast<I>(nnzb * block_dim * block_dim),
+        double gflop_count = spmv_gflop_count(static_cast<J>(mb * blockDim),
+                                              static_cast<I>(nnzb * blockDim * blockDim),
                                               h_beta != make_DataType<T>(0.0));
         double gbyte_count
-            = bsrmv_gbyte_count<T>(mb, nb, nnzb, block_dim, h_beta != make_DataType<T>(0.0));
+            = bsrmv_gbyte_count<T>(mb, nb, nnzb, blockDim, h_beta != make_DataType<T>(0.0));
 
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
@@ -430,7 +433,7 @@ void testing_spmv_bsr(Arguments argus)
                             display_key_t::N,
                             n,
                             display_key_t::block_dim,
-                            block_dim,
+                            blockDim,
                             display_key_t::direction,
                             hipsparse_direction2string(block_dir),
                             display_key_t::nnzb,

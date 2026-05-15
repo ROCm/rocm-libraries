@@ -494,67 +494,71 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
 }
 #endif
 
-#if (CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 12011)
 hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
                                      int64_t                mb,
                                      int64_t                nb,
                                      int64_t                nnzb,
-                                     hipsparseDirection_t   blockDir,
-                                     int64_t                blockDim,
+                                     int64_t                rowBlockDim,
+                                     int64_t                colBlockDim,
                                      void*                  bsrRowPtr,
                                      void*                  bsrColInd,
                                      void*                  bsrValues,
                                      hipsparseIndexType_t   bsrRowPtrType,
                                      hipsparseIndexType_t   bsrColIndType,
                                      hipsparseIndexBase_t   idxBase,
-                                     hipDataType            valueType)
+                                     hipDataType            valueType,
+                                     hipsparseOrder_t       order)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateBsr((cusparseSpMatDescr_t*)spMatDescr,
                           mb,
                           nb,
                           nnzb,
-                          hipsparse::hipDirectionToCudaDirection(blockDir),
-                          blockDim,
+                          rowBlockDim,
+                          colBlockDim,
                           bsrRowPtr,
                           bsrColInd,
                           bsrValues,
                           hipsparse::hipIndexTypeToCudaIndexType(bsrRowPtrType),
                           hipsparse::hipIndexTypeToCudaIndexType(bsrColIndType),
                           hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                          hipsparse::hipDataTypeToCudaDataType(valueType)));
+                          hipsparse::hipDataTypeToCudaDataType(valueType),
+                          hipsparse::hipOrderToCudaOrder(order)));
 }
 #endif
 
-#if (CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 12011)
 hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
                                           int64_t                     mb,
                                           int64_t                     nb,
                                           int64_t                     nnzb,
-                                          hipsparseDirection_t        blockDir,
-                                          int64_t                     blockDim,
+                                          int64_t                     rowBlockDim,
+                                          int64_t                     colBlockDim,
                                           const void*                 bsrRowPtr,
                                           const void*                 bsrColInd,
                                           const void*                 bsrValues,
                                           hipsparseIndexType_t        bsrRowPtrType,
                                           hipsparseIndexType_t        bsrColIndType,
                                           hipsparseIndexBase_t        idxBase,
-                                          hipDataType                 valueType)
+                                          hipDataType                 valueType,
+                                          hipsparseOrder_t            order)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCreateConstBsr((cusparseConstSpMatDescr_t*)spMatDescr,
                                mb,
                                nb,
                                nnzb,
-                               hipsparse::hipDirectionToCudaDirection(blockDir),
-                               blockDim,
+                               rowBlockDim,
+                               colBlockDim,
                                bsrRowPtr,
                                bsrColInd,
                                bsrValues,
                                hipsparse::hipIndexTypeToCudaIndexType(bsrRowPtrType),
                                hipsparse::hipIndexTypeToCudaIndexType(bsrColIndType),
                                hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                               hipsparse::hipDataTypeToCudaDataType(valueType)));
+                               hipsparse::hipDataTypeToCudaDataType(valueType),
+                               hipsparse::hipOrderToCudaOrder(order)));
 }
 #endif
 

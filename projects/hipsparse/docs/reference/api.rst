@@ -140,8 +140,6 @@ Auxiliary functions
 +------------------------------------------+
 |:cpp:func:`hipsparseBlockedEllGet`        |
 +------------------------------------------+
-|:cpp:func:`hipsparseBsrGet`               |
-+------------------------------------------+
 |:cpp:func:`hipsparseCsrSetPointers`       |
 +------------------------------------------+
 |:cpp:func:`hipsparseCscSetPointers`       |

@@ -329,11 +329,6 @@ hipsparseBlockedEllGet()
 
 .. doxygenfunction:: hipsparseBlockedEllGet
 
-hipsparseBsrGet()
-=================
-
-.. doxygenfunction:: hipsparseBsrGet
-
 hipsparseCsrSetPointers()
 =========================
 
