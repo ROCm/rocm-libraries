@@ -25,17 +25,20 @@ namespace ck_tile::core::arch::mma {
  * accumulates results into output WaveTile (C: WaveTileM x WaveTileN).
  * Like WaveWiseMmaPipeline, this decomposes WaveTile dimensions into fragments and iterates
  * internally over FragsM x FragsN x FragsK, passing per-wave scale factors to each fragment call.
- * @tparam ADataType_     Data type of input WaveTile A
- * @tparam BDataType_     Data type of input WaveTile B
- * @tparam CDataType_     Data type of input/output WaveTile C (accumulator)
- * @tparam WaveTileM      Mma WaveTile M dimension
- * @tparam WaveTileN      Mma WaveTile N dimension
- * @tparam WaveTileK      Mma WaveTile K dimension
- * @tparam AccumPolicy    The fragment order of the accum. registers (row or col major frag order)
- * @tparam CTranspose     Swaps A and B input vectors
- * @tparam CompilerTarget The compiler target
- * @tparam MmaOp_         Backend wrapper class that will perform the mma op
- * @tparam MmaTransforms  The set of transforms to be applied to input/output WaveTiles
+ * @tparam ADataType_      Data type of input WaveTile A
+ * @tparam BDataType_      Data type of input WaveTile B
+ * @tparam CDataType_      Data type of input/output WaveTile C (accumulator)
+ * @tparam WaveTileM       Mma WaveTile M dimension
+ * @tparam WaveTileN       Mma WaveTile N dimension
+ * @tparam WaveTileK       Mma WaveTile K dimension
+ * @tparam AccumPolicy     The fragment order of the accum. registers (row or col major frag order)
+ * @tparam CTranspose       Swaps A and B input vectors and interprets C with transposed layout.
+ * @tparam SwizzleFactor   Swizzlefactor for Tile Distribution Encoding calculation.
+ * @tparam AttrNumAccessAV Extra unmerge factor for vector dimension for A vec, see amdgcn_mma.hpp.
+ * @tparam AttrNumAccessBV Extra unmerge factor for vector dimension for B vec, see amdgcn_mma.hpp.
+ * @tparam CompilerTarget  The compiler target
+ * @tparam MmaOp_          Backend wrapper class that will perform the mma op
+ * @tparam MmaTransforms   The set of transforms to be applied to input/output WaveTiles
  */
 template <typename ADataType_,
           typename BDataType_,
@@ -45,6 +48,9 @@ template <typename ADataType_,
           uint32_t WaveTileK,
           MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
           bool CTranspose            = false,
+          index_t SwizzleFactor      = 1,
+          index_t AttrNumAccessAV    = 1,
+          index_t AttrNumAccessBV    = AttrNumAccessAV,
           typename CompilerTarget =
               decltype(getCMakeCompilerTarget()), // TODO: c++20 amdgcn_target_arch_id GfxTargetId =
                                                   // get_compiler_target(),
@@ -61,9 +67,9 @@ template <typename ADataType_,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp_, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, CompilerTarget, MmaOp_, MmaTransforms>>
+struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, CompilerTarget, MmaOp_, MmaTransforms>>;
+    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
 
     using MmaOp = MmaOp_; // Expose the selected MmaOp
@@ -75,10 +81,6 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
     static_assert(std::is_same_v<ADataType, ADataType_>);
     static_assert(std::is_same_v<BDataType, BDataType_>);
     static_assert(std::is_same_v<CDataType, CDataType_>);
-
-    // TODO: Check where this should come from.
-    static constexpr index_t ABNumAccess   = 2;
-    static constexpr index_t SwizzleFactor = 1;
 
     // WaveTile dimensions (Used to be fragment dims but higher level expects these to include k
     // iteration!)
@@ -112,9 +114,13 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
     };
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
-    // A layout.
-    using EncCalc =
-        TileDistrEncCalc<MmaOp, CTranspose, SwizzleFactor, FragsK, ABNumAccess, ABNumAccess>;
+    // A layout. No Swizzle support yet.
+    using EncCalc           = TileDistrEncCalc<MmaOp,
+                                               CTranspose,
+                                               SwizzleFactor,
+                                               FragsK,
+                                               AttrNumAccessAV,
+                                               AttrNumAccessBV>;
     using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
     using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
     using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;

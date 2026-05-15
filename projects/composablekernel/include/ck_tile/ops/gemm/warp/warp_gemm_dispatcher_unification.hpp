@@ -29,7 +29,10 @@ static constexpr auto EQuad   = WGAttrNumAccessEnum::Quad;
 using namespace ck_tile::core::arch;
 using namespace mma;
 
-// We need to make sure that we don't try to evaluate invalid Scale or Wavewise pipelines...
+// This is a bit awkward but we need to be able to select the appropriate Mma Pipeline (dense,
+// sparse, scale) based on some constexpr calculations in the UnificationDispatcher, without
+// exposing the wrong path to the compiler, which may end up being ill-formed (if we were to use a
+// simple "if constexpr" instead of TMP).
 template <bool IsMx,
           typename AType,
           typename BType,
@@ -37,7 +40,11 @@ template <bool IsMx,
           index_t M,
           index_t N,
           index_t K,
-          bool TransposeC>
+          MmaAccumPolicy AccumPolicy,
+          bool TransposeC,
+          index_t SwizzleFactor,
+          index_t AttrNumAccessAV,
+          index_t AttrNumAccessBV>
 struct MmaPipelineSelector;
 
 template <typename AType,
@@ -46,8 +53,23 @@ template <typename AType,
           index_t M,
           index_t N,
           index_t K,
-          bool TransposeC>
-struct MmaPipelineSelector<true, AType, BType, AccType, M, N, K, TransposeC>
+          MmaAccumPolicy AccumPolicy,
+          bool TransposeC,
+          index_t SwizzleFactor,
+          index_t AttrNumAccessAV,
+          index_t AttrNumAccessBV>
+struct MmaPipelineSelector<true,
+                           AType,
+                           BType,
+                           AccType,
+                           M,
+                           N,
+                           K,
+                           AccumPolicy,
+                           TransposeC,
+                           SwizzleFactor,
+                           AttrNumAccessAV,
+                           AttrNumAccessBV>
 {
     using Type = ScaleMmaPipeline<AType,
                                   BType,
@@ -55,9 +77,11 @@ struct MmaPipelineSelector<true, AType, BType, AccType, M, N, K, TransposeC>
                                   M,
                                   N,
                                   K,
-                                  MmaAccumPolicy::ROW_MAJOR, // Always ROW_MAJOR for now, we don't
-                                                             // allow MN composition.
-                                  TransposeC>;
+                                  AccumPolicy,
+                                  TransposeC,
+                                  SwizzleFactor,
+                                  AttrNumAccessAV,
+                                  AttrNumAccessBV>;
 };
 
 template <typename AType,
@@ -66,8 +90,23 @@ template <typename AType,
           index_t M,
           index_t N,
           index_t K,
-          bool TransposeC>
-struct MmaPipelineSelector<false, AType, BType, AccType, M, N, K, TransposeC>
+          MmaAccumPolicy AccumPolicy,
+          bool TransposeC,
+          index_t SwizzleFactor,
+          index_t AttrNumAccessAV,
+          index_t AttrNumAccessBV>
+struct MmaPipelineSelector<false,
+                           AType,
+                           BType,
+                           AccType,
+                           M,
+                           N,
+                           K,
+                           AccumPolicy,
+                           TransposeC,
+                           SwizzleFactor,
+                           AttrNumAccessAV,
+                           AttrNumAccessBV>
 {
     using Type = WaveWiseMmaPipeline<AType,
                                      BType,
@@ -75,10 +114,11 @@ struct MmaPipelineSelector<false, AType, BType, AccType, M, N, K, TransposeC>
                                      M,
                                      N,
                                      K,
-                                     MmaOpFamily::DENSE,
-                                     MmaAccumPolicy::ROW_MAJOR, // Always ROW_MAJOR for now, we
-                                                                // don't allow MN composition.
-                                     TransposeC>;
+                                     AccumPolicy,
+                                     TransposeC,
+                                     SwizzleFactor,
+                                     AttrNumAccessAV,
+                                     AttrNumAccessBV>;
 };
 
 template <typename AType,
@@ -103,7 +143,8 @@ struct UnificationDispatcher
     static constexpr bool IsMx =
         (IsMxSized && std::is_same_v<AccType, float> && UseStructuredSparsity == false);
 
-    // General checks.
+    // General checks. Swizzle not supported yet. Structured sparsity Mma pipeline not adapted to
+    // UnificationDispatcher yet since we have no sparse tests or examples in CK Tile.
     static_assert(SwizzleA == false);
     static_assert(UseStructuredSparsity == false);
 
@@ -116,16 +157,29 @@ struct UnificationDispatcher
     static_assert(IsMx || AttrNumAccessA == ESingle);
     static_assert(IsMx || AttrNumAccessB == ESingle);
 
-    // static_assert(!IsMx);
+    // Convert SwizzleA bool to SwizzleFactor. This used to be hardcoded in a number of places in
+    // the original dispatcher / warpgemms, generally using a factor of 2 if swizzling was
+    // requested but not always. TODO: Check original usage for correct swizzle factors.
+    static constexpr index_t SwizzleFactor = SwizzleA ? 2 : 1;
 
-    using Type = typename MmaPipelineSelector<IsMx,
-                                              AType,
-                                              BType,
-                                              AccType,
-                                              MPerWave,
-                                              NPerWave,
-                                              KPerWave,
-                                              TransposeC>::Type;
+    // Convert WGAttrNumAccessEnums to index_t values.
+    static constexpr index_t AttrNumAccessAV = get_wgattr_num_access<AttrNumAccessA>::value;
+    static constexpr index_t AttrNumAccessBV = get_wgattr_num_access<AttrNumAccessB>::value;
+
+    using Type =
+        typename MmaPipelineSelector<IsMx,
+                                     AType,
+                                     BType,
+                                     AccType,
+                                     MPerWave,
+                                     NPerWave,
+                                     KPerWave,
+                                     MmaAccumPolicy::ROW_MAJOR, // Always ROW_MAJOR for now, we
+                                                                // don't allow MN composition.
+                                     TransposeC,
+                                     SwizzleFactor,
+                                     AttrNumAccessAV,
+                                     AttrNumAccessBV>::Type;
 };
 
 // clang-format on

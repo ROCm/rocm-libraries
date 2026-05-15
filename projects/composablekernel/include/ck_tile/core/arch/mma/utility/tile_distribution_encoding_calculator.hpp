@@ -19,27 +19,27 @@ namespace ck_tile::core::arch::mma {
  * @tparam CTranspose     Whether we are using CTranspose.
  * @tparam SFactor        Swizzle factor. Not implemented.
  * @tparam kIter          K composition factor (consecutive intrinsic calls to form larger k dim).
- * @tparam AttrNumAccessA Requested NumAccess for the A matrix. Must be multiple of "fundamental"
+ * @tparam AttrNumAccessAV Requested NumAccess for the A matrix. Must be multiple of "fundamental"
  *                        NumAccess for intrinsic. See details in amdgcn_mma.hpp.
- * @tparam AttrNumAccessB Requested NumAccess for the B matrix.
+ * @tparam AttrNumAccessBV Requested NumAccess for the B matrix.
  */
 template <typename MmaOp,
-          bool CTranspose        = false,
-          index_t SFactor        = 1,
-          index_t kIter          = 1,
-          index_t AttrNumAccessA = MmaOp::kAKNumAccess,
-          index_t AttrNumAccessB = MmaOp::kBKNumAccess>
+          bool CTranspose         = false,
+          index_t SFactor         = 1,
+          index_t kIter           = 1,
+          index_t AttrNumAccessAV = MmaOp::kAKNumAccess,
+          index_t AttrNumAccessBV = MmaOp::kBKNumAccess>
 struct TileDistrEncCalc
 {
     private:
-    static constexpr index_t NumAccessA = std::max(MmaOp::kAKNumAccess, AttrNumAccessA);
-    static constexpr index_t NumAccessB = std::max(MmaOp::kBKNumAccess, AttrNumAccessB);
+    static constexpr index_t NumAccessA = std::max(MmaOp::kAKNumAccess, AttrNumAccessAV);
+    static constexpr index_t NumAccessB = std::max(MmaOp::kBKNumAccess, AttrNumAccessBV);
 
     // We are free to choose any NumAccess value to manipulate the load / store behavior, unless the
     // intrinsic fundamentally requires a base NumAccess factor for the layout to be correct.
-    static_assert(AttrNumAccessA % MmaOp::kAKNumAccess == 0,
+    static_assert(AttrNumAccessAV % MmaOp::kAKNumAccess == 0,
                   "Requesting NumAccessA incompatible with builtin.");
-    static_assert(AttrNumAccessB % MmaOp::kBKNumAccess == 0,
+    static_assert(AttrNumAccessBV % MmaOp::kBKNumAccess == 0,
                   "Requesting NumAccessB incompatible with builtin.");
 
     static_assert(MmaOp::kABKPerLane %

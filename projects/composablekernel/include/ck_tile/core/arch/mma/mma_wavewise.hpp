@@ -43,17 +43,20 @@ constexpr inline int getPipelineFlags()
  * (e.g., mfma or wmma), this class performs fragment-wise (MmaTile) decomposition to
  * matrix-multiply input WaveTiles of (A: WaveTileM x WaveTileK) x (B: WaveTileK x WaveTileN) and
  * accumulates results into output WaveTile (C: WaveTileM x WaveTileN).
- * @tparam ADataType_     Data type of input WaveTile A
- * @tparam BDataType_     Data type of input WaveTile B
- * @tparam CDataType_     Data type of input/output WaveTile C (accumulator)
- * @tparam WaveTileM      Mma WaveTile M dimension
- * @tparam WaveTileN      Mma WaveTile K dimension
- * @tparam WaveTileK      Mma WaveTile M dimension
- * @tparam AccumPolicy    The fragment order of the accum. registers (row or col major frag order)
- * @tparam CTranspose     Swaps A and B input vectors
- * @tparam CompilerTarget The compiler target
- * @tparam MmaOp_         Backend wrapper class that will perform the mma op (e.g., mfma or wmma)
- * @tparam MmaTransforms  The set of transforms to be applied to input/output WaveTiles
+ * @tparam ADataType_      Data type of input WaveTile A
+ * @tparam BDataType_      Data type of input WaveTile B
+ * @tparam CDataType_      Data type of input/output WaveTile C (accumulator)
+ * @tparam WaveTileM       Mma WaveTile M dimension
+ * @tparam WaveTileN       Mma WaveTile K dimension
+ * @tparam WaveTileK       Mma WaveTile M dimension
+ * @tparam AccumPolicy     The fragment order of the accum. registers (row or col major frag order)
+ * @tparam CTranspose      Swaps A and B input vectors and interprets C with transposed layout.
+ * @tparam SwizzleFactor   SwizzleFactor for Tile Distribution Encoding calculation.
+ * @tparam AttrNumAccessAV Extra unmerge factor for vector dimension for A vec, see amdgcn_mma.hpp.
+ * @tparam AttrNumAccessBV Extra unmerge factor for vector dimension for B vec, see amdgcn_mma.hpp.
+ * @tparam CompilerTarget  The compiler target
+ * @tparam MmaOp_          Backend wrapper class that will perform the mma op (e.g., mfma or wmma)
+ * @tparam MmaTransforms   The set of transforms to be applied to input/output WaveTiles
  * @par This is an example of an Mma decomposition driver class that can be used in a wave-tile
  * context. Given a WaveTile size, we can decompose the WaveTile into smaller mma op fragments
  * that are natively supported by the hardware (e.g., mfma or wmma). The class also supports
@@ -68,9 +71,11 @@ template <typename ADataType_,
           uint32_t WaveTileM,
           uint32_t WaveTileN,
           uint32_t WaveTileK,
-          MmaOpFamily OpFamily,
           MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
           bool CTranspose            = false,
+          index_t SwizzleFactor      = 1,
+          index_t AttrNumAccessAV    = 1,
+          index_t AttrNumAccessBV    = AttrNumAccessAV,
           typename CompilerTarget =
               decltype(getCMakeCompilerTarget()), // TODO: c++20 amdgcn_target_arch_id GfxTargetId =
                                                   // get_compiler_target(),
@@ -83,15 +88,13 @@ template <typename ADataType_,
                                           WaveTileN,
                                           WaveTileK,
                                           CompilerTarget,
-                                          OpFamily>::SelectedOp,
+                                          MmaOpFamily::DENSE>::SelectedOp,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp_, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<CTranspose>(),
-                                            WaveWiseMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, CTranspose, CompilerTarget, MmaOp_, MmaTransforms>>
+struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<CTranspose>(), WaveWiseMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<CTranspose>(),
-                                 WaveWiseMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, CTranspose, CompilerTarget, MmaOp_, MmaTransforms>>;
+    using Base = MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<CTranspose>(), WaveWiseMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
     using MmaOp = MmaOp_;
 
@@ -102,10 +105,6 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
     static_assert(std::is_same_v<ADataType, ADataType_>);
     static_assert(std::is_same_v<BDataType, BDataType_>);
     static_assert(std::is_same_v<CDataType, CDataType_>);
-
-    // TODO: Check where this should come from.
-    static constexpr index_t ABNumAccess   = 1;
-    static constexpr index_t SwizzleFactor = 1;
 
     // WaveTile dimensions (Used to be fragment dims but higher level expects these to include k
     // iteration!)
@@ -136,9 +135,13 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
     };
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
-    // A layout.
-    using EncCalc =
-        TileDistrEncCalc<MmaOp, CTranspose, SwizzleFactor, FragsK, ABNumAccess, ABNumAccess>;
+    // A layout. No Swizzle support yet.
+    using EncCalc           = TileDistrEncCalc<MmaOp,
+                                               CTranspose,
+                                               SwizzleFactor,
+                                               FragsK,
+                                               AttrNumAccessAV,
+                                               AttrNumAccessBV>;
     using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
     using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
     using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;
