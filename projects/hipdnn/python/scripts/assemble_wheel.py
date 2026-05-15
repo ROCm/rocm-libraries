@@ -58,17 +58,10 @@ def _hash_record(data):
 
 
 def _collect_package_files(package_dir):
-    """Walk the pure-Python package directory and yield (arcname, filepath) pairs."""
-    for dirpath, _, filenames in os.walk(package_dir):
-        for fname in sorted(filenames):
-            if fname.endswith((".pyc", "__pycache__")):
-                continue
-            filepath = os.path.join(dirpath, fname)
-            arcname = os.path.join(
-                _PACKAGE_NAME,
-                os.path.relpath(filepath, package_dir),
-            )
-            yield arcname, filepath
+    """Yield (arcname, filepath) for __init__.py only."""
+    init_path = os.path.join(package_dir, "__init__.py")
+    if os.path.isfile(init_path):
+        yield f"{_PACKAGE_NAME}/__init__.py", init_path
 
 
 def _build_metadata(version):
