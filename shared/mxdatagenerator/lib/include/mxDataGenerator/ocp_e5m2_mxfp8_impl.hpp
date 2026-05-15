@@ -4,6 +4,11 @@
 #pragma once
 #include "dataTypeInfo.hpp"
 
+inline uint8_t signedNaNMaskOcpE5m2Mxfp8(uint sign)
+{
+    return sign ? 0b11111111 : 0b01111111;
+}
+
 template <>
 inline bool isNaN<ocp_e5m2_mxfp8>(uint8_t const* scaleBytes,
                                   uint8_t const* dataBytes,
@@ -33,13 +38,14 @@ inline bool isNaNPacked<ocp_e5m2_mxfp8>(uint8_t const* scaleBytes,
 }
 
 template <>
-inline bool isInf<ocp_e5m2_mxfp8>(uint8_t const* scaleBytes [[maybe_unused]],
+inline bool isInf<ocp_e5m2_mxfp8>(uint8_t const* scaleBytes,
                                   uint8_t const* dataBytes,
-                                  index_t         scaleIndex [[maybe_unused]],
+                                  index_t         scaleIndex,
                                   index_t         dataIndex)
 {
+    if(scaleBytes[scaleIndex] == getScaleNan<ScaleType::E8M0>())
+        return false;
 
-    // No need to check the scale since it does not have an inf representation
     uint8_t data = *(dataBytes + dataIndex);
 
     //set the sign bit to zero as it does not matter
@@ -93,7 +99,10 @@ inline double toDouble<ocp_e5m2_mxfp8>(uint8_t const* scaleBytes,
         return std::numeric_limits<double>::quiet_NaN();
 
     if(isZero<ocp_e5m2_mxfp8>(scaleBytes, dataBytes, scaleIndex, dataIndex))
-        return 0.0f;
+    {
+        uint8_t data = *(dataBytes + dataIndex);
+        return std::copysign(0.0, data & ocp_e5m2_mxfp8::signBitMask ? -1.0 : 1.0);
+    }
 
     if(isInf<ocp_e5m2_mxfp8>(scaleBytes, dataBytes, scaleIndex, dataIndex))
     {
@@ -131,7 +140,10 @@ inline float toFloat<ocp_e5m2_mxfp8>(uint8_t const* scaleBytes,
         return std::numeric_limits<float>::quiet_NaN();
 
     if(isZero<ocp_e5m2_mxfp8>(scaleBytes, dataBytes, scaleIndex, dataIndex))
-        return 0.0f;
+    {
+        uint8_t data = *(dataBytes + dataIndex);
+        return std::copysign(0.0f, data & ocp_e5m2_mxfp8::signBitMask ? -1.0f : 1.0f);
+    }
 
     if(isInf<ocp_e5m2_mxfp8>(scaleBytes, dataBytes, scaleIndex, dataIndex))
     {
@@ -162,9 +174,11 @@ inline float toFloatPacked<ocp_e5m2_mxfp8>(uint8_t const* scaleBytes,
 template <>
 inline bool isSubnorm<ocp_e5m2_mxfp8>(uint8_t const* dataBytes, index_t dataIndex)
 {
-    uint8_t data = *(dataBytes + dataIndex);
-    return isSubNormal<uint8_t>(
+    uint8_t data     = *(dataBytes + dataIndex);
+    uint8_t exponent = getExponentValue<uint8_t>(
         data, ocp_e5m2_mxfp8::dataInfo.mantissaBits, ocp_e5m2_mxfp8::dataInfo.exponentBits);
+    uint8_t mantissa = data & ((1 << ocp_e5m2_mxfp8::dataInfo.mantissaBits) - 1);
+    return exponent == 0 && mantissa != 0;
 }
 
 template <>
@@ -231,7 +245,7 @@ inline uint64_t satConvertToType<ocp_e5m2_mxfp8>(float value)
     if(std::isnan(value))
     {
 
-        return sign << 15 | ocp_e5m2_mxfp8::dataNaNMasks[0];
+        return signedNaNMaskOcpE5m2Mxfp8(sign);
     }
 
     uint8_t res = convertToType<uint8_t, ocp_e5m2_mxfp8>(value);
@@ -246,7 +260,7 @@ inline uint64_t satConvertToType<ocp_e5m2_mxfp8>(float value)
                          : ocp_e5m2_mxfp8::dataMaxPositiveNormalMask;
 
     if(std::abs(resVal) < ocp_e5m2_mxfp8::dataMinSubNormalNumber)
-        return value < 0 ? ocp_e5m2_mxfp8::negativeZeroMask : ocp_e5m2_mxfp8::positiveZeroMask;
+        return sign ? ocp_e5m2_mxfp8::negativeZeroMask : ocp_e5m2_mxfp8::positiveZeroMask;
 
     return res;
 }
@@ -261,7 +275,7 @@ inline uint64_t nonSatConvertToType<ocp_e5m2_mxfp8>(float value)
     if(std::isnan(value))
     {
 
-        return sign << 15 | ocp_e5m2_mxfp8::dataNaNMasks[0];
+        return signedNaNMaskOcpE5m2Mxfp8(sign);
     }
 
     uint8_t res = convertToType<uint8_t, ocp_e5m2_mxfp8>(value);
@@ -274,7 +288,7 @@ inline uint64_t nonSatConvertToType<ocp_e5m2_mxfp8>(float value)
         return value < 0 ? ocp_e5m2_mxfp8::negativeInfMask : ocp_e5m2_mxfp8::positiveInfMask;
 
     if(std::abs(resVal) < ocp_e5m2_mxfp8::dataMinSubNormalNumber)
-        return value < 0 ? ocp_e5m2_mxfp8::negativeZeroMask : ocp_e5m2_mxfp8::positiveZeroMask;
+        return sign ? ocp_e5m2_mxfp8::negativeZeroMask : ocp_e5m2_mxfp8::positiveZeroMask;
 
     return res;
 }
@@ -286,7 +300,7 @@ inline uint64_t satConvertToTypeSR<ocp_e5m2_mxfp8>(float value, uint seed)
     t.num      = value;
     uint sign = t.bRep >> 31;
     if(std::isnan(value))
-        return sign << 15 | ocp_e5m2_mxfp8::dataNaNMasks[0];
+        return signedNaNMaskOcpE5m2Mxfp8(sign);
     else if(value > ocp_e5m2_mxfp8::dataMaxRoundedRange)
         return ocp_e5m2_mxfp8::dataMaxPositiveNormalMask;
     else if(value < -ocp_e5m2_mxfp8::dataMaxRoundedRange)
@@ -304,7 +318,7 @@ inline uint64_t satConvertToTypeSR<ocp_e5m2_mxfp8>(float value, uint seed)
                          : ocp_e5m2_mxfp8::dataMaxPositiveNormalMask;
 
     if(std::abs(resVal) < ocp_e5m2_mxfp8::dataMinSubNormalNumber)
-        return value < 0 ? ocp_e5m2_mxfp8::negativeZeroMask : ocp_e5m2_mxfp8::positiveZeroMask;
+        return sign ? ocp_e5m2_mxfp8::negativeZeroMask : ocp_e5m2_mxfp8::positiveZeroMask;
 
     return res;
 }
@@ -318,7 +332,7 @@ inline uint64_t nonSatConvertToTypeSR<ocp_e5m2_mxfp8>(float value, uint seed)
     uint sign = t.bRep >> 31;
 
     if(std::isnan(value))
-        return sign << 15 | ocp_e5m2_mxfp8::dataNaNMasks[0];
+        return signedNaNMaskOcpE5m2Mxfp8(sign);
     else if(value > ocp_e5m2_mxfp8::dataMaxRoundedRange)
         return ocp_e5m2_mxfp8::positiveInfMask;
     else if(value < -ocp_e5m2_mxfp8::dataMaxRoundedRange)
@@ -334,7 +348,7 @@ inline uint64_t nonSatConvertToTypeSR<ocp_e5m2_mxfp8>(float value, uint seed)
         return value < 0 ? ocp_e5m2_mxfp8::negativeInfMask : ocp_e5m2_mxfp8::positiveInfMask;
 
     if(std::abs(resVal) < ocp_e5m2_mxfp8::dataMinSubNormalNumber)
-        return value < 0 ? ocp_e5m2_mxfp8::negativeZeroMask : ocp_e5m2_mxfp8::positiveZeroMask;
+        return sign ? ocp_e5m2_mxfp8::negativeZeroMask : ocp_e5m2_mxfp8::positiveZeroMask;
 
     return res;
 }
