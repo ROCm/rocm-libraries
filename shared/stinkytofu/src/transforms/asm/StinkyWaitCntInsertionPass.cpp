@@ -433,6 +433,14 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             auto memOpDependencies = collectSources(inst, [](StinkyInstruction* src) {
                 return isDSMemoryOp(*src) || isBufferMemoryOp(*src);
             });
+
+            // WAR-on-LDS: an LDS writer (tensor_load_to_lds / ds_write) must wait
+            // for prior token-overlapping DS reads to drain.
+            if (isLdsWriterWithTokens(*inst)) {
+                auto warDeps = collectLdsWarDependencies(inst, bb, localState);
+                memOpDependencies.insert(warDeps.begin(), warDeps.end());
+            }
+
             if (memOpDependencies.empty()) {
                 continue;
             }
