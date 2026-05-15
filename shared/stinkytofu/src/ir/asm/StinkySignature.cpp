@@ -246,6 +246,23 @@ std::shared_ptr<BitfieldUnion> createSrdUpperValue(const std::array<int, 3>& isa
 }
 
 /***************************************
+ * gfx1250-Only SRD Upper Accessors (Public DSO Interface)
+ ***************************************/
+// Delegate to SrdUpperValue125X::staticInit() (line 187) and surface the
+// two primitives Tensilelite needs (packed value + human-readable
+// description). Keeping the public entry points primitive-typed lets us
+// EXPORT them without dragging the polymorphic BitfieldUnion base
+// across DSO boundaries — matching the export style established by
+// SignatureBase in StinkySignature.hpp.
+uint32_t getSrdUpperValue125X() {
+    return static_cast<uint32_t>(SrdUpperValue125X::staticInit().getValue());
+}
+
+std::string getSrdUpperDesc125X() {
+    return SrdUpperValue125X::staticInit().desc();
+}
+
+/***************************************
  * SignatureArgument
  ***************************************/
 const std::unordered_map<std::string, int> SignatureArgument::ValueTypeSizeDict = {

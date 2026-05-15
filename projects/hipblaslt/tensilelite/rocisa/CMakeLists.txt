@@ -133,13 +133,21 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     if(NOT TARGET stinkytofu::stinkytofu)
         find_package(stinkytofu QUIET)
         if(NOT stinkytofu_FOUND)
-            set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
-            if(IS_DIRECTORY "${_stinkytofu_sibling}")
+            set(STINKYTOFU_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+            if(EXISTS "${STINKYTOFU_DIR}/CMakeLists.txt")
+                set(BUILD_SHARED_LIBS ON)
                 set(STINKYTOFU_ENABLE_WERROR ON)
-                add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
+                
+                # From your branch (5018ae2bb1): Force the stinkytofu Python binding ON before we descend.
+                # Required because the rocisa->stinkytofu adapter needs the _stinkytofu.so nanobind module.
+                set(STINKYTOFU_BUILD_PYTHON ON CACHE BOOL
+                    "Build StinkyTofu Python bindings (required by ROCISA_BACKEND=stinkytofu adapter)"
+                    FORCE)
+                
+                add_subdirectory("${STINKYTOFU_DIR}" stinkytofu EXCLUDE_FROM_ALL)
                 set(_stinkytofu_from_subdirectory TRUE)
             else()
-                message(FATAL_ERROR "stinkytofu not found via find_package or sibling directory")
+                message(FATAL_ERROR "stinkytofu not found via find_package or sibling directory: ${STINKYTOFU_DIR}")
             endif()
         endif()
     endif()
@@ -247,6 +255,51 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
             OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_dll_dirs.py"
             CONTENT "DEP_DLLS = [p for p in r'''$<TARGET_RUNTIME_DLLS:_rocisa>'''.split(';') if p]\n"
         )
+
+    # ---------------------------------------------------------------------
+    # Sibling staging for the stinkytofu Python package.
+    # ---------------------------------------------------------------------
+    if(TARGET stinkytofu_python)
+        add_dependencies(_rocisa stinkytofu_python)
+
+        set_target_properties(stinkytofu_python PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
+            BUILD_RPATH "$ORIGIN"
+            INSTALL_RPATH "$ORIGIN"
+        )
+
+        set(STINKYTOFU_TOP_DIR "${STINKYTOFU_DIR}")
+        configure_file(
+            "${STINKYTOFU_DIR}/python_module/stinkytofu/__init__.py"
+            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/__init__.py"
+            COPYONLY
+        )
+        configure_file(
+            "${STINKYTOFU_DIR}/python_module/stinkytofu/_build_info.py.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/_build_info.py"
+            @ONLY
+        )
+
+        # -----------------------------------------------------------------
+        # intrinsics.st.bc — runtime bitcode loaded by IntrinsicRegistry
+        # -----------------------------------------------------------------
+        if(TARGET intrinsics_compiled)
+            add_dependencies(_rocisa intrinsics_compiled)
+
+            set(_intrinsics_bc_src "${CMAKE_BINARY_DIR}/intrinsics.st.bc")
+            set(_intrinsics_bc_dst "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/intrinsics.st.bc")
+            add_custom_command(
+                OUTPUT "${_intrinsics_bc_dst}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_intrinsics_bc_src}" "${_intrinsics_bc_dst}"
+                DEPENDS intrinsics_compiled "${_intrinsics_bc_src}"
+                COMMENT "Staging intrinsics.st.bc next to _stinkytofu.so"
+                VERBATIM
+            )
+            add_custom_target(rocisa_stage_intrinsics ALL
+                DEPENDS "${_intrinsics_bc_dst}")
+            add_dependencies(_rocisa rocisa_stage_intrinsics)
+        endif()
     endif()
 
     if(ROCISA_STANDALONE)

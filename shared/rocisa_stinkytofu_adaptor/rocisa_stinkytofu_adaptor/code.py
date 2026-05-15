@@ -27,13 +27,21 @@ What this file is:
     ``ValueSet``, ...).
 
 What it does (real):
-    - ``SrdUpperValue(isa)`` — workaround port of
-      ``rocisa::SrdUpperValue``. Returns a stub matching the
-      ``BitfieldUnion`` interface (``.desc()`` / ``.getValue()``); for
-      gfx1250 the SRD upper 32 bits are zero by ``staticInit`` (see
-      ``rocisa/include/code.hpp:1174-1260``), so the stub returns 0
-      byte-for-byte. Other ISAs fall through to the same stub today.
-      TODO: dispatch on ``IsaVersion`` when extending beyond gfx1250.
+    - ``SrdUpperValue(isa)`` — gfx1250-only wrapper backed by the
+      stinkytofu C++ free functions ``getSrdUpperValue125X`` /
+      ``getSrdUpperDesc125X`` (declared in
+      ``shared/stinkytofu/include/stinkytofu/ir/asm/StinkySignature.hpp``
+      next to ``SrdUpperValue125X``, implemented via
+      ``SrdUpperValue125X::staticInit()``). Returns a small wrapper
+      exposing rocisa's ``.getValue() / .desc() / .toString()`` API.
+
+      This is the first end-to-end "vertical slice" through
+      KernelWriter → rocisa_stinkytofu_adaptor → ``_stinkytofu.so``
+      (nanobind) → ``libstinkytofu.so`` (C++). Use the same recipe for
+      future shim entries that need to delegate to logicalIR.
+
+      Other ISAs are intentionally not supported today — the rocisa →
+      stinkytofu adapter is gfx1250-only.
 
 Not yet done (dummy):
     - Container nodes: ``Module``, ``KernelBody``, ``Label``,
@@ -41,6 +49,13 @@ Not yet done (dummy):
       ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif``, ``ValueSet``,
       ``RegSet``, ``BitfieldUnion``, ``SignatureCodeMeta``,
       ``SignatureBase``.
+
+Future:
+    When this shim grows beyond gfx1250, prefer adding sibling free
+    functions in ``StinkySignature.hpp`` (``getSrdUpperValue12XX`` …)
+    or surface a method on ``SignatureBase`` (already exported) rather
+    than re-exporting the polymorphic ``BitfieldUnion`` base across
+    DSO boundaries.
 
 logicalIR correspondence:
     ``StinkyAsmModule`` is the closest analogue at the *module* level
@@ -70,45 +85,78 @@ SignatureCodeMeta = make_dummy_class(f"{_P}.SignatureCodeMeta")
 SignatureBase = make_dummy_class(f"{_P}.SignatureBase")
 KernelBody = make_dummy_class(f"{_P}.KernelBody")
 
-class _Gfx1250SrdUpperStub:
-    """Workaround port of ``rocisa::SrdUpperValue125X::staticInit()`` for
-    gfx1250.
 
-    The gfx1250 SRD upper 32 bits are zero (see
-    ``rocisa/include/code.hpp:1174-1260``); the bitfield layout
-    (``num_records_upper`` / ``stride`` / ``oob_select`` / ...) is
-    gfx125X-specific and unrelated to gfx12XX. The stub returns 0 to
-    match the C++ default and reproduces the C++ ``desc()`` text format
-    so KernelWriter's ``addComment2`` prints byte-for-byte equivalent
-    output.
+# ---------------------------------------------------------------------------
+# logicalIR-backed: gfx1250 SRD upper accessor (the first end-to-end slice).
+#
+# Soft-import so this package itself stays importable even when
+# ``_stinkytofu.so`` hasn't been built yet (the rocisa dispatcher silently
+# falls back to native bindings on any adapter import failure; we don't
+# want that fallback triggered just because logicalIR is missing).
+# ``SrdUpperValue`` re-raises a clear actionable error on first use.
+# ---------------------------------------------------------------------------
+try:
+    from stinkytofu import (  # type: ignore[import-not-found]
+        getSrdUpperValue125X as _get_srd_upper_value_125x,
+        getSrdUpperDesc125X as _get_srd_upper_desc_125x,
+    )
 
-    TODO: replace with a real ``BitfieldUnion`` family when extending
-    beyond gfx1250 — at that point ``SrdUpperValue`` should dispatch on
-    ``IsaVersion`` (major / minor) like ``rocisa::SrdUpperValue`` does
-    in ``rocisa/src/code.cpp:56``.
+    _STINKYTOFU_IMPORT_ERR: "ImportError | None" = None
+except ImportError as _e:  # pragma: no cover - exercised only without a build
+    _get_srd_upper_value_125x = None
+    _get_srd_upper_desc_125x = None
+    _STINKYTOFU_IMPORT_ERR = _e
+
+
+class _Gfx1250SrdUpper:
+    """rocisa-shaped wrapper around the two gfx1250 free functions.
+
+    Tensile only reads ``.getValue() / .desc() / .toString()`` off
+    ``SrdUpperValue(IsaVersion)`` (see ``KernelWriterAssembly.py:1497``);
+    we expose exactly that surface and forward to logicalIR. Keeping
+    the wrapper on the Python side lets logicalIR's public C++ ABI
+    stay primitive-typed (no ``BitfieldUnion`` base crossing the DSO).
     """
 
-    def getValue(self) -> int:
-        return 0
+    __slots__ = ()
+
+    def getValue(self) -> int:  # noqa: N802 (matches rocisa public API)
+        return int(_get_srd_upper_value_125x())
 
     def desc(self) -> str:
-        return (
-            "hex: 0\n"
-            "num_records_upper (6b): 0\n"
-            "reserved (6b): 0\n"
-            "stride (14b): 0\n"
-            "stride_scale (2b): 0\n"
-            "swizzle_enable (1b): 0\n"
-            "oob_select (1b): 0\n"
-            "type (2b): 0"
-        )
+        return _get_srd_upper_desc_125x()
+
+    def toString(self) -> str:  # noqa: N802 (matches rocisa public API)
+        return f"0x{self.getValue():x}"
 
 
 def SrdUpperValue(isa):  # noqa: N802 (matches rocisa public API)
-    """Factory matching ``rocisa::SrdUpperValue(IsaVersion)``.
+    """Wrapper matching ``rocisa::SrdUpperValue(IsaVersion)`` for gfx1250.
 
-    Today every ISA gets the gfx1250 stub. Once we extend beyond
-    gfx1250, branch on ``isa.major / isa.minor`` here just like
-    ``rocisa/src/code.cpp:56-77``.
+    Accepts either a 3-tuple/list (``kernel["ISA"]``-style) or a struct
+    with ``.major / .minor / .stepping`` (rocisa's ``IsaVersion``).
+    Only ``(12, 5, *)`` is supported today; other ISAs raise
+    ``NotImplementedError`` deliberately — extending coverage should add
+    sibling free functions in ``StinkySignature.hpp`` rather than
+    re-exporting the polymorphic ``BitfieldUnion`` base.
     """
-    return _Gfx1250SrdUpperStub()
+    if _get_srd_upper_value_125x is None:
+        raise ImportError(
+            "rocisa_stinkytofu_adaptor.code.SrdUpperValue requires the "
+            "stinkytofu Python binding (_stinkytofu.so). Build it via:\n"
+            "  cmake --build <build_dir> --target stinkytofu_python\n"
+            "and ensure <build_dir>/lib is on PYTHONPATH.\n"
+            f"  Underlying error: {_STINKYTOFU_IMPORT_ERR}"
+        )
+    if hasattr(isa, "major"):
+        major, minor = int(isa.major), int(isa.minor)
+    else:
+        major, minor = int(isa[0]), int(isa[1])
+    if (major, minor) != (12, 5):
+        raise NotImplementedError(
+            f"rocisa_stinkytofu_adaptor.code.SrdUpperValue is gfx1250-only; "
+            f"got ISA major={major}, minor={minor}. Extend coverage by "
+            f"adding sibling free functions in "
+            f"shared/stinkytofu/include/stinkytofu/ir/asm/StinkySignature.hpp."
+        )
+    return _Gfx1250SrdUpper()

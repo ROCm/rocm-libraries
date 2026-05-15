@@ -235,6 +235,35 @@ struct SrdUpperValue125X : public BitfieldUnion {
 // Factory function to create appropriate SRD value based on ISA version
 std::shared_ptr<BitfieldUnion> createSrdUpperValue(const std::array<int, 3>& isa);
 
+// gfx1250-only public accessors for the SRD upper-32-bit literal.
+//
+// Tensilelite reads ``.getValue()`` / ``.desc()`` off the rocisa
+// ``BitfieldUnion`` return value (KernelWriterAssembly.py:1497) to embed
+// the SRD upper 32 bits into the kernel signature comment. The
+// ``rocisa_stinkytofu_adaptor`` shim needs the same two pieces of
+// information when ``ROCISA_BACKEND=stinkytofu`` is active.
+//
+// We expose them as ``STINKYTOFU_EXPORT`` free functions that return
+// primitives, deliberately following the same export style already used
+// by ``SignatureBase`` below (line 346) instead of EXPORT-ing the
+// polymorphic ``BitfieldUnion`` base struct (line 50). That keeps the
+// public DSO-stable surface narrow: only primitive-typed entry points
+// cross the library boundary; ``BitfieldUnion`` and the per-ISA
+// ``SrdUpperValue*X`` structs stay implementation-internal.
+//
+// Internally these delegate to ``SrdUpperValue125X::staticInit()`` (the
+// concrete gfx1250 layout, declared at line 223), reusing existing
+// logic without duplicating the bitfield computation in Python.
+//
+// Other gfx generations are intentionally not exposed today: the rocisa
+// → stinkytofu adapter is gfx1250-only for now (see
+// ``shared/rocisa_stinkytofu_adaptor/``). When extending coverage
+// either add sibling free functions (``getSrdUpperValue12XX`` …) or
+// surface the SRD upper through ``SignatureBase`` itself, which is
+// already exported.
+STINKYTOFU_EXPORT uint32_t getSrdUpperValue125X();
+STINKYTOFU_EXPORT std::string getSrdUpperDesc125X();
+
 /***************************************
  * Signature Argument
  ***************************************/
