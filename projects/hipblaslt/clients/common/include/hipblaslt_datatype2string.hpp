@@ -139,43 +139,6 @@ inline int blockSize(hipblaslt_scaling_format s)
     }
 }
 
-inline std::vector<size_t> preSwizzleSizeForScale(hipblaslt_scaling_format s)
-{
-    // Returns preSwizzleSize for scale as {swizzleTileMN, 256 / swizzleTileMN, matrixInstruction.k / scaleBlockSize}
-    switch(s)
-    {
-    // preSwizzleSize: {swizzleTileMN, 256 / swizzleTileMN, matrixInstruction.k / scaleBlockSize}
-    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
-        return {32, 8, 4};
-    default:
-        return {};
-    }
-}
-
-inline std::vector<size_t> preTileSizeForScaleA(hipblaslt_scaling_format s)
-{
-    // Returns preTile for scale A: {tileM, tileK}
-    switch(s)
-    {
-    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
-        return {32, 8};
-    default:
-        return {};
-    }
-}
-
-inline std::vector<size_t> preTileSizeForScaleB(hipblaslt_scaling_format s)
-{
-    // Returns preTile for scale B: {tileK, tileN}
-    switch(s)
-    {
-    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
-        return {8, 32};
-    default:
-        return {};
-    }
-}
-
 // Compute scale buffer size with padding for block-scaled MX formats.
 // dataRow, dataCol are the raw data matrix dimensions (A_row/A_col or B_row/B_col).
 // Scale dimensions are padded to ensure kernels that process data in 32-element (M/N)

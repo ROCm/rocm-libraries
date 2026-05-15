@@ -34,6 +34,8 @@
 #include "ClientProblemFactory.hpp"
 #include "Rotating.hpp"
 
+#include <mxDataGen.hpp>
+
 #include <cstddef>
 #include <random>
 
@@ -54,6 +56,14 @@ namespace TensileLite
                 || isMXFP4Tensor(problem.b(), problem.mxBlockB());
         }
 
+        // Generalised MX predicate. Used by initializeMXData (which drives
+        // mxDataGenerator for any supported MX side); the mapping from
+        // rocisa::DataType to hipDataType for the data generator lives in
+        // DataInitializationHelpers.hpp / namespace detail and currently
+        // supports {Float4, Float8, BFloat8}. isMXFP4* above is kept because
+        // ReferenceValidator's per-solution re-validation logic is still
+        // wired only to the FP4-subtile preswizzle case (no behaviour change
+        // for non-FP4 MX).
         inline bool isMXTensor(const TensorDescriptor& tensor, size_t mxBlock)
         {
             if(mxBlock == 0)
@@ -905,8 +915,12 @@ namespace TensileLite
                    && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty())
                 {
-                    bool isMX = isMXProblem(*m_currentGemmProblem);
-                    if(isMX)
+                    // Per-solution re-init is needed only for the gfx950 FP4 subtile
+                    // preswizzle case (the preswizzle layout depends on the solution's
+                    // matrix instruction). Non-FP4 MX dtypes use the K-swizzle path which
+                    // is solution-independent, so they don't need re-running here.
+                    bool isMXFP4 = isMXFP4Problem(*m_currentGemmProblem);
+                    if(isMXFP4)
                     {
                         initializeMXData(*m_currentGemmProblem);
                         copyValidToGPUBuffer(*m_currentGemmProblem);
@@ -1157,10 +1171,17 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
-            // True when the current GPU uses preswizzled MX scale layout (gfx950 subtile).
-            // False for architectures that use K-swizzle layout (e.g. gfx1250).
-            bool m_isMXPreswizzleArch = false;
-            // Set by initializeMXDataForFP4 when preswizzled scale was uploaded to gpuInput.valid.
+            // The MX scale tensor layout the current GPU's kernels expect.
+            //   kGFX950  -- preSwizzleScalesGFX950 -- gfx950 subtile.
+            //   kGFX1250 -- preSwizzleScalesGFX1250 (dimk) -- gfx1250 (and
+            //               other non-rocroller WMMA architectures).
+            //   kNone    -- the user did not request an MX scale format
+            //               (`--mx-scale-format=0`); no swizzle is applied.
+            // Set once at construction time from `gcnArchName`.
+            MXScaleLayout m_mxScaleLayout = MXScaleLayout::kNone;
+            // Set by initializeMXData when a preswizzled scale was uploaded
+            // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
+            // hand back gpuInput.valid as-is rather than re-swizzling).
             bool m_mxPreswizzledA = false;
             bool m_mxPreswizzledB = false;
         };

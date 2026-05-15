@@ -61,9 +61,6 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
     std::vector<uint8_t> dataBuffer(numPacked, 0);
     std::vector<uint8_t> scaleBuffer(numScales, 0);
 
-    std::vector<size_t> emptySwizzle;
-    std::vector<size_t> emptyTile;
-
     generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     HIP_R_8F_UE8M0,
                     dataBuffer.data(),
@@ -72,11 +69,10 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
                     cols,
                     rows, // stride = rows (column-major)
                     isTranspose,
-                    emptySwizzle,
-                    emptyTile,
                     mxBlock,
                     1,
                     true,
+                    MXScaleLayout::kNone,
                     "Bounded",
                     -1.0f,
                     1.0f);
@@ -130,19 +126,17 @@ TEST_P(MXGeneratorDeterminismTest, GeneratorOutputIsDeterministic)
     std::vector<uint8_t> scale1(numScales, 0x00);
     std::vector<uint8_t> scale2(numScales, 0xFF); // sentinel: catches no-write if scale1==scale2 passes
 
-    std::vector<size_t> emptySwizzle, emptyTile;
-
     generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
                     data1.data(), scale1.data(),
                     rows, cols, rows, isTranspose,
-                    emptySwizzle, emptyTile,
-                    mxBlock, 1, isMatrixA, "Bounded", -1.f, 1.f);
+                    mxBlock, 1, isMatrixA,
+                    MXScaleLayout::kNone, "Bounded", -1.f, 1.f);
 
     generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
                     data2.data(), scale2.data(),
                     rows, cols, rows, isTranspose,
-                    emptySwizzle, emptyTile,
-                    mxBlock, 1, isMatrixA, "Bounded", -1.f, 1.f);
+                    mxBlock, 1, isMatrixA,
+                    MXScaleLayout::kNone, "Bounded", -1.f, 1.f);
 
     EXPECT_EQ(data1, data2)
         << "FP4 data is non-deterministic";
@@ -170,11 +164,10 @@ INSTANTIATE_TEST_SUITE_P(
 // ============================================================================
 // PreSwizzle scale tests
 //
-// Verify generateMXInput with preSwizzle produces scale data that is a
-// permutation of the unswizzled layout. gfx950 FP4 MX kernels expect:
-//   preSwizzle = {swizzleTileMN=32, tileK=8, subTileK=MiK/mxBlock}
-//   preTile    = {tileK=8, swizzleTileMN=32}
-// swizzleTileMN=32 is fixed (2 SIMDs * 16 lanes); subTileK=4 for MiK=128, mxBlock=32.
+// Verify generateMXInput with MXScaleLayout::kGFX950 produces scale data
+// that is a permutation of the unswizzled (kNone) layout. The actual
+// swizzle parameters (swizzleTileMN=32, tileK=8, subTileK=MiK/mxBlock) are
+// hard-coded inside `generateMXInput` -- callers just pick the layout.
 // ============================================================================
 
 // Params: {rows, cols, mxBlock, isTranspose, isMatrixA}
@@ -183,13 +176,10 @@ class MXPreSwizzleTest
 {
 };
 
-/** @brief Verify preSwizzle produces a non-trivial permutation of scale data. */
+/** @brief Verify the gfx950 swizzle produces a non-trivial permutation of scale data. */
 TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
 {
     auto [rows, cols, mxBlock, isTranspose, isMatrixA] = GetParam();
-
-    const std::vector<size_t> preSwizzle = {32, 8, 4};
-    const std::vector<size_t> preTile    = {8, 32};
 
     const uint64_t numElements  = rows * cols;
     const uint64_t numPacked    = (numElements + 1) / 2;
@@ -206,8 +196,8 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
                     scaleNoShuf.data(),
                     rows, cols, rows,
                     isTranspose,
-                    {}, {},
                     mxBlock, 1, isMatrixA,
+                    MXScaleLayout::kNone,
                     "Bounded", -1.0f, 1.0f);
 
     // Generate with preSwizzle
@@ -216,8 +206,8 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
                     scaleShuf.data(),
                     rows, cols, rows,
                     isTranspose,
-                    preSwizzle, preTile,
                     mxBlock, 1, isMatrixA,
+                    MXScaleLayout::kGFX950,
                     "Bounded", -1.0f, 1.0f);
 
     // The scale buffers must be different

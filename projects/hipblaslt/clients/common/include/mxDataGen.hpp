@@ -26,10 +26,33 @@
 
 #pragma once
 
-// All content below is gated so the header is harmless to include when the
-// feature is disabled (the entire translation unit collapses to nothing).
-// Callers that actually invoke `generateMXInput` must guard their use sites
-// on the same macro.
+// Pure-value enums declared outside the HIPBLASLT_ENABLE_MXDATAGENERATOR guard
+// so widely-included headers can hold them as member variables without
+// transitively dragging in HIP / hipblaslt when the feature is disabled.
+
+// Cpu = host PRNG, host pointers (deterministic baseline).
+// Gpu = device PRNG into device pointers; reference float is read back from
+// the device buffer. Layouts that need PRNG rearrangement
+// (getAlignedFloat) silently fall back to the CPU path; only
+// (isMatrixA == isTranspose) actually exercises the GPU PRNG.
+enum class MXInitDevice
+{
+    Cpu = 0,
+    Gpu = 1,
+};
+
+// Scale tensor memory layout left in the `scale` buffer.
+//   kNone    : natural mxDataGenerator layout (no swizzle).
+//   kGFX950  : preSwizzleScalesGFX950 layout for gfx950 subtile kernels.
+//   kGFX1250 : preSwizzleScalesGFX1250 (dimk) layout for gfx1250 +
+//              non-rocroller WMMA kernels.
+enum class MXScaleLayout
+{
+    kNone    = 0,
+    kGFX950  = 1,
+    kGFX1250 = 2,
+};
+
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 #include <hip/hip_bfloat16.h>
@@ -41,21 +64,24 @@
 #include <string_view>
 #include <vector>
 
-std::vector<float> generateMXInput(hipDataType                dataType,
-                                   hipDataType                scaleType,
-                                   void*                      data,
-                                   void*                      scale,
-                                   uint64_t                   row,
-                                   uint64_t                   col,
-                                   uint64_t                   stride,
-                                   bool                       isTranspose,
-                                   const std::vector<size_t>& preSwizzleTile,
-                                   const std::vector<size_t>& preTile,
-                                   int const                  scaleBlockRowSize,
-                                   int const                  scaleBlockColSize,
-                                   bool                       isMatrixA,
-                                   std::string_view const     initMethod = "Bounded",
-                                   float                      min_val    = -1.0f,
-                                   float                      max_val    = 1.0f);
+// `scaleLayout` selects the post-generation scale memory layout. `initDevice`
+// selects the host vs device PRNG path; with MXInitDevice::Gpu, data/scale
+// must be device pointers (see MXInitDevice for full semantics).
+std::vector<float> generateMXInput(hipDataType            dataType,
+                                   hipDataType            scaleType,
+                                   void*                  data,
+                                   void*                  scale,
+                                   uint64_t               row,
+                                   uint64_t               col,
+                                   uint64_t               stride,
+                                   bool                   isTranspose,
+                                   int const              scaleBlockRowSize,
+                                   int const              scaleBlockColSize,
+                                   bool                   isMatrixA,
+                                   MXScaleLayout          scaleLayout = MXScaleLayout::kNone,
+                                   std::string_view const initMethod  = "Bounded",
+                                   float                  min_val     = -1.0f,
+                                   float                  max_val     = 1.0f,
+                                   MXInitDevice           initDevice  = MXInitDevice::Cpu);
 
 #endif
