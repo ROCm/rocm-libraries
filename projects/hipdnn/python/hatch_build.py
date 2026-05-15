@@ -37,7 +37,9 @@ class CustomBuildHook(BuildHookInterface):
         prebuilt = os.environ.get("HIPDNN_PREBUILT_SO")
         if prebuilt:
             if not os.path.isfile(prebuilt):
-                raise RuntimeError(f"HIPDNN_PREBUILT_SO points to missing file: {prebuilt}")
+                raise RuntimeError(
+                    f"HIPDNN_PREBUILT_SO points to missing file: {prebuilt}"
+                )
             return prebuilt
         return self._compile_extension()
 
@@ -47,8 +49,10 @@ class CustomBuildHook(BuildHookInterface):
 
         cmake_args = [
             "cmake",
-            "-S", self.root,
-            "-B", build_dir,
+            "-S",
+            self.root,
+            "-B",
+            build_dir,
             "-DCMAKE_BUILD_TYPE=Release",
         ]
 

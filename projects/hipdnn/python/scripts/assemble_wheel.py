@@ -116,9 +116,15 @@ def assemble(so_path, package_dir, output_dir, version):
         so_data = open(so_path, "rb").read()
         info = zipfile.ZipInfo(so_arcname)
         info.compress_type = zipfile.ZIP_STORED
-        info.external_attr = (stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
-                              stat.S_IRGRP | stat.S_IXGRP |
-                              stat.S_IROTH | stat.S_IXOTH) << 16
+        info.external_attr = (
+            stat.S_IRUSR
+            | stat.S_IWUSR
+            | stat.S_IXUSR
+            | stat.S_IRGRP
+            | stat.S_IXGRP
+            | stat.S_IROTH
+            | stat.S_IXOTH
+        ) << 16
         whl.writestr(info, so_data)
         h, sz = _hash_record(so_data)
         records.append((so_arcname, h, sz))
@@ -160,7 +166,9 @@ def assemble(so_path, package_dir, output_dir, version):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--so-path", required=True, help="Path to compiled .so")
-    parser.add_argument("--package-dir", required=True, help="Path to pure-Python package dir")
+    parser.add_argument(
+        "--package-dir", required=True, help="Path to pure-Python package dir"
+    )
     parser.add_argument("--output-dir", required=True, help="Directory for output .whl")
     parser.add_argument("--version", default=_DEFAULT_VERSION, help="Package version")
     args = parser.parse_args()
