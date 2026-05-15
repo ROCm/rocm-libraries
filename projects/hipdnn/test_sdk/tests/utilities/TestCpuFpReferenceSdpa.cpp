@@ -415,6 +415,76 @@ TEST(TestCpuFpReferenceSdpaFp64, CausalMask)
     EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), expSq2, 1e-5);
 }
 
+TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSkv)
+{
+    // Verify that correct values are being masked when seqKv is greater than seqQ
+    // Expected mask
+    //    ___kv____
+    // q | 1 1 1 0
+    //   | 1 1 1 1
+
+    Tensor<double> q({1, 1, 2, 1});
+    Tensor<double> k({1, 1, 4, 1});
+    Tensor<double> v({1, 1, 4, 1});
+    Tensor<double> o({1, 1, 2, 1});
+
+    // q = {0.0, 0.0}
+    q.fillWithValue(0.0);
+
+    // k = {0.0, 0.0, 0.0, 0.0}
+    k.fillWithValue(0.0);
+
+    // v = {1.0, 2.0, 3.0, 4.0}
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 1, 0);
+    v.setHostValue(3.0, 0, 0, 2, 0);
+    v.setHostValue(4.0, 0, 0, 3, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, -1, 0, /*topLeftAlignment=*/false);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 6.0 / 3.0, 1e-5); // Rightmost value should be masked
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0),
+                10.0 / 4.0,
+                1e-5); // Rightmost value shouldn't be masked for second row
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSq)
+{
+    // Verify that correct values are being masked when seqQ is greater than seqKv
+    // Expected mask
+    //    _kv__
+    //   | 0 0
+    // q | 0 0
+    //   | 1 0
+    //   | 1 1
+
+    Tensor<double> q({1, 1, 4, 1});
+    Tensor<double> k({1, 1, 2, 1});
+    Tensor<double> v({1, 1, 2, 1});
+    Tensor<double> o({1, 1, 4, 1});
+
+    // q = {0.0, 0.0, 0.0, 0.0}
+    q.fillWithValue(0.0);
+
+    // k = {0.0, 0.0}
+    k.fillWithValue(0.0);
+
+    // v = {1.0, 2.0}
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 1, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, -1, 0, /*topLeftAlignment=*/false);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 0.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 0.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), 1.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), 1.5, 1e-5);
+}
+
 TEST(TestCpuFpReferenceSdpaFp64, CausalMaskFutureTokensHaveNoEffect)
 {
     // Verify the causal property: changing V values at masked (future) kv positions

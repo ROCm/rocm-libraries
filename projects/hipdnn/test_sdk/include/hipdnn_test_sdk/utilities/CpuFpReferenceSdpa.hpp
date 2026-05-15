@@ -180,18 +180,22 @@ public:
                 }
             }
 
-            // Step 3: Apply causal mask (skv > sq → -inf)
-            if(rightBound != -1)
+            // Step 3: Apply sliding-window mask.
+            // For topLeftAlignment, the diagonal is at skv == sq.
+            // For bottomRightAlignment, the diagonal is at skv == sq + (seqKv - seqQ),
+            // which is negative (i.e. nothing visible) for early query positions when seqKv < seqQ.
+            if(rightBound >= 0)
             {
                 // Offset to account for bottomRightAlignment
                 const int64_t offset = (topLeftAlignment) ? 0 : seqKv - seqQ;
-                for(int64_t skv = sq + 1 + offset + rightBound; skv < seqKv; ++skv)
+                const int64_t startKv = std::max<int64_t>(sq + 1 + offset + rightBound, 0);
+                for(int64_t skv = startKv; skv < seqKv; ++skv)
                 {
                     scores[static_cast<size_t>(skv)]
                         = -std::numeric_limits<ComputeDataType>::infinity();
                 }
             }
-            if(leftBound != -1)
+            if(leftBound >= 0)
             {
                 // Offset to account for bottomRightAlignment
                 const int64_t offset = (topLeftAlignment) ? 0 : seqKv - seqQ;
@@ -206,16 +210,22 @@ public:
             const auto maxVal = *std::max_element(scores.begin(), scores.end());
             std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
             auto sumExp = static_cast<ComputeDataType>(0.0);
-            for(int64_t skv = 0; skv < seqKv; ++skv)
+
+            // If row is not all -inf, probs should be calculated normally
+            if(maxVal != -std::numeric_limits<ComputeDataType>::infinity())
             {
-                probs[static_cast<size_t>(skv)]
-                    = std::exp(scores[static_cast<size_t>(skv)] - maxVal);
-                sumExp += probs[static_cast<size_t>(skv)];
+                for(int64_t skv = 0; skv < seqKv; ++skv)
+                {
+                    probs[static_cast<size_t>(skv)]
+                        = std::exp(scores[static_cast<size_t>(skv)] - maxVal);
+                    sumExp += probs[static_cast<size_t>(skv)];
+                }
+                for(int64_t skv = 0; skv < seqKv; ++skv)
+                {
+                    probs[static_cast<size_t>(skv)] /= sumExp;
+                }
             }
-            for(int64_t skv = 0; skv < seqKv; ++skv)
-            {
-                probs[static_cast<size_t>(skv)] /= sumExp;
-            }
+            // Else, probabilities should remain all zero
 
             // Step 4b: Write LSE (log-sum-exp) if requested
             // LSE = maxVal + log(sumExp) enables backward pass to recompute softmax
