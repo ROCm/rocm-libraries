@@ -259,6 +259,8 @@ PIPELINE_NAME_TO_VERSION = {
 
 # Maps ck_tile StreamKReductionStrategy int values (from static_cast<int> in instance string)
 # to builder enum names. ck_tile enum: Atomic=0, Linear=1, Tree=2.
+# Atomic=0 is omitted: it is not expected in generated instances. If encountered, .get()
+# falls back to str(reduction_int) ("0"), which will cause a downstream build error.
 STREAMK_REDUCTION_STRATEGY = {
     1: "LINEAR",
     2: "TREE",

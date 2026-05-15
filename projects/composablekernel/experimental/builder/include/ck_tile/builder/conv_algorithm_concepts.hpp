@@ -301,6 +301,10 @@ concept SpecifiesTileOptimizations = requires {
     { T::optimizations.explicit_gemm } -> std::convertible_to<bool>;
     { T::optimizations.two_stage } -> std::convertible_to<bool>;
     { T::optimizations.streamk.enabled } -> std::convertible_to<bool>;
+    {
+        T::optimizations.streamk.reduction_strategy
+    } -> std::convertible_to<StreamKReductionStrategy>;
+    { T::optimizations.streamk.persistent } -> std::convertible_to<bool>;
 };
 
 template <typename T>
@@ -460,18 +464,6 @@ template <typename T>
 concept SpecifiesDlFwdBlockTransfer = requires {
     { T::transfer.a } -> DlBlockTransferDescriptor4D;
     { T::transfer.b } -> DlBlockTransferDescriptor4D;
-};
-
-template <typename T>
-concept SpecifiesDlBwdBlockTransfer = requires {
-    { T::transfer.a } -> DlBlockTransferDescriptor5D;
-    { T::transfer.b } -> DlBlockTransferDescriptor5D;
-};
-
-// Concept to check if algorithm specifies DL C thread transfer
-template <typename T>
-concept SpecifiesDlEpilogue = requires {
-    { T::transfer.c } -> DlEpilogueDescriptor;
 };
 
 // Concept to detect StreamK configuration in a tile algorithm descriptor.

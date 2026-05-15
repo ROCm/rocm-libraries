@@ -1099,7 +1099,7 @@ struct GroupedConvolutionBackwardWeightKernel
                     amd_wave_read_first_lane(tile_mn[I1] * TilePartitioner::NPerBlock);
                 const index_t i_g = amd_wave_read_first_lane(tile_mn[I0] % kargs.GemmBatch);
 
-                // Group offset (blockIdx.y = group batch index)
+                // Group offset derived from tile index (gridDim.z = 1 for StreamK)
                 const auto group_offset_a = amd_wave_read_first_lane(kargs.group_stride_a * i_g);
                 const auto group_offset_b = amd_wave_read_first_lane(kargs.group_stride_b * i_g);
                 const auto group_offset_c = amd_wave_read_first_lane(kargs.group_stride_c * i_g);
