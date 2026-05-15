@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "test_grouped_4c_fp16_harness.hpp"
+#include "test_harness.hpp"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -20,7 +20,7 @@ struct TileConvKernelTraits
 };
 
 class DirectConvGrouped4cFp16TileConvTestV3
-    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConvKernelTraits>
 {
 };
 
@@ -638,7 +638,7 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_LdsEpilogue_Config30_
 
 // Cyclic-shift swizzle tests (instances 40-43)
 class DirectConvGrouped4cFp16TileConvV3CyclicShiftSwizzleTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConvKernelTraits>
 {
 };
 
@@ -673,7 +673,7 @@ TEST_F(DirectConvGrouped4cFp16TileConvV3CyclicShiftSwizzleTest, Dgrad_V3_CyclicS
 // =============================================================================
 
 class DirectConvGrouped4cFp16TileConvV3PaddedTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits>
+    : public DirectConvGroupedTestHarness<TileConvKernelTraits>
 {
 };
 

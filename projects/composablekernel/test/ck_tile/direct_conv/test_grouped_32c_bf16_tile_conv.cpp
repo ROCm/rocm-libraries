@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "test_grouped_4c_fp16_harness.hpp"
+#include "test_harness.hpp"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -26,7 +26,7 @@ struct TileConv32cBf16KernelTraits
 // =============================================================================
 
 class DirectConvGrouped32cBf16TileConvV2Test
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cBf16KernelTraits, ck_tile::bfloat16_t>
+    : public DirectConvGroupedTestHarness<TileConv32cBf16KernelTraits, ck_tile::bfloat16_t>
 {
 };
 
@@ -79,7 +79,7 @@ TEST_F(DirectConvGrouped32cBf16TileConvV2Test, Dgrad_Config5_Groups3_LargerSpati
 // =============================================================================
 
 class DirectConvGrouped32cBf16TileConvV2LdsTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cBf16KernelTraits, ck_tile::bfloat16_t>
+    : public DirectConvGroupedTestHarness<TileConv32cBf16KernelTraits, ck_tile::bfloat16_t>
 {
 };
 
@@ -108,7 +108,7 @@ TEST_F(DirectConvGrouped32cBf16TileConvV2LdsTest, Dgrad_Config22_Groups2)
 // =============================================================================
 
 class DirectConvGrouped32cBf16TileConvV2XorTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cBf16KernelTraits, ck_tile::bfloat16_t>
+    : public DirectConvGroupedTestHarness<TileConv32cBf16KernelTraits, ck_tile::bfloat16_t>
 {
 };
 
@@ -137,7 +137,7 @@ TEST_F(DirectConvGrouped32cBf16TileConvV2XorTest, Dgrad_Config38_Groups2)
 // =============================================================================
 
 class DirectConvGrouped32cBf16TileConvV2XorLdsTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cBf16KernelTraits, ck_tile::bfloat16_t>
+    : public DirectConvGroupedTestHarness<TileConv32cBf16KernelTraits, ck_tile::bfloat16_t>
 {
 };
 
@@ -156,7 +156,7 @@ TEST_F(DirectConvGrouped32cBf16TileConvV2XorLdsTest, Dgrad_Config55_Groups1_Pad1
 // =============================================================================
 
 class DirectConvGrouped32cBf16TileConvV2CyclicShiftSwizzleTest
-    : public DirectConvGrouped4cFp16TestHarness<TileConv32cBf16KernelTraits, ck_tile::bfloat16_t>
+    : public DirectConvGroupedTestHarness<TileConv32cBf16KernelTraits, ck_tile::bfloat16_t>
 {
 };
 

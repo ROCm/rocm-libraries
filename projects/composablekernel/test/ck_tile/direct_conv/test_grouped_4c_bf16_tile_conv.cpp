@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "test_grouped_4c_fp16_harness.hpp"
+#include "test_harness.hpp"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -22,7 +22,7 @@ struct TileConv4cBf16KernelTraits
 };
 
 class DirectConvGrouped4cBf16TileConvTestV3
-    : public DirectConvGrouped4cFp16TestHarness<TileConv4cBf16KernelTraits, ck_tile::bfloat16_t>
+    : public DirectConvGroupedTestHarness<TileConv4cBf16KernelTraits, ck_tile::bfloat16_t>
 {
 };
 

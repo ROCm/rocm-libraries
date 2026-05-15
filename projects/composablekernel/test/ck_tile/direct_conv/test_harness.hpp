@@ -27,7 +27,7 @@
 /// RunFprop and RunDgrad are templated on the config index. If the specified
 /// config is not supported for the given problem, the test fails.
 template <typename KernelTraits, typename ElementT = ck_tile::half_t>
-class DirectConvGrouped4cFp16TestHarness : public ::testing::Test
+class DirectConvGroupedTestHarness : public ::testing::Test
 {
     protected:
     using HalfT = ElementT;
