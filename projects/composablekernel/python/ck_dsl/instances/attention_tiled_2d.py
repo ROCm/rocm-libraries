@@ -880,27 +880,44 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
             )
     b.sync()
 
+    # Output store: each thread writes 32 halves (4 vec8 chunks) of one
+    # BLOCK_M row at a time. THREADS / OUT_THREADS_PER_ROW threads cooperate
+    # on a single row; if BLOCK_M is larger than that, we need multiple
+    # row-iterations per thread. Skipping this multi-iter loop only writes
+    # the first `THREADS / OUT_THREADS_PER_ROW` rows, which leaves later
+    # BLOCK_M rows uninitialized -- exactly the failure observed for
+    # HD=256 + MHA prefill (BLOCK_M=16, OUT_THREADS_PER_ROW=8 -> only 8 rows
+    # written -> ~half the output is garbage).
     OUT_THREADS_PER_ROW = HD // 32
-    OUT_row = b.div(tid, b.const_i32(OUT_THREADS_PER_ROW))
+    ROWS_PER_ITER = THREADS // OUT_THREADS_PER_ROW
+    assert THREADS == OUT_THREADS_PER_ROW * ROWS_PER_ITER
+    assert BLOCK_M % ROWS_PER_ITER == 0, (
+        f"BLOCK_M={BLOCK_M} must be a multiple of ROWS_PER_ITER={ROWS_PER_ITER}"
+    )
+    OUT_ROW_BASE = b.div(tid, b.const_i32(OUT_THREADS_PER_ROW))
     OUT_col_base = b.mul(b.mod(tid, b.const_i32(OUT_THREADS_PER_ROW)), b.const_i32(32))
-    op_pos = b.add(qb_start_pos, b.div(OUT_row, b.const_i32(NQK)))
-    op_qh = b.add(
-        b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(OUT_row, b.const_i32(NQK))
-    )
-    op_mask = b.land(
-        b.cmp_lt(op_pos, cur_batch_q_len), b.cmp_lt(op_qh, b.const_i32(NUM_QH))
-    )
-    out_base = b.add(
-        b.mul(b.add(cu_q_start, op_pos), b.const_i32(NUM_QH * HD)),
-        b.mul(op_qh, b.const_i32(HD)),
-    )
-    for chunk in range(4):
-        col = b.add(OUT_col_base, b.const_i32(chunk * 8))
-        vf1 = b.smem_load_vN_f32(Acc_lds, OUT_row, col, n=4)
-        vf2 = b.smem_load_vN_f32(Acc_lds, OUT_row, b.add(col, b.const_i32(4)), n=4)
-        v8h = b.vec_concat(b.vec_cast_f32_to(vf1, dtype), b.vec_cast_f32_to(vf2, dtype))
-        with b.scf_if(op_mask):
-            b.global_store_vN(output, b.add(out_base, col), v8h, 8, align=16)
+    for row_iter in range(BLOCK_M // ROWS_PER_ITER):
+        OUT_row = b.add(OUT_ROW_BASE, b.const_i32(row_iter * ROWS_PER_ITER))
+        op_pos = b.add(qb_start_pos, b.div(OUT_row, b.const_i32(NQK)))
+        op_qh = b.add(
+            b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(OUT_row, b.const_i32(NQK))
+        )
+        op_mask = b.land(
+            b.cmp_lt(op_pos, cur_batch_q_len), b.cmp_lt(op_qh, b.const_i32(NUM_QH))
+        )
+        out_base = b.add(
+            b.mul(b.add(cu_q_start, op_pos), b.const_i32(NUM_QH * HD)),
+            b.mul(op_qh, b.const_i32(HD)),
+        )
+        for chunk in range(4):
+            col = b.add(OUT_col_base, b.const_i32(chunk * 8))
+            vf1 = b.smem_load_vN_f32(Acc_lds, OUT_row, col, n=4)
+            vf2 = b.smem_load_vN_f32(Acc_lds, OUT_row, b.add(col, b.const_i32(4)), n=4)
+            v8h = b.vec_concat(
+                b.vec_cast_f32_to(vf1, dtype), b.vec_cast_f32_to(vf2, dtype)
+            )
+            with b.scf_if(op_mask):
+                b.global_store_vN(output, b.add(out_base, col), v8h, 8, align=16)
 
     return b.kernel
 

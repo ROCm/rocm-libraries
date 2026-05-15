@@ -366,6 +366,13 @@ class IRBuilder:
     def rcp(self, a: Value) -> Value:
         return self._op("math.rcp", [a], [a.type], result_name_hint="rcp").result
 
+    def sqrt(self, a: Value) -> Value:
+        return self._op("math.sqrt", [a], [a.type], result_name_hint="sqrt").result
+
+    def rsqrt(self, a: Value) -> Value:
+        """1.0 / sqrt(a). Lowered to a single hardware reciprocal-sqrt on AMDGPU."""
+        return self._op("math.rsqrt", [a], [a.type], result_name_hint="rsq").result
+
     def tanh(self, a: Value) -> Value:
         return self._op("math.tanh", [a], [a.type], result_name_hint="tanh").result
 
@@ -1508,6 +1515,8 @@ PURE_OP_NAMES = {
     "arith.cvt_fp8_to_f32",
     "math.exp2",
     "math.rcp",
+    "math.sqrt",
+    "math.rsqrt",
     "math.tanh",
     "vector.extract",
     "vector.trunc_f32_to_f16",

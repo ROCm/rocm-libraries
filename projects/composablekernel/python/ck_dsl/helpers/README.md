@@ -23,6 +23,43 @@ leaves the boilerplate to the helpers.
 ```text
 ck_dsl/helpers/
 ├── __init__.py        # public exports
+│
+│  # CK Tile-inspired data abstractions (port of the C++ template family).
+│  # Docs: docs/conceptual/ck_tile/tensor_views.rst, tile_window.rst,
+│  #       descriptors.rst, sweep_tile.rst, tile_distribution.rst,
+│  #       static_distributed_tensor.rst, load_store_traits.rst,
+│  #       coordinate_movement.rst.
+│
+├── tensor_view.py     # TensorDescriptor + TensorView + TileWindow.
+│                      # The Python analogue of make_tensor_view<addr_space::*>,
+│                      # make_naive_tensor_descriptor_packed, make_tile_window.
+│                      # Strides may be int (compile-time) or SSA Value (runtime).
+│                      # Also: TensorCoordinate + move_tensor_coordinate
+│                      # (incremental (index, offset) updates) and
+│                      # view_from_transforms_descriptor (bridge to
+│                      # ck_dsl.transforms).
+├── distribution.py    # TileDistributionEncoding + make_static_tile_distribution
+│                      # (Rs/Hs/Ps/Ys mapping; v1 = no R, 1D-2D X, flexible P/Y).
+│                      # StaticDistributedTensor: thread-local register
+│                      # container indexed by Y. LoadStoreTraits: auto-picks
+│                      # vector_dim_y + scalar_per_vector + snake traversal.
+│                      # load_tile / store_tile drive a fully-automated
+│                      # window <-> register-tile pass through the distribution.
+├── sweep.py           # sweep_row_chunks + pass2_row_chunks: CK Tile-style
+│                      # "load X once, sweep Y positions" lambda iteration.
+│                      # The simpler form used by every small-op kernel;
+│                      # the distribution path is opt-in for cases where
+│                      # the (Y, P) decomposition is non-trivial.
+├── io.py              # io_ir_type, load_vec, load_vec_as_f32, pack_f32_to,
+│                      # store_vec_from_f32; dtype-string-tolerant I/O dispatch.
+├── reduction.py       # block_lds_reduce (sum/max) -- canonical LDS tree
+│                      # reduction shared by norm/reduce/pool kernels.
+├── spec.py            # IOSpecRule + validate_io, SignatureBuilder,
+│                      # kernel_name_join, ceil_div_grid -- spec/signature/grid
+│                      # scaffolding so each instance file is ~10 lines of glue.
+│
+│  # Kernel-shape abstractions (GEMM / conv / attention infrastructure).
+│
 ├── atoms.py           # MfmaAtom catalog (the matrix-multiply intrinsics)
 ├── geometry.py        # WarpGrid: block/warp/lane decomposition
 ├── loads.py           # CoalescedTileLoader + AsyncTileLoader
@@ -30,9 +67,90 @@ ck_dsl/helpers/
 ├── schedule.py        # SchedulePolicy: named sched_group_barrier policies
 ├── pipeline.py        # SoftwarePipeline: prologue/steady-state/epilogue
 ├── epilogues.py       # DirectEpilogue + CShuffleEpilogue
+├── attention.py       # Attention2DConfig, OnlineSoftmaxState, PagedKvDescriptor,
+│                      # causal/sliding-window masks, soft-cap, select_*d_config.
 ├── compile.py         # compile_kernel() one-shot IR -> HSACO
 └── manifest.py        # make_gemm_manifest, make_conv_manifest, write_artifact
 ```
+
+The two halves compose: the CK Tile-inspired layer (`tensor_view`,
+`sweep`, `io`, `reduction`, `spec`) is the small-op / norm / reduce
+authoring surface; the kernel-shape layer (`atoms`, `geometry`,
+`loads`, `epilogues`, `pipeline`) is the GEMM / conv / attention
+authoring surface. Both lower to the same `ck_dsl.core.ir` builder, so
+mixing them in one kernel is fine.
+
+CK Tile parity (which C++ name maps to which Python helper):
+
+| CK Tile C++ | DSL helper |
+| --- | --- |
+| `make_naive_tensor_descriptor_packed(shape)` | `TensorDescriptor.packed(shape, dtype)` or `make_naive_tensor_descriptor_packed(shape, dtype)` |
+| `make_tensor_view<addr_space::global>(ptr, desc)` | `make_global_view(ptr, shape, dtype)` |
+| `make_tensor_view<addr_space::lds>(...)` | `make_lds_view(b, dtype=..., shape=...)` |
+| `make_naive_tensor_view_packed<...>(ptr, shape)` | `make_naive_tensor_view_packed(ptr, shape, dtype)` |
+| `make_tile_window(view, lengths, origin)` | `make_tile_window(view, lengths, origin)` (or `view.tile(...)`) |
+| `tile_window.set_window_origin(origin)` | `tile.move_to(*origin)` / `tile.shift_by(b, *deltas)` |
+| `tensor_coordinate<Desc>(idx)` | `make_tensor_coordinate(b, desc, idx)` |
+| `move_tensor_coordinate(desc, coord, step)` | `move_tensor_coordinate(b, coord, step)` |
+| `transform_tensor_descriptor(...)` + `make_*_transform` | `ck_dsl.transforms.TensorDescriptor.naive(...).transform(...)`; wrap with `view_from_transforms_descriptor(ptr, rich_desc)` |
+| `tile_distribution_encoding<Rs, Hs, Ps2RHs..., Ys2RHs...>` | `TileDistributionEncoding(Rs=..., Hs=..., Ps2RHs_major=..., Ps2RHs_minor=..., Ys2RHs_major=..., Ys2RHs_minor=...)` |
+| `make_static_tile_distribution(encoding)` | `make_static_tile_distribution(encoding)` |
+| `make_static_distributed_tensor<T, Distribution>()` | `make_static_distributed_tensor(distribution, dtype=...)` |
+| `load_store_traits<Distribution>` (vector_dim_y + scalar_per_vector + sfc) | `make_load_store_traits(distribution, max_vec=...)` |
+| `tile_window.load() -> distributed_tensor` | `load_tile(b, window, distribution=..., ps=[[tid]])` |
+| `tile_window.store(distributed)` | `store_tile(b, window, distributed, ps=[[tid]])` |
+| `sweep_tile(dt, [&](auto idx){...})` | `sweep_row_chunks(b, tile, body=..., cache=...)` *(simple form)*<br/>or `distributed_tensor.sweep(lambda y, v: ...)` *(distribution form)* |
+| `block_tile_reduce_*` (sum / max) | `block_lds_reduce(b, val, lds, tid, ...)` |
+| `block_sync_lds()` | `b.sync()` (now emits `s_waitcnt vmcnt(0) lgkmcnt(0)` before `s_barrier`) |
+| `numeric<T>::min/max/lowest`, `type_convert<DstT, SrcT>` | `cast_to_f32`, `cast_f32_to`, `io_ir_type` |
+
+### Two ergonomic paths
+
+The DSL exposes the small-op authoring surface twice:
+
+1. **Simple sweep** (recommended for 1D-row patterns: norm, reduce,
+   elementwise). The author writes the per-thread chunked loop with
+   `sweep_row_chunks(...)` and the helper handles tid arithmetic +
+   `vec`-wide load + f32 promotion. The vector dim and chunk count
+   are explicit kernel-author choices, not inferred.
+
+2. **Distribution-driven** (recommended when the (Y, P) decomposition
+   is non-trivial — multi-warp tiles, multi-dim Y space, MFMA-style
+   distributions, or replicated workloads). The author writes a
+   `TileDistributionEncoding` describing the (Rs, Hs, Ps, Ys)
+   decomposition, then calls `window.load(b, distribution=...,
+   ps=[[tid]])`. The helper's `LoadStoreTraits` picks the vector
+   dim + width and the snake traversal order automatically.
+
+Both paths lower through the same `TensorView` / `TileWindow` API and
+land at the same `b.global_load_vN` / `b.smem_store_vN` IR ops.
+
+Worked examples:
+
+* `ck_dsl/examples/distribution_reduce_demo.py` — 1D row-sum reduce
+  driven by a 1D distribution. Bit-exact vs `torch.sum(dim=-1)`.
+* `ck_dsl/examples/distribution_2d_add_demo.py` — 2D tile add driven
+  by a 2D distribution (Hs has 2 X dims, P has 2 contributors).
+  Demonstrates `make_tile_window` over a runtime-stride view +
+  `window.load(...) / window.store(...)` instance methods.
+* `ck_dsl/instances/reduce.py` / `ck_dsl/instances/layernorm2d.py` —
+  the matching simple-sweep versions (production today).
+
+### Distribution feature matrix
+
+| Feature | Status |
+|---|---|
+| `Rs == ()` (no replication) | done |
+| `Rs != ()` (replication; major=0 routes to R buckets) | done |
+| 1D X (single tile dim) | done |
+| 2D X (two tile dims, P with multiple contributors) | done |
+| 3D+ X | encoding accepts it, untested in demos |
+| `LoadStoreTraits` smart picker (scans Y dims for stride-1 in X) | done |
+| `LoadStoreTraits` scalar fallback (no stride-1 Y) | done |
+| Snake traversal (multi-axis Gray-code-style) | done |
+| Row-major (non-snake) traversal | done (`iterate_accesses(snake=False)`) |
+| `TileWindow.load(distribution=...)` / `store(...)` methods | done |
+| Validity / mask threading through `load_tile` | not yet (use raw rich-descriptor for now) |
 
 The cycle of a typical kernel author becomes:
 
@@ -48,6 +166,66 @@ from ck_dsl import (
 # IR construction + the helpers do the heavy lifting; the kernel author
 # only writes the descriptor callback (the "what is this op" part).
 ```
+
+### Worked example: row-wise reduce in the CK Tile style
+
+A complete row-reduction kernel using only the small-op layer (one CTA
+per row, vec-wide chunks, LDS tree reduction, scalar write per row):
+
+```python
+from ck_dsl.core.ir import F32, I32, IRBuilder, PtrType
+from ck_dsl.helpers import (
+    SignatureBuilder, ceil_div_grid, kernel_name_join,
+    io_ir_type, store_scalar_from_f32, block_lds_reduce,
+    make_lds_view, make_naive_tensor_view_packed, make_tile_window,
+    sweep_row_chunks,
+)
+
+def build_row_sum(*, n_per_block: int, block_size: int = 256, vec: int = 8,
+                  dtype: str = "f16"):
+    io_ty = io_ir_type(dtype)
+    b = IRBuilder(kernel_name_join("row_sum", dtype, f"N{n_per_block}"))
+    b.kernel.attrs["max_workgroup_size"] = block_size
+
+    X = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Y = b.param("Y", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
+    M = b.param("M", I32)  # noqa: F841 -- ABI symmetry with the C++ reference
+
+    tid = b.thread_id_x()
+    row = b.block_id_x()
+
+    x_view = make_naive_tensor_view_packed(X, shape=(1, n_per_block), dtype=io_ty)
+    x_tile = make_tile_window(
+        x_view, lengths=(1, n_per_block), origin=(row, b.const_i32(0))
+    )
+    lds = make_lds_view(b, dtype=F32, shape=(block_size,)).base
+
+    acc = b.const_f32(0.0)
+    def body(_n_off, x_scalars):
+        nonlocal acc
+        for xi in x_scalars:
+            acc = b.fadd(acc, xi)
+
+    sweep_row_chunks(
+        b, x_tile, tid=tid, block_size=block_size, vec=vec,
+        elems_per_thread=n_per_block // block_size, body=body,
+    )
+    total = block_lds_reduce(b, acc, lds, tid, block_size=block_size, combine="sum")
+
+    with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+        store_scalar_from_f32(b, Y, row, total, dtype=dtype)
+
+    return b.kernel
+
+# Grid / signature:
+grid = ceil_div_grid((M, 1))  # one CTA per row
+sig = SignatureBuilder().ptr("X", dtype).ptr("Y", dtype).scalar("M", "i32").build()
+```
+
+That's the entire kernel — ~25 lines of body, no `smem_alloc` / no
+`global_load_vN` / no manual `b.add(b.mul(row, N), col)` offset math.
+The CK Tile-inspired layer recognises the row-sweep pattern and folds
+all of that in.
 
 ## Atoms — `helpers/atoms.py`
 

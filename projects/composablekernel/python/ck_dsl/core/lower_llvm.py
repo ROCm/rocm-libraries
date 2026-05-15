@@ -68,6 +68,8 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "workgroup.z": "declare i32 @llvm.amdgcn.workgroup.id.z()",
     "s.barrier": "declare void @llvm.amdgcn.s.barrier()",
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
+    "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
+    "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "tanh.f32": "declare float @llvm.tanh.f32(float)",
     "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
     "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
@@ -81,9 +83,15 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<8 x half>, <8 x half>, <4 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
-    "mfma.f32.16x16x16.bf16": (
-        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16.bf16("
-        "<4 x bfloat>, <4 x bfloat>, <4 x float>, "
+    "mfma.f32.16x16x16bf16.1k": (
+        # gfx950 lowers `16x16x16` bf16 MFMAs through the `_1k` variant
+        # introduced for CDNA2; the operands take `<4 x i16>` (bitcast of
+        # `<4 x bfloat>`). There is no plain `mfma.f32.16x16x16.bf16`
+        # intrinsic on this LLVM target -- attempting to declare it
+        # produces `undefined symbol` at link time, which is what blocked
+        # bf16 head_size>=128 attention until this fix.
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16bf16.1k("
+        "<4 x i16>, <4 x i16>, <4 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     "mfma.f32.16x16x32.bf16": (
@@ -507,6 +515,26 @@ class _Lowerer:
             f"  {op.result.name} = fdiv {_llvm_type(v.type)} {one}, {self._operand(v)}"
         )
 
+    def _op_math_sqrt(self, op: Op) -> None:
+        (v,) = op.operands
+        if v.type.name != "f32":
+            raise NotImplementedError("math.sqrt currently supports f32")
+        self._need("sqrt.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.sqrt.f32(float {self._operand(v)})"
+        )
+
+    def _op_math_rsqrt(self, op: Op) -> None:
+        (v,) = op.operands
+        if v.type.name != "f32":
+            raise NotImplementedError("math.rsqrt currently supports f32")
+        # llvm.amdgcn.rsq.f32 maps directly to v_rsq_f32 (~1 ulp). For higher precision
+        # the user can compute rcp(sqrt(x)) explicitly. This matches Triton's tl.rsqrt.
+        self._need("rsqrt.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.amdgcn.rsq.f32(float {self._operand(v)})"
+        )
+
     def _op_math_tanh(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
@@ -742,11 +770,20 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
         a, b, c = op.operands
-        self._need("mfma.f32.16x16x16.bf16")
+        self._need("mfma.f32.16x16x16bf16.1k")
+        # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
+        a_cast = self._fresh("mfma_a_i16")
+        b_cast = self._fresh("mfma_b_i16")
         self._current().emit(
-            f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16.bf16("
-            f"<4 x bfloat> {self._operand(a)}, "
-            f"<4 x bfloat> {self._operand(b)}, "
+            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16bf16.1k("
+            f"<4 x i16> {a_cast}, "
+            f"<4 x i16> {b_cast}, "
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
@@ -915,7 +952,20 @@ class _Lowerer:
         )
 
     def _op_tile_sync(self, op: Op) -> None:
+        # AMDGPU's ``s_barrier`` only synchronises waves -- it does NOT
+        # wait for outstanding ``ds_write`` / ``ds_read`` instructions
+        # to drain. Without an explicit ``s_waitcnt lgkmcnt(0)`` the
+        # post-barrier readers can observe stale LDS contents (see the
+        # transpose2d 24x24 grid failure that surfaced this). We also
+        # drop ``vmcnt(0)`` so a ds_write whose source data came from a
+        # global load completes its VMEM-to-VGPR-to-LDS chain before the
+        # barrier; that matches what CK Tile's ``block_sync_lds`` does.
+        # ``_encode_waitcnt_gfx9_10(vmcnt=0, lgkmcnt=0)`` evaluates to
+        # ``0x70`` (= 112) -- ``vmcnt(0) lgkmcnt(0) expcnt(<max>)``.
+        mask = _encode_waitcnt_gfx9_10(vmcnt=0, expcnt=-1, lgkmcnt=0)
+        self._need("s.waitcnt")
         self._need("s.barrier")
+        self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
         self._current().emit("  call void @llvm.amdgcn.s.barrier()")
 
     def _op_tile_s_waitcnt(self, op: Op) -> None:

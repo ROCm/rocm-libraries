@@ -832,5 +832,779 @@ class TestInstances(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.mfma.f32.4x4x4f16", ll)
 
 
+# ---------------------------------------------------------------------
+# Non-GEMM CK Tile counterparts (elementwise / norm / reduce / transpose).
+# ---------------------------------------------------------------------
+
+
+class TestElementwiseInstance(unittest.TestCase):
+    def test_unary_builds(self):
+        from ck_dsl.instances import ElementwiseSpec, build_elementwise
+
+        for op in ("copy", "neg", "abs", "relu", "exp2", "silu", "gelu_tanh"):
+            kernel = build_elementwise(ElementwiseSpec(op=op))
+            ll = lower_kernel_to_llvm(kernel)
+            self.assertIn("define amdgpu_kernel void", ll)
+
+    def test_binary_builds(self):
+        from ck_dsl.instances import ElementwiseSpec, build_elementwise
+
+        for op in ("add", "sub", "mul", "max", "min"):
+            kernel = build_elementwise(ElementwiseSpec(op=op))
+            ll = lower_kernel_to_llvm(kernel)
+            self.assertIn("define amdgpu_kernel void", ll)
+
+    def test_bf16_path_builds(self):
+        from ck_dsl.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="add", dtype="bf16"))
+        ll = lower_kernel_to_llvm(kernel)
+        self.assertIn("bfloat", ll)
+
+    def test_rejects_unknown_op(self):
+        from ck_dsl.instances import ElementwiseSpec, build_elementwise
+
+        with self.assertRaises(ValueError):
+            build_elementwise(ElementwiseSpec(op="bogus"))
+
+
+class TestLayerNormInstance(unittest.TestCase):
+    def test_builds_with_save_mean(self):
+        from ck_dsl.instances import LayerNorm2DSpec, build_layernorm2d
+
+        spec = LayerNorm2DSpec(n_per_block=4096, save_mean_invstd=True)
+        kernel = build_layernorm2d(spec)
+        ll = lower_kernel_to_llvm(kernel)
+        # The reduction uses LDS tree (s_barrier) and the rsqrt intrinsic.
+        self.assertIn("@llvm.amdgcn.s.barrier", ll)
+        self.assertIn("@llvm.amdgcn.rsq.f32", ll)
+
+    def test_rejects_unaligned_n(self):
+        from ck_dsl.instances import LayerNorm2DSpec, build_layernorm2d
+
+        spec = LayerNorm2DSpec(n_per_block=3072, block_size=256, vec=8)
+        with self.assertRaises(ValueError):
+            build_layernorm2d(spec)
+
+
+class TestRMSNormInstance(unittest.TestCase):
+    def test_builds(self):
+        from ck_dsl.instances import RMSNorm2DSpec, build_rmsnorm2d
+
+        kernel = build_rmsnorm2d(RMSNorm2DSpec(n_per_block=4096))
+        ll = lower_kernel_to_llvm(kernel)
+        self.assertIn("@llvm.amdgcn.rsq.f32", ll)
+
+
+class TestReduceInstance(unittest.TestCase):
+    def test_sum_max_mean_builds(self):
+        from ck_dsl.instances import Reduce2DSpec, build_reduce2d
+
+        for op in ("sum", "max", "mean"):
+            kernel = build_reduce2d(Reduce2DSpec(n_per_block=4096, op=op))
+            ll = lower_kernel_to_llvm(kernel)
+            self.assertIn("define amdgpu_kernel void", ll)
+
+
+class TestTransposeInstance(unittest.TestCase):
+    def test_builds(self):
+        from ck_dsl.instances import Transpose2DSpec, build_transpose2d
+
+        kernel = build_transpose2d(Transpose2DSpec())
+        ll = lower_kernel_to_llvm(kernel)
+        # Transpose uses a global memory load->LDS->global store and a
+        # workgroup barrier between the two phases.
+        self.assertIn("@llvm.amdgcn.s.barrier", ll)
+        self.assertIn("addrspace(3)", ll)
+
+    def test_rejects_oversize_tile(self):
+        from ck_dsl.instances import Transpose2DSpec, build_transpose2d
+
+        # 128x128/2 = 8192 threads > 1024 cap.
+        with self.assertRaises(ValueError):
+            build_transpose2d(Transpose2DSpec(tile_m=128, tile_n=128, vec=2))
+
+
+class TestBatchedGemmInstance(unittest.TestCase):
+    def test_builds_with_strides(self):
+        from ck_dsl.instances import BatchedGemmSpec, build_batched_gemm
+
+        spec = BatchedGemmSpec(
+            name="bgemm_smoke",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(pipeline="compv3", epilogue="cshuffle"),
+        )
+        kernel = build_batched_gemm(spec)
+        ll = lower_kernel_to_llvm(kernel)
+        # The batched form pulls in `block_id_z` for the batch index.
+        self.assertIn("@llvm.amdgcn.workgroup.id.z", ll)
+        self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
+
+
+# ---------------------------------------------------------------------
+# CK Tile-inspired helpers (tensor_view / io / reduction / spec).
+# ---------------------------------------------------------------------
+
+
+class TestTensorViewHelper(unittest.TestCase):
+    def test_packed_descriptor_strides(self):
+        from ck_dsl.helpers import (
+            TensorDescriptor,
+            make_naive_tensor_descriptor_packed,
+        )
+
+        d = make_naive_tensor_descriptor_packed((32, 128, 64), F16)
+        self.assertEqual(d.strides, (128 * 64, 64, 1))
+        self.assertEqual(d.numel(), 32 * 128 * 64)
+        d2 = TensorDescriptor.with_strides((4, 16), (32, 1), F16)
+        self.assertEqual(d2.strides, (32, 1))
+
+    def test_runtime_stride_offsets_via_value(self):
+        from ck_dsl.helpers import TensorDescriptor
+
+        # The point of the runtime-stride branch: stride entry can be an
+        # SSA Value (e.g. for a runtime W). We exercise it through the
+        # offset builder and verify the emitted IR contains the
+        # expected mul instruction.
+        builder = IRBuilder("rt_stride_smoke")
+        W = builder.param("W", I32)
+        d = TensorDescriptor.with_strides((1, 1), (W, 1), F16)
+        # The offset call is the thing under test; we don't read the
+        # returned Value because we inspect the lowered IR instead.
+        d.offset(builder, [builder.const_i32(3), builder.const_i32(2)])
+        ll = lower_kernel_to_llvm(builder.kernel)
+        self.assertIn("mul nsw i32", ll)
+
+    def test_tile_window_origin_arithmetic(self):
+        from ck_dsl.helpers import make_global_view, make_lds_view
+
+        builder = IRBuilder("tw_origin_smoke")
+        builder.kernel.attrs["max_workgroup_size"] = 64
+        X = builder.param("X", PtrType(F16, "global"), align=16)
+        Y = builder.param("Y", PtrType(F16, "global"), align=16)
+        H = builder.param("H", I32)  # noqa: F841 - simulating runtime stride
+        x_view = make_global_view(X, shape=(8, 16), dtype=F16)
+        y_view = make_global_view(Y, shape=(8, 16), dtype=F16)
+        lds_view = make_lds_view(builder, dtype=F16, shape=(8, 16), name_hint="t")
+        h0 = builder.const_i32(0)
+        w0 = builder.const_i32(0)
+        x_tile = x_view.tile(lengths=(8, 16), origin=(h0, w0))
+        y_tile = y_view.tile(lengths=(8, 16), origin=(h0, w0))
+        lds_tile = lds_view.tile(lengths=(8, 16), origin=(h0, w0))
+        # round-trip: load -> LDS -> store
+        v = x_tile.load_vec(builder, builder.const_i32(0), builder.const_i32(0), n=8)
+        lds_tile.store_vec(
+            builder, builder.const_i32(0), builder.const_i32(0), value=v, n=8
+        )
+        builder.sync()
+        v2 = lds_tile.load_vec(builder, builder.const_i32(0), builder.const_i32(0), n=8)
+        y_tile.store_vec(
+            builder, builder.const_i32(0), builder.const_i32(0), value=v2, n=8
+        )
+        ll = lower_kernel_to_llvm(builder.kernel)
+        # Expect LDS round-trip via addrspace(3) + a barrier.
+        self.assertIn("addrspace(3)", ll)
+        self.assertIn("@llvm.amdgcn.s.barrier", ll)
+
+
+class TestIOHelper(unittest.TestCase):
+    def test_dtype_string_aliases(self):
+        from ck_dsl.helpers import io_ir_type
+        from ck_dsl.core.ir import BF16
+
+        self.assertIs(io_ir_type("f16"), F16)
+        self.assertIs(io_ir_type("fp16"), F16)
+        self.assertIs(io_ir_type("bf16"), BF16)
+        with self.assertRaises(ValueError):
+            io_ir_type("fp32")
+
+
+class TestReductionHelper(unittest.TestCase):
+    def test_block_lds_reduce_emits_barrier_chain(self):
+        from ck_dsl.helpers import block_lds_reduce, make_lds_view
+
+        b = IRBuilder("red_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        tid = b.thread_id_x()
+        lds = make_lds_view(b, dtype=F32_ir(), shape=(64,), name_hint="r").base
+        total = block_lds_reduce(
+            b, b.const_f32(1.0), lds, tid, block_size=64, combine="sum"
+        )
+        b.global_store(b.param("Y", PtrType(F32_ir(), "global")), b.const_i32(0), total)
+        ll = lower_kernel_to_llvm(b.kernel)
+        # Six barrier stages for block_size=64 (log2(64)=6).
+        self.assertGreaterEqual(ll.count("@llvm.amdgcn.s.barrier"), 6)
+
+
+def F32_ir():
+    from ck_dsl.core.ir import F32
+
+    return F32
+
+
+class TestTensorCoordinate(unittest.TestCase):
+    def test_make_and_move_emit_offset_chain(self):
+        from ck_dsl.helpers import (
+            make_naive_tensor_view_packed,
+            make_tensor_coordinate,
+            move_tensor_coordinate,
+        )
+
+        b = IRBuilder("coord_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        view = make_naive_tensor_view_packed(X, shape=(64, 128), dtype=F16)
+        c0 = make_tensor_coordinate(b, view.desc, [b.const_i32(2), b.const_i32(3)])
+        # The cache should be populated eagerly.
+        self.assertTrue(c0.has_cached_offset)
+        # Move by (1, 0) -> incremental update emits one fresh add.
+        c1 = move_tensor_coordinate(b, c0, [b.const_i32(1), b.const_i32(0)])
+        self.assertTrue(c1.has_cached_offset)
+        # Index has been bumped.
+        self.assertNotEqual(c0.index, c1.index)
+        # Lower the kernel to make sure the chain is well-formed.
+        ll = lower_kernel_to_llvm(b.kernel)
+        self.assertIn("define amdgpu_kernel void", ll)
+
+    def test_move_rank_mismatch_raises(self):
+        from ck_dsl.helpers import (
+            make_naive_tensor_view_packed,
+            make_tensor_coordinate,
+            move_tensor_coordinate,
+        )
+
+        b = IRBuilder("coord_rank")
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        view = make_naive_tensor_view_packed(X, shape=(4, 4), dtype=F16)
+        c = make_tensor_coordinate(b, view.desc, [b.const_i32(0), b.const_i32(0)])
+        with self.assertRaises(ValueError):
+            move_tensor_coordinate(b, c, [b.const_i32(1)])
+
+
+class TestWindowLoadStoreMethods(unittest.TestCase):
+    def test_window_load_returns_distributed_tensor(self):
+        from ck_dsl.helpers import (
+            TileDistributionEncoding,
+            make_load_store_traits,
+            make_naive_tensor_view_packed,
+            make_static_tile_distribution,
+            make_tile_window,
+        )
+
+        enc = TileDistributionEncoding(
+            Hs=((1, 64, 8),),
+            Ps2RHs_major=((1,),),
+            Ps2RHs_minor=((1,),),
+            Ys2RHs_major=(1, 1),
+            Ys2RHs_minor=(0, 2),
+        )
+        dist = make_static_tile_distribution(enc)
+        traits = make_load_store_traits(dist)
+
+        b = IRBuilder("win_load_method")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        view = make_naive_tensor_view_packed(X, shape=(512,), dtype=F16)
+        tile = make_tile_window(view, lengths=(512,), origin=(b.const_i32(0),))
+        tid = b.thread_id_x()
+
+        dt = tile.load(b, distribution=dist, ps=[[tid]], traits=traits)
+        self.assertEqual(dt.num_elements, dist.num_elements_per_thread)
+        self.assertEqual(dt.distribution, dist)
+
+    def test_window_store_emits_global_store(self):
+        from ck_dsl.helpers import (
+            TileDistributionEncoding,
+            make_load_store_traits,
+            make_naive_tensor_view_packed,
+            make_static_distributed_tensor,
+            make_static_tile_distribution,
+            make_tile_window,
+        )
+
+        enc = TileDistributionEncoding(
+            Hs=((1, 64, 8),),
+            Ps2RHs_major=((1,),),
+            Ps2RHs_minor=((1,),),
+            Ys2RHs_major=(1, 1),
+            Ys2RHs_minor=(0, 2),
+        )
+        dist = make_static_tile_distribution(enc)
+        traits = make_load_store_traits(dist)
+
+        b = IRBuilder("win_store_method")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        Y = b.param("Y", PtrType(F16, "global"), align=16)
+        view = make_naive_tensor_view_packed(Y, shape=(512,), dtype=F16)
+        tile = make_tile_window(view, lengths=(512,), origin=(b.const_i32(0),))
+        tid = b.thread_id_x()
+
+        dt = make_static_distributed_tensor(dist, dtype=F16)
+        dt.fill(b.const_f32(1.0))
+        tile.store(b, dt, ps=[[tid]], traits=traits)
+
+        ll = lower_kernel_to_llvm(b.kernel)
+        # Confirm vectorised global store was emitted.
+        self.assertIn("store <8 x half>", ll)
+
+
+class TestTransformsBridge(unittest.TestCase):
+    def test_view_from_transforms_descriptor(self):
+        from ck_dsl.helpers import (
+            make_tile_window,
+            view_from_transforms_descriptor,
+        )
+        from ck_dsl.transforms import TensorDescriptor as RichTensorDescriptor
+
+        b = IRBuilder("bridge_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        rich = RichTensorDescriptor.naive("A", lengths=[16, 16])
+        view = view_from_transforms_descriptor(X, rich)
+        self.assertEqual(view.addr_space, "global")
+        self.assertEqual(view.dtype.name, "f16")
+        # The wrapped view should still expose tile() and load_vec().
+        window = make_tile_window(
+            view, lengths=(1, 1), origin=(b.const_i32(0), b.const_i32(0))
+        )
+        v = window.load_vec(b, b.const_i32(2), b.const_i32(0), n=4)
+        self.assertEqual(v.type.elem.name, "f16")
+
+
+class TestTileDistribution(unittest.TestCase):
+    def _encoding(self):
+        from ck_dsl.helpers import TileDistributionEncoding
+
+        return TileDistributionEncoding(
+            Hs=((4, 256, 8),),
+            Ps2RHs_major=((1,),),
+            Ps2RHs_minor=((1,),),
+            Ys2RHs_major=(1, 1),
+            Ys2RHs_minor=(0, 2),
+        )
+
+    def test_encoding_lengths(self):
+        from ck_dsl.helpers import make_static_tile_distribution
+
+        dist = make_static_tile_distribution(self._encoding())
+        self.assertEqual(dist.X_lengths, (8192,))
+        self.assertEqual(dist.Y_lengths, (4, 8))
+        self.assertEqual(dist.num_elements_per_thread, 32)
+
+    def test_encoding_rejects_duplicate_h_bucket(self):
+        from ck_dsl.helpers import TileDistributionEncoding
+
+        with self.assertRaises(ValueError):
+            TileDistributionEncoding(
+                Hs=((4, 8),),
+                # Both P and Y point at the same (1, 0) bucket -> overlap.
+                Ps2RHs_major=((1,),),
+                Ps2RHs_minor=((0,),),
+                Ys2RHs_major=(1,),
+                Ys2RHs_minor=(0,),
+            )
+
+    def test_encoding_rejects_uncovered_h_bucket(self):
+        from ck_dsl.helpers import TileDistributionEncoding
+
+        with self.assertRaises(ValueError):
+            TileDistributionEncoding(
+                Hs=((4, 8, 2),),  # 3 H levels
+                Ps2RHs_major=((1,),),  # only one P contributor
+                Ps2RHs_minor=((1,),),
+                Ys2RHs_major=(1,),  # only one Y contributor
+                Ys2RHs_minor=(0,),
+                # Level 2 is uncovered -> X is not reconstructable.
+            )
+
+    def test_encoding_accepts_R_with_full_coverage(self):
+        """Rs != () is now supported; an R bucket needs a P or Y."""
+        from ck_dsl.helpers import (
+            TileDistributionEncoding,
+            make_static_tile_distribution,
+        )
+
+        enc = TileDistributionEncoding(
+            Rs=(2,),
+            Hs=((4, 8),),
+            Ps2RHs_major=((1,),),
+            Ps2RHs_minor=((0,),),
+            Ys2RHs_major=(1, 0),
+            Ys2RHs_minor=(1, 0),
+        )
+        self.assertTrue(enc.has_replication)
+        dist = make_static_tile_distribution(enc)
+        # Y_lengths picks up R length for the R-mapped Y.
+        self.assertEqual(dist.Y_lengths, (8, 2))
+        self.assertEqual(dist.num_elements_per_thread, 16)
+
+    def test_encoding_rejects_uncovered_R(self):
+        from ck_dsl.helpers import TileDistributionEncoding
+
+        with self.assertRaises(ValueError):
+            TileDistributionEncoding(
+                Rs=(2,),
+                Hs=((4,),),
+                Ps2RHs_major=((1,),),
+                Ps2RHs_minor=((0,),),
+                Ys2RHs_major=(),
+                Ys2RHs_minor=(),
+            )
+
+
+class TestStaticDistributedTensor(unittest.TestCase):
+    def test_set_get_fill_sweep(self):
+        from ck_dsl.helpers import (
+            TileDistributionEncoding,
+            make_static_distributed_tensor,
+            make_static_tile_distribution,
+        )
+
+        enc = TileDistributionEncoding(
+            Hs=((2, 4),),
+            Ps2RHs_major=((1,),),
+            Ps2RHs_minor=((0,),),
+            Ys2RHs_major=(1,),
+            Ys2RHs_minor=(1,),
+        )
+        dist = make_static_tile_distribution(enc)
+        b = IRBuilder("dt_smoke")
+        dt = make_static_distributed_tensor(dist, dtype=F16)
+        self.assertEqual(dt.num_elements, 4)
+        dt.fill(b.const_f32(7.0))
+        self.assertEqual(dt.get((0,)), dt.get((1,)))
+        # sweep can mutate via returned value.
+        dt.sweep(lambda y, _v: b.const_f32(float(y[0])))
+        # Now slot y=2 should hold 2.0.
+        self.assertNotEqual(dt.get((0,)), dt.get((2,)))
+
+
+class TestLoadStoreTraits(unittest.TestCase):
+    def test_vector_width_picks_innermost_y(self):
+        from ck_dsl.helpers import (
+            TileDistributionEncoding,
+            make_load_store_traits,
+            make_static_tile_distribution,
+        )
+
+        enc = TileDistributionEncoding(
+            Hs=((4, 256, 8),),
+            Ps2RHs_major=((1,),),
+            Ps2RHs_minor=((1,),),
+            Ys2RHs_major=(1, 1),
+            Ys2RHs_minor=(0, 2),
+        )
+        dist = make_static_tile_distribution(enc)
+        traits = make_load_store_traits(dist, max_vec=8)
+        self.assertEqual(traits.vector_dim_y, 1)
+        self.assertEqual(traits.scalar_per_vector, 8)
+        # Y_lengths = (4, 8). Non-vector axis is dim 0 with length 4.
+        self.assertEqual(traits.num_access, 4)
+        bases = list(traits.iterate_accesses(snake=False))
+        # Vector dim is pinned at 0 in every emitted base.
+        self.assertTrue(all(y[1] == 0 for y in bases))
+        self.assertEqual([y[0] for y in bases], [0, 1, 2, 3])
+
+    def test_vector_width_cap(self):
+        from ck_dsl.helpers import (
+            TileDistributionEncoding,
+            make_load_store_traits,
+            make_static_tile_distribution,
+        )
+
+        enc = TileDistributionEncoding(
+            Hs=((2, 16),),
+            Ps2RHs_major=((1,),),
+            Ps2RHs_minor=((0,),),
+            Ys2RHs_major=(1,),
+            Ys2RHs_minor=(1,),
+        )
+        dist = make_static_tile_distribution(enc)
+        traits = make_load_store_traits(dist, max_vec=4)
+        self.assertEqual(traits.scalar_per_vector, 4)  # capped from 16
+
+    def test_smart_picker_finds_non_innermost_stride1_y(self):
+        """Picker should not blindly pick the last Y; if Y0 has stride 1
+        and Y1 doesn't, vector_dim_y must be 0."""
+        from ck_dsl.helpers import (
+            TileDistributionEncoding,
+            make_load_store_traits,
+            make_static_tile_distribution,
+        )
+
+        # Y0 -> innermost level of X0 (stride 1, len 4)
+        # Y1 -> outermost level of X0 (stride 256*4 = 1024)
+        enc = TileDistributionEncoding(
+            Hs=((8, 256, 4),),
+            Ps2RHs_major=((1,),),
+            Ps2RHs_minor=((1,),),
+            Ys2RHs_major=(1, 1),
+            Ys2RHs_minor=(2, 0),
+        )
+        dist = make_static_tile_distribution(enc)
+        traits = make_load_store_traits(dist)
+        self.assertEqual(traits.vector_dim_y, 0)
+        self.assertEqual(traits.scalar_per_vector, 4)
+
+    def test_smart_picker_prefers_largest_stride1_y(self):
+        """When multiple Ys have stride 1, pick the one with the largest length."""
+        from ck_dsl.helpers import (
+            TileDistributionEncoding,
+            make_load_store_traits,
+            make_static_tile_distribution,
+        )
+
+        # Both Ys mapped to innermost levels of their respective X dims.
+        # Y0 has length 8, Y1 has length 16; picker should choose Y1.
+        enc = TileDistributionEncoding(
+            Hs=((4, 8), (4, 16)),
+            Ps2RHs_major=((1, 2),),
+            Ps2RHs_minor=((0, 0),),
+            Ys2RHs_major=(1, 2),
+            Ys2RHs_minor=(1, 1),
+        )
+        dist = make_static_tile_distribution(enc)
+        traits = make_load_store_traits(dist)
+        self.assertEqual(traits.vector_dim_y, 1)
+        self.assertEqual(traits.scalar_per_vector, 8)  # 16 capped to max_vec=8
+
+    def test_smart_picker_falls_back_to_scalar(self):
+        """If no Y has stride 1 (degenerate encoding), pick scalar path."""
+        from ck_dsl.helpers import (
+            TileDistributionEncoding,
+            make_load_store_traits,
+            make_static_tile_distribution,
+        )
+
+        # Only one Y, and it maps to a non-innermost level.
+        enc = TileDistributionEncoding(
+            Hs=((4, 8),),
+            Ps2RHs_major=((1,),),
+            Ps2RHs_minor=((1,),),
+            Ys2RHs_major=(1,),
+            Ys2RHs_minor=(0,),  # outer level (stride 8)
+        )
+        dist = make_static_tile_distribution(enc)
+        traits = make_load_store_traits(dist)
+        self.assertEqual(traits.scalar_per_vector, 1)
+
+    def test_multi_axis_snake_adjacency(self):
+        """The full multi-axis snake guarantees |diff|=1 between
+        consecutive emitted access bases."""
+        from ck_dsl.helpers import (
+            TileDistributionEncoding,
+            make_load_store_traits,
+            make_static_tile_distribution,
+        )
+
+        # Three non-vector axes (Y1, Y2, Y3); vector dim Y0.
+        enc = TileDistributionEncoding(
+            Hs=((4, 3, 2, 256, 4),),
+            Ps2RHs_major=((1,),),
+            Ps2RHs_minor=((3,),),  # P -> level 3 (256 lanes)
+            Ys2RHs_major=(1, 1, 1, 1),
+            Ys2RHs_minor=(4, 2, 1, 0),  # Y0 inner (vec=4); Y1 len 2; Y2 len 3; Y3 len 4
+        )
+        dist = make_static_tile_distribution(enc)
+        traits = make_load_store_traits(dist)
+        self.assertEqual(traits.vector_dim_y, 0)
+        order = list(traits.iterate_accesses(snake=True))
+        # Verify adjacency: each step differs by 1 in exactly one
+        # non-vector axis.
+        for a, b in zip(order, order[1:]):
+            non_vec = [
+                (i, abs(ai - bi))
+                for i, (ai, bi) in enumerate(zip(a, b))
+                if i != traits.vector_dim_y
+            ]
+            total_diff = sum(d for _, d in non_vec)
+            self.assertEqual(
+                total_diff, 1, msg=f"snake adjacency broken between {a} and {b}"
+            )
+
+
+class TestSweepHelper(unittest.TestCase):
+    def test_sweep_row_chunks_invokes_body_per_chunk(self):
+        from ck_dsl.helpers import (
+            make_naive_tensor_view_packed,
+            make_tile_window,
+            sweep_row_chunks,
+        )
+
+        b = IRBuilder("sweep_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        N = 256
+        view = make_naive_tensor_view_packed(X, shape=(1, N), dtype=F16)
+        tile = make_tile_window(
+            view, lengths=(1, N), origin=(b.const_i32(0), b.const_i32(0))
+        )
+        tid = b.thread_id_x()
+        seen = []
+
+        def body(n_off, x_scalars):
+            seen.append((n_off, x_scalars))
+
+        res = sweep_row_chunks(
+            b,
+            tile,
+            tid=tid,
+            block_size=64,
+            vec=8,
+            elems_per_thread=16,
+            body=body,
+            cache=True,
+        )
+        # 16 elems/thread / 8 vec = 2 chunks; cache holds 16 f32 scalars.
+        self.assertEqual(res.chunks_per_thread, 2)
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(len(res.cached), 16)
+        # Each scalar in `cached` is a fresh SSA Value.
+        self.assertEqual(len({id(v) for v in res.cached}), 16)
+
+    def test_pass2_row_chunks_writes_expected_vec_count(self):
+        from ck_dsl.helpers import (
+            make_naive_tensor_view_packed,
+            make_tile_window,
+            pass2_row_chunks,
+        )
+
+        b = IRBuilder("pass2_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        Y = b.param("Y", PtrType(F16, "global"), align=16)
+        view = make_naive_tensor_view_packed(Y, shape=(1, 256), dtype=F16)
+        tile = make_tile_window(
+            view, lengths=(1, 256), origin=(b.const_i32(0), b.const_i32(0))
+        )
+        tid = b.thread_id_x()
+        call_count = [0]
+
+        def body(_n_off, _k, _x_scalars):
+            call_count[0] += 1
+            return [b.const_f32(0.0)] * 8
+
+        pass2_row_chunks(
+            b,
+            tile,
+            tid=tid,
+            block_size=64,
+            vec=8,
+            elems_per_thread=16,
+            body=body,
+        )
+        self.assertEqual(call_count[0], 2)
+
+    def test_pass2_body_must_return_vec_length(self):
+        from ck_dsl.helpers import (
+            make_naive_tensor_view_packed,
+            make_tile_window,
+            pass2_row_chunks,
+        )
+
+        b = IRBuilder("pass2_arity_smoke")
+        Y = b.param("Y", PtrType(F16, "global"), align=16)
+        view = make_naive_tensor_view_packed(Y, shape=(1, 256), dtype=F16)
+        tile = make_tile_window(
+            view, lengths=(1, 256), origin=(b.const_i32(0), b.const_i32(0))
+        )
+        tid = b.thread_id_x()
+
+        with self.assertRaises(ValueError):
+            pass2_row_chunks(
+                b,
+                tile,
+                tid=tid,
+                block_size=64,
+                vec=8,
+                elems_per_thread=16,
+                body=lambda _n, _k, _x: [b.const_f32(0.0)],  # wrong arity
+            )
+
+
+class TestSpecHelper(unittest.TestCase):
+    def test_validate_io_dtype_block_vec(self):
+        from ck_dsl.helpers import IOSpecRule, validate_io
+
+        ok, _ = validate_io(IOSpecRule("f16", 256, 8, n_per_block=4096))
+        self.assertTrue(ok)
+        bad, why = validate_io(IOSpecRule("f16", 256, 8, n_per_block=4099))
+        self.assertFalse(bad)
+        self.assertIn("divisible", why)
+        bad, _ = validate_io(IOSpecRule("fp32", 256, 8))
+        self.assertFalse(bad)
+        bad, _ = validate_io(IOSpecRule("f16", 96, 8))
+        self.assertFalse(bad)
+        bad, _ = validate_io(IOSpecRule("f16", 256, 3))
+        self.assertFalse(bad)
+
+    def test_kernel_name_join_flags_and_drops_empty(self):
+        from ck_dsl.helpers import kernel_name_join
+
+        self.assertEqual(
+            kernel_name_join(
+                "ck_dsl_op", "f16", "", "v8", flags={"smv": True, "n": False}
+            ),
+            "ck_dsl_op_f16_v8_smv",
+        )
+
+    def test_signature_builder_chaining(self):
+        from ck_dsl.helpers import SignatureBuilder
+
+        sig = (
+            SignatureBuilder()
+            .ptr("X", "f16")
+            .ptr("Gamma", "bf16")
+            .scalar("M", "i32")
+            .scalar("eps", "f32")
+            .build()
+        )
+        self.assertEqual(sig[0]["type"], "ptr<f16, global>")
+        self.assertEqual(sig[1]["type"], "ptr<bf16, global>")
+        self.assertEqual(sig[3]["type"], "f32")
+
+    def test_ceil_div_grid_shapes(self):
+        from ck_dsl.helpers import ceil_div_grid
+
+        self.assertEqual(ceil_div_grid((100, 16), (128, 32)), (7, 4, 1))
+        self.assertEqual(ceil_div_grid((100, 16), (128, 32), (4, 1)), (7, 4, 4))
+        self.assertEqual(ceil_div_grid((512, 1)), (512, 1, 1))
+
+
+class TestGroupedGemmInstance(unittest.TestCase):
+    def test_builds(self):
+        from ck_dsl.instances import GroupedGemmSpec, build_grouped_gemm
+
+        spec = GroupedGemmSpec(
+            name="ggemm_smoke",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(pipeline="compv3", epilogue="cshuffle"),
+        )
+        kernel = build_grouped_gemm(spec)
+        ll = lower_kernel_to_llvm(kernel)
+        # The (current) per-group launcher uses the non-batched kernel
+        # so there's no block_id_z dependency.
+        self.assertIn("define amdgpu_kernel void", ll)
+
+
 if __name__ == "__main__":
     unittest.main()

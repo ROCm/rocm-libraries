@@ -53,7 +53,7 @@ What is left out for now (called out explicitly):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterator, List, Literal, Sequence, Tuple
+from typing import Iterator, List, Literal, Optional, Sequence, Tuple
 
 from ..core.ir import (
     F16,
@@ -155,6 +155,14 @@ class UniversalGemmSpec:
     # `BlockSize = NumWarps * warp_size`). We expose it so an over-rider
     # can force a specific block_size for autotuning experiments.
     block_size: int = 0
+    # When True, the kernel reads ``block_id_z`` as the batch index and
+    # picks up three extra i64 stride args (``stride_a``, ``stride_b``,
+    # ``stride_c``) that scale the per-batch pointer offset. The grid
+    # then becomes ``(N_tiles, M_tiles, batch_count)``. This is the only
+    # difference between the non-batched ``build_universal_gemm`` and the
+    # batched form -- the MFMA / LDS body is shared verbatim so the
+    # batched kernel inherits the same correctness + perf as the base.
+    batched: bool = False
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -176,6 +184,7 @@ class UniversalGemmSpec:
             f"_{tr.pipeline}_{tr.scheduler}_{tr.epilogue}"
             f"{'_pad' if any([tr.pad_m, tr.pad_n, tr.pad_k]) else ''}"
             f"{'_pers' if tr.persistent else ''}"
+            f"{'_bat' if self.batched else ''}"
         ).replace("/", "_")
 
 
@@ -355,6 +364,15 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
     M = b.param("M", I32)
     N = b.param("N", I32)
     K = b.param("K", I32)
+    if spec.batched:
+        # Per-batch strides (in elements, not bytes). The kernel uses
+        # ``block_id_z`` as the batch index and adds
+        # ``z * stride_X`` to the X-load/store base offset for X in
+        # {A, B, C}. Strides are i32 to match the rest of the index
+        # arithmetic; the LLVM zext/sext folds them into the gep idx.
+        stride_a = b.param("stride_a", I32)
+        stride_b = b.param("stride_b", I32)
+        stride_c = b.param("stride_c", I32)
 
     t = spec.tile
     a_per_lane, b_per_lane, c_per_lane = _mfma_atom_widths(spec)
@@ -376,6 +394,16 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
     warp_m_idx = b.div(warp_id, c_warps_n)
     warp_n_idx = b.mod(warp_id, c_warps_n)
     lane = b.mod(tid, c_wave)
+
+    if spec.batched:
+        batch_idx = b.block_id_z()
+        batch_off_a = b.mul(batch_idx, stride_a)
+        batch_off_b = b.mul(batch_idx, stride_b)
+        batch_off_c = b.mul(batch_idx, stride_c)
+    else:
+        batch_off_a = c0
+        batch_off_b = c0
+        batch_off_c = c0
 
     block_m_off = b.mul(b.block_id_y(), c_block_m)
     block_n_off = b.mul(b.block_id_x(), c_block_n)
@@ -426,7 +454,7 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
             col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
             a_row = b.add(block_m_off, row)
             a_k = b.add(k_off, col)
-            a_off = b.add(b.mul(a_row, K), a_k)
+            a_off = b.add(batch_off_a, b.add(b.mul(a_row, K), a_k))
             if load_vec == 1:
                 a_val = b.global_load_f16(A, a_off)
                 b.smem_store_f16(A_dst, [row, col], a_val)
@@ -440,7 +468,7 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
             col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
             b_row = b.add(block_n_off, row)
             b_k = b.add(k_off, col)
-            b_off = b.add(b.mul(b_row, K), b_k)
+            b_off = b.add(batch_off_b, b.add(b.mul(b_row, K), b_k))
             if load_vec == 1:
                 b_val = b.global_load_f16(Bp, b_off)
                 b.smem_store_f16(B_dst, [row, col], b_val)
@@ -545,6 +573,7 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
             a_per_lane,
             b_per_lane,
             c_per_lane,
+            batch_off_c=batch_off_c,
         )
     else:
         _emit_epilogue_default(
@@ -560,6 +589,7 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
             N,
             C,
             c_per_lane,
+            batch_off_c=batch_off_c,
         )
 
     return b.kernel
@@ -583,6 +613,8 @@ def _emit_epilogue_default(
     N: Value,
     C: Value,
     c_per_lane: int,
+    *,
+    batch_off_c: Optional[Value] = None,
 ) -> None:
     """Direct vector-store epilogue.
 
@@ -642,6 +674,8 @@ def _emit_epilogue_default(
                         b.add(b.const_i32(mi * t.warp_tile_m), m_off),
                     )
                     c_off = b.add(b.mul(c_m, N), c_n)
+                    if batch_off_c is not None:
+                        c_off = b.add(batch_off_c, c_off)
                     v = b.vec_extract(acc, i)
                     h = b.trunc_f32_to_f16(v)
                     b.store_f16(C, c_off, h)
@@ -668,6 +702,8 @@ def _emit_epilogue_default(
                         b.add(b.const_i32(mi * t.warp_tile_m), m_off),
                     )
                     c_off = b.add(b.mul(c_m, N), c_n)
+                    if batch_off_c is not None:
+                        c_off = b.add(batch_off_c, c_off)
                     v = b.vec_extract(acc, i)
                     h = b.trunc_f32_to_f16(v)
                     b.store_f16(C, c_off, h)
@@ -689,6 +725,8 @@ def _emit_epilogue_cshuffle(
     a_per_lane: int,
     b_per_lane: int,
     c_per_lane: int,
+    *,
+    batch_off_c: Optional[Value] = None,
 ) -> None:
     """LDS-staged cshuffle epilogue.
 
@@ -807,6 +845,8 @@ def _emit_epilogue_cshuffle(
         c_m = b.add(block_m_off, row)
         c_n = b.add(block_n_off, col)
         c_off = b.add(b.mul(c_m, N), c_n)
+        if batch_off_c is not None:
+            c_off = b.add(batch_off_c, c_off)
 
         if store_vec == 1:
             h = _load_smem_scalar(b, Cs, row, col)

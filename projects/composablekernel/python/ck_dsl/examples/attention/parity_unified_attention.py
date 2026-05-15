@@ -322,6 +322,293 @@ def default_scenarios() -> List[Scenario]:
     ]
 
 
+def fmha_scenarios() -> List[Scenario]:
+    """Shapes adapted from `tile_engine/ops/fmha/ck_fmha_testing_matrix.yaml`.
+
+    The CK FMHA matrix is a dense Cartesian product over `(batch,
+    seqlen_q, seqlen_k, nhead_q, nhead_k, hdim_q, hdim_v, dtype, mask,
+    bias, dropout, lse)`. Our paged-attention API is more
+    constrained: causal-only, `head_size in {128, 256}`,
+    `block_size in {16, 64}`, `hdim_q == hdim_v`, no dropout/FP8,
+    and `num_queries_per_kv <= 16` so the 2D tiled kernel can map
+    `(qpos, qhead)` onto a 16-row MFMA `BLOCK_M`.
+
+    The scenarios below cover every YAML *group* whose shape space
+    fits those constraints, translated to `(batch * seqlen_q,
+    seqlen_k)` per-sequence pairs.
+    """
+    fp16 = torch.float16
+    bf16 = torch.bfloat16
+
+    def rep(n: int, q: int, k: int) -> List[Tuple[int, int]]:
+        return [(q, k)] * int(n)
+
+    return [
+        # --- GQA_4to1_Prefill_Basic (32:8, 2K, fp16/bf16) ---
+        Scenario(
+            name="fmha_gqa_4to1_prefill_2k_b1",
+            seq_lens=rep(1, 2048, 2048),
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        Scenario(
+            name="fmha_gqa_4to1_prefill_2k_b4",
+            seq_lens=rep(4, 2048, 2048),
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        Scenario(
+            name="fmha_gqa_4to1_prefill_2k_bf16",
+            seq_lens=rep(2, 2048, 2048),
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=64,
+            dtype=bf16,
+        ),
+        # --- GQA_16to1_Large (capped to 16:1 inside our 16-head limit) ---
+        Scenario(
+            name="fmha_gqa_16to1_prefill_2k_b1",
+            seq_lens=rep(1, 2048, 2048),
+            num_query_heads=16,
+            num_kv_heads=1,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        # --- MQA_128to8_Decode adapted: cap 16:1 MQA ratio ---
+        Scenario(
+            name="fmha_mqa_16to1_decode_1k_b8",
+            seq_lens=rep(8, 1, 1024),
+            num_query_heads=16,
+            num_kv_heads=1,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        Scenario(
+            name="fmha_mqa_16to1_decode_4k_b8",
+            seq_lens=rep(8, 1, 4096),
+            num_query_heads=16,
+            num_kv_heads=1,
+            head_size=128,
+            block_size=16,
+            dtype=bf16,
+        ),
+        # --- CK_Tiny_Sequences: very short sq/sk ---
+        Scenario(
+            name="fmha_tiny_seqs",
+            seq_lens=[(1, 10), (3, 99), (33, 33), (1, 33), (3, 10)],
+            num_query_heads=16,
+            num_kv_heads=1,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        # --- CK_Asymmetric_Seqlen (varlen) ---
+        # Paged attention requires `seqlen_q <= seqlen_k` per sequence so
+        # `context_len = seqlen_k - seqlen_q >= 0`. The original YAML row
+        # also has `q > k` combinations that NaN ref_paged_attn; we drop
+        # those and keep only valid varlen mixes.
+        Scenario(
+            name="fmha_asym_seqlen_b1",
+            seq_lens=[(100, 256), (51, 99), (256, 1024)],
+            num_query_heads=16,
+            num_kv_heads=1,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        Scenario(
+            name="fmha_asym_seqlen_b2_d64variant",
+            seq_lens=[(100, 256), (51, 99), (256, 1024)] * 2,
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=64,
+            dtype=fp16,
+        ),
+        # --- Cross_Attention_Shapes (sq << sk) ---
+        Scenario(
+            name="fmha_cross_attn",
+            seq_lens=[
+                (1, 1024),
+                (1, 4096),
+                (32, 1024),
+                (32, 4096),
+                (128, 1024),
+                (128, 4096),
+            ],
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        # --- Paged_Decode_Shapes (multi-batch short Q, mid-long KV) ---
+        Scenario(
+            name="fmha_paged_decode_b80",
+            seq_lens=rep(80, 1, 4096),
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        Scenario(
+            name="fmha_paged_decode_q4_b16",
+            seq_lens=rep(16, 4, 4096),
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=64,
+            dtype=fp16,
+        ),
+        # --- Padding_Boundary_Stress_Odd_Lengths ---
+        Scenario(
+            name="fmha_pad_boundary_odd",
+            seq_lens=[(259, 259), (500, 500), (987, 987), (1023, 1023)],
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        # --- Prefill_Odd_Lengths ---
+        Scenario(
+            name="fmha_prefill_odd",
+            seq_lens=[(113, 203), (339, 339), (799, 799), (1023, 1024), (3131, 3131)],
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        # --- MHA_H256_High_LDS_Pressure (with hdim=256) ---
+        Scenario(
+            name="fmha_h256_high_lds_2k",
+            seq_lens=rep(1, 2048, 2048),
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            dtype=bf16,
+        ),
+        Scenario(
+            name="fmha_h256_high_lds_4k_b2",
+            seq_lens=rep(2, 4096, 4096),
+            num_query_heads=8,
+            num_kv_heads=4,
+            head_size=256,
+            block_size=16,
+            dtype=bf16,
+        ),
+        # --- Long_Sequence_Stress (8K / 16K seqs, GQA 16:4) ---
+        Scenario(
+            name="fmha_long_8k",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=16,
+            dtype=bf16,
+        ),
+        Scenario(
+            name="fmha_long_16k",
+            seq_lens=[(16384, 16384)],
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=16,
+            dtype=bf16,
+        ),
+        # --- Extreme_Batch_Size_Stress (many short sequences) ---
+        Scenario(
+            name="fmha_batch_64_s128",
+            seq_lens=rep(64, 128, 128),
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        Scenario(
+            name="fmha_batch_128_s128",
+            seq_lens=rep(128, 128, 128),
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        # --- CK_Benchmark_Standard subset (mid-context, mid-batch) ---
+        Scenario(
+            name="fmha_bench_1k_b4",
+            seq_lens=rep(4, 1024, 1024),
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        Scenario(
+            name="fmha_bench_4k_b2_d256",
+            seq_lens=rep(2, 4096, 4096),
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=256,
+            block_size=16,
+            dtype=fp16,
+        ),
+        # --- Bias_Variants_Sweep (ALiBi at modest lengths) ---
+        Scenario(
+            name="fmha_alibi_512_b4",
+            seq_lens=rep(4, 512, 512),
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+            use_alibi=True,
+        ),
+        Scenario(
+            name="fmha_alibi_1k_b4",
+            seq_lens=rep(4, 1024, 1024),
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+            use_alibi=True,
+        ),
+        # --- Vision_Transformer_Shapes (h=128 subset, GQA capped) ---
+        Scenario(
+            name="fmha_vit_1k_b4",
+            seq_lens=rep(4, 1024, 1024),
+            num_query_heads=16,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+        Scenario(
+            name="fmha_vit_256_b4",
+            seq_lens=rep(4, 256, 256),
+            num_query_heads=16,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        ),
+    ]
+
+
 def creative_scenarios() -> List[Scenario]:
     """Exploratory sweep: corners we don't hit in the default 11 scenarios.
 
@@ -635,7 +922,14 @@ def _time_call_loop(call_once, warmup: int, attempts: int):
     """Standard event-timer: ``warmup`` untimed + ``attempts`` timed launches.
 
     Returns mean per-call ms. The caller owns the output tensor and the
-    streaming context.
+    streaming context. After timing we always do a full
+    ``hipDeviceSynchronize`` (via :func:`synchronize_and_release`) before
+    returning: on systems where torch's current stream is the legacy null
+    stream (`cuda_stream == 0`) and our raw ctypes kernels also target
+    stream 0, `torch.cuda.Event.synchronize()` does not always observe
+    the ctypes-issued work. Forcing a device sync at the lane boundary
+    is the only reliable way to guarantee the output tensor reflects all
+    of the launched kernels' writes before the caller reads them.
     """
     for _ in range(warmup):
         call_once()
@@ -647,16 +941,12 @@ def _time_call_loop(call_once, warmup: int, attempts: int):
         call_once()
     t_end.record()
     t_end.synchronize()
-    # The CK DSL raw-HIP launcher retains packed args and tensor objects
-    # until the stream is known complete. We just synchronized the timing
-    # event on torch's current stream, so release those retained resources
-    # before the next independent benchmark lane allocates fresh tensors.
     try:
-        from ck_dsl.runtime import release_retained_for_stream
+        from ck_dsl.runtime import synchronize_and_release
 
-        release_retained_for_stream(int(torch.cuda.current_stream().cuda_stream))
+        synchronize_and_release()
     except Exception:
-        pass
+        torch.cuda.synchronize()
     return t_start.elapsed_time(t_end) / attempts
 
 
@@ -807,9 +1097,16 @@ def run_reference(s: Scenario, data) -> torch.Tensor:
 
 
 def compare(reference: torch.Tensor, out: torch.Tensor) -> dict:
-    diff = (reference - out).float()
+    # Promote both sides to fp32 explicitly. This (1) avoids fp16 overflow
+    # in the subtraction when the two tensors disagree by more than the
+    # fp16 range (rare but possible under aliasing bugs) and (2) lets the
+    # harness keep the reference as fp32 throughout to immunize it from
+    # any in-flight aliasing.
+    a = reference.float()
+    b = out.float()
+    diff = a - b
     abs_diff = diff.abs()
-    abs_ref = reference.float().abs()
+    abs_ref = a.abs()
     rel = abs_diff / (abs_ref + 1e-6)
     return {
         "max_abs": float(abs_diff.max().item()),
@@ -857,6 +1154,19 @@ def _row_print(label: str, out_ms, ref_out, t_out):
     if out_ms is None:
         return
     out, ms = out_ms
+    # Hard sync via the runtime so that raw HIP launches issued via ctypes
+    # have actually completed. torch.cuda.synchronize() alone is not always
+    # enough when torch is on the legacy null stream (handle 0) AND we
+    # launched via hipModuleLaunchKernel on the same null stream; some
+    # ROCm setups treat the two as distinct queues. Using
+    # `Runtime.sync()` directly calls `hipDeviceSynchronize` which
+    # always drains every stream on the device.
+    try:
+        from ck_dsl.runtime import synchronize_and_release
+
+        synchronize_and_release()
+    except Exception:
+        torch.cuda.synchronize()
     diffs = compare(ref_out, out) if ref_out is not None else None
     extra = f"max_abs={diffs['max_abs']:.4g}" if diffs else ""
     print(f"  {label:14s}: {ms * 1000:9.2f} us  {extra}")
@@ -877,14 +1187,18 @@ def main() -> int:
     )
     parser.add_argument(
         "--set",
-        choices=("default", "creative", "all"),
+        choices=("default", "creative", "fmha", "all"),
         default="default",
         help=(
             "Which scenario set to use. 'default' is the 11 production "
             "scenarios; 'creative' is an exploratory sweep covering "
             "long-context decode, GQA/MQA variants, head_size=256, "
             "bf16, sliding window extremes, and bias combinations; "
-            "'all' is both."
+            "'fmha' is the subset of CK Tile's "
+            "`tile_engine/ops/fmha/ck_fmha_testing_matrix.yaml` that "
+            "fits our paged-attention constraints "
+            "(causal-only, h in {128,256}, b in {16,64}, "
+            "num_queries_per_kv <= 16); 'all' is default + creative."
         ),
     )
     args = parser.parse_args()
@@ -898,6 +1212,8 @@ def main() -> int:
         scenarios = default_scenarios()
     elif args.set == "creative":
         scenarios = creative_scenarios()
+    elif args.set == "fmha":
+        scenarios = fmha_scenarios()
     else:  # all
         scenarios = default_scenarios() + creative_scenarios()
 
@@ -919,9 +1235,15 @@ def main() -> int:
         print(
             f"\n=== scenario: {s.name}  dtype={s.dtype}  block={s.block_size}  d={s.head_size} ==="
         )
-        # See notes in `_run_ck_dsl`: empty the caching allocator between
-        # scenarios so transient reference tensors don't fragment VA space.
-        torch.cuda.empty_cache()
+        # Strongly isolate the previous scenario before allocating inputs.
+        # Without this the prior scenario's retained tensor args (held by
+        # the CK DSL runtime to keep raw HIP launches' arg buffers alive
+        # until the stream sync) can outlive `data` allocation, and the
+        # new reference / scenario inputs land in storage the prior
+        # scenario's launches are still touching. The symptom is large
+        # max_abs drift on the longer-context rows even though each
+        # kernel is bit-correct in isolation.
+        _isolate_benchmark_lane()
         data = make_inputs(s)
         row = {
             "scenario": s.name,
@@ -933,7 +1255,16 @@ def main() -> int:
         }
 
         with torch.inference_mode():
-            ref_out = run_reference(s, data)
+            # Keep an independent fp32 clone of the reference so later
+            # comparisons cannot be silently corrupted by an adjacent
+            # allocation: when many large tensors are allocated in the
+            # same scenario the torch caching allocator can hand back a
+            # block adjacent to `ref_out`, and an OOB write from a CK
+            # ctypes-launched kernel can spill onto it. Clone is fp32 so
+            # subsequent compare() promotes losslessly.
+            ref_out_raw = run_reference(s, data)
+            ref_out = ref_out_raw.float().clone()
+            _isolate_benchmark_lane()
 
             # Reference Triton "natural" path. This is what unified_attention()
             # picks via its own use_2d_kernel selector.
@@ -960,6 +1291,7 @@ def main() -> int:
                     # Already done above. Just run CK auto for the
                     # apples-to-apples lane on CK side.
                     if not args.skip_ck:
+                        _isolate_benchmark_lane()
                         ck_auto, err_ck = _safe_run(
                             lambda: _run_ck_dsl(
                                 s,
@@ -983,6 +1315,7 @@ def main() -> int:
                     continue
 
                 # Force-path: Triton on `path`, CK DSL on `path`.
+                _isolate_benchmark_lane()
                 t_p, err_t = _safe_run(
                     lambda p=path: _run_triton(
                         s,
@@ -996,6 +1329,7 @@ def main() -> int:
                 _isolate_benchmark_lane()
 
                 if not args.skip_ck:
+                    _isolate_benchmark_lane()
                     ck_p, err_c = _safe_run(
                         lambda p=path: _run_ck_dsl(
                             s,

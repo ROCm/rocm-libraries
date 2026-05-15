@@ -5,8 +5,51 @@
 
 This package sits one layer above `ck_dsl._ir` (the SSA IR + builder) and
 captures the patterns that every CK Tile-style GEMM, attention, or
-convolution kernel re-implements by hand:
+convolution kernel re-implements by hand. Two cohesive layers:
 
+CK Tile-inspired data abstractions (port of ``make_tensor_view`` etc.)
+  - `TensorDescriptor`        - shape + strides + dtype (``tensor_descriptor``).
+                                Stride entries can be ``int`` (compile-time)
+                                or SSA ``Value`` (runtime), paralleling
+                                CK Tile's ``number<>`` vs ``index_t``
+                                distinction.
+  - `TensorView`              - pointer + descriptor + addr space
+                                (``tensor_view<addr_space::*>``)
+  - `TileWindow`              - moveable origin + extents into a TensorView
+                                (``tile_window``). Supports ``move_to`` /
+                                ``shift_by`` for sliding-window patterns.
+  - `TensorCoordinate`,         Cached (index, offset) pair with incremental
+    `make_tensor_coordinate`,   ``move`` updates (``tensor_coordinate`` +
+    `move_tensor_coordinate`    ``move_tensor_coordinate``).
+  - `make_global_view`,         ``make_tensor_view<addr_space::global, lds>``
+    `make_lds_view`             plus ``make_naive_tensor_descriptor_packed``.
+  - `make_naive_tensor_view_packed`,  CK Tile literal-name aliases for the
+    `make_tile_window`                two free-function forms; use either.
+  - `view_from_transforms_descriptor`  Bridge ``ck_dsl.transforms`` (rich
+                                       transform-pipeline descriptors with
+                                       named coords) into the :class:`TensorView`
+                                       API; discards validity masks for now.
+  - `sweep_row_chunks`,         CK Tile-style "load X once, sweep Y" iteration
+    `pass2_row_chunks`          helpers; see ``ck_tile/core/tensor/sweep_tile.hpp``
+                                and :ref:`ck_tile_sweep_tile`.
+  - `TileDistributionEncoding`,  Full CK Tile distribution machinery (v1: no R,
+    `make_static_tile_distribution`,  1D-2D X, Ps/Ys flexible). The encoding
+    `TileDistribution`,               carries the (Rs, Hs, Ps2RHs, Ys2RHs)
+    `LoadStoreTraits`,                tuples; :func:`make_load_store_traits`
+    `make_load_store_traits`,         analyses it to pick `vector_dim_y` +
+    `StaticDistributedTensor`,        `scalar_per_vector` + snake traversal
+    `load_tile`, `store_tile`         order; :func:`load_tile` / `store_tile`
+                                      drive an automated, vectorised
+                                      window <-> register-tile pass.
+  - `io_ir_type`, `load_vec`, `store_vec`, `load_vec_as_f32`,
+    `pack_f32_to`             - dtype-string-tolerant I/O dispatch
+  - `block_lds_reduce`        - canonical LDS tree reduction (sum / max)
+  - `IOSpecRule`, `validate_io`,
+    `kernel_name_join`,
+    `SignatureBuilder`,
+    `ceil_div_grid`           - one-line spec / signature / grid helpers
+
+Kernel-shape abstractions (GEMM / conv / attention infrastructure):
   - `MfmaAtom`                - one matrix-multiply intrinsic + its lane layout
   - `WarpGrid`                - block/warp/lane decomposition and constants
   - `CoalescedTileLoader`     - coalesced global-to-LDS sync tile copy
@@ -49,8 +92,30 @@ from .attention import (
     use_2d_kernel,
 )
 from .compile import KernelArtifact, compile_kernel
+from .distribution import (
+    LoadStoreTraits,
+    StaticDistributedTensor,
+    TileDistribution,
+    TileDistributionEncoding,
+    load_tile,
+    make_load_store_traits,
+    make_static_distributed_tensor,
+    make_static_tile_distribution,
+    store_tile,
+)
 from .epilogues import CShuffleEpilogue, DirectEpilogue
 from .geometry import WarpGrid
+from .io import (
+    io_ir_type,
+    load_scalar,
+    load_scalar_as_f32,
+    load_vec,
+    load_vec_as_f32,
+    pack_f32_to,
+    store_scalar,
+    store_scalar_from_f32,
+    store_vec,
+)
 from .layouts import LdsLayout
 from .loads import (
     AsyncTileLoader,
@@ -60,7 +125,37 @@ from .loads import (
     lane_contiguous_descriptor,
 )
 from .pipeline import SoftwarePipeline
+from .reduction import ReduceCombine, block_lds_reduce
 from .schedule import SchedulePolicy
+from .spec import (
+    IOSpecRule,
+    SignatureBuilder,
+    ceil_div_grid,
+    kernel_name_join,
+    ptr_type_str,
+    sig_param,
+    sig_scalar,
+    validate_io,
+)
+from .sweep import (
+    RowChunkSweepResult,
+    pass2_row_chunks,
+    sweep_row_chunks,
+)
+from .tensor_view import (
+    TensorCoordinate,
+    TensorDescriptor,
+    TensorView,
+    TileWindow,
+    make_global_view,
+    make_lds_view,
+    make_naive_tensor_descriptor_packed,
+    make_naive_tensor_view_packed,
+    make_tensor_coordinate,
+    make_tile_window,
+    move_tensor_coordinate,
+    view_from_transforms_descriptor,
+)
 from .manifest import (
     MANIFEST_SCHEMA,
     attention_args_signature,
@@ -113,4 +208,53 @@ __all__ = [
     "make_conv_manifest",
     "make_gemm_manifest",
     "write_artifact",
+    # CK Tile-inspired tensor abstractions
+    "TensorCoordinate",
+    "TensorDescriptor",
+    "TensorView",
+    "TileWindow",
+    "make_global_view",
+    "make_lds_view",
+    "make_naive_tensor_descriptor_packed",
+    "make_naive_tensor_view_packed",
+    "make_tensor_coordinate",
+    "make_tile_window",
+    "move_tensor_coordinate",
+    "view_from_transforms_descriptor",
+    # Distribution + distributed tensor + load_store_traits
+    "LoadStoreTraits",
+    "StaticDistributedTensor",
+    "TileDistribution",
+    "TileDistributionEncoding",
+    "load_tile",
+    "make_load_store_traits",
+    "make_static_distributed_tensor",
+    "make_static_tile_distribution",
+    "store_tile",
+    # Sweep iteration
+    "RowChunkSweepResult",
+    "pass2_row_chunks",
+    "sweep_row_chunks",
+    # I/O dispatch
+    "io_ir_type",
+    "load_scalar",
+    "load_scalar_as_f32",
+    "load_vec",
+    "load_vec_as_f32",
+    "pack_f32_to",
+    "store_scalar",
+    "store_scalar_from_f32",
+    "store_vec",
+    # Reductions
+    "ReduceCombine",
+    "block_lds_reduce",
+    # Spec / signature / grid
+    "IOSpecRule",
+    "SignatureBuilder",
+    "ceil_div_grid",
+    "kernel_name_join",
+    "ptr_type_str",
+    "sig_param",
+    "sig_scalar",
+    "validate_io",
 ]
