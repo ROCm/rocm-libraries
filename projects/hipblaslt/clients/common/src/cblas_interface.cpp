@@ -78,22 +78,175 @@ private:
     void*          m_pointer = nullptr;
 };
 
+template <typename T>
+struct is_hip_custom_type
+    : std::integral_constant<bool,
+                             std::is_same_v<T, hipblasLtHalf> || // HIP_R_16F
+                                 std::is_same_v<T, hip_bfloat16> || // HIP_R_16BF
+                                 std::is_same_v<T, hipblaslt_f8> || // HIP_R_8F_E4M3
+                                 std::is_same_v<T, hipblaslt_bf8> || // HIP_R_8F_E5M2
+                                 std::is_same_v<T, hipblaslt_f8_fnuz> || // HIP_R_8F_E4M3_FNUZ
+                                 std::is_same_v<T, hipblaslt_bf8_fnuz> // HIP_R_8F_E5M2_FNUZ
+                             >
+{
+};
+
+template <typename T1, typename T2>
+constexpr bool is_any_custom_type_v
+    = is_hip_custom_type<T1>::value || is_hip_custom_type<T2>::value;
+
+
+template <typename T>
+constexpr auto get_real_if_complex(const T& val)
+{
+    if constexpr(std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>)
+    {
+        return val.real();
+    }
+    else
+    {
+        return val;
+    }
+}
+
+template <typename T1, typename T2, std::enable_if_t<!is_any_custom_type_v<T1, T2>, int> = 0>
+constexpr auto safe_multiply(const T1& a, const T2& b)
+{
+    using is_T1_complex = std::integral_constant<bool, is_std_complex_v<T1>>;
+    using is_T2_complex = std::integral_constant<bool, is_std_complex_v<T2>>;
+
+    if constexpr(std::is_integral_v<T1> && is_T2_complex::value)
+    {
+        using ComplexRealT = typename T2::value_type;
+        return static_cast<ComplexRealT>(a) * b; 
+    }
+    else if constexpr(std::is_floating_point_v<T1> && is_T2_complex::value)
+    {
+        using ComplexRealT = typename T2::value_type;
+        return static_cast<ComplexRealT>(a) * b;
+    }
+    else if constexpr(is_T1_complex::value && std::is_integral_v<T2>)
+    {
+        using ComplexRealT = typename T1::value_type;
+        return a * static_cast<ComplexRealT>(b); 
+    }
+    else if constexpr(is_T1_complex::value && std::is_floating_point_v<T2>)
+    {
+        using ComplexRealT = typename T1::value_type;
+        return a * static_cast<ComplexRealT>(b);
+    }
+    else if constexpr(is_T1_complex::value && is_T2_complex::value)
+    {
+        using T1_Val = typename T1::value_type;
+        using T2_Val = typename T2::value_type;
+        
+        if constexpr(sizeof(T1_Val) >= sizeof(T2_Val))
+        {
+             return a * static_cast<T1>(b);
+        }
+        else
+        {
+             return static_cast<T2>(a) * b;
+        }
+    }
+    else
+    {
+        return a * b;
+    }
+}
+
+template <
+    typename CustomReal,
+    typename StandardT,
+    std::enable_if_t<is_hip_custom_type<CustomReal>::value && !is_hip_custom_type<StandardT>::value,
+                     int>
+    = 0>
+constexpr auto safe_multiply(const CustomReal& a, const StandardT& b)
+{
+    if constexpr(is_std_complex_v<StandardT>)
+    {
+        using RealT = typename StandardT::value_type;
+        return static_cast<RealT>(a) * b; // Results in a complex type
+    }
+    else
+    {
+        return static_cast<float>(a) * b; // Results in a standard float type
+    }
+}
+
+template <
+    typename StandardT,
+    typename CustomReal,
+    std::enable_if_t<!is_hip_custom_type<StandardT>::value && is_hip_custom_type<CustomReal>::value,
+                     int>
+    = 0>
+constexpr auto safe_multiply(const StandardT& a, const CustomReal& b)
+{
+    if constexpr(is_std_complex_v<StandardT>)
+    {
+        using RealT = typename StandardT::value_type;
+        return a * static_cast<RealT>(b); // Results in a complex type
+    }
+    else
+    {
+        return a * static_cast<float>(b); // Results in a standard float type
+    }
+}
+
+template <typename CustomReal1,
+          typename CustomReal2,
+          std::enable_if_t<is_hip_custom_type<CustomReal1>::value
+                               && is_hip_custom_type<CustomReal2>::value,
+                           int>
+          = 0>
+constexpr auto safe_multiply(const CustomReal1& a, const CustomReal2& b)
+{
+    return static_cast<float>(a) * static_cast<float>(b);
+}
+
 template <typename TD, typename TcCast, typename Tc>
 void sat_cast_mul(TD* dst, customVector<TcCast>& src, Tc scale, size_t size)
 {
+    constexpr bool is_TD_complex
+        = std::is_same_v<TD, std::complex<float>> || std::is_same_v<TD, std::complex<double>>;
+    constexpr bool is_src_complex = is_std_complex_v<TcCast>; // TcCast is the type of src/result
+
+    constexpr bool is_TD_real_or_int = !is_TD_complex;
+
     if constexpr(std::is_same<TcCast, float>::value
                  || (!std::is_same<TD, hipblaslt_bf8_fnuz>::value
                      && !std::is_same<TD, hipblaslt_f8_fnuz>::value))
     {
-        if(scale != 1)
+        if(scale != static_cast<Tc>(1))
         {
             for(size_t i = 0; i < size; i++)
-                dst[i] = saturate_cast<TD>(src[i] * scale);
+            {
+                auto result
+                    = src[i] * scale;
+
+                if constexpr(is_TD_real_or_int && is_src_complex)
+                {
+                    dst[i] = saturate_cast<TD>(get_real_if_complex(result));
+                }
+                else
+                {
+                    dst[i] = saturate_cast<TD>(result);
+                }
+            }
         }
         else
         {
             for(size_t i = 0; i < size; i++)
-                dst[i] = saturate_cast<TD>(src[i]);
+            {
+                if constexpr(is_TD_real_or_int && is_src_complex)
+                {
+                    dst[i] = saturate_cast<TD>(get_real_if_complex(src[i]));
+                }
+                else
+                {
+                    dst[i] = saturate_cast<TD>(src[i]);
+                }
+            }
         }
     }
 }
@@ -108,6 +261,14 @@ void sat_cast_mul(void* dst, hipDataType typeD, customVector<TcCast>& src, Tc sc
         break;
     case HIP_R_64F:
         sat_cast_mul<double, TcCast, Tc>(static_cast<double*>(dst), src, scale, size);
+        break;
+    case HIP_C_32F:
+        sat_cast_mul<std::complex<float>, TcCast, Tc>(
+            static_cast<std::complex<float>*>(dst), src, scale, size);
+        break;
+    case HIP_C_64F:
+        sat_cast_mul<std::complex<double>, TcCast, Tc>(
+            static_cast<std::complex<double>*>(dst), src, scale, size);
         break;
     case HIP_R_16F:
         sat_cast_mul<hipblasLtHalf, TcCast, Tc>(static_cast<hipblasLtHalf*>(dst), src, scale, size);
@@ -144,6 +305,9 @@ void sat_cast_mul(void* dst, hipDataType typeD, customVector<TcCast>& src, Tc sc
 template <typename TcCast, typename TiA>
 void cast_mul(customVector<TcCast>& dst, const TiA* src, size_t size)
 {
+    // Logic: Only extract real part if Destination is Real AND Source is Complex
+    constexpr bool requires_real_extraction = !is_std_complex_v<TcCast> && is_std_complex_v<TiA>;
+
     if constexpr(std::is_same<TcCast, float>::value
                  || (!std::is_same<TiA, hipblaslt_bf8_fnuz>::value
                      && !std::is_same<TiA, hipblaslt_f8_fnuz>::value))
@@ -153,7 +317,14 @@ void cast_mul(customVector<TcCast>& dst, const TiA* src, size_t size)
                           || std::is_same<TiA, hipblaslt_f8>::value))
             for(size_t i = 0; i < size; i++)
             {
-                dst[i] = static_cast<TcCast>(src[i]);
+                if constexpr(requires_real_extraction)
+                {
+                    dst[i] = static_cast<TcCast>(get_real_if_complex(src[i]));
+                }
+                else
+                {
+                    dst[i] = static_cast<TcCast>(src[i]);
+                }
             }
     }
 }
@@ -168,6 +339,14 @@ void cast_mul(customVector<TcCast>& dst, const void* src, hipDataType TiA, size_
         break;
     case HIP_R_64F:
         cast_mul<TcCast, double>(dst, static_cast<const double*>(src), size);
+        break;
+    case HIP_C_32F:
+        cast_mul<TcCast, std::complex<float>>(
+            dst, static_cast<const std::complex<float>*>(src), size);
+        break;
+    case HIP_C_64F:
+        cast_mul<TcCast, std::complex<double>>(
+            dst, static_cast<const std::complex<double>*>(src), size);
         break;
     case HIP_R_16F:
         cast_mul<TcCast, hipblasLtHalf>(dst, static_cast<const hipblasLtHalf*>(src), size);
@@ -202,16 +381,31 @@ void cast_mul(customVector<TcCast>& dst, const void* src, hipDataType TiA, size_
 
 template <typename TcCast, typename Tc, typename TiA>
 void cast_mul(customVector<TcCast>& dst,
-              const TiA*            A,
+              const TiA* A,
               bool                  isScaleAVec,
-              const TcCast*         scaleAVec,
-              const TcCast*         AlphaVec,
+              const TcCast* scaleAVec,
+              const TcCast* AlphaVec,
               bool                  transA,
               int64_t               m,
               int64_t               k,
               size_t                size,
               bool                  isMXFormat = false)
 {
+    constexpr bool requires_real_extraction = !is_std_complex_v<TcCast> && is_std_complex_v<TiA>;
+    constexpr bool destination_is_real      = !is_std_complex_v<TcCast>;
+
+    // If we are casting Complex -> Real, extract real part.
+    // Otherwise return val as-is.
+    auto get_cast_val = [&](auto val) {
+        if constexpr(requires_real_extraction)                              // complex→real
+            return get_real_if_complex(val);
+        else if constexpr(is_std_complex_v<TcCast>
+                      && !is_std_complex_v<std::decay_t<decltype(val)>>)    // real→complex
+           return static_cast<scalar_of_t<TcCast>>(val);                    // always valid: complex<float>→float, complex<double>→double
+        else                                                                // same type
+            return val;
+};
+
     if constexpr((std::is_same<TcCast, float>::value)
                  || (!std::is_same<TiA, hipblaslt_bf8_fnuz>::value
                      && !std::is_same<TiA, hipblaslt_f8_fnuz>::value))
@@ -237,9 +431,19 @@ void cast_mul(customVector<TcCast>& dst,
 #pragma omp for
                     for(size_t i = 0; i < size; i++)
                     {
+                        auto A_val = A[i];
+
                         if(isMXFormat)
                         {
-                            dst[i] = static_cast<TcCast>(A[i]) * AlphaVec[i % m];
+                            auto result = safe_multiply(static_cast<TcCast>(get_cast_val(A_val)), AlphaVec[i % m]);
+                            if constexpr(destination_is_real)
+                            {
+                                dst[i] = static_cast<TcCast>(get_real_if_complex(result));
+                            }
+                            else
+                            {
+                                dst[i] = static_cast<TcCast>(result);
+                            }
                         }
                         else
                         {
@@ -264,7 +468,17 @@ void cast_mul(customVector<TcCast>& dst,
                             }
                             else
                             {
-                                dst[i] = static_cast<TcCast>(A[i]) * scaleA * AlphaVec[i % m];
+                                auto scaled_A = safe_multiply(static_cast<TcCast>(get_cast_val(A_val)), scaleA);
+                                auto result   = safe_multiply(scaled_A, AlphaVec[i % m]);
+
+                                if constexpr(destination_is_real)
+                                {
+                                    dst[i] = static_cast<TcCast>(get_real_if_complex(result));
+                                }
+                                else
+                                {
+                                    dst[i] = static_cast<TcCast>(result);
+                                }
                             }
                         }
                     }
@@ -274,9 +488,19 @@ void cast_mul(customVector<TcCast>& dst,
 #pragma omp for
                     for(size_t i = 0; i < size; i++)
                     {
+                        auto A_val = A[i];
+
                         if(isMXFormat)
                         {
-                            dst[i] = static_cast<TcCast>(A[i]) * AlphaVec[i / k];
+                            auto result = safe_multiply(static_cast<TcCast>(get_cast_val(A_val)), AlphaVec[i / k]);
+                            if constexpr(destination_is_real)
+                            {
+                                dst[i] = static_cast<TcCast>(get_real_if_complex(result));
+                            }
+                            else
+                            {
+                                dst[i] = static_cast<TcCast>(result);
+                            }
                         }
                         else
                         {
@@ -301,7 +525,17 @@ void cast_mul(customVector<TcCast>& dst,
                             }
                             else
                             {
-                                dst[i] = static_cast<TcCast>(A[i]) * scaleA * AlphaVec[i / k];
+                                auto scaled_A = safe_multiply(static_cast<TcCast>(get_cast_val(A_val)), scaleA);
+                                auto result   = safe_multiply(scaled_A, AlphaVec[i / k]);
+
+                                if constexpr(destination_is_real)
+                                {
+                                    dst[i] = static_cast<TcCast>(get_real_if_complex(result));
+                                }
+                                else
+                                {
+                                    dst[i] = static_cast<TcCast>(result);
+                                }
                             }
                         }
                     }
@@ -314,9 +548,11 @@ void cast_mul(customVector<TcCast>& dst,
 #pragma omp for
                     for(size_t i = 0; i < size; i++)
                     {
+                        auto A_val = A[i];
+
                         if(isMXFormat)
                         {
-                            dst[i] = static_cast<TcCast>(A[i]);
+                            dst[i] = static_cast<TcCast>(get_cast_val(A_val));
                         }
                         else
                         {
@@ -335,12 +571,21 @@ void cast_mul(customVector<TcCast>& dst,
                                 for(int j = 0; j < type::packed_size; j++)
                                 {
                                     dst[type::packed_size * i + j]
-                                        = static_cast<TcCast>(A[i].castElement(j) * scaleA);
+                                        = static_cast<TcCast>(static_cast<TcCast>(A[i].castElement(j)) * scaleA);
                                 }
                             }
                             else
                             {
-                                dst[i] = static_cast<TcCast>(A[i] * scaleA);
+                                auto result = safe_multiply(static_cast<TcCast>(get_cast_val(A_val)), scaleA);
+
+                                if constexpr(destination_is_real)
+                                {
+                                    dst[i] = static_cast<TcCast>(get_real_if_complex(result));
+                                }
+                                else
+                                {
+                                    dst[i] = static_cast<TcCast>(result);
+                                }
                             }
                         }
                     }
@@ -350,9 +595,11 @@ void cast_mul(customVector<TcCast>& dst,
 #pragma omp for
                     for(size_t i = 0; i < size; i++)
                     {
+                        auto A_val = A[i];
+
                         if(isMXFormat)
                         {
-                            dst[i] = static_cast<TcCast>(A[i]);
+                            dst[i] = static_cast<TcCast>(get_cast_val(A_val));
                         }
                         else
                         {
@@ -371,12 +618,21 @@ void cast_mul(customVector<TcCast>& dst,
                                 for(int j = 0; j < type::packed_size; j++)
                                 {
                                     dst[type::packed_size * i + j]
-                                        = static_cast<TcCast>(A[i].castElement(j) * scaleA);
+                                        = static_cast<TcCast>(static_cast<TcCast>(A[i].castElement(j)) * scaleA);
                                 }
                             }
                             else
                             {
-                                dst[i] = static_cast<TcCast>(A[i] * scaleA);
+                                auto result = safe_multiply(static_cast<TcCast>(get_cast_val(A_val)), scaleA);
+
+                                if constexpr(destination_is_real)
+                                {
+                                    dst[i] = static_cast<TcCast>(get_real_if_complex(result));
+                                }
+                                else
+                                {
+                                    dst[i] = static_cast<TcCast>(result);
+                                }
                             }
                         }
                     }
@@ -424,6 +680,30 @@ void cast_mul(customVector<TcCast>& dst,
                                      k,
                                      size,
                                      isMXFormat);
+        break;
+    case HIP_C_32F:
+        cast_mul<TcCast, Tc, std::complex<float>>(dst,
+                                                  static_cast<const std::complex<float>*>(src),
+                                                  isScaleAVec,
+                                                  scaleAVec,
+                                                  AlphaVec,
+                                                  transA,
+                                                  m,
+                                                  k,
+                                                  size,
+                                                  isMXFormat);
+        break;
+    case HIP_C_64F:
+        cast_mul<TcCast, Tc, std::complex<double>>(dst,
+                                                   static_cast<const std::complex<double>*>(src),
+                                                   isScaleAVec,
+                                                   scaleAVec,
+                                                   AlphaVec,
+                                                   transA,
+                                                   m,
+                                                   k,
+                                                   size,
+                                                   isMXFormat);
         break;
     case HIP_R_16F:
         cast_mul<TcCast, Tc, hipblasLtHalf>(dst,
@@ -566,15 +846,31 @@ void cast_mul(customVector<TcCast>& dst,
 
 template <typename TcCast, typename Tc, typename TciACast, typename TiA>
 void cast_mul_with_Tci(customVector<TcCast>& dst,
-                       const TiA*            A,
+                       const TiA* A,
                        bool                  isScaleAVec,
-                       const TcCast*         scaleAVec,
-                       const TcCast*         AlphaVec,
+                       const TcCast* scaleAVec,
+                       const TcCast* AlphaVec,
                        bool                  transA,
                        int64_t               m,
                        int64_t               k,
                        size_t                size)
 {
+    // NOTE: TciACast is the intermediate type. If the result of the math (A*Scale*Alpha) is Complex,
+    // but TciACast is Real, we must extract the real part before casting to TciACast.
+    constexpr bool intermediate_is_real = !is_std_complex_v<TciACast>;
+
+    // Helper to extract real only if we are squashing complex to real
+    auto get_intermediate_val = [&](auto val) {
+        if constexpr(intermediate_is_real)
+        {
+            return get_real_if_complex(val);
+        }
+        else
+        {
+            return val;
+        }
+    };
+
     if constexpr(std::is_same<TcCast, float>::value
                  || (!std::is_same<TciACast, hipblaslt_bf8_fnuz>::value
                      && !std::is_same<TciACast, hipblaslt_f8_fnuz>::value)
@@ -594,40 +890,88 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
 #pragma omp for
                     for(size_t i = 0; i < size; i++)
                     {
-                        auto scaleA = isScaleAVec ? scaleAVec[i % m] : scaleAVec[0];
-                        dst[i]      = static_cast<TcCast>(static_cast<TciACast>(A[i] * scaleA))
-                                 * AlphaVec[i % m];
+                        auto scaleA_val = isScaleAVec ? scaleAVec[i % m] : scaleAVec[0];
+                        auto scaled_val = safe_multiply(A[i], scaleA_val);
+                        auto result     = safe_multiply(scaled_val, AlphaVec[i % m]);
+
+                        auto intermediate_val = static_cast<TciACast>(get_intermediate_val(result));
+                        
+                        constexpr bool final_cast_requires_real = !is_std_complex_v<TcCast> && is_std_complex_v<TciACast>;
+                        if constexpr(final_cast_requires_real)
+                        {
+                            dst[i] = static_cast<TcCast>(get_real_if_complex(intermediate_val));
+                        }
+                        else
+                        {
+                            dst[i] = static_cast<TcCast>(intermediate_val);
+                        }
                     }
                 }
-                else
+                else // not transA
                 {
 #pragma omp for
                     for(size_t i = 0; i < size; i++)
                     {
-                        auto scaleA = isScaleAVec ? scaleAVec[i / k] : scaleAVec[0];
-                        dst[i]      = static_cast<TcCast>(static_cast<TciACast>(A[i] * scaleA))
-                                 * AlphaVec[i / k];
+                        auto scaleA_val = isScaleAVec ? scaleAVec[i / k] : scaleAVec[0];
+                        auto scaled_val = safe_multiply(A[i], scaleA_val);
+                        auto result     = safe_multiply(scaled_val, AlphaVec[i / k]);
+
+                        auto intermediate_val = static_cast<TciACast>(get_intermediate_val(result));
+                        
+                        constexpr bool final_cast_requires_real = !is_std_complex_v<TcCast> && is_std_complex_v<TciACast>;
+                        if constexpr(final_cast_requires_real)
+                        {
+                            dst[i] = static_cast<TcCast>(get_real_if_complex(intermediate_val));
+                        }
+                        else
+                        {
+                            dst[i] = static_cast<TcCast>(intermediate_val);
+                        }
                     }
                 }
             }
-            else
+            else // AlphaVec == nullptr
             {
                 if(transA)
                 {
 #pragma omp for
                     for(size_t i = 0; i < size; i++)
                     {
-                        auto scaleA = isScaleAVec ? scaleAVec[i % m] : scaleAVec[0];
-                        dst[i]      = static_cast<TcCast>(static_cast<TciACast>(A[i] * scaleA));
+                        auto scaleA_val = isScaleAVec ? scaleAVec[i % m] : scaleAVec[0];
+                        auto scaled_val = safe_multiply(A[i], scaleA_val);
+
+                        auto intermediate_val = static_cast<TciACast>(get_intermediate_val(scaled_val));
+
+                        constexpr bool final_cast_requires_real = !is_std_complex_v<TcCast> && is_std_complex_v<TciACast>;
+                        if constexpr(final_cast_requires_real)
+                        {
+                            dst[i] = static_cast<TcCast>(get_real_if_complex(intermediate_val));
+                        }
+                        else
+                        {
+                            dst[i] = static_cast<TcCast>(intermediate_val);
+                        }
                     }
                 }
-                else
+                else // not transA
                 {
 #pragma omp for
                     for(size_t i = 0; i < size; i++)
                     {
-                        auto scaleA = isScaleAVec ? scaleAVec[i / k] : scaleAVec[0];
-                        dst[i]      = static_cast<TcCast>(static_cast<TciACast>(A[i] * scaleA));
+                        auto scaleA_val = isScaleAVec ? scaleAVec[i / k] : scaleAVec[0];
+                        auto scaled_val = safe_multiply(A[i], scaleA_val);
+
+                        auto intermediate_val = static_cast<TciACast>(get_intermediate_val(scaled_val));
+                        
+                        constexpr bool final_cast_requires_real = !is_std_complex_v<TcCast> && is_std_complex_v<TciACast>;
+                        if constexpr(final_cast_requires_real)
+                        {
+                            dst[i] = static_cast<TcCast>(get_real_if_complex(intermediate_val));
+                        }
+                        else
+                        {
+                            dst[i] = static_cast<TcCast>(intermediate_val);
+                        }
                     }
                 }
             }
@@ -663,6 +1007,28 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
     case HIP_R_64F:
         cast_mul_with_Tci<TcCast, Tc, TciACast, double>(dst,
                                                         static_cast<const double*>(src),
+                                                        isScaleAVec,
+                                                        scaleAVec,
+                                                        AlphaVec,
+                                                        transA,
+                                                        m,
+                                                        k,
+                                                        size);
+        break;
+    case HIP_C_32F:
+        cast_mul_with_Tci<TcCast, Tc, TciACast, std::complex<float>>(dst,
+                                                       static_cast<const std::complex<float>*>(src),
+                                                       isScaleAVec,
+                                                       scaleAVec,
+                                                       AlphaVec,
+                                                       transA,
+                                                       m,
+                                                       k,
+                                                       size);
+        break;
+    case HIP_C_64F:
+        cast_mul_with_Tci<TcCast, Tc, TciACast, std::complex<double>>(dst,
+                                                        static_cast<const std::complex<double>*>(src),
                                                         isScaleAVec,
                                                         scaleAVec,
                                                         AlphaVec,
@@ -791,6 +1157,14 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
         break;
     case HIP_R_64F:
         cast_mul_with_Tci<TcCast, Tc, double>(
+            dst, src, TiA, isScaleAVec, scaleAVec, AlphaVec, transA, m, k, size);
+        break;
+    case HIP_C_32F:
+        cast_mul_with_Tci<TcCast, Tc, std::complex<float>>(
+            dst, src, TiA, isScaleAVec, scaleAVec, AlphaVec, transA, m, k, size);
+        break;
+    case HIP_C_64F:
+        cast_mul_with_Tci<TcCast, Tc, std::complex<double>>(
             dst, src, TiA, isScaleAVec, scaleAVec, AlphaVec, transA, m, k, size);
         break;
     case HIP_R_16F:
@@ -1213,8 +1587,18 @@ void cblas_gemm(hipblasOperation_t       transA,
                 transA, transB, m, n, k, alphaCast, A_Tc, lda, B_Tc, ldb, betaCast, C_Tc, ldc);
         }
     }
+     else if constexpr(std::is_same<TcCast, std::complex<float>>::value)
+    {
+        cblas_cgemm(CblasColMajor, HIPOperationToCBLASTanspose(transA), HIPOperationToCBLASTanspose(transB),
+                    m, n, k, &alphaCast, A_Tc, lda, B_Tc, ldb, &betaCast, C_Tc, ldc);
+    }
+    else if constexpr(std::is_same<TcCast, std::complex<double>>::value)
+    {
+        cblas_zgemm(CblasColMajor, HIPOperationToCBLASTanspose(transA), HIPOperationToCBLASTanspose(transB),
+                    m, n, k, &alphaCast, A_Tc, lda, B_Tc, ldb, &betaCast, C_Tc, ldc);
+    }
 
-    if(scaleD != 1)
+    if(scaleD != static_cast<Tc>(1))
     {
         sat_cast_mul<TcCast, Tc>(C, To, C_Tc, scaleD, sizeC);
     }
@@ -1261,3 +1645,5 @@ CREATEFUNCTION(hipblasLtHalf)
 CREATEFUNCTION(float)
 CREATEFUNCTION(double)
 CREATEFUNCTION(int32_t)
+CREATEFUNCTION(std::complex<float>)
+CREATEFUNCTION(std::complex<double>)

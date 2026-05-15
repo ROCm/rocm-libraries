@@ -217,7 +217,7 @@ protected:
            && bundle.tensors.find(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_MEAN_UID)
                   != bundle.tensors.end())
         {
-            unsigned runningMeanSeed = seed + 1000;
+            const unsigned runningMeanSeed = seed + 1000;
             bundle.tensors.at(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID)
                 ->fillTensorWithRandomValues(-2.0f, 2.0f, runningMeanSeed);
             bundle.tensors.at(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_MEAN_UID)
@@ -230,7 +230,7 @@ protected:
            && bundle.tensors.find(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_VARIANCE_UID)
                   != bundle.tensors.end())
         {
-            unsigned runningVarianceSeed = seed + 2000;
+            const unsigned runningVarianceSeed = seed + 2000;
             bundle.tensors.at(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID)
                 ->fillTensorWithRandomValues(-2.0f, 2.0f, runningVarianceSeed);
             bundle.tensors.at(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_VARIANCE_UID)

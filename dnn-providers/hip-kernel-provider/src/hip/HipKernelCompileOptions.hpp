@@ -52,7 +52,7 @@ public:
         // Add activation options if activation is fused
         if(optActivationMode.has_value())
         {
-            int nrnOpId = static_cast<int>(optActivationMode.value());
+            const int nrnOpId = static_cast<int>(optActivationMode.value());
             add("HIP_PLUGIN_NRN_OP_ID", nrnOpId);
         }
     }

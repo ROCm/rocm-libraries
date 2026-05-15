@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,14 @@ constexpr auto hipsparse_datatype2string(hipDataType type)
 {
     switch(type)
     {
+    case HIP_R_8I:
+        return "i8_r";
+    case HIP_R_16F:
+        return "f16_r";
+    case HIP_R_16BF:
+        return "bf16_r";
+    case HIP_R_32I:
+        return "i32_r";
     case HIP_R_32F:
         return "f32_r";
     case HIP_R_64F:

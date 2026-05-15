@@ -15,9 +15,6 @@
 namespace
 {
 
-using asm_sdpa_engine::alignUp;
-using asm_sdpa_engine::K_WORKSPACE_ALIGNMENT_BYTES;
-
 // =============================================================================
 // MhaBwdArgs — convenience struct mirroring AITER's mha_bwd_args
 // =============================================================================
@@ -435,7 +432,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
                      + sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
 
     // 5. Build convenience args struct (mirrors AITER mha_bwd_args)
-    MhaBwdArgs mhaArgs = buildMhaBwdArgs(
+    const MhaBwdArgs mhaArgs = buildMhaBwdArgs(
         _params, qPtr, kPtr, vPtr, oPtr, doPtr, lsePtr, dqPtr, dkPtr, dvPtr, dBufPtr, dqAccPtr);
 
     // 6. Launch 3 kernels on the same stream.
@@ -448,7 +445,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
     // 6a. Build args and launch kernel 1: ODO
     auto odoArgs = buildOdoArgs(mhaArgs);
 
-    unsigned int gdxOdo = (mhaArgs.seqlen_q + K_TS_ODO - 1) / K_TS_ODO;
+    const unsigned int gdxOdo = (mhaArgs.seqlen_q + K_TS_ODO - 1) / K_TS_ODO;
 
     if(!launchKernel("SDPA backward ODO",
                      _odoKernel.function(),
@@ -466,7 +463,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
     // 6b. Build args and launch kernel 2: DQDKDV
     auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs);
 
-    unsigned int gdxDqdkdv = (mhaArgs.seqlen_k + K_TS_KV - 1) / K_TS_KV;
+    const unsigned int gdxDqdkdv = (mhaArgs.seqlen_k + K_TS_KV - 1) / K_TS_KV;
 
     if(!launchKernel("SDPA backward DQDKDV",
                      _dqdkdvKernel.function(),
@@ -484,7 +481,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
     // 6c. Build args and launch kernel 3: DQ_CONVERT (FP32 → BF16)
     auto postArgs = buildPostArgs(mhaArgs);
 
-    unsigned int gdxPost = (mhaArgs.seqlen_q + K_TS_DQ - 1) / K_TS_DQ;
+    const unsigned int gdxPost = (mhaArgs.seqlen_q + K_TS_DQ - 1) / K_TS_DQ;
 
     if(!launchKernel("SDPA backward DQ_CONVERT",
                      _postKernel.function(),
