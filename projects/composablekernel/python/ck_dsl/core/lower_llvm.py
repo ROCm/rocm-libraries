@@ -1797,9 +1797,13 @@ class _Lowerer:
                         result.name = f"%{base_name}{iteration_suffix}"
 
             # Phase 4a: Mark trailing sync for elision in non-final iterations
+            # Rationale: sync before yield ensures current iter's LDS writes are
+            # visible to NEXT iter's LDS reads. In iterations 0..N-2, the NEXT
+            # iteration starts with its own barrier after global load, making this
+            # trailing barrier redundant. Only the final iteration needs it.
             is_final_iteration = (iteration == trip_count - 1)
             if trailing_sync_op and not is_final_iteration:
-                # Mark this specific op to be skipped
+                # Mark this specific op to be skipped (next iter has its own barrier)
                 self._unroll_elide_sync_op = {'op': trailing_sync_op}
             else:
                 self._unroll_elide_sync_op = None
