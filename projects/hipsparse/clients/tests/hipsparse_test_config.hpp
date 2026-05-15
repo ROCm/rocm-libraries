@@ -88,6 +88,12 @@ struct hipsparse_test_config_ijt_complex_only
 {
 };
 
+struct hipsparse_test_config_axpby
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::axpby,
+                                     hipsparse_test_numeric_types_enum::all>
+{
+};
+
 struct hipsparse_test_config_ijabct_spmv
     : hipsparse_test_config_template<hipsparse_test_dispatch_enum::ijabct_spmv,
                                      hipsparse_test_numeric_types_enum::spmv>

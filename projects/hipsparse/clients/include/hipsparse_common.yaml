@@ -33,15 +33,15 @@ Datatypes:
   - hipDataType:
       bases: [ c_int ]
       attr:
-        f32_r:  0
-        f64_r:  1
-        f16_r:  2
-        i8_r:   3
-        f32_c:  4
-        f64_c:  5
-        u8_r:   8
-        i32_r:  10
-        u32_r:  12
+        f32_r: 0
+        f64_r: 1
+        f16_r: 2
+        i8_r:  3
+        f32_c: 4
+        f64_c: 5
+        u8_r:  8
+        i32_r: 10
+        u32_r: 12
         bf16_r: 14
   - { single: f32_r, double: f64_r }
   - { single complex: f32_c, double complex: f64_c }
@@ -222,6 +222,10 @@ Real precisions: &real_precisions
     { a_type: f64_r, b_type: f64_r, c_type: f64_r, x_type: f64_r, y_type: f64_r, compute_type: f64_r }
   - &float32_float64_float64_float64
     { a_type: f32_r, x_type: f64_r, y_type: f64_r, compute_type: f64_r }
+  - &float16_float32_axpby_precision
+    { x_type: f16_r, y_type: f16_r, compute_type: f32_r }
+  - &bfloat16_float32_axpby_precision
+    { x_type: bf16_r, y_type: bf16_r, compute_type: f32_r }
 
 Complex precisions: &complex_precisions
   - &float32_cmplx32_cmplx32_cmplx32_axyt_precision
@@ -268,6 +272,18 @@ C precisions complex and real: &single_only_precisions_complex_real
 C precisions complex and real: &double_only_precisions_complex_real
   - *double_precision
   - *double_precision_complex
+
+C precisions axpby mixed: &axpby_mixed_precisions
+  - *float16_float32_axpby_precision
+  - *bfloat16_float32_axpby_precision
+
+C precisions axpby all: &axpby_all_precisions
+  - *single_precision
+  - *double_precision
+  - *single_precision_complex
+  - *double_precision_complex
+  - *float16_float32_axpby_precision
+  - *bfloat16_float32_axpby_precision
 
 SpMV mixed precisions: &spmv_mixed_precisions
   - *int8_int8_int32_int32_axyt_precision
@@ -415,6 +431,8 @@ Defaults:
   x_type: f32_r
   y_type: f32_r
   compute_type: f32_r
+  x_type: f32_r
+  y_type: f32_r
   alpha: 1.0
   alphai: 0.0
   beta: 0.0
