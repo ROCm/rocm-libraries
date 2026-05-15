@@ -57,7 +57,13 @@ def _mkKernel(dA, dB, miK=128, sourceSwap=False, miArchVgpr=True):
 
 @pytest.fixture(scope="module", autouse=True)
 def _rocisa_once():
-    init_rocisa()
+    # This file is a PURE STRING test (no GPU runtime). It validates the
+    # gfx950 MFMA emission path, so we MUST pin rocisa to gfx950, otherwise
+    # MXMFMAInstruction::preStr() would emit gfx12 WMMA opcodes on a gfx12
+    # host (and the asserts on "v_mfma_scale_*" / "cbsz:X blgp:Y" would all
+    # fail). amdclang++ assembles any -mcpu= target regardless of the host
+    # GPU, so this works on any machine that has ROCm installed.
+    init_rocisa(target="gfx950")
 
 
 @pytest.fixture
@@ -238,7 +244,7 @@ def test_legacy_no_DataType_falls_back_to_F4(writer):
     tD = _mkTile(32, 4, writer.vgprPool)
 
     with pytest.raises(RuntimeError):
-      emitMfmaInstruction(writer, kernel, tA, tB, tC, tD)
+        emitMfmaInstruction(writer, kernel, tA, tB, tC, tD)
 
 
 # ---- Backward-compat (BF16) -----------------------------------------------
@@ -294,9 +300,7 @@ F8_F4_MIX_CASES = [
 
 
 @pytest.mark.parametrize("dA,dB,swap,modifiers,a_pos,b_pos", F8_F4_MIX_CASES)
-def test_8bit_x_F4_mixed_dispatch(
-    writer, dA, dB, swap, modifiers, a_pos, b_pos
-):
+def test_8bit_x_F4_mixed_dispatch(writer, dA, dB, swap, modifiers, a_pos, b_pos):
     """8-bit-float x FP4 dispatch."""
 
     kernel = _mkKernel(dA, dB, miK=128, sourceSwap=swap)
