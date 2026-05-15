@@ -96,7 +96,6 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
     AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
@@ -382,7 +381,6 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
     AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
@@ -668,7 +666,6 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
     AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
@@ -954,7 +951,6 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
     AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
