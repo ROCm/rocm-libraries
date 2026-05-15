@@ -52,7 +52,7 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
     float                beta       = 0.2;
     hipsparseOperation_t transA     = HIPSPARSE_OPERATION_NON_TRANSPOSE;
     hipsparseIndexBase_t idxBase    = HIPSPARSE_INDEX_BASE_ZERO;
-    hipsparseOrder_t blockOrder     = HIPSPARSE_ORDER_ROW;
+    hipsparseOrder_t     blockOrder = HIPSPARSE_ORDER_ROW;
     hipsparseIndexType_t idxType    = HIPSPARSE_INDEX_32I;
     hipDataType          dataType   = HIP_R_32F;
     hipsparseSpMVAlg_t   alg        = HIPSPARSE_MV_ALG_DEFAULT;

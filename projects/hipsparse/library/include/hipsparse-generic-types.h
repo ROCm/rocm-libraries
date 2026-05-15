@@ -307,7 +307,7 @@ typedef enum
     HIPSPARSE_SPMV_BSR_ALG1    = 6
 } hipsparseSpMVAlg_t;
 #else
-#if(CUDART_VERSION >= 13000)
+#if(CUDART_VERSION >= 13001)
 typedef enum
 {
     HIPSPARSE_SPMV_ALG_DEFAULT = 0,
@@ -318,7 +318,7 @@ typedef enum
     HIPSPARSE_SPMV_SELL_ALG1   = 5,
     HIPSPARSE_SPMV_BSR_ALG1    = 6
 } hipsparseSpMVAlg_t;
-#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13000)
+#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
 typedef enum
 {
     HIPSPARSE_SPMV_ALG_DEFAULT = 0,

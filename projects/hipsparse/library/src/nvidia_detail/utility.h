@@ -755,7 +755,7 @@ namespace hipsparse
     }
 #endif
 
-#if(CUDART_VERSION >= 13000)
+#if(CUDART_VERSION >= 13001)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)
@@ -778,7 +778,7 @@ namespace hipsparse
             throw "Non existant hipsparseSpMVAlg_t";
         }
     }
-#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13000)
+#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)
