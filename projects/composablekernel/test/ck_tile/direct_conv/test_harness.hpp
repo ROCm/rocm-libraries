@@ -236,7 +236,7 @@ class DirectConvGroupedTestHarness : public ::testing::Test
 
         // BF16 needs wider tolerance because MFMA multiplies at BF16 precision
         // (7-bit mantissa) while the GPU reference promotes to fp32 first.
-        // Tolerance values match profiler/common.hpp get_rtol/get_atol<ck::bhalf_t>.
+        // Tolerance values match profiler/common.hpp get_rtol/get_atol<ck_til::bfloat16_t>.
         constexpr double rtol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
         constexpr double atol = std::is_same_v<ElementT, ck_tile::bfloat16_t> ? 5e-2 : 1e-2;
         return check_err(h_result, h_ref, "Error: Dgrad incorrect results!", rtol, atol);
