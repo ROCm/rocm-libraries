@@ -6,11 +6,11 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
-#include "gemm_quant_profiler.hpp"
+#include "gemm_tensor_quant_profiler.hpp"
 
 void benchmark_single(const ck_tile::ArgParser& arg_parser)
 {
-    GemmQuantProblem gemm_problem{};
+    GemmTensorQuantProblem gemm_problem{};
     gemm_problem.split_k_  = arg_parser.get_int("split_k");
     gemm_problem.m_        = arg_parser.get_int("m");
     gemm_problem.n_        = arg_parser.get_int("n");
@@ -39,7 +39,7 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
                      arg_parser.get_int("rotating_count"),
                      arg_parser.get_bool("json_output")};
 
-    auto& profiler = GemmQuantProfiler::BaseGemm::instance(setting);
+    auto& profiler = GemmTensorQuantProfiler::BaseGemm::instance(setting);
 
     try
     {

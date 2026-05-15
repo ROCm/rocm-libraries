@@ -9,14 +9,14 @@
 #include "gemm/gemm_benchmark.hpp"
 #include "gemm/gemm_common.hpp"
 
-using GemmQuantProblem = GemmProblem;
+using GemmTensorQuantProblem = GemmProblem;
 
-inline void gemm_quant_host_reference(int verify,
-                                      ck_tile::HostTensor<ADataType>& a_m_k,
-                                      ck_tile::HostTensor<AQDataType>& aq_tensor,
-                                      ck_tile::HostTensor<BDataType>& b_k_n,
-                                      ck_tile::HostTensor<BQDataType>& bq_tensor,
-                                      ck_tile::HostTensor<CDataType>& c_m_n_host_result)
+inline void gemm_tensor_quant_host_reference(int verify,
+                                             ck_tile::HostTensor<ADataType>& a_m_k,
+                                             ck_tile::HostTensor<AQDataType>& aq_tensor,
+                                             ck_tile::HostTensor<BDataType>& b_k_n,
+                                             ck_tile::HostTensor<BQDataType>& bq_tensor,
+                                             ck_tile::HostTensor<CDataType>& c_m_n_host_result)
 {
     if(verify == 0)
     {

@@ -11,11 +11,11 @@ import time
 
 def _import_gemm_benchmark():
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
+    gemm_dir = os.path.dirname(os.path.dirname(current_dir))
 
     spec = importlib.util.spec_from_file_location(
         "gemm_benchmark",
-        os.path.join(parent_dir, "gemm_benchmark.py"),
+        os.path.join(gemm_dir, "gemm_benchmark.py"),
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -24,11 +24,11 @@ def _import_gemm_benchmark():
 
 def _import_benchmark_utils():
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(os.path.dirname(current_dir))
+    ops_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
 
     spec = importlib.util.spec_from_file_location(
         "benchmark_utils",
-        os.path.join(parent_dir, "common", "benchmark_utils.py"),
+        os.path.join(ops_dir, "common", "benchmark_utils.py"),
     )
     benchmark_utils = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(benchmark_utils)
@@ -40,13 +40,13 @@ GemmBenchmark = _import_gemm_benchmark()
 benchmark_utils = _import_benchmark_utils()
 
 
-class GemmQuantBenchmark(GemmBenchmark):
+class GemmTensorQuantBenchmark(GemmBenchmark):
     def __init__(self, build_dir: str, verbose: bool = False):
-        super().__init__(build_dir, verbose=verbose, name="benchmark_gemm_quant_")
+        super().__init__(build_dir, verbose=verbose, name="benchmark_gemm_tensor_quant_")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Quant GEMM Kernel Benchmarking Tool")
+    parser = argparse.ArgumentParser(description="GEMM Tensor Quant Kernel Benchmarking Tool")
     parser.add_argument(
         "build_dir", help="Build directory containing kernel executables"
     )
@@ -62,7 +62,7 @@ def main():
     parser.add_argument("--verify", action="store_true", help="Enable verification")
     parser.add_argument(
         "--csv",
-        default="gemm_quant_benchmark_results.csv",
+        default="gemm_tensor_quant_benchmark_results.csv",
         help="CSV output filename",
     )
     parser.add_argument(
@@ -106,9 +106,9 @@ def main():
             print(f"Invalid problem size: {size_str}")
             return 1
 
-    benchmark = GemmQuantBenchmark(args.build_dir, verbose=args.verbose)
+    benchmark = GemmTensorQuantBenchmark(args.build_dir, verbose=args.verbose)
 
-    print("Starting Quant GEMM kernel benchmark sweep...")
+    print("Starting GEMM Tensor Quant kernel benchmark sweep...")
     start_time = time.time()
 
     best_kernels = benchmark.benchmark_sweep(

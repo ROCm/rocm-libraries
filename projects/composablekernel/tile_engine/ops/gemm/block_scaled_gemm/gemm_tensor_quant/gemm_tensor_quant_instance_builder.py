@@ -9,11 +9,11 @@ import os
 
 def _import_gemm_builder_module():
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
+    gemm_dir = os.path.dirname(os.path.dirname(current_dir))
 
     spec = importlib.util.spec_from_file_location(
         "gemm_instance_builder",
-        os.path.join(parent_dir, "gemm_instance_builder.py"),
+        os.path.join(gemm_dir, "gemm_instance_builder.py"),
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -26,7 +26,7 @@ get_dtype_string = gemm_builder_module.get_dtype_string
 get_abc_layouts = gemm_builder_module.get_abc_layouts
 
 
-class GemmQuantKernelBuilder(GemmKernelBuilder):
+class GemmTensorQuantKernelBuilder(GemmKernelBuilder):
     def _build_kernel_name(self, tile_config, trait_combo):
         pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = trait_combo
         tile_str = self._format_tile_config(tile_config)
@@ -63,7 +63,7 @@ class GemmQuantKernelBuilder(GemmKernelBuilder):
             tile_config["warp_tile_k"],
             pipeline,
         ):
-            raise ValueError("Unsupported gemm_quant configuration")
+            raise ValueError("Unsupported gemm_tensor_quant configuration")
 
         kernel_name = self._build_kernel_name(tile_config, trait_combo)
         k_block_per_cu = self.config.get("k_block_per_cu", 1)
@@ -202,7 +202,7 @@ struct SelectedKernel {{
             auto kargs = Kernel::MakeKernelArgs(args);
             if(!Kernel::IsSupportedArgument(kargs))
             {{
-                throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm_quant!");
+                throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm_tensor_quant!");
             }}
 
             const dim3 grids = Kernel::GridSize(args.M, args.N, args.k_batch);
@@ -231,7 +231,7 @@ struct SelectedKernel {{
 
 
 def main():
-    parser = argparse.ArgumentParser(description="GEMM Quant kernel instance builder")
+    parser = argparse.ArgumentParser(description="GEMM Tensor Quant kernel instance builder")
     parser.add_argument("--working_path", required=True, help="Working directory path")
     parser.add_argument("--gpu_target", required=True, help="GPU target architecture")
     parser.add_argument(
@@ -259,8 +259,8 @@ def main():
 
     args = parser.parse_args()
 
-    builder = GemmQuantKernelBuilder(
-        "gemm_quant",
+    builder = GemmTensorQuantKernelBuilder(
+        "gemm_tensor_quant",
         args.working_path,
         args.gpu_target,
         args.datatype,

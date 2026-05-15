@@ -8,22 +8,24 @@
 
 #include "ck_tile/ops/gemm_quant.hpp"
 #include "gemm/gemm_profiler.hpp"
-#include "gemm_quant_benchmark.hpp"
+#include "gemm_tensor_quant_benchmark.hpp"
 
-class GemmQuantProfiler
-    : public GemmProfiler<GemmQuantProfiler, GemmQuantProblem, ck_tile::QuantGemmHostArgs>
+class GemmTensorQuantProfiler
+    : public GemmProfiler<GemmTensorQuantProfiler, GemmTensorQuantProblem, ck_tile::QuantGemmHostArgs>
 {
     public:
-    using BaseGemm = GemmProfiler<GemmQuantProfiler, GemmQuantProblem, ck_tile::QuantGemmHostArgs>;
+    using BaseGemm =
+        GemmProfiler<GemmTensorQuantProfiler, GemmTensorQuantProblem, ck_tile::QuantGemmHostArgs>;
     using BaseGemm::benchmark;
 
-    GemmQuantProfiler(Settings setting)
-        : GemmProfiler<GemmQuantProfiler, GemmQuantProblem, ck_tile::QuantGemmHostArgs>(setting)
+    GemmTensorQuantProfiler(Settings setting)
+        : GemmProfiler<GemmTensorQuantProfiler, GemmTensorQuantProblem, ck_tile::QuantGemmHostArgs>(
+              setting)
     {
     }
 
     void
-    benchmark(GemmQuantProblem& gemm_problem,
+    benchmark(GemmTensorQuantProblem& gemm_problem,
               std::vector<std::function<std::tuple<std::string, float>(
                   ck_tile::QuantGemmHostArgs&, const ck_tile::stream_config&)>>& callables) override
     {
@@ -124,7 +126,7 @@ class GemmQuantProfiler
 
         if(setting_.verify)
         {
-            gemm_quant_host_reference(
+            gemm_tensor_quant_host_reference(
                 setting_.verify, a_m_k, aq_tensor, b_k_n, bq_tensor, c_m_n_host_result);
         }
 
@@ -148,7 +150,7 @@ class GemmQuantProfiler
     }
 
     protected:
-    std::size_t get_byte_count(const GemmQuantProblem& problem) const override
+    std::size_t get_byte_count(const GemmTensorQuantProblem& problem) const override
     {
         std::size_t num_byte = BaseGemm::get_byte_count(problem);
 
