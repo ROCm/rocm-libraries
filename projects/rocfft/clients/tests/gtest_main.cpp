@@ -360,7 +360,7 @@ int main(int argc, char* argv[])
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.1)
+        ->default_val(0.0)
         ->check(CLI::PositiveNumber);
 
     constexpr std::array<std::string_view, 4> emulation_types

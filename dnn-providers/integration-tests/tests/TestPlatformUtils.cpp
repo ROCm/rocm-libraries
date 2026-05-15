@@ -3,8 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cctype>
+
 #include "common/PlatformUtils.hpp"
 
+using hipdnn_integration_tests::currentPlatform;
 using hipdnn_integration_tests::globMatch;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
@@ -116,6 +119,30 @@ TEST(TestGlobMatch, BroadWildcardPattern)
 {
     EXPECT_TRUE(globMatch("*convolution*fp16*", "test_convolution_fwd_fp16_nchw"));
     EXPECT_FALSE(globMatch("*convolution*fp16*", "test_convolution_fwd_fp32_nchw"));
+}
+
+// ---------------------------------------------------------------------------
+// currentPlatform
+// ---------------------------------------------------------------------------
+
+TEST(TestCurrentPlatform, ReturnsExpectedValueForBuildOs)
+{
+#ifdef _WIN32
+    EXPECT_EQ(currentPlatform(), "windows");
+#elif defined(__linux__)
+    EXPECT_EQ(currentPlatform(), "linux");
+#endif
+}
+
+TEST(TestCurrentPlatform, ReturnsLowercase)
+{
+    // Schema contract: values match against TOML 'platforms' entries which
+    // we document as lowercase. Verify the helper itself returns lowercase.
+    const auto p = currentPlatform();
+    for(const char c : p)
+    {
+        EXPECT_FALSE(std::isupper(static_cast<unsigned char>(c))) << "non-lowercase char: " << c;
+    }
 }
 
 // NOLINTEND(readability-identifier-naming)

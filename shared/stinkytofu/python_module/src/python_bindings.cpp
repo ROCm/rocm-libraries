@@ -56,8 +56,20 @@ NB_MODULE(_stinkytofu, m) {
     // ========================================================================
     nb::class_<StinkyAsmModule>(m, "StinkyAsmModule")
         .def("getName", &StinkyAsmModule::getName, "Get the name of this module")
+        .def("setOutputName", &StinkyAsmModule::setOutputName,
+             "Set the name used for output files (e.g. cost file); use full kernel name to match "
+             ".o basename")
+        .def("getOutputName", &StinkyAsmModule::getOutputName,
+             "Get the output file basename; empty means use getName()")
+        .def("setOutputDir", &StinkyAsmModule::setOutputDir,
+             "Set output directory for cost file: comparison_output/<yaml_name>; file goes to "
+             "<outputDir>/<kernel_name>/aggregated_instruction_cost.txt")
+        .def("getOutputDir", &StinkyAsmModule::getOutputDir,
+             "Get the output directory; empty means current directory")
         .def("emitAssembly", &StinkyAsmModule::emitAssembly,
              "Emit the assembly code for all instructions in this module")
+        .def("getMetaDataU64", &StinkyAsmModule::getMetaDataU64, nb::arg("key"),
+             "Get uint64 metadata from function by key")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
              "Run the optimization pipeline on this module");
 
