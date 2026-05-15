@@ -1304,34 +1304,7 @@ class Solution(collections.abc.Mapping):
     state["MathClocksUnrolledLoop"] = 0
 
     Solution.assignProblemIndependentDerivedParameters(state, printRejectionReason, isaInfoMap)
-    # KRingShift currently only supported for TN (A transposed, B not transposed).
-    # Disallow enabling KRingShift on NN/NT/TT until those paths are validated.
-    if state["KRingShift"]:
-      ta = int(state["ProblemType"]["TransposeA"])
-      tb = int(state["ProblemType"]["TransposeB"])
-      if not (ta == 1 and tb == 0):
-        reject(state, printRejectionReason, f"KRingShift requires TN (TransposeA=1, TransposeB=0); got TransposeA={ta}, TransposeB={tb}")
-        return
 
-    # KRingShift is defined to operate only in conjunction with BAddrInterleave (BInterleaveG).
-    # If BAddrInterleave is not enabled, do not allow KRingShift to be enabled.
-    if state["KRingShift"] and (not state["BAddrInterleave"]):
-      reject(state, printRejectionReason, "KRingShift requires BAddrInterleave (BInterleaveG)")
-      return
-
-    # BAddrInterleave runtime restriction (host-side predicate, not codegen):
-    # Match the kernel's initBInterleaveG enable conditions:
-    #   - require tiles1 = SizeJ / MT1 to be an integer (SizeJ % MT1 == 0)
-    #   - require lowbit(tiles1) > 1 so that G=min(lowbit(tiles1), LVCB) is > 1 (enabled)
-    # Note: if lowbit(tiles1) == 1, then G==1 and the kernel disables BAddrInterleave.
-    if state["BAddrInterleave"]:
-      state["AssertFree1DivByMT1LowbitGT1"] = state["MacroTile1"]
-
-    if state["UseDirect32XEmulation"] == True:
-      #   Turn off Direct32X for the following kernels:
-      #   Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1
-      if (state["MacroTile0"] == 16 and state["MacroTile1"] == 16 and state["DepthU"] == 512):
-        state["UseDirect32XEmulation"] = False
     if "AssignedDerivedParameters" in state:
       if state["AssignedDerivedParameters"]:
         return
@@ -3605,30 +3578,6 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["MXBlockB"]:
       state["LVCMXSB"] = roundupRatio(state["LSCMXSB"] , state["GlobalReadVectorWidthMXSB"])
       state["LVPMXSB"] = roundupRatio(state["LSPMXSB"] , state["GlobalReadVectorWidthMXSB"])
-
-    # KRingShift wrap handling exists only in the tail loop.
-    # If (k + KRingShift) would wrap inside the main loop, the kernel will be incorrect (no main-loop wrap fix).
-    # Enforce a host-side runtime predicate which guarantees any KRS wrap happens only in tail.
-    #
-    # NOTE: This must be encoded after LVCB/LSCB are computed above.
-    if state["KRingShift"]:
-      # Pack predicate args (see ContractionProblemPredicates.hpp::KRingShiftTailWrapOnly):
-      #   [63:48]=cacheLineBytes, [47:32]=depthU, [31:16]=mt1, [15:8]=lvcb, [7:0]=bpeB
-      cacheLineBytes = int(isaInfoMap[isa].archCaps.get("vL1DCacheLineBytes", 0))
-      depthU         = int(state["DepthU"])
-      mt1            = int(state["MacroTile1"])
-      bpeB           = int(state["ProblemType"]["DataTypeB"].numBytes())
-      lvcb           = int(state["LVCB"])
-
-      if (0 < cacheLineBytes < (1<<16)) and (0 < depthU < (1<<16)) and (0 < mt1 < (1<<16)) and (0 < lvcb < (1<<8)) and (0 < bpeB < (1<<8)):
-        state["AssertKRingShiftTailWrapOnly"] = (cacheLineBytes << 48) | (depthU << 32) | (mt1 << 16) | (lvcb << 8) | bpeB
-      else:
-        reject(state, printRejectionReason,
-               f"KRingShift requires encodable AssertKRingShiftTailWrapOnly predicate "
-               f"(cacheLineBytes={cacheLineBytes}, depthU={depthU}, mt1={mt1}, "
-               f"lvcb={lvcb}, lscb={state.get('LSCB', None)}, grvwB={state.get('GlobalReadVectorWidthB', None)}, "
-               f"bpeB={bpeB})")
-        return
 
     if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
       state["LVCMetadata"] = roundupRatio(state["LSCMetadata"] , state["GlobalReadVectorWidthMetadata"])

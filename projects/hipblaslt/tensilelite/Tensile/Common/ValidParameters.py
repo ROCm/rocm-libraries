@@ -386,14 +386,6 @@ validParameters = { # we need to make sure this matches develop
     "DirectToVgprMXSA": [False, True],
     "DirectToVgprMXSB": [False, True],
     "DirectToVgprSparseMetadata": [False, True],
-    # B address interleave (restricted): non-contiguous tile columns for TN/NN-like B (TLUB == False),
-    # with runtime G chosen as the largest power-of-two factor of (N/MT1), capped by LVCB.
-    # Requires SizeJ % MT1 == 0 at runtime; otherwise falls back to original mapping.
-    "BAddrInterleave": [False, True],
-    # K ring-shift (restricted): apply a per-WG shift along the summation (K) dimension so that
-    # the B-side base K address for each workgroup is cacheline-aligned/congruent, while preserving
-    # correctness via tail-loop ring wrap. Intended for TN/NN-like B (TLUB == False).
-    "KRingShift": [False, True],
     # Attempt to load directly from global memory into LDS.
     # Assembly only
     # Requires BufferLoad, assembler support for lds modifier on buffer
@@ -509,16 +501,6 @@ validParameters = { # we need to make sure this matches develop
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
     "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32],
-    # Address-interleave restriction:
-    # If >0, require tiles1=(Free1Size / MT1) to have lowbit(tiles1)>1 (i.e. G>1).
-    # This matches the kernel's initBInterleaveG logic:
-    #   - require Free1Size % MT1 == 0
-    #   - compute lowbit(tiles1)
-    #   - enable only if min(lowbit, LVCB) > 1
-    "AssertFree1DivByMT1LowbitGT1": -1,
-    # KRingShift wrap restriction (packed integer; see Solution.py for encoding):
-    # If >0, require any (k + KRingShift) wrap to occur only in tail loop (no main-loop wrap).
-    "AssertKRingShiftTailWrapOnly": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
