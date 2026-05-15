@@ -66,6 +66,8 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
         return std::make_unique<Tensor<fp6_e2m3>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2:
         return std::make_unique<Tensor<fp6_e3m2>>(dims, strides);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
+        return std::make_unique<Tensor<bool>>(dims, strides);
     default:
         throw std::runtime_error("Unsupported data type for tensor");
     }

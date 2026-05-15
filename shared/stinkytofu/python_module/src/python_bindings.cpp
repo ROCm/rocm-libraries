@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
@@ -38,6 +39,7 @@
 #include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 namespace nb = nanobind;
 using namespace stinkytofu;
@@ -46,6 +48,7 @@ using namespace stinkytofu;
 void init_logical_count(nb::module_& m);
 
 NB_MODULE(_stinkytofu, m) {
+    BackendRegistry::registerAllBackends();
     m.doc() = "StinkyTofu: High-Level IR for AMDGPU Assembly Generation (internal C++ module)";
 
     // ========================================================================
@@ -53,8 +56,20 @@ NB_MODULE(_stinkytofu, m) {
     // ========================================================================
     nb::class_<StinkyAsmModule>(m, "StinkyAsmModule")
         .def("getName", &StinkyAsmModule::getName, "Get the name of this module")
+        .def("setOutputName", &StinkyAsmModule::setOutputName,
+             "Set the name used for output files (e.g. cost file); use full kernel name to match "
+             ".o basename")
+        .def("getOutputName", &StinkyAsmModule::getOutputName,
+             "Get the output file basename; empty means use getName()")
+        .def("setOutputDir", &StinkyAsmModule::setOutputDir,
+             "Set output directory for cost file: comparison_output/<yaml_name>; file goes to "
+             "<outputDir>/<kernel_name>/aggregated_instruction_cost.txt")
+        .def("getOutputDir", &StinkyAsmModule::getOutputDir,
+             "Get the output directory; empty means current directory")
         .def("emitAssembly", &StinkyAsmModule::emitAssembly,
              "Emit the assembly code for all instructions in this module")
+        .def("getMetaDataU64", &StinkyAsmModule::getMetaDataU64, nb::arg("key"),
+             "Get uint64 metadata from function by key")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
              "Run the optimization pipeline on this module");
 
@@ -397,6 +412,18 @@ NB_MODULE(_stinkytofu, m) {
         "    - float literals (0.0, 1.0, 3.14, etc.)\n"
         "    - string literals (for special values)\n\n"
         "The intrinsic will be expanded during optimization by IntrinsicExpansionPass.");
+
+    // ========================================================================
+    // Architecture support query
+    // ========================================================================
+    m.def(
+        "isSupportedByStinkyTofu",
+        [](std::array<int, 3> arch) { return BackendRegistry::getArchPipeline(arch) != nullptr; },
+        nb::arg("arch"),
+        "Return True if the given architecture [major, minor, stepping] has a StinkyTofu backend");
+    m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
+          "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
+          "[\"gfx1250\"]).");
 
     // ========================================================================
     // Logical Instruction Counting (ported from rocisa)

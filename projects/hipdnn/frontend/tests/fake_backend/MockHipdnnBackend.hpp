@@ -82,6 +82,20 @@ public:
                  const char* jsonGraph,
                  size_t jsonByteSize),
                 (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendGetSerializedExecutionPlanExt,
+                (hipdnnBackendDescriptor_t descriptor,
+                 size_t requestedByteSize,
+                 size_t* planByteSize,
+                 uint8_t* serializedPlan),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendCreateAndDeserializeExecutionPlanExt,
+                (hipdnnHandle_t handle,
+                 hipdnnBackendDescriptor_t* descriptor,
+                 const uint8_t* serializedPlan,
+                 size_t planByteSize),
+                (override));
     MOCK_METHOD(void, loggingCallbackExt, (hipdnnSeverity_t severity, const char* msg), ());
     MOCK_METHOD(hipdnnStatus_t,
                 setEnginePluginPathsExt,

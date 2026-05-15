@@ -6,6 +6,26 @@ def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
 }
 
+// Returns the original PR branch tip SHA (pullHash) or branch HEAD SHA (hash)
+// from the Jenkins SCMRevisionAction, which is recorded before any local merge.
+// Returns null for non-SCM triggers; caller should handle fall back.
+@NonCPS
+String getGitHubCommitHash(def build)
+{
+    def scmAction = build?.actions.find { action ->
+        action instanceof jenkins.scm.api.SCMRevisionAction
+    }
+    if (scmAction?.revision instanceof org.jenkinsci.plugins.github_branch_source.PullRequestSCMRevision)
+    {
+        return scmAction.revision.pullHash
+    }
+    else if (scmAction?.revision instanceof jenkins.plugins.git.AbstractGitSCMSource$SCMRevisionImpl)
+    {
+        return scmAction.revision.hash
+    }
+    return null
+}
+
 def get_branch_name(){
     def shared_library_branch = scm.branches[0].name
     if (shared_library_branch .contains("*/")) {
@@ -85,8 +105,14 @@ def checkoutRepo()
 {
     //update ref repo
     cloneUpdateRefRepo()
-    // checkout project
-    checkout scm
+    def scmVars = checkout scm
+    // getGitHubCommitHash reads SCMRevisionAction recorded before any local merge,
+    // giving the true PR branch tip (pullHash) or branch HEAD (hash).
+    // Falls back to ORIG_HEAD (pre-merge HEAD set by git merge) when SCMRevisionAction
+    // is unavailable, then to HEAD for branch builds where no merge occurred.
+    env.GIT_COMMIT = getGitHubCommitHash(currentBuild.rawBuild) ?: sh(returnStdout: true, script: '''
+        git rev-parse ORIG_HEAD 2>/dev/null || git rev-parse HEAD
+    ''').trim()
 }
 
 def withWorkingDir(Closure body) {
@@ -468,6 +494,21 @@ pipeline {
                         }
                     }
                 }
+                stage('Fp32 Hip Debug NOCK Build-Only') {
+                    agent{ label rocmnode("nogpu") }
+                    steps{
+                        script {
+                            withWorkingDir {
+                                utils.buildHipClangJob( build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off", make_targets: "", build_install: true, needs_gpu: false, gpu_family: "ci")
+                            }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
             }
         }
         stage("Full Tests") {
@@ -711,25 +752,6 @@ pipeline {
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJob( build_type: 'debug', setup_flags: NOMLIR_flags + gfx90a_flags, build_cmd: NOMLIR_build_cmd, test_flags: ' --verbose ', build_install: true, gpu_family: "ci")
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Fp32 Hip Debug NOCK gfx90a Build-Only') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX90A }
-                    }
-                    agent{ label rocmnode("gfx90a") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJob( build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off" + gfx90a_flags, make_targets: "", build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -1050,14 +1072,19 @@ pipeline {
 
     post {
         success {
-            githubNotify context: 'Math CI Summary',
-                         status: 'SUCCESS',
-                         description: 'All checks have passed'
+            script {
+                node {
+                    utils.setGithubStatus('Math CI Summary', 'success', 'All checks have passed')
+                }
+            }
         }
         failure {
-            githubNotify context: 'Math CI Summary',
-                         status: 'FAILURE',
-                         description: 'Some checks have failed'
+            script {
+                node {
+                    utils.setGithubStatus('Math CI Summary', 'failure', 'Some checks have failed')
+                    utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
+                }
+            }
         }
     }
 }

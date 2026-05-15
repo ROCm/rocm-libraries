@@ -1,0 +1,37 @@
+name: "Setup ROCm (Windows)"
+description: "Install ROCm SDK on Windows via TheRock artifacts"
+
+inputs:
+  amdgpu_family:
+    description: "GPU family for ROCm install (e.g. gfx1151)"
+    required: true
+  extra_args:
+    description: "Additional arguments to pass to install_rocm_from_artifacts.py"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout TheRock
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: ROCm/TheRock
+        ref: 1372b2541cd0991c3b53d2134abb1a6fcd7ec792 # 2026-05-08
+        path: TheRock
+        sparse-checkout: build_tools
+
+    - name: Install ROCm dependencies
+      shell: bash
+      run: pip install boto3
+
+    - name: Install ROCm
+      shell: bash
+      run: |
+        python3 TheRock/build_tools/install_rocm_from_artifacts.py \
+          --latest-release \
+          --amdgpu-family ${{ inputs.amdgpu_family }} \
+          --output-dir B:/ROCm \
+          --base-only \
+          ${{ inputs.extra_args }}
+        echo "ROCM_PATH=B:/ROCm" >> "$GITHUB_ENV"

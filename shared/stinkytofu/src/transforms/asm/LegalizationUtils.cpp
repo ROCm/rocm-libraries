@@ -28,6 +28,7 @@
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 
@@ -35,8 +36,6 @@ namespace stinkytofu {
 Legalized legalizeVNop(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
     assert(inst->getUnifiedOpcode() == GFX::v_nop && "Invalid v_nop instruction");
     // Check if this is a v_nop with count > 1
-    const auto& srcRegs = inst->getSrcRegs();
-
     int count = inst->getSrcReg(0).literalInt;
     if (count <= 1) {
         inst->erase();
@@ -330,6 +329,7 @@ Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, G
     // Get comment if present
     const CommentData* commentMod = inst->getModifier<CommentData>();
     std::string comment = commentMod ? commentMod->comment : "";
+    const MemTokenData* memTokenMod = inst->getModifier<MemTokenData>();
 
     // Create ds_load_b128 v[a:a+3], v[b] offset:X
     const HwInstDesc* desc1 = getMCIDByUOp(GFX::ds_load_b128, archId);
@@ -354,6 +354,9 @@ Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, G
 
     if (!comment.empty()) {
         load1->addModifier<CommentData>(CommentData{comment});
+    }
+    if (memTokenMod) {
+        load1->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
     }
 
     // Create ds_load_b64 v[a+4:a+5], v[b] offset:X+16
@@ -389,6 +392,9 @@ Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, G
     if (!comment.empty()) {
         load2->addModifier<CommentData>(CommentData{comment});
     }
+    if (memTokenMod) {
+        load2->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
+    }
 
     // Remove the original ds_load_b192 instruction
     inst->erase();
@@ -417,6 +423,7 @@ Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
     // Get comment if present
     const CommentData* commentMod = inst->getModifier<CommentData>();
     std::string comment = commentMod ? commentMod->comment : "";
+    const MemTokenData* memTokenMod = inst->getModifier<MemTokenData>();
 
     // Create ds_store_b128 v[a], v[b:b+3] offset:X
     const HwInstDesc* desc1 = getMCIDByUOp(GFX::ds_store_b128, archId);
@@ -442,6 +449,9 @@ Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
 
     if (!comment.empty()) {
         store1->addModifier<CommentData>(CommentData{comment});
+    }
+    if (memTokenMod) {
+        store1->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
     }
 
     // Create ds_store_b64 v[a], v[b+4:b+5] offset:X+16
@@ -479,6 +489,9 @@ Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
     if (!comment.empty()) {
         store2->addModifier<CommentData>(CommentData{comment});
     }
+    if (memTokenMod) {
+        store2->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
+    }
 
     // Remove the original ds_store_b192 instruction
     inst->erase();
@@ -507,6 +520,7 @@ Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
     // Get comment if present
     const CommentData* commentMod = inst->getModifier<CommentData>();
     std::string comment = commentMod ? commentMod->comment : "";
+    const MemTokenData* memTokenMod = inst->getModifier<MemTokenData>();
 
     const HwInstDesc* dsB128Desc = getMCIDByUOp(GFX::ds_store_b128, archId);
 
@@ -533,6 +547,9 @@ Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
 
     if (!comment.empty()) {
         store1->addModifier<CommentData>(CommentData{comment});
+    }
+    if (memTokenMod) {
+        store1->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
     }
 
     // Create ds_write_b128/ds_store_b128 v[a], v[b+4:b+7] offset:X+16
@@ -569,11 +586,46 @@ Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
     if (!comment.empty()) {
         store2->addModifier<CommentData>(CommentData{comment});
     }
+    if (memTokenMod) {
+        store2->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
+    }
 
     // Remove the original ds_store_b256 instruction
     inst->erase();
 
     return {store1, store2};
+}
+
+namespace {
+// Add `reg` to the dest list of `inst`, unless a register with the same
+// RegType/idx is already present. SCC/VCC/EXEC are singletons, so RegType+idx
+// is sufficient to detect duplicates introduced by an upstream stage or by an
+// instruction that already encodes the register as an explicit operand.
+void addUniqueSpecialDest(StinkyInstruction* inst, const StinkyRegister& reg) {
+    for (const StinkyRegister& d : inst->getDestRegs())
+        if (isSameRegister(d, reg)) return;
+    inst->addDestReg(reg);
+}
+
+void addUniqueSpecialSrc(StinkyInstruction* inst, const StinkyRegister& reg) {
+    for (const StinkyRegister& s : inst->getSrcRegs())
+        if (isSameRegister(s, reg)) return;
+    inst->addSrcReg(reg);
+}
+}  // namespace
+
+void legalizeImplicitSpecialRegisters(StinkyInstruction* inst, uint32_t wavefrontSize) {
+    if (inst == nullptr) return;
+
+    if (inst->is(IF_ImplicitReadSCC)) addUniqueSpecialSrc(inst, StinkyRegister::getSCCRegister());
+    if (inst->is(IF_ImplicitWriteSCC)) addUniqueSpecialDest(inst, StinkyRegister::getSCCRegister());
+
+    if (inst->is(IF_ImplicitReadVCC))
+        addUniqueSpecialSrc(inst, StinkyRegister::getVCCRegister(wavefrontSize));
+    if (inst->is(IF_ImplicitReadEXEC))
+        addUniqueSpecialSrc(inst, StinkyRegister::getEXECRegister(wavefrontSize));
+    if (inst->is(IF_ImplicitWriteEXEC))
+        addUniqueSpecialDest(inst, StinkyRegister::getEXECRegister(wavefrontSize));
 }
 
 }  // namespace stinkytofu

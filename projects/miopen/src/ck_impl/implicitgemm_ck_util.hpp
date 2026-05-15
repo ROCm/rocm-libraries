@@ -239,6 +239,7 @@ template <template <typename, typename> class DeviceOpPtrs,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 std::vector<std::string> FillValidKernelsGeneric(const ProblemDescriptionType& problem)
 {
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
     {
     case miopenHalf:
@@ -261,6 +262,10 @@ std::vector<std::string> FillValidKernelsGeneric(const ProblemDescriptionType& p
 
     default: return {};
     }
+#else
+    (void)problem;
+    return {};
+#endif
 }
 
 /**
@@ -344,6 +349,7 @@ template <template <typename, typename> class BilinearPtrs,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 std::vector<std::string> FillValidKernelsWithAlphaBetaGeneric(const ProblemDescriptionType& problem)
 {
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     // Data type dispatch with TF32 support (C++17 compatible - uses helper function)
     switch(problem.GetInDataType())
     {
@@ -384,6 +390,10 @@ std::vector<std::string> FillValidKernelsWithAlphaBetaGeneric(const ProblemDescr
 
     default: return {};
     }
+#else
+    (void)problem;
+    return {};
+#endif
 }
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -1099,7 +1109,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                   should_allocated_wrw_buffer_ = should_allocated_wrw_buffer,
                                   sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](
                                      const std::vector<Kernel>&) mutable {
-            return [&kernel_id2                  = kernel_id_,
+            return [kernel_id2                   = kernel_id_,
                     split_k2                     = split_k_,
                     ck_args2                     = std::move(ck_args_),
                     alpha_beta_case2             = alpha_beta_case_,

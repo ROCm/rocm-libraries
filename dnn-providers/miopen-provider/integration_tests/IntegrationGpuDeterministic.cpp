@@ -17,6 +17,7 @@
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/BatchnormCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
+#include "../tests/common/TestWorkarounds.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -218,6 +219,8 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
 
         const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
@@ -301,7 +304,8 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
-
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
         const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
         Graph graphObj;
@@ -383,6 +387,8 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
 
         const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
@@ -465,6 +471,8 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
 
         const auto& [convTestCase, doBias, activTestCase]
             = DeterministicTestBase<FusedConvTestCase>::GetParam();
@@ -523,6 +531,11 @@ protected:
         yTensorAttr->set_output(true);
 
         auto result = graphObj.build(_handle);
+        // Inline rather than the IntegrationGraphVerificationHarness hook
+        // pattern: this fixture inherits from a different base
+        // (DeterministicTestBase), so the harness's
+        // shouldSkipOnEngineConfigResult override isn't available here.
+        SKIP_IF_WORKAROUND_ISSUE_6979(result);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
         GraphTensorBundle bundle1;

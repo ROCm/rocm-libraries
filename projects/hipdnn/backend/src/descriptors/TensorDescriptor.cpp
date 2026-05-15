@@ -70,20 +70,22 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                     "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_DIMENSIONS:
-        getInt64Vector(_data.dims,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::getAttribute()");
+        getScalarVector<int64_t>(_data.dims,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 requestedElementCount,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_STRIDES:
-        getInt64Vector(_data.strides,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::getAttribute()");
+        getScalarVector<int64_t>(_data.strides,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 requestedElementCount,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_IS_VIRTUAL:
         getScalar(_data.virtual_,
@@ -146,18 +148,20 @@ void TensorDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                     "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_DIMENSIONS:
-        setInt64Vector(_data.dims,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::setAttribute()");
+        setScalarVector<int64_t>(_data.dims,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_STRIDES:
-        setInt64Vector(_data.strides,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::setAttribute()");
+        setScalarVector<int64_t>(_data.strides,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_IS_VIRTUAL:
         setScalar(_data.virtual_,
@@ -268,6 +272,13 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
         int64_t val;
         std::memcpy(&val, bytes, sizeof(int64_t));
         _data.value.Set(Int64Value(val));
+        break;
+    }
+    case DataType::BOOLEAN:
+    {
+        bool val;
+        std::memcpy(&val, bytes, sizeof(bool));
+        _data.value.Set(BoolValue(val));
         break;
     }
     case DataType::UINT8:
@@ -384,6 +395,16 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
         std::memcpy(output, &nativeVal, sizeof(int64_t));
         break;
     }
+    case DataType::BOOLEAN:
+    {
+        const auto* val = _data.value.AsBoolValue();
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        auto nativeVal = val->value();
+        std::memcpy(output, &nativeVal, sizeof(bool));
+        break;
+    }
     case DataType::UINT8:
     case DataType::INT8:
     {
@@ -479,6 +500,9 @@ std::string TensorDescriptor::toString() const
             break;
         case TensorValue::Int64Value:
             str += std::to_string(_data.value.AsInt64Value()->value());
+            break;
+        case TensorValue::BoolValue:
+            str += _data.value.AsBoolValue()->value() ? "true" : "false";
             break;
         case TensorValue::Float8Value:
             str += std::to_string(_data.value.AsFloat8Value()->value());

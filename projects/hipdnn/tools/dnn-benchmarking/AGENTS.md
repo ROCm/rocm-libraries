@@ -10,8 +10,8 @@
 - `graphs/`: sample JSON graphs (for local benchmarking).
 
 ## Build, Test, and Development Commands
-- Install (ROCm): `pip install -r requirements-rocm.txt -r requirements-dev.txt && pip install -e .`
-- Install (CUDA): `pip install -r requirements-cuda.txt -r requirements-dev.txt && pip install -e .`
+- Install (ROCm): `bash setup.sh`
+- Install (CUDA): `pip install torch --index-url https://download.pytorch.org/whl/cu124 && pip install -e .`
 - Run CLI: `python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --warmup 10 --iters 100`
 - A/B test: `python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2`
 - Tests (CPU-only): `pytest -m "not gpu"`
