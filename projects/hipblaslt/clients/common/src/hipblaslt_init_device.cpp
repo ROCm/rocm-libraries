@@ -258,7 +258,7 @@ __host__ __device__ T random_hpl(size_t idx)
 
 /*! \brief  generate a random number in [-6.0,6.0] doubles  */
 template <typename T>
-__device__ T random_low_precision(size_t idx)
+__host__ __device__ T random_low_precision(size_t idx)
 {
     auto r = pseudo_random_device(idx);
     return T(double(r) / double(std::numeric_limits<decltype(r)>::max()) * 12.0 - 6.0);
@@ -266,7 +266,7 @@ __device__ T random_low_precision(size_t idx)
 
 /*! \brief  generate a random number in [-6.0,6.0] for int8  */
 template <>
-__device__ int8_t random_low_precision(size_t idx)
+__host__ __device__ int8_t random_low_precision(size_t idx)
 {
     auto r = pseudo_random_device(idx);
     auto v = nearbyint(double(r) / double(std::numeric_limits<decltype(r)>::max()) * 12. - 6.);
@@ -337,7 +337,7 @@ __host__ __device__ hipblaslt_f4x2 random_hpl(size_t idx)
 }
 
 template <>
-__device__ hipblaslt_f4x2 random_low_precision(size_t idx)
+__host__ __device__ hipblaslt_f4x2 random_low_precision(size_t idx)
 {
     constexpr auto cvt_max_ui32_to_double
         = static_cast<double>(std::numeric_limits<uint32_t>::max());
@@ -381,7 +381,7 @@ __host__ __device__ hipblaslt_f6x16 random_hpl(size_t idx)
 }
 
 template <>
-__device__ hipblaslt_f6x16 random_low_precision(size_t idx)
+__host__ __device__ hipblaslt_f6x16 random_low_precision(size_t idx)
 {
     using type                          = hipblaslt_f6x16;
     double         r[type::packed_size] = {0.0};
@@ -446,7 +446,7 @@ __host__ __device__ hipblaslt_bf6x16 random_hpl(size_t idx)
 }
 
 template <>
-__device__ hipblaslt_bf6x16 random_low_precision(size_t idx)
+__host__ __device__ hipblaslt_bf6x16 random_low_precision(size_t idx)
 {
     using type                          = hipblaslt_bf6x16;
     double         r[type::packed_size] = {0.0};
@@ -487,7 +487,7 @@ __host__ __device__ hipblaslt_e8 random_hpl<hipblaslt_e8>(size_t idx)
 }
 
 template <>
-__device__ hipblaslt_e8 random_low_precision<hipblaslt_e8>(size_t idx)
+__host__ __device__ hipblaslt_e8 random_low_precision<hipblaslt_e8>(size_t idx)
 {
     hipblaslt_e8 val;
     val.data = ((pseudo_random_device(idx) % 7 - 3) + 127);
