@@ -18,7 +18,7 @@ class CustomBuildHook(BuildHookInterface):
 
     def initialize(self, version, build_data):
         package_dir = os.path.join(self.root, "hipdnn_frontend")
-        so_path = self._find_or_build_extension()
+        so_path = self._compile_extension()
         dest = os.path.join(package_dir, os.path.basename(so_path))
         shutil.copy2(so_path, dest)
         build_data["shared_data"] = {"_extension_path": dest}
@@ -32,16 +32,6 @@ class CustomBuildHook(BuildHookInterface):
         path = (build_data.get("shared_data") or {}).get("_extension_path")
         if path and os.path.isfile(path):
             os.remove(path)
-
-    def _find_or_build_extension(self):
-        prebuilt = os.environ.get("HIPDNN_PREBUILT_SO")
-        if prebuilt:
-            if not os.path.isfile(prebuilt):
-                raise RuntimeError(
-                    f"HIPDNN_PREBUILT_SO points to missing file: {prebuilt}"
-                )
-            return prebuilt
-        return self._compile_extension()
 
     def _compile_extension(self):
         build_dir = os.path.join(self.root, "_hatch_build")
