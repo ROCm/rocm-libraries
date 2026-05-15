@@ -391,6 +391,53 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask_Det)
     EXPECT_EQ(k.block_n0, 128);
 }
 
+// Bottom-right causal and sliding-window variants share the compiled spec
+// with _cmask. They are separate registry entries, reachable only via
+// fmha_bwd_dqdkdv_variant_spec("<exact name>") (consteval name lookup).
+// mask_type and window_size_left/right are runtime-parametrized via scalar slots.
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMaskBR)
+{
+    constexpr auto k =
+        ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br");
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
+    EXPECT_FALSE(k.has_bias_grad);
+    EXPECT_TRUE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+    EXPECT_EQ(k.pad_hdim_q, 8);
+    EXPECT_EQ(k.pad_hdim_v, 8);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_SWA)
+{
+    constexpr auto k =
+        ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_swa");
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
+    EXPECT_FALSE(k.has_bias_grad);
+    EXPECT_TRUE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+    EXPECT_EQ(k.pad_hdim_q, 8);
+    EXPECT_EQ(k.pad_hdim_v, 8);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
 // ============================================================================
 // ConvertDQ frozen baselines
 // ============================================================================
