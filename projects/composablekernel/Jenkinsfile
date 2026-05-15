@@ -781,9 +781,11 @@ def cmake_build(Map conf=[:]){
                     archiveArtifacts "clang_build_analysis_${arch_name}.log"
                 }
                 // Process ninja build trace after full build
-                sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
-                archiveArtifacts "ck_build_trace_${arch_name}.json"
-                sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
+                if(fileExists(".ninja_log")) {
+                    sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
+                    archiveArtifacts "ck_build_trace_${arch_name}.json"
+                    sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
+                }
 
                 if (params.NINJA_FTIME_TRACE) {
                     echo "running ClangBuildAnalyzer"
