@@ -102,6 +102,14 @@ bool hasTokenOverlap(const ContainerA& a, const ContainerB& b) {
                        [&b](int token) { return std::find(b.begin(), b.end(), token) != b.end(); });
 }
 
+/// True for LDS writers (tensor_load_to_lds / ds_write) carrying MemTokenData.
+bool isLdsWriterWithTokens(const StinkyInstruction& inst) {
+    if (!isTensorLoad(inst) && !isDSWrite(inst)) {
+        return false;
+    }
+    return inst.getModifier<MemTokenData>() != nullptr;
+}
+
 // ----------------------------------------------------------------------------
 // Data structures
 // ----------------------------------------------------------------------------
@@ -342,6 +350,50 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         }
 
         return {requiredWait, needsWait};
+    }
+
+    /// Collect prior DS reads/atomics whose MemTokenData tokens overlap @p writer's.
+    /// Scans @p localState (current block) and each predecessor's exit state to
+    /// surface the WAR-on-LDS hazard that the SSA def-use chain does not encode.
+    /// Skips @p writer itself (a ds_write is in @p pendingDSOps by this point).
+    std::unordered_set<StinkyInstruction*> collectLdsWarDependencies(
+        StinkyInstruction* writer, BasicBlock& bb, const PendingMemOpTracker& localState) {
+        std::unordered_set<StinkyInstruction*> warDeps;
+        const MemTokenData* writerTokens = writer->getModifier<MemTokenData>();
+        if (writerTokens == nullptr) {
+            return warDeps;
+        }
+
+        auto isConflictingRead = [&](StinkyInstruction* op) {
+            if (op == nullptr || op == writer) {
+                return false;
+            }
+            if (!isDSRead(*op) && !isDSAtomic(*op)) {
+                return false;
+            }
+            const MemTokenData* mt = op->getModifier<MemTokenData>();
+            return mt != nullptr && hasTokenOverlap(mt->tokens, writerTokens->tokens);
+        };
+
+        for (StinkyInstruction* op : localState.pendingDSOps) {
+            if (isConflictingRead(op)) {
+                warDeps.insert(op);
+            }
+        }
+
+        for (BasicBlock* pred : bb.getPredecessors()) {
+            auto it = blockExitMemState.find(pred);
+            if (it == blockExitMemState.end()) {
+                continue;
+            }
+            for (StinkyInstruction* op : it->second.pendingDSOps) {
+                if (isConflictingRead(op)) {
+                    warDeps.insert(op);
+                }
+            }
+        }
+
+        return warDeps;
     }
 
     /// Phase 2: walk @p bb in program order; return (anchor, WaitCountSpec) pairs.
