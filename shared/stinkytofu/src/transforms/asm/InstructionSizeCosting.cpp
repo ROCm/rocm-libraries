@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/InstructionSizeCosting.hpp"
 

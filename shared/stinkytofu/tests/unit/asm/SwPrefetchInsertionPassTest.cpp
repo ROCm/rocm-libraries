@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc.
  *
  * Unit tests for SwPrefetchInsertionPass (insertSwPrefetchLabels is exercised
  * only through the public pass API; this file does not include the .cpp).

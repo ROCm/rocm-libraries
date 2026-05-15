@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc.
  * Unit tests: instruction byte costing (VALU promotion + literal extra), shared
  * with AccumulateInstructionSizePass via InstructionSizeCosting.
  * ************************************************************************ */
