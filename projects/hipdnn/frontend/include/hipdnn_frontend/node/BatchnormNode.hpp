@@ -87,8 +87,8 @@ public:
         // Why: All required parameters (x, scale, bias, epsilon) must have dimensions
         // set by user. Validate them upfront before proceeding with shape checks.
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 2, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
 
         // Epsilon (ε) provides numerical stability: xhat = (x - mean) / sqrt(var + ε)
         // Without ε, division by zero occurs when var ≈ 0. Must be a scalar.
@@ -97,12 +97,13 @@ public:
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape - it only transforms values, not dimensions.
         // Output y[n,c,h,w] has same shape as input x[n,c,h,w].
-        HIPDNN_CHECK_ERROR(
-            detail::validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
+        HIPDNN_CHECK_ERROR(detail::validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
-        // Why: All BN parameters (scale, bias, mean, variance) are per-channel with
-        // shape [1, C, 1, 1, ...]. This is because:
+        // Why: BN parameters (scale, bias, mean, variance) are typically associated with channels.
+        // Previously, scale and bias were required to have shape [1, C, 1, 1, ...].
+        // Now, scale and bias may use any broadcastable shape. Backend providers may
+        // still enforce stricter constraints.
         // - Each channel c has its own statistics: mean_c, var_c
         // - Each channel c has its own learnable parameters: scale_c, bias_c
         //   - scale_c controls feature importance/gain after normalization
@@ -112,17 +113,12 @@ public:
         auto& xDims = x->get_dim();
         const int64_t channels = xDims[1];
 
-        // Validate scale has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
-
-        // Validate bias has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+        // Validate that scale and bias tensors have matching shapes
+        HIPDNN_CHECK_ERROR(detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
 
         // Validate optional mean and inv_variance tensors (only if dimensions set)
-        HIPDNN_CHECK_ERROR(
-            detail::validateChannelOnlyShapeIfSet(attributes.get_mean(), channels, "Mean tensor"));
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
-            attributes.get_inv_variance(), channels, "Inverse variance tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(attributes.get_mean(), channels, "Mean tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(attributes.get_inv_variance(), channels, "Inverse variance tensor"));
 
         // SECTION 5: Validate Running Stats Consistency
         // Why: Running statistics are updated together during training:
