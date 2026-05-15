@@ -32,7 +32,7 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, True16M
                       DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister, \
                       HWRegContainer, GLOBALModifiers, MemTokenData
 from rocisa.instruction import SGetPositivePCOffset, SLongBranch, SLongBranchPositive, SLongBranchNegative, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
-                        SMulInt64to32, VCvtBF16toFP32, SGetRegB32, SBfeU32
+                        SMulInt64to32, VCvtBF16toFP32, SBfeU32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
                         vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
                         scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
@@ -2355,9 +2355,6 @@ class KernelWriterAssembly(KernelWriter):
           moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup2"), src0=sgpr("WorkGroup2"), \
                              src1=sgpr(sTmp+4), \
                              comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
-#          moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup2"), src0=0, \
-#                             src1=sgpr(sTmp+4), \
-#                             comment="WorkGroup2 = (cluster_z(0) * nwg_z(1)) + wg_z"))
           moduleRegInit.add(label_calculate_workgroup_done)
 
           if kernel["Multicast"]:
@@ -2532,7 +2529,8 @@ class KernelWriterAssembly(KernelWriter):
       module.add(ArgType3_Routed_To_ArgType0)      
       module.add(deepcopy(moduleWg))
       if kernel["StreamK"] == 0:
-        if self.states.version[:2] == (12, 5):
+        enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+        if enableCluster:
           module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
         module.add(self.remapWgSerial(kernel, earlyStop=False))
 
@@ -2738,7 +2736,8 @@ class KernelWriterAssembly(KernelWriter):
       earlyReturnModule.add(noEarlyReturnLabel)
       module.add(earlyReturnModule)
       if kernel["StreamK"] == 0:
-        if self.states.version[:2] == (12, 5):
+        enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+        if enableCluster:
           module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
         module.add(self.remapWgSerial(kernel))
       module.addSpaceLine()
@@ -2943,7 +2942,6 @@ class KernelWriterAssembly(KernelWriter):
   def graWorkGroup(self, kernel, tPA, tPB):
     module = Module("graWorkGroup")
     module.addComment0("graWorkGroup mapping")
-    enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
 
     skComponent = Component.StreamK.find(self)
     module.add(skComponent.graWorkGroup(self, kernel, tPA, tPB))

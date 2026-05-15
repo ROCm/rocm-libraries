@@ -1475,18 +1475,8 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties
-        auto removePrefix = [](const std::string& s) {
-            size_t pos = s.find("gfx");
-            if(pos != std::string::npos)
-            {
-                return s.substr(pos + 3);
-            }
-            return s;
-        };
-
-        auto gpu_arch_no_prefix = removePrefix(hardware.archName());
-        if(stoi(gpu_arch_no_prefix) / 10 != 125)
+        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+        if(!enableCluster)
         {
             if(internalArgsSupport.version >= 1)
             {

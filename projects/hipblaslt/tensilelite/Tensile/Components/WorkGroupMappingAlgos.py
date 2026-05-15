@@ -96,7 +96,8 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
     sgprWGM = "WGM"
     label_skipWGMXCC = Label(label="skip_WGMXCC", comment="skip WGMXCC if no enough WGs to remap")
 
-    if writer.states.version[:2] == (12, 5):
+    enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+    if enableCluster:
         module.add(SBranch(label_skipWGMXCC.getLabelName()))
     if(kernel["StreamK"] != 0 and kernel["WorkGroupMappingXCC"] == -1):
         # We need to get WGMXCC from WGM
@@ -241,7 +242,8 @@ def DefaultWGM(writer, kernel, sgprWGM):
     wgmLabel         = Label(label=writer.labels.getNameInc("WGM"), comment="")
     wgmLabelPositive = Label(label=writer.labels.getNameInc("WGMPositive"), comment="")
 
-    if writer.states.version[:2] == (12, 5):
+    enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+    if enableCluster:
       module.add(SBranch(wgmLabel.getLabelName()))
 
     module.add(SCmpGtI32(src0=sgpr(tmpWGM), src1=1, comment="WGM > 1 ?"))

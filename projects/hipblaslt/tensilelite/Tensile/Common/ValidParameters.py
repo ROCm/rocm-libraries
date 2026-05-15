@@ -72,6 +72,7 @@ for i in validMacroTileSides:
 validTT = 32
 
 maxWGsInCluster = 16
+# 2D [x, y] only — z is always 1 (hardcoded in HipSolutionAdapter); C++ uses dim3 for HIP API compat.
 validClusterDimensions = []
 for i in range(1, maxWGsInCluster + 1):
   for j in range(1, maxWGsInCluster + 1):
