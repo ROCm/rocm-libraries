@@ -285,6 +285,36 @@ class _Lowerer:
     def _need(self, key: str) -> None:
         self._needs_intrin[key] = True
 
+    # ----- constant folding helpers -----
+
+    def _is_constant(self, v: Value) -> bool:
+        """Check if a value is a compile-time constant.
+
+        Returns True if the value is produced by arith.constant op.
+        """
+        if v.op is None:
+            return False
+        return v.op.name == "arith.constant"
+
+    def _eval_constant(self, v: Value) -> int:
+        """Evaluate a compile-time constant to an integer.
+
+        Args:
+            v: Value that must be a compile-time constant (from arith.constant)
+
+        Returns:
+            Integer value of the constant
+
+        Raises:
+            ValueError: If value is not a compile-time constant
+        """
+        if not self._is_constant(v):
+            raise ValueError(f"Value {v.name} is not a compile-time constant")
+
+        op = v.op
+        val = op.attrs["value"]
+        return int(val)
+
     # ----- pre-pass: collect smem allocations -----
 
     def _collect_smem(self, region: Region) -> None:
