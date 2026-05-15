@@ -3864,13 +3864,12 @@ class Solution(collections.abc.Mapping):
             blockWidth = bw
             break
         if blockWidth == 0:
-          printWarning("findValidWriteBlockWidth: no valid block width found "
-                       "(nwcv=%s, bpe=%s, bpr=%s, localWriteWidth=%s). "
-                       "This typically means TransposeLDS=0 is incompatible with the selected "
-                       "DataType and MatrixInstruction (e.g. FP4 + [16,16,128] requires TransposeLDS=1). "
-                       "Rejecting solution." % (nwcv, bpe, bpr, localWriteWidth))
-          reject(state, printRejectionReason, "invalid local write block width")
-          return blockWidth
+          reject(state, printRejectionReason,
+                 "invalid local write block width "
+                 "(nwcv=%s, bpe=%s, bpr=%s, localWriteWidth=%s). "
+                 "This typically means TransposeLDS=0 is incompatible with the selected "
+                 "DataType and MatrixInstruction (e.g. FP4 + [16,16,128] requires TransposeLDS=1)."
+                 % (nwcv, bpe, bpr, localWriteWidth))
 
         return blockWidth
 
@@ -3893,10 +3892,8 @@ class Solution(collections.abc.Mapping):
 
         blockWidth = findValidWriteBlockWidth(nwcv, bpe, bpr)
         if blockWidth == 0:
-          printWarning("subCheckLdsBlockSizePerPad: blockWidth=0 for tensor %s "
-                       "(nwcv=%s, bpe=%s, bpr=%s, vw=%s, TransposeLDS=%s). "
-                       "Skipping LDS pad check to avoid ZeroDivisionError." % (
-                       tc, nwcv, bpe, bpr, vw, state.get("TransposeLDS", "N/A")))
+          # Solution already rejected in findValidWriteBlockWidth; bail out to
+          # avoid ZeroDivisionError at "vw // nwcvpi" below.
           return False
         nwcvpi = int(blockWidth * bpr / bpe)
 
