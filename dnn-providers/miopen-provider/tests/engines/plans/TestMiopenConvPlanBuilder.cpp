@@ -404,6 +404,8 @@ TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutab
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableBwd)
 {
+    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+    SKIP_IF_ASAN();
     const auto& tc = GetParam();
     auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
