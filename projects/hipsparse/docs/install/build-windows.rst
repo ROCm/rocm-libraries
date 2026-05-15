@@ -4,59 +4,30 @@
 
 .. _windows-install:
 
-********************************************************************
-Installing and building hipSPARSE for Microsoft Windows
-********************************************************************
+***************************************
+Build and install hipSPARSE for Windows
+***************************************
 
-This topic describes how to install or build hipSPARSE on Microsoft Windows by using prebuilt packages or building from source.
-For information on installing and building hipSPARSE on Linux, see :doc:`hipSPARSE for Linux <./install>`.
+For information on installing and building hipSPARSE on Linux, see :doc:`hipSPARSE for Linux <./build-linux>`.
+
+To build hipSPARSE as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build hipSPARSE standalone using the following
+instructions.
 
 Prerequisites
 =============
 
-hipSPARSE on Windows requires an AMD HIP SDK-enabled platform. It's supported on the
-same Windows versions and toolchains that the HIP SDK supports. For more information, see
-:doc:`HIP SDK installation for Windows <rocm-install-on-windows:index>`.
-
-Installing prebuilt packages
-============================
-
-hipSPARSE can be installed on Windows using the AMD HIP SDK installer.
-For version support information, see the :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
-
-To add hipSPARSE to your code, use CMake.
-Add the SDK installation location to your ``CMAKE_PREFIX_PATH``.
-
-.. note::
-
-   You must use quotes because the path contains a space.
-
-.. code-block:: shell
-
-   -DCMAKE_PREFIX_PATH="C:\Program Files\AMD\ROCm\7.0"
-
-In your ``CMakeLists.txt`` file, use these lines:
-
-.. code-block:: shell
-
-   find_package(hipsparse)
-   target_link_libraries( your_exe PRIVATE roc::hipsparse )
-
-After hipSPARSE is installed, it can be used just like any other library with a C API.
-To call hipSPARSE, the ``hipsparse.h`` header file must be included in the user code.
-This means the hipSPARSE  import library and dynamic link library respectively become link-time and run-time dependencies
-for the user application.
-
-After the installation, you can find ``hipsparse.h`` in the HIP SDK ``\\include\\hipsparse``
-directory. When you need to include hipSPARSE in your application code, you must only use this file.
-You can find the other hipSPARSE files included in the HIP SDK ``\\include\\hipsparse\\internal`` directory, but
-do not include these files directly in your source code.
+hipSPARSE requires a :doc:`ROCm-enabled platform <compatibility/compatibility-matrix>`.
 
 Building hipSPARSE from source
 =================================
 
 It isn't necessary to build hipSPARSE from source because it's ready to use after installing
-the prebuilt packages, as described above.
+the prebuilt packages, as described in :doc:`Install hipSPARSE <./install>`.
 To build hipSPARSE from source, follow the instructions in this section.
 
 Requirements

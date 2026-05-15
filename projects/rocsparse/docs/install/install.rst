@@ -1,25 +1,25 @@
 .. meta::
-   :description: Installation instructions for hipSPARSE
-   :keywords: lib, hipsparse, sparse, algorithm, install, sdk, rocm, math
+   :description: Installation instructions for rocSPARSE
+   :keywords: lib, rocsparse, sparse, algorithm, install, sdk, rocm, math
 
 .. _installation:
 
 *****************
-Install hipSPARSE
+Install rocSPARSE
 *****************
 
 Before you begin, verify that your system is supported. For more information,
-see the :doc:`ROCm compatibilty matrix <rocm:compatibility/compatibility-matrix>`.
+see :doc:`ROCm compatibility matrix <rocm:compatibility/compatibility-matrix>`.
 
 For advanced workflows, source builds, or custom configurations, see
-:doc:`./build-linux` and :doc:`./build-windows`.
+:doc:`./Linux_Install_Guide` or :doc:`./Windows_Install_Guide`.
 
 .. _install-rocm:
 
 Install the ROCm Core SDK
 =========================
 
-hipSPARSE is included with the ROCm Core SDK on Linux. For the most complete
+rocSPARSE is included with the ROCm Core SDK on Linux. For the most complete
 installation, we recommend that developers use the ``amdrocm-core-sdk`` meta
 package.
 
@@ -32,10 +32,10 @@ environment.
 Install ROCm sparse math libraries on Linux
 ===========================================
 
-Alternatively, if you want to install hipSPARSE as part of the ROCm
+Alternatively, if you want to install rocSPARSE as part of the ROCm
 sparse math package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
 additional ROCm libraries and tools, install the ``amdrocm-sparse`` package.
-This includes both hipSPARSE and rocSPARSE.
+This includes both rocSPARSE and hipSPARSE.
 
 1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
    install dependencies and configure GPU access permissions.
@@ -95,7 +95,7 @@ Install a nightly build
 =======================
 
 The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
-nightly builds for the ROCm Core SDK and its components, including hipSPARSE.
+nightly builds for the ROCm Core SDK and its components, including rocSPARSE.
 See `Nightly release status
 <https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
 
