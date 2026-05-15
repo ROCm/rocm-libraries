@@ -158,6 +158,8 @@ enum class EncodeField : uint8_t {
     literal,
     // Scalar memory (SMEM)
     sdata,
+    /// PC-relative SMEM offset field (e.g. S_PREFETCH_INST_PC_REL koffset).
+    ioffset,
     sbase,
     // Scalar / control-flow
     simm16,
@@ -195,10 +197,16 @@ enum class FieldType : uint8_t {
     sleep,
     // Scalar memory types
     smem_offset,
+    /// SMEM offset without K (e.g. slength on S_PREFETCH_INST_PC_REL).
+    smem_offset_nok,
     // Immediate / control-flow types
     label,
     simm16,
     simm32,
+    /// 24-bit signed immediate (e.g. koffset on S_PREFETCH_INST_PC_REL).
+    simm24,
+    /// 5-bit signed immediate (e.g. klength on S_PREFETCH_INST_PC_REL).
+    simm5,
     ssrc_barrier_id,
     // Vector ALU source types
     src,

@@ -478,7 +478,7 @@ class Solution(collections.abc.Mapping):
       state["ScheduleIterAlg"] = 0
       state["_StinkyTofuOptLevel"] = 3
     else:
-      state["_StinkyTofuOptLevel"] = None
+      state["_StinkyTofuOptLevel"] = 0
 
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")

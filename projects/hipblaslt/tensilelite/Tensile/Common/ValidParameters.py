@@ -313,6 +313,16 @@ validParameters = { # we need to make sure this matches develop
     # don't create a whole copy of the Unroll loop with loads removed - instead
     # use buffer limits to suppress global loads and ignore unnecessary ds_reads
     "SuppressNoLoadLoop": [False, True],
+    # StinkyTofu: whether SwPrefetchInsertionPass may insert software instruction prefetch.
+    # True: Turn on StinkyTofu instruction prefetch for this solution (extra SGPR on supported ISAs only).
+    # False: no prefetch SGPR, prefetch pass disabled for this kernel.
+    #
+    # Purpose: command-processor (CP) prefetch only covers a bounded amount of code. When
+    # the kernel's assembly footprint is large enough to exceed that window, the front of the
+    # kernel can fall out of the I-cache before execution reaches it, causing misses. Software
+    # prefetch instructions bring hot code back under software control so execution stays ahead of
+    # the fetch pointer and avoids those misses.
+    "SwInstructionPrefetch": [False, True],
     # For PrefetchGlobalRead=1, create a second copy of the unroll loop with
     # the LDS pointer swaps expanded into inline constants for LDS read and write instructions
     # This eliminates 4 vector XOR instructions used for pointer swap

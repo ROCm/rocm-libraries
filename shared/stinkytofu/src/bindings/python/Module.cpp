@@ -81,7 +81,11 @@ struct StinkyAsmModule::Impl {
 
 StinkyAsmModule::StinkyAsmModule(const std::string& name, const std::array<int, 3>& arch,
                                  const ModuleOptions& moduleOptions)
-    : pImpl(std::make_unique<Impl>(name, arch)), moduleOptions(moduleOptions) {}
+    : pImpl(std::make_unique<Impl>(name, arch)), moduleOptions(moduleOptions) {
+    // SwPrefetchScratchSgpr == -1: do not run SwPrefetchInsertionPass (see Gfx1250Backend).
+    this->moduleOptions.EnableSwPrefetchInsertion =
+        (this->moduleOptions.SwPrefetchScratchSgpr != -1);
+}
 
 StinkyAsmModule::~StinkyAsmModule() = default;
 

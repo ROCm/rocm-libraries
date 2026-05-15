@@ -47,6 +47,7 @@
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -129,6 +130,9 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         pm.addPass(createInsertDelayAluPass());
     }
     pm.addPass(createEstimateAsmCyclesPass());
+    if (moduleOptions.EnableSwPrefetchInsertion) {
+        pm.addPass(createSwPrefetchInsertionPass(module));
+    }
     // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to
     // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
     pm.addPass(createAccumulateInstructionSizePass(module));

@@ -499,6 +499,16 @@ DEF_BATCH(.format = SMRD_LOAD,
         .operand_fields = { {D0, .size=512} },
 )
 
+// SMRD / SMEM — S_PREFETCH_INST_PC_REL (PC-relative; koffset simm24, slength, klength simm5)
+DEF_T(SPrefetchInstPcRelInst, "s_prefetch_inst_pc_rel",
+    .format = SMRD,
+    .flags = {ScalarInstPrefetch},
+    .operand_fields = {
+        {S0, ioffset, simm24, 32},
+        {S1, soffset, smem_offset_nok, 32},
+        {S2, sdata, simm5, 32},
+    })
+
 // Scalar Compare
 DEF_BATCH(.format = SOPC,
     SBitcmp1B32Inst, "s_bitcmp1_b32", .logical = "SBitcmp1B32",
