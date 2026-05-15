@@ -120,7 +120,10 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(rocblas_handle handle,
 }
 
 //------------------------------------------------------------------------------
-// Reduces A to Aband with bandwidth kd, using outer block size nb.
+// Reduces matrix A to Aband with bandwidth kd (inner block size), using outer
+// block size nb. We require kd to evenly divide nb. For comparison, LAPACK uses
+// single-level blocking with nb == kd.
+// Matrix A must be explicitly symmetrized before calling this.
 // Householder vectors overwrite A below bandwidth, with associated tau.
 // D, V, W, X, Z are workspaces.
 template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
@@ -152,6 +155,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
 
     using S = decltype(std::real(T{}));
 
+    // gemm implementation is faster than her2k/hemm,
+    // which are provided for comparison.
     bool const use_her2k = false;
 
     // quick return
@@ -267,8 +272,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
             cpy_mblks = ceildiv(kd + 1 + qn, 32);
             cpy_nblks = ceildiv(kd, 32);
             ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count),
-                                    dim3(32, 32), 0, stream, kd + 1 + qn, kd, V, idx2D(i, i - j, ldv),
-                                    ldv, strideV, Aband, idx2D(idiag, i, ldab), ldab - 1, strideAb);
+                                    dim3(32, 32), 0, stream, kd + 1 + qn, kd, // opts
+                                    V, idx2D(i, i - j, ldv), ldv, strideV, // A_ii
+                                    Aband, idx2D(idiag, i, ldab), ldab - 1, strideAb); // Aband_ii
 
             // Set upper triangle of Vi to identity.
             T const offdiag = zero;
@@ -427,7 +433,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32),
                                 0, stream, n - j, jb_rnd, // opts
                                 V, idx2D(j, 0, ldv), ldv, strideV, // Vj
-                                A, idx2D(j, j, lda), lda, strideA); // Aj
+                                A, idx2D(j, j, lda) + shiftA, lda, strideA); // Aj
     }
 
     // Copy last, lower triangular block of band of A to Aband.
