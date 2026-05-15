@@ -15,10 +15,12 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..common.exceptions import ExecutionError
+from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
 from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
+from ..execution.timing import Timer
+from ..reporting.reporter import Reporter
 from ..reporting.statistics import BenchmarkStats
 from ..reporting.suite_results import (
     CorrectnessResult,
@@ -30,15 +32,6 @@ from ..validation.reference_provider import (
     ReferenceProviderRegistry,
 )
 from ..validation.validator import Validator
-
-# Keywords in error messages that indicate an unsupported combination
-# rather than a hard error.
-_SUPPORT_CHECK_KEYWORDS = (
-    "support check failed",
-    "not supported",
-    "unsupported",
-    "no engine",
-)
 
 
 def _resolve_engine_name(engine_id: int) -> str:
@@ -65,19 +58,6 @@ def _resolve_engine_name(engine_id: int) -> str:
     return f"engine_{engine_id:#x}"
 
 
-def _is_support_error(error_msg: str) -> bool:
-    """Check if an error message indicates a support/compatibility issue.
-
-    Args:
-        error_msg: The error message string.
-
-    Returns:
-        True if the error indicates an unsupported combination.
-    """
-    lower = error_msg.lower()
-    return any(kw in lower for kw in _SUPPORT_CHECK_KEYWORDS)
-
-
 def _get_reference_provider(
     config: SuiteConfig, graph_json: Dict[str, Any]
 ) -> Optional[ReferenceProvider]:
@@ -89,9 +69,12 @@ def _get_reference_provider(
 
     Returns:
         ReferenceProvider instance if available and supports the graph,
-        None otherwise. Caller distinguishes "not requested" from
-        "requested but unsupported" via ``config.reference_provider``.
+        None if validation was not requested (``config.reference_provider``
+        is ``"none"``) or if the provider is unavailable/unsupported.
     """
+    if config.reference_provider == "none":
+        return None
+
     try:
         provider = ReferenceProviderRegistry.get_provider(config.reference_provider)
     except ValueError:
@@ -207,7 +190,7 @@ def _check_correctness(
             max_rel_diff=worst_rel_diff,
         )
 
-    except Exception as e:
+    except (ValueError, RuntimeError, ExecutionError) as e:
         return CorrectnessResult(
             execution_success=True,
             tolerance_match=False,
@@ -223,6 +206,7 @@ def run_graph_all_providers(
     tensor_infos: list,
     config: SuiteConfig,
     handle: Any,
+    reporter: Optional[Reporter] = None,
 ) -> GraphResult:
     """Run a single graph against every engine the backend ranks for it.
 
@@ -264,25 +248,38 @@ def run_graph_all_providers(
             gpu_backend=config.gpu_backend,
         )
         engine_ids = discovery_executor.discover_engines(handle)
-    except (ExecutionError, RuntimeError) as e:
-        msg = str(e)
-        status = "skipped" if _is_support_error(msg) else "error"
-        result_kwargs: Dict[str, Any] = {
-            "provider": "unknown",
-            "engine_id": 0,
-            "status": status,
-            "correctness": CorrectnessResult.failed(
-                rtol=config.rtol, atol=config.atol, error_message=msg
-            ),
-        }
-        if status == "error":
-            result_kwargs["error_message"] = f"Engine discovery failed: {msg}"
-        else:
-            result_kwargs["skip_reason"] = msg
+    except UnsupportedGraphError as e:
         return GraphResult(
             graph_name=graph_name,
             graph_path=str(graph_path),
-            results=[ProviderEngineResult(**result_kwargs)],
+            results=[
+                ProviderEngineResult(
+                    provider="unknown",
+                    engine_id=0,
+                    status="skipped",
+                    skip_reason=str(e),
+                    correctness=CorrectnessResult.failed(
+                        rtol=config.rtol, atol=config.atol, error_message=str(e)
+                    ),
+                )
+            ],
+        )
+    except (ExecutionError, RuntimeError) as e:
+        msg = str(e)
+        return GraphResult(
+            graph_name=graph_name,
+            graph_path=str(graph_path),
+            results=[
+                ProviderEngineResult(
+                    provider="unknown",
+                    engine_id=0,
+                    status="error",
+                    error_message=f"Engine discovery failed: {msg}",
+                    correctness=CorrectnessResult.failed(
+                        rtol=config.rtol, atol=config.atol, error_message=msg
+                    ),
+                )
+            ],
         )
 
     if config.engine_filter is not None:
@@ -311,25 +308,32 @@ def run_graph_all_providers(
     pe_results: List[ProviderEngineResult] = []
     for engine_id in engine_ids:
         engine_name = _resolve_engine_name(engine_id)
-        pe_result = _run_single_provider_engine(
-            graph_path=graph_path,
-            graph_json_str=graph_json_str,
-            graph_name=graph_name,
-            tensor_infos=tensor_infos,
-            config=config,
-            handle=handle,
-            provider=engine_name,
-            engine_id=engine_id,
-            ref_provider=ref_provider,
-            validation_requested=validation_requested,
-            graph_json=graph_json,
-        )
+        if reporter is not None:
+            reporter.print_engine_start(engine_name)
+        with Timer() as t:
+            pe_result = _run_single_provider_engine(
+                graph_path=graph_path,
+                graph_json_str=graph_json_str,
+                graph_name=graph_name,
+                tensor_infos=tensor_infos,
+                config=config,
+                handle=handle,
+                provider=engine_name,
+                engine_id=engine_id,
+                ref_provider=ref_provider,
+                validation_requested=validation_requested,
+                graph_json=graph_json,
+            )
+        pe_result.elapsed_time_ms = t.elapsed_ms
+        if reporter is not None:
+            reporter.print_engine_result(pe_result)
         pe_results.append(pe_result)
 
     return GraphResult(
         graph_name=graph_name,
         graph_path=str(graph_path),
         results=pe_results,
+        engine_ids=engine_ids,
     )
 
 
@@ -419,25 +423,30 @@ def _run_single_provider_engine(
         result.status = "success"
         return result
 
-    except ExecutionError as e:
-        error_msg = str(e)
-        # Drop any partial timing collected before the failure so the JSON
-        # output never carries half-populated stats on an error/skip entry.
+    except UnsupportedGraphError as e:
         result.cpu_build_time_ms = None
         result.gpu_kernel_stats = None
         result.e2e_stats = None
+        result.status = "skipped"
+        result.skip_reason = str(e)
+        result.correctness = CorrectnessResult.failed(
+            rtol=config.rtol, atol=config.atol, error_message=str(e)
+        )
+        return result
+
+    except ExecutionError as e:
+        error_msg = str(e)
+        result.cpu_build_time_ms = None
+        result.gpu_kernel_stats = None
+        result.e2e_stats = None
+        result.status = "error"
+        result.error_message = error_msg
         result.correctness = CorrectnessResult.failed(
             rtol=config.rtol, atol=config.atol, error_message=error_msg
         )
-        if _is_support_error(error_msg):
-            result.status = "skipped"
-            result.skip_reason = error_msg
-        else:
-            result.status = "error"
-            result.error_message = error_msg
         return result
 
-    except Exception as e:
+    except (ValueError, RuntimeError, OSError) as e:
         error_msg = str(e)
         result.cpu_build_time_ms = None
         result.gpu_kernel_stats = None

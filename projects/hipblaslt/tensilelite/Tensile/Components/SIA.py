@@ -512,11 +512,11 @@ def fixLocalWriteEndMfmaIndex(writer, kernel, tPA, tPB, globalReadIncACode, glob
 ################################################################################
 ################################################################################
 
-def _splitTdmLoad(grACode):
-    """Split globalReadA into (non-TDM items module, TDM-load-only module)."""
+def _splitTdmLoad(grCode):
+    """Split a globalRead module into (non-TDM items module, TDM-load-only module)."""
     tdmLoadMod = Module("deferredTdmLoad")
     nonTdmMod = Module()
-    grAItems = grACode.items() if hasattr(grACode, 'items') else []
+    grAItems = grCode.items() if hasattr(grCode, 'items') else []
     for item in grAItems:
         hasTdm = isinstance(item, TensorLoadToLds) or \
                  (hasattr(item, 'flatitems') and any(isinstance(f, TensorLoadToLds) for f in item.flatitems()))
@@ -543,7 +543,7 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
         if tdmDeferLoad:
             imod.addComment1("Global Read A")
             imod.add(writer.codes.dtlsM0UpdateA)
-            nonTdmMod, tdmLoadMod = _splitTdmLoad(writer.codes.globalReadA)
+            nonTdmMod, tdmLoadModA = _splitTdmLoad(writer.codes.globalReadA)
             imod.add(nonTdmMod)
             imod.addComment1("Global Read MXSA")
             imod.add(writer.codes.dtlsM0UpdateMXSA)
@@ -553,11 +553,18 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             imod.add(writer.codes.globalReadMXSB)
             imod.addComment1("Global Read B")
             imod.add(writer.codes.dtlsM0UpdateB)
-            imod.add(writer.codes.globalReadB)
-            if tdmLoadMod.itemsSize() > 0:
-                deferMod = writer.codes.perIterGlobalRead[tdmLoadIter].add(Module())
+            nonTdmModB, tdmLoadModB = _splitTdmLoad(writer.codes.globalReadB)
+            imod.add(nonTdmModB)
+            # Defer both A and B tensor_load_to_lds to after the LDS swap (at tdmLoadIter).
+            # This ensures both loads go into the post-swap buffer, matching the ds_load reads.
+            deferMod = writer.codes.perIterGlobalRead[tdmLoadIter].add(Module())
+            if tdmLoadModA.itemsSize() > 0:
                 deferMod.addComment1("Global Read A (TDM deferred after LDS swap)")
-                deferMod.add(tdmLoadMod)
+                deferMod.add(tdmLoadModA)
+            if tdmLoadModB.itemsSize() > 0:
+                # TODO: For the 1-wave case, schedule B's TDM load independently for better tensor load balance.
+                deferMod.addComment1("Global Read B (TDM deferred after LDS swap)")
+                deferMod.add(tdmLoadModB)
         else:
             imod.addComment1("Global Read A")
             imod.add(writer.codes.dtlsM0UpdateA)
@@ -781,7 +788,7 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
     # if no scheduleLocalWrite - just add writes to localWritelocalWriteEndIter
     # If PGR=0, writes have to be done immediately following the loads - no opportunity to schedule
     #   so don't add to schedule, these will be added separately and before the first iter
-    if kernel["PrefetchGlobalRead"]:
+    if kernel["PrefetchGlobalRead"] and not kernel["NoLdsWriteCode"]:
         # do we need a module here? That would prevent these from being scheduled
         imod = writer.codes.perIterLocalWrite[localWriteEndIter][1].add(Module())
         imod.add(

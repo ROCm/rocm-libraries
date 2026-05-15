@@ -309,13 +309,6 @@ globalParameters["DisableAsmComments"] = False  # Set to True to disable assembl
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
-# StinkyTofu optimization level
-# None: Disable StinkyTofu feature (set null in yaml file)
-# 0: No optimization
-# 1: Basic optimization
-# 2: Full optimization
-globalParameters["StinkyTofuOptLevel"] = 0
-
 # StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
 # 0: Silent (default)
 # 1: Pass names + AnalysisManager cache activity to stdout
@@ -515,6 +508,15 @@ defaultBenchmarkCommonParameters = [
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
+    {"TDMSplit": [False]},
+    {"MXScaleFormat": ["Auto"]},
+    {"MXLoadInst": ["Auto"]},
+    # SwInstructionPrefetch — True: reserve one scratch SGPR so StinkyTofu can insert software
+    # instruction prefetch when the ISA supports it (SwPrefetchInsertionPass).
+    # Purpose: CP prefetch covers only a bounded window; very large kernels can see early kernel
+    # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
+    # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
+    {"SwInstructionPrefetch": [True]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter

@@ -8,7 +8,6 @@ table SerializedExecutionPlan {
     engine_id: int64;
     workspace_size: int64;
     tensor_uids: [int64];
-    engine_config: [ubyte];
     plugin_payload: [ubyte];
 }
 

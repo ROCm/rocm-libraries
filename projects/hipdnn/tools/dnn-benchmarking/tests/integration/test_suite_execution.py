@@ -217,7 +217,6 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--no-kernel-timing",
             ]
             + cli_plugin_args,
             capture_output=True,
@@ -253,7 +252,6 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--no-kernel-timing",
                 "--output",
                 str(output_file),
             ]
@@ -301,7 +299,6 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--no-kernel-timing",
                 "--output",
                 str(output_file),
             ]
@@ -339,7 +336,6 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--no-kernel-timing",
             ]
             + cli_plugin_args,
             capture_output=True,
@@ -371,7 +367,6 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--no-kernel-timing",
                 "-v",
             ]
             + cli_plugin_args,
@@ -407,7 +402,6 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--no-kernel-timing",
                 "--engine",
                 "0,1",
                 "--output",
@@ -461,7 +455,6 @@ class TestSuiteCLIIntegration:
                 "1",
                 "--iters",
                 "2",
-                "--no-kernel-timing",
             ],
             capture_output=True,
             text=True,
