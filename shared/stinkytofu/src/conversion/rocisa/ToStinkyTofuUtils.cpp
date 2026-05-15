@@ -778,7 +778,7 @@ std::shared_ptr<stinkytofu::SignatureBase> toStinkySignature(const rocisa::Signa
     auto stinkySig = std::make_shared<stinkytofu::SignatureBase>(
         rocisaSig.name, isaVersion, cm.kernArgsVersion, cm.codeObjectVersion, kd.groupSegSize,
         kd.sgprWorkGroup, kd.vgprWorkItem, cm.flatWgSize, wavefrontSize, kd.originalTotalVgprs,
-        kd.totalAgprs, kd.totalSgprs, kd.enablePreloadKernArgs);
+        kd.totalAgprs, kd.totalSgprs, kd.numSgprPreload);
 
     // Convert arguments
     for (const auto& arg : cm.argList) {
@@ -1120,10 +1120,28 @@ void init_stinkytofu(nb::module_ m) {
             return module_->getName();
         }
 
+        void setOutputName(const std::string& name) {
+            module_->setOutputName(name);
+        }
+
+        std::string getOutputName() const {
+            return module_->getOutputName();
+        }
+
+        void setOutputDir(const std::string& dir) {
+            module_->setOutputDir(dir);
+        }
+
+        std::string getOutputDir() const {
+            return module_->getOutputDir();
+        }
+
         // Override emitAssembly to include signature
         std::string emitAssembly() const {
             std::string result;
             if (signature_) {
+                int64_t totalBytes = module_->getTotalInstructionBytes();
+                if (totalBytes >= 0) signature_->setTotalInstructionBytes(totalBytes);
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
@@ -1141,6 +1159,13 @@ void init_stinkytofu(nb::module_ m) {
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
         .def("getName", &StinkyAsmModuleWithSignature::getName)
+        .def("setOutputName", &StinkyAsmModuleWithSignature::setOutputName,
+             "Set full kernel name for output files (e.g. cost file); should match .o basename")
+        .def("getOutputName", &StinkyAsmModuleWithSignature::getOutputName)
+        .def("setOutputDir", &StinkyAsmModuleWithSignature::setOutputDir,
+             "Set output dir for cost file: comparison_output/<yaml_name>; file at "
+             "<dir>/<kernel_name>/aggregated_instruction_cost.txt")
+        .def("getOutputDir", &StinkyAsmModuleWithSignature::getOutputDir)
         .def("getModule", &StinkyAsmModuleWithSignature::getModule);
 
     // Bind toStinkyTofuModule with signature support
@@ -1152,7 +1177,9 @@ void init_stinkytofu(nb::module_ m) {
             std::array<int, 3> archArray = convertArch(arch_obj);
 
             // Override with options dict if provided
-            StinkyAsmModule::ModuleOptions moduleOptions;
+            StinkyAsmModule::ModuleOptions moduleOptions{};
+            // Sentinel: <0 means use legacy default scratch SGPR in SwPrefetchInsertionPass (102).
+            moduleOptions.SwPrefetchScratchSgpr = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 
@@ -1174,7 +1201,8 @@ void init_stinkytofu(nb::module_ m) {
 #undef DEBUG_SET_MODULE_OPTION
             }
 
-            // Convert module to StinkyAsmModule
+            // Convert module to StinkyAsmModule (StinkyAsmModule ctor sets
+            // EnableSwPrefetchInsertion from Sgpr != -1)
             auto stinkyModule =
                 stinkytofu::toStinkyTofuModule(module, archArray, moduleName, moduleOptions);
 

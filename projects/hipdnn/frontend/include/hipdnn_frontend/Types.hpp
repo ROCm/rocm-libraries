@@ -49,7 +49,9 @@ namespace hipdnn_frontend
 {
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::fp8_e4m3;
+using hipdnn_data_sdk::types::fp8_e4m3_fnuz;
 using hipdnn_data_sdk::types::fp8_e5m2;
+using hipdnn_data_sdk::types::fp8_e5m2_fnuz;
 using hipdnn_data_sdk::types::half;
 
 /**
@@ -201,6 +203,8 @@ enum class DataType
     FP6_E3M2 = 14, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
     INT64 = 15, ///< 64-bit signed integer
     BOOLEAN = 16, ///< 8-bit boolean
+    FP8_E4M3_FNUZ = 17, ///< 8-bit floating point (4 exponent, 3 mantissa bits, FNUZ)
+    FP8_E5M2_FNUZ = 18, ///< 8-bit floating point (5 exponent, 2 mantissa bits, FNUZ)
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -351,9 +355,17 @@ DataType getDataTypeEnumFromType()
     {
         return DataType::FP8_E4M3;
     }
+    else if constexpr(std::is_same_v<T, fp8_e4m3_fnuz>)
+    {
+        return DataType::FP8_E4M3_FNUZ;
+    }
     else if constexpr(std::is_same_v<T, fp8_e5m2>)
     {
         return DataType::FP8_E5M2;
+    }
+    else if constexpr(std::is_same_v<T, fp8_e5m2_fnuz>)
+    {
+        return DataType::FP8_E5M2_FNUZ;
     }
     else if constexpr(std::is_same_v<T, bool>)
     {
@@ -710,6 +722,10 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_INT64;
     case DataType::BOOLEAN:
         return HIPDNN_DATA_BOOLEAN;
+    case DataType::FP8_E4M3_FNUZ:
+        return HIPDNN_DATA_FP8_E4M3_FNUZ;
+    case DataType::FP8_E5M2_FNUZ:
+        return HIPDNN_DATA_FP8_E5M2_FNUZ;
     case DataType::NOT_SET:
     default:
         return std::nullopt;
@@ -760,6 +776,10 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::INT64, {}};
     case HIPDNN_DATA_BOOLEAN:
         return {DataType::BOOLEAN, {}};
+    case HIPDNN_DATA_FP8_E4M3_FNUZ:
+        return {DataType::FP8_E4M3_FNUZ, {}};
+    case HIPDNN_DATA_FP8_E5M2_FNUZ:
+        return {DataType::FP8_E5M2_FNUZ, {}};
     default:
         return {DataType::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -949,6 +969,10 @@ inline const char* to_string(const DataType& type)
         return "int64";
     case DataType::BOOLEAN:
         return "boolean";
+    case DataType::FP8_E4M3_FNUZ:
+        return "fp8_e4m3_fnuz";
+    case DataType::FP8_E5M2_FNUZ:
+        return "fp8_e5m2_fnuz";
     default:
         return "unknown";
     }
