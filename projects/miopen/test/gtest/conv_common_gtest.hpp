@@ -12,16 +12,26 @@
 #include <miopen/convolution.hpp>
 #include <miopen/tensor_layout.hpp>
 #include <miopen/tensor_ops.hpp>
+#include <sstream>
 
+#include "args.hpp"
 #include "compare_helper.hpp"
 #include "cpu_conv.hpp"
 #include "get_handle.hpp"
 #include "gpu_conv.hpp"
-#include "gtest/gtest.h"
+#include "gtest_common.hpp"
 #include "miopen/find_db.hpp"
 #include "tensor_holder.hpp"
 #include "test_parameter_name_generator.hpp"
 #include "workspace.hpp"
+
+template <typename T>
+concept ISStream = std::is_convertible_v<T, std::istringstream&>;
+
+template <typename T>
+concept ISStreamable = requires(std::istringstream& iss, T value) {
+    { iss >> value } -> ISStream;
+};
 
 #define TEST_DIRECT_SUPPORTED_CONFIG_ONLY (!MIOPEN_USE_ROCBLAS)
 
@@ -1969,17 +1979,86 @@ struct conv_test : public testing::TestWithParam<TestCase>
     bool deterministic       = false;
     bool preallocate         = false;
 
-    const std::unordered_map<std::string, miopenConvolutionMode_t> cmode_lookup = {
+    const std::unordered_map<std::string, miopenConvolutionMode_t> cmode_lookup{
         {"CONV", miopenConvolution},
         {"TRANS", miopenTranspose},
         {"CONVOLUTION", miopenConvolution},
         {"TRANSPOSE", miopenTranspose},
         {"CONVFP16", miopenConvolution}};
 
-    const std::unordered_map<std::string, miopenPaddingMode_t> pmode_lookup = {
+    const std::unordered_map<std::string, miopenPaddingMode_t> pmode_lookup{
         {"SAME", miopenPaddingSame},
         {"VALID", miopenPaddingValid},
         {"DEFAULT", miopenPaddingDefault}};
+
+    static const args::string_map& get_commandline_args()
+    {
+        static const args::string_map cmdline_args =
+            args::parse(CommandLineArgs::GetInstance().GetArgs(),
+                        [](const std::string& x) { return x.starts_with("--"); });
+        return cmdline_args;
+    }
+
+    template <typename V>
+        requires ISStreamable<V>
+    static V get_commandline_arg_as_value(const std::string& arg_name,
+                                          const V& default_value = V{}) const
+    {
+        const auto& cmdline_args = get_commandline_args();
+        auto it                  = cmdline_args.find(arg_name);
+
+        if(it != cmdline_args.end())
+        {
+            std::istringstream iss(it->second[0]);
+            V value;
+            iss >> value;
+
+            if(iss.fail())
+            {
+                MIOPEN_FRIENDLY_FAIL("Failed to parse command line argument: \""
+                                     << arg_name << "\" with value: \"" << it->second[0] << "\"");
+            }
+
+            return value;
+        }
+
+        return default_value;
+    }
+
+    template <typename V>
+        requires ISStreamable<V>
+    static std::vector<V>
+    get_commandline_arg_as_vector(const std::string& arg_name,
+                                  const std::vector<V>& default_value = {}) const
+    {
+        const auto& cmdline_args = get_commandline_args();
+        auto it                  = cmdline_args.find(arg_name);
+
+        if(it != cmdline_args.end())
+        {
+            std::vector<V> values;
+            values.reserve(it->second.size());
+
+            for(const auto& val_str : it->second)
+            {
+                std::istringstream iss(val_str);
+                V value;
+                iss >> value;
+
+                if(iss.fail())
+                {
+                    MIOPEN_FRIENDLY_FAIL("Failed to parse command line argument: \""
+                                         << arg_name << "\" with value: \"" << val_str << "\"");
+                }
+
+                values.emplace_back(value);
+            }
+
+            return values;
+        }
+
+        return default_value;
+    }
 
     static std::vector<std::size_t> get_batch_sizes() { return {1, 8, 2, 64, 30, 128, 352, 512}; }
 
@@ -2129,20 +2208,26 @@ struct conv_test : public testing::TestWithParam<TestCase>
     {
         if(!input_dims.empty())
         {
-            filter.spatialDim = get_spatial_dim();
-            if(filter.spatialDim < 0)
+            const int spatial_dim = get_spatial_dim();
+
+            if(spatial_dim < 0)
             {
                 FAIL() << "FAILED: get_spatial_dim() can't calculate dims count.";
             }
+
+            filter.spatialDim = static_cast<size_t>(spatial_dim);
         }
         else
+        {
             filter.spatialDim = filter_dims.size();
-        bool is_int8 = (input.desc.GetType() == miopenInt8);
+        }
 
-        filter.mode             = cmode_lookup.at(miopen::ToUpper(conv_mode));
-        filter.paddingMode      = pmode_lookup.at(miopen::ToUpper(pad_mode));
-        std::size_t spatial_dim = filter.GetSpatialDimension();
-        filter.group_count      = std::max(static_cast<int>(groupCount), 1);
+        const bool is_int8 = (input.desc.GetType() == miopenInt8);
+
+        filter.mode              = cmode_lookup.at(miopen::ToUpper(conv_mode));
+        filter.paddingMode       = pmode_lookup.at(miopen::ToUpper(pad_mode));
+        const size_t spatial_dim = filter.GetSpatialDimension();
+        filter.group_count       = std::max(static_cast<int>(groupCount), 1);
 
         miopenTensorLayout_t input_layout_t =
             StringToLayoutType(in_layout, tensor_vect, vector_length);
