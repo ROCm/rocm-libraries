@@ -27,6 +27,7 @@
 #define TYPE_DISPATCH_HPP
 
 #include "hipsparse_arguments.hpp"
+#include <hipsparse/hipsparse.h>
 
 // ----------------------------------------------------------------------------
 // Calls TEST template based on the argument types. TEST<> is expected to
@@ -151,6 +152,78 @@ auto hipsparse_ijt_dispatch(const Arguments& arg)
             return TEST<int64_t, int64_t, hipDoubleComplex>{}(arg);
         default:
             return TEST<void>{}(arg);
+        }
+    }
+
+    return TEST<void>{}(arg);
+}
+
+// Dispatch for hipsparseAxpby: selects a <I, X, Y, T> template instantiation
+// based on the valid (uniform and mixed) precision combinations supported by
+// hipsparseAxpby. Each routine that needs an <I, X, Y, T> dispatch should
+// define its own routine-specific dispatch so that different routines with the
+// same template parameter structure can advertise different sets of valid
+// precision combinations (including mixed precisions).
+template <template <typename...> class TEST>
+auto hipsparse_axpby_dispatch(const Arguments& arg)
+{
+    const auto I = arg.index_type_I;
+    const auto X = arg.x_type;
+    const auto Y = arg.y_type;
+    const auto T = arg.compute_type;
+
+    if(I == HIPSPARSE_INDEX_32I)
+    {
+        if(X == HIP_R_16F && Y == HIP_R_16F && T == HIP_R_32F)
+        {
+            return TEST<int32_t, hipsparseFloat16, hipsparseFloat16, float>{}(arg);
+        }
+        if(X == HIP_R_16BF && Y == HIP_R_16BF && T == HIP_R_32F)
+        {
+            return TEST<int32_t, hipsparseBfloat16, hipsparseBfloat16, float>{}(arg);
+        }
+        if(X == HIP_R_32F && Y == HIP_R_32F && T == HIP_R_32F)
+        {
+            return TEST<int32_t, float, float, float>{}(arg);
+        }
+        if(X == HIP_R_64F && Y == HIP_R_64F && T == HIP_R_64F)
+        {
+            return TEST<int32_t, double, double, double>{}(arg);
+        }
+        if(X == HIP_C_32F && Y == HIP_C_32F && T == HIP_C_32F)
+        {
+            return TEST<int32_t, hipComplex, hipComplex, hipComplex>{}(arg);
+        }
+        if(X == HIP_C_64F && Y == HIP_C_64F && T == HIP_C_64F)
+        {
+            return TEST<int32_t, hipDoubleComplex, hipDoubleComplex, hipDoubleComplex>{}(arg);
+        }
+    }
+    else if(I == HIPSPARSE_INDEX_64I)
+    {
+        if(X == HIP_R_16F && Y == HIP_R_16F && T == HIP_R_32F)
+        {
+            return TEST<int64_t, hipsparseFloat16, hipsparseFloat16, float>{}(arg);
+        }
+        if(X == HIP_R_16BF && Y == HIP_R_16BF && T == HIP_R_32F)
+        {
+            return TEST<int64_t, hipsparseBfloat16, hipsparseBfloat16, float>{}(arg);
+        }
+        if(X == HIP_R_32F && Y == HIP_R_32F && T == HIP_R_32F)
+        {
+            return TEST<int64_t, float, float, float>{}(arg);
+        }
+        if(X == HIP_R_64F && Y == HIP_R_64F && T == HIP_R_64F)
+        {
+            return TEST<int64_t, double, double, double>{}(arg);
+        }
+        if(X == HIP_C_32F && Y == HIP_C_32F && T == HIP_C_32F)
+        {
+            return TEST<int64_t, hipComplex, hipComplex, hipComplex>{}(arg);
+        }
+        if(X == HIP_C_64F && Y == HIP_C_64F && T == HIP_C_64F)
+        {
+            return TEST<int64_t, hipDoubleComplex, hipDoubleComplex, hipDoubleComplex>{}(arg);
         }
     }
 

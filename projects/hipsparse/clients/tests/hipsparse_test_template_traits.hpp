@@ -54,6 +54,14 @@ struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::ijt
 };
 
 template <hipsparse_test_enum::value_type ROUTINE>
+struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::axpby>
+{
+    using filter = typename hipsparse_test_axpby_template<ROUTINE>::test;
+    template <typename... P>
+    using caller = typename hipsparse_test_axpby_template<ROUTINE>::template test_call<P...>;
+};
+
+template <hipsparse_test_enum::value_type ROUTINE>
 struct hipsparse_test_template_traits<ROUTINE, hipsparse_test_dispatch_enum::ijabct_spmv>
 {
     using filter = typename hipsparse_test_ijabct_spmv_template<ROUTINE>::test;
