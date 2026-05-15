@@ -132,6 +132,8 @@ namespace rocsparse
                                                      const rocsparse_int* __restrict__ csr_row_ptr,
                                                      rocsparse_int* __restrict__ csr_col_ind)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
         const rocsparse_int wavefront_index = hipThreadIdx_x / WF_SIZE,
                             lane_index      = hipThreadIdx_x % WF_SIZE;
         const uint64_t      filter          = 0xffffffffffffffff >> (63 - lane_index);
