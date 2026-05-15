@@ -360,7 +360,8 @@ int main(int argc, char* argv[])
 {
     primbench::settings settings;
     settings.size                 = DEFAULT_N;
-    settings.min_gpu_ms_per_batch = 100;
+    settings.min_gpu_ms_per_batch = 1000;
+    settings.batch_window_size    = 3;
 
     primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
