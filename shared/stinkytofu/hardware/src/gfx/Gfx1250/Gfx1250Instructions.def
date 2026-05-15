@@ -231,7 +231,7 @@ DEF_BATCH(.format = MXWMMA_SCALE, .flags = {WMMA_XDL},
     VWmmaScaleF3232x16x128F4Inst, "v_wmma_scale_f32_32x16x128_f4",
         .operand_fields = { {D0, .size=512}, {S1, .size=256}, {S2, .size=512} },
 )
-// v_wmma_scale16_* — VOP3PX3 (192-bit), inherit fields from MXWMMA_SCALE16
+// v_wmma_scale16_* — VOP3PX3 (128-bit), inherit fields from MXWMMA_SCALE16
 DEF_BATCH(.format = MXWMMA_SCALE16, .flags = {WMMA_XDL},
     VWmmaScale16F3216x16x128F8f6f4Inst, "v_wmma_scale16_f32_16x16x128_f8f6f4",
         .cost = {1, 8}, .coissue = 0x00C0, .costOverride = { { MatrixFmtModifiers(FP4, FP4), 1, 4 } },
@@ -498,6 +498,16 @@ DEF_BATCH(.format = SMRD_LOAD,
     SLoadDwordx16Inst, "s_load_dwordx16",
         .operand_fields = { {D0, .size=512} },
 )
+
+// SMRD / SMEM — S_PREFETCH_INST_PC_REL (PC-relative; koffset simm24, slength, klength simm5)
+DEF_T(SPrefetchInstPcRelInst, "s_prefetch_inst_pc_rel",
+    .format = SMRD,
+    .flags = {ScalarInstPrefetch},
+    .operand_fields = {
+        {S0, ioffset, simm24, 32},
+        {S1, soffset, smem_offset_nok, 32},
+        {S2, sdata, simm5, 32},
+    })
 
 // Scalar Compare
 DEF_BATCH(.format = SOPC,

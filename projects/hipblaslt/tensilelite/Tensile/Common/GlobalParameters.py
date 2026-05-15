@@ -510,7 +510,13 @@ defaultBenchmarkCommonParameters = [
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
     {"MXScaleFormat": ["Auto"]},
-    {"MXLoadInst": ["Auto"]}
+    {"MXLoadInst": ["Auto"]},
+    # SwInstructionPrefetch — True: reserve one scratch SGPR so StinkyTofu can insert software
+    # instruction prefetch when the ISA supports it (SwPrefetchInsertionPass).
+    # Purpose: CP prefetch covers only a bounded window; very large kernels can see early kernel
+    # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
+    # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
+    {"SwInstructionPrefetch": [True]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter
