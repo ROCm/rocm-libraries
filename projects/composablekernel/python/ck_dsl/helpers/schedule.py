@@ -36,11 +36,20 @@ from ..analysis.ir import LlvmIrStats
 from ..core.ir import IRBuilder
 
 
-DS_READ = 0x100
-DS_WRITE = 0x200
-VMEM_READ = 0x020
+# AMDGPU ``sched_group_barrier`` instruction-class masks, matching the
+# bit layout that the AMDGPU backend recognises. The backend honours
+# these by keeping each named instruction class together as a group
+# during post-RA scheduling.
+#
+# Reference: ``__builtin_amdgcn_sched_group_barrier(mask, count, group)``.
+VALU = 0x002  # vector ALU (v_add, v_mul, v_cvt, ...)
+SALU = 0x004  # scalar ALU
+MFMA = 0x008  # matrix-fused multiply-add
+VMEM_READ = 0x020  # global / buffer load
 VMEM_WRITE = 0x040
-MFMA = 0x008
+DS_READ = 0x100  # LDS load
+DS_WRITE = 0x200  # LDS store
+TRANS = 0x400  # transcendentals (v_exp_f32, v_log_f32, v_rcp_f32, ...)
 
 
 @dataclass(frozen=True)
@@ -139,6 +148,70 @@ class SchedulePolicy:
             return
         b.sched_group_barrier(DS_READ, int(ds_read_count), 0)
         b.sched_group_barrier(MFMA, int(mfma_count), 0)
+
+    def emit_mfma_valu_pairs(
+        self,
+        b: IRBuilder,
+        *,
+        pairs: int,
+        valu_per_pair: int = 1,
+        group: int = 0,
+    ) -> None:
+        """Emit ``pairs`` alternating ``(MFMA, VALU)`` group hints.
+
+        Use inside an attention softmax / online-rescale loop where each
+        MFMA is followed by a small fixed number of VALU ops (sub /
+        mul / cmp) and the goal is for the post-RA scheduler to keep
+        the MFMA pipe fed by interleaving VALU between each MFMA.
+        """
+        if not self.emit_hints:
+            return
+        for _ in range(int(pairs)):
+            b.sched_group_barrier(MFMA, 1, group)
+            b.sched_group_barrier(VALU, int(valu_per_pair), group)
+
+    def emit_mfma_trans_pairs(
+        self,
+        b: IRBuilder,
+        *,
+        pairs: int,
+        trans_per_pair: int = 1,
+        group: int = 0,
+    ) -> None:
+        """Emit ``pairs`` alternating ``(MFMA, TRANS)`` group hints.
+
+        Used in softmax-style loops where each MFMA is followed by an
+        ``exp2`` / ``log2`` transcendental: the TRANS unit and the
+        MFMA pipe are independent execution resources, so encouraging
+        the scheduler to interleave them maximizes overlap.
+        """
+        if not self.emit_hints:
+            return
+        for _ in range(int(pairs)):
+            b.sched_group_barrier(MFMA, 1, group)
+            b.sched_group_barrier(TRANS, int(trans_per_pair), group)
+
+    def emit_mfma_setprio_bookend(
+        self,
+        b: IRBuilder,
+        emit_mfma_fn,
+    ) -> None:
+        """Wrap a single ``mfma`` emission in ``s_setprio(1)/(0)``.
+
+        The fine-grained interwave ping-pong pattern: *every* MFMA is
+        bracketed so the dispatcher gives MFMA-issuing waves max
+        priority over waves stalled on ``buffer_load`` / VMEM. Caller
+        passes a no-arg callable that emits the MFMA op via the IR
+        builder; the bookends are emitted only when
+        ``mode == 'interwave'``, otherwise the callable is invoked
+        directly with no bracket.
+        """
+        if self.mode == "interwave":
+            b.s_setprio(self.compute_high_prio)
+            emit_mfma_fn()
+            b.s_setprio(self.compute_low_prio)
+        else:
+            emit_mfma_fn()
 
     def assert_expected_ir(self, stats: LlvmIrStats) -> None:
         """Lightweight sanity check against lowered LLVM IR stats."""

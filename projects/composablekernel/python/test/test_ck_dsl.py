@@ -1711,5 +1711,555 @@ class TestGroupedGemmInstance(unittest.TestCase):
         self.assertIn("define amdgpu_kernel void", ll)
 
 
+class TestCdnaPrimitives(unittest.TestCase):
+    """Coverage for the AMDGPU/CDNA-specific primitives added in
+    :mod:`ck_dsl.helpers.grid`, :mod:`ck_dsl.helpers.schedule`,
+    :mod:`ck_dsl.helpers.layouts`, plus the new IR primitives
+    ``pin_sgpr`` / ``to_sgpr_u32`` / ``wave_all`` / ``sync_half_block``.
+    """
+
+    # ---- XOR-based LDS swizzles (canonical CK Tile shared-tile layouts) ----
+    def test_xor_swizzle_matches_canonical_st_16x32(self):
+        from ck_dsl.helpers.layouts import LdsLayout
+
+        def reference(off: int) -> int:
+            return off ^ (((off % 1024) >> 9) << 5)
+
+        layout = LdsLayout.xor_swizzled(tile_rows=16, tile_cols=32, elem_bytes=2)
+        for off in range(0, 16 * 32 * 2, 7):
+            self.assertEqual(
+                layout.apply_swizzle_bytes(off),
+                reference(off),
+                msg=f"swizzle mismatch at off={off}",
+            )
+
+    def test_xor_swizzle_matches_canonical_st_32x32_two_stage(self):
+        from ck_dsl.helpers.layouts import LdsLayout
+
+        def reference(off: int) -> int:
+            return off ^ (((off % 1024) >> 9) << 5) ^ (((off % 2048) >> 10) << 4)
+
+        layout = LdsLayout.xor_swizzled(tile_rows=32, tile_cols=32, elem_bytes=2)
+        for off in range(0, 32 * 32 * 2, 13):
+            self.assertEqual(layout.apply_swizzle_bytes(off), reference(off))
+
+    def test_xor_swizzle_unknown_shape_raises(self):
+        from ck_dsl.helpers.layouts import LdsLayout
+
+        with self.assertRaises(ValueError):
+            LdsLayout.xor_swizzled(tile_rows=24, tile_cols=24, elem_bytes=2)
+
+    def test_xor_swizzle_validate_requires_stages(self):
+        from ck_dsl.helpers.layouts import LdsLayout
+
+        # Manually constructing with swizzle='xor' but no stages should fail.
+        bad = LdsLayout(logical_cols=32, k_pad=0, swizzle="xor", swizzle_stages=())
+        with self.assertRaises(ValueError):
+            bad.validate()
+
+    # ---- chiplet_transform_chunked (XCD round-robin reverse) ----
+    def test_chiplet_python_reference_matches_closed_form(self):
+        from ck_dsl.helpers.grid import python_chiplet_transform_chunked
+
+        # Closed-form chiplet remap: WGs in the first
+        # (num_xcds * chunk_size) block round-robin onto XCDs in chunks
+        # of `chunk_size` consecutive WGs per XCD.
+        def reference(wgid, num_wgs, num_xcds, chunk_size):
+            block = num_xcds * chunk_size
+            limit = (num_wgs // block) * block
+            if wgid >= limit:
+                return wgid
+            xcd = wgid % num_xcds
+            local_pid = wgid // num_xcds
+            chunk_idx = local_pid // chunk_size
+            pos_in_chunk = local_pid % chunk_size
+            return chunk_idx * block + xcd * chunk_size + pos_in_chunk
+
+        for wgid in range(0, 2048):
+            self.assertEqual(
+                python_chiplet_transform_chunked(
+                    wgid, num_wgs=2048, num_xcds=8, chunk_size=64
+                ),
+                reference(wgid, 2048, 8, 64),
+            )
+
+    def test_chiplet_first_8_wgs_collapse_to_one_xcd(self):
+        # After remap, WGs 0..7 should all land on the SAME XCD (XCD 0).
+        from ck_dsl.helpers.grid import python_chiplet_transform_chunked
+
+        xcds = set()
+        for wgid in range(8):
+            remapped = python_chiplet_transform_chunked(
+                wgid, num_wgs=2048, num_xcds=8, chunk_size=64
+            )
+            xcds.add(remapped % 8)
+        self.assertEqual(
+            xcds,
+            {0},
+            msg="chiplet remap failed: first 8 WGs should all land on XCD 0",
+        )
+
+    def test_chiplet_tail_falls_through_unchanged(self):
+        # WGs past the last complete (num_xcds * chunk_size) block are
+        # passed through unchanged (tail-handling contract).
+        from ck_dsl.helpers.grid import python_chiplet_transform_chunked
+
+        num_wgs = 8 * 64 + 7  # one full block plus 7 tail WGs
+        for wgid in range(8 * 64, num_wgs):
+            self.assertEqual(
+                python_chiplet_transform_chunked(
+                    wgid, num_wgs=num_wgs, num_xcds=8, chunk_size=64
+                ),
+                wgid,
+            )
+
+    def test_super_tile_swizzle_walks_column_first_inside_group(self):
+        from ck_dsl.helpers.grid import python_super_tile_swizzle
+
+        # Group of WGM=4 rows x num_pid_n=4 cols = 16 WGs.
+        # WGs 0..3 should walk pid_m = 0..3 at pid_n = 0.
+        wgm = 4
+        npm = 8
+        npn = 4
+        for wgid in range(4):
+            pid_m, pid_n = python_super_tile_swizzle(
+                wgid, num_pid_m=npm, num_pid_n=npn, wgm=wgm
+            )
+            self.assertEqual((pid_m, pid_n), (wgid, 0))
+        # WGs 4..7 should walk pid_m = 0..3 at pid_n = 1.
+        for k in range(4):
+            pid_m, pid_n = python_super_tile_swizzle(
+                4 + k, num_pid_m=npm, num_pid_n=npn, wgm=wgm
+            )
+            self.assertEqual((pid_m, pid_n), (k, 1))
+
+    # ---- SchedulePolicy modes / sched_barrier helpers ----
+    def test_schedule_policy_interwave_emits_setprio_bookends(self):
+        from ck_dsl.helpers.schedule import SchedulePolicy
+        from ck_dsl.core.ir import IRBuilder, PtrType, F16
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        b = IRBuilder("interwave_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        b.param("X", PtrType(F16, "global"))
+        pol = SchedulePolicy.for_pipeline("interwave")
+        pol.emit_prologue(b)
+        pol.emit_compute_prologue(b)
+        # Fake "compute": just emit a sched_barrier(0)
+        b.sched_barrier(0)
+        pol.emit_compute_epilogue(b)
+        ll = lower_kernel_to_llvm(b.kernel)
+        # Both s_setprio(1) and s_setprio(0) must appear.
+        self.assertIn("@llvm.amdgcn.s.setprio(i16 1)", ll)
+        self.assertIn("@llvm.amdgcn.s.setprio(i16 0)", ll)
+
+    def test_schedule_policy_intrawave_emits_no_setprio_bookends(self):
+        from ck_dsl.helpers.schedule import SchedulePolicy
+        from ck_dsl.core.ir import IRBuilder, PtrType, F16
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        b = IRBuilder("intrawave_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        b.param("X", PtrType(F16, "global"))
+        pol = SchedulePolicy.for_pipeline("intrawave")
+        pol.emit_compute_prologue(b)
+        b.sched_barrier(0)
+        pol.emit_compute_epilogue(b)
+        ll = lower_kernel_to_llvm(b.kernel)
+        # Intrawave mode must NOT emit the per-compute setprio bookends
+        # (the prologue setprio is a separate hook).
+        self.assertNotIn("@llvm.amdgcn.s.setprio", ll)
+
+    def test_schedule_policy_emits_mfma_valu_pair_hints(self):
+        from ck_dsl.helpers.schedule import SchedulePolicy
+        from ck_dsl.core.ir import IRBuilder, PtrType, F16
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        b = IRBuilder("pairs_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        b.param("X", PtrType(F16, "global"))
+        pol = SchedulePolicy.for_pipeline("compv4")  # emit_hints=True
+        pol.emit_mfma_valu_pairs(b, pairs=3, valu_per_pair=2)
+        ll = lower_kernel_to_llvm(b.kernel)
+        # MFMA=0x008 = i32 8 ; VALU=0x002 = i32 2.
+        # `sched.group.barrier(MFMA, 1, 0)` and `sched.group.barrier(VALU, 2, 0)`.
+        self.assertEqual(
+            ll.count("@llvm.amdgcn.sched.group.barrier(i32 8, i32 1, i32 0)"),
+            3,
+        )
+        self.assertEqual(
+            ll.count("@llvm.amdgcn.sched.group.barrier(i32 2, i32 2, i32 0)"),
+            3,
+        )
+
+    # ---- pin_sgpr / to_sgpr_u32 ----
+    def test_to_sgpr_u32_emits_readfirstlane_and_pin(self):
+        from ck_dsl.core.ir import IRBuilder, PtrType, F16, I32
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        b = IRBuilder("sgpr_pin")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        b.param("X", PtrType(F16, "global"))
+        v = b.mul(b.const_i32(7), b.const_i32(11))
+        # `to_sgpr_u32` returns the SGPR-pinned value; we don't need to
+        # bind it (the test asserts on the lowered IR). The call itself
+        # is what triggers the readfirstlane + asm emission.
+        b.to_sgpr_u32(v)
+        b.param("Out", PtrType(I32, "global"))
+        ll = lower_kernel_to_llvm(b.kernel)
+        # readfirstlane + matched-constraint SGPR-pin asm.
+        self.assertIn("@llvm.amdgcn.readfirstlane.i32", ll)
+        # Constraint "=s,0" ties output 0 (SGPR class) to input 0 — the
+        # LLVM IR translation of HIP's `asm volatile("" : "+s"(x))`.
+        self.assertIn('asm "", "=s,0"(i32', ll)
+        # Must NOT be `sideeffect` -- that confuses divergence analysis
+        # and silently breaks downstream uniform-value selection.
+        self.assertNotIn("asm sideeffect", ll)
+
+    # ---- wave_all / wave_any ----
+    def test_wave_all_lowers_to_ballot_eq_minus_one(self):
+        from ck_dsl.core.ir import IRBuilder, PtrType, I32
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        b = IRBuilder("wave_all_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        Out = b.param("Out", PtrType(I32, "global"))
+        all_t = b.wave_all(b.const_i32(1))
+        b.global_store(Out, b.const_i32(0), all_t)
+        ll = lower_kernel_to_llvm(b.kernel)
+        self.assertIn("@llvm.amdgcn.ballot.i64", ll)
+        # Compares ballot to -1 (i.e. all wave64 lanes voted true).
+        self.assertIn("icmp eq i64", ll)
+
+    # ---- coherency hints ----
+    def test_async_buffer_load_lds_addr_propagates_aux(self):
+        from ck_dsl.core.ir import (
+            IRBuilder,
+            PtrType,
+            F16,
+            I32,
+            CACHE_STREAM,
+        )
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        b = IRBuilder("coh_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"))
+        N = b.param("N_bytes", I32)
+        rsrc = b.buffer_rsrc(X, N)
+        lds = b.smem_alloc(F16, [64, 8], name_hint="stage")
+        lds_base = b.smem_addr_of(lds)
+        b.async_buffer_load_lds_addr(
+            rsrc,
+            lds_base,
+            b.const_i32(0),
+            b.const_i32(0),
+            dwords=4,
+            coherency=CACHE_STREAM,
+        )
+        ll = lower_kernel_to_llvm(b.kernel)
+        # Last arg should be `i32 2` (CACHE_STREAM = 2).
+        self.assertIn("i32 0, i32 2)", ll)
+
+    def test_coherency_rejects_invalid_aux(self):
+        from ck_dsl.core.ir import IRBuilder, PtrType, F16, I32
+
+        b = IRBuilder("coh_bad")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"))
+        N = b.param("N_bytes", I32)
+        rsrc = b.buffer_rsrc(X, N)
+        lds = b.smem_alloc(F16, [64, 8], name_hint="stage")
+        lds_base = b.smem_addr_of(lds)
+        with self.assertRaises(ValueError):
+            b.async_buffer_load_lds_addr(
+                rsrc,
+                lds_base,
+                b.const_i32(0),
+                b.const_i32(0),
+                dwords=4,
+                coherency=7,
+            )
+
+    # ---- N-buffer SoftwarePipeline ----
+    def test_software_pipeline_quad_buffer_emits_three_prologue_loads(self):
+        from ck_dsl.helpers.pipeline import SoftwarePipeline
+        from ck_dsl.core.ir import IRBuilder, PtrType, F16
+
+        b = IRBuilder("quadbuf_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        b.param("X", PtrType(F16, "global"))
+
+        load_count = [0]
+        compute_count = [0]
+
+        def issue_load(it, buf):
+            load_count[0] += 1
+
+        def compute(it, buf, state):
+            compute_count[0] += 1
+            return state
+
+        pipe = SoftwarePipeline(
+            num_iters=10,
+            num_buffers=4,
+            wait_vmcnt=False,
+            sync_after_wait=False,
+            sync_before_issue=False,
+        )
+        pipe.run_ping_pong(
+            b,
+            buffers=[("a", "b"), ("c", "d"), ("e", "f"), ("g", "h")],
+            initial_state=None,
+            issue_load=issue_load,
+            compute=compute,
+        )
+        # Prologue issues (num_buffers - 1) = 3 loads; steady-state issues
+        # `num_iters - (num_buffers - 1)` more = 7. Total = 10.
+        self.assertEqual(load_count[0], 10)
+        self.assertEqual(compute_count[0], 10)
+
+    def test_software_pipeline_legacy_double_buffer_still_works(self):
+        from ck_dsl.helpers.pipeline import SoftwarePipeline
+        from ck_dsl.core.ir import IRBuilder, PtrType, F16
+
+        b = IRBuilder("legacy_dbuf")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        b.param("X", PtrType(F16, "global"))
+
+        cnt = [0]
+
+        def issue_load(it, buf):
+            cnt[0] += 1
+
+        def compute(it, buf, state):
+            return state
+
+        pipe = SoftwarePipeline(num_iters=5, double_buffer=True)
+        pipe.run_ping_pong(
+            b,
+            buffers=[("a", "b"), ("c", "d")],
+            initial_state=None,
+            issue_load=issue_load,
+            compute=compute,
+        )
+        self.assertEqual(cnt[0], 5)
+
+    # ---- waves_per_eu launch bound ----
+    def test_waves_per_eu_attribute_emitted(self):
+        from ck_dsl.core.ir import IRBuilder, PtrType, F16
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        b = IRBuilder("occu_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 256
+        b.kernel.attrs["waves_per_eu"] = 2
+        b.param("X", PtrType(F16, "global"))
+        ll = lower_kernel_to_llvm(b.kernel)
+        self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
+
+    def test_waves_per_eu_tuple_range(self):
+        from ck_dsl.core.ir import IRBuilder, PtrType, F16
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        b = IRBuilder("occu_range")
+        b.kernel.attrs["max_workgroup_size"] = 256
+        b.kernel.attrs["waves_per_eu"] = (2, 4)
+        b.param("X", PtrType(F16, "global"))
+        ll = lower_kernel_to_llvm(b.kernel)
+        self.assertIn('"amdgpu-waves-per-eu"="2,4"', ll)
+
+    # ---- Instance integration tests ----
+    def test_universal_gemm_chiplet_swizzle_emits_remap_math(self):
+        """The opt-in ``trait.chiplet_swizzle`` must emit the
+        chiplet round-robin reverse plus the WGM super-tile remap
+        inside the kernel body.
+        """
+        from ck_dsl.instances import (
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            build_universal_gemm,
+        )
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        spec = UniversalGemmSpec(
+            name="ugemm_swz_smoke",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(
+                pipeline="compv4",
+                epilogue="cshuffle",
+                chiplet_swizzle=True,
+                chiplet_wgm=8,
+            ),
+        )
+        ll = lower_kernel_to_llvm(build_universal_gemm(spec))
+        # Chiplet remap: the closed-form formula generates `sdiv` /
+        # `srem` by the chunk_size and num_xcds constants.
+        self.assertIn("sdiv i32", ll)
+        self.assertIn("srem i32", ll)
+        # The chiplet+supertile preamble constants for chunk_size=64
+        # and (num_xcds * chunk_size)=8*64=512.
+        self.assertIn(", 8\n", ll)  # `mod` by num_xcds = 8
+        self.assertIn(", 512\n", ll)  # `div` by num_xcds*chunk_size = 512
+        # And ``block_id_x`` / ``block_id_y`` are both read (the swizzle
+        # flattens the 2D grid first).
+        self.assertIn("@llvm.amdgcn.workgroup.id.x", ll)
+        self.assertIn("@llvm.amdgcn.workgroup.id.y", ll)
+
+    def test_universal_gemm_waves_per_eu_attr(self):
+        from ck_dsl.instances import (
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            build_universal_gemm,
+        )
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        spec = UniversalGemmSpec(
+            name="ugemm_wpe",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(
+                pipeline="compv4",
+                epilogue="cshuffle",
+                waves_per_eu=2,
+            ),
+        )
+        ll = lower_kernel_to_llvm(build_universal_gemm(spec))
+        self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
+
+    def test_implicit_gemm_conv_chiplet_swizzle_compiles(self):
+        from ck_dsl.instances import (
+            ImplicitGemmConvSpec,
+            build_implicit_gemm_conv,
+        )
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        prob = ConvProblem(
+            N=4,
+            Hi=14,
+            Wi=14,
+            C=128,
+            K=128,
+            R=3,
+            S=3,
+            sH=1,
+            sW=1,
+            pH=1,
+            pW=1,
+            dH=1,
+            dW=1,
+        )
+        spec = ImplicitGemmConvSpec(
+            problem=prob,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+            chiplet_swizzle=True,
+            chiplet_wgm=4,
+            waves_per_eu=2,
+        )
+        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec))
+        self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
+        self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
+        # The chiplet swizzle takes both blockIdx.x and blockIdx.y.
+        self.assertIn("@llvm.amdgcn.workgroup.id.x", ll)
+        self.assertIn("@llvm.amdgcn.workgroup.id.y", ll)
+
+    def test_implicit_gemm_conv_async_uses_sgpr_pinned_lds_base(self):
+        """The async-DMA conv must hoist the per-wave LDS base into
+        an SGPR via ``to_sgpr_u32`` (``readfirstlane`` + SGPR-pin asm).
+        """
+        from ck_dsl.instances import (
+            ImplicitGemmConvSpec,
+            build_implicit_gemm_conv,
+        )
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        prob = ConvProblem(
+            N=8,
+            Hi=56,
+            Wi=56,
+            C=64,
+            K=64,
+            R=3,
+            S=3,
+            sH=1,
+            sW=1,
+            pH=1,
+            pW=1,
+            dH=1,
+            dW=1,
+        )
+        spec = ImplicitGemmConvSpec(
+            problem=prob,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+            async_dma=True,
+        )
+        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec))
+        # readfirstlane for wave-uniform LDS offset.
+        self.assertIn("@llvm.amdgcn.readfirstlane.i32", ll)
+        # SGPR-pin asm constraint.
+        self.assertIn('asm "", "=s,0"(i32', ll)
+        # CACHE_STREAM coherency on the async loads (aux i32 = 2).
+        self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
+
+    def test_attention_tiled_2d_waves_per_eu(self):
+        from ck_dsl.instances import (
+            UnifiedAttention2DTiledSpec,
+            build_unified_attention_2d_tiled,
+        )
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        spec = UnifiedAttention2DTiledSpec(
+            head_size=128,
+            block_size=16,
+            num_query_heads=16,
+            num_kv_heads=2,
+            dtype="fp16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+            waves_per_eu=2,
+        )
+        ll = lower_kernel_to_llvm(build_unified_attention_2d_tiled(spec))
+        self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
+
+
 if __name__ == "__main__":
     unittest.main()

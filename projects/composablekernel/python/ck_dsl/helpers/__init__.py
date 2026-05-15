@@ -105,6 +105,20 @@ from .distribution import (
 )
 from .epilogues import CShuffleEpilogue, DirectEpilogue
 from .geometry import WarpGrid
+from .grid import (
+    NUM_XCDS_MI300X,
+    NUM_XCDS_MI325X,
+    NUM_XCDS_MI350X,
+    SuperTileSwizzleResult,
+    chiplet_aware_super_tile,
+    chiplet_aware_super_tile_dynamic,
+    chiplet_transform_chunked,
+    chiplet_transform_chunked_dynamic,
+    python_chiplet_transform_chunked,
+    python_super_tile_swizzle,
+    super_tile_swizzle,
+    super_tile_swizzle_dynamic,
+)
 from .io import (
     io_ir_type,
     load_scalar,
@@ -187,6 +201,19 @@ __all__ = [
     "use_2d_kernel",
     # Geometry
     "WarpGrid",
+    # Chiplet / grid swizzle (multi-XCD L2 locality)
+    "NUM_XCDS_MI300X",
+    "NUM_XCDS_MI325X",
+    "NUM_XCDS_MI350X",
+    "SuperTileSwizzleResult",
+    "chiplet_aware_super_tile",
+    "chiplet_aware_super_tile_dynamic",
+    "chiplet_transform_chunked",
+    "chiplet_transform_chunked_dynamic",
+    "python_chiplet_transform_chunked",
+    "python_super_tile_swizzle",
+    "super_tile_swizzle",
+    "super_tile_swizzle_dynamic",
     # Loads
     "LdsLayout",
     "AsyncTileLoader",

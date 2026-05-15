@@ -736,3 +736,184 @@ Phase 2:
   - `MfmaAtom` extension for bf16, fp8, and `smfmac` (sparse matmul).
   - `PersistentKernel` wrapper for multi-tile-per-CTA scheduling.
   - `StreamKEpilogue` for split-K accumulation via atomics.
+
+## CDNA / chiplet-aware helpers
+
+A second wave of helpers covering the AMDGPU-specific scheduling and
+addressing tricks that high-performance matmul / attention kernels
+need on CDNA3 / CDNA4. Each plays inside the same `IRBuilder` /
+helper layering as everything above.
+
+### Chiplet-aware grid swizzle (`helpers/grid.py`)
+
+```python
+from ck_dsl import chiplet_aware_super_tile, NUM_XCDS_MI300X
+
+# At the very top of the kernel body, before any per-block math:
+result = chiplet_aware_super_tile(
+    b,
+    b.block_id_x(),
+    num_pid_m=ceil_div(M, BLOCK_M),
+    num_pid_n=ceil_div(N, BLOCK_N),
+    wgm=8,
+    num_xcds=NUM_XCDS_MI300X,
+    chunk_size=64,
+)
+pid_m, pid_n = result.row, result.col  # use these instead of blockIdx
+```
+
+The composition is `chiplet_transform_chunked` (XCD round-robin
+reversal) followed by `super_tile_swizzle` (WGM-style Hilbert order
+inside each XCD). Together they restore L2 locality on the multi-die
+MI300X / MI350X by ensuring every contiguous stripe of workgroups
+shares one XCD's L2 slice.
+
+### XOR-based LDS swizzles (`helpers/layouts.py`)
+
+```python
+from ck_dsl import LdsLayout
+
+# Closed-form bank-conflict-free swizzle for the canonical CK Tile
+# shared-tile shapes:
+layout = LdsLayout.xor_swizzled(tile_rows=32, tile_cols=32, elem_bytes=2)
+
+# Apply the swizzle to a byte offset (producer or consumer side):
+swizzled_bytes = layout.apply_swizzle_bytes(off_bytes)
+```
+
+Five canonical swizzles supported: `16x16`, `16x32`, `32x16`,
+`32x32`, `16x128` (fp8). The XOR permutation guarantees
+bank-conflict-free ds_read_b128 for the matching MFMA atom shape;
+saves the ~6 % LDS overhead of a row-pad approach.
+
+### SGPR scalarization (`IRBuilder.to_sgpr_u32`)
+
+```python
+lds_base = b.to_sgpr_u32(
+    b.cast_i32(reinterpret_cast_address(&A_smem[0]) + warp_id * elem_per_warp * 2)
+)
+# `lds_base` is now an SGPR; subsequent uses don't pay v_readfirstlane each iteration.
+```
+
+`to_sgpr_u32(v) = pin_sgpr(readfirstlane(v))`. The `pin_sgpr` step
+emits a no-op `asm sideeffect "", "=s,s"(...)` that forces the AMDGPU
+register allocator to keep the value in an SGPR — without it, an
+SGPR-uniform value computed once at the top of the kernel can get
+re-materialized into a VGPR every loop iteration. The canonical
+AMDGPU "scalarize this wave-uniform value" idiom.
+
+### Wave-vote primitives
+
+```python
+all_below = b.wave_all(b.cmp_lt(max_diff, threshold))
+# `all_below` is a wave-uniform i32 (1 or 0); single hardware op,
+# no ds_bpermute ladder.
+
+if_branch = b.cmp_eq(all_below, b.const_i32(1))
+# ... skip the per-row rescale when every lane agrees ...
+```
+
+Lowered to `llvm.amdgcn.ballot.i64` + `icmp eq i64 ... -1`. Pairs
+naturally with adaptive online-softmax rescaling: skip the rescale
+pass entirely when every lane's `max_diff` stayed below threshold.
+
+### Cache-coherency hints
+
+```python
+from ck_dsl.core.ir import CACHE_STREAM, NON_TEMPORAL
+
+b.async_buffer_load_lds_addr(
+    rsrc, lds_base, voff, soff, dwords=4,
+    coherency=CACHE_STREAM,  # SLC=1, won't evict useful L2 lines
+)
+```
+
+Maps to the AUX-byte AMDGPU buffer-load encoding. Use `CACHE_STREAM`
+for one-shot streaming GEMM loads, `NON_TEMPORAL` for tail loads that
+won't be reused.
+
+### Per-MFMA setprio bookends (interwave ping-pong)
+
+```python
+from ck_dsl import SchedulePolicy
+
+pol = SchedulePolicy.for_pipeline("interwave")
+# Inside the MFMA loop body, wrap each MFMA atom:
+pol.emit_mfma_setprio_bookend(b, lambda: b.mfma_f32_32x32x16_f16(...))
+```
+
+`s_setprio(1)` before the MFMA, `s_setprio(0)` after. Tells the
+dispatcher to favour MFMA-issuing waves over VMEM-issuing waves at
+single-MFMA granularity. The whole-`compute(...)` bookend pattern
+remains as the outer wrapper (`run_ping_pong(... schedule=pol)`);
+prefer the per-MFMA variant when one wave's `compute` body issues
+many MFMAs interleaved with ds_reads.
+
+### Scheduler-group barrier helpers (intrawave)
+
+```python
+# Inside one wave's K-loop body, after each MFMA group:
+pol.emit_mfma_valu_pairs(b, pairs=4, valu_per_pair=2)
+pol.emit_mfma_trans_pairs(b, pairs=2, trans_per_pair=1)
+```
+
+Emits `(MFMA, VALU)` and `(MFMA, TRANS)` alternating-group
+`sched_group_barrier` hints — the right shape for attention-softmax
+loops where each MFMA is followed by a fixed number of VALU sub /
+mul / cmp or TRANS exp2 / log2 instructions. New mask constants
+`VALU = 0x002`, `TRANS = 0x400` join the existing `MFMA`, `DS_READ`,
+`DS_WRITE`, `VMEM_READ` masks.
+
+### N-buffer software pipeline (quad-buffer)
+
+```python
+pipe = SoftwarePipeline(
+    num_iters=K_iters,
+    num_buffers=4,         # quad-buffer for deeper VMEM-prefetch parallelism
+    wait_vmcnt=True,
+    sync_after_wait=True,
+    sync_before_issue=True,
+    overlap_vmcnt=True,    # vmcnt(prefetch_depth) keeps prefetches in flight
+)
+final = pipe.run_ping_pong(b, buffers=[(A0,B0),(A1,B1),(A2,B2),(A3,B3)],
+                          initial_state=accs,
+                          issue_load=..., compute=...,
+                          schedule=SchedulePolicy.for_pipeline("interwave"))
+```
+
+The pipeline prologue now issues `num_buffers - 1` loads (so the
+steady-state can immediately overlap them with compute), and
+`overlap_vmcnt=True` uses `s_waitcnt(vmcnt=num_buffers-1)` so the
+in-flight prefetches stay alive across each iter's compute step.
+Legacy `double_buffer=True` is still supported and defaults to
+`num_buffers=2`.
+
+### Half-block barrier (8-wave ping-pong)
+
+```python
+# Top of the kernel: stagger = warp_id / (NUM_WARPS / 2)
+warp = b.div(tid, b.const_i32(64))
+stagger = b.div(warp, b.const_i32(NUM_WARPS // 2))
+
+# In one cluster, only the "upper" half synchronises:
+b.sync_half_block(stagger)
+
+# Later, the "lower" half synchronises:
+b.sync_half_block(b.sub(b.const_i32(1), stagger))
+```
+
+Each call emits `if (selector) __builtin_amdgcn_s_barrier();`. Pairs
+must match across the cluster or the workgroup will deadlock —
+half-block barriers are valid only when every wave participates in
+exactly one branch of every barrier pair.
+
+### Occupancy launch bound
+
+```python
+b.kernel.attrs["max_workgroup_size"] = 256
+b.kernel.attrs["waves_per_eu"] = 2      # int or (min, max) tuple
+```
+
+Emits `"amdgpu-waves-per-eu"="2,2"` on the kernel function attribute.
+Equivalent to CUDA's `__launch_bounds__(NUM_THREADS, MIN_BLOCKS_PER_SM)`
+— the second number is the waves-per-EU occupancy target.

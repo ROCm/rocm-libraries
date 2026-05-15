@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Tuple
+from typing import Optional, Tuple
 
 from ..core.ir import (
     BF16,
@@ -81,6 +81,11 @@ class UnifiedAttention2DTiledSpec:
     # cshuffle epilogue across more lanes. Default `1` preserves the
     # original single-warp behaviour bit-for-bit.
     num_warps: int = 1
+    # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). Attention is
+    # register-pressure-bound; setting this to 2 or 3 forces the
+    # backend to tighten VGPR allocation in exchange for higher
+    # occupancy. ``None`` keeps the LLVM heuristic.
+    waves_per_eu: Optional[int] = None
 
     def __post_init__(self):
         if self.num_warps not in (1, 2, 4):
@@ -282,6 +287,8 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     name = spec.kernel_name()
     b = IRBuilder(name)
     b.kernel.attrs["max_workgroup_size"] = THREADS
+    if spec.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
     # ---------------- parameter declarations ----------------
     output = b.param(

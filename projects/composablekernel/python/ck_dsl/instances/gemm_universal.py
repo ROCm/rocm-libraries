@@ -122,7 +122,23 @@ Epilogue = Literal["default", "cshuffle"]
 
 @dataclass(frozen=True)
 class TraitSpec:
-    """Mirror of CK's `TraitConfig`."""
+    """Mirror of CK's `TraitConfig`.
+
+    Extra traits beyond CK's defaults:
+
+    * ``chiplet_swizzle``: opt into the chiplet-aware grid swizzle
+      that remaps WGIDs so every contiguous stripe of workgroups
+      lands on the same XCD (improves L2 reuse on multi-die GPUs).
+      Composes a XCD-round-robin reverse (chunk_size WGs per XCD)
+      with a WGM super-tile reordering. The kernel still launches
+      with the standard ``(N_tiles, M_tiles[, batch])`` grid; the
+      remap happens at kernel entry from the flattened blockIdx.
+
+    * ``waves_per_eu``: AMDGPU occupancy hint emitted as
+      ``"amdgpu-waves-per-eu"`` on the kernel attribute list. Default
+      ``None`` keeps the LLVM backend's heuristic choice; set to 2
+      (or a ``(min, max)`` tuple) when targeting two workgroups per CU.
+    """
 
     pipeline: Pipeline = "compv4"
     scheduler: Scheduler = "intrawave"
@@ -131,6 +147,11 @@ class TraitSpec:
     pad_n: bool = False
     pad_k: bool = False
     persistent: bool = False
+    chiplet_swizzle: bool = False
+    chiplet_wgm: int = 8
+    chiplet_num_xcds: int = 8
+    chiplet_chunk_size: int = 64
+    waves_per_eu: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -363,6 +384,8 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
     # returns `unspecified launch failure` *before* the kernel body
     # runs. Pin the upper bound to this spec's `block_size`.
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
+    if spec.trait.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = spec.trait.waves_per_eu
     A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     C = b.param("C", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
@@ -410,8 +433,39 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
         batch_off_b = c0
         batch_off_c = c0
 
-    block_m_off = b.mul(b.block_id_y(), c_block_m)
-    block_n_off = b.mul(b.block_id_x(), c_block_n)
+    # Tile-index assignment. By default ``block_id_x`` maps to the
+    # N-tile and ``block_id_y`` to the M-tile (the host launcher uses
+    # ``grid = (N_tiles, M_tiles, batch?)``). With
+    # ``trait.chiplet_swizzle=True`` we instead flatten the 2D grid
+    # into a linear WGID and run it through the chiplet-aware
+    # super-tile remap so consecutive workgroups land on the same XCD.
+    if spec.trait.chiplet_swizzle:
+        from ..helpers.grid import chiplet_aware_super_tile_dynamic
+
+        # Compute M_tiles / N_tiles at runtime from the dynamic M/N args.
+        n_pid_m = b.div(b.add(M, b.const_i32(block_m - 1)), c_block_m)
+        n_pid_n = b.div(b.add(N, b.const_i32(block_n - 1)), c_block_n)
+        # Flatten (bx, by) -> wgid_flat using the actual launch grid's
+        # X-extent (= n_pid_n) so wgid_flat mirrors a 1D dispatch
+        # walking ``for by: for bx:`` order.
+        wgid_flat = b.add(
+            b.mul(b.block_id_y(), n_pid_n),
+            b.block_id_x(),
+        )
+        swz = chiplet_aware_super_tile_dynamic(
+            b,
+            wgid_flat,
+            num_pid_m=n_pid_m,
+            num_pid_n=n_pid_n,
+            wgm=spec.trait.chiplet_wgm,
+            num_xcds=spec.trait.chiplet_num_xcds,
+            chunk_size=spec.trait.chiplet_chunk_size,
+        )
+        block_m_off = b.mul(swz.row, c_block_m)
+        block_n_off = b.mul(swz.col, c_block_n)
+    else:
+        block_m_off = b.mul(b.block_id_y(), c_block_m)
+        block_n_off = b.mul(b.block_id_x(), c_block_n)
 
     # LDS allocation. For compv4 we double-buffer; the second buffer is
     # logically allocated as a second smem region. The cshuffle epilogue

@@ -315,6 +315,30 @@ class _Lowerer:
             f"{ty} {_name(op.result)} = __builtin_amdgcn_readfirstlane({_name(v)});"
         )
 
+    def _op_tile_pin_sgpr(self, op: Op) -> None:
+        # AMDGPU idiom: `asm volatile("" : "+s"(x))` keeps x in an
+        # SGPR across uses. We emit a fresh variable initialised
+        # from the input then apply the constraint to that variable.
+        (v,) = op.operands
+        ty = _type_to_hip(op.result.type)
+        self._emit(f"{ty} {_name(op.result)} = {_name(v)};")
+        self._emit(f'asm volatile("" : "+s"({_name(op.result)}));')
+
+    def _op_tile_wave_ballot(self, op: Op) -> None:
+        # HIP exposes `__ballot(int pred)` which on AMD wave64 returns
+        # a 64-bit lane mask.
+        (pred,) = op.operands
+        self._emit(f"int64_t {_name(op.result)} = __ballot({_name(pred)});")
+
+    def _op_tile_wave_all(self, op: Op) -> None:
+        # `__all(pred)` returns 1 iff every active lane's pred is non-zero.
+        (pred,) = op.operands
+        self._emit(f"int32_t {_name(op.result)} = __all({_name(pred)});")
+
+    def _op_tile_wave_any(self, op: Op) -> None:
+        (pred,) = op.operands
+        self._emit(f"int32_t {_name(op.result)} = __any({_name(pred)});")
+
     def _op_tile_smem_addr_of(self, op: Op) -> None:
         (smem,) = op.operands
         self._emit(f"int64_t {_name(op.result)} = (int64_t)({_name(smem)});")
@@ -397,6 +421,13 @@ class _Lowerer:
 
     def _op_tile_sync(self, op: Op) -> None:
         self._emit("__syncthreads();")
+
+    def _op_tile_sync_half_block(self, op: Op) -> None:
+        # `if (selector) __builtin_amdgcn_s_barrier();` -- the
+        # staggered half-block barrier pattern used by interwave
+        # ping-pong kernels to sync only one half of the workgroup.
+        (sel,) = op.operands
+        self._emit(f"if ({_name(sel)}) {{ __builtin_amdgcn_s_barrier(); }}")
 
     def _op_tile_sync_lds_only(self, op: Op) -> None:
         # Drain LDS counter (lgkmcnt) but leave VMEM in flight, then

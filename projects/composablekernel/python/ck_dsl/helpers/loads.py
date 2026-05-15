@@ -370,10 +370,19 @@ class AsyncTileLoader:
         smem_dst: Value,
         wave_id: Value,
     ) -> "AsyncTileLoaderSlot":
-        """Materialise the SSA values needed by `issue`."""
+        """Materialise the SSA values needed by `issue`.
+
+        The per-wave LDS base offset is hoisted into an SGPR via
+        :meth:`IRBuilder.to_sgpr_u32` (``readfirstlane`` followed by an
+        SGPR-class pin). Without the pin, the AMDGPU register
+        allocator can re-materialise the ``wave_id * wave_bytes``
+        offset into VGPRs at every iteration of an unrolled K-loop,
+        paying a ``v_readfirstlane_b32`` plus an extra VGPR's worth
+        of live-range every time.
+        """
         lds_base = b.smem_addr_of(smem_dst)  # i64
         wave_byte_off_i32 = b.mul(wave_id, b.const_i32(self.wave_bytes))
-        wave_byte_off_i32 = b.readfirstlane(wave_byte_off_i32)
+        wave_byte_off_i32 = b.to_sgpr_u32(wave_byte_off_i32)
         wave_byte_off_i64 = b.zext(wave_byte_off_i32, I64)
         per_wave_lds = b.smem_ptr_add(lds_base, wave_byte_off_i64)
         return AsyncTileLoaderSlot(
@@ -399,11 +408,17 @@ class AsyncTileLoaderSlot:
         rsrc: Value,
         descriptor: DescriptorFn,
         oob_sentinel: int = (1 << 31) - 1,
+        coherency: int = 0,
     ) -> None:
         """Fire all `passes * threads` async loads for this iteration.
 
         After `issue`, the LDS contents are *in flight*. Consumers must
         place an `s_waitcnt(vmcnt=0)` before reading the LDS.
+
+        ``coherency`` selects the AUX-byte cache-coherence hint. For
+        K-loop streaming tile loads in a software-pipelined kernel,
+        :data:`ck_dsl.core.ir.CACHE_STREAM` is the right choice — the
+        tile is consumed in the next iter and never re-read.
         """
         L = self.loader
         c_half_bytes = b.const_i32(2)
@@ -447,6 +462,7 @@ class AsyncTileLoaderSlot:
                 safe,
                 c0,
                 L.dwords,
+                coherency=coherency,
             )
 
     def required_lds_bytes(self) -> int:

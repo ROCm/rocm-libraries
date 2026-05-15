@@ -116,6 +116,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     "readfirstlane.i32": ("declare i32 @llvm.amdgcn.readfirstlane.i32(i32)"),
     "readfirstlane.i64": ("declare i64 @llvm.amdgcn.readfirstlane.i64(i64)"),
+    "ballot.i64": ("declare i64 @llvm.amdgcn.ballot.i64(i1)"),
     "ds.bpermute": ("declare i32 @llvm.amdgcn.ds.bpermute(i32, i32)"),
     "mbcnt.lo": ("declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"),
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
@@ -851,6 +852,71 @@ class _Lowerer:
             f"  {op.result.name} = call {ty} @llvm.amdgcn.readfirstlane.{ty}({ty} {self._operand(v)})"
         )
 
+    def _op_tile_pin_sgpr(self, op: Op) -> None:
+        # No-op inline asm whose output (SGPR class) is tied to its
+        # input (constraint "0" matches operand 0). This is the LLVM
+        # IR translation of HIP's ``asm volatile("" : "+s"(x))`` —
+        # the input and output are the SAME register, and the only
+        # effect on the IR is the SGPR-class allocation hint. We do
+        # NOT mark it ``sideeffect``: a sideeffect-tagged asm with an
+        # SGPR-class constraint confuses AMDGPU's divergence analysis
+        # because the result is mis-tagged as potentially divergent,
+        # which corrupts downstream uniform-value selection (silently
+        # producing NaN outputs from buffer_load_lds whose voffset
+        # ends up in a VGPR with wrong per-lane values).
+        (v,) = op.operands
+        ty = {
+            "i32": "i32",
+            "i64": "i64",
+        }[v.type.name]
+        self._current().emit(
+            f'  {op.result.name} = call {ty} asm "", "=s,0"({ty} {self._operand(v)})'
+        )
+
+    def _emit_wave_ballot(self, pred_v: "Op", result_name: str) -> None:
+        """Helper: emit ``ballot_w64(pred != 0)`` returning ``i64``.
+
+        AMDGPU intrinsic: ``i64 @llvm.amdgcn.ballot.i64(i1)`` takes the
+        i1 predicate and returns the 64-bit lane mask. We compare the
+        i32 pred to zero to derive the i1.
+        """
+        self._need("ballot.i64")
+        cmp_name = self._fresh("ballot_pred")
+        self._current().emit(f"  {cmp_name} = icmp ne i32 {self._operand(pred_v)}, 0")
+        self._current().emit(
+            f"  {result_name} = call i64 @llvm.amdgcn.ballot.i64(i1 {cmp_name})"
+        )
+
+    def _op_tile_wave_ballot(self, op: Op) -> None:
+        (pred,) = op.operands
+        self._emit_wave_ballot(pred, op.result.name)
+
+    def _op_tile_wave_all(self, op: Op) -> None:
+        # wave_all(p) = (ballot(p) == -1).
+        # On wave64 with all lanes active, ``ballot.i64`` returns
+        # ``-1 == 0xffffffffffffffff`` iff every lane voted true.
+        # Matches HIP's ``__all(p)`` which uses the same shorthand.
+        # This form is robust under wave64 with full EXEC (our standard
+        # workgroup launch profile); under a partially-predicated EXEC
+        # mask the result counts only the active lanes (still the
+        # semantics we want for "did every *active* lane vote true").
+        (pred,) = op.operands
+        self._need("ballot.i64")
+        b_name = self._fresh("ballot")
+        self._emit_wave_ballot(pred, b_name)
+        eq_name = self._fresh("all_eq")
+        self._current().emit(f"  {eq_name} = icmp eq i64 {b_name}, -1")
+        self._current().emit(f"  {op.result.name} = zext i1 {eq_name} to i32")
+
+    def _op_tile_wave_any(self, op: Op) -> None:
+        # wave_any(p) = (ballot(p) != 0).
+        (pred,) = op.operands
+        b_name = self._fresh("ballot")
+        self._emit_wave_ballot(pred, b_name)
+        ne_name = self._fresh("any_nz")
+        self._current().emit(f"  {ne_name} = icmp ne i64 {b_name}, 0")
+        self._current().emit(f"  {op.result.name} = zext i1 {ne_name} to i32")
+
     def _op_tile_ds_bpermute(self, op: Op) -> None:
         addr, data = op.operands
         self._need("ds.bpermute")
@@ -935,6 +1001,7 @@ class _Lowerer:
         rsrc, lds_addr, voff, soff = op.operands
         dwords = int(op.attrs["dwords"])
         size_bytes = dwords * 4
+        aux = int(op.attrs.get("aux", 0))
         self._need("raw.ptr.buffer.load.lds")
         # Convert the i64 LDS address back to ptr addrspace(3).
         ptr_name = self._fresh("lds_ptr")
@@ -948,7 +1015,7 @@ class _Lowerer:
             f"i32 {size_bytes}, "
             f"i32 {self._operand(voff)}, "
             f"i32 {self._operand(soff)}, "
-            f"i32 0, i32 0)"
+            f"i32 0, i32 {aux})"
         )
 
     def _op_tile_sync(self, op: Op) -> None:
@@ -967,6 +1034,37 @@ class _Lowerer:
         self._need("s.barrier")
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
         self._current().emit("  call void @llvm.amdgcn.s.barrier()")
+
+    def _op_tile_sync_half_block(self, op: Op) -> None:
+        # Half-block barrier: branch on the i32 selector; only the
+        # ``then`` branch hits the s_barrier. This emits the AMDGPU pattern
+        # ``if (stagger) __builtin_amdgcn_s_barrier();`` directly in LLVM IR.
+        # Note: we don't drain LDS / VMEM here -- the caller is expected
+        # to have done that already (the staggered pipeline uses
+        # explicit `s_waitcnt` immediately before the half-block sync).
+        (sel,) = op.operands
+        self._need("s.barrier")
+        i1_name = self._fresh("half_pred")
+        self._current().emit(f"  {i1_name} = icmp ne i32 {self._operand(sel)}, 0")
+        # Allocate fresh blocks for the then-branch and the join.
+        then_blk = self._new_block("hb_then")
+        join_blk = self._new_block("hb_join")
+        # The "current" block before _new_block was the one we just
+        # emitted the icmp into; we need to terminate it with the cond br.
+        # `_new_block` appended the new block AT THE END, but our `_current`
+        # has shifted to it. Walk back to the prior block to terminate.
+        # Simpler: capture the prior block index.
+        prev_idx = len(self._blocks) - 3  # we pushed two: then + join
+        prev_blk = self._blocks[prev_idx]
+        prev_blk.lines.append(
+            f"  br i1 {i1_name}, label %{then_blk.label}, label %{join_blk.label}"
+        )
+        prev_blk.terminated = True
+        # `then` block: barrier, then fall through to join.
+        then_blk.lines.append("  call void @llvm.amdgcn.s.barrier()")
+        then_blk.lines.append(f"  br label %{join_blk.label}")
+        then_blk.terminated = True
+        # Subsequent ops go into the join block (which is now `_current`).
 
     def _op_tile_sync_lds_only(self, op: Op) -> None:
         # Workgroup barrier that drains LDS (lgkmcnt) but NOT VMEM (vmcnt).
@@ -1155,6 +1253,7 @@ class _Lowerer:
         rsrc, lds_ptr, voffset, soffset = op.operands
         dwords = int(op.attrs["dwords"])
         bytes_per_lane = dwords * 4
+        aux = int(op.attrs.get("aux", 0))
         self._need("raw.ptr.buffer.load.lds")
         self._current().emit(
             f"  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
@@ -1164,7 +1263,7 @@ class _Lowerer:
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
             f"i32 0, "
-            f"i32 0)"
+            f"i32 {aux})"
         )
 
     # ----- f32 LDS ops (cshuffle epilogue) -----
@@ -1620,10 +1719,24 @@ class _Lowerer:
         out.append("}")
         out.append("")
         max_wg = self.kernel.max_workgroup_size
+        attr_parts = [
+            '"uniform-work-group-size"="true"',
+            f'"amdgpu-flat-work-group-size"="64,{max_wg}"',
+        ]
+        # Optional explicit waves-per-EU occupancy hint, the AMDGPU
+        # equivalent of CUDA's ``__launch_bounds__(NUM_THREADS, MIN_BLOCKS_PER_SM)``.
+        # The AMDGPU backend reads this to size the register file
+        # allocation per workgroup so we hit the target occupancy.
+        waves_per_eu = self.kernel.attrs.get("waves_per_eu")
+        if waves_per_eu is not None:
+            lo, hi = (
+                waves_per_eu
+                if isinstance(waves_per_eu, tuple)
+                else (waves_per_eu, waves_per_eu)
+            )
+            attr_parts.append(f'"amdgpu-waves-per-eu"="{int(lo)},{int(hi)}"')
         out.append(
-            'attributes #0 = { "uniform-work-group-size"="true" '
-            f'"amdgpu-flat-work-group-size"="64,{max_wg}" '
-            "norecurse nounwind }"
+            "attributes #0 = { " + " ".join(attr_parts) + " norecurse nounwind }"
         )
         out.append("")
         return "\n".join(out)

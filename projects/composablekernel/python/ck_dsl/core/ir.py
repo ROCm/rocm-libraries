@@ -49,6 +49,17 @@ F32 = Type("f32")
 FP8E4M3 = Type("fp8e4m3")
 
 
+# AMDGPU buffer-load AUX-byte cache-coherency hints. The AUX field of
+# the ``raw_ptr_buffer_load[_lds]`` intrinsics encodes the GLC and SLC
+# bits that bias the load's L1/L2 caching policy. Pass one of these
+# constants as the ``coherency`` argument to
+# ``async_buffer_load_lds_addr`` / ``buffer_load_vN_*``.
+CACHE_ALL = 0  # Cache at all levels (default).
+CACHE_GLOBAL = 1  # GLC set — skip L2; useful for one-shot loads.
+CACHE_STREAM = 2  # SLC set — streaming hint (don't evict useful lines).
+NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
+
+
 @dataclass(frozen=True)
 class VectorType(Type):
     elem: Type
@@ -889,6 +900,89 @@ class IRBuilder:
             result_name_hint="ufm",
         ).result
 
+    def pin_sgpr(self, v: Value) -> Value:
+        """No-op asm constraint that forces ``v`` to stay in an SGPR
+        across uses.
+
+        Emits the AMDGPU idiom ``asm volatile("" : "+s"(x))`` —
+        without it the register allocator may copy a value produced
+        by :meth:`readfirstlane` back into a VGPR before re-using it
+        across many uses (e.g. an SGPR LDS-base cursor that we bump
+        with ``s_add_u32`` across an unrolled K-loop). Pinning saves
+        both the round-trip ``v_readfirstlane_b32`` and the VGPR
+        pressure on the LDS-base.
+
+        Typical usage::
+
+            lds_base = b.pin_sgpr(b.readfirstlane(b.cast_i32(addr)))
+            # ... subsequent uses of lds_base land in SGPR-only paths ...
+        """
+        return self._op(
+            "tile.pin_sgpr",
+            [v],
+            [v.type],
+            result_name_hint="sgpr",
+        ).result
+
+    def to_sgpr_u32(self, v: Value) -> Value:
+        """Convenience: ``pin_sgpr(readfirstlane(v))``.
+
+        The canonical AMDGPU "lift this value into scalar registers"
+        pattern. Use whenever you have a wave-uniform i32 (an LDS
+        base, a global byte offset, a tile coord) that you want to
+        keep in scalar registers across many uses.
+        """
+        return self.pin_sgpr(self.readfirstlane(v))
+
+    def wave_all(self, predicate: Value) -> Value:
+        """Wave-wide AND vote: ``__all_sync``-style ``i32`` result.
+
+        Returns a wave-uniform i32 that is 1 iff *every* lane's
+        ``predicate`` was non-zero, 0 otherwise. Lowered to
+        ``__builtin_amdgcn_read_exec()`` AND/compare on AMDGPU
+        (a single ``s_or_b64`` / ``s_cmp_eq`` pair) — no ds_bpermute,
+        no LDS round-trip.
+
+        Pairs naturally with adaptive online-softmax rescaling: when
+        ``wave_all(max_diff < THRESHOLD)`` is 1, the workgroup can skip
+        the rescale path entirely.
+        """
+        return self._op(
+            "tile.wave_all",
+            [predicate],
+            [I32],
+            result_name_hint="wave_all",
+        ).result
+
+    def wave_any(self, predicate: Value) -> Value:
+        """Wave-wide OR vote: 1 iff *any* lane's predicate is non-zero.
+
+        Lowered to a wave ballot + non-zero check. Useful for early
+        bailout — e.g. "are any cells of this attention row finite?".
+        """
+        return self._op(
+            "tile.wave_any",
+            [predicate],
+            [I32],
+            result_name_hint="wave_any",
+        ).result
+
+    def wave_ballot(self, predicate: Value) -> Value:
+        """Wave-wide ballot: returns a 64-bit mask of which lanes
+        satisfied the predicate.
+
+        Lowered to ``__builtin_amdgcn_ballot_w64`` (or the wave32
+        equivalent on gfx12). For boolean reductions prefer the
+        higher-level :meth:`wave_all` / :meth:`wave_any` which avoid
+        forcing the mask materialisation on the consumer side.
+        """
+        return self._op(
+            "tile.wave_ballot",
+            [predicate],
+            [I64],
+            result_name_hint="ballot",
+        ).result
+
     def ds_bpermute(self, addr: Value, data: Value) -> Value:
         """`__builtin_amdgcn_ds_bpermute(addr, data)` — wave64 cross-lane
         broadcast permute, using LDS as the shuffle vehicle.
@@ -1032,26 +1126,70 @@ class IRBuilder:
         voffset: Value,
         soffset: Value,
         dwords: int,
+        coherency: int = 0,
     ) -> None:
         """Variant of `async_buffer_load_lds` that takes a raw i64 LDS
         address instead of a typed `smem<...>` value. This is the form
         that lets you pass a per-wave-offset LDS pointer to the
         intrinsic.
+
+        Args:
+            coherency: AMDGPU buffer-load AUX bits (0..3). One of
+                :data:`CACHE_ALL` (0, default), :data:`CACHE_GLOBAL`
+                (1, GLC set — skip L2), :data:`CACHE_STREAM` (2, SLC
+                set), :data:`NON_TEMPORAL` (3, GLC|SLC). The AUX field
+                lives in the last argument of
+                ``llvm.amdgcn.raw.ptr.buffer.load[.lds]`` and biases
+                the L1/L2 caching policy. ``CACHE_STREAM`` is the
+                right hint for one-shot streaming loads in a
+                ping-pong pipeline that won't reuse the data.
         """
         if dwords not in (1, 3, 4):
             raise ValueError(
                 f"async_buffer_load_lds_addr dwords must be 1, 3, or 4 (got {dwords})"
             )
+        if coherency not in (0, 1, 2, 3):
+            raise ValueError(f"coherency must be 0..3 (got {coherency})")
         self._op(
             "tile.async_buffer_load_lds_addr",
             [rsrc, lds_addr, voffset, soffset],
-            attrs={"dwords": int(dwords)},
+            attrs={"dwords": int(dwords), "aux": int(coherency)},
         )
 
     # ----- scheduler / synchronisation hints -----
 
     def sync(self) -> None:
         self._op("tile.sync")
+
+    def sync_half_block(self, half_selector: Value) -> None:
+        """Half-block barrier: only the waves where ``half_selector``
+        is non-zero participate in the workgroup barrier.
+
+        Emits the AMDGPU idiom
+        ``if (selector) __builtin_amdgcn_s_barrier()``. The ping-pong
+        / interwave pattern partitions an N-wave block into two
+        halves (typically ``stagger = warpid() / (N/2)``), and
+        half-block barriers let one half synchronise on each of two
+        independently-progressing pipelines without forcing the whole
+        block to converge.
+
+        Caveats:
+          * The non-participating waves must NOT reach this point — the
+            caller is responsible for ensuring all waves either enter
+            this barrier or the matching companion barrier (e.g. on the
+            ``stagger=0`` half). If only some waves reach an unmatched
+            half-block barrier the HW will deadlock.
+          * Always pair with a full :meth:`sync` at the start and end
+            of the cluster so the two halves rejoin cleanly.
+
+        Parameters
+        ----------
+        half_selector
+            i32 SSA. Non-zero -> this wave participates in the barrier.
+            Typical use: ``b.cmp_ne(stagger, b.const_i32(0))`` where
+            ``stagger = warpid() / (num_warps / 2)``.
+        """
+        self._op("tile.sync_half_block", [half_selector])
 
     def sync_lds_only(self) -> None:
         """Workgroup barrier that drains LDS ops but NOT VMEM.
@@ -1215,7 +1353,13 @@ class IRBuilder:
         return self.zero_vec(F16, n)
 
     def async_buffer_load_lds(
-        self, rsrc: Value, lds_ptr: Value, voffset: Value, soffset: Value, dwords: int
+        self,
+        rsrc: Value,
+        lds_ptr: Value,
+        voffset: Value,
+        soffset: Value,
+        dwords: int,
+        coherency: int = 0,
     ) -> None:
         """Async DRAM->LDS copy via `raw_ptr_buffer_load_lds`.
 
@@ -1226,15 +1370,21 @@ class IRBuilder:
 
         Completion is signalled via the VMEM counter; consumers must
         place an `s_waitcnt(vmcnt=0)` before reading the LDS.
+
+        ``coherency`` selects AUX-bit cache-coherence hints — see
+        :data:`CACHE_ALL` / :data:`CACHE_GLOBAL` /
+        :data:`CACHE_STREAM` / :data:`NON_TEMPORAL`.
         """
         if dwords not in (1, 3, 4):
             raise ValueError(
                 f"async_buffer_load_lds dwords must be 1, 3, or 4 (got {dwords})"
             )
+        if coherency not in (0, 1, 2, 3):
+            raise ValueError(f"coherency must be 0..3 (got {coherency})")
         self._op(
             "tile.async_buffer_load_lds",
             [rsrc, lds_ptr, voffset, soffset],
-            attrs={"dwords": int(dwords)},
+            attrs={"dwords": int(dwords), "aux": int(coherency)},
         )
 
     # ----- f32 LDS ops (cshuffle epilogue) -----
@@ -1550,6 +1700,11 @@ PURE_OP_NAMES = {
     "gpu.thread_id",
     "gpu.block_id",
     "tile.readfirstlane",
+    "tile.pin_sgpr",
+    "tile.wave_all",
+    "tile.wave_any",
+    "tile.wave_ballot",
+    "tile.sync_half_block",
     "tile.smem_addr_of",
     "tile.smem_ptr_add",
     "tile.lane_id",

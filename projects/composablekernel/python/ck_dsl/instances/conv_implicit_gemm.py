@@ -206,6 +206,18 @@ class ImplicitGemmConvSpec:
     async_dma: bool = False
     lds_k_pad: Optional[int] = None
     lds_layout: Optional[LdsLayout] = None
+    # Chiplet-aware grid swizzle (multi-XCD L2 locality). When True,
+    # the kernel flattens its 2D blockIdx into a linear WGID, runs it
+    # through ``chiplet_aware_super_tile`` (compile-time variant — conv
+    # tile counts are derived from the problem shape so they are known
+    # statically), and uses the remapped (pid_m, pid_n) for tile offsets.
+    chiplet_swizzle: bool = False
+    chiplet_wgm: int = 8
+    chiplet_num_xcds: int = 8
+    chiplet_chunk_size: int = 64
+    # AMDGPU occupancy hint: emits ``amdgpu-waves-per-eu`` on the
+    # kernel attribute list. ``None`` keeps the backend's default.
+    waves_per_eu: Optional[int] = None
 
     @property
     def block_size(self) -> int:
@@ -444,6 +456,8 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
+    if spec.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
     A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
@@ -475,8 +489,33 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
 
     # Grid: (block_n_idx, block_m_idx, 1). We follow gemm_universal:
     # block.x indexes N tile, block.y indexes M tile.
-    block_n_off_v = b.mul(b.block_id_x(), c_block_n)
-    block_m_off_v = b.mul(b.block_id_y(), c_block_m)
+    #
+    # With ``spec.chiplet_swizzle=True`` the (bx, by) is first flattened
+    # into a linear WGID and run through the chiplet-aware super-tile
+    # remap so consecutive WGs share an XCD (and an L2 slice). Conv
+    # tile counts are derived from the problem shape and known at
+    # build time, so we use the compile-time variant.
+    if spec.chiplet_swizzle:
+        from ..helpers.grid import chiplet_aware_super_tile
+
+        num_pid_m = (p.M + block_m - 1) // block_m
+        num_pid_n = (p.N_gemm + block_n - 1) // block_n
+        c_num_pid_n = b.const_i32(num_pid_n)
+        wgid_flat = b.add(b.mul(b.block_id_y(), c_num_pid_n), b.block_id_x())
+        swz = chiplet_aware_super_tile(
+            b,
+            wgid_flat,
+            num_pid_m=num_pid_m,
+            num_pid_n=num_pid_n,
+            wgm=spec.chiplet_wgm,
+            num_xcds=spec.chiplet_num_xcds,
+            chunk_size=spec.chiplet_chunk_size,
+        )
+        block_m_off_v = b.mul(swz.row, c_block_m)
+        block_n_off_v = b.mul(swz.col, c_block_n)
+    else:
+        block_n_off_v = b.mul(b.block_id_x(), c_block_n)
+        block_m_off_v = b.mul(b.block_id_y(), c_block_m)
 
     # LDS bank-conflict avoidance for the sync path: pad each K-row
     # by 8 halves so the stride is `block_k + 8` not `block_k`.
@@ -646,10 +685,30 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
         k_off_capture[0] = k_off
 
         if spec.async_dma:
+            # ``CACHE_STREAM`` (SLC=1) is correct here: each K-tile is
+            # consumed exactly once by the MFMA phase of the same iter
+            # and then overwritten by the next iter's prefetch. Marking
+            # the loads as streaming keeps them from evicting useful
+            # cache lines (e.g. the B matrix's columns that *will* be
+            # re-read across multiple M-tiles within the same XCD).
+            from ..core.ir import CACHE_STREAM
+
             a_slot = a_loader.bind(b, smem_dst=A_dst, wave_id=warp_id)
-            a_slot.issue(b, tid=tid, rsrc=a_rsrc, descriptor=a_descriptor)
+            a_slot.issue(
+                b,
+                tid=tid,
+                rsrc=a_rsrc,
+                descriptor=a_descriptor,
+                coherency=CACHE_STREAM,
+            )
             b_slot = b_loader.bind(b, smem_dst=B_dst, wave_id=warp_id)
-            b_slot.issue(b, tid=tid, rsrc=b_rsrc, descriptor=b_descriptor)
+            b_slot.issue(
+                b,
+                tid=tid,
+                rsrc=b_rsrc,
+                descriptor=b_descriptor,
+                coherency=CACHE_STREAM,
+            )
             return
 
         # Sync path: register-staged DRAM -> LDS, driven by the

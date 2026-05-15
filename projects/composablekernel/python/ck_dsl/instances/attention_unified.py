@@ -63,6 +63,11 @@ class UnifiedAttentionProblem:
     use_qq_bias: bool = False
     use_fp8: bool = False
     num_sms: int = 120
+    # AMDGPU occupancy hint ("amdgpu-waves-per-eu"). The 2D-tiled and
+    # 3D-tiled specs both honour this knob; the scalar paths ignore it
+    # because they already fit at 1 wave per workgroup. ``None`` keeps
+    # the LLVM backend's heuristic choice.
+    waves_per_eu: Optional[int] = None
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -265,6 +270,7 @@ def _tiled_spec_from_problem(
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
         num_warps=_select_2d_num_warps(problem),
+        waves_per_eu=problem.waves_per_eu,
     )
 
 
@@ -290,6 +296,7 @@ def _tiled_3d_spec_from_problem(
         use_alibi=problem.use_alibi,
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
+        waves_per_eu=problem.waves_per_eu,
     )
 
 
