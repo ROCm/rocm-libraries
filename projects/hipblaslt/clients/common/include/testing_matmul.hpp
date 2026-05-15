@@ -2065,12 +2065,18 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             if(arg.bias_vector)
-            {
+        {
                 if(arg.bias_source == hipblaslt_bias_source::a
                    || arg.bias_source == hipblaslt_bias_source::d)
                     size_bias[i] = M[i];
                 else if(arg.bias_source == hipblaslt_bias_source::b)
                     size_bias[i] = N[i];
+
+                if(arg.bias_stride > 0)
+                {
+                    //std::cout<< "Using bias stride of " << arg.bias_stride << " for batch count of " << num_batches[i] << std::endl;
+                    size_bias[i] = arg.bias_stride * num_batches[i];
+                }
             }
             else
             {
@@ -3025,7 +3031,11 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.bias_vector)
             {
-                hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
+                // Filling up unique bias values for each batch in Strided Batch
+                if(arg.bias_stride > 0)
+                    hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias, arg.bias_stride, num_batches[i]);
+                else
+                    hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
             }
 
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
@@ -3208,6 +3218,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.bias_vector)
             {
                 const void* bias_addr;
+                int32_t bias_stride = arg.bias_stride;
                 EXPECT_HIPBLAS_STATUS(
                     hipblasLtMatmulDescSetAttribute(matmul[0][i],
                                                     HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE,
@@ -3222,6 +3233,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     &bias_addr,
                                                     sizeof(void*)),
                     HIPBLAS_STATUS_SUCCESS);
+                
+                if(bias_stride > 0)
+                    EXPECT_HIPBLAS_STATUS(
+                        hipblasLtMatmulDescSetAttribute(matmul[0][i],
+                                                        HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE,
+                                                        &bias_stride,
+                                                        sizeof(bias_stride)),
+                        HIPBLAS_STATUS_SUCCESS);
             }
 
             if(arg.scaleA != hipblaslt_scaling_format::none)
@@ -4797,7 +4816,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                               : ((*hEInst)[gemmIdx].as<char>() + pos * realDataTypeSize(Taux));
                     auto  applyBias = arg.gradient ? false : arg.bias_vector;
                     void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
-
+                    if(arg.bias_stride > 0 && hBias_buf != nullptr)
+                    {
+                        hBias_buf = (char*)hBias_buf + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
+                    }
                     switch(arg.activation_type)
                     {
                     case hipblaslt_activation_type::gelu:
@@ -4876,6 +4898,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                         epilogue_func(epilogue_param, hBias_buf, Tbias, false, To, Talpha);
                         break;
                     }
+                    auto *hBias_gold_buf = hBias_gold[gemmIdx].buf();
+                    if(arg.bias_stride > 0 && hBias_gold_buf != nullptr)
+                    {
+                        hBias_gold_buf = (char*)hBias_gold_buf + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
+                    }
                     if(arg.gradient && arg.bias_vector && batchIdx == num_batches[gemmIdx] - 1)
                     {
                         if(arg.bias_source == hipblaslt_bias_source::d)
@@ -4883,7 +4910,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             reduction_func<false, float>(hBias_gold_epl[gemmIdx].as<char>()
                                                              + pos * realDataTypeSize(Talpha),
                                                          Talpha,
-                                                         hBias_gold[gemmIdx].buf(),
+                                                         hBias_gold_buf,
                                                          Tbias,
                                                          M[gemmIdx],
                                                          N[gemmIdx],
@@ -4900,7 +4927,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           &s1,
                                           &s2,
                                           &s3,
-                                          &hBias_gold,
+                                          &hBias_gold_buf,
                                           &Tbias,
                                           &size_bias,
                                           &K,
@@ -4911,7 +4938,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 {
                                     reduction_func<true, float>(ptr,
                                                                 Ti,
-                                                                hBias_gold[gemmIdx].buf(),
+                                                                hBias_gold_buf,
                                                                 Tbias,
                                                                 size_bias[gemmIdx],
                                                                 K[gemmIdx],
@@ -4924,7 +4951,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 {
                                     reduction_func<false, float>(ptr,
                                                                  Ti,
-                                                                 hBias_gold[gemmIdx].buf(),
+                                                                 hBias_gold_buf,
                                                                  Tbias,
                                                                  size_bias[gemmIdx],
                                                                  K[gemmIdx],
