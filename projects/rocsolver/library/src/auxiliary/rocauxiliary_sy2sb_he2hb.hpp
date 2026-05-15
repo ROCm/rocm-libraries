@@ -161,17 +161,21 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
+    // Row of Aband that stores main diagonal.
+    I idiag = kd - 1;
+
     // If band covers matrix, just copy to Aband.
     if(kd >= n - 1)
     {
-        // Copies some "don't care entries". That probably messes up the fill in bulges, right?
         // Using ldab-1 converts dense to band format.
+        // When kd == n-1, A(0, n-1) is outside the kd-1 upper diagonals,
+        // but gets copied to a "don't care" entry in the band structure.
         I cpy_mblks = ceildiv(n, 32);
         I cpy_nblks = ceildiv(n, 32);
         ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32),
                                 0, stream, n, n, // opts
                                 A, shiftA, lda, strideA, // A
-                                Aband, 0, ldab - 1, strideAb); // Aband
+                                Aband, idiag, ldab - 1, strideAb); // Aband
         return rocblas_status_success;
     }
 
@@ -179,6 +183,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
     rocblas_pointer_mode old_mode;
     rocblas_get_pointer_mode(handle, &old_mode);
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+
     T const one = 1;
     T const zero = 0;
     T const neg_half = -0.5;
@@ -198,9 +203,6 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
     rocblas_stride strideW = ldw * nb;
     rocblas_stride strideX = ldx * nb;
     rocblas_stride strideZ = ldz * nb;
-
-    // Row of Aband that stores main diagonal.
-    I idiag = kd - 1;
 
     // Index i tracks what sub-panels have been factored.
     I i = 0;
@@ -429,7 +431,6 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
     }
 
     // Copy last, lower triangular block of band of A to Aband.
-    // Using ldab-1 converts dense to band format.
     cpy_mblks = ceildiv(n - i, 32);
     ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(cpy_mblks, cpy_mblks, batch_count), dim3(32, 32), 0,
                             stream, n - i, n - i, // opts
