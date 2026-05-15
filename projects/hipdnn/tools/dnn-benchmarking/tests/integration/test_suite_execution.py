@@ -589,4 +589,4 @@ class TestSuiteCLIIntegration:
             cwd=project_root,
         )
         assert result.returncode == 1
-        assert "not supported with --backend pytorch" in result.stderr
+        assert "not supported with --backend pytorch" in result.stdout
