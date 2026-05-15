@@ -546,9 +546,13 @@ def build(
         else:
             client_opts = ["-DHIPBLASLT_ENABLE_BLIS=OFF"]
         if not use_system_packages and install_deps:
+            # LAPACK superbuild installs into deps_prefix (see _install_system_deps), not /usr/local.
+            deps_lib = deps_prefix / "lib"
+            blas_a = (deps_lib / "libblas.a").as_posix()
+            lapack_a = (deps_lib / "liblapack.a").as_posix()
             client_opts += [
-                "-DBLAS_LIBRARIES=/usr/local/lib/libblas.a",
-                '"-DLAPACK_LIBRARIES=/usr/local/lib/liblapack.a;/usr/local/lib/libblas.a"',
+                f"-DBLAS_LIBRARIES={blas_a}",
+                f'"-DLAPACK_LIBRARIES={lapack_a};{blas_a}"',
                 "-DBLA_STATIC=ON",
             ]
 

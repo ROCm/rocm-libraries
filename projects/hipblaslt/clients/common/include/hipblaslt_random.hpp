@@ -43,6 +43,21 @@ extern std::thread::id g_main_thread_id;
 extern thread_local hipblaslt_rng_t t_hipblaslt_rng;
 extern thread_local int             t_hipblaslt_rand_idx;
 
+
+template <typename T>
+constexpr bool is_std_complex_v
+    = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
+
+// Extracts the underlying scalar type: scalar_of_t<float> = float,
+// scalar_of_t<std::complex<double>> = double. Unlike T::value_type,
+// this is safe to use even when T is a non-complex scalar type.
+template <typename T>
+struct scalar_of { using type = T; };
+template <typename T>
+struct scalar_of<std::complex<T>> { using type = T; };
+template <typename T>
+using scalar_of_t = typename scalar_of<T>::type;
+
 // optimized helper
 float hipblaslt_uniform_int_1_10();
 
@@ -374,7 +389,15 @@ inline void random_run_generator_small(T* ptr, size_t num)
 {
     for(size_t i = 0; i < num; i++)
     {
-        ptr[i] = random_generator<T>() / 10.f;
+        if constexpr(is_std_complex_v<T>)
+        {
+            using RealT = typename T::value_type;
+            ptr[i] = random_generator<T>() / static_cast<RealT>(10.0);
+        }
+        else
+        {
+            ptr[i] = random_generator<T>() / static_cast<double>(10.0);
+        }
     }
 }
 
@@ -419,6 +442,32 @@ template <>
 inline hip_bfloat16 random_hpl_generator()
 {
     return hip_bfloat16(std::uniform_real_distribution<float>(-0.5, 0.5)(t_hipblaslt_rng));
+}
+
+/*! \brief  generate a random number in [-6.0,6.0] doubles  */
+template <typename T>
+inline T random_low_precision_generator()
+{
+    return static_cast<T>(std::uniform_real_distribution<double>(-6.0, 6.0)(t_hipblaslt_rng));
+}
+
+template <>
+inline int8_t random_low_precision_generator()
+{
+    auto saturate = [](double val) {
+        auto _val = std::nearbyint(val);
+        _val      = _val > 127.f ? 127.f : _val < -128.f ? -128.f : _val;
+        return _val;
+    };
+
+    return static_cast<int8_t>(
+        saturate(std::uniform_real_distribution<double>(-6.0, 6.0)(t_hipblaslt_rng)));
+}
+
+template <>
+inline hip_bfloat16 random_low_precision_generator()
+{
+    return hip_bfloat16(std::uniform_real_distribution<float>(-6.0, 6.0)(t_hipblaslt_rng));
 }
 
 /*! \brief  generate a random ASCII string of up to length n */

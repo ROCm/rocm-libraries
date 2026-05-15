@@ -14,6 +14,9 @@ namespace reduction
 
 namespace detail
 {
+
+const unsigned long long FULL_MASK = 0xFFFFFFFFFFFFFFFFull;
+
 template <int N>
 struct log2_floor
 {
@@ -152,6 +155,111 @@ __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
 
     x *= scale;
     y *= scale;
+}
+
+template <typename FloatAccum, unsigned int BlockSize>
+__forceinline__ __device__ void
+    reduce2(FloatAccum& x, FloatAccum& y, FloatAccum scale, unsigned int lid)
+{
+    static_assert(BlockSize > 0, "BlockSize must be positive");
+
+    if constexpr(BlockSize == 1)
+    {
+        x *= scale;
+        y *= scale;
+        return;
+    }
+
+    if constexpr(BlockSize % 64 == 0)
+    {
+        for(unsigned int d = warpSize / 2; d >= 1; d >>= 1)
+        {
+            x += __shfl_down_sync(detail::FULL_MASK, x, d);
+            y += __shfl_down_sync(detail::FULL_MASK, y, d);
+        }
+
+        if(BlockSize <= static_cast<unsigned int>(warpSize))
+        {
+            x = __shfl_sync(detail::FULL_MASK, x, 0) * scale;
+            y = __shfl_sync(detail::FULL_MASK, y, 0) * scale;
+            return;
+        }
+
+        constexpr unsigned int max_warps = BlockSize / 32;
+        __shared__ FloatAccum s_x[max_warps];
+        __shared__ FloatAccum s_y[max_warps];
+
+        const unsigned int lane = lid % static_cast<unsigned int>(warpSize);
+        const unsigned int wid = lid / static_cast<unsigned int>(warpSize);
+        const unsigned int num_warps = BlockSize / static_cast<unsigned int>(warpSize);
+
+        if(lane == 0)
+        {
+            s_x[wid] = x;
+            s_y[wid] = y;
+        }
+        __syncthreads();
+
+        if(wid == 0)
+        {
+            x = FloatAccum{0};
+            y = FloatAccum{0};
+            for(unsigned int i = lane; i < num_warps; i += static_cast<unsigned int>(warpSize))
+            {
+                x += s_x[i];
+                y += s_y[i];
+            }
+            for(unsigned int d = warpSize / 2; d >= 1; d >>= 1)
+            {
+                x += __shfl_down_sync(detail::FULL_MASK, x, d);
+                y += __shfl_down_sync(detail::FULL_MASK, y, d);
+            }
+        }
+
+        if(lid == 0)
+        {
+            s_x[0] = x * scale;
+            s_y[0] = y * scale;
+        }
+        __syncthreads();
+        x = s_x[0];
+        y = s_y[0];
+    }
+    else
+    {
+        // Slow path, mainly for the unlikely case of a 32 thread block
+        __shared__ FloatAccum s_x[BlockSize];
+        __shared__ FloatAccum s_y[BlockSize];
+
+        s_x[lid] = x;
+        s_y[lid] = y;
+        __syncthreads();
+
+        if(lid < static_cast<unsigned int>(warpSize))
+        {
+            x = FloatAccum{0};
+            y = FloatAccum{0};
+            for(unsigned int i = lid; i < BlockSize; i += static_cast<unsigned int>(warpSize))
+            {
+                x += s_x[i];
+                y += s_y[i];
+            }
+            for(unsigned int d = warpSize / 2; d >= 1; d >>= 1)
+            {
+                x += __shfl_down_sync(detail::FULL_MASK, x, d);
+                y += __shfl_down_sync(detail::FULL_MASK, y, d);
+            }
+        }
+
+        if(lid == 0)
+        {
+            s_x[0] = x * scale;
+            s_y[0] = y * scale;
+        }
+        __syncthreads();
+        x = s_x[0];
+        y = s_y[0];
+    }
 }
 
 } // namespace reduction

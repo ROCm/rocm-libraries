@@ -170,6 +170,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid reduction graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid resample fwd graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;
