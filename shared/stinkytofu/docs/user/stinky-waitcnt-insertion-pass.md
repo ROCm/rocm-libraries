@@ -137,10 +137,11 @@ Per-counter bookkeeping during a single block walk. Tracks the last emitted wait
 
 Several instructions in the IR carry `MemTokenData` modifiers -- integer token IDs that represent logical LDS memory regions. These tokens are attached upstream by `StinkyBuildImplicitDependencyPass`, which assigns them to tensor loads, DS writes, DS reads, and barriers to express implicit ordering dependencies that are not visible in the register def-use chain.
 
-This pass uses `MemTokenData` in two ways:
+This pass uses `MemTokenData` in three ways:
 
 1. **DS barrier conflict** (in `computeRequiredWaits`): if a barrier's tokens overlap with the `activeDSTokens` accumulated from pending DS ops, force a `s_wait_dscnt 0`.
-2. **Tensor barrier matching** (in `reinsertTensorWaitsHeuristic`): if the oldest pending tensor load's tokens overlap with a barrier's tokens, emit a `s_wait_tensorcnt`.
+2. **LDS write-after-read (WAR)** (in `computeRequiredWaits`): if an LDS writer (`tensor_load_to_lds` / `ds_write`) has tokens that overlap with prior pending DS reads, synthesize WAR dependencies and emit an `s_wait_dscnt` that drains them.
+3. **Tensor barrier matching** (in `reinsertTensorWaitsHeuristic`): if the oldest pending tensor load's tokens overlap with a barrier's tokens, emit a `s_wait_tensorcnt`.
 
 ## Core Algorithm: computeRequiredWaits
 
@@ -160,16 +161,21 @@ For each non-PHI instruction in the block:
 
   3. Collect its memory-op dependencies via collectSources
      (flatten through PHIs, filter to DS/buffer ops only)
-     -> If no memory-op dependencies, skip to next instruction
 
-  4. For each counter (DS, buffer):
+  4. If it is an LDS writer with MemTokenData (tensor_load_to_lds / ds_write):
+     -> Add token-overlapping pending DS reads/atomics to memOpDependencies
+        (current block + each CFG predecessor's exit state)
+
+  5. If memOpDependencies is empty, skip to next instruction
+
+  6. For each counter (DS, buffer):
      a. Compute the required wait value (current block + predecessors)
      b. Check if a new wait is actually needed (redundancy elision)
      c. If needed, record the (anchor, waitSpec) pair
 
 After the loop:
-  5. Trim exit state queues based on last emitted waits
-  6. Store the trimmed state into blockExitMemState for successor blocks
+  7. Trim exit state queues based on last emitted waits
+  8. Store the trimmed state into blockExitMemState for successor blocks
 ```
 
 ### Barrier token conflict handling
@@ -185,6 +191,52 @@ Barrier @tokens=[2, 3]:
   -> Emit s_wait_dscnt 0 before barrier
   -> Clear activeDSTokens and pendingDSOps
 ```
+
+### LDS write-after-read (WAR) handling
+
+`tensor_load_to_lds` and `ds_write` are LDS *writers*. If a prior `ds_read` is still draining on the DS counter, the writer cannot be safely issued because it would clobber memory that the read is still consuming. The pure SSA-style def-use chain captures **read-after-write** (a `ds_read` lists its LDS writer as a source) but never captures **write-after-read** -- a writer never lists prior readers as sources. The pass therefore synthesizes WAR dependencies inside `computeRequiredWaits` whenever it sees an LDS writer with `MemTokenData`:
+
+```
+For each LDS writer with MemTokenData (tensor_load_to_lds / ds_write):
+
+  Scan pending DS reads/atomics in two scopes (mirrors computeWaitValueForCounter):
+    1. Current block: localState.pendingDSOps
+    2. Each CFG predecessor's refined exit state in blockExitMemState
+
+  For each scanned op:
+    if op is a DS read (or DS atomic) with MemTokenData
+       and hasTokenOverlap(op.tokens, writer.tokens)
+       and op != writer (skip self-match for ds_write)
+      -> add op to memOpDependencies
+```
+
+The synthesized deps then flow through the existing DS-counter pipeline. `computeWaitValueForCounter` selects `min(pendingDSCountFrom(dep) - 1)` over the set, which is the position of the *youngest* token-overlapping read; waiting on that read implicitly drains all older overlapping reads because the DS counter retires FIFO. The buffer counter is unaffected because `pendingBufferCountFrom(read) == 0` for DS reads.
+
+```
+Pending DS ops:    [r0 @t=0, r1 @t=0, r2 @t=1, r3 @t=1]
+                       ^      ^
+                       token-0 reads -- "youngest" is r1 at position 3 from end
+
+tensor_load_to_lds @tokens=[0]:
+  -> hasTokenOverlap({0}, {0}) for r0, r1 -> add to memOpDependencies
+  -> r2, r3 have token=1, no overlap -> not added
+  -> DS-counter wait = min(pendingDSCountFrom(r0)-1=3, pendingDSCountFrom(r1)-1=2) = 2
+  -> Emit s_wait_dscnt 2 before tensor_load_to_lds
+     (r0, r1 complete; r2, r3 stay in flight)
+```
+
+#### Relationship to barrier conflict handling
+
+Both paths look at token overlap against pending DS ops, but they are not the same:
+
+| Aspect             | Barrier conflict             | WAR-on-LDS                                 |
+|--------------------|------------------------------|--------------------------------------------|
+| Trigger            | `isBarrier(inst)` + tokens   | `isTensorLoad(inst) || isDSWrite(inst)` + tokens |
+| Source set checked | `activeDSTokens` (any DS op) | `pendingDSOps` (DS reads / atomics only)   |
+| Wait emitted       | Always `s_wait_dscnt 0`      | `min(count - 1)` over conflicting reads    |
+| Effect on queue    | Clears `pendingDSOps`        | Trim happens via the standard `lastEmittedWait` path |
+
+Barrier handling is the bigger hammer (drain everything sharing a token). WAR handling is more surgical: it lets newer non-conflicting DS ops keep flowing.
 
 ## Wait Value Computation: computeWaitValueForCounter
 
