@@ -397,7 +397,7 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
 *  \p hipsparseCreateBsr creates a sparse BSR matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
 */
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
                                      int64_t                mb,
@@ -420,7 +420,7 @@ hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
 *  \p hipsparseCreateConstBsr creates a sparse BSR matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
 */
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
                                           int64_t                     mb,
