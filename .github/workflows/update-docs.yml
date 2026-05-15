@@ -77,7 +77,7 @@ jobs:
             # Load the map and look up the rtd_slug by project name (folder name)
             project_slug=$(jq -r --arg folder_name "$project" \
               '.projects[] | select(.folder == $folder_name) | .rtd_slug' \
-              .github/project-map.json)
+              .github/docs-config.json)
 
             if echo "$project_list" | grep -Fxq "$project_slug"; then
               latest_branch=$(curl -s \

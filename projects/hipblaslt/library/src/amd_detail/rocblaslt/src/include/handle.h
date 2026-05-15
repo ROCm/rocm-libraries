@@ -31,6 +31,7 @@
 
 #include "rocblaslt.h"
 //#include "rocblaslt_ostream.hpp"
+#include <atomic>
 #include <fstream>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
@@ -81,7 +82,7 @@ struct _rocblaslt_handle
     // constructor
     _rocblaslt_handle();
     // destructor
-    ~_rocblaslt_handle() = default;
+    ~_rocblaslt_handle();
 
     // device id
     int device;
@@ -100,6 +101,24 @@ struct _rocblaslt_handle
     void* rocroller_handle = nullptr;
     int   useRocRoller     = -1;
 #endif
+
+    // HIPBLASLT_CHECK_NUMERICS state. Read once in the ctor; opt-in via env.
+    // See check_numerics_matrix.hpp for the scanner protocol.
+    hipblaslt_check_numerics_mode check_numerics = hipblaslt_check_numerics_mode_no_check;
+
+    // 4-byte device slot; scanner does atomicCAS(0, call_id) so the slot
+    // holds the FIRST matmul's call_id whose D contained a NaN.
+    uint32_t*             check_numerics_flag       = nullptr;
+    // Host-mapped alias of the flag under STOP_ON_FIRST (null otherwise).
+    uint32_t*             check_numerics_flag_host  = nullptr;
+    // Per-matmul counter; 1-indexed so 0 stays the "no NaN" sentinel.
+    std::atomic<uint32_t> check_numerics_call_id{0};
+    uint32_t              check_numerics_scan_every = 1u;
+    uint32_t              check_numerics_scan_from  = 1u;
+    uint32_t              check_numerics_scan_until = ~uint32_t(0);
+    bool                  check_numerics_stop_on_first = false;
+    // Sticky bypass for scan_D once any caller observes a NaN.
+    std::atomic<bool>     check_numerics_short_circuit{false};
 };
 
 /********************************************************************************

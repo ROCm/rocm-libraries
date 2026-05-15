@@ -881,6 +881,15 @@ try
     if(arg.initialization == static_cast<hipblaslt_initialization>(0))
         throw std::invalid_argument("Invalid value for --initialization " + initialization);
 
+    if(vm["initialization"].defaulted()
+       && (arg.a_type == HIP_R_4F_E2M1 || arg.b_type == HIP_R_4F_E2M1))
+    {
+        arg.initialization = hipblaslt_initialization::uniform_low_precision;
+        hipblaslt_cerr << "Note: 'hpl' init produces ~50% zero rate for FP4. "
+                       << "Using 'uniform_low_precision' for FP4 by default. "
+                       << "Use '--initialization hpl' to override." << std::endl;
+    }
+
     arg.activation_type = string_to_hipblaslt_activation_type(activation_type);
     if(arg.activation_type == static_cast<hipblaslt_activation_type>(-1))
         throw std::invalid_argument("Invalid value for --activation_type " + activation_type);
