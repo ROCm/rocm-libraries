@@ -1,0 +1,10 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Tests:
+- name: set_get_alpha_beta_inc
+  category: quick
+  function: set_get_alpha_beta_inc
+  precision: *single_precision
+...

@@ -75,6 +75,23 @@ ROCBLAS_EXPORT rocblas_status rocblas_set_atomics_mode(rocblas_handle       hand
 ROCBLAS_EXPORT rocblas_status rocblas_get_atomics_mode(rocblas_handle        handle,
                                                        rocblas_atomics_mode* atomics_mode);
 
+/*! \brief Set alpha increment stored on the handle (element count between successive alpha values). Default is 0.
+Used by limited set of L2 and L1 batched functions to specify the spacing between successive alpha values.
+ */
+ROCBLAS_EXPORT rocblas_status rocblas_set_alpha_inc(rocblas_handle handle, rocblas_int alpha_inc);
+
+/*! \brief Get alpha increment from the handle.
+ */
+ROCBLAS_EXPORT rocblas_status rocblas_get_alpha_inc(rocblas_handle handle, rocblas_int* alpha_inc);
+
+/*! \brief Set beta increment stored on the handle (element count between successive beta values). Default is 0.
+ */
+ROCBLAS_EXPORT rocblas_status rocblas_set_beta_inc(rocblas_handle handle, rocblas_int beta_inc);
+
+/*! \brief Get beta increment from the handle.
+ */
+ROCBLAS_EXPORT rocblas_status rocblas_get_beta_inc(rocblas_handle handle, rocblas_int* beta_inc);
+
 /*! \brief Set ``rocblas_math_mode``.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_set_math_mode(rocblas_handle    handle,

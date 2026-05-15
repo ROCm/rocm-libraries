@@ -127,6 +127,82 @@ catch(...)
 }
 
 /*******************************************************************************
+ * ! \brief get alpha increment
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_get_alpha_inc(rocblas_handle handle, rocblas_int* alpha_inc)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    *alpha_inc = handle->alpha_inc;
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_get_alpha_inc", *alpha_inc);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief set alpha increment
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_alpha_inc(rocblas_handle handle, rocblas_int alpha_inc)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_set_alpha_inc", alpha_inc);
+    handle->alpha_inc = alpha_inc;
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief get beta increment
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_get_beta_inc(rocblas_handle handle, rocblas_int* beta_inc)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    *beta_inc = handle->beta_inc;
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_get_beta_inc", *beta_inc);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief set beta increment
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_beta_inc(rocblas_handle handle, rocblas_int beta_inc)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_set_beta_inc", beta_inc);
+    handle->beta_inc = beta_inc;
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
  * ! \brief get math mode
  ******************************************************************************/
 extern "C" rocblas_status rocblas_get_math_mode(rocblas_handle handle, rocblas_math_mode* mode)

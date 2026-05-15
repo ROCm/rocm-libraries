@@ -19,6 +19,10 @@ Auxiliary functions
 .. doxygenfunction:: rocblas_get_pointer_mode
 .. doxygenfunction:: rocblas_set_atomics_mode
 .. doxygenfunction:: rocblas_get_atomics_mode
+.. doxygenfunction:: rocblas_set_alpha_inc
+.. doxygenfunction:: rocblas_get_alpha_inc
+.. doxygenfunction:: rocblas_set_beta_inc
+.. doxygenfunction:: rocblas_get_beta_inc
 .. doxygenfunction:: rocblas_pointer_to_mode
 .. doxygenfunction:: rocblas_initialize
 .. doxygenfunction:: rocblas_status_to_string
