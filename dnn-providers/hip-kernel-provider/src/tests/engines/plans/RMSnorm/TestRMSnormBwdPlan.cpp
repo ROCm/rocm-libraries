@@ -66,7 +66,7 @@ TEST(TestRMSnormBwdParams, TensorPointersMatchExpectedUids)
     EXPECT_EQ(params.dy()->uid(), attr.dy_tensor_uid());
     EXPECT_EQ(params.x()->uid(), attr.x_tensor_uid());
     EXPECT_EQ(params.scale()->uid(), attr.scale_tensor_uid());
-    EXPECT_EQ(params.invRMS()->uid(), attr.inv_rms_tensor_uid().value());
+    EXPECT_EQ(params.invRMS()->uid(), attr.inv_rms_tensor_uid());
     EXPECT_EQ(params.dx()->uid(), attr.dx_tensor_uid());
     EXPECT_EQ(params.dscale()->uid(), attr.dscale_tensor_uid());
     EXPECT_EQ(params.dbias()->uid(), attr.dbias_tensor_uid().value());
@@ -87,9 +87,9 @@ TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvided)
     EXPECT_NE(params.dy(), nullptr);
     EXPECT_NE(params.x(), nullptr);
     EXPECT_NE(params.scale(), nullptr);
+    EXPECT_NE(params.invRMS(), nullptr);
     EXPECT_NE(params.dx(), nullptr);
     EXPECT_NE(params.dscale(), nullptr);
-    EXPECT_EQ(params.invRMS(), nullptr);
     EXPECT_EQ(params.dbias(), nullptr);
 }
 

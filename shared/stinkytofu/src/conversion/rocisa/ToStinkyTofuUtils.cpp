@@ -778,7 +778,7 @@ std::shared_ptr<stinkytofu::SignatureBase> toStinkySignature(const rocisa::Signa
     auto stinkySig = std::make_shared<stinkytofu::SignatureBase>(
         rocisaSig.name, isaVersion, cm.kernArgsVersion, cm.codeObjectVersion, kd.groupSegSize,
         kd.sgprWorkGroup, kd.vgprWorkItem, cm.flatWgSize, wavefrontSize, kd.originalTotalVgprs,
-        kd.totalAgprs, kd.totalSgprs, kd.enablePreloadKernArgs);
+        kd.totalAgprs, kd.totalSgprs, kd.numSgprPreload);
 
     // Convert arguments
     for (const auto& arg : cm.argList) {

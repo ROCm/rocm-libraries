@@ -6301,16 +6301,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numVgprBufferPackMXSB = 1
 
     if kernel["UnrollMajorLDSA"]:
-      divider = 2 if (kernel["ProblemType"]["Sparse"] == 1) and (kernel["MIInputPerThread"] * kernel["ProblemType"]["MacDataTypeA"].numBytes() <= 16) else 1
-      self.states.lrvwUnrollA = kernel["LocalReadVectorWidthA"] // divider
+      self.states.lrvwUnrollA = kernel["LocalReadVectorWidthA"]
     else:
       self.states.lrvwUnrollA = 1
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.lrvwUnrollMXSA = 1
 
     if kernel["UnrollMajorLDSB"]:
-      divider = 2 if (kernel["ProblemType"]["Sparse"] == 2) and (kernel["MIInputPerThread"] * kernel["ProblemType"]["MacDataTypeB"].numBytes() <= 16) else 1
-      self.states.lrvwUnrollB = kernel["LocalReadVectorWidthB"] // divider
+      self.states.lrvwUnrollB = kernel["LocalReadVectorWidthB"]
     else:
       self.states.lrvwUnrollB = 1
     if kernel["ProblemType"]["MXBlockB"]:
@@ -8309,16 +8307,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.preloadGuard = []
     self.states.numSgprPreload = 0
     if kernel["PreloadKernArgs"]:
-      # Max num spgrs can be setup by CP is only 16 for now
       # kernel argument buffer address needs 2 sgprs
       # Workgroup ID x, y, z need 3 sgprs
-      numWorkgroupIDSgpr = kernel["ProblemType"]["NumIndicesC"]
-      self.states.numSgprPreload = 16 - self.states.rpga - kernel["ProblemType"]["NumIndicesC"]
+      self.states.numSgprPreload = self.states.archCaps["MaxSgprPreload"] - self.states.rpga - kernel["ProblemType"]["NumIndicesC"]
 
       # Safe guard for preload arguments
       while(1):
         tmpSgpr = self.sgprPool.checkOut(1, preventOverflow=False)
-        if tmpSgpr >= 16:
+        if tmpSgpr >= self.states.archCaps["MaxSgprPreload"]:
           self.sgprPool.checkIn(tmpSgpr)
           break
         self.states.preloadGuard.append(tmpSgpr)

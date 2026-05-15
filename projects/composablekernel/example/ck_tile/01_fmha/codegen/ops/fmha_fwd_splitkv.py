@@ -122,6 +122,7 @@ using trait_{F_idx} = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F
                         {F_dvpad}>;
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wtautological-compare"
 
 namespace {{
@@ -970,6 +971,8 @@ def get_fwd_splitkv_blobs(
                     cond &= pipeline.F_squant == "f"
                     if not cond:
                         continue
+                elif receipt == 700:
+                    continue  # TE does not use this API
 
                 # fp32 only
                 if receipt == 800 or receipt == 801:
