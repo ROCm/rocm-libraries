@@ -48,6 +48,30 @@
 #include <string>
 #include <vector>
 
+// MSVC CRT lacks POSIX setenv/unsetenv. Mirror the existing _putenv_s shim
+// pattern from shared/origami/tests/include/common.hpp:37 and
+// projects/hipblaslt/clients/common/src/utility.cpp:299 so existing
+// setenv/unsetenv call sites below stay portable. _putenv_s with an empty
+// value removes the variable on Windows, matching POSIX unsetenv semantics
+// (return-value shape differs -- POSIX is 0/-1, _putenv_s is 0/errno_t --
+// but no caller here inspects the return). The !defined() guards keep us
+// safe if a future Windows toolchain ever exposes the POSIX names. This
+// header must not be included from non-test TUs.
+#ifdef _WIN32
+#if !defined(setenv)
+inline int setenv(const char* name, const char* value, int /*overwrite*/)
+{
+    return _putenv_s(name, value);
+}
+#endif
+#if !defined(unsetenv)
+inline int unsetenv(const char* name)
+{
+    return _putenv_s(name, "");
+}
+#endif
+#endif
+
 inline void testing_aux_check_numerics_gemm(const Arguments& arg)
 {
     (void)arg;
@@ -347,7 +371,12 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         EXPECT_EQ(count_substr(captured_log, "on-demand drain"), 0u)
             << "drain helper must suppress the duplicate on-demand log; captured:\n"
             << captured_log;
-        EXPECT_EQ(count_substr(captured_log, "handle teardown"), 0u)
+        // Match the drain helper's NaN-event line specifically -- the bare
+        // substring "handle teardown" also appears in the STOP_ON_FIRST tail
+        // report ("handle teardown: matmul calls (X..Y] were intentionally
+        // skipped...") emitted from a separate code path in handle.cpp, which
+        // is not what the dedup is meant to suppress.
+        EXPECT_EQ(count_substr(captured_log, "handle teardown: first NaN"), 0u)
             << "drain helper must suppress the duplicate teardown log; captured:\n"
             << captured_log;
     }
@@ -385,7 +414,10 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
             << "drain helper must suppress the duplicate on-demand log under "
                "sampling; captured:\n"
             << captured_log;
-        EXPECT_EQ(count_substr(captured_log, "handle teardown"), 0u)
+        // See note on the matching assertion above: tighten to the drain
+        // helper's NaN-event prefix so the always-fires STOP_ON_FIRST tail
+        // report doesn't false-trigger this check.
+        EXPECT_EQ(count_substr(captured_log, "handle teardown: first NaN"), 0u)
             << "drain helper must suppress the duplicate teardown log under "
                "sampling; captured:\n"
             << captured_log;
