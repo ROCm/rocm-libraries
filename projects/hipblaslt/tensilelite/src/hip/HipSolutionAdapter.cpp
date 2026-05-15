@@ -454,7 +454,6 @@ namespace TensileLite
                 HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
 
             bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
-
             if(enableCluster)
             {
                 if(kernel.clusterDim.x == 0 || kernel.clusterDim.y == 0)
