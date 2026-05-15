@@ -109,8 +109,8 @@ class merge_keys_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.add_writes<key_type>(size);
         state.set_items(size);
+        state.add_writes<key_type>(size);
 
         state.run(
             [&]
