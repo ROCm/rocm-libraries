@@ -1585,7 +1585,20 @@ class IRBuilder:
         step: Value,
         iter_args: Sequence[Tuple[str, Value]],
         iv_name: str = "k0",
+        unroll: bool = False,
     ) -> "_ForBuilder":
+        """Create a scf.for loop with iteration arguments.
+
+        Args:
+            lower: Loop lower bound
+            upper: Loop upper bound
+            step: Loop step
+            iter_args: Sequence of (name, init_value) for iteration variables
+            iv_name: Induction variable name (default: "k0")
+            unroll: Loop unrolling hint (default: False)
+                - False: emit normal loop
+                - True: fully unroll if trip count is compile-time constant
+        """
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
         iter_vars: List[Value] = []
@@ -1605,6 +1618,7 @@ class IRBuilder:
                 "iv_type": lower.type.name,
                 "iter_args": iter_meta,
                 "num_iter_args": len(iter_args),
+                "unroll": unroll,
             },
             results=results,
             regions=[body],
