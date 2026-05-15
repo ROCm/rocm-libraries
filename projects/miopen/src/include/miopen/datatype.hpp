@@ -157,7 +157,7 @@ inline KernelBuildParameters GetDataTypeKBP(miopenDataType_t type)
     case miopenDouble: use_fp64 = 1; break;
     case miopenFloat8_fnuz: use_fp8 = 1; break;
     case miopenBFloat8_fnuz: use_bfp8 = 1; break;
-    default: MIOPEN_THROW("Unsupported data type."); break;
+    case miopenInt64: MIOPEN_THROW("Unsupported data type."); break;
     }
 
     auto kbp = KernelBuildParameters{

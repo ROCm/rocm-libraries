@@ -103,6 +103,7 @@ std::string ProblemDescription::GetDirectionStr() const
     }
 
     assert(false);
+    return "";
 }
 
 std::string ProblemDescription::GetAlphaBetaCaseStr() const

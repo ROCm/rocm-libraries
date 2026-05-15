@@ -225,10 +225,11 @@ inline int GetDataTypeSize(miopenDataType_t t)
     case miopenBFloat16: return (2);
     case miopenInt32: return (4);
 
-    case miopenInt64:
-        MIOPEN_THROW("Only float, half, double, bfloat16, int8 data types are supported.");
+    case miopenInt64: break;
     };
-};
+
+    MIOPEN_THROW("Only float, half, double, bfloat16, int8 data types are supported.");
+}
 
 }; // end of namespace detail
 
@@ -249,9 +250,11 @@ static ck::DataTypeEnum_t mapDataTypeId(miopenDataType_t t)
 
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
-    case miopenInt64: MIOPEN_THROW("Only float, half, double data type is supported.");
+    case miopenInt64: break;
     };
-};
+
+    MIOPEN_THROW("Only float, half, double data type is supported.");
+}
 
 static ck::ReduceTensorOp_t mapReduceOpId(miopenReduceTensorOp_t t)
 {
@@ -270,7 +273,7 @@ static ck::ReduceTensorOp_t mapReduceOpId(miopenReduceTensorOp_t t)
     };
 
     MIOPEN_THROW("Operation is not supported");
-};
+}
 
 static std::string get_network_config_string_from_type_enums(miopenDataType_t TSrc,
                                                              miopenDataType_t TComp,
@@ -355,7 +358,7 @@ static std::string getReductionMethodStr(ReductionMethod_t reduceImpl)
     };
 
     MIOPEN_THROW("Invalid reduction method ID!");
-};
+}
 
 static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
                                               size_t invariantLen,
@@ -399,7 +402,7 @@ static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
     };
 
     return (std::make_pair(src_need_padding, dst_need_padding));
-};
+}
 
 static std::string get_kernel_file_name(const bool isFirstCall,
                                         const ReductionMethod_t reduceImpl,

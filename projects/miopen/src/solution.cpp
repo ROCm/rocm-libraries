@@ -386,7 +386,11 @@ void Solution::RunImpl(const Handle& handle,
             return mha::InvokeParams(dataBackward, workspace, workspace_size);
         }
 
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
+        case miopenProblemDirectionBackwardWeights:
+#ifdef MIOPEN_BETA_API
+        case miopenProblemDirectionInference:
+#endif
+            MIOPEN_THROW(miopenStatusNotImplemented);
         }
     }();
 
