@@ -27,16 +27,6 @@ get_abc_layouts = gemm_builder_module.get_abc_layouts
 
 
 class GemmTensorQuantKernelBuilder(GemmKernelBuilder):
-    def _build_kernel_name(self, tile_config, trait_combo):
-        pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = trait_combo
-        tile_str = self._format_tile_config(tile_config)
-
-        return (
-            f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_{pipeline}_{epilogue}_"
-            f"{scheduler}_{str(pad_m).capitalize()}_{str(pad_n).capitalize()}_"
-            f"{str(pad_k).capitalize()}_{str(persistent).capitalize()}_{tile_str}"
-        )
-
     def _parse_trait_string(self, trait_string):
         trait_parts = trait_string.split("_")
         return (
@@ -49,7 +39,7 @@ class GemmTensorQuantKernelBuilder(GemmKernelBuilder):
             trait_parts[6] == "True",  # persistent
         )
 
-    def _generate_kernel_instance(self, tile_config, trait_combo):
+    def _generate_kernel_instance(self, tile_config, trait_combo, kernel_name):
         pipeline, _, scheduler, pad_m, pad_n, pad_k, _ = trait_combo
         if not self._validate_tile_config(
             tile_config["tile_m"],
@@ -65,7 +55,6 @@ class GemmTensorQuantKernelBuilder(GemmKernelBuilder):
         ):
             raise ValueError("Unsupported gemm_tensor_quant configuration")
 
-        kernel_name = self._build_kernel_name(tile_config, trait_combo)
         k_block_per_cu = self.config.get("k_block_per_cu", 1)
 
         a_layout, b_layout, c_layout = get_abc_layouts(self.layout)
@@ -294,7 +283,7 @@ def main():
             "warp_tile_k": int(warp_tile_dims[2]),
         }
         trait_combo = builder._parse_trait_string(args.trait_combo)
-        builder._generate_kernel_instance(tile_config, trait_combo)
+        builder._generate_kernel_instance(tile_config, trait_combo, args.kernel_name)
         return
 
     parser.error("Must specify either --list_kernels or --gen_single")

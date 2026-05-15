@@ -10,8 +10,9 @@
 #include "gemm/gemm_profiler.hpp"
 #include "gemm_tensor_quant_benchmark.hpp"
 
-class GemmTensorQuantProfiler
-    : public GemmProfiler<GemmTensorQuantProfiler, GemmTensorQuantProblem, ck_tile::QuantGemmHostArgs>
+class GemmTensorQuantProfiler : public GemmProfiler<GemmTensorQuantProfiler,
+                                                    GemmTensorQuantProblem,
+                                                    ck_tile::QuantGemmHostArgs>
 {
     public:
     using BaseGemm =

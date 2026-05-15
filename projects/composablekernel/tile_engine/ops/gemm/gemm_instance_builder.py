@@ -194,7 +194,10 @@ class GemmKernelBuilder:
                 tile_config = kernel["tile_config"]
                 trait_combo = kernel["trait_combo"]
 
-                tile_str = self._format_tile_config(tile_config)
+                tile_str = f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
+                tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
+                tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
+
                 trait_str = (
                     f"{trait_combo[0]}_{trait_combo[1]}_{trait_combo[2]}_"
                     + "_".join(str(x) for x in trait_combo[3:])
@@ -206,6 +209,41 @@ class GemmKernelBuilder:
 
     def _get_tile_configs(self):
         """Get tile configurations for the current datatype and layout"""
+
+        tile_config = self.config["tile_config"]
+
+        # Generate values in the config if default range is given
+        if tile_config.get("tile_m").get("values") is None:
+            tile_config.get("tile_m")["values"] = self._generate_values(
+                tile_config.get("tile_m").get("min"),
+                tile_config.get("tile_m").get("max"),
+                tile_config.get("tile_m").get("step"),
+            )
+        if tile_config.get("tile_n").get("values") is None:
+            tile_config.get("tile_n")["values"] = self._generate_values(
+                tile_config.get("tile_n").get("min"),
+                tile_config.get("tile_n").get("max"),
+                tile_config.get("tile_n").get("step"),
+            )
+        if tile_config.get("tile_k").get("values") is None:
+            tile_config.get("tile_k")["values"] = self._generate_values(
+                tile_config.get("tile_k").get("min"),
+                tile_config.get("tile_k").get("max"),
+                tile_config.get("tile_k").get("step"),
+            )
+
+        # Get all possible values for each parameter
+        tile_m_values = tile_config.get("tile_m").get("values")
+        tile_n_values = tile_config.get("tile_n").get("values")
+        tile_k_values = tile_config.get("tile_k").get("values")
+        warp_m_values = tile_config.get("warp_m").get("values")
+        warp_n_values = tile_config.get("warp_n").get("values")
+        warp_k_values = tile_config.get("warp_k").get("values")
+        warp_tile_m_values = tile_config.get("warp_tile_m").get("values")
+        warp_tile_n_values = tile_config.get("warp_tile_n").get("values")
+        warp_tile_k_values = tile_config.get("warp_tile_k").get("values")
+
+        # Generate all combinations
         default_pipeline = ""
         if self.kernel_name_prefix == "gemm_universal":
             default_pipeline = "compv4"
@@ -227,20 +265,41 @@ class GemmKernelBuilder:
             default_pipeline = "compv3"
 
         configs = []
-        for tile_config in self._iter_tile_config_candidates():
-            if self._validate_tile_config(
-                tile_config["tile_m"],
-                tile_config["tile_n"],
-                tile_config["tile_k"],
-                tile_config["warp_m"],
-                tile_config["warp_n"],
-                tile_config["warp_k"],
-                tile_config["warp_tile_m"],
-                tile_config["warp_tile_n"],
-                tile_config["warp_tile_k"],
-                default_pipeline,
-            ):
-                configs.append(tile_config)
+        for tile_m in tile_m_values:
+            for tile_n in tile_n_values:
+                for tile_k in tile_k_values:
+                    for warp_m in warp_m_values:
+                        for warp_n in warp_n_values:
+                            for warp_k in warp_k_values:
+                                for warp_tile_m in warp_tile_m_values:
+                                    for warp_tile_n in warp_tile_n_values:
+                                        for warp_tile_k in warp_tile_k_values:
+                                            # Validate configuration
+                                            if self._validate_tile_config(
+                                                tile_m,
+                                                tile_n,
+                                                tile_k,
+                                                warp_m,
+                                                warp_n,
+                                                warp_k,
+                                                warp_tile_m,
+                                                warp_tile_n,
+                                                warp_tile_k,
+                                                default_pipeline,
+                                            ):
+                                                configs.append(
+                                                    {
+                                                        "tile_m": tile_m,
+                                                        "tile_n": tile_n,
+                                                        "tile_k": tile_k,
+                                                        "warp_m": warp_m,
+                                                        "warp_n": warp_n,
+                                                        "warp_k": warp_k,
+                                                        "warp_tile_m": warp_tile_m,
+                                                        "warp_tile_n": warp_tile_n,
+                                                        "warp_tile_k": warp_tile_k,
+                                                    }
+                                                )
         return configs
 
     def _generate_values(self, min_val, max_val, step):
@@ -251,61 +310,6 @@ class GemmKernelBuilder:
             values.append(val)
             val += step
         return values
-
-    def _get_config_values(self, config_section, key):
-        values = config_section.get(key).get("values")
-        if values is not None:
-            return values
-
-        return self._generate_values(
-            config_section.get(key).get("min"),
-            config_section.get(key).get("max"),
-            config_section.get(key).get("step"),
-        )
-
-    def _iter_tile_config_candidates(self):
-        """Yield raw tile configuration candidates before op-specific validation."""
-        tile_config = self.config["tile_config"]
-
-        tile_m_values = self._get_config_values(tile_config, "tile_m")
-        tile_n_values = self._get_config_values(tile_config, "tile_n")
-        tile_k_values = self._get_config_values(tile_config, "tile_k")
-        warp_m_values = self._get_config_values(tile_config, "warp_m")
-        warp_n_values = self._get_config_values(tile_config, "warp_n")
-        warp_k_values = self._get_config_values(tile_config, "warp_k")
-        warp_tile_m_values = self._get_config_values(tile_config, "warp_tile_m")
-        warp_tile_n_values = self._get_config_values(tile_config, "warp_tile_n")
-        warp_tile_k_values = self._get_config_values(tile_config, "warp_tile_k")
-
-        for tile_m in tile_m_values:
-            for tile_n in tile_n_values:
-                for tile_k in tile_k_values:
-                    for warp_m in warp_m_values:
-                        for warp_n in warp_n_values:
-                            for warp_k in warp_k_values:
-                                for warp_tile_m in warp_tile_m_values:
-                                    for warp_tile_n in warp_tile_n_values:
-                                        for warp_tile_k in warp_tile_k_values:
-                                            yield {
-                                                "tile_m": tile_m,
-                                                "tile_n": tile_n,
-                                                "tile_k": tile_k,
-                                                "warp_m": warp_m,
-                                                "warp_n": warp_n,
-                                                "warp_k": warp_k,
-                                                "warp_tile_m": warp_tile_m,
-                                                "warp_tile_n": warp_tile_n,
-                                                "warp_tile_k": warp_tile_k,
-                                            }
-
-    def _format_tile_config(self, tile_config):
-        tile_str = f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
-        tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
-        tile_str += (
-            f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x"
-            f"{tile_config['warp_tile_k']}"
-        )
-        return tile_str
 
     def _validate_tile_config(
         self,
@@ -424,7 +428,14 @@ class GemmKernelBuilder:
         kernel_name = f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_{pipeline}_{epilogue}_{scheduler}_{str(pad_m).capitalize()}_{str(pad_n).capitalize()}_{str(pad_k).capitalize()}_{str(persistent).capitalize()}"
 
         # Create tile configuration string
-        tile_str = self._format_tile_config(tile_config)
+        tile_str = (
+            f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
+        )
+        tile_str += (
+            f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
+        )
+        tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
+
         kernel_name += f"_{tile_str}"
 
         if self.kernel_name_prefix in [
@@ -1167,7 +1178,10 @@ struct SelectedKernel {{
             pipeline, epilogue, scheduler = trait_combo[:3]
 
             # Format tile config for CMake function
-            tile_str = self._format_tile_config(tile_config)
+            tile_str = f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
+            tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
+            tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
+
             trait_str = f"{pipeline}_{epilogue}_{scheduler}_" + "_".join(
                 str(x) for x in trait_combo[3:]
             )
