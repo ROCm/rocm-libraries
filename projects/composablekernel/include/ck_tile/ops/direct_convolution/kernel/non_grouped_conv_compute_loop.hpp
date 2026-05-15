@@ -9,13 +9,41 @@
 // static_for with compile-time modular accumulator indexing:
 //   p_idx = (Y_LOCAL - R + kh) % kh
 //
-// Structure per input row y:
+// Weight LDS double-buffering:
+//   When LDS budget allows (2-wave and 4-wave configs), the weight LDS
+//   is split into two buffers. This eliminates the WAR (Write-After-Read)
+//   hazard sync: while MFMA uses weights from registers (loaded from
+//   buf[cur]), the next weight slice loads into buf[1-cur]. Since reads
+//   and writes target different LDS regions, no sync is needed between
+//   the weight read and the next weight load.
+//
+//   For configs where 2× weight LDS exceeds the LDS budget (8-wave),
+//   the single-buffer path is used with an explicit WAR sync.
+//
+// Structure per input row y (double-buffered):
 //   for c_block in 0..num_c_blocks:
-//     Load input[y, c_block * BLOCK_C : +BLOCK_C] to input LDS
+//     Co-issue: input load + weight[0] load → buf[0]
+//     sync                                   (input + weight[0] visible)
+//     weight[0] read from buf[0] → registers
 //     for c_local in 0..c_local_count:
-//       Load weight[c_slice] from KYXC to weight LDS
-//       Read weight from LDS to registers
-//       for S in 0..kw: for R in 0..kh: MFMA with input from section c_local
+//       weight[c_local+1] load → buf[1-cur]  (no WAR sync needed!)
+//       MFMA with weight registers + input from section c_local
+//       sync                                 (weight LDS write + input reads done)
+//       weight[c_local+1] read from buf[1-cur] → registers
+//       swap cur
+//   Flush completed output row (after full C-reduction)
+//
+// Structure per input row y (single-buffered fallback):
+//   for c_block in 0..num_c_blocks:
+//     Co-issue: input load + weight[0] load
+//     sync                                   (input + weight[0] visible)
+//     weight[0] read → registers
+//     for c_local in 0..c_local_count:
+//       sync                                 (WAR: weight read complete)
+//       Prefetch weight[c_local+1] → LDS     (overlaps with MFMA below)
+//       MFMA with weight registers + input from section c_local
+//       sync                                 (weight LDS write + input reads done)
+//       weight[c_local+1] read → registers
 //   Flush completed output row (after full C-reduction)
 
 #pragma once
@@ -52,16 +80,23 @@ __device__ void conv_compute_loop(const ElementType* __restrict__ in,
     constexpr bool use_lds_epilogue = (cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory);
     constexpr bool is_dgrad = (cfg.direction == Direction::Dgrad);
 
-    // --- Separate LDS regions: weight and input/output coexist ---
+    // --- LDS layout: weight region + input/output region ---
     static constexpr int INPUT_TOTAL = TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8;
     static constexpr int IO_LDS = use_lds_epilogue
                                        ? INPUT_TOTAL + TC::Output::OUTPUT_LDS_BUFFER_SIZE
                                        : INPUT_TOTAL;
 
-    __shared__ uint4 weight_lds_buf[TC::WEIGHT_LDS_SIZE_UINT4];
+    // Weight LDS double-buffering: allocate 2 buffers when the total
+    // LDS fits within the gfx950 budget (128 KB = 8192 uint4).
+    static constexpr int WEIGHT_LDS_PER_BUF = TC::WEIGHT_LDS_SIZE_UINT4;
+    static constexpr int LDS_BUDGET_UINT4 = 131072 / 16;
+    static constexpr bool use_weight_double_buf =
+        (2 * WEIGHT_LDS_PER_BUF + IO_LDS <= LDS_BUDGET_UINT4);
+    static constexpr int NUM_WEIGHT_BUFS = use_weight_double_buf ? 2 : 1;
+
+    __shared__ uint4 weight_lds_buf[NUM_WEIGHT_BUFS * WEIGHT_LDS_PER_BUF];
     __shared__ uint4 io_lds_buf[IO_LDS];
 
-    uint4* weight_lds = weight_lds_buf;
     uint4* input_lds  = io_lds_buf;
     uint4* output_lds = io_lds_buf + INPUT_TOTAL;
 
@@ -101,6 +136,17 @@ __device__ void conv_compute_loop(const ElementType* __restrict__ in,
     constexpr int stride = 1;
     constexpr int dilation = 1;
 
+    // Helper: load weight for a given c_slice into the specified LDS buffer.
+    auto load_weight_slice = [&](int c_slice, uint4* target_lds)
+    {
+        if constexpr(is_dgrad)
+            WeightLoaderT::load_kyxc_to_lds_dgrad(target_lds, wei,
+                                                   c_slice * 32, weight_block_k, C);
+        else
+            WeightLoaderT::load_kyxc_to_lds(target_lds, wei,
+                                             weight_block_k, c_slice, C);
+    };
+
     // Helper lambda: process all c_blocks for input row y, accumulating
     // MFMA products into acc[] with compile-time p_idx.
     auto process_row = [&](int y, auto Y_LOCAL_const)
@@ -116,36 +162,43 @@ __device__ void conv_compute_loop(const ElementType* __restrict__ in,
             // Advance to row y in O(1).
             if(y > 0 && il.load_active)
                 il.input_voffset += y * il.row_stride_bytes;
+
+            // Co-issue input load and first weight load (separate LDS regions).
+            const int first_c_slice = c_block * c_local_count;
             il.prefetch_tile_to_lds(0);
+            load_weight_slice(first_c_slice, weight_lds_buf);
 
             wait_vmcnt<0>();
             __syncthreads();
 
+            // Read first weight from LDS → registers.
+            WeightLoaderT wl;
+            wl.read_from_lds(weight_lds_buf);
+
+            int cur_buf = 0;
+
             // Iterate over C-sections within this c_block.
             for(int c_local = 0; c_local < c_local_count; c_local++)
             {
-                int c_slice = c_block * c_local_count + c_local;
+                const bool has_next = (c_local + 1 < c_local_count);
 
-                // Load weight for this c_slice from KYXC DRAM.
-                if constexpr(is_dgrad)
+                if constexpr(use_weight_double_buf)
                 {
-                    // Dgrad: c_slice indexes the K dimension, weight_block_k indexes C.
-                    // Load weight[c_slice*32 : +32, :, weight_block_k : +block_k_size].
-                    WeightLoaderT::load_kyxc_to_lds_dgrad(weight_lds, wei,
-                                                           c_slice * 32, weight_block_k, C);
+                    // Double-buffer: load next weight into alternate buffer.
+                    // No WAR sync — reads and writes target different buffers.
+                    if(has_next)
+                    {
+                        uint4* next_lds = weight_lds_buf + (1 - cur_buf) * WEIGHT_LDS_PER_BUF;
+                        load_weight_slice(first_c_slice + c_local + 1, next_lds);
+                    }
                 }
                 else
                 {
-                    // Fprop: weight_block_k indexes K, c_slice indexes C.
-                    // Load weight[weight_block_k : +block_k_size, :, c_slice*32 : +32].
-                    WeightLoaderT::load_kyxc_to_lds(weight_lds, wei,
-                                                     weight_block_k, c_slice, C);
+                    // Single-buffer: WAR sync before overwriting weight LDS.
+                    __syncthreads();
+                    if(has_next)
+                        load_weight_slice(first_c_slice + c_local + 1, weight_lds_buf);
                 }
-                __syncthreads();
-
-                // Read weight from LDS to registers.
-                WeightLoaderT wl;
-                wl.read_from_lds(weight_lds);
 
                 // MFMA: accumulate over filter taps.
                 int c_section_delta = (c_local - wave_group) * 32;
@@ -176,7 +229,23 @@ __device__ void conv_compute_loop(const ElementType* __restrict__ in,
                             });
                     });
 
+                // Sync: ensures (a) weight LDS write for next iteration is complete,
+                //                (b) all input LDS reads for this iteration are done.
                 __syncthreads();
+
+                // Read next weight from LDS → registers.
+                if(has_next)
+                {
+                    if constexpr(use_weight_double_buf)
+                    {
+                        cur_buf = 1 - cur_buf;
+                        wl.read_from_lds(weight_lds_buf + cur_buf * WEIGHT_LDS_PER_BUF);
+                    }
+                    else
+                    {
+                        wl.read_from_lds(weight_lds_buf);
+                    }
+                }
             }
         }
     };
