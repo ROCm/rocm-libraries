@@ -196,7 +196,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  <table>
 *  <caption id="spmv_csr_algorithms">CSR/CSC Algorithms</caption>
-*  <tr><th>CSR Algorithms
+*  <tr><th>CSR/CSC Algorithms
 *  <tr><td>HIPSPARSE_SPMV_CSR_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMV_CSR_ALG2</td>
 *  </table>
@@ -206,6 +206,12 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  <tr><th>COO Algorithms
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG2</td>
+*  </table>
+*
+*  <table>
+*  <caption id="spmv_bsr_algorithms">BSR Algorithms</caption>
+*  <tr><th>BSR Algorithms
+*  <tr><td>HIPSPARSE_SPMV_BSR_ALG1</td>
 *  </table>
 *
 *  <table>

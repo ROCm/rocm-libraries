@@ -502,6 +502,8 @@ namespace hipsparse
             return rocsparse_spmv_alg_csr_stream;
         case HIPSPARSE_SPMV_SELL_ALG1:
             return rocsparse_spmv_alg_sell;
+        case HIPSPARSE_SPMV_BSR_ALG1:
+            return rocsparse_spmv_alg_bsr;
         default:
             throw "Non existent hipsparseSpMVAlg_t";
         }

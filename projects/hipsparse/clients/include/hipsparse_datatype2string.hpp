@@ -509,6 +509,8 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
         return "csr_alg2";
     case HIPSPARSE_SPMV_SELL_ALG1:
         return "sell_alg1";
+    case HIPSPARSE_SPMV_BSR_ALG1:
+        return "bsr_alg1";
     }
     return "invalid";
 }
@@ -530,6 +532,8 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
         return "csr_alg2";
     case HIPSPARSE_SPMV_SELL_ALG1:
         return "sell_alg1";
+    case HIPSPARSE_SPMV_BSR_ALG1:
+        return "bsr_alg1";
     }
     return "invalid";
 }
