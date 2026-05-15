@@ -27,7 +27,13 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from .runtime.hip_module import Runtime
-from .runtime.launcher import time_launches
+
+# Try to import torch-based launcher, fall back to direct HIP timing if unavailable
+try:
+    from .runtime.launcher import time_launches
+    HAS_TORCH_LAUNCHER = True
+except ImportError:
+    HAS_TORCH_LAUNCHER = False
 
 
 @dataclass
@@ -76,17 +82,39 @@ def _launch_timed(
     rt: Runtime, fn, grid, block, args: bytes, warmup: int, iters: int
 ) -> float:
     """Time `iters` repeats of `rt.launch(fn, grid, block, args)` on
-    the default stream. Delegates to `ck_dsl.runtime.launcher.time_launches`
-    so the manifest runner and the in-tree Launcher abstraction share
-    one bench-timing path; see that function's docstring for the
+    the default stream.
+
+    Delegates to `ck_dsl.runtime.launcher.time_launches` when torch is
+    available, so the manifest runner and the in-tree Launcher abstraction
+    share one bench-timing path; see that function's docstring for the
     correctness rationale (no per-call module reload, no module unload,
     args buffer lifetime tracked by Runtime._pending_args).
+
+    Falls back to direct HIP event timing when torch is unavailable
+    (torch-free environments).
     """
-    return time_launches(
-        lambda: rt.launch(fn, grid, block, args),
-        warmup=warmup,
-        iters=iters,
-    )
+    if HAS_TORCH_LAUNCHER:
+        return time_launches(
+            lambda: rt.launch(fn, grid, block, args),
+            warmup=warmup,
+            iters=iters,
+        )
+    else:
+        # Fallback: Direct HIP event timing (torch-free)
+        for _ in range(warmup):
+            rt.launch(fn, grid, block, args)
+        rt.sync()
+        e0 = rt.event()
+        e1 = rt.event()
+        e0.record()
+        for _ in range(iters):
+            rt.launch(fn, grid, block, args)
+        e1.record()
+        e1.synchronize()
+        total_ms = e0.elapsed_to(e1)
+        e0.destroy()
+        e1.destroy()
+        return total_ms / iters
 
 
 def _gemm_problem(

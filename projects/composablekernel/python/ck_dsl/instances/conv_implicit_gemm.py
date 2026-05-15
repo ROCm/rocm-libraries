@@ -204,6 +204,7 @@ class ImplicitGemmConvSpec:
     pipeline: str = "mem"
     epilogue: str = "default"
     async_dma: bool = False
+    unroll_k: bool = False  # NEW: Clean Python-level K-loop unrolling
     lds_k_pad: Optional[int] = None
     lds_layout: Optional[LdsLayout] = None
     # Chiplet-aware grid swizzle (multi-XCD L2 locality). When True,
@@ -853,7 +854,25 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
     #    bake-off shape this is 9 (576 / 64), generating ~9x more IR
     #    but staying well under the 160 KiB LDS budget and the
     #    per-kernel ISA size limits.
-    if not spec.async_dma:
+    if spec.unroll_k:
+        # Clean Python-level K-loop unrolling
+        K_iters = (p.K_gemm + block_k - 1) // block_k
+        current_accs = [v for _, v in accs]
+
+        for it in range(K_iters):
+            k_offset = b.const_i32(it * block_k)
+
+            # Load phase: global load → LDS write
+            emit_load_phase(k_offset, A_smem, B_smem)
+            b.sync()  # Barrier after LDS writes (required)
+
+            # MFMA phase: LDS read → MFMA execute
+            # Remove the sync() call to allow ds_read → MFMA overlap
+            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+            # NO sync() here - let next iteration's global loads overlap with tail MFMAs
+
+        final_accs = current_accs
+    elif not spec.async_dma:
         for_op = b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
             emit_load_phase(k0, A_smem, B_smem)
@@ -863,6 +882,7 @@ def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec) -> KernelDef:
             b.scf_yield(*new_accs)
         final_accs = for_op.results
     else:
+        # async_dma path (now fixed as of d6119ef2b8a)
         K_iters = (p.K_gemm + block_k - 1) // block_k
         bufs = [(A_smem, B_smem), (A_smem2, B_smem2)]
 
