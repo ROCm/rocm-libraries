@@ -2261,5 +2261,190 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
 
+class TestAutotuner(unittest.TestCase):
+    """Coverage for ``helpers/autotune.py``: cache, winner pick, errors."""
+
+    def test_autotune_sweep_picks_minimum(self):
+        from ck_dsl.helpers import AutotuneConfig, autotune_sweep
+
+        configs = [
+            AutotuneConfig(spec=object(), name=f"c{i}", extra={}) for i in range(5)
+        ]
+        # Synthetic "ms" = the index + 1, so c0 should win.
+        timings = {f"c{i}": float(i + 1) for i in range(5)}
+
+        def bench(cfg):
+            return timings[cfg.name]
+
+        winner, results = autotune_sweep(configs, bench_fn=bench)
+        self.assertEqual(winner.name, "c0")
+        self.assertEqual(len(results), 5)
+        self.assertTrue(all(r.is_ok for r in results))
+
+    def test_autotune_sweep_excludes_errored_configs(self):
+        from ck_dsl.helpers import AutotuneConfig, autotune_sweep
+
+        configs = [
+            AutotuneConfig(spec=object(), name="good_fast", extra={}),
+            AutotuneConfig(spec=object(), name="errored", extra={}),
+            AutotuneConfig(spec=object(), name="good_slow", extra={}),
+        ]
+
+        def bench(cfg):
+            if cfg.name == "errored":
+                raise RuntimeError("oom")
+            return 5.0 if cfg.name == "good_fast" else 50.0
+
+        winner, results = autotune_sweep(configs, bench_fn=bench)
+        self.assertEqual(winner.name, "good_fast")
+        # Errored config recorded but excluded from winner pick.
+        self.assertEqual(len(results), 3)
+        err_row = next(r for r in results if r.config_name == "errored")
+        self.assertFalse(err_row.is_ok)
+        self.assertIn("oom", err_row.error)
+
+    def test_autotune_sweep_all_errored_raises(self):
+        from ck_dsl.helpers import AutotuneConfig, autotune_sweep
+
+        configs = [
+            AutotuneConfig(spec=object(), name="a", extra={}),
+            AutotuneConfig(spec=object(), name="b", extra={}),
+        ]
+
+        def bench(cfg):
+            raise RuntimeError("nope")
+
+        with self.assertRaises(RuntimeError):
+            autotune_sweep(configs, bench_fn=bench)
+
+    def test_autotuner_caches_winner_and_skips_resweep(self):
+        import tempfile
+        import os as _os
+        from ck_dsl.helpers import Autotuner, AutotuneConfig
+
+        configs = [
+            AutotuneConfig(spec=object(), name=f"c{i}", extra={}) for i in range(3)
+        ]
+        ms_table = {"c0": 30.0, "c1": 10.0, "c2": 20.0}
+        bench_calls = []
+        launch_calls = []
+
+        def bench(cfg, **_):
+            bench_calls.append(cfg.name)
+            return ms_table[cfg.name]
+
+        def launch(cfg, **_):
+            launch_calls.append(cfg.name)
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            cache_path = f.name
+        try:
+            tuner = Autotuner(
+                configs=configs,
+                key_fn=lambda *, shape, **_: (shape,),
+                bench_fn=bench,
+                launch_fn=launch,
+                cache_path=cache_path,
+                verbose=False,
+            )
+            # First call -- sweeps all 3 configs.
+            tuner(shape=(1024, 1024, 1024))
+            self.assertEqual(set(bench_calls), {"c0", "c1", "c2"})
+            self.assertEqual(launch_calls, ["c1"])  # c1 is the winner
+
+            bench_calls.clear()
+            launch_calls.clear()
+
+            # Second call same shape -- cache hit, no benchmark runs.
+            tuner(shape=(1024, 1024, 1024))
+            self.assertEqual(bench_calls, [])  # didn't re-sweep
+            self.assertEqual(launch_calls, ["c1"])
+
+            # Different shape -- sweeps again.
+            tuner(shape=(2048, 2048, 2048))
+            self.assertEqual(set(bench_calls), {"c0", "c1", "c2"})
+
+            # Persistence: rebuild Autotuner pointing at same cache
+            # file; warm lookup should NOT require any sweep.
+            tuner2 = Autotuner(
+                configs=configs,
+                key_fn=lambda *, shape, **_: (shape,),
+                bench_fn=lambda *_, **__: 9999.0,  # would lose if it ran
+                launch_fn=launch,
+                cache_path=cache_path,
+                verbose=False,
+            )
+            launch_calls.clear()
+            tuner2(shape=(1024, 1024, 1024))
+            self.assertEqual(launch_calls, ["c1"])  # persisted winner
+        finally:
+            if _os.path.exists(cache_path):
+                _os.unlink(cache_path)
+
+    def test_autotuner_select_returns_winner_without_launch(self):
+        from ck_dsl.helpers import Autotuner, AutotuneConfig
+
+        configs = [
+            AutotuneConfig(spec=object(), name="slow", extra={}),
+            AutotuneConfig(spec=object(), name="fast", extra={}),
+        ]
+        launch_calls = []
+        tuner = Autotuner(
+            configs=configs,
+            key_fn=lambda **_: (),
+            bench_fn=lambda cfg, **_: 1.0 if cfg.name == "fast" else 100.0,
+            launch_fn=lambda cfg, **_: launch_calls.append(cfg.name),
+            cache_path=None,
+            verbose=False,
+        )
+        winner = tuner.select(foo=1)
+        self.assertEqual(winner.name, "fast")
+        # `.select` must NOT dispatch a launch.
+        self.assertEqual(launch_calls, [])
+
+    def test_autotuner_rejects_duplicate_config_names(self):
+        from ck_dsl.helpers import Autotuner, AutotuneConfig
+
+        with self.assertRaises(ValueError):
+            Autotuner(
+                configs=[
+                    AutotuneConfig(spec=object(), name="dup"),
+                    AutotuneConfig(spec=object(), name="dup"),
+                ],
+                key_fn=lambda **_: (),
+                bench_fn=lambda *a, **k: 1.0,
+                launch_fn=lambda *a, **k: None,
+            )
+
+    def test_spec_replace_with_dataclass(self):
+        from ck_dsl.helpers import spec_replace
+        from ck_dsl.instances import (
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+        )
+
+        base = UniversalGemmSpec(
+            name="base",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
+        )
+        renamed = spec_replace(base, name="renamed")
+        self.assertEqual(renamed.name, "renamed")
+        self.assertEqual(renamed.tile.tile_m, 128)
+        # Original untouched (frozen dataclass).
+        self.assertEqual(base.name, "base")
+
+
 if __name__ == "__main__":
     unittest.main()

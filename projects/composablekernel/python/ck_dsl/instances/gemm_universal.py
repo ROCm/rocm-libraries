@@ -836,6 +836,7 @@ def _emit_epilogue_cshuffle(
     c_per_lane: int,
     *,
     batch_off_c: Optional[Value] = None,
+    fused_epilogue=None,  # Optional[FusedEpilogue] from helpers.fuse
 ) -> None:
     """LDS-staged cshuffle epilogue.
 

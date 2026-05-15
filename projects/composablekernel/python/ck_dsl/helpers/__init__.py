@@ -79,6 +79,13 @@ convolution kernels in the CK Tile style.
 from __future__ import annotations
 
 from .atoms import MFMA_F16_ATOMS, MfmaAtom, mfma_atom
+from .autotune import (
+    AutotuneConfig,
+    AutotuneResult,
+    Autotuner,
+    autotune_sweep,
+    spec_replace,
+)
 from .attention import (
     Attention2DConfig,
     Attention3DConfig,
@@ -201,6 +208,12 @@ __all__ = [
     "use_2d_kernel",
     # Geometry
     "WarpGrid",
+    # Autotuning
+    "AutotuneConfig",
+    "AutotuneResult",
+    "Autotuner",
+    "autotune_sweep",
+    "spec_replace",
     # Chiplet / grid swizzle (multi-XCD L2 locality)
     "NUM_XCDS_MI300X",
     "NUM_XCDS_MI325X",
