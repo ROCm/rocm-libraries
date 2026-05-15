@@ -27,6 +27,7 @@ include(CMakeDependentOption)
 include(GNUInstallDirs)
 include(add_subdirectory_with_message)
 include(fetch_rocm_cmake)
+include(SecurityHardening)
 
 # --- Options and cache variables ---
 option(ROCM_LIBS_SUPERBUILD "Enable superbuild mode" ON)
@@ -83,6 +84,11 @@ set(UNSUPPORTED_COMPONENTS
 option(ROCM_WARN_TOOLCHAIN_VAR "Warn if the toolchain version is not supported" OFF)
 
 option(CMAKE_MESSAGE_CONTEXT_SHOW "Show the context of the message" ON)
+
+# Apply security hardening globally
+if(ROCM_LIBS_ENABLE_SECURITY_HARDENING)
+    apply_security_hardening_globally()
+endif()
 
 # --- Validate options ---
 if(NOT ROCM_LIBS_ENABLE_COMPONENTS)

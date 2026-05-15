@@ -17,9 +17,8 @@ macro(add_armor_flags target level)
         _GLIBCXX_DEBUG
       )
     endif()
-    # Note that _FORTIFY_SOURCE does not work unless optimizations are enabled
     target_compile_definitions(${target} PRIVATE
-      $<$<NOT:$<BOOL:${BUILD_ADDRESS_SANITIZER}>>:_FORTIFY_SOURCE=1>
+      $<$<NOT:$<BOOL:${BUILD_ADDRESS_SANITIZER}>>:_FORTIFY_SOURCE=2>
       _GLIBCXX_ASSERTIONS
       ROCSOLVER_VERIFY_ASSUMPTIONS
     )

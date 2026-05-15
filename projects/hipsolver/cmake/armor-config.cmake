@@ -37,7 +37,7 @@ macro(add_armor_flags target level)
       )
     endif()
     target_compile_definitions(${target} PRIVATE
-      $<$<NOT:$<BOOL:${BUILD_ADDRESS_SANITIZER}>>:_FORTIFY_SOURCE=1> # requires optimizations to work
+      $<$<NOT:$<BOOL:${BUILD_ADDRESS_SANITIZER}>>:_FORTIFY_SOURCE=2>
       _GLIBCXX_ASSERTIONS
     )
   endif()
