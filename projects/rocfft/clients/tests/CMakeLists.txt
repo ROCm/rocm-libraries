@@ -70,7 +70,7 @@ set( rocfft-test_source
   gtest_main.cpp
   rocfft_accuracy_test.cpp
   bitwise_repro/bitwise_repro_test.cpp
-  accuracy_test_1D.cpp	
+  accuracy_test_1D.cpp
   accuracy_test_2D.cpp
   accuracy_test_3D.cpp
   accuracy_test_adhoc.cpp
@@ -127,11 +127,33 @@ if( NOT BUILD_FFTW )
       message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
       string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
       if ( NOT WIN32 )
+        # Try to get the imported location for the current build type
         get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
         get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+        # Fallback: if not found, try RELEASE configuration
+        if(NOT fftw3_libs OR fftw3_libs MATCHES "NOTFOUND")
+          get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
+        endif()
+        if(NOT fftw3f_libs OR fftw3f_libs MATCHES "NOTFOUND")
+          get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+        endif()
+        # Final fallback: try generic IMPORTED_LOCATION without suffix
+        if(NOT fftw3_libs OR fftw3_libs MATCHES "NOTFOUND")
+          get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION)
+        endif()
+        if(NOT fftw3f_libs OR fftw3f_libs MATCHES "NOTFOUND")
+          get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION)
+        endif()
       else()
         get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
         get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
+        # Fallback for Windows: try RELEASE configuration
+        if(NOT fftw3_libs OR fftw3_libs MATCHES "NOTFOUND")
+          get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_RELEASE)
+        endif()
+        if(NOT fftw3f_libs OR fftw3f_libs MATCHES "NOTFOUND")
+          get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_RELEASE)
+        endif()
       endif()
 
       # Look for omp (preferred) or thread libraries. These are not a
@@ -156,7 +178,7 @@ if( NOT BUILD_FFTW )
       endif()
 
       set (FFTW_FOUND ${FFTW3_FOUND})
-      set (FFTW_INCLUDE_DIRS ${FFTW3_INCLUDE_DIRS})
+      get_target_property(FFTW_INCLUDE_DIRS FFTW3::fftw3 INTERFACE_INCLUDE_DIRECTORIES)
       set (FFTW_LIBRARIES ${fftw3_libs} )
       list( APPEND FFTW_LIBRARIES ${fftw3f_libs} )
     endif()
@@ -373,12 +395,12 @@ endif()
 string( CONCAT TESTS_OUT_DIR "${PROJECT_BINARY_DIR}" ${TESTS_OUT_DIR} )
 
 set_target_properties(rocfft-test
-                      PROPERTIES 
-                      RUNTIME_OUTPUT_DIRECTORY 
+                      PROPERTIES
+                      RUNTIME_OUTPUT_DIRECTORY
                       ${TESTS_OUT_DIR})
 set_target_properties(rtc_helper_crash
-                      PROPERTIES 
-                      RUNTIME_OUTPUT_DIRECTORY 
+                      PROPERTIES
+                      RUNTIME_OUTPUT_DIRECTORY
                       ${TESTS_OUT_DIR})
 
 
@@ -447,14 +469,14 @@ if( ROCFFT_MPI_ENABLE )
         hip::device
         MPI::MPI_CXX
         ${FFTW_LIBRARIES}
-      )    
+      )
     endif()
 
     target_compile_definitions( ${worker} PRIVATE USE_HIPRAND )
 
     set_target_properties(${worker}
-                          PROPERTIES 
-                          RUNTIME_OUTPUT_DIRECTORY 
+                          PROPERTIES
+                          RUNTIME_OUTPUT_DIRECTORY
                           ${TESTS_OUT_DIR})
     rocm_install(TARGETS ${worker} COMPONENT tests)
 

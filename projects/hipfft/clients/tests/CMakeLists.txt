@@ -88,11 +88,33 @@ else()
     message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
     string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
     if ( NOT WIN32 )
+      # Try to get the imported location for the current build type
       get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
       get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+      # Fallback: if not found, try RELEASE configuration
+      if(NOT fftw3_libs OR fftw3_libs MATCHES "NOTFOUND")
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
+      endif()
+      if(NOT fftw3f_libs OR fftw3f_libs MATCHES "NOTFOUND")
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+      endif()
+      # Final fallback: try generic IMPORTED_LOCATION without suffix
+      if(NOT fftw3_libs OR fftw3_libs MATCHES "NOTFOUND")
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION)
+      endif()
+      if(NOT fftw3f_libs OR fftw3f_libs MATCHES "NOTFOUND")
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION)
+      endif()
     else()
       get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
       get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
+      # Fallback for Windows: try RELEASE configuration
+      if(NOT fftw3_libs OR fftw3_libs MATCHES "NOTFOUND")
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_RELEASE)
+      endif()
+      if(NOT fftw3f_libs OR fftw3f_libs MATCHES "NOTFOUND")
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_RELEASE)
+      endif()
     endif()
 
     # Look for omp (preferred) or thread libraries. These are not a
@@ -117,7 +139,7 @@ else()
     endif()
 
     set (FFTW_FOUND ${FFTW3_FOUND})
-    set (FFTW_INCLUDE_DIRS ${FFTW3_INCLUDE_DIRS})
+    get_target_property(FFTW_INCLUDE_DIRS FFTW3::fftw3 INTERFACE_INCLUDE_DIRECTORIES)
     set (FFTW_LIBRARIES ${fftw3_libs} )
     list( APPEND FFTW_LIBRARIES ${fftw3f_libs} )
   endif()
@@ -195,20 +217,20 @@ foreach( target ${TEST_TARGETS} )
     if( NOT hiprand_FOUND )
       find_package( hiprand REQUIRED )
     endif()
-    
+
     if( BUILD_WITH_LIB STREQUAL "CUDA" )
       # nvcc doesn't know what do with hiprand.so.1.1, but we can try linking it to hiprand.so,
       # assuming that it's in the same directory.
       get_target_property( HIPRAND_FILE_PATH hip::hiprand LOCATION )
       string( REGEX REPLACE ".so(.[0-9]*)*" ".so" HIPRAND_FILE_PATH_NOVER "${HIPRAND_FILE_PATH}" )
       message( "Renamed hiprand so filename: ${HIPRAND_FILE_PATH_NOVER}" )
-      
+
       target_link_libraries( ${target} PRIVATE ${HIPRAND_FILE_PATH_NOVER} )
     else()
       target_link_libraries( ${target} PRIVATE hip::hiprand )
     endif()
   endif()
-  
+
   if( BUILD_WITH_LIB STREQUAL "ROCM" )
     target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
     target_link_libraries( ${target}
@@ -249,7 +271,7 @@ foreach( target ${TEST_TARGETS} )
     hip::hipfft
     ${FFTW_LIBRARIES}
   )
-  
+
   if( BUILD_CLIENTS_TESTS_OPENMP )
     if( BUILD_WITH_LIB STREQUAL "CUDA" )
       message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
@@ -275,8 +297,8 @@ foreach( target ${TEST_TARGETS} )
   endif()
 
   set_target_properties(${target}
-                        PROPERTIES 
-                        RUNTIME_OUTPUT_DIRECTORY 
+                        PROPERTIES
+                        RUNTIME_OUTPUT_DIRECTORY
                         ${TESTS_OUT_DIR})
 
   rocm_install(TARGETS ${target} COMPONENT tests)
