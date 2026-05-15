@@ -4056,10 +4056,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ExpertSchedulingMode"] > 0:
             pointerLWCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
           if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
-            pointerLWCode.add(SWaitCnt(dscnt=0, comment="Waiting current LR finish for next GR(TDM)"))
-            _barrier = SBarrier(comment="Waiting current LR finish for next GR(TDM), sync LDS%u"%(self.states.ldsReadTokenIdx))
-            _barrier.setMemToken(MemTokenData([self.states.ldsReadTokenIdx]))
-            pointerLWCode.add(_barrier)
+            pointerLWCode.add(self._syncThreads(
+              kernel,
+              "Waiting current LR finish for next GR(TDM), sync LDS%u"%(self.states.ldsReadTokenIdx),
+              memoryToken=[self.states.ldsReadTokenIdx]))
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
           if kernel["enableTDMA"]:
