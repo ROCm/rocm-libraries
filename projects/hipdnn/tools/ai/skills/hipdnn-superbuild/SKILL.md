@@ -115,21 +115,31 @@ cmake --preset <preset> -DROCM_PATH="$ROCM_PATH" -DCMAKE_PROGRAM_PATH="$CLANG_PA
 
 If a `jobs` value was specified, pass it via `-j`. Otherwise let ninja auto-detect.
 
+Run the build with stdout/stderr captured to a log; tail only on failure and propagate the exit code so PASS/FAIL is detectable from the bash exit status. Don't pipe directly to `tail` — bash without `pipefail` would mask the failing exit code.
+
 With explicit jobs:
 ```bash
-cmake --build $BUILD_DIR -- -j <jobs> 2>&1 | tail -100
+LOG=$(mktemp)
+cmake --build $BUILD_DIR -- -j <jobs> > "$LOG" 2>&1
+RC=$?
+if [ $RC -ne 0 ]; then echo "BUILD FAILED (exit $RC). Full log: $LOG"; tail -200 "$LOG"; else rm -f "$LOG"; fi
+exit $RC
 ```
 
 Without explicit jobs:
 ```bash
-cmake --build $BUILD_DIR 2>&1 | tail -100
+LOG=$(mktemp)
+cmake --build $BUILD_DIR > "$LOG" 2>&1
+RC=$?
+if [ $RC -ne 0 ]; then echo "BUILD FAILED (exit $RC). Full log: $LOG"; tail -200 "$LOG"; else rm -f "$LOG"; fi
+exit $RC
 ```
 
 ### Stale Cache Auto-Recovery
 
 If the build fails with `does not match the source` (flatbuffers cache mismatch — common after rebasing or merging), automatically recover:
 
-1. Detect the pattern in the build output.
+1. Detect the pattern in the failure tail (or `grep` the kept `$LOG` if the tail truncated it).
 2. Remove the build directory: `rm -rf $BUILD_DIR`
 3. Re-run Step 3 (configure) and Step 4 (build) once more.
 

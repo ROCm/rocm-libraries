@@ -94,10 +94,16 @@ The helper outputs one `<component>:<target>` line per match. If `--filter` was 
 
 ### Step 5a: Run via cmake target (helper-wrapped)
 
-For each `component:target` line from Step 4, run the shared cmake build helper. On Windows it wraps the invocation in PowerShell with PATH set so DLLs resolve. On Linux it runs cmake directly. On both platforms the helper sets `ROCM_PATH` in the test process env so providers that JIT-compile kernels via hiprtc (e.g. `hip-kernel-provider`) can find the HIP headers.
+For each `component:target` line from Step 4, run the shared cmake build helper. It runs `cmake --build … --target …` with `ROCM_PATH` set in the test process env, and on Windows also prepends `<build>/bin` and the ROCm bin directory to `PATH` so the test executables ctest spawns can resolve their DLLs. The env block propagates through cmake → ninja → ctest → test.exe via `CreateProcessW`, so no PowerShell wrapper is needed.
+
+Run the helper with stdout/stderr captured to a log, tail only on failure, and propagate the exit code so PASS/FAIL is detectable from the bash exit status (don't rely on parsing tail output — a segfault or `0xc0000135` DLL-load crash may produce no "FAIL" string):
 
 ```bash
-python $HELPERS/pwsh_cmake_run.py --build-dir $BUILD_DIR --target <target> [--jobs <N>] [--rocm-path $ROCM_PATH] [--rocm-bin $ROCM_BIN] 2>&1 | tail -100
+LOG=$(mktemp)
+python $HELPERS/cmake_run.py --build-dir $BUILD_DIR --target <target> [--jobs <N>] [--rocm-path $ROCM_PATH] [--rocm-bin $ROCM_BIN] > "$LOG" 2>&1
+RC=$?
+if [ $RC -ne 0 ]; then echo "FAILED (exit $RC). Full log: $LOG"; tail -200 "$LOG"; else rm -f "$LOG"; fi
+exit $RC
 ```
 
 `--rocm-path` is optional: the helper defaults to `/opt/rocm` on Linux and to `--rocm-bin`'s parent on Windows. Pass it explicitly only when the user supplied `ROCM_PATH=`. Pass `--rocm-bin $ROCM_BIN` only on Windows.
@@ -130,21 +136,15 @@ Component → binary mapping:
 | `hip-kernel` | `hip_kernel_provider_tests` | `hip_kernel_provider_integration_tests` |
 | `integration-tests` | `hipdnn_integration_tests_unit_tests` | `hipdnn_integration_tests`, `hipdnn_gpu_ref_tests` |
 
-#### Linux
+Use the same helper in `--binary` mode — it sets `PATH`/`ROCM_PATH` the same way and avoids any shell-quoting concerns with paths containing spaces or special characters:
 
 ```bash
-$BIN_DIR/<binary> --gtest_filter="<filter>"
+LOG=$(mktemp)
+python $HELPERS/cmake_run.py --build-dir $BUILD_DIR --binary $BIN_DIR/<binary>[.exe] --gtest-filter "<filter>" [--rocm-path $ROCM_PATH] [--rocm-bin $ROCM_BIN] > "$LOG" 2>&1
+RC=$?
+if [ $RC -ne 0 ]; then echo "FAILED (exit $RC). Full log: $LOG"; tail -200 "$LOG"; else rm -f "$LOG"; fi
+exit $RC
 ```
-
-#### Windows
-
-Wrap in PowerShell with PATH set. Convert to backslashes:
-
-```bash
-powershell -Command "\$env:PATH = '<BIN_DIR_BACKSLASH>;<ROCM_BIN_BACKSLASH>;' + \$env:PATH; & '<BIN_DIR>\<binary>.exe' --gtest_filter='<filter>'" 2>&1 | tail -100
-```
-
-(The cmake-wrapper helper covers ninja-target invocations; direct binary calls with custom args still need this manual form.)
 
 ## Step 6: Report
 
@@ -170,8 +170,8 @@ If a component was requested but its targets are not in the build, say so explic
 - **Helpers** under `$REPO_ROOT/projects/hipdnn/tools/ai/skills/helpers/`:
   - `windows_rocm_setup.py` — detects/installs the wheel ROCm and prints paths
   - `discover_test_targets.py` — finds available test targets, with hip-kernel fallback
-  - `pwsh_cmake_run.py` — runs `cmake --build` (wrapped in PowerShell on Windows)
-- **Windows DLL/PATH** — Handled by `pwsh_cmake_run.py`. Bash `PATH=...` does not propagate through ninja's `cmd.exe /C` invocations on Windows.
+  - `cmake_run.py` — runs `cmake --build <target>` or a test binary directly with `PATH`/`ROCM_PATH` set in the subprocess env
+- **Windows DLL/PATH** — Handled by `cmake_run.py`: it prepends `<build>/bin` and the ROCm bin to `PATH` on Python's subprocess env, which `CreateProcessW` propagates to grandchildren. Do **not** try to set `PATH` from bash — MSYS2 doesn't translate it into the Win32 form ninja's `cmd.exe /C` invocations need.
 - **Integration tests require an AMD GPU.** They will fail on machines without GPU access. For unit-only verification, use `scope: unit` (the default).
 - **hip-kernel-provider target naming** — Auto-handled by the discovery helper. The provider currently uses unprefixed `unit-check` rather than `hip-kernel-provider-unit-check`; the helper finds it under `dnn-providers/hip-kernel-provider/src/unit-check`.
 - **Stale build** — If the discovery helper returns no targets for a component, that component was not in the superbuild's preset. Re-run `/hipdnn-superbuild <preset>` with a preset that includes it.
