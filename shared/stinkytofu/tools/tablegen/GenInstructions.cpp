@@ -176,6 +176,7 @@ struct InstructionDef {
     std::vector<OperandFieldEntry> finalOperandFields;   // After format inheritance
     std::string finalPromotedFormat;                     // Promoted encoding format
     std::vector<OperandFieldEntry> finalPromotedFields;  // Promoted encoding fields
+    int encodingBits = 32;  // From format .encoding (bits); sizeInBytes = encodingBits/8
 };
 
 //==========================================================================
@@ -507,6 +508,7 @@ class DefTParser {
             parseFieldInt(block, ".maxOperands", fmt.maxOperands);
             parseFieldCost(block, ".cost", fmt.cycle, fmt.latency);
             parseFieldIntAuto(block, ".coissue", fmt.coIssueWindow);
+            parseFieldEncoding(block, ".encoding", fmt.encoding);
             parseFieldFlags(block, ".flags", fmt.flags);
             parseFieldOperandFields(block, ".fields", fmt.fields);
             parseField(block, ".promotedFormat", fmt.promotedFormat);
@@ -875,6 +877,28 @@ class DefTParser {
         if (!val.empty()) out = std::stoi(val, nullptr, 0);
     }
 
+    // Parse .encoding = {32} or .encoding = {64} (instruction size in bits)
+    void parseFieldEncoding(const std::string& block, const std::string& fieldName,
+                            std::vector<int>& out) {
+        size_t pos = block.find(fieldName);
+        if (pos == std::string::npos) return;
+        size_t lbrace = block.find("{", pos);
+        size_t rbrace = block.find("}", lbrace);
+        if (lbrace == std::string::npos || rbrace == std::string::npos) return;
+        std::string inner = block.substr(lbrace + 1, rbrace - lbrace - 1);
+        out.clear();
+        size_t start = 0;
+        while (start < inner.size()) {
+            size_t end = inner.find(",", start);
+            if (end == std::string::npos) end = inner.size();
+            std::string num = inner.substr(start, end - start);
+            num.erase(0, num.find_first_not_of(" \t\n\r"));
+            num.erase(num.find_last_not_of(" \t\n\r") + 1);
+            if (!num.empty()) out.push_back(std::stoi(num));
+            start = end + 1;
+        }
+    }
+
     // Helper: Parse cost field (.cost = {cycle, latency})
     void parseFieldCost(const std::string& block, const std::string& fieldName, int& cycle,
                         int& latency) {
@@ -1237,6 +1261,7 @@ class InstructionCodeGen {
         if (f == "simm32") return "EncodeField::simm32";
         if (f == "ssrc0") return "EncodeField::ssrc0";
         if (f == "sdata") return "EncodeField::sdata";
+        if (f == "ioffset") return "EncodeField::ioffset";
         if (f == "sbase") return "EncodeField::sbase";
         if (f == "vsrc1") return "EncodeField::vsrc1";
         if (f == "vaddr0") return "EncodeField::vaddr0";
@@ -1253,6 +1278,8 @@ class InstructionCodeGen {
         if (t == "label") return "FieldType::label";
         if (t == "simm16") return "FieldType::simm16";
         if (t == "simm32") return "FieldType::simm32";
+        if (t == "simm24") return "FieldType::simm24";
+        if (t == "simm5") return "FieldType::simm5";
         if (t == "sdst") return "FieldType::sdst";
         if (t == "ssrc") return "FieldType::ssrc";
         if (t == "hwreg") return "FieldType::hwreg";
@@ -1266,6 +1293,7 @@ class InstructionCodeGen {
         if (t == "wait_alu") return "FieldType::wait_alu";
         if (t == "wait_mem_ds") return "FieldType::wait_mem_ds";
         if (t == "smem_offset") return "FieldType::smem_offset";
+        if (t == "smem_offset_nok") return "FieldType::smem_offset_nok";
         if (t == "src") return "FieldType::src";
         if (t == "vcc") return "FieldType::vcc";
         if (t == "exec") return "FieldType::exec";
@@ -1499,7 +1527,8 @@ static bool emitArchIsaFile(const std::string& arch,
     out << "};\n\n";
     out << "#endif // GET_ISAINFO_OPCODE_ENUMERATION\n\n";
 
-    // MCIDTable
+    // MCIDTable (HwInstDesc: isaOpcode, unifiedOpcode, issue, latency, mnemonic, flags, microcode,
+    // encoding bits, unit, operandFields placeholder)
     EMIT_GUARD("GET_ISAINFO_HWINSTDESC_TABLE");
     out << "// MCIDTable: operandFields set by ArchInfo getMCIDTable()\n"
         << "static HwInstDesc MCIDTable[] = {\n";
@@ -1508,6 +1537,8 @@ static bool emitArchIsaFile(const std::string& arch,
         int uop = 0;
         auto it = unifiedOpcodeMap.find(inst.mnemonic);
         if (it != unifiedOpcodeMap.end()) uop = it->second;
+        int encodingBits = inst.encodingBits;
+        if (encodingBits <= 0) encodingBits = 32;
         std::string flagStr = flagsToMakeFlagSetContent(inst.finalFlags);
         out << "  { " << std::setw(3) << i << ", " << std::setw(5) << uop << ", " << std::setw(3)
             << inst.cycle << ", " << std::setw(4) << inst.latency << ", " << "0x" << std::hex

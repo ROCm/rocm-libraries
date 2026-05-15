@@ -103,6 +103,7 @@ def getRequiredParametersMin() -> set:
         "TDMSplit",
         "MXScaleFormat",
         "MXLoadInst",
+        'SwInstructionPrefetch',
         'UnrollLoopSwapGlobalReadOrder',
         'Use64bShadowLimit',
         'Use64bShadowLimitMX',

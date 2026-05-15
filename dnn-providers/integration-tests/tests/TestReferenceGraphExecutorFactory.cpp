@@ -37,7 +37,7 @@ TEST(TestReferenceGraphExecutorFactory, CreateDeviceExecutor)
 
 // Exercises the factory's core value: both CPU and GPU executors produce
 // consistent results for a conv forward graph using a canonical test shape.
-TEST(TestReferenceGraphExecutorFactory, GpuAndCpuExecutorsAgreeOnConvFwd)
+TEST(TestGpuReferenceGraphExecutorFactory, CpuAndDeviceExecutorsAgreeOnConvFwd)
 {
     SKIP_IF_NO_DEVICES();
 
