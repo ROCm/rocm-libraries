@@ -45,7 +45,7 @@ union NodeAttributes {
 	CustomOpAttributes,
 	RMSNormBackwardAttributes,
 	ReductionAttributes,
-        ResampleFwdAttributes,
+	ResampleFwdAttributes,
 	LayernormBackwardAttributes
 }
 
