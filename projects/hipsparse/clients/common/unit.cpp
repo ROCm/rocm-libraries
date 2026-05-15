@@ -64,30 +64,6 @@ void unit_check_general(int64_t M, int64_t N, int64_t lda, int8_t* hCPU, int8_t*
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 template <>
 void unit_check_general(
     int64_t M, int64_t N, int64_t lda, hipsparseFloat16* hCPU, hipsparseFloat16* hGPU)
