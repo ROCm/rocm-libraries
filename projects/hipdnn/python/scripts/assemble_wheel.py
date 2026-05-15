@@ -16,6 +16,7 @@ import zipfile
 
 _PACKAGE_NAME = "hipdnn_frontend"
 _DEFAULT_VERSION = "0.1.0"
+_REQUIRES_DIST = ["numpy>=1.19.0"]
 
 
 def _parse_so_tags(so_filename):
@@ -57,11 +58,12 @@ def _hash_record(data):
     return f"sha256={b64}", len(data)
 
 
-def _collect_package_files(package_dir):
-    """Yield (arcname, filepath) for __init__.py only."""
+def _get_init_file(package_dir):
+    """Return (arcname, filepath) for __init__.py, or None if missing."""
     init_path = os.path.join(package_dir, "__init__.py")
     if os.path.isfile(init_path):
-        yield f"{_PACKAGE_NAME}/__init__.py", init_path
+        return f"{_PACKAGE_NAME}/__init__.py", init_path
+    return None
 
 
 def _build_metadata(version):
@@ -73,7 +75,7 @@ def _build_metadata(version):
         f"Author: Advanced Micro Devices, Inc.\n"
         f"License: MIT\n"
         f"Requires-Python: >=3.8\n"
-        f"Requires-Dist: numpy>=1.19.0\n"
+        + "".join(f"Requires-Dist: {dep}\n" for dep in _REQUIRES_DIST)
     )
 
 
@@ -97,16 +99,20 @@ def assemble(so_path, package_dir, output_dir, version):
     records = []
 
     with zipfile.ZipFile(wheel_path, "w", zipfile.ZIP_DEFLATED) as whl:
-        # 1. Pure Python files
-        for arcname, filepath in _collect_package_files(package_dir):
-            data = open(filepath, "rb").read()
+        # 1. __init__.py
+        init_entry = _get_init_file(package_dir)
+        if init_entry:
+            arcname, filepath = init_entry
+            with open(filepath, "rb") as f:
+                data = f.read()
             whl.writestr(arcname, data)
             h, sz = _hash_record(data)
             records.append((arcname, h, sz))
 
         # 2. Compiled extension — use ZIP_STORED for the .so (no compression benefit)
         so_arcname = f"{_PACKAGE_NAME}/{so_filename}"
-        so_data = open(so_path, "rb").read()
+        with open(so_path, "rb") as f:
+            so_data = f.read()
         info = zipfile.ZipInfo(so_arcname)
         info.compress_type = zipfile.ZIP_STORED
         info.external_attr = (

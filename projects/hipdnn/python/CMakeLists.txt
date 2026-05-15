@@ -92,4 +92,6 @@ install(CODE "
     if(_result)
         message(FATAL_ERROR \"Failed to assemble hipdnn-frontend wheel\")
     endif()
+
+    file(REMOVE_RECURSE \"\${_staging}\")
 ")
