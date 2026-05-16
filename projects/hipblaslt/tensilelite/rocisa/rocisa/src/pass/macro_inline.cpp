@@ -191,8 +191,14 @@ namespace rocisa
         reg.isMacro = false;
 
         // Strip register type prefix from substituted value (e.g. "v5" → "5")
-        if(nameStr.size() > reg.regType.size()
-           && nameStr.substr(0, reg.regType.size()) == reg.regType)
+        // Try full prefix first ("vgpr") since toString() adds regType+"gpr",
+        // then fall back to single-letter prefix ("v") for numeric values like "v5".
+        std::string fullPrefix = reg.regType + "gpr";
+        if(nameStr.size() > fullPrefix.size()
+           && nameStr.substr(0, fullPrefix.size()) == fullPrefix)
+            nameStr = nameStr.substr(fullPrefix.size());
+        else if(nameStr.size() > reg.regType.size()
+                && nameStr.substr(0, reg.regType.size()) == reg.regType)
             nameStr = nameStr.substr(reg.regType.size());
 
         // Try to evaluate as integer index or simple expression like "1+1"
