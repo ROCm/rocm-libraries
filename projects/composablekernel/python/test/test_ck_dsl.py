@@ -3644,5 +3644,240 @@ class TestTransformsRuntimeAware(unittest.TestCase):
         self.assertIn("base", ll)
 
 
+class TestLauncherFenceContract(unittest.TestCase):
+    """Per-launch event-fence policy in :mod:`ck_dsl.runtime.launcher`.
+
+    These tests pin down the host-side launch-lifecycle contract that
+    fixed the M=N=K=2048 silent-corruption regression: every
+    ``KernelLauncher`` call must, by default, event-synchronize on its
+    own launch's completion before returning so the host never
+    observes a half-finished kernel. The contract is enforced via
+    ``LaunchConfig.fence`` plus the :func:`no_fence` context manager
+    that batch wrappers (e.g. :func:`time_launches`) use to suppress
+    per-call sync inside an outer event-timed region.
+
+    No GPU is required: we use a fake :class:`KernelLauncher` that
+    records what ``_resolved_fence`` reports inside its ``__call__``,
+    then assert the public API combinations resolve as documented.
+    """
+
+    def test_launch_config_default_fence_is_on(self):
+        from ck_dsl.runtime.launcher import LaunchConfig
+
+        self.assertTrue(LaunchConfig().fence)
+
+    def test_no_fence_overrides_config_fence_true(self):
+        from ck_dsl.runtime.launcher import _resolved_fence, no_fence
+
+        # Outside the context, the per-config value wins.
+        self.assertTrue(_resolved_fence(True))
+        self.assertFalse(_resolved_fence(False))
+
+        # Inside, the override forces False regardless of the per-config value.
+        with no_fence():
+            self.assertFalse(_resolved_fence(True))
+            self.assertFalse(_resolved_fence(False))
+
+        # And the override is correctly torn down on exit.
+        self.assertTrue(_resolved_fence(True))
+
+    def test_no_fence_nests(self):
+        from ck_dsl.runtime.launcher import _resolved_fence, no_fence
+
+        with no_fence():
+            self.assertFalse(_resolved_fence(True))
+            with no_fence():
+                self.assertFalse(_resolved_fence(True))
+            # Inner contexts don't drop the override too early.
+            self.assertFalse(_resolved_fence(True))
+        self.assertTrue(_resolved_fence(True))
+
+    def test_pipeline_launcher_fences_only_last_stage(self):
+        """Same-stream FIFO already orders intermediate stages, so they
+        do NOT fence (a per-stage host sync would defeat pipelining).
+        Only the final stage honors ``cfg.fence`` on the host's behalf.
+
+        We pass a non-zero ``stream`` so :func:`resolve_stream` does
+        not eagerly initialize torch.cuda inside a pure-Python unit
+        test; that keeps this test isolated from any HIP-context
+        ordering effects on other unit tests.
+        """
+        from ck_dsl.runtime.launcher import LaunchConfig, PipelineLauncher
+
+        recorded: list = []
+
+        class FakeStage:
+            kernel_name = "fake"
+
+            def __init__(self, idx):
+                self.idx = idx
+
+            def __call__(self, values, *, config):
+                recorded.append((self.idx, config.fence))
+                # Return an object that looks like LaunchSummary enough.
+                from ck_dsl.runtime.launcher import LaunchSummary
+
+                return LaunchSummary(launches=1)
+
+        stages = [FakeStage(0), FakeStage(1), FakeStage(2)]
+        pipeline = PipelineLauncher(stages)
+
+        cfg = LaunchConfig(grid=(1, 1, 1), block=(64, 1, 1), fence=True)
+        pipeline(
+            values_per_stage=[{}, {}, {}],
+            configs_per_stage=[cfg, cfg, cfg],
+            stream=1,
+        )
+        self.assertEqual(recorded, [(0, False), (1, False), (2, True)])
+
+    def test_pipeline_launcher_honors_no_fence_on_last_stage(self):
+        """If the user passed ``fence=False`` for the final stage, the
+        pipeline must NOT override it: the caller is opting into
+        managing their own sync (e.g. inside :func:`time_launches`).
+        """
+        from ck_dsl.runtime.launcher import LaunchConfig, PipelineLauncher
+
+        recorded: list = []
+
+        class FakeStage:
+            kernel_name = "fake"
+
+            def __init__(self, idx):
+                self.idx = idx
+
+            def __call__(self, values, *, config):
+                recorded.append((self.idx, config.fence))
+                from ck_dsl.runtime.launcher import LaunchSummary
+
+                return LaunchSummary(launches=1)
+
+        pipeline = PipelineLauncher([FakeStage(0), FakeStage(1)])
+        cfg_nofence = LaunchConfig(grid=(1, 1, 1), block=(64, 1, 1), fence=False)
+        pipeline(
+            values_per_stage=[{}, {}],
+            configs_per_stage=[cfg_nofence, cfg_nofence],
+            stream=1,
+        )
+        self.assertEqual(recorded, [(0, False), (1, False)])
+
+
+class TestRuntimeEventLifecycle(unittest.TestCase):
+    """:class:`Runtime` pending-args queue: events + FIFO drain.
+
+    Pure-Python contract checks; no GPU needed. We stand up a
+    :class:`Runtime` instance and stub the ``Event``s that
+    ``_reap_completed`` would normally query so the FIFO walk and
+    ref-release semantics are exercised deterministically.
+    """
+
+    def _isolate_pending(self):
+        """Snapshot + clear the class-level pending-args dict so this
+        test doesn't observe (or leak into) other tests' state.
+        """
+        from ck_dsl.runtime.hip_module import Runtime
+
+        prior = dict(Runtime._pending_args)
+        Runtime._pending_args.clear()
+        return prior
+
+    def _restore_pending(self, prior):
+        from ck_dsl.runtime.hip_module import Runtime
+
+        Runtime._pending_args.clear()
+        Runtime._pending_args.update(prior)
+
+    def test_reap_completed_pops_fired_events_in_fifo_order(self):
+        """Eager release on next launch must drop only the prefix of
+        bucket entries whose events have fired; an un-fired event
+        halts the walk so later entries (which may still be in
+        flight) are not freed prematurely.
+        """
+        from ck_dsl.runtime.hip_module import Runtime
+
+        class FakeEvent:
+            def __init__(self, fired: bool):
+                self._fired = fired
+                self.destroyed = False
+
+            def query(self) -> bool:
+                return self._fired
+
+            def destroy(self) -> None:
+                self.destroyed = True
+
+        rt = Runtime()
+        prior = self._isolate_pending()
+        try:
+            e0 = FakeEvent(fired=True)
+            e1 = FakeEvent(fired=True)
+            e2 = FakeEvent(fired=False)  # this one is still in flight
+            e3 = FakeEvent(fired=True)
+            Runtime._pending_args[42] = [
+                (("ref0",), e0),
+                (("ref1",), e1),
+                (("ref2",), e2),
+                (("ref3",), e3),
+            ]
+            rt._reap_completed(42)
+            # The first two should be popped (FIFO from the head);
+            # e2 halts the walk so e3 is NOT touched even though it
+            # has fired.
+            self.assertEqual(len(Runtime._pending_args[42]), 2)
+            self.assertTrue(e0.destroyed and e1.destroyed)
+            self.assertFalse(e2.destroyed)
+            self.assertFalse(e3.destroyed)
+        finally:
+            self._restore_pending(prior)
+
+    def test_reap_stops_at_none_event(self):
+        """Legacy ``retain_for_stream`` calls before any launch park
+        refs with ``event=None``. Those entries must NOT be reaped
+        by the eager pre-launch walk (only ``sync`` releases them);
+        otherwise the runtime would drop refs the GPU is still
+        relying on.
+        """
+        from ck_dsl.runtime.hip_module import Runtime
+
+        rt = Runtime()
+        prior = self._isolate_pending()
+        try:
+            Runtime._pending_args[7] = [(("legacy_ref",), None)]
+            rt._reap_completed(7)
+            self.assertEqual(len(Runtime._pending_args[7]), 1)
+        finally:
+            self._restore_pending(prior)
+
+    def test_retain_for_stream_merges_into_latest_entry(self):
+        """``retain_for_stream`` must attach to the most-recent
+        launch's bucket entry so the tensors share that launch's
+        completion event. If it appended a fresh entry instead the
+        retain would never be released unless ``sync`` is called.
+        """
+        from ck_dsl.runtime.hip_module import Runtime
+
+        class FakeEvent:
+            def query(self) -> bool:
+                return False
+
+            def destroy(self) -> None:
+                pass
+
+        rt = Runtime()
+        prior = self._isolate_pending()
+        try:
+            e = FakeEvent()
+            Runtime._pending_args[9] = [(("args_buf",), e)]
+            rt.retain_for_stream(9, "tensor_A", "tensor_B", 1234)
+            entries = Runtime._pending_args[9]
+            self.assertEqual(len(entries), 1)
+            refs, evt = entries[0]
+            # ints are filtered out; tensors are merged into the same
+            # tuple so they all share the launch's completion event.
+            self.assertEqual(refs, ("args_buf", "tensor_A", "tensor_B"))
+            self.assertIs(evt, e)
+        finally:
+            self._restore_pending(prior)
+
+
 if __name__ == "__main__":
     unittest.main()

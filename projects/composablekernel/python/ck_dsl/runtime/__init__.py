@@ -78,9 +78,11 @@ from .launcher import (
     LaunchSummary,
     PipelineLauncher,
     WorkspacePool,
+    no_fence,
     release_retained_for_stream,
     synchronize_and_release,
     time_launches,
+    wait_stream_and_release,
 )
 from .torch_module import (
     TorchLaunchSummary,
@@ -105,9 +107,11 @@ __all__ = [
     "build_hsaco_from_llvm_ir",
     "empty_workspace",
     "launch_torch_kernel",
+    "no_fence",
     "pack_args",
     "release_retained_for_stream",
     "resolve_stream",
     "synchronize_and_release",
     "time_launches",
+    "wait_stream_and_release",
 ]

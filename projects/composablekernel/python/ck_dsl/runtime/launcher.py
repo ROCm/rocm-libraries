@@ -88,8 +88,10 @@ applies to ``gemm``, ``grouped_gemm``, ``conv``, and any future op.
 
 from __future__ import annotations
 
+import contextvars
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, Tuple
 
 from .hip_module import Runtime
 from .torch_module import pack_args, resolve_stream
@@ -102,10 +104,53 @@ __all__ = [
     "PipelineLauncher",
     "WorkspaceSpec",
     "WorkspacePool",
+    "no_fence",
     "release_retained_for_stream",
     "synchronize_and_release",
     "time_launches",
 ]
+
+
+# ---------------------------------------------------------------------
+# Launch-fence override
+# ---------------------------------------------------------------------
+#
+# ``LaunchConfig.fence`` controls whether a single ``KernelLauncher``
+# call event-synchronizes on its launch's completion before returning
+# (mirroring CK Tile's ``launch_kernel`` contract, which always ends
+# with ``hipStreamSynchronize``). Batch wrappers like
+# :func:`time_launches` need to suppress that per-call sync to time
+# many launches inside one outer event-timed region. They do so via
+# the :func:`no_fence` context manager, which forces the resolved
+# fence to ``False`` for any ``KernelLauncher`` call made within its
+# scope -- even ones whose ``LaunchConfig.fence`` is True.
+_fence_override: "contextvars.ContextVar[Optional[bool]]" = contextvars.ContextVar(
+    "ck_dsl_launcher_fence_override", default=None
+)
+
+
+@contextmanager
+def no_fence() -> "Iterator[None]":
+    """Context: every :class:`KernelLauncher` call inside is fire-and-forget.
+
+    Use only when the surrounding code does its own stream/event sync
+    (e.g. :func:`time_launches` records start/end events around an
+    iteration block). Outside this context the default
+    ``LaunchConfig.fence=True`` policy applies and every launcher
+    call event-synchronizes before returning.
+    """
+    token = _fence_override.set(False)
+    try:
+        yield
+    finally:
+        _fence_override.reset(token)
+
+
+def _resolved_fence(config_fence: bool) -> bool:
+    """Combine the per-call ``LaunchConfig.fence`` with the active
+    :func:`no_fence` override. The override wins when set."""
+    override = _fence_override.get()
+    return bool(config_fence) if override is None else bool(override)
 
 
 @dataclass(frozen=True)
@@ -145,6 +190,30 @@ class LaunchConfig:
     shared_bytes: int = 0
     """Dynamic LDS bytes requested at launch (in addition to the
     kernel's statically-declared LDS)."""
+
+    fence: bool = True
+    """Event-synchronize on this launch's completion before returning.
+
+    Mirrors CK Tile's ``launch_kernel`` contract: every launch is
+    paired with a stream-bound synchronization primitive
+    (``hipEventSynchronize`` here, ``hipStreamSynchronize`` there) so
+    the host never observes a half-finished kernel and tensors /
+    args buffers can be released immediately on return.
+
+    Why default ``True``: on ROCm, ``torch.cuda.synchronize()`` does
+    not reliably drain raw ``hipModuleLaunchKernel`` work queued
+    through ctypes, so a fire-and-forget launch followed by a torch
+    sync is unsafe (the host may observe an output buffer that the
+    kernel has not yet written to). A per-launch HIP event is the
+    minimum safe primitive.
+
+    Set ``fence=False`` only when the caller wraps multiple launches
+    in an outer event-timed region (e.g. :func:`time_launches` or a
+    multi-stage pipeline that ends with its own
+    :meth:`Runtime.wait_stream`). The :func:`no_fence` context
+    manager forces this off for any nested launcher call regardless
+    of the per-call value.
+    """
 
 
 @dataclass(frozen=True)
@@ -189,23 +258,45 @@ def _runtime() -> Runtime:
 def release_retained_for_stream(stream: int = 0) -> None:
     """Drop retained args/tensors for a stream after external synchronization.
 
-    Use this after `torch.cuda.synchronize()` or an equivalent event/stream
-    synchronization that guarantees all raw HIP launches on the stream have
-    completed. It mirrors CK Tile's RAII cleanup point: the owner keeps
-    launch resources alive until the stream is known done, then releases
-    them explicitly.
+    Use this when the caller has already synchronized the stream via
+    some other mechanism (an external HIP event sync,
+    ``hipStreamSynchronize``, etc.) and only needs the bucket
+    bookkeeping to be cleared. For the common case of "wait and then
+    release", prefer :func:`wait_stream_and_release` which does both
+    in one event-based call.
     """
     _runtime().release_pending_for_stream(resolve_stream(stream))
+
+
+def wait_stream_and_release(stream: int = 0) -> None:
+    """Event-synchronize on ``stream`` and release all retained refs.
+
+    The CK Tile-shaped per-stream drain: equivalent to
+    ``hipEventSynchronize`` on the stream's most-recent launch
+    event, followed by destroying every event in the stream's
+    bucket. This is the *correct* primitive on ROCm for raw HIP
+    launches queued through ctypes -- ``torch.cuda.synchronize()``
+    does not reliably drain that queue.
+
+    Use this when isolating a single stream's work in a benchmark
+    harness or between dispatcher lanes; use
+    :func:`synchronize_and_release` for whole-device drain.
+    """
+    _runtime().wait_stream(resolve_stream(stream))
 
 
 def synchronize_and_release(stream: int = 0) -> None:
     """Synchronize the device and release all retained launch resources.
 
-    This is intentionally device-wide (`Runtime.sync`) because it must also
-    be safe for callers using the legacy HIP null stream or multiple torch
-    streams. Benchmark harnesses should call this between independent lanes
-    (e.g. Triton 2D -> CK 2D -> Triton 3D -> CK 3D) when they want strong
-    isolation rather than maximum overlap.
+    Device-wide drain (``hipDeviceSynchronize`` + ref release). Safe
+    when the caller is on the legacy HIP null stream or has work
+    spread across multiple streams. Benchmark harnesses call this
+    between independent lanes (e.g. Triton 2D -> CK 2D -> Triton 3D
+    -> CK 3D) when they want strong isolation rather than maximum
+    overlap.
+
+    Prefer :func:`wait_stream_and_release` when you know the target
+    stream -- a per-stream event wait avoids stalling unrelated work.
     """
     _runtime().sync()
 
@@ -288,18 +379,36 @@ class KernelLauncher:
         rt = _runtime()
         args = pack_args(self._signature, values)
         stream = resolve_stream(config.stream)
-        rt.launch(
+        fence = _resolved_fence(config.fence)
+
+        # ``Runtime.launch`` always records a completion event when
+        # ``record_event=True``; we record an event whenever the caller
+        # is going to fence on it (skip the event-create cost otherwise).
+        evt = rt.launch(
             self._fn,
             config.grid,
             config.block,
             args,
             shared_bytes=config.shared_bytes,
             stream=stream,
+            record_event=fence,
         )
-        # Keep all tensor-like objects in `values` alive until the stream
-        # is complete. This covers inputs/outputs/workspaces even when a
-        # caller passes a temporary tensor expression by accident.
+        # Tie tensor-arg lifetime to the same launch entry. Tensors are
+        # appended into the bucket entry that holds args_buf + event, so
+        # they share the launch's completion lifecycle and are released
+        # together (either by ``_reap_completed`` on the next launch,
+        # by ``wait_stream`` on the next sync, or by ``sync`` device-wide).
         rt.retain_for_stream(stream, *values.values())
+
+        if fence and evt is not None:
+            # CK Tile ``launch_kernel`` parity: synchronously wait on the
+            # completion event so the host never observes a half-written
+            # output buffer. Destroy the event and drop the bucket entry
+            # we just held -- the launch is fully done by the time we
+            # return.
+            evt.synchronize()
+            rt._reap_completed(stream)
+
         return LaunchSummary(launches=1)
 
     def __repr__(self) -> str:
@@ -351,16 +460,29 @@ class PipelineLauncher:
                 f"but pipeline has {len(self._stages)} stages"
             )
         resolved_stream = resolve_stream(stream)
+        n_stages = len(self._stages)
         total = 0
-        for stage, vals, cfg in zip(self._stages, values_per_stage, configs_per_stage):
+        for idx, (stage, vals, cfg) in enumerate(
+            zip(self._stages, values_per_stage, configs_per_stage)
+        ):
             # Force the same stream across all stages -- this is the
             # whole point of a pipeline launcher; we override the
             # per-stage config's stream field.
+            #
+            # Same-stream FIFO ordering already guarantees stage N+1
+            # observes stage N's writes, so intermediate stages do NOT
+            # need to fence -- a per-stage ``hipEventSynchronize`` would
+            # serialize the host on every stage and defeat the whole
+            # purpose of chaining. Only the LAST stage honors
+            # ``cfg.fence`` so the host sees a fully-finished pipeline
+            # on return.
+            is_last = idx == n_stages - 1
             stage_cfg = LaunchConfig(
                 stream=resolved_stream,
                 grid=cfg.grid,
                 block=cfg.block,
                 shared_bytes=cfg.shared_bytes,
+                fence=bool(cfg.fence) and is_last,
             )
             s = stage(vals, config=stage_cfg)
             total += s.launches
@@ -541,26 +663,29 @@ def time_launches(
     capture whatever :class:`KernelLauncher` or :class:`PipelineLauncher`
     you want to measure and just call it.
 
-    Replaces both ``run_manifest._launch_timed`` (which built its own
-    event scaffolding around `rt.launch`) and the timing branch of
-    ``launch_torch_kernel`` (which also reloaded the module per call
-    on top of timing -- a separate bug). Keeping the timer out of the
-    launcher lets the launcher stay overhead-free for production code
-    paths that aren't benchmarking.
+    Internally runs ``fn`` under :func:`no_fence` so each launcher
+    call inside the timed iteration stays fire-and-forget; the two
+    outer events record start/end and the trailing
+    ``hipEventSynchronize`` is the single drain point that bounds
+    the elapsed-time measurement. After timing, the bucket retained
+    for ``stream`` is reaped via :meth:`Runtime.wait_stream`.
     """
     rt = _runtime()
-    for _ in range(int(warmup)):
-        fn()
-    rt.sync()
     resolved = resolve_stream(stream)
-    e0 = rt.event()
-    e1 = rt.event()
-    e0.record(stream=resolved)
-    for _ in range(int(iters)):
-        fn()
-    e1.record(stream=resolved)
-    e1.synchronize()
+    with no_fence():
+        for _ in range(int(warmup)):
+            fn()
+        rt.sync()
+        e0 = rt.event()
+        e1 = rt.event()
+        e0.record(stream=resolved)
+        for _ in range(int(iters)):
+            fn()
+        e1.record(stream=resolved)
+        e1.synchronize()
     ms = e0.elapsed_to(e1) / int(iters)
     e0.destroy()
     e1.destroy()
+    # Drain the per-launch events accumulated during the timed loop.
+    rt.wait_stream(resolved)
     return ms
