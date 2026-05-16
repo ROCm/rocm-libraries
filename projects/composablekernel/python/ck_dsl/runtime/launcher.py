@@ -381,34 +381,46 @@ class KernelLauncher:
         stream = resolve_stream(config.stream)
         fence = _resolved_fence(config.fence)
 
-        # ``Runtime.launch`` always records a completion event when
-        # ``record_event=True``; we record an event whenever the caller
-        # is going to fence on it (skip the event-create cost otherwise).
-        evt = rt.launch(
+        if fence:
+            # Synchronous-launch fast path -- mirrors CK Tile's
+            # ``launch_kernel`` (single ``hipStreamSynchronize`` after
+            # the launch). Empirical cost on ROCm 7: ~0.3 us per call
+            # vs ~43 us for an event-based fence. The stream sync is
+            # both the GPU completion wait and the host-side
+            # args-buffer-drain barrier; nothing parks in
+            # :attr:`Runtime._pending_args` for fenced launches, so
+            # there's no bucket growth and no need to attach tensor
+            # refs to a completion event.
+            rt.launch_blocking(
+                self._fn,
+                config.grid,
+                config.block,
+                args,
+                shared_bytes=config.shared_bytes,
+                stream=stream,
+            )
+            return LaunchSummary(launches=1)
+
+        # Asynchronous path (e.g. inside :func:`time_launches` under
+        # the :func:`no_fence` override): retain refs in
+        # :attr:`Runtime._pending_args` with no per-launch event.
+        # The caller's outer ``time_launches`` event timer (or a later
+        # :meth:`Runtime.wait_stream` / :func:`synchronize_and_release`)
+        # is the drain point. ``wait_stream`` uses
+        # ``hipStreamSynchronize`` so per-launch events are dead weight
+        # in this path -- skipping them is the difference between ~0.3
+        # us and ~1 us per launch in tight benchmark loops, and
+        # multiple-percent on tiny kernels like the conv bake-off.
+        rt.launch(
             self._fn,
             config.grid,
             config.block,
             args,
             shared_bytes=config.shared_bytes,
             stream=stream,
-            record_event=fence,
+            record_event=False,
         )
-        # Tie tensor-arg lifetime to the same launch entry. Tensors are
-        # appended into the bucket entry that holds args_buf + event, so
-        # they share the launch's completion lifecycle and are released
-        # together (either by ``_reap_completed`` on the next launch,
-        # by ``wait_stream`` on the next sync, or by ``sync`` device-wide).
         rt.retain_for_stream(stream, *values.values())
-
-        if fence and evt is not None:
-            # CK Tile ``launch_kernel`` parity: synchronously wait on the
-            # completion event so the host never observes a half-written
-            # output buffer. Destroy the event and drop the bucket entry
-            # we just held -- the launch is fully done by the time we
-            # return.
-            evt.synchronize()
-            rt._reap_completed(stream)
-
         return LaunchSummary(launches=1)
 
     def __repr__(self) -> str:

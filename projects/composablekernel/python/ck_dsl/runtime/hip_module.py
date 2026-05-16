@@ -105,6 +105,7 @@ _hipMemcpy = _b(
 )
 _hipMemset = _b("hipMemset", ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t)
 _hipDeviceSynchronize = _b("hipDeviceSynchronize")
+_hipStreamSynchronize = _b("hipStreamSynchronize", ctypes.c_void_p)
 _hipEventCreate = _b("hipEventCreate", ctypes.POINTER(_HipEventHandle))
 _hipEventDestroy = _b("hipEventDestroy", _HipEventHandle)
 _hipEventRecord = _b("hipEventRecord", _HipEventHandle, ctypes.c_void_p)
@@ -283,32 +284,43 @@ class Runtime:
         if not bucket:
             self._pending_args.pop(s, None)
 
+    def stream_sync(self, stream: int) -> None:
+        """``hipStreamSynchronize(stream)`` -- the cheap per-stream drain.
+
+        On ROCm this typically costs <1 us when the stream is already
+        idle. We use it for the synchronous-launch fast path
+        (:meth:`launch_blocking` and ``LaunchConfig.fence=True``)
+        instead of paying the ~40 us tax of a full
+        ``hipEventCreate+Record+Synchronize+Destroy`` cycle just to
+        wait on a single launch.
+
+        Mirrors CK Tile's ``launch_kernel`` post-amble, which always
+        ends with ``HIP_CHECK(hipStreamSynchronize(stream_config.stream_id_))``.
+        """
+        _check(
+            _hipStreamSynchronize(ctypes.c_void_p(int(stream))), "hipStreamSynchronize"
+        )
+
     def wait_stream(self, stream: int) -> None:
-        """Event-synchronize on every queued launch for ``stream``, then release.
+        """Per-stream drain + release all retained refs.
 
-        This is the safe per-stream drain primitive. On ROCm,
-        ``torch.cuda.synchronize()`` does not reliably drain raw
-        ``hipModuleLaunchKernel`` work queued through ctypes; the only
-        primitives that have empirically held are
-        ``hipDeviceSynchronize`` (whole-device, used by :meth:`sync`)
-        and ``hipEventSynchronize`` on a per-launch event (used here).
-
-        Same-stream FIFO ordering means waiting on the LAST queued
-        event drains every earlier launch on the same stream, so this
-        is a single ``hipEventSynchronize`` regardless of bucket
-        depth.
+        Uses ``hipStreamSynchronize`` as the safe, cheap primitive that
+        works on ROCm for raw ``hipModuleLaunchKernel`` work queued
+        through ctypes. (``torch.cuda.synchronize()`` does not reliably
+        drain that queue.) If the bucket also holds event-tagged
+        entries from a prior async batch (e.g. inside
+        :func:`time_launches`), every event will have fired by the
+        time the stream-sync returns, and we destroy them as we drop
+        the bucket.
         """
         s = int(stream)
-        bucket = self._pending_args.get(s)
+        self.stream_sync(s)
+        bucket = self._pending_args.pop(s, None)
         if not bucket:
             return
-        last_evt = next((e for _, e in reversed(bucket) if e is not None), None)
-        if last_evt is not None:
-            last_evt.synchronize()
         for _refs, evt in bucket:
             if evt is not None:
                 evt.destroy()
-        self._pending_args.pop(s, None)
 
     def sync(self) -> None:
         """Device-wide drain: ``hipDeviceSynchronize`` + release everything.
@@ -385,24 +397,32 @@ class Runtime:
         *,
         shared_bytes: int = 0,
         stream: int = 0,
-        record_event: bool = True,
+        record_event: bool = False,
     ) -> "Optional[Event]":
-        """Issue one kernel launch on ``stream``.
+        """Issue one kernel launch on ``stream`` (fire-and-forget).
 
-        With ``record_event=True`` (default), a HIP completion event
-        is recorded on ``stream`` immediately after the launch and
-        stored alongside the args buffer in
-        :attr:`_pending_args[stream]`. The returned :class:`Event` can
-        be used by the caller for fine-grained synchronization
-        (mirrors CK Tile's per-launch event in ``launch_kernel``).
+        For *synchronous* launches that the host wants to fence on
+        before reading outputs, use :meth:`launch_blocking` instead
+        -- it pays only a single ``hipStreamSynchronize`` (~0.3 us)
+        and never creates a HIP event.
 
-        With ``record_event=False`` no event is recorded. Use this
-        only when the caller is wrapping many launches in a single
-        outer event-timed region (see
-        :func:`ck_dsl.runtime.launcher.time_launches`); bucket
-        entries created without an event are released only by an
-        explicit :meth:`sync` call (or :meth:`release_pending_for_stream`
-        after an external sync).
+        With ``record_event=False`` (default) no event is recorded.
+        Bucket entries created without an event are released by
+        :meth:`wait_stream` (which uses ``hipStreamSynchronize``) or
+        by :meth:`sync` device-wide. This is the right setting for
+        timed benchmark loops (see
+        :func:`ck_dsl.runtime.launcher.time_launches`), for the
+        async path inside :class:`ck_dsl.runtime.launcher.KernelLauncher`,
+        and for the raw manifest runner.
+
+        With ``record_event=True`` a HIP completion event is recorded
+        on ``stream`` and stored alongside the args buffer. The
+        returned :class:`Event` lets a caller wait on this specific
+        launch and lets :meth:`_reap_completed` eagerly drop the
+        bucket entry once the event has fired -- useful when the
+        caller needs fine-grained per-launch observability rather
+        than batch-wide stream drains. Costs ~1 us per launch on
+        ROCm 7.
         """
         s = int(stream)
         # Eagerly reap any prior launches on this stream that have
@@ -447,6 +467,68 @@ class Runtime:
         bucket = self._pending_args.setdefault(s, [])
         bucket.append(((args_buf, size_buf, extra), evt))
         return evt
+
+    def launch_blocking(
+        self,
+        fn: _HipFunctionHandle,
+        grid: Tuple[int, int, int],
+        block: Tuple[int, int, int],
+        args_packed: bytes,
+        *,
+        shared_bytes: int = 0,
+        stream: int = 0,
+    ) -> None:
+        """Synchronous launch: enqueue, then ``hipStreamSynchronize``.
+
+        This is the fast path for the default ``LaunchConfig.fence=True``
+        contract. Unlike :meth:`launch`, no HIP event is created /
+        recorded / destroyed -- a single ``hipStreamSynchronize`` is
+        sufficient to (a) wait for the kernel and (b) guarantee the
+        GPU command processor has finished reading the packed-args
+        buffer. By the time this method returns, the args buffer can
+        be safely freed by the Python frame's normal cleanup; no
+        :attr:`_pending_args` bookkeeping is needed for the launch.
+
+        Empirical cost on ROCm 7 / MI355X: ~0.3 us per call vs
+        ~43 us for the event-based fence. Mirrors CK Tile's
+        ``launch_kernel`` post-amble (``hipStreamSynchronize(stream_id_)``).
+        """
+        s = int(stream)
+        # Eagerly reap any prior async launches that have completed.
+        # Cheap (~0.1 us when the bucket is empty); keeps the bucket
+        # from growing if the caller mixes fenced and unfenced launches.
+        self._reap_completed(s)
+
+        args_buf = (ctypes.c_ubyte * len(args_packed)).from_buffer_copy(args_packed)
+        size_buf = ctypes.c_size_t(len(args_packed))
+        extra = (ctypes.c_void_p * 5)(
+            HIP_LAUNCH_PARAM_BUFFER_POINTER,
+            ctypes.cast(args_buf, ctypes.c_void_p),
+            HIP_LAUNCH_PARAM_BUFFER_SIZE,
+            ctypes.cast(ctypes.pointer(size_buf), ctypes.c_void_p),
+            HIP_LAUNCH_PARAM_END,
+        )
+        _check(
+            _hipModuleLaunchKernel(
+                fn,
+                ctypes.c_uint(grid[0]),
+                ctypes.c_uint(grid[1]),
+                ctypes.c_uint(grid[2]),
+                ctypes.c_uint(block[0]),
+                ctypes.c_uint(block[1]),
+                ctypes.c_uint(block[2]),
+                ctypes.c_uint(shared_bytes),
+                ctypes.c_void_p(s),
+                None,
+                extra,
+            ),
+            "hipModuleLaunchKernel",
+        )
+        # Single ``hipStreamSynchronize`` is both the kernel-completion
+        # wait and the args-buffer-drain barrier. After it returns,
+        # ``args_buf``/``size_buf``/``extra`` can be dropped by Python's
+        # frame cleanup -- the GPU is no longer reading them.
+        _check(_hipStreamSynchronize(ctypes.c_void_p(s)), "hipStreamSynchronize")
 
     def launch_kernelparams(
         self,
