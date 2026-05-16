@@ -2065,7 +2065,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             if(arg.bias_vector)
-        {
+            {
                 if(arg.bias_source == hipblaslt_bias_source::a
                    || arg.bias_source == hipblaslt_bias_source::d)
                     size_bias[i] = M[i];
@@ -2074,7 +2074,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                 if(arg.bias_stride > 0)
                 {
-                    //std::cout<< "Using bias stride of " << arg.bias_stride << " for batch count of " << num_batches[i] << std::endl;
+                    //hipblaslt_cout<< "Using bias stride of " << arg.bias_stride << " for batch count of " << num_batches[i] << std::endl;
                     size_bias[i] = arg.bias_stride * num_batches[i];
                 }
             }
@@ -4816,7 +4816,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                               : ((*hEInst)[gemmIdx].as<char>() + pos * realDataTypeSize(Taux));
                     auto  applyBias = arg.gradient ? false : arg.bias_vector;
                     void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
-                    if(arg.bias_stride > 0 && hBias_buf != nullptr)
+                    if(applyBias && arg.bias_stride > 0)
                     {
                         hBias_buf = (char*)hBias_buf + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
                     }
@@ -4898,13 +4898,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                         epilogue_func(epilogue_param, hBias_buf, Tbias, false, To, Talpha);
                         break;
                     }
-                    auto *hBias_gold_buf = hBias_gold[gemmIdx].buf();
-                    if(arg.bias_stride > 0 && hBias_gold_buf != nullptr)
-                    {
-                        hBias_gold_buf = (char*)hBias_gold_buf + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
-                    }
+
                     if(arg.gradient && arg.bias_vector && batchIdx == num_batches[gemmIdx] - 1)
                     {
+                        auto *hBias_gold_buf = hBias_gold[gemmIdx].buf();
+                        if(arg.bias_stride > 0 && hBias_gold_buf != nullptr)
+                        {
+                            hBias_gold_buf = (char*)hBias_gold_buf + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
+                        }
                         if(arg.bias_source == hipblaslt_bias_source::d)
                         {
                             reduction_func<false, float>(hBias_gold_epl[gemmIdx].as<char>()
