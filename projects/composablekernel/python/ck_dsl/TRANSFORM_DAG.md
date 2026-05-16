@@ -46,11 +46,17 @@ And the four transform constructors:
   - `pass_through(name, into=None)` — identity rename
   - `pad(name, lo, hi)` — adds a bounds check to a coord's validity
     predicate (does not change the coord's value)
+  - `pad_dynamic(name, lo=None, hi=None)` — same validity-only
+    transform as `pad`, but `lo` / `hi` may be runtime SSA values
+    (for example `cur_batch_q_len` in attention)
   - `unmerge(upper, into, dims)` — split a flat coord into N coords
   - `embed(upper, into, strides, offset, lo, hi)` — affine map with
     bounds check
   - `merge(upper, into, dims)` — flatten N coords into one (the
     inverse of unmerge)
+  - `indirect(upper, into, table, base)` — consume a logical coord
+    and produce a lower coord by loading an i32 table entry. This is
+    the paged-KV / grouped-indirection building block.
 
 ## Walkthrough 1: padded NHWC input
 
@@ -218,6 +224,93 @@ The kernel body never writes `(m / (Ho*Wo)) * Hi*Wi*C + (m / Wo) % Ho
 computation, and editing the conv shape (e.g., stride 2 or dilated)
 changes only the descriptor, not the K-loop body.
 
+## Walkthrough 5: paged-KV attention indirection
+
+Paged attention has one piece that plain affine transforms cannot
+express: a logical KV tile maps to a physical cache block through a
+page table:
+
+```text
+physical_block = block_tables[seq_idx * block_table_stride + tile_idx]
+offset_bytes   = physical_block * stride_block
+               + token_in_block * stride_token
+               + kv_head * stride_head
+               + dim * elem_bytes
+```
+
+The `indirect` transform makes the table lookup part of the descriptor
+chain, and `unmerge` splits a cooperative per-lane `linear_half`
+counter into `(token, dim)`:
+
+```python
+from ck_dsl.transforms import TensorDescriptor, indirect, unmerge
+
+seq_base = b.mul(seq_idx, block_table_stride)
+
+kv_desc = TensorDescriptor.naive(
+    "paged_kv_bytes",
+    lengths=[1 << 24, block_size, num_kv_heads, head_size],
+    # These are byte strides because async DMA takes byte offsets.
+    strides=[
+        block_size * num_kv_heads * head_size * 2,
+        num_kv_heads * head_size * 2,
+        head_size * 2,
+        2,
+    ],
+    coord_names=("physical_block", "token", "kv_head", "dim"),
+).transform(
+    indirect("tile_idx", into="physical_block",
+             table=block_tables, base=seq_base),
+    unmerge("linear_half", into=("token", "dim"),
+            dims=(block_size, head_size)),
+)
+
+voff, valid = kv_desc.offset(
+    b,
+    tile_idx=kv_tile_idx,
+    linear_half=linear_half,
+    kv_head=kv_head_idx,
+)
+```
+
+This is now used by the tiled 2D and 3D unified-attention kernels for
+K/V async DMA. The kernel body no longer writes a separate
+`block_base_from_table(...) + linear_half_voff(...)` expression; the
+descriptor emits the page-table load, the unmerge arithmetic, and the
+byte-stride offset as one DAG evaluation.
+
+## Walkthrough 6: runtime bounds with `pad_dynamic`
+
+Attention row masks often depend on runtime values:
+
+```text
+0 <= query_pos < cur_batch_q_len
+0 <= query_head < num_query_heads
+```
+
+When a bound is an SSA value rather than an `int`, use
+`pad_dynamic`:
+
+```python
+from ck_dsl.transforms import TensorDescriptor, pad_dynamic
+
+q_desc = TensorDescriptor.naive(
+    "Q",
+    lengths=[1 << 30, num_query_heads, head_size],
+    coord_names=("token", "head", "dim"),
+).transform(
+    pad_dynamic("token", lo=cu_q_start, hi=cu_q_stop),
+    pad_dynamic("head", lo=0, hi=b.const_i32(num_query_heads)),
+)
+
+q_off, q_valid = q_desc.offset(
+    b, token=q_token, head=q_head, dim=head_dim,
+)
+```
+
+As with compile-time `pad`, the coord's value is unchanged and the
+validity predicate is AND-ed into the descriptor's final `valid`.
+
 ## How `.offset()` is evaluated
 
 Internally, `TensorDescriptor.offset(b, **coords)` walks the chain
@@ -300,13 +393,17 @@ kernel's caller can route the load to a safe sentinel address (the
 | `.transform(t1, t2, ...)`           | `transform_tensor_descriptor(...)`         |
 | `pass_through(...)`                 | `PassThroughTransform`                     |
 | `pad(...)`                          | `PadTransform` (validity-only variant)     |
+| `pad_dynamic(...)`                  | `PadTransform` with runtime bounds          |
 | `merge([...], into=...)`            | `MergeTransform`                           |
 | `unmerge(..., into=[...])`          | `UnmergeTransform`                         |
 | `embed([...], into=..., strides=[...], offset=..., lo=, hi=)` | `EmbedTransform` (affine + bounds) |
+| `indirect(..., table=..., base=...)` | paged/gather descriptor lookup (Python extension over the current subset) |
 | `desc.offset(b, ...) -> (off, valid)` | `tensor_descriptor::calculate_offset()` |
 
 Anything that can be expressed via `transform_tensor_descriptor` in
 C++ can be expressed via `.transform()` here. The Python surface is
-strictly a subset (no fp16-stride descriptors, no register-tile
-descriptors yet) but covers every shape we've needed for the
-GEMM / convolution / attention examples in this repo.
+strictly a subset (no register-tile descriptors yet), but it now
+covers the high-value non-affine cases used in this repo: implicit
+convolution (`unmerge` + `embed` + `pad`), grouped/direct convolution
+H/W validity (`pad`), and paged attention (`indirect` + `unmerge` plus
+runtime validity through `pad_dynamic`).

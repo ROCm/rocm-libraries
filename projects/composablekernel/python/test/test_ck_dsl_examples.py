@@ -129,6 +129,16 @@ def _parse_tflops(stdout: str) -> Optional[float]:
     return None
 
 
+def _parse_gbps(stdout: str) -> Optional[float]:
+    for line in stdout.splitlines():
+        if line.startswith("Perf:"):
+            for tok in line.split(","):
+                tok = tok.strip()
+                if tok.endswith(" GB/s"):
+                    return float(tok.removesuffix(" GB/s").strip())
+    return None
+
+
 def _all_examples() -> list[Path]:
     if not DSL_EXAMPLES.exists():
         return []
@@ -175,37 +185,46 @@ class TestCkDslExamples(unittest.TestCase):
                     # the launcher's `bad=0/N` exit (1e-2 tolerance vs
                     # fp32 CPU ref).
                     kind = expected.get("kind", manifest.get("kind", "gemm_fp16"))
-                    if kind == "gemm_fp16":
+                    if kind in ("gemm_fp16", "batched_gemm_fp16"):
                         # Correctness on small shape.
+                        verify_shape = "256,256,256" if kind == "gemm_fp16" else "0,0,0"
                         out_verify = _run_launcher(
                             launcher,
                             hs,
                             out / "manifest.json",
-                            shape="256,256,256",
+                            shape=verify_shape,
                             verify=True,
                         )
                         self.assertIn(
                             "max_abs_diff=0",
                             out_verify,
-                            f"{ex.name}: not bit-exact on 256^3",
+                            f"{ex.name}: not bit-exact",
                         )
                         # Performance gate on production shape.
-                        shape = expected["shapes"][0]
+                        if kind == "gemm_fp16":
+                            shape = expected["shapes"][0]
+                            perf_shape = f"{shape['M']},{shape['N']},{shape['K']}"
+                        else:
+                            shape = None
+                            perf_shape = "0,0,0"
                         perf = _run_launcher(
                             launcher,
                             hs,
                             out / "manifest.json",
-                            shape=f"{shape['M']},{shape['N']},{shape['K']}",
+                            shape=perf_shape,
                             verify=False,
                         )
                         tflops = _parse_tflops(perf)
                         self.assertIsNotNone(tflops, f"{ex.name}: no TFLOPS line")
-                        lb = float(shape["tflops_lower_bound"])
+                        lb = (
+                            float(shape["tflops_lower_bound"])
+                            if shape is not None
+                            else float(expected.get("min_tflops", 0.0))
+                        )
                         self.assertGreaterEqual(
                             tflops,
                             lb,
-                            f"{ex.name}: {tflops:.2f} TFLOPS < lower bound {lb} "
-                            f"on {shape['M']}x{shape['N']}x{shape['K']}",
+                            f"{ex.name}: {tflops:.2f} TFLOPS < lower bound {lb}",
                         )
                     elif kind == "conv_fp16":
                         # Correctness: launcher verifies vs CPU ref and
@@ -239,6 +258,46 @@ class TestCkDslExamples(unittest.TestCase):
                                 lb,
                                 f"{ex.name}: median {tflops:.2f} TFLOPS < lower bound {lb}; "
                                 f"runs={tflops_runs}",
+                            )
+                    elif kind in {
+                        "elementwise_fp16",
+                        "reduce_fp16",
+                        "layernorm_fp16",
+                        "rmsnorm_fp16",
+                        "transpose_fp16",
+                    }:
+                        # Generic simple-op kernels use their manifest's
+                        # default shape and the Python-native runner's
+                        # numpy reference. The verify gate is authoritative:
+                        # reaching here means max_abs/bad is within that
+                        # op family's tolerance.
+                        _run_launcher(
+                            launcher,
+                            hs,
+                            out / "manifest.json",
+                            shape="0,0,0",
+                            verify=True,
+                        )
+                        gbps_runs = []
+                        for _ in range(3):
+                            perf = _run_launcher(
+                                launcher,
+                                hs,
+                                out / "manifest.json",
+                                shape="0,0,0",
+                                verify=False,
+                            )
+                            gbps = _parse_gbps(perf)
+                            self.assertIsNotNone(gbps, f"{ex.name}: no GB/s line")
+                            gbps_runs.append(gbps)
+                        if "min_gbps" in expected:
+                            lb = float(expected["min_gbps"])
+                            med = statistics.median(gbps_runs)
+                            self.assertGreaterEqual(
+                                med,
+                                lb,
+                                f"{ex.name}: median {med:.2f} GB/s < lower bound {lb}; "
+                                f"runs={gbps_runs}",
                             )
                     else:
                         self.fail(f"{ex.name}: unknown kind {kind!r}")

@@ -1,0 +1,5 @@
+{
+  "kind": "batched_gemm_fp16",
+  "min_tflops": 150.0,
+  "notes": "Batched GEMM RCR, default shape [B=8, M=N=K=1024]. Lower bound is conservative because this path is launch/grid overhead sensitive relative to the large single-GEMM example."
+}

@@ -36,8 +36,8 @@ helper Z".
 | §4.1 GEMM | `instances/gemm_universal.py` (full dispatcher schema) |
 | §4.2 Convolution as implicit GEMM | `instances/conv_implicit_gemm.py` + `transforms.py` DAG |
 | §4.2 Convolution direct (streaming row) | `instances/conv_direct_grouped.py` (16c and 4c bake-off paths) |
-| §4.3 Attention | `instances/attention_unified.py` scalar semantics kernels + `helpers/attention.py`; optimized MFMA/tiled path still required for performance parity |
-| §4.4 Reductions | not yet implemented |
+| §4.3 Attention | `instances/attention_unified.py` scalar semantics + `attention_tiled_{2d,3d}.py` MFMA kernels; paged-KV addressing uses `transforms.indirect(...) + unmerge(...)` |
+| §4.4 Reductions | `instances/reduce.py`, `layernorm2d.py`, `rmsnorm2d.py`; `block_lds_reduce` + sweep helpers |
 
 ## §5 Work decomposition
 
@@ -56,7 +56,7 @@ helper Z".
 | Runbook | DSL primitive |
 |---|---|
 | §6.1 Buffer rsrc OOB clamp | `buffer_rsrc(ptr, num_bytes)` IR op (DW3 = 0x00027000); verify with `analyze_llvm_ir` / `analyze_hsaco` |
-| §6.1 Tail-safe loads via sentinel offset | `select(valid, real_off, oob_sentinel)` pattern |
+| §6.1 Tail-safe loads via sentinel offset | `select(valid, real_off, oob_sentinel)` pattern, usually with `TensorDescriptor.offset(...)->valid` from `pad` / `pad_dynamic` |
 | §6.2 Wide vector loads/stores | `buffer_load_vN_f16`, `buffer_store_vN_f16`, `global_store_vN_f16` (N ∈ {1,2,4} dwords) |
 | §6.3 Async DRAM→LDS | `AsyncTileLoader` (wraps `async_buffer_load_lds_addr` with per-wave LDS base) |
 | §6.3 LDS bank-conflict avoidance | `ImplicitGemmConvSpec.lds_k_pad` (default `+8` sync, `0` async) plus manual consumer-side read swizzle when async requires packed LDS |
@@ -70,7 +70,7 @@ helper Z".
 | §7.2 K-pack atoms (wider K per atom) | `f16_16x16x32` (vs 16x16x16), `f16_32x32x16` (vs 32x32x8) |
 | §7.3 Scheduler hints | `sched_group_barrier(mask, count, sync_id)`, `s_setprio`, `s_waitcnt` |
 | §7.3 Pipeline interleave | `SchedulePolicy.for_pipeline(...)` emits canonical DS_READ/MFMA group hints |
-| Attention online softmax math | `OnlineSoftmaxState`, `exp2`, `rcp`, `fmax`, vector reductions |
+| Attention online softmax math | `OnlineSoftmaxState`, `warp_xor_reduce_*`, `apply_softcap_log2`, `exp2`, `rcp`, `fmax` |
 
 ## §8 Pipelining
 
@@ -125,7 +125,7 @@ the static analysis.
 | Runbook | DSL primitive |
 |---|---|
 | CPU reference | `ck_dsl.run_manifest` (NumPy fp32 accum; grouped conv aware); legacy C++ launcher remains optional |
-| Tolerance | gemm: bit-exact on rounded inputs; conv: `max_abs < 1e-2` (fp16 sum noise) |
+| Tolerance | gemm: bit-exact on rounded inputs; conv: `max_abs < 1e-2`; norm/reduce/pointwise/transpose use op-specific NumPy references in `run_manifest` |
 | Bit-exact comparison | `python -m ck_dsl.run_manifest ... --verify` (also wrapped by `test_ck_dsl_examples.py`) |
 | Cross-check vs torch | conv reference matches `torch.nn.functional.conv2d` semantics |
 
@@ -161,12 +161,9 @@ Direct grouped conv, `N=32, H=W=200, R=S=3, pad=1`, on MI300X / gfx950:
 | 4c (`groups=64, cpg=kpg=4`) | baseline (4 scalar `buffer_store_short` per lane) | ~44 |
 | 4c | + vec2-dword epilogue (1 store/lane, 4 halves fused) | **~48** |
 
-Each lever applied through the new helpers: `MfmaAtom.f16_16x16x32` /
-`f16_4x4x4`, `WarpGrid` for the lane decomposition, the kernel's
-own per-(R, S) coordinate computation (the direct-conv addressing
-isn't shaped like a (M, K) tile so the loaders don't apply directly
-here), and a manually-spelled wide vector epilogue via
-`buffer_store_vN_f16(..., dwords=2)`.
+Each lever applied through the helpers: `MfmaAtom.f16_16x16x32` /
+`f16_4x4x4`, `TensorDescriptor` / `pad` for H/W-valid input addressing,
+and wide vector epilogues via `buffer_store_vN_f16(..., dwords=2)`.
 
 This is the canonical "pull every lever; measure each" example for
 the runbook's optimisation methodology — see
@@ -174,3 +171,23 @@ the runbook's optimisation methodology — see
 `09_bake_off_direct_conv_16c/expected.json`, and
 `10_bake_off_direct_conv_4c/expected.json` for the gates, and
 `ck/dsl/ck_dsl_current_results.md` for the full results.
+
+## CK Tile parity examples
+
+The `example/ck_tile/dsl/` tree now contains Python-generated CK DSL
+counterparts for the CK Tile examples that already have DSL instance
+builders:
+
+| CK Tile example | CK DSL example | Backing instance |
+|---|---|---|
+| `02_layernorm2d` | `dsl/02_layernorm2d` | `instances/layernorm2d.py` |
+| `05_reduce` | `dsl/05_reduce` | `instances/reduce.py` |
+| `10_rmsnorm2d` | `dsl/10_rmsnorm2d` | `instances/rmsnorm2d.py` |
+| `16_batched_gemm` | `dsl/16_batched_gemm` | `instances/batched_gemm.py` |
+| `21_elementwise` | `dsl/21_elementwise` | `instances/elementwise.py` |
+| `37_transpose` | `dsl/37_transpose` | `instances/transpose.py` |
+| universal GEMM / conv bake-offs | `dsl/06_*` through `dsl/10_*` | GEMM + conv instances |
+
+`python/test/test_ck_dsl_examples.py` discovers these `gen.py`
+wrappers, builds each HSACO, runs `ck_dsl.run_manifest --verify`, and
+optionally checks any declared TFLOPS/GB/s lower bounds.

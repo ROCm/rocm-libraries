@@ -55,11 +55,31 @@ from ..core.ir import (
     Type,
     Value,
 )
-from ..helpers.attention import PagedKvDescriptor
+from ..helpers.attention import (
+    apply_softcap_log2,
+    binary_search_seq_idx,
+    mfma_16x16x16_for_dtype,
+    mfma_16x16x32_for_dtype,
+    warp_xor_reduce_max,
+    warp_xor_reduce_sum,
+)
+from ..helpers.layouts import TransposeLdsReader
+from ..transforms import TensorDescriptor, indirect, unmerge
 
 
 MFMA_M = 16
 MFMA_N = 16
+
+
+# Backwards-compatible aliases. The 3D tiled kernel currently imports these
+# from this module; once that import is removed in a follow-up these aliases
+# can go away too. Promoted helpers live in ``ck_dsl.helpers.attention``.
+_apply_softcap = apply_softcap_log2
+_binary_search_seq_idx = binary_search_seq_idx
+_mfma_16x16x16 = mfma_16x16x16_for_dtype
+_mfma_16x16x32 = mfma_16x16x32_for_dtype
+_warp_xor_reduce_max = warp_xor_reduce_max
+_warp_xor_reduce_sum = warp_xor_reduce_sum
 
 
 @dataclass(frozen=True)
@@ -191,38 +211,6 @@ def supports_tiled_2d(
 
 
 # ---------------------------------------------------------------------------
-# Cross-lane reductions (CK `block_tile_reduce_xor_sync` pattern)
-# ---------------------------------------------------------------------------
-
-
-def _warp_xor_reduce_max(b: IRBuilder, v: Value, stages: int = 4) -> Value:
-    """Wave64 16-lane butterfly max reduction via `ds_bpermute`.
-
-    Reduces `v` across lanes whose `lane%16` differ but `lane/16` is fixed
-    (i.e. each group of 16 lanes that share the same MFMA `(m_row_group)`).
-    After `stages` (=4 for 16-lane reduction), every lane in a 16-lane group
-    holds the max of the 16 input values.
-
-    The lane-XOR pattern matches CK Tile's `block_tile_reduce_xor_sync`:
-    `addr = (lane ^ 2^k) << 2` for `k in 0..stages-1`.
-    """
-    cur = v
-    for k in range(stages):
-        remote = b.warp_shuffle_xor(cur, 1 << k)
-        cur = b.fmax(cur, remote)
-    return cur
-
-
-def _warp_xor_reduce_sum(b: IRBuilder, v: Value, stages: int = 4) -> Value:
-    """Wave64 16-lane butterfly sum reduction via `ds_bpermute`."""
-    cur = v
-    for k in range(stages):
-        remote = b.warp_shuffle_xor(cur, 1 << k)
-        cur = b.fadd(cur, remote)
-    return cur
-
-
-# ---------------------------------------------------------------------------
 # Builder
 # ---------------------------------------------------------------------------
 
@@ -345,8 +333,13 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         wave_row_base = b.mul(wave_id, b.const_i32(BLOCK_M_PER_WARP))
 
     # ---------------- seq lookup ----------------
-    seq_idx = _binary_search_seq_idx(
-        b, cu_q, q_block_global_idx, num_seqs_p, BLOCK_Q, spec.binary_search_iters
+    seq_idx = binary_search_seq_idx(
+        b,
+        cu_q,
+        q_block_global_idx,
+        num_seqs_p,
+        block_q=BLOCK_Q,
+        iterations=spec.binary_search_iters,
     )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
@@ -375,23 +368,12 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     Acc_lds = b.smem_alloc(F32, [BLOCK_M, HD], name_hint="Aclds")
 
     # ---- CK Tile `TransposeLDSLayout<M=16, K=*, B=1>` lane formulas ----
-    # See `composablekernel/include/ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp`.
-    # For M=16, K_L = K / (64/M) = K/4. read = 0..K_L/4-1.
-    #
-    #   row(lane, read) = (lane/16)*K_L + read*4 + (lane/4)%4
-    #   col(lane)       = (lane%4) * 4
-    #
-    # Each lane reads 4 consecutive elements at V_lds[buf, k_iter*K + row,
-    # n_atom*16 + col]; hardware transposes them so lane (n=l%16, k_chunk=l/16)
-    # ends up with the MFMA B operand `B[k_chunk*K_L + 0..K_L-1, n]`.
-    # These are per-warp lane formulas, so they must use the in-warp lane
-    # id (`lane`), not the global thread id.
-    tr_lane_div_16 = b.div(lane, b.const_i32(16))  # 0..3 (lane/16)
-    tr_lane_div_4_mod_4 = b.mod(
-        b.div(lane, b.const_i32(4)), b.const_i32(4)
-    )  # (lane/4)%4
-    tr_lane_mod_4 = b.mod(lane, b.const_i32(4))  # 0..3
-    tr_col_lane = b.mul(tr_lane_mod_4, b.const_i32(4))  # col(lane) = (lane%4)*4
+    # ``TransposeLdsReader`` materializes the per-lane row / col SSA
+    # values once and exposes ``row(k_offset, read)`` for use inside
+    # the PV K iteration loop. These are per-warp formulas, so the
+    # bind site uses the in-warp ``lane`` id (not the global thread id).
+    pv_tr_reader = TransposeLdsReader(K=PV_K_STEP, M=16).bind(b, lane)
+    tr_col_lane = pv_tr_reader.col
 
     # ---------------- constants ----------------
     neg_inf = b.const_f32(float("-inf"))
@@ -409,6 +391,19 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     # This gives 4 chunks/thread for HD=128 and 8 chunks/thread for HD=256.
     Q_VECS_PER_ROW = HD // 8
     Q_VECS_PER_THREAD = (BLOCK_M * Q_VECS_PER_ROW) // THREADS
+    # Coordinate transform for Q (and the symmetric output buffer):
+    # ``(token, head, dim)`` packed contiguously. The element-unit
+    # descriptor is reused below for the output store too.
+    q_desc = TensorDescriptor.naive(
+        "Q",
+        # The runtime extents (total_q, num_query_heads, head_size) are
+        # only used by the validity predicate (which we don't request
+        # here). Use generous compile-time bounds so the descriptor's
+        # row-major stride product matches the kernel's layout
+        # assumptions exactly.
+        lengths=[1 << 30, NUM_QH, HD],
+        coord_names=("token", "head", "dim"),
+    )
     for li in range(Q_VECS_PER_THREAD):
         q_vid = b.add(b.mul(b.const_i32(li), b.const_i32(THREADS)), tid)
         Q_row = b.div(q_vid, b.const_i32(Q_VECS_PER_ROW))
@@ -422,9 +417,11 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         )
         q_pos_safe = b.select(qmask_t, q_pos_t, b.const_i32(0))
         qh_safe = b.select(qmask_t, qh_t, b.const_i32(0))
-        q_off_base = b.add(
-            b.mul(b.add(cu_q_start, q_pos_safe), b.const_i32(NUM_QH * HD)),
-            b.mul(qh_safe, b.const_i32(HD)),
+        q_off_base, _ = q_desc.offset(
+            b,
+            token=b.add(cu_q_start, q_pos_safe),
+            head=qh_safe,
+            dim=b.const_i32(0),
         )
         v8 = b.global_load_vN(query, b.add(q_off_base, Q_col), dtype, 8, align=16)
         b.smem_store_vN(
@@ -536,23 +533,38 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         wave_lds_offset_i32 = b.mul(wave_id, b.const_i32(WAVE_BYTES))
         wave_lds_offset_i64 = b.zext(wave_lds_offset_i32, I64)
 
-    kv_desc = PagedKvDescriptor(
-        block_size=T,
-        stride_0=kv_stride_blk_b,
-        stride_1=kv_stride_tok_b,
-        stride_2=kv_stride_h_b,
-        stride_3=2,
+    # ---- Paged KV byte descriptor (full transform DAG) ----
+    # The paged-KV cache is laid out ``[num_blocks, BS, NUM_KV, HD]`` with
+    # *byte* strides. The kernel addresses it via three layered
+    # coordinate transforms:
+    #
+    #   1. ``indirect(tile_idx -> physical_block)`` does the
+    #      ``physical_block = block_tables[seq_idx*bt_stride + tile_idx]``
+    #      table lookup; the upper coord ``tile_idx`` becomes the
+    #      naive descriptor's leaf coord ``physical_block``.
+    #   2. ``unmerge(linear_half -> (token, dim))`` splits the
+    #      cooperative ``THREADS*8`` half count into ``(token_in_tile,
+    #      head_dim)``.
+    #   3. The naive 4D base ``(physical_block, token, kv_head, dim)``
+    #      with byte strides produces the final byte offset.
+    #
+    # Calling ``paged_kv_desc.offset(b, tile_idx=, linear_half=, kv_head=)``
+    # returns the byte offset for one lane's load -- including the table
+    # indirection, the (token, dim) unmerge, and the byte stride math --
+    # in one shot, replacing the previous ``block_base_from_table`` +
+    # ``linear_half_voff`` two-step composition.
+    seq_base = b.mul(seq_idx, bt_stride_p)
+    paged_kv_desc = TensorDescriptor.naive(
+        "paged_kv_bytes",
+        # ``lengths`` here is just informational (validity propagation
+        # is driven by the transforms above, not by these bounds).
+        lengths=[1 << 24, T, NUM_KV, HD],
+        strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, 2],
+        coord_names=("physical_block", "token", "kv_head", "dim"),
+    ).transform(
+        indirect("tile_idx", into="physical_block", table=block_tables, base=seq_base),
+        unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
     )
-
-    def _kv_base_bytes(kv_tile_idx: Value) -> Value:
-        return kv_desc.block_base_from_table(
-            b,
-            block_table=block_tables,
-            seq_idx=seq_idx,
-            tile_idx=kv_tile_idx,
-            block_table_stride=bt_stride_p,
-            kv_head=kv_head_idx,
-        )
 
     def _issue_k_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
         """Issue async K loads for one tile into K_lds[buf_idx].
@@ -569,18 +581,17 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         offset (lanes 64..127 have `tid*8 / HD` advanced by T/NUM_WARPS),
         the cooperative load fills the full `[T, HD]` slab correctly.
         """
-        kv_base_bytes = _kv_base_bytes(kv_tile_idx)
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
         buf_off_i64 = b.zext(buf_off_i32, I64)
         K_buf_base = b.smem_ptr_add(K_lds_addr, buf_off_i64)
         K_wave_base = b.smem_ptr_add(K_buf_base, wave_lds_offset_i64)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            t_idx = b.div(linear_half, b.const_i32(HD))
-            hd_idx_bytes = b.mul(b.mod(linear_half, b.const_i32(HD)), b.const_i32(2))
-            voff = b.add(
-                b.add(b.mul(t_idx, b.const_i32(kv_stride_tok_b)), hd_idx_bytes),
-                kv_base_bytes,
+            voff, _ = paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear_half,
+                kv_head=kv_head_idx,
             )
             k_dst = b.smem_ptr_add(K_wave_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(key_rsrc, k_dst, voff, zero_soff, 4)
@@ -593,18 +604,17 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         waited only immediately before PV. See `_issue_k_load_runtime` for
         the multi-warp LDS-offset rationale.
         """
-        kv_base_bytes = _kv_base_bytes(kv_tile_idx)
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
         buf_off_i64 = b.zext(buf_off_i32, I64)
         V_buf_base = b.smem_ptr_add(V_lds_addr, buf_off_i64)
         V_wave_base = b.smem_ptr_add(V_buf_base, wave_lds_offset_i64)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            t_idx = b.div(linear_half, b.const_i32(HD))
-            hd_idx_bytes = b.mul(b.mod(linear_half, b.const_i32(HD)), b.const_i32(2))
-            voff = b.add(
-                b.add(b.mul(t_idx, b.const_i32(kv_stride_tok_b)), hd_idx_bytes),
-                kv_base_bytes,
+            voff, _ = paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear_half,
+                kv_head=kv_head_idx,
             )
             v_dst = b.smem_ptr_add(V_wave_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(value_rsrc, v_dst, voff, zero_soff, 4)
@@ -825,13 +835,11 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 scaled_comps.append(b.fmul(e, alpha_regs[reg]))
             acc_v = b.vec_pack(scaled_comps, F32)
 
-            # Per-CK formula constants for this PV's K dimension:
-            #   K_L = PV_K_STEP / 4 = 4 (K=16) or 8 (K=32).
-            K_L_pv = PV_K_STEP // 4
-            # Common lane components: (lane/16)*K_L + (lane/4)%4.
-            tr_row_base = b.add(
-                b.mul(tr_lane_div_16, b.const_i32(K_L_pv)), tr_lane_div_4_mod_4
-            )
+            # PV's K-direction TransposeLDSLayout row/col addresses are
+            # produced by ``pv_tr_reader`` -- :meth:`row(k_offset, read)`
+            # computes ``(lane/16)*K_L + read*4 + (lane/4)%4 + k_offset``
+            # for one ds_read_b64_tr_b16. ``tr_col_lane`` is the cached
+            # ``(lane%4)*4`` column component.
             n_col_base = b.add(b.mul(b.const_i32(n), b.const_i32(16)), tr_col_lane)
 
             # P_lds is shared across warps in the BLOCK_M dimension. Each
@@ -845,9 +853,8 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                     # reads (READS=2 per CK formula).
                     p_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                     A_p = b.smem_load_vN(P_lds, p_row, p_off, dtype=dtype, n=8)
-                    # read 0: row = k*32 + base; read 1: row = k*32 + base + 4
-                    row_r0 = b.add(b.const_i32(k * 32), tr_row_base)
-                    row_r1 = b.add(b.const_i32(k * 32 + 4), tr_row_base)
+                    row_r0 = pv_tr_reader.row(b, k_offset=k * 32, read=0)
+                    row_r1 = pv_tr_reader.row(b, k_offset=k * 32, read=1)
                     B_r0 = b.ds_read_tr16_b64(
                         V_lds, cur_buf, row_r0, n_col_base, dtype=dtype
                     )
@@ -860,7 +867,7 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                     # K=16: single ds_read_b64_tr_b16 returns the full B operand.
                     p_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
                     A_p = b.smem_load_vN(P_lds, p_row, p_off, dtype=dtype, n=4)
-                    row_lane = b.add(b.const_i32(k * 16), tr_row_base)
+                    row_lane = pv_tr_reader.row(b, k_offset=k * 16, read=0)
                     B_v = b.ds_read_tr16_b64(
                         V_lds, cur_buf, row_lane, n_col_base, dtype=dtype
                     )
@@ -929,9 +936,13 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         op_mask = b.land(
             b.cmp_lt(op_pos, cur_batch_q_len), b.cmp_lt(op_qh, b.const_i32(NUM_QH))
         )
-        out_base = b.add(
-            b.mul(b.add(cu_q_start, op_pos), b.const_i32(NUM_QH * HD)),
-            b.mul(op_qh, b.const_i32(HD)),
+        # Output and Q share the ``(token, head, dim)`` layout, so the
+        # same descriptor produces the global store base address.
+        out_base, _ = q_desc.offset(
+            b,
+            token=b.add(cu_q_start, op_pos),
+            head=op_qh,
+            dim=b.const_i32(0),
         )
         for chunk in range(4):
             col = b.add(OUT_col_base, b.const_i32(chunk * 8))
@@ -944,76 +955,3 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 b.global_store_vN(output, b.add(out_base, col), v8h, 8, align=16)
 
     return b.kernel
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _binary_search_seq_idx(
-    b: IRBuilder,
-    cu_q: Value,
-    q_block_global_idx: Value,
-    num_seqs: Value,
-    block_q: int,
-    iterations: int,
-) -> Value:
-    """Triton-style binary search for the seq_idx for this q_block.
-
-    Mirrors `aiter.ops.triton._triton_kernels.attention.unified_attention`
-    `find_seq_idx(use_q_block_mode=True)` -- the loop invariant is
-    `cu_q[i]//BLOCK_Q + i <= target` (i.e. the cumulative Q-block count up to
-    sequence `i`). The caller specializes `iterations` from the known problem
-    batch size; 32 is used only as a fallback for unspecialized tests.
-    """
-    bq = b.const_i32(block_q)
-    loop = b.scf_for_iter(
-        b.const_i32(0),
-        b.const_i32(iterations),
-        b.const_i32(1),
-        [("left", b.const_i32(0)), ("right", num_seqs)],
-        iv_name="bs_i",
-    )
-    with loop as (_iv, (left, right)):
-        done = b.cmp_ge(left, right)
-        mid = b.div(b.add(left, right), b.const_i32(2))
-        val = b.global_load_i32(cu_q, mid)
-        mid_val = b.add(b.div(val, bq), mid)
-        le = b.cmp_le(mid_val, q_block_global_idx)
-        nl = b.select(le, b.add(mid, b.const_i32(1)), left)
-        nr = b.select(le, right, mid)
-        b.scf_yield(b.select(done, left, nl), b.select(done, right, nr))
-    return b.sub(loop.results[0], b.const_i32(1))
-
-
-def _apply_softcap(b: IRBuilder, score_log2: Value, softcap: Value) -> Value:
-    """Triton-equivalent softcap on a log2-domain score (returns natural-domain).
-
-    Computes `softcap * tanh(score_natural / softcap)` via `exp2` only:
-
-        Sdiv = score_log2 / softcap
-        p1   = exp2(Sdiv) = e^(score_natural / softcap)
-        p2   = exp2(-Sdiv)
-        out  = softcap * (p1 - p2) / (p1 + p2)
-    """
-    sdiv = b.fdiv(score_log2, softcap)
-    p1 = b.exp2(sdiv)
-    p2 = b.exp2(b.fneg(sdiv))
-    return b.fmul(softcap, b.fmul(b.fsub(p1, p2), b.rcp(b.fadd(p1, p2))))
-
-
-def _mfma_16x16x16(b: IRBuilder, dtype: Type, a: Value, bv: Value, c: Value) -> Value:
-    if dtype.name == "f16":
-        return b.mfma_f32_16x16x16_f16(a, bv, c)
-    if dtype.name == "bf16":
-        return b.mfma_f32_16x16x16_bf16(a, bv, c)
-    raise ValueError(f"unsupported MFMA dtype {dtype.name}")
-
-
-def _mfma_16x16x32(b: IRBuilder, dtype: Type, a: Value, bv: Value, c: Value) -> Value:
-    if dtype.name == "f16":
-        return b.mfma_f32_16x16x32_f16(a, bv, c)
-    if dtype.name == "bf16":
-        return b.mfma_f32_16x16x32_bf16(a, bv, c)
-    raise ValueError(f"unsupported MFMA dtype {dtype.name}")

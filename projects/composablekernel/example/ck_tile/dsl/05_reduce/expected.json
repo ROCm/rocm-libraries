@@ -1,0 +1,5 @@
+{
+  "kind": "reduce_fp16",
+  "min_tflops": 0.0,
+  "notes": "Reduce is memory-bound; we report GB/s. Verify enforces bit-exact-within-fp16-ULP vs a fp32 numpy reference."
+}

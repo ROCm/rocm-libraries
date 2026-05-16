@@ -70,7 +70,7 @@ addressing.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .core.ir import F16, IRBuilder, Type, Value
 
@@ -401,6 +401,137 @@ def unmerge(upper: str, into: Sequence[str], *, dims: Sequence[int]) -> Unmerge:
 
 
 # ---------------------------------------------------------------------
+# Runtime-bound transforms
+# ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PadDynamic(Transform):
+    """``pad`` with one or both bounds supplied as runtime SSA values.
+
+    CK Tile's ``PadTransform`` accepts both compile-time and runtime
+    bounds; the original :class:`Pad` here only handles the compile-
+    time case. ``PadDynamic`` lifts that restriction: ``lo`` and
+    ``hi`` may be either ``None`` (skip that side), an ``int``
+    (compile-time), or an ``i32 SSA Value`` (runtime, e.g. the
+    ``cur_batch_q_len`` or ``NUM_QH`` that attention kernels test
+    against). The coord's value passes through unchanged; the
+    validity predicate picks up ``lo <= value < hi`` AND-ed with any
+    incoming validity.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    lo: Any
+    hi: Any
+
+    def __init__(
+        self,
+        coord_name: str,
+        *,
+        lo: Any = None,
+        hi: Any = None,
+    ) -> None:
+        object.__setattr__(self, "upper", (coord_name,))
+        object.__setattr__(self, "lower", (coord_name,))
+        object.__setattr__(self, "lo", lo)
+        object.__setattr__(self, "hi", hi)
+
+    @staticmethod
+    def _as_value(b: IRBuilder, x: Any) -> Value:
+        if isinstance(x, Value):
+            return x
+        return b.const_i32(int(x))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        bounds: Optional[Value] = None
+        if self.lo is not None:
+            bounds = _and(b, bounds, _ge(b, u.value, self._as_value(b, self.lo)))
+        if self.hi is not None:
+            bounds = _and(b, bounds, _lt(b, u.value, self._as_value(b, self.hi)))
+        merged_valid = _and(b, u.valid, bounds)
+        return {self.lower[0]: CoordVar(self.lower[0], u.value, merged_valid)}
+
+
+def pad_dynamic(coord: str, *, lo: Any = None, hi: Any = None) -> PadDynamic:
+    """``pad`` with possibly-runtime bounds.
+
+    Pass ``lo`` / ``hi`` as ``int`` for compile-time bounds, as an
+    ``i32 SSA Value`` for runtime bounds, or ``None`` to skip that
+    side. Use this when the upper bound only becomes known at launch
+    time (e.g. ``cur_batch_q_len`` in attention) or when only one
+    side of the range needs a check.
+    """
+    return PadDynamic(coord, lo=lo, hi=hi)
+
+
+@dataclass(frozen=True)
+class Indirect(Transform):
+    """Table-lookup transform: ``physical = table[base + upper]``.
+
+    Implements CK Tile's "indirection" pattern for paged-KV style
+    addressing where a *logical* index is mapped to a *physical*
+    block via a one-dimensional lookup table. Concretely:
+
+    .. code-block:: text
+
+        idx        = base + upper
+        physical   = global_load_i32(table, idx)
+
+    The upper coord (e.g. ``tile_idx`` for paged attention) is
+    consumed; the lower coord (``physical_block``) is what subsequent
+    transforms see. ``base`` is the offset within the table (often
+    ``seq_idx * block_table_stride`` for multi-sequence batches);
+    ``table`` is the i32* pointer; the load is unguarded so callers
+    are responsible for keeping the indexed offset in range.
+
+    This is the descriptor-level equivalent of
+    :meth:`PagedKvDescriptor.block_base_from_table` and lets the
+    whole paged-KV addressing collapse into one descriptor chain.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+
+    def __init__(
+        self,
+        upper_name: str,
+        *,
+        lower_name: str,
+        table: Value,
+        base: Value,
+    ) -> None:
+        object.__setattr__(self, "upper", (upper_name,))
+        object.__setattr__(self, "lower", (lower_name,))
+        object.__setattr__(self, "_table", table)
+        object.__setattr__(self, "_base", base)
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        idx = b.add(self._base, u.value)
+        physical = b.global_load_i32(self._table, idx)
+        return {self.lower[0]: CoordVar(self.lower[0], physical, u.valid)}
+
+
+def indirect(
+    upper: str,
+    *,
+    into: str,
+    table: Value,
+    base: Value,
+) -> Indirect:
+    """One-line page-table lookup transform.
+
+    Equivalent to writing the chain
+    ``embed(("seq", "tile"), into="idx", strides=(stride, 1))``
+    followed by an ad-hoc ``global_load_i32`` -- but explicit about
+    the indirection step so legality / explainer tooling can see it.
+    """
+    return Indirect(upper, lower_name=into, table=table, base=base)
+
+
+# ---------------------------------------------------------------------
 # TensorDescriptor: a chain of transforms over a naive layout
 # ---------------------------------------------------------------------
 
@@ -602,15 +733,19 @@ class TensorDescriptor:
 __all__ = [
     "CoordVar",
     "Embed",
+    "Indirect",
     "Merge",
     "Pad",
+    "PadDynamic",
     "PassThrough",
     "TensorDescriptor",
     "Transform",
     "Unmerge",
     "embed",
+    "indirect",
     "merge",
     "pad",
+    "pad_dynamic",
     "pass_through",
     "unmerge",
 ]

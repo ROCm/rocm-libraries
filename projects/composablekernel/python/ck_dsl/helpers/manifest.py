@@ -55,6 +55,20 @@ from .compile import KernelArtifact
 MANIFEST_SCHEMA = "ck.dsl.example.manifest/v1"
 
 
+# Re-exports for examples to use.
+__all__ = [
+    "MANIFEST_SCHEMA",
+    "attention_args_signature",
+    "conv_args_signature",
+    "gemm_args_signature",
+    "make_attention_manifest",
+    "make_conv_manifest",
+    "make_gemm_manifest",
+    "make_simple_op_manifest",
+    "write_artifact",
+]
+
+
 # ---------------------------------------------------------------------
 # Args signature helpers
 # ---------------------------------------------------------------------
@@ -142,6 +156,79 @@ def attention_args_signature(*, path: str = "2d") -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------
 # Manifest emitters
 # ---------------------------------------------------------------------
+
+
+def make_simple_op_manifest(
+    *,
+    artifact: KernelArtifact,
+    kind: str,
+    op: str,
+    dtype: str,
+    threads_per_block: int,
+    default_shape: Sequence[int],
+    args_signature: List[Dict[str, Any]],
+    elems_per_block: Optional[int] = None,
+    is_binary: bool = False,
+    block_m: Optional[int] = None,
+    block_n: Optional[int] = None,
+    grid_explicit: Optional[Sequence[int]] = None,
+    eps: Optional[float] = None,
+    warmup_iters: int = 5,
+    timed_iters: int = 100,
+    atoms: Iterable[str] = (),
+    notes: str = "",
+    extra: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Generic manifest emitter for the ``simple_op`` family.
+
+    Handles ``elementwise_fp16``, ``reduce_fp16``, ``layernorm_fp16``,
+    ``rmsnorm_fp16``, and ``transpose_fp16`` -- every "X(input)→output"
+    op that the :mod:`ck_dsl.run_manifest` runner can dispatch via
+    ``_simple_op_problem``. Each example's ``gen.py`` builds one of
+    these by passing in the artifact + the per-op shape / signature.
+
+    ``default_shape`` is the canonical shape the runner uses:
+      * elementwise: ``[N]``
+      * reduce / layernorm / rmsnorm / transpose: ``[M, N]``
+
+    ``args_signature`` mirrors what the kernel emitted via
+    ``SignatureBuilder`` (one entry per kernel param). The runner
+    packs these into the AMDGPU kernarg buffer in declaration order.
+    """
+    manifest: Dict[str, Any] = {
+        "schema": MANIFEST_SCHEMA,
+        "kind": kind,
+        "op": op,
+        "dtype": dtype,
+        "kernel_name": artifact.kernel_name,
+        "hsaco": f"{artifact.kernel_name}.hsaco",
+        "threads_per_block": int(threads_per_block),
+        "default_shape": [int(x) for x in default_shape],
+        "warmup_iters": int(warmup_iters),
+        "timed_iters": int(timed_iters),
+        "args_signature": list(args_signature),
+        "sig_has_bytes": 0,
+        "timing_ms": dict(artifact.timings),
+        "hsaco_bytes": artifact.hsaco_bytes,
+        "atoms": list(atoms),
+        "notes": notes,
+        "ck_dependency": False,
+        "ir_authored": True,
+        "is_binary": bool(is_binary),
+    }
+    if elems_per_block is not None:
+        manifest["elems_per_block"] = int(elems_per_block)
+    if block_m is not None:
+        manifest["block_m"] = int(block_m)
+    if block_n is not None:
+        manifest["block_n"] = int(block_n)
+    if grid_explicit is not None:
+        manifest["grid_explicit"] = [int(x) for x in grid_explicit]
+    if eps is not None:
+        manifest["eps"] = float(eps)
+    if extra:
+        manifest.update(dict(extra))
+    return manifest
 
 
 def make_gemm_manifest(

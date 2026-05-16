@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import math
 from typing import Tuple
 
-from ..core.ir import IRBuilder, Value
+from ..core.ir import IRBuilder, Type, Value
 
 
 def next_power_of_2(x: int) -> int:
@@ -173,6 +173,26 @@ class PagedKvDescriptor:
             dim=b.const_i32(0),
         )
 
+    def linear_half_voff(
+        self,
+        b: IRBuilder,
+        linear_half: Value,
+        *,
+        head_size: int,
+    ) -> Value:
+        """``(token_in_tile, head_dim_in_halves)`` byte offset within a tile.
+
+        Given a per-thread half index inside one ``[T, HD]`` KV tile
+        (e.g. ``tid * 8 + call * THREADS * 8``), compute the byte
+        offset relative to the tile base. This collapses the two-step
+        ``(linear_half // HD, linear_half % HD)`` arithmetic the async
+        DMA loaders previously inlined.
+        """
+        c_hd = b.const_i32(head_size)
+        token = b.div(linear_half, c_hd)
+        dim_bytes = b.mul(b.mod(linear_half, c_hd), b.const_i32(self.stride_3))
+        return b.add(b.mul(token, b.const_i32(self.stride_1)), dim_bytes)
+
 
 @dataclass(frozen=True)
 class OnlineSoftmaxState:
@@ -222,3 +242,140 @@ def sliding_window_mask(
 def apply_softcap_scalar(b: IRBuilder, score: Value, softcap: Value) -> Value:
     """softcap * tanh(score / softcap)."""
     return b.fmul(softcap, b.tanh(b.fdiv(score, softcap)))
+
+
+# ---------------------------------------------------------------------------
+# Cross-lane reductions (CK Tile ``block_tile_reduce_xor_sync`` pattern)
+# ---------------------------------------------------------------------------
+
+
+def warp_xor_reduce_max(b: IRBuilder, v: Value, stages: int = 4) -> Value:
+    """Wave64 16-lane butterfly max reduction via ``ds_bpermute``.
+
+    Reduces ``v`` across lanes whose ``lane % 16`` differ but
+    ``lane / 16`` is fixed (each group of 16 lanes that share the same
+    MFMA ``m_row_group``). After ``stages`` (default 4 for 16-lane
+    reduction), every lane in the group holds the max of the 16
+    inputs.
+
+    The XOR sequence ``addr = (lane ^ 2^k) << 2`` for ``k in 0..stages-1``
+    matches CK Tile's ``block_tile_reduce_xor_sync``. This helper used
+    to live in :mod:`ck_dsl.instances.attention_tiled_2d` as a private
+    function; promoting it makes the same reduction available to the
+    3D segment kernel, the future MFMA-based norm kernels, and any
+    other op that needs an in-warp 16-lane butterfly.
+    """
+    cur = v
+    for k in range(stages):
+        remote = b.warp_shuffle_xor(cur, 1 << k)
+        cur = b.fmax(cur, remote)
+    return cur
+
+
+def warp_xor_reduce_sum(b: IRBuilder, v: Value, stages: int = 4) -> Value:
+    """Wave64 16-lane butterfly sum reduction via ``ds_bpermute``.
+
+    See :func:`warp_xor_reduce_max` for the lane-XOR rationale; the
+    only difference is the combiner is ``fadd`` instead of ``fmax``.
+    """
+    cur = v
+    for k in range(stages):
+        remote = b.warp_shuffle_xor(cur, 1 << k)
+        cur = b.fadd(cur, remote)
+    return cur
+
+
+# ---------------------------------------------------------------------------
+# Softcap (log2-domain)
+# ---------------------------------------------------------------------------
+
+
+def apply_softcap_log2(b: IRBuilder, score_log2: Value, softcap: Value) -> Value:
+    """``softcap * tanh(score_natural / softcap)`` computed via exp2 only.
+
+    Given a log2-domain score (i.e. the natural-domain score already
+    multiplied by ``log2(e)``), return the natural-domain softcapped
+    value. The closed form avoids ``math.tanh`` (which the AMDGPU
+    backend does not lower) by computing
+
+    .. code-block:: text
+
+        Sdiv = score_log2 / softcap
+        p1   = exp2(Sdiv)           = e^( score_natural / softcap)
+        p2   = exp2(-Sdiv)          = e^(-score_natural / softcap)
+        out  = softcap * (p1 - p2) / (p1 + p2)
+    """
+    sdiv = b.fdiv(score_log2, softcap)
+    p1 = b.exp2(sdiv)
+    p2 = b.exp2(b.fneg(sdiv))
+    return b.fmul(softcap, b.fmul(b.fsub(p1, p2), b.rcp(b.fadd(p1, p2))))
+
+
+# ---------------------------------------------------------------------------
+# MFMA dtype dispatch (small but shared across every tiled attention kernel)
+# ---------------------------------------------------------------------------
+
+
+def mfma_16x16x16_for_dtype(
+    b: IRBuilder, dtype: Type, a: Value, bv: Value, c: Value
+) -> Value:
+    """Dispatch ``mfma_f32_16x16x16_<dtype>`` for fp16 / bf16."""
+    if dtype.name == "f16":
+        return b.mfma_f32_16x16x16_f16(a, bv, c)
+    if dtype.name == "bf16":
+        return b.mfma_f32_16x16x16_bf16(a, bv, c)
+    raise ValueError(f"unsupported MFMA 16x16x16 dtype {dtype.name}")
+
+
+def mfma_16x16x32_for_dtype(
+    b: IRBuilder, dtype: Type, a: Value, bv: Value, c: Value
+) -> Value:
+    """Dispatch ``mfma_f32_16x16x32_<dtype>`` for fp16 / bf16."""
+    if dtype.name == "f16":
+        return b.mfma_f32_16x16x32_f16(a, bv, c)
+    if dtype.name == "bf16":
+        return b.mfma_f32_16x16x32_bf16(a, bv, c)
+    raise ValueError(f"unsupported MFMA 16x16x32 dtype {dtype.name}")
+
+
+# ---------------------------------------------------------------------------
+# Binary search on ``cu_q``
+# ---------------------------------------------------------------------------
+
+
+def binary_search_seq_idx(
+    b: IRBuilder,
+    cu_q: Value,
+    q_block_global_idx: Value,
+    num_seqs: Value,
+    *,
+    block_q: int,
+    iterations: int,
+) -> Value:
+    """Triton-style binary search for the seq_idx for this q_block.
+
+    Mirrors ``aiter.ops.triton.attention.unified_attention``'s
+    ``find_seq_idx(use_q_block_mode=True)`` -- the loop invariant is
+    ``cu_q[i] // BLOCK_Q + i <= target`` (i.e. the cumulative Q-block
+    count up to sequence ``i``). The caller specializes ``iterations``
+    from the known problem batch size; 32 is a safe fallback for
+    unspecialized tests.
+    """
+    bq = b.const_i32(block_q)
+    loop = b.scf_for_iter(
+        b.const_i32(0),
+        b.const_i32(iterations),
+        b.const_i32(1),
+        [("left", b.const_i32(0)), ("right", num_seqs)],
+        iv_name="bs_i",
+    )
+    with loop as (_iv, (left, right)):
+        done = b.cmp_ge(left, right)
+        mid = b.div(b.add(left, right), b.const_i32(2))
+        val = b.global_load_i32(cu_q, mid)
+        mid_val = b.add(b.div(val, bq), mid)
+        le = b.cmp_le(mid_val, q_block_global_idx)
+        nl = b.select(le, b.add(mid, b.const_i32(1)), left)
+        nr = b.select(le, right, mid)
+        b.scf_yield(b.select(done, left, nl), b.select(done, right, nr))
+    return b.sub(loop.results[0], b.const_i32(1))

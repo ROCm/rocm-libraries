@@ -23,7 +23,8 @@ python/ck_dsl/
 ├── __init__.py               # top-level package re-exports
 ├── __main__.py               # `python -m ck_dsl` (lists discoverable entry points)
 ├── transforms.py             # CK-style coordinate-transform DAG
-│                             #   (TensorDescriptor + Transform subclasses)
+│                             #   (TensorDescriptor + pad/embed/unmerge/merge,
+│                             #    runtime pad_dynamic, indirect table lookup)
 ├── run_manifest.py           # Python-native (hsaco + manifest.json) runner
 ├── sweep.py                  # parallel build-on-the-fly sweep driver
 ├── sweep_bench.py            # benchmark driver consuming sweep manifests
@@ -74,8 +75,15 @@ python/ck_dsl/
 ├── instances/                # parametric kernel instance builders
 │   ├── gemm_universal.py     #   universal GEMM (matches CK dispatcher's
 │   │                         #     config schema 1:1)
+│   ├── batched_gemm.py       #   CK Tile 16_batched_gemm wrapper
+│   ├── grouped_gemm.py       #   CK Tile 17_grouped_gemm launcher wrapper
 │   ├── conv_implicit_gemm.py #   NHWC × KRSC -> NHWK (bake-off 1)
 │   ├── conv_direct_grouped.py#   grouped direct conv (bake-off 2: 16c + 4c)
+│   ├── elementwise.py        #   CK Tile 21_elementwise
+│   ├── layernorm2d.py        #   CK Tile 02_layernorm2d
+│   ├── rmsnorm2d.py          #   CK Tile 10_rmsnorm2d
+│   ├── reduce.py             #   CK Tile 05_reduce
+│   ├── transpose.py          #   CK Tile 37_transpose / 35_batched_transpose
 │   └── __init__.py
 │
 └── examples/                 # maintained Python-owned example generators
@@ -89,10 +97,15 @@ example/ck_tile/dsl/          # CMake integration (each <N>_*/gen.py wraps a
 │                             #     is the primary path)
 ├── 06_gemm_universal_cshuffle/  # universal-builder hero GEMM (cshuffle)
 ├── 07_gemm_universal_sweep/  # full dispatcher-config sweep
-├── 08_bake_off_implicit_gemm/# implicit-GEMM conv (~248 / ~280 TFLOPS;
-│                             # see results.md)
+├── 02_layernorm2d/           # CK Tile 02_layernorm2d parity
+├── 05_reduce/                # CK Tile 05_reduce parity
+├── 08_bake_off_implicit_gemm/# implicit-GEMM conv (~248 / ~280 TFLOPS)
 ├── 09_bake_off_direct_conv_16c/  # direct grouped conv 16c (~210 TFLOPS)
-└── 10_bake_off_direct_conv_4c/   # direct grouped conv 4c (~48.8 TFLOPS)
+├── 10_bake_off_direct_conv_4c/   # direct grouped conv 4c (~50 TFLOPS)
+├── 10_rmsnorm2d/             # CK Tile 10_rmsnorm2d parity
+├── 16_batched_gemm/          # CK Tile 16_batched_gemm parity
+├── 21_elementwise/           # CK Tile 21_elementwise parity
+└── 37_transpose/             # CK Tile 37_transpose parity
 ```
 
 ## Hello, GEMM (12 lines)
@@ -185,6 +198,16 @@ writes `(m / (Ho*Wo)) % N` by hand, and any change to the problem
 (e.g., stride/dilation/pad) edits the *descriptor*, not the
 addressing math inside the K-loop.
 
+For runtime/non-affine cases, the DAG also has:
+
+- `pad_dynamic(coord, lo=None, hi=None)` — validity-only pad where
+  `lo` / `hi` may be runtime SSA values (used for attention-style
+  runtime bounds).
+- `indirect(upper, into, table, base)` — descriptor-level page-table
+  lookup (used by tiled 2D/3D attention's paged-KV cache addressing).
+
+See `python/ck_dsl/TRANSFORM_DAG.md` for both examples.
+
 ## Helpers (high-level kernel-authoring layer)
 
 `python/ck_dsl/helpers/` is the "shortest path" surface for kernel
@@ -247,91 +270,38 @@ benchmark with median/spread (`benchmark_manifest`).
 ## Unified Attention Status
 
 `ck_dsl` now has the full compiler/runtime stack for AITER's
-`unified_attention` *and* ships two tuned MFMA kernels: a tiled 2D
-single-warp kernel and a tiled 3D split-KV pipeline (segment +
-reduce). The 3D path is the one we ship in production; it beats AITER's
-Triton `unified_attention` on every covered scenario.
+`unified_attention` and ships two MFMA kernels: a tiled 2D single-warp
+kernel and a tiled 3D split-KV pipeline (segment + reduce). The 3D path
+is the production path for long-context decode; the 2D path remains
+useful for chunked-prefill / sliding-window rows but is intentionally
+simple and under-occupies the GPU on long single-token decode.
 
-### Apples-to-apples vs Triton (MI355X / gfx950, ROCm 7.0.1)
+### Apples-to-apples vs Triton (MI355X / gfx950, ROCm 7.0.2)
 
-All numbers are the average of 10 timed iterations after 5 warmup
-launches, produced by
-`python/ck_dsl/examples/attention/parity_unified_attention.py`.
+The canonical numbers live in
+[`examples/attention/README.md`](examples/attention/README.md). The
+current table there is the **mean of 5 full harness runs**, where each
+run uses 10 timed launches after 5 warmups. Triton and CK DSL both
+launch on torch's current stream and are timed with the same HIP-event
+timer.
 
-#### Each backend's own selector (production-relevant)
+Summary from that 5-run mean:
 
-CK DSL's dispatcher always chooses the 3D split-KV path when supported.
-Triton's dispatcher uses its own `use_2d_kernel(...)` heuristic, so
-"tri-path" below shows which kernel Triton actually launched per
-scenario.
+| Lane | Geomean speedup (CK / Triton) | Notes |
+|---|---:|---|
+| Auto selector | **1.799x** | CK wins every default scenario in the 5-run mean |
+| 3D vs 3D | **1.743x** | Same split-KV algorithm; CK wins every default scenario |
+| 2D vs 2D | **0.574x** | CK 2D wins prefill / sliding / qq-bias rows, loses long decode rows |
 
-| Scenario                  | tri-auto | ck-auto  | speedup | tri-path | max_abs(CK vs ref) |
-|---------------------------|---------:|---------:|--------:|---------:|-------------------:|
-| decode_d128_b16           |  87.1us  |  36.8us  | **2.36x** | 3d | 1.83e-4 |
-| decode_d128_b64           |  84.8us  |  33.6us  | **2.53x** | 3d | 1.83e-4 |
-| decode_d256_b16           |  86.2us  |  35.5us  | **2.43x** | 3d | 1.22e-4 |
-| prefill_d128_b16          |  52.5us  |  34.7us  | **1.51x** | 2d | 1.95e-3 |
-| mixed_d128_b16            |  97.5us  |  33.5us  | **2.91x** | 3d | 9.77e-4 |
-| sliding_d128_b16          |  63.5us  |  34.8us  | **1.82x** | 2d | 3.05e-4 |
-| softcap_d128_b16          |  84.1us  |  34.4us  | **2.45x** | 3d | 1.22e-4 |
-| bf16_decode_d128_b64      |  85.2us  |  36.6us  | **2.33x** | 3d | 9.77e-4 |
-| alibi_decode_d128_b16     |  85.7us  |  35.9us  | **2.39x** | 3d | 9.77e-4 |
-| alibi_mixed_d128_b16      |  87.8us  |  35.6us  | **2.47x** | 3d | 1.95e-3 |
-| qq_bias_prefill_d128_b16  |  73.4us  |  34.8us  | **2.11x** | 2d | 1.95e-3 |
+Correctness: every CK lane stays within the expected fp16/bf16 ULP
+range versus the AITER `ref_paged_attn` reference (max errors in the
+5-run mean sweep are `1.83e-4`, `9.77e-4`, or `1.95e-3`, depending on
+scenario).
 
-`max_abs(CK vs ref)` is the worst per-element error against the AITER
-`ref_paged_attn` reference — on every scenario CK DSL matches Triton
-bit-for-bit (`max_abs(CK vs Triton) == 0` once both are cast back to
-`fp16`/`bf16`).
-
-#### 3D vs 3D (force both backends to use the split-KV kernel)
-
-The CK DSL 3D kernel is the apples-to-apples winner on 10 of 11
-scenarios; same split-KV algorithm as Triton's 3D, just hand-tuned
-with CK Tile lessons. `alibi_mixed_d128_b16` is launch-overhead-bound
-on this GPU (one of its sequences is only 5 query tokens / 18 KV
-tokens) and varies 3-4x across attempts; rerun the harness for a
-stable median.
-
-| Scenario                  | tri-3d   | ck-3d    | speedup |
-|---------------------------|---------:|---------:|--------:|
-| decode_d128_b16           |  84.1us  |  33.8us  | **2.49x** |
-| decode_d128_b64           |  83.3us  |  33.9us  | **2.46x** |
-| decode_d256_b16           |  83.9us  |  33.6us  | **2.50x** |
-| prefill_d128_b16          |  94.7us  |  50.7us  | **1.87x** |
-| mixed_d128_b16            |  83.5us  |  33.2us  | **2.51x** |
-| sliding_d128_b16          |  84.2us  |  34.4us  | **2.45x** |
-| softcap_d128_b16          |  84.7us  |  36.1us  | **2.35x** |
-| bf16_decode_d128_b64      |  85.2us  |  33.0us  | **2.58x** |
-| alibi_decode_d128_b16     |  83.1us  |  33.5us  | **2.48x** |
-| alibi_mixed_d128_b16      |  87.7us  |  33.8us  | **2.59x** |
-| qq_bias_prefill_d128_b16  |  85.6us  |  35.5us  | **2.41x** |
-
-#### 2D vs 2D (force both backends to use the single-CTA path)
-
-CK DSL's 2D kernel is a single-warp, single-CTA-per-(qblock, kv_head)
-design, but it now beats Triton's 2D path on every covered default
-scenario. The turnaround came from three concrete fixes:
-
-- long-lived `KernelLauncher` dispatch (no per-call HSACO load/event/unload tax);
-- correct gfx950 `s_waitcnt` encoding for 6-bit VMCNT partial waits, so
-  next-K async copies remain in flight while PV consumes current V;
-- correct online-softmax recurrence (`m_new = max(m_old, tile_max)`),
-  which fixes ALiBi decreasing-logit cases without disabling ALiBi.
-
-| Scenario                  | tri-2d   | ck-2d    | speedup |
-|---------------------------|---------:|---------:|--------:|
-| decode_d128_b16           | 115.6us  |  21.2us  | **5.46x** |
-| decode_d128_b64           |  91.9us  |  16.6us  | **5.55x** |
-| decode_d256_b16           |  79.0us  |  16.9us  | **4.66x** |
-| prefill_d128_b16          |  51.8us  |  18.1us  | **2.87x** |
-| mixed_d128_b16            |  54.9us  |  16.3us  | **3.37x** |
-| sliding_d128_b16          |  50.0us  |  17.8us  | **2.81x** |
-| softcap_d128_b16          | 100.0us  |  22.8us  | **4.40x** |
-| bf16_decode_d128_b64      |  88.8us  |  17.3us  | **5.14x** |
-| alibi_decode_d128_b16     | 122.6us  |  19.2us  | **6.40x** |
-| alibi_mixed_d128_b16      |  53.7us  |  16.3us  | **3.30x** |
-| qq_bias_prefill_d128_b16  |  74.6us  |  17.1us  | **4.37x** |
+The old single-run tables that showed CK 2D faster everywhere were
+collected with mixed clocks (torch CUDA events for Triton, raw HIP
+events for CK DSL). The current harness uses one HIP-event timer for
+both backends and is the only supported apples-to-apples methodology.
 
 ### Reproducing
 
@@ -457,9 +427,13 @@ Three forces:
 ## Tests, sweeps, examples
 
 ```sh
-# unit tests (34 passing in test_ck_dsl.py; 3 pre-existing failures in
-# test_gen_instances need a CK library path not present in this workspace)
-PYTHONPATH=python python3 -m pytest python/test/test_ck_dsl.py
+# unit tests
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
+  /workspace/dsl_bake_off/venv/bin/python python/test/test_ck_dsl.py
+
+# generated examples (discovers every example/ck_tile/dsl/<N>_*/gen.py)
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
+  /workspace/dsl_bake_off/venv/bin/python python/test/test_ck_dsl_examples.py
 
 # build + bench one example (Python-native runner, no C++ host launch)
 PYTHONPATH=python python3 -m ck_dsl.examples.bake_off_implicit_gemm \

@@ -26,10 +26,12 @@ from ..runtime.launcher import (
 from ..helpers.attention import (
     Attention2DConfig,
     Attention3DConfig,
+    PagedKvDescriptor,
     select_2d_config,
     select_3d_config,
     use_2d_kernel,
 )
+from ..transforms import TensorDescriptor
 from .attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_unified_attention_2d_tiled,
@@ -993,6 +995,22 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
         init_l = one_f
     init_acc = zero_f
 
+    # Coordinate transforms over the kernel's tensors. Q/output are a
+    # naive ``(query_token, query_head, dim)`` layout; the paged KV
+    # cache uses ``PagedKvDescriptor`` (in element units, not bytes).
+    q_desc = TensorDescriptor.naive(
+        "Q",
+        lengths=[p.max_seqlen_q + 1, p.num_query_heads, p.head_size],
+        coord_names=("token", "head", "dim"),
+    )
+    kv_desc_elem = PagedKvDescriptor(
+        block_size=p.block_size,
+        stride_0=p.block_size * p.num_kv_heads * p.head_size,
+        stride_1=p.num_kv_heads * p.head_size,
+        stride_2=p.head_size,
+        stride_3=1,
+    )
+
     loop = b.scf_for_iter(
         b.const_i32(0),
         kv_len,
@@ -1016,27 +1034,14 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
 
         score = zero_f
         for d in b.unroll(p.head_size):
-            q_off = b.add(
-                b.add(
-                    b.mul(q_tok, b.const_i32(p.num_query_heads * p.head_size)),
-                    b.mul(q_head, b.const_i32(p.head_size)),
-                ),
-                b.const_i32(d),
-            )
-            k_off = b.add(
-                b.add(
-                    b.add(
-                        b.mul(
-                            physical,
-                            b.const_i32(p.block_size * p.num_kv_heads * p.head_size),
-                        ),
-                        b.mul(
-                            token_in_block, b.const_i32(p.num_kv_heads * p.head_size)
-                        ),
-                    ),
-                    b.mul(kv_head, b.const_i32(p.head_size)),
-                ),
-                b.const_i32(d),
+            d_v = b.const_i32(d)
+            q_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=d_v)
+            k_off = kv_desc_elem.offset(
+                b,
+                physical_block=physical,
+                token_in_block=token_in_block,
+                kv_head=kv_head,
+                dim=d_v,
             )
             qv = b.cast_to_f32(b.global_load(query, q_off, dtype, align=2))
             kv = b.cast_to_f32(b.global_load(key, k_off, dtype, align=2))
@@ -1061,18 +1066,12 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))
         new_l = b.fadd(b.fmul(l_val, alpha), prob)
-        v_off = b.add(
-            b.add(
-                b.add(
-                    b.mul(
-                        physical,
-                        b.const_i32(p.block_size * p.num_kv_heads * p.head_size),
-                    ),
-                    b.mul(token_in_block, b.const_i32(p.num_kv_heads * p.head_size)),
-                ),
-                b.mul(kv_head, b.const_i32(p.head_size)),
-            ),
-            dim,
+        v_off = kv_desc_elem.offset(
+            b,
+            physical_block=physical,
+            token_in_block=token_in_block,
+            kv_head=kv_head,
+            dim=dim,
         )
         vv = b.cast_to_f32(b.global_load(value, v_off, dtype, align=2))
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
@@ -1080,13 +1079,7 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
 
     out_val = b.fmul(loop.results[2], b.rcp(loop.results[1]))
     out_cast = b.cast_f32_to(out_val, dtype)
-    out_off = b.add(
-        b.add(
-            b.mul(q_tok, b.const_i32(p.num_query_heads * p.head_size)),
-            b.mul(q_head, b.const_i32(p.head_size)),
-        ),
-        dim,
-    )
+    out_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
     valid = b.land(active, b.cmp_lt(dim, b.const_i32(p.head_size)))
     with b.scf_if(valid):
         b.global_store(output, out_off, out_cast, align=2)
@@ -1257,25 +1250,17 @@ def build_unified_attention_3d(spec: UnifiedAttention3DSpec) -> KernelDef:
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
         b.scf_yield(new_m, new_l, new_acc)
 
-    base = b.add(
-        b.add(
-            b.mul(
-                q_tok, b.const_i32(p.num_query_heads * spec.num_segments * p.head_size)
-            ),
-            b.mul(q_head, b.const_i32(spec.num_segments * p.head_size)),
-        ),
-        b.add(b.mul(segm_idx, b.const_i32(p.head_size)), dim),
-    )
+    ml_desc, out_desc = _segm_descriptors(p, spec.num_segments)
+    base, _ = out_desc.offset(b, token=q_tok, head=q_head, seg=segm_idx, dim=dim)
     with b.scf_if(active):
         b.global_store(segm_output, base, loop.results[2], align=4)
         is_dim0 = b.cmp_eq(dim, b.const_i32(0))
         with b.scf_if(is_dim0):
-            segm_base = b.add(
-                b.add(
-                    b.mul(q_tok, b.const_i32(p.num_query_heads * spec.num_segments)),
-                    b.mul(q_head, b.const_i32(spec.num_segments)),
-                ),
-                segm_idx,
+            segm_base, _ = ml_desc.offset(
+                b,
+                token=q_tok,
+                head=q_head,
+                seg=segm_idx,
             )
             b.global_store(segm_max, segm_base, loop.results[0], align=4)
             b.global_store(segm_expsum, segm_base, loop.results[1], align=4)
@@ -1332,6 +1317,8 @@ def build_unified_attention_reduce(spec: UnifiedAttentionReduceSpec) -> KernelDe
     active = b.cmp_eq(tid, b.const_i32(0))
     neg_inf = b.const_f32(float("-inf"))
     zero = b.const_f32(0.0)
+    ml_desc, seg_out_desc = _segm_descriptors(p, spec.num_segments)
+    q_desc = _q_descriptor(p)
     max_loop = b.scf_for_iter(
         b.const_i32(0),
         b.const_i32(spec.num_segments),
@@ -1340,7 +1327,7 @@ def build_unified_attention_reduce(spec: UnifiedAttentionReduceSpec) -> KernelDe
         iv_name="seg",
     )
     with max_loop as (seg, (mx,)):
-        idx = _seg_idx(b, p, spec.num_segments, q_tok, q_head, seg)
+        idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
         b.scf_yield(b.fmax(mx, mv))
     overall = max_loop.results[0]
@@ -1352,53 +1339,27 @@ def build_unified_attention_reduce(spec: UnifiedAttentionReduceSpec) -> KernelDe
         iv_name="seg2",
     )
     with red as (seg, (den, acc)):
-        idx = _seg_idx(b, p, spec.num_segments, q_tok, q_head, seg)
+        idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
         lv = b.global_load_f32(segm_expsum, idx)
         factor = b.exp2(b.fsub(mv, overall))
         den2 = b.fadd(den, b.fmul(lv, factor))
-        out_idx = b.add(
-            b.add(
-                b.mul(
-                    q_tok,
-                    b.const_i32(p.num_query_heads * spec.num_segments * p.head_size),
-                ),
-                b.mul(q_head, b.const_i32(spec.num_segments * p.head_size)),
-            ),
-            b.add(b.mul(seg, b.const_i32(p.head_size)), dim),
+        out_idx, _ = seg_out_desc.offset(
+            b,
+            token=q_tok,
+            head=q_head,
+            seg=seg,
+            dim=dim,
         )
         ov = b.global_load_f32(segm_output, out_idx)
         acc2 = b.fadd(acc, b.fmul(ov, factor))
         b.scf_yield(den2, acc2)
     result = b.fmul(red.results[1], b.rcp(red.results[0]))
     cast = b.cast_f32_to(result, dtype)
-    out_idx = b.add(
-        b.add(
-            b.mul(q_tok, b.const_i32(p.num_query_heads * p.head_size)),
-            b.mul(q_head, b.const_i32(p.head_size)),
-        ),
-        dim,
-    )
+    out_idx, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
     with b.scf_if(active):
         b.global_store(out, out_idx, cast, align=2)
     return b.kernel
-
-
-def _seg_idx(
-    b: IRBuilder,
-    p: UnifiedAttentionProblem,
-    segments: int,
-    q_tok: Value,
-    q_head: Value,
-    seg: Value,
-) -> Value:
-    return b.add(
-        b.add(
-            b.mul(q_tok, b.const_i32(p.num_query_heads * segments)),
-            b.mul(q_head, b.const_i32(segments)),
-        ),
-        seg,
-    )
 
 
 def _emit_find_seq_idx_scan(
@@ -1416,6 +1377,60 @@ def _emit_find_seq_idx_scan(
         le = b.cmp_le(start_i, q_tok)
         b.scf_yield(b.select(le, si, seq_idx))
     return scan.results[0]
+
+
+def _q_descriptor(p: UnifiedAttentionProblem) -> TensorDescriptor:
+    """Element-unit Q/output descriptor: ``(token, head, dim)``."""
+    return TensorDescriptor.naive(
+        "Q",
+        lengths=[p.max_seqlen_q + 1, p.num_query_heads, p.head_size],
+        coord_names=("token", "head", "dim"),
+    )
+
+
+def _paged_kv_descriptor(p: UnifiedAttentionProblem) -> PagedKvDescriptor:
+    """Element-unit paged-KV descriptor for the scalar kernels."""
+    return PagedKvDescriptor(
+        block_size=p.block_size,
+        stride_0=p.block_size * p.num_kv_heads * p.head_size,
+        stride_1=p.num_kv_heads * p.head_size,
+        stride_2=p.head_size,
+        stride_3=1,
+    )
+
+
+def _segm_descriptors(
+    p: UnifiedAttentionProblem,
+    num_segments: int,
+) -> Tuple[TensorDescriptor, TensorDescriptor]:
+    """``(segm_ml, segm_output)`` descriptors used by 3D + reduce kernels.
+
+    Layouts:
+
+      ``segm_ml``      : ``[total_q, num_query_heads, num_segments]``
+      ``segm_output``  : ``[total_q, num_query_heads, num_segments, head_size]``
+
+    Both are produced by ``build_unified_attention_3d`` and consumed by
+    ``build_unified_attention_reduce``. Encoding them as descriptors
+    means every offset becomes ``desc.offset(token=..., head=..., seg=...,
+    dim=...)`` instead of the original ``add(mul, mul)`` ladder.
+    """
+    ml_desc = TensorDescriptor.naive(
+        "segm_ml",
+        lengths=[p.max_seqlen_q + 1, p.num_query_heads, num_segments],
+        coord_names=("token", "head", "seg"),
+    )
+    out_desc = TensorDescriptor.naive(
+        "segm_output",
+        lengths=[
+            p.max_seqlen_q + 1,
+            p.num_query_heads,
+            num_segments,
+            p.head_size,
+        ],
+        coord_names=("token", "head", "seg", "dim"),
+    )
+    return ml_desc, out_desc
 
 
 def _emit_qk_score(
@@ -1437,26 +1452,17 @@ def _emit_qk_score(
     physical, token_in_block = _physical_block_and_token(
         b, p, block_tables, seq_idx, kpos
     )
+    q_desc = _q_descriptor(p)
+    kv_desc = _paged_kv_descriptor(p)
     for d in b.unroll(p.head_size):
-        q_off = b.add(
-            b.add(
-                b.mul(q_tok, b.const_i32(p.num_query_heads * p.head_size)),
-                b.mul(q_head, b.const_i32(p.head_size)),
-            ),
-            b.const_i32(d),
-        )
-        k_off = b.add(
-            b.add(
-                b.add(
-                    b.mul(
-                        physical,
-                        b.const_i32(p.block_size * p.num_kv_heads * p.head_size),
-                    ),
-                    b.mul(token_in_block, b.const_i32(p.num_kv_heads * p.head_size)),
-                ),
-                b.mul(kv_head, b.const_i32(p.head_size)),
-            ),
-            b.const_i32(d),
+        d_v = b.const_i32(d)
+        q_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=d_v)
+        k_off = kv_desc.offset(
+            b,
+            physical_block=physical,
+            token_in_block=token_in_block,
+            kv_head=kv_head,
+            dim=d_v,
         )
         qv = b.cast_to_f32(b.global_load(query, q_off, dtype, align=2))
         kv = b.cast_to_f32(b.global_load(key, k_off, dtype, align=2))
@@ -1478,17 +1484,12 @@ def _emit_v_load(
     physical, token_in_block = _physical_block_and_token(
         b, p, block_tables, seq_idx, kpos
     )
-    v_off = b.add(
-        b.add(
-            b.add(
-                b.mul(
-                    physical, b.const_i32(p.block_size * p.num_kv_heads * p.head_size)
-                ),
-                b.mul(token_in_block, b.const_i32(p.num_kv_heads * p.head_size)),
-            ),
-            b.mul(kv_head, b.const_i32(p.head_size)),
-        ),
-        dim,
+    v_off = _paged_kv_descriptor(p).offset(
+        b,
+        physical_block=physical,
+        token_in_block=token_in_block,
+        kv_head=kv_head,
+        dim=dim,
     )
     return b.cast_to_f32(b.global_load(value, v_off, dtype, align=2))
 

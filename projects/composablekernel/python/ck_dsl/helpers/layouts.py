@@ -30,6 +30,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from ..core.ir import IRBuilder, Value
+
 
 # Closed-form XOR swizzle parameters per tile shape, for fp16/bf16 (2-byte)
 # data. Read these as: for a byte offset ``off`` into the tile, the
@@ -168,3 +170,87 @@ class LdsLayout:
                 "xor swizzle requires non-empty swizzle_stages; "
                 "use LdsLayout.xor_swizzled(...) to populate it"
             )
+
+
+# ---------------------------------------------------------------------------
+# CK Tile ``TransposeLDSLayout<M, K, B>`` lane formulas
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TransposeLdsReader:
+    """``ds_read_b64_tr_b16`` lane-address formulas for ``M=16`` tiles.
+
+    Mirrors CK Tile's ``TransposeLDSLayout<M, K, B>`` (see
+    ``composablekernel/include/ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp``).
+    For the ``M=16`` MFMA shape that the tiled attention kernels use,
+    each PV MFMA reads its ``B`` operand by issuing
+    ``ds_read_b64_tr_b16`` reads with these lane formulas:
+
+    .. code-block:: text
+
+        row(lane, read) = (lane / 16) * K_L + read * 4 + ((lane / 4) % 4)
+        col(lane)       = (lane % 4) * 4
+
+    where ``K_L = K / (64 / M) = K / 4`` and ``read in 0..K_L / 4 - 1``.
+    The hardware transposes the 4 consecutive halves each lane returns
+    so lane ``(n = lane % 16, k_chunk = lane / 16)`` ends up holding the
+    MFMA ``B[k_chunk * K_L + 0..K_L-1, n]`` slice it needs.
+
+    The dataclass is unbound; call :meth:`bind` once per kernel to
+    materialize the SSA values that depend on ``lane``, then use
+    :meth:`row` and the cached :attr:`col` to address LDS for each
+    read.
+    """
+
+    K: int
+    M: int = 16
+
+    @property
+    def k_lanes(self) -> int:
+        return self.K // 4
+
+    def reads_per_k_iter(self, k_step: int) -> int:
+        return max(1, k_step // self.K)
+
+    def bind(self, b: IRBuilder, lane: Value) -> "_BoundTransposeLdsReader":
+        """Materialize the lane-derived constants once per kernel.
+
+        Returns a small bound view that knows the SSA ``lane`` and exposes
+        :meth:`row` for use inside the K iteration loops.
+        """
+        return _BoundTransposeLdsReader(
+            reader=self,
+            lane=lane,
+            lane_div_16=b.div(lane, b.const_i32(16)),
+            lane_div_4_mod_4=b.mod(b.div(lane, b.const_i32(4)), b.const_i32(4)),
+            col=b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4)),
+        )
+
+
+@dataclass(frozen=True)
+class _BoundTransposeLdsReader:
+    """SSA values produced by :meth:`TransposeLdsReader.bind`."""
+
+    reader: TransposeLdsReader
+    lane: Value
+    lane_div_16: Value
+    lane_div_4_mod_4: Value
+    col: Value
+
+    def row(self, b: IRBuilder, *, k_offset: int, read: int = 0) -> Value:
+        """The ``row`` LDS index for one ``ds_read_b64_tr_b16`` call.
+
+        ``k_offset`` is the base of this K iteration (e.g. ``k * K_STEP``
+        in the calling MFMA loop). ``read`` is the read index within the
+        K iteration; the helper bumps the row by ``read * 4`` because
+        each ``ds_read_b64_tr_b16`` covers 4 K rows of the transpose
+        layout.
+        """
+        return b.add(
+            b.const_i32(k_offset + read * 4),
+            b.add(
+                b.mul(self.lane_div_16, b.const_i32(self.reader.k_lanes)),
+                self.lane_div_4_mod_4,
+            ),
+        )

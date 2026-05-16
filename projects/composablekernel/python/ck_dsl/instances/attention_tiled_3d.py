@@ -40,16 +40,32 @@ from ..core.ir import (
     Type,
     Value,
 )
-from ..helpers.attention import PagedKvDescriptor
-
-from .attention_tiled_2d import (
-    _apply_softcap,
-    _binary_search_seq_idx,
-    _mfma_16x16x16,
-    _mfma_16x16x32,
-    _warp_xor_reduce_max,
-    _warp_xor_reduce_sum,
+from ..helpers.attention import (
+    apply_softcap_log2 as _apply_softcap,
+    binary_search_seq_idx as _binary_search_seq_idx_helper,
+    mfma_16x16x16_for_dtype as _mfma_16x16x16,
+    mfma_16x16x32_for_dtype as _mfma_16x16x32,
+    warp_xor_reduce_max as _warp_xor_reduce_max,
+    warp_xor_reduce_sum as _warp_xor_reduce_sum,
 )
+from ..helpers.layouts import TransposeLdsReader
+from ..transforms import TensorDescriptor, indirect, unmerge
+
+
+def _binary_search_seq_idx(b, cu_q, q_block_global_idx, num_seqs, block_q, iterations):
+    """Positional-arg adapter for the legacy 3D call site.
+
+    Lets the 3D kernel keep its original call shape while the helper now
+    enforces keyword-only ``block_q`` / ``iterations`` for new callers.
+    """
+    return _binary_search_seq_idx_helper(
+        b,
+        cu_q,
+        q_block_global_idx,
+        num_seqs,
+        block_q=block_q,
+        iterations=iterations,
+    )
 
 
 MFMA_M = 16
@@ -279,15 +295,33 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
     # (m=-inf zeros the reduce contribution; acc=0 and l=0 keep everything
     # finite even when other segments have finite m). AITER's Triton kernel
     # achieves the same effect through `tl.store` masks.
+    # Coordinate transforms over the three workspace tensors:
+    #   segm_max     [total_q, num_qh, num_segments]
+    #   segm_expsum  [total_q, num_qh, num_segments]
+    #   segm_output  [total_q, num_qh, num_segments, head_size]
+    # plus Q / output which both share ``(token, head, dim)``. ``1<<30``
+    # is a compile-time upper bound on ``total_q`` so the row-major
+    # stride product matches the kernel's layout assumptions exactly.
+    ml_desc = TensorDescriptor.naive(
+        "segm_ml",
+        lengths=[1 << 30, NUM_QH, NUM_SEG],
+        coord_names=("token", "head", "seg"),
+    )
+    seg_acc_desc = TensorDescriptor.naive(
+        "segm_output",
+        lengths=[1 << 30, NUM_QH, NUM_SEG, HD],
+        coord_names=("token", "head", "seg", "dim"),
+    )
+    q_desc = TensorDescriptor.naive(
+        "Q",
+        lengths=[1 << 30, NUM_QH, HD],
+        coord_names=("token", "head", "dim"),
+    )
+
     seg_start_tile_pos = b.mul(b.mul(seg_idx, tps), b.const_i32(T))
     with b.scf_if(b.cmp_ge(seg_start_tile_pos, seq_len)):
         neg_inf_local = b.const_f32(float("-inf"))
         zero_local = b.const_f32(0.0)
-        ml_stride_qtoken_e = NUM_QH * NUM_SEG
-        ml_stride_qhead_e = NUM_SEG
-        seg_acc_stride_qt = NUM_QH * NUM_SEG * HD
-        seg_acc_stride_qh = NUM_SEG * HD
-        seg_acc_stride_seg = HD
         lane_writes_ml_e = b.cmp_eq(b.mod(tid, b.const_i32(16)), b.const_i32(0))
         for reg in range(4):
             row = b.add(
@@ -303,13 +337,7 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
             qp_r_safe = b.select(row_ok, qp_r, b.const_i32(0))
             qh_r_safe = b.select(row_ok, qh_r, b.const_i32(0))
             qtoken = b.add(cu_q_start, qp_r_safe)
-            ml_idx = b.add(
-                b.add(
-                    b.mul(qtoken, b.const_i32(ml_stride_qtoken_e)),
-                    b.mul(qh_r_safe, b.const_i32(ml_stride_qhead_e)),
-                ),
-                seg_idx,
-            )
+            ml_idx, _ = ml_desc.offset(b, token=qtoken, head=qh_r_safe, seg=seg_idx)
             with b.scf_if(lane_writes_ml_e):
                 b.global_store(segm_max_ptr, ml_idx, neg_inf_local, align=4)
                 b.global_store(segm_expsum_ptr, ml_idx, zero_local, align=4)
@@ -331,12 +359,12 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
                 qp_r_safe = b.select(row_ok, qp_r, b.const_i32(0))
                 qh_r_safe = b.select(row_ok, qh_r, b.const_i32(0))
                 qtoken = b.add(cu_q_start, qp_r_safe)
-                seg_acc_idx = b.add(
-                    b.add(
-                        b.mul(qtoken, b.const_i32(seg_acc_stride_qt)),
-                        b.mul(qh_r_safe, b.const_i32(seg_acc_stride_qh)),
-                    ),
-                    b.add(b.mul(seg_idx, b.const_i32(seg_acc_stride_seg)), col),
+                seg_acc_idx, _ = seg_acc_desc.offset(
+                    b,
+                    token=qtoken,
+                    head=qh_r_safe,
+                    seg=seg_idx,
+                    dim=col,
                 )
                 b.global_store(segm_output_ptr, seg_acc_idx, zero_local, align=4)
         b.ret()
@@ -347,10 +375,10 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
     V_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Vlds")
     P_lds = b.smem_alloc(dtype, [BLOCK_M, T], name_hint="Plds")
 
-    tr_lane_div_16 = b.div(tid, b.const_i32(16))
-    tr_lane_div_4_mod_4 = b.mod(b.div(tid, b.const_i32(4)), b.const_i32(4))
-    tr_lane_mod_4 = b.mod(tid, b.const_i32(4))
-    tr_col_lane = b.mul(tr_lane_mod_4, b.const_i32(4))
+    # CK Tile ``TransposeLDSLayout<M=16, K=PV_K_STEP, B=1>`` lane formulas.
+    # The 3D segment kernel is single-warp, so ``lane == tid``.
+    pv_tr_reader = TransposeLdsReader(K=PV_K_STEP, M=16).bind(b, tid)
+    tr_col_lane = pv_tr_reader.col
 
     neg_inf = b.const_f32(float("-inf"))
     zero_f = b.const_f32(0.0)
@@ -369,16 +397,19 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
         Q_col = b.mul(b.mod(q_vid, b.const_i32(Q_VECS_PER_ROW)), b.const_i32(8))
         q_pos_t = b.add(qb_start_pos, b.div(Q_row, b.const_i32(NQK)))
         qh_t = b.add(
-            b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(Q_row, b.const_i32(NQK))
+            b.mul(kv_head_idx, b.const_i32(NQK)),
+            b.mod(Q_row, b.const_i32(NQK)),
         )
         qmask_t = b.land(
             b.cmp_lt(q_pos_t, cur_batch_q_len), b.cmp_lt(qh_t, b.const_i32(NUM_QH))
         )
         q_pos_safe = b.select(qmask_t, q_pos_t, b.const_i32(0))
         qh_safe = b.select(qmask_t, qh_t, b.const_i32(0))
-        q_off_base = b.add(
-            b.mul(b.add(cu_q_start, q_pos_safe), b.const_i32(NUM_QH * HD)),
-            b.mul(qh_safe, b.const_i32(HD)),
+        q_off_base, _ = q_desc.offset(
+            b,
+            token=b.add(cu_q_start, q_pos_safe),
+            head=qh_safe,
+            dim=b.const_i32(0),
         )
         v8 = b.global_load_vN(query, b.add(q_off_base, Q_col), dtype, 8, align=16)
         b.smem_store_vN(
@@ -458,50 +489,48 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
     V_lds_addr = b.smem_addr_of(V_lds)
     zero_soff = b.const_i32(0)
 
-    kv_desc = PagedKvDescriptor(
-        block_size=T,
-        stride_0=kv_stride_blk_b,
-        stride_1=kv_stride_tok_b,
-        stride_2=kv_stride_h_b,
-        stride_3=2,
+    # Paged-KV byte descriptor — same DAG composition the 2D kernel uses:
+    # an ``indirect(tile_idx -> physical_block)`` table lookup followed
+    # by ``unmerge(linear_half -> (token, dim))`` to split the per-lane
+    # half offset, plus the byte-stride 4D base. One ``.offset()`` call
+    # produces the final byte address for one async DMA call.
+    seq_base = b.mul(seq_idx, bt_stride_p)
+    paged_kv_desc = TensorDescriptor.naive(
+        "paged_kv_bytes",
+        lengths=[1 << 24, T, NUM_KV, HD],
+        strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, 2],
+        coord_names=("physical_block", "token", "kv_head", "dim"),
+    ).transform(
+        indirect("tile_idx", into="physical_block", table=block_tables, base=seq_base),
+        unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
     )
 
-    def _kv_base_bytes(kv_tile_idx: Value) -> Value:
-        return kv_desc.block_base_from_table(
-            b,
-            block_table=block_tables,
-            seq_idx=seq_idx,
-            tile_idx=kv_tile_idx,
-            block_table_stride=bt_stride_p,
-            kv_head=kv_head_idx,
-        )
-
     def _issue_k_load(kv_tile_idx: Value, buf_idx: Value) -> None:
-        kv_base = _kv_base_bytes(kv_tile_idx)
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
         buf_off_i64 = b.zext(buf_off_i32, I64)
         K_buf_base = b.smem_ptr_add(K_lds_addr, buf_off_i64)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            t_idx = b.div(linear_half, b.const_i32(HD))
-            hd_idx_bytes = b.mul(b.mod(linear_half, b.const_i32(HD)), b.const_i32(2))
-            voff = b.add(
-                b.add(b.mul(t_idx, b.const_i32(kv_stride_tok_b)), hd_idx_bytes), kv_base
+            voff, _ = paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear_half,
+                kv_head=kv_head_idx,
             )
             k_dst = b.smem_ptr_add(K_buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(key_rsrc, k_dst, voff, zero_soff, 4)
 
     def _issue_v_load(kv_tile_idx: Value, buf_idx: Value) -> None:
-        kv_base = _kv_base_bytes(kv_tile_idx)
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
         buf_off_i64 = b.zext(buf_off_i32, I64)
         V_buf_base = b.smem_ptr_add(V_lds_addr, buf_off_i64)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            t_idx = b.div(linear_half, b.const_i32(HD))
-            hd_idx_bytes = b.mul(b.mod(linear_half, b.const_i32(HD)), b.const_i32(2))
-            voff = b.add(
-                b.add(b.mul(t_idx, b.const_i32(kv_stride_tok_b)), hd_idx_bytes), kv_base
+            voff, _ = paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear_half,
+                kv_head=kv_head_idx,
             )
             v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(value_rsrc, v_dst, voff, zero_soff, 4)
@@ -651,18 +680,14 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
                 scaled_comps.append(b.fmul(e, alpha_regs[reg]))
             acc_v = b.vec_pack(scaled_comps, F32)
 
-            K_L_pv = PV_K_STEP // 4
-            tr_row_base = b.add(
-                b.mul(tr_lane_div_16, b.const_i32(K_L_pv)), tr_lane_div_4_mod_4
-            )
             n_col_base = b.add(b.mul(b.const_i32(n), b.const_i32(16)), tr_col_lane)
 
             for k in range(PV_K_ITERS):
                 if PV_K_STEP == 32:
                     p_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                     A_p = b.smem_load_vN(P_lds, lane_col, p_off, dtype=dtype, n=8)
-                    row_r0 = b.add(b.const_i32(k * 32), tr_row_base)
-                    row_r1 = b.add(b.const_i32(k * 32 + 4), tr_row_base)
+                    row_r0 = pv_tr_reader.row(b, k_offset=k * 32, read=0)
+                    row_r1 = pv_tr_reader.row(b, k_offset=k * 32, read=1)
                     B_r0 = b.ds_read_tr16_b64(
                         V_lds, cur_buf, row_r0, n_col_base, dtype=dtype
                     )
@@ -674,7 +699,7 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
                 else:
                     p_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
                     A_p = b.smem_load_vN(P_lds, lane_col, p_off, dtype=dtype, n=4)
-                    row_lane = b.add(b.const_i32(k * 16), tr_row_base)
+                    row_lane = pv_tr_reader.row(b, k_offset=k * 16, read=0)
                     B_v = b.ds_read_tr16_b64(
                         V_lds, cur_buf, row_lane, n_col_base, dtype=dtype
                     )
@@ -697,16 +722,11 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
     acc_final = [final[8 + n] for n in range(PV_N_TILES)]
 
     # Per-thread: write own (row, col) of acc; only the lane in each
-    # 4-lane row group (lane%4 == 0) writes m and l.
-    seg_stride_qtoken = NUM_QH * NUM_SEG * HD
-    seg_stride_qhead = NUM_SEG * HD
-    seg_stride_seg = HD
-    ml_stride_qtoken = NUM_QH * NUM_SEG
-    ml_stride_qhead = NUM_SEG
-
-    # Only valid rows write to the workspace. Padding rows (rows of the
-    # BLOCK_M tile that fall outside `cur_batch_q_len` or `NUM_QH`) would
-    # otherwise race onto valid row 0's address after the qh/qtoken clamp.
+    # 4-lane row group (lane%4 == 0) writes m and l. The workspace
+    # layouts ``segm_output[token, head, seg, dim]`` and
+    # ``segm_{max,expsum}[token, head, seg]`` are encoded by the
+    # ``seg_acc_desc`` / ``ml_desc`` coordinate transforms defined at
+    # the top of this function.
     for n in range(PV_N_TILES):
         for reg in range(4):
             row = b.add(b.mul(lane_rg, b.const_i32(4)), b.const_i32(reg))
@@ -719,15 +739,12 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
                 b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
             )
             qtoken = b.add(cu_q_start, qp_r)
-            seg_acc_idx = b.add(
-                b.add(
-                    b.mul(qtoken, b.const_i32(seg_stride_qtoken)),
-                    b.mul(qh_r, b.const_i32(seg_stride_qhead)),
-                ),
-                b.add(
-                    b.mul(seg_idx, b.const_i32(seg_stride_seg)),
-                    col,
-                ),
+            seg_acc_idx, _ = seg_acc_desc.offset(
+                b,
+                token=qtoken,
+                head=qh_r,
+                seg=seg_idx,
+                dim=col,
             )
             v_acc = b.vec_extract(acc_final[n], reg)
             with b.scf_if(row_ok):
@@ -742,13 +759,7 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
             b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
         )
         qtoken = b.add(cu_q_start, qp_r)
-        ml_idx = b.add(
-            b.add(
-                b.mul(qtoken, b.const_i32(ml_stride_qtoken)),
-                b.mul(qh_r, b.const_i32(ml_stride_qhead)),
-            ),
-            seg_idx,
-        )
+        ml_idx, _ = ml_desc.offset(b, token=qtoken, head=qh_r, seg=seg_idx)
         do_write = b.land(lane_writes_ml, row_ok)
         with b.scf_if(do_write):
             b.global_store(segm_max_ptr, ml_idx, m_final[reg], align=4)
@@ -833,10 +844,32 @@ def build_unified_attention_reduce_tiled(
     neg_inf = b.const_f32(float("-inf"))
     zero_f = b.const_f32(0.0)
 
-    base_ml = b.add(
-        b.mul(q_token, b.const_i32(NUM_QH * NUM_SEG)),
-        b.mul(q_head, b.const_i32(NUM_SEG)),
+    # Workspace layouts (same as the segment kernel's outputs):
+    #   segm_max / segm_expsum : [total_q, num_qh, num_segments]
+    #   segm_output            : [total_q, num_qh, num_segments, head_size]
+    # And the final output uses ``(token, head, dim)``. Encoding them
+    # as descriptors makes the per-pass offset math one call instead of
+    # an `add(mul(qt,...), mul(qh,...))` ladder.
+    ml_desc_red = TensorDescriptor.naive(
+        "segm_ml",
+        lengths=[1 << 30, NUM_QH, NUM_SEG],
+        coord_names=("token", "head", "seg"),
     )
+    seg_acc_desc_red = TensorDescriptor.naive(
+        "segm_output",
+        lengths=[1 << 30, NUM_QH, NUM_SEG, HD],
+        coord_names=("token", "head", "seg", "dim"),
+    )
+    out_desc_red = TensorDescriptor.naive(
+        "out",
+        lengths=[1 << 30, NUM_QH, HD],
+        coord_names=("token", "head", "dim"),
+    )
+
+    # Per-segment ml base for this (q_token, q_head); pass 1/2 add the
+    # segment index inside their loops, which is the same as
+    # ``ml_desc_red.offset(... seg=sv)``.
+    base_ml, _ = ml_desc_red.offset(b, token=q_token, head=q_head, seg=b.const_i32(0))
 
     # ---- pass 1: overall_max ----
     max_loop = b.scf_for_iter(
@@ -875,10 +908,6 @@ def build_unified_attention_reduce_tiled(
     inv_l = b.select(safe_expsum, zero_f, b.rcp(overall_expsum))
 
     # ---- pass 3: per-element reduce + normalize + write ----
-    base_acc = b.add(
-        b.mul(q_token, b.const_i32(NUM_QH * NUM_SEG * HD)),
-        b.mul(q_head, b.const_i32(NUM_SEG * HD)),
-    )
     # Each thread handles HALFS_PER_THREAD output dims.
     for li in range(HALFS_PER_THREAD):
         d = b.add(b.mul(b.const_i32(li), b.const_i32(THREADS)), tid)
@@ -890,11 +919,14 @@ def build_unified_attention_reduce_tiled(
             iv_name=f"s_acc{li}",
         )
         with acc_loop as (sv, (ac,)):
-            idx_ml = b.add(base_ml, sv)
+            idx_ml, _ = ml_desc_red.offset(b, token=q_token, head=q_head, seg=sv)
             ms = b.global_load_f32(seg_max, idx_ml)
-            idx_acc = b.add(
-                b.add(base_acc, b.mul(sv, b.const_i32(HD))),
-                d,
+            idx_acc, _ = seg_acc_desc_red.offset(
+                b,
+                token=q_token,
+                head=q_head,
+                seg=sv,
+                dim=d,
             )
             ov = b.global_load_f32(seg_out, idx_acc)
             ms_finite = b.fcmp("ogt", ms, neg_inf)
@@ -903,13 +935,7 @@ def build_unified_attention_reduce_tiled(
             b.scf_yield(b.fadd(ac, b.fmul(ov, factor)))
         scalar_out_f32 = b.fmul(acc_loop.results[0], inv_l)
         scalar_out = b.cast_f32_to(scalar_out_f32, dtype)
-        out_idx = b.add(
-            b.add(
-                b.mul(q_token, b.const_i32(NUM_QH * HD)),
-                b.mul(q_head, b.const_i32(HD)),
-            ),
-            d,
-        )
+        out_idx, _ = out_desc_red.offset(b, token=q_token, head=q_head, dim=d)
         b.global_store(out, out_idx, scalar_out, align=2)
 
     return b.kernel

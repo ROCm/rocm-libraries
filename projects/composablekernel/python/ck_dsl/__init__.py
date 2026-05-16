@@ -132,10 +132,14 @@ from .benchmark import BenchmarkSummary, benchmark_manifest, summarize_runs
 # ---- transforms ----
 from .transforms import (
     CoordVar,
+    Indirect,
+    PadDynamic,
     TensorDescriptor,
     embed,
+    indirect,
     merge,
     pad,
+    pad_dynamic,
     pass_through,
     unmerge,
 )
@@ -218,10 +222,14 @@ __all__ = [
     "summarize_runs",
     # transforms
     "CoordVar",
+    "Indirect",
+    "PadDynamic",
     "TensorDescriptor",
     "embed",
+    "indirect",
     "merge",
     "pad",
+    "pad_dynamic",
     "pass_through",
     "unmerge",
 ]

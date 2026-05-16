@@ -93,12 +93,18 @@ from .attention import (
     Attention3DConfig,
     OnlineSoftmaxState,
     PagedKvDescriptor,
+    apply_softcap_log2,
     apply_softcap_scalar,
+    binary_search_seq_idx,
     causal_mask,
+    mfma_16x16x16_for_dtype,
+    mfma_16x16x32_for_dtype,
     select_2d_config,
     select_3d_config,
     sliding_window_mask,
     use_2d_kernel,
+    warp_xor_reduce_max,
+    warp_xor_reduce_sum,
 )
 from .compile import KernelArtifact, compile_kernel
 from .distribution import (
@@ -191,7 +197,7 @@ from .io import (
     store_scalar_from_f32,
     store_vec,
 )
-from .layouts import LdsLayout
+from .layouts import LdsLayout, TransposeLdsReader
 from .loads import (
     AsyncTileLoader,
     AsyncTileLoaderSlot,
@@ -242,6 +248,7 @@ from .manifest import (
     make_attention_manifest,
     make_conv_manifest,
     make_gemm_manifest,
+    make_simple_op_manifest,
     write_artifact,
 )
 
@@ -253,13 +260,19 @@ __all__ = [
     "MfmaAtom",
     "OnlineSoftmaxState",
     "PagedKvDescriptor",
+    "apply_softcap_log2",
     "apply_softcap_scalar",
+    "binary_search_seq_idx",
     "causal_mask",
+    "mfma_16x16x16_for_dtype",
+    "mfma_16x16x32_for_dtype",
     "mfma_atom",
     "select_2d_config",
     "select_3d_config",
     "sliding_window_mask",
     "use_2d_kernel",
+    "warp_xor_reduce_max",
+    "warp_xor_reduce_sum",
     # Geometry
     "WarpGrid",
     # Autotuning
@@ -285,6 +298,7 @@ __all__ = [
     "super_tile_swizzle_dynamic",
     # Loads
     "LdsLayout",
+    "TransposeLdsReader",
     "AsyncTileLoader",
     "AsyncTileLoaderSlot",
     "CoalescedTileLoader",
@@ -352,6 +366,7 @@ __all__ = [
     "make_attention_manifest",
     "make_conv_manifest",
     "make_gemm_manifest",
+    "make_simple_op_manifest",
     "write_artifact",
     # CK Tile-inspired tensor abstractions
     "BufferResource",

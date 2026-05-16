@@ -63,14 +63,17 @@ ck_dsl/helpers/
 ├── atoms.py           # MfmaAtom catalog (the matrix-multiply intrinsics)
 ├── geometry.py        # WarpGrid: block/warp/lane decomposition
 ├── loads.py           # CoalescedTileLoader + AsyncTileLoader
-├── layouts.py         # LdsLayout: K-padding, packed async layouts, guardrails
+├── layouts.py         # LdsLayout: K-padding, packed async layouts, guardrails;
+│                      # TransposeLdsReader for CK Tile ds_read_b64_tr_b16 formulas
 ├── schedule.py        # SchedulePolicy: named sched_group_barrier policies
 ├── pipeline.py        # SoftwarePipeline: prologue/steady-state/epilogue
 ├── epilogues.py       # DirectEpilogue + CShuffleEpilogue
 ├── attention.py       # Attention2DConfig, OnlineSoftmaxState, PagedKvDescriptor,
-│                      # causal/sliding-window masks, soft-cap, select_*d_config.
+│                      # warp_xor_reduce_*, dtype MFMA dispatch, log2 softcap,
+│                      # causal/sliding-window masks, select_*d_config.
 ├── compile.py         # compile_kernel() one-shot IR -> HSACO
-└── manifest.py        # make_gemm_manifest, make_conv_manifest, write_artifact
+└── manifest.py        # make_gemm_manifest, make_conv_manifest,
+                       # make_simple_op_manifest, write_artifact
 ```
 
 The two halves compose: the CK Tile-inspired layer (`tensor_view`,
@@ -86,21 +89,21 @@ Every kernel-building file in `ck_dsl/instances/` uses helpers from at
 least one of the two layers; bigger kernels (`gemm_universal`,
 `conv_implicit_gemm`) blend both. The current matrix:
 
-| Instance | tensor_view | sweep | io | reduction | spec | distribution | GEMM-shape |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `elementwise.py`         | yes | -   | yes | -   | yes | -  | - |
-| `layernorm2d.py`         | yes | yes | yes | yes | yes | -  | - |
-| `rmsnorm2d.py`           | yes | yes | yes | yes | yes | -  | - |
-| `reduce.py`              | yes | yes | yes | yes | yes | -  | - |
-| `transpose.py`           | yes | -   | yes | -   | yes | -  | - |
-| `gemm_universal.py`      | yes | -   | -   | -   | yes | -  | `MfmaAtom` |
-| `batched_gemm.py`        | -   | -   | -   | -   | yes | -  | (wraps `gemm_universal`) |
-| `grouped_gemm.py`        | -   | -   | -   | -   | yes | -  | (wraps `gemm_universal`) |
-| `conv_implicit_gemm.py`  | yes (buffer) | - | - | - | yes | - | `AsyncTileLoader`, `WarpGrid`, `CoalescedTileLoader`, `CShuffleEpilogue`, `MfmaAtom` |
-| `conv_direct_grouped.py` | -   | -   | -   | -   | yes | -  | - |
-| `attention_unified.py`   | -   | -   | -   | -   | yes | -  | - |
-| `attention_tiled_2d.py`  | -   | -   | -   | -   | yes | -  | - |
-| `attention_tiled_3d.py`  | -   | -   | -   | -   | yes | -  | - |
+| Instance | tensor_view | transform DAG | sweep | io | reduction | spec | distribution | GEMM-shape |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `elementwise.py`         | yes | - | -   | yes | -   | yes | -  | - |
+| `layernorm2d.py`         | yes | - | yes | yes | yes | yes | -  | - |
+| `rmsnorm2d.py`           | yes | - | yes | yes | yes | yes | -  | - |
+| `reduce.py`              | yes | - | yes | yes | yes | yes | -  | - |
+| `transpose.py`           | yes | - | -   | yes | -   | yes | -  | - |
+| `gemm_universal.py`      | yes | partial (view strides) | - | - | - | yes | -  | `MfmaAtom` |
+| `batched_gemm.py`        | -   | - | -   | -   | -   | yes | -  | (wraps `gemm_universal`) |
+| `grouped_gemm.py`        | -   | planned | - | - | - | yes | -  | (wraps `gemm_universal`) |
+| `conv_implicit_gemm.py`  | yes (buffer) | full (`unmerge`+`embed`+`pad`) | - | - | - | yes | - | `AsyncTileLoader`, `WarpGrid`, `CoalescedTileLoader`, `CShuffleEpilogue`, `MfmaAtom` |
+| `conv_direct_grouped.py` | - | input/output/weight descriptors + H/W `pad` | - | - | - | yes | -  | - |
+| `attention_unified.py`   | - | Q/output + paged-KV descriptor | - | - | - | yes | -  | - |
+| `attention_tiled_2d.py`  | - | Q/output + paged-KV `indirect`+`unmerge` | - | - | - | yes | -  | `TransposeLdsReader`, MFMA helpers |
+| `attention_tiled_3d.py`  | - | Q/output + workspace + paged-KV `indirect`+`unmerge` | - | - | - | yes | -  | `TransposeLdsReader`, MFMA helpers |
 
 The "spec" column (kernel_name_join, SignatureBuilder, ceil_div_grid,
 IOSpecRule/validate_io) is now uniform across all 13 instances. The
@@ -110,7 +113,10 @@ families too, after adding the buffer-view feature (`BufferResource`
 methods with the `mask=` OOB-sentinel idiom). Attention still
 intentionally uses raw IR for its per-warp `ds_bpermute` softmax
 butterfly; that pattern is not a memory access and so doesn't fit
-the `TensorView` surface.
+the `TensorView` surface. Attention addressing itself is now expressed
+through `ck_dsl.transforms` where it is a real coordinate problem:
+Q/output descriptors, workspace descriptors, and paged-KV cache
+addressing through `indirect(...) + unmerge(...)`.
 
 #### Buffer-view feature surface (new)
 
@@ -153,7 +159,7 @@ CK Tile parity (which C++ name maps to which Python helper):
 | `tile_window.set_window_origin(origin)` | `tile.move_to(*origin)` / `tile.shift_by(b, *deltas)` |
 | `tensor_coordinate<Desc>(idx)` | `make_tensor_coordinate(b, desc, idx)` |
 | `move_tensor_coordinate(desc, coord, step)` | `move_tensor_coordinate(b, coord, step)` |
-| `transform_tensor_descriptor(...)` + `make_*_transform` | `ck_dsl.transforms.TensorDescriptor.naive(...).transform(...)`; wrap with `view_from_transforms_descriptor(ptr, rich_desc)` |
+| `transform_tensor_descriptor(...)` + `make_*_transform` | `ck_dsl.transforms.TensorDescriptor.naive(...).transform(...)`; supports `pad`, `pad_dynamic`, `embed`, `merge`, `unmerge`, and `indirect`; wrap with `view_from_transforms_descriptor(ptr, rich_desc)` |
 | `tile_distribution_encoding<Rs, Hs, Ps2RHs..., Ys2RHs...>` | `TileDistributionEncoding(Rs=..., Hs=..., Ps2RHs_major=..., Ps2RHs_minor=..., Ys2RHs_major=..., Ys2RHs_minor=...)` |
 | `make_static_tile_distribution(encoding)` | `make_static_tile_distribution(encoding)` |
 | `make_static_distributed_tensor<T, Distribution>()` | `make_static_distributed_tensor(distribution, dtype=...)` |
