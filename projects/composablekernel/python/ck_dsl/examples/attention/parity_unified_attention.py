@@ -918,49 +918,71 @@ def make_inputs(s: Scenario, seed: int = 0):
 # ---------------------------------------------------------------------------
 
 
-def _time_torch_call_loop(call_once, warmup: int, attempts: int) -> float:
-    """Time a torch/Triton lane with torch CUDA events.
+# ---------------------------------------------------------------------------
+# Shared timer + bench stream
+# ---------------------------------------------------------------------------
+#
+# For an apples-to-apples comparison we must time both backends with
+# the same clock on the same stream. Both Triton (which dispatches via
+# ``torch.cuda.current_stream()``) and CK DSL (which we explicitly
+# route through ``stream=...`` on :func:`run_unified_attention_torch`)
+# can share a single long-lived stream: torch's default current stream
+# on the active device.
+#
+# Using that one stream for both backends gives us:
+#
+#   1. A single HIP queue carrying every launch from both backends, so
+#      timing one queue captures both fairly.
+#   2. Persistent stream lifetime - torch keeps the default stream
+#      alive for the whole process, so HIP modules loaded into its
+#      context stay valid across lanes (HIP error 709 "context is
+#      destroyed" was caused by short-lived per-lane streams).
+#   3. The torch caching allocator already attributes its allocations
+#      to ``current_stream()``, so the workspace-allocator lifetime
+#      story remains the one the production dispatch relies on.
+#
+# The timer for both lanes is :func:`ck_dsl.runtime.time_launches`
+# recording HIP events on that one stream.
 
-    Triton launches on torch's current stream, so torch events are the
-    correct timer and observe exactly the queued Triton work.
+
+def _bench_stream_handle() -> int:
+    """The shared bench stream's HIP handle.
+
+    Both lanes time on torch's current stream so the HIP events live
+    on the same queue as the launches they are bracketing.
     """
-    for _ in range(warmup):
-        call_once()
-    torch.cuda.synchronize()
-    t_start = torch.cuda.Event(enable_timing=True)
-    t_end = torch.cuda.Event(enable_timing=True)
-    t_start.record()
-    for _ in range(attempts):
-        call_once()
-    t_end.record()
-    t_end.synchronize()
-    return t_start.elapsed_time(t_end) / attempts
+    return int(torch.cuda.current_stream().cuda_stream)
 
 
-def _time_ck_dsl_call_loop(
-    call_once, warmup: int, attempts: int, *, stream: int
-) -> float:
-    """Time a CK DSL lane with HIP events on the launch stream.
+def _time_lane_ms(call_once, *, warmup: int, attempts: int, stream: int) -> float:
+    """Single shared HIP-event timer for any lane.
 
-    CK DSL kernels are issued through raw ``hipModuleLaunchKernel`` via
-    ctypes, not through torch. Timing them with ``torch.cuda.Event`` can
-    miss or misattribute raw HIP work on some ROCm stream setups; that
-    was the source of the old ``ck_2d_ms == ck_3d_ms`` harness artifact.
-    Use the CK DSL runtime's HIP-event timer instead, on the exact same
-    HIP stream passed to :func:`run_unified_attention_torch`.
+    ``call_once`` issues exactly one full per-iteration sequence of
+    launches on ``stream``. We pass that same ``stream`` to
+    :func:`ck_dsl.runtime.time_launches` so the HIP events are recorded
+    on the same queue the launches land on; the result is comparable
+    across Triton and CK DSL.
     """
     from ck_dsl.runtime import synchronize_and_release, time_launches
 
     ms = time_launches(call_once, warmup=warmup, iters=attempts, stream=stream)
+    # Drain CK DSL's retained-args bucket for this stream so the next
+    # lane's measurements cannot see leftover kernarg buffers.
     synchronize_and_release(stream)
     return ms
 
 
 def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
-    """Run AITER's Triton `unified_attention` with the requested path forced."""
+    """Run AITER's Triton `unified_attention` with the requested path forced.
+
+    Triton launches onto ``torch.cuda.current_stream()``. We time it
+    with the shared HIP-event timer recording on the same stream, so
+    the measurement is directly comparable to the CK DSL lane.
+    """
     output = torch.empty_like(data["query"])
     window_size = (s.sliding_window - 1, 0) if s.sliding_window else (-1, -1)
     _force_triton_path(path)
+    hip_stream = _bench_stream_handle()
     try:
 
         def call_once():
@@ -987,7 +1009,9 @@ def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
                 backend="triton",
             )
 
-        ms = _time_torch_call_loop(call_once, warmup, attempts)
+        ms = _time_lane_ms(
+            call_once, warmup=warmup, attempts=attempts, stream=hip_stream
+        )
         return output, ms
     finally:
         _force_triton_path("auto")
@@ -996,12 +1020,10 @@ def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
 def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
     """Run CK DSL `run_unified_attention_torch` with the requested path forced.
 
-    Uses the DSL's direct entry point (bypassing AITER's wrapper) so that
-    the path argument is honored exactly. The CK launches are placed on
-    torch's current stream (via `resolve_stream` inside the runtime) so
-    the torch caching allocator sees them and cannot recycle workspace
-    memory while a kernel is still pending -- the same invariant Triton
-    and AITER's paged-attention shim rely on.
+    Both backends share the default bench stream (torch's current
+    stream) so the timer measures them on the same queue. Routing
+    through that explicit stream also lets torch's caching allocator
+    observe the launches and stop recycling workspace memory mid-flight.
     """
     import torch
     from ck_dsl.instances import (
@@ -1039,13 +1061,7 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
         num_sms=120,
     )
 
-    # Launch on torch's current stream so the torch caching allocator
-    # sees the kernel launches. Default HIP stream 0 is decoupled from
-    # torch's streams, which previously produced sporadic NaNs and
-    # illegal accesses after a 2D launch was followed by a 3D launch
-    # because torch would recycle workspace memory while a kernel was
-    # still pending on stream 0.
-    torch_stream = int(torch.cuda.current_stream().cuda_stream)
+    hip_stream = _bench_stream_handle()
 
     def call_once():
         run_unified_attention_torch(
@@ -1064,10 +1080,10 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
             qq_bias=qq_bias,
             qq_bias_stride_0=qq_bias_stride_0,
             backend=_ck_backend(path),
-            stream=torch_stream,
+            stream=hip_stream,
         )
 
-    ms = _time_ck_dsl_call_loop(call_once, warmup, attempts, stream=torch_stream)
+    ms = _time_lane_ms(call_once, warmup=warmup, attempts=attempts, stream=hip_stream)
     return output, ms
 
 

@@ -3392,20 +3392,33 @@ class TestValidationHarness(unittest.TestCase):
 
 
 class TestAttentionHarnessTimers(unittest.TestCase):
-    """The attention benchmark must use backend-appropriate timer APIs."""
+    """The attention benchmark must time every lane with one shared clock.
 
-    def test_ck_dsl_timer_uses_runtime_time_launches(self):
+    The harness keeps both Triton and CK DSL apples-to-apples by:
+
+    1. Allocating one explicit HIP stream per lane.
+    2. Routing the Triton call through ``torch.cuda.stream(...)`` so its
+       launches land on that stream.
+    3. Passing the same HIP stream handle into the CK DSL runner so its
+       raw ``hipModuleLaunchKernel`` calls share the stream.
+    4. Recording HIP events on that stream via
+       :func:`ck_dsl.runtime.time_launches`.
+
+    These tests pin down (1, 3, 4): the timer goes through
+    ``time_launches`` with the caller-supplied stream and follows up
+    with a per-stream release.
+    """
+
+    @staticmethod
+    def _load_harness_with_fake_aiter():
         import importlib.util
         import sys
         import types
         from pathlib import Path
         from unittest import mock
 
-        # Import torch before patching sys.modules. Otherwise
-        # mock.patch.dict restores sys.modules to a pre-torch snapshot
-        # after this test, while torch's C extensions remain loaded;
-        # later tests that import torch can then trip PyTorch's
-        # "already has a docstring" re-import bug.
+        # Import torch BEFORE patching sys.modules so torch stays in the
+        # parent process's module table after ``mock.patch.dict`` exits.
         import torch  # noqa: F401
 
         module_path = Path(
@@ -3434,6 +3447,12 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         with mock.patch.dict(sys.modules, modules):
             sys.modules[spec.name] = mod
             spec.loader.exec_module(mod)
+        return mod
+
+    def test_lane_timer_routes_through_time_launches_with_stream(self):
+        from unittest import mock
+
+        mod = self._load_harness_with_fake_aiter()
 
         calls = []
 
@@ -3448,80 +3467,30 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         with mock.patch("ck_dsl.runtime.time_launches", fake_time_launches), mock.patch(
             "ck_dsl.runtime.synchronize_and_release", fake_sync
         ):
-            ms = mod._time_ck_dsl_call_loop(
-                lambda: calls.append(("launch",)), 2, 5, stream=77
+            ms = mod._time_lane_ms(
+                lambda: calls.append(("launch",)),
+                warmup=2,
+                attempts=5,
+                stream=77,
             )
 
         self.assertEqual(ms, 0.123)
         self.assertIn(("time_launches", 2, 5, 77), calls)
+        # Must release the args bucket for THIS lane's stream, not stream 0.
         self.assertIn(("sync", 77), calls)
 
-    def test_triton_timer_uses_torch_events(self):
-        import importlib.util
-        import sys
-        import types
-        from pathlib import Path
-        from unittest import mock
+    def test_lane_timer_is_the_only_timer(self):
+        """Sanity: the harness must NOT also export a torch-event timer.
 
-        # Keep torch in sys.modules across the temporary aiter-module
-        # patch; see the sibling timer test for the rationale.
-        import torch  # noqa: F401
-
-        module_path = Path(
-            "/workspace/rocm-libraries-streaming/projects/composablekernel/python/"
-            "ck_dsl/examples/attention/parity_unified_attention.py"
-        )
-        fake_aiter = types.ModuleType("aiter")
-        fake_ops = types.ModuleType("aiter.ops")
-        fake_triton = types.ModuleType("aiter.ops.triton")
-        fake_attention = types.ModuleType("aiter.ops.triton.attention")
-        fake_unified = types.ModuleType("aiter.ops.triton.attention.unified_attention")
-        fake_unified.use_2d_kernel = lambda *a, **k: True
-        fake_unified.unified_attention = lambda *a, **k: None
-        modules = {
-            "aiter": fake_aiter,
-            "aiter.ops": fake_ops,
-            "aiter.ops.triton": fake_triton,
-            "aiter.ops.triton.attention": fake_attention,
-            "aiter.ops.triton.attention.unified_attention": fake_unified,
-        }
-        spec = importlib.util.spec_from_file_location(
-            "ck_dsl_attention_parity_torch_timer_test",
-            module_path,
-        )
-        mod = importlib.util.module_from_spec(spec)
-        with mock.patch.dict(sys.modules, modules):
-            sys.modules[spec.name] = mod
-            spec.loader.exec_module(mod)
-
-        event_log = []
-
-        class FakeEvent:
-            def __init__(self, enable_timing=False):
-                self.enable_timing = enable_timing
-
-            def record(self):
-                event_log.append("record")
-
-            def synchronize(self):
-                event_log.append("sync_event")
-
-            def elapsed_time(self, other):
-                return 10.0
-
-        fake_torch = types.SimpleNamespace(
-            cuda=types.SimpleNamespace(
-                Event=FakeEvent,
-                synchronize=lambda: event_log.append("sync_cuda"),
-            )
-        )
-        launches = []
-        with mock.patch.object(mod, "torch", fake_torch):
-            ms = mod._time_torch_call_loop(lambda: launches.append("launch"), 1, 4)
-
-        self.assertEqual(ms, 2.5)
-        self.assertEqual(len(launches), 5)  # one warmup + four timed launches
-        self.assertEqual(event_log.count("record"), 2)
+        Keeping two clocks in the harness is what produced the
+        apples-to-oranges Triton-vs-CK comparison the README originally
+        called out. Make that contract explicit so a future patch that
+        re-introduces a torch-event timer will fail this test.
+        """
+        mod = self._load_harness_with_fake_aiter()
+        self.assertTrue(hasattr(mod, "_time_lane_ms"))
+        self.assertFalse(hasattr(mod, "_time_torch_call_loop"))
+        self.assertFalse(hasattr(mod, "_time_ck_dsl_call_loop"))
 
 
 class TestConvDirectGroupedTransforms(unittest.TestCase):

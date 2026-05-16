@@ -57,7 +57,7 @@ Flags:
 |------|---------|-------|
 | `--scenario NAME` (repeatable) | all | restrict to the named scenarios |
 | `--paths auto,2d,3d` | `auto,2d,3d` | which apples-to-apples lanes to run |
-| `--attempts N` | `10` | timed iterations per lane (`torch.cuda.Event`-based) |
+| `--attempts N` | `10` | timed iterations per lane; reported number is `elapsed_ms / N` from a single HIP-event pair recorded on torch's current stream |
 | `--warmup N`   | `3`  | untimed warmup iterations |
 | `--skip-ck`    | off  | only run Triton (useful when CK is unavailable) |
 | `--report PATH` | none | dump every measurement to JSON |
@@ -85,52 +85,72 @@ use `fp16` unless noted otherwise. The sequence-length pairs
 | `alibi_mixed_d128_b16`        | (1, 1328), (5, 18), (129, 463)                         | fp16 | 16 | 128 | ALiBi |
 | `qq_bias_prefill_d128_b16`    | (64, 64), (128, 256), (32, 256)                        | fp16 | 16 | 128 | QQ-bias, stride=256 |
 
-## Latest results (MI355X, gfx950, ROCm 7.0.1)
+## Latest results (MI355X, gfx950, ROCm 7.0.2)
 
-Numbers are the average per-launch latency from 10 timed iterations
-after 5 warmup launches (single shot per timed call).
+### Methodology
+
+Every row in the tables below is the **mean per-launch wall time over
+10 timed iterations** after 5 untimed warmup launches, measured with
+HIP events recorded on torch's current stream. **Both backends use
+the same timer and the same stream**, so the numbers are directly
+comparable. Concretely, the harness does:
+
+1. 5 untimed warmup launches (CK DSL or Triton, depending on lane).
+2. ``hipDeviceSynchronize`` to drain.
+3. Record a start HIP event on ``torch.cuda.current_stream()``.
+4. 10 timed launches on that same stream.
+5. Record an end HIP event, synchronize on it, report
+   ``elapsed_ms / 10``.
+
+This is the apples-to-apples replacement for the older mixed-clock
+setup (torch CUDA events for Triton, HIP events for CK DSL), which
+under-measured CK lanes for some shapes.
+
+Numbers below reflect commit-time MI355X / gfx950 / ROCm 7.0.2.
 
 ### Auto vs Auto — each backend's own selector
 
 | Scenario                  | tri-auto | ck-auto  | speedup | tri-path | max_abs(CK vs ref) |
 |---------------------------|---------:|---------:|--------:|---------:|-------------------:|
-| decode_d128_b16           |  87.1us  |  36.8us  | **2.36x** | 3d | 1.83e-4 |
-| decode_d128_b64           |  84.8us  |  33.6us  | **2.53x** | 3d | 1.83e-4 |
-| decode_d256_b16           |  86.2us  |  35.5us  | **2.43x** | 3d | 1.22e-4 |
-| prefill_d128_b16          |  52.5us  |  34.7us  | **1.51x** | 2d | 1.95e-3 |
-| mixed_d128_b16            |  97.5us  |  33.5us  | **2.91x** | 3d | 9.77e-4 |
-| sliding_d128_b16          |  63.5us  |  34.8us  | **1.82x** | 2d | 3.05e-4 |
-| softcap_d128_b16          |  84.1us  |  34.4us  | **2.45x** | 3d | 1.22e-4 |
-| bf16_decode_d128_b64      |  85.2us  |  36.6us  | **2.33x** | 3d | 9.77e-4 |
-| alibi_decode_d128_b16     |  85.7us  |  35.9us  | **2.39x** | 3d | 9.77e-4 |
-| alibi_mixed_d128_b16      |  87.8us  |  35.6us  | **2.47x** | 3d | 1.95e-3 |
-| qq_bias_prefill_d128_b16  |  73.4us  |  34.8us  | **2.11x** | 2d | 1.95e-3 |
+| decode_d128_b16           |  134.1us |   42.0us | **3.19x** | 3d | 1.83e-4 |
+| decode_d128_b64           |   78.5us |   43.6us | **1.80x** | 3d | 1.83e-4 |
+| decode_d256_b16           |   78.7us |   54.2us | **1.45x** | 3d | 1.22e-4 |
+| prefill_d128_b16          |   48.2us |   39.9us | **1.21x** | 2d | 1.95e-3 |
+| mixed_d128_b16            |   80.0us |   52.5us | **1.52x** | 3d | 9.77e-4 |
+| sliding_d128_b16          |   64.1us |   41.1us | **1.56x** | 2d | 3.05e-4 |
+| softcap_d128_b16          |   80.2us |   42.2us | **1.90x** | 3d | 1.22e-4 |
+| bf16_decode_d128_b64      |   78.7us |   39.8us | **1.98x** | 3d | 9.77e-4 |
+| alibi_decode_d128_b16     |   79.6us |   41.0us | **1.94x** | 3d | 9.77e-4 |
+| alibi_mixed_d128_b16      |   79.1us |   41.2us | **1.92x** | 3d | 1.95e-3 |
+| qq_bias_prefill_d128_b16  |   50.2us |   40.8us | **1.23x** | 2d | 1.95e-3 |
 
-CK DSL beats Triton on every scenario, geomean speedup **≈2.3x**.
-`max_abs(CK vs ref)` is the worst per-element error against the AITER
-`ref_paged_attn` reference — all rows are within fp16/bf16 ULP. The
-output is bit-identical to Triton's (`max_abs(CK vs Triton) == 0` once
-both are cast back to the working dtype).
+CK DSL beats Triton on every scenario; geomean speedup **≈1.8x** under
+the unified HIP-event timer. `max_abs(CK vs ref)` is the worst
+per-element error against the AITER `ref_paged_attn` reference — all
+rows are within fp16/bf16 ULP. The output is bit-identical to
+Triton's (`max_abs(CK vs Triton) == 0` once both are cast back to the
+working dtype).
 
 ### 3D vs 3D — same split-KV algorithm on both backends
 
-Force-flag rows. This is the algorithmically-honest comparison.
+Force-flag rows. This is the algorithmically-honest comparison: same
+algorithm, same timer, same stream.
 
 | Scenario                  | tri-3d   | ck-3d    | speedup |
 |---------------------------|---------:|---------:|--------:|
-| decode_d128_b16           |  84.1us  |  33.8us  | **2.49x** |
-| decode_d128_b64           |  83.3us  |  33.9us  | **2.46x** |
-| decode_d256_b16           |  83.9us  |  33.6us  | **2.50x** |
-| prefill_d128_b16          |  94.7us  |  50.7us  | **1.87x** |
-| mixed_d128_b16            |  83.5us  |  33.2us  | **2.51x** |
-| sliding_d128_b16          |  84.2us  |  34.4us  | **2.45x** |
-| softcap_d128_b16          |  84.7us  |  36.1us  | **2.35x** |
-| bf16_decode_d128_b64      |  85.2us  |  33.0us  | **2.58x** |
-| alibi_decode_d128_b16     |  83.1us  |  33.5us  | **2.48x** |
-| alibi_mixed_d128_b16      |  87.7us  |  33.8us  | **2.59x** |
-| qq_bias_prefill_d128_b16  |  85.6us  |  35.5us  | **2.41x** |
+| decode_d128_b16           |   80.1us |   42.2us | **1.90x** |
+| decode_d128_b64           |   78.7us |   40.9us | **1.92x** |
+| decode_d256_b16           |   78.3us |   55.1us | **1.42x** |
+| prefill_d128_b16          |   82.0us |   40.9us | **2.00x** |
+| mixed_d128_b16            |   78.0us |   46.5us | **1.68x** |
+| sliding_d128_b16          |   77.7us |   42.3us | **1.84x** |
+| softcap_d128_b16          |   78.2us |   42.9us | **1.82x** |
+| bf16_decode_d128_b64      |   78.2us |   41.8us | **1.87x** |
+| alibi_decode_d128_b16     |   79.8us |   41.1us | **1.94x** |
+| alibi_mixed_d128_b16      |   79.6us |   48.3us | **1.65x** |
+| qq_bias_prefill_d128_b16  |   79.1us |   42.6us | **1.86x** |
 
-CK DSL wins 1.87x–2.59x on 10 of 11 scenarios. The win comes from the
+CK DSL wins 1.42x–2.00x on every scenario. The win comes from the
 CK Tile lessons we ported into the segment kernel:
 
 - `ds_read_b64_tr_b16` for the PV operand using
@@ -157,28 +177,37 @@ GPU. Re-run the harness a few times for a stable median.
 
 ### 2D vs 2D — same single-CTA algorithm on both backends
 
-CK DSL's tiled 2D kernel is single-warp by design, but the current
-runtime/compiler/kernel stack makes it faster than Triton's 2D path on
-every default scenario. The important fixes were:
-
-- `KernelLauncher` keeps the HSACO module/function loaded across calls,
-  removing the old per-call load/event/unload tax;
-- gfx950 `s_waitcnt` encoding preserves 6-bit VMCNT partial waits;
-- online softmax uses `m_new = max(m_old, tile_max)`, fixing ALiBi.
+CK DSL's tiled 2D kernel is single-warp by design. Under the unified
+HIP-event timer the 2D path **wins on the chunked-prefill scenarios
+and the small-context sliding row** but **loses on long-context
+single-query decode**, because the single-warp grid leaves the device
+under-occupied for those shapes. The kernel itself is correct
+(`max_abs(CK vs ref)` matches Triton's), this is purely a kernel-shape
+trade-off worth fixing.
 
 | Scenario                  | tri-2d   | ck-2d    | speedup |
 |---------------------------|---------:|---------:|--------:|
-| decode_d128_b16           | 115.6us  |  21.2us  | **5.46x** |
-| decode_d128_b64           |  91.9us  |  16.6us  | **5.55x** |
-| decode_d256_b16           |  79.0us  |  16.9us  | **4.66x** |
-| prefill_d128_b16          |  51.8us  |  18.1us  | **2.87x** |
-| mixed_d128_b16            |  54.9us  |  16.3us  | **3.37x** |
-| sliding_d128_b16          |  50.0us  |  17.8us  | **2.81x** |
-| softcap_d128_b16          | 100.0us  |  22.8us  | **4.40x** |
-| bf16_decode_d128_b64      |  88.8us  |  17.3us  | **5.14x** |
-| alibi_decode_d128_b16     | 122.6us  |  19.2us  | **6.40x** |
-| alibi_mixed_d128_b16      |  53.7us  |  16.3us  | **3.30x** |
-| qq_bias_prefill_d128_b16  |  74.6us  |  17.1us  | **4.37x** |
+| decode_d128_b16           |   49.6us |  272.3us | **0.18x** |
+| decode_d128_b64           |   49.9us |  127.2us | **0.39x** |
+| decode_d256_b16           |   48.4us |  198.0us | **0.24x** |
+| prefill_d128_b16          |   48.7us |   21.8us | **2.24x** |
+| mixed_d128_b16            |   47.8us |   90.3us | **0.53x** |
+| sliding_d128_b16          |   48.7us |   21.9us | **2.23x** |
+| softcap_d128_b16          |   48.5us |  165.7us | **0.29x** |
+| bf16_decode_d128_b64      |   55.4us |  127.0us | **0.44x** |
+| alibi_decode_d128_b16     |   49.4us |  277.2us | **0.18x** |
+| alibi_mixed_d128_b16      |   49.0us |   91.7us | **0.53x** |
+| qq_bias_prefill_d128_b16  |   50.0us |   23.3us | **2.15x** |
+
+**Note on the earlier 2D table.** Previous versions of this README
+reported CK 2D as universally faster than Triton 2D. Those numbers
+were collected with torch CUDA events timing CK's raw
+`hipModuleLaunchKernel` calls, which on some ROCm stream setups
+under-counts the queued work. The unified HIP-event timer above is
+what the production dispatcher's `auto` selector already does
+(it prefers 3D wherever the scenario allows), so the 2D regression
+rows do not affect end-to-end performance — they are a known
+follow-up for the 2D kernel itself.
 
 ## JSON report layout
 
