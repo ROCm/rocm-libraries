@@ -59,23 +59,50 @@ def resolve_stream(stream, device=None) -> int:
         import torch
     except Exception:
         return 0
-    if device is None:
-        device = torch.cuda.current_device()
-    return int(torch.cuda.current_stream(device).cuda_stream)
+    try:
+        if device is None:
+            device = torch.cuda.current_device()
+        return int(torch.cuda.current_stream(device).cuda_stream)
+    except Exception:
+        # This function is also used by the numpy/raw-HIP manifest
+        # runner. In that path there are no torch-owned tensors and no
+        # torch caching allocator lifetime rules to respect, so the HIP
+        # null stream is correct. If torch is importable but cannot
+        # initialize in this process (for example after raw HIP has
+        # already loaded a module), honor the torch-optional contract in
+        # the docstring and fall back to stream 0.
+        return 0
 
 
 def pack_args(
     signature: Sequence[Mapping[str, Any]], values: Mapping[str, Any]
 ) -> bytes:
-    """Pack args from a manifest-style signature.
+    """Pack args from a manifest-style signature, respecting the AMDGPU
+    kernarg ABI's natural-alignment rule.
 
-    Supported `type`s:
-      - `ptr<..., global>`: value is a torch tensor or integer device pointer
-      - `i32`, `i64`
-      - `f32`
+    Each AMDGPU kernarg sits at an offset aligned to its own size:
+    8-byte alignment for ``ptr`` / ``i64``, 4-byte alignment for
+    ``i32`` / ``f32``. The flat ``struct.pack`` we used to use packed
+    fields back-to-back with no inter-field padding, which is fine
+    when the signature has only ptrs *or* only ints, but fails the
+    instant a (ptr ptr ptr i32 i32 i32 ptr)-shaped signature shows
+    up (e.g. a GEMM + bias-fused kernel) — the trailing pointer
+    lands 4 bytes before its expected kernarg slot and the kernel
+    reads garbage as the pointer, then segfaults on first access.
+
+    Supported types: ``ptr<..., global>``, ``i32``, ``i64``, ``f32``.
     """
-    fmt = "<"
+    # Map manifest type -> (struct format char, size in bytes, align).
+    # The Python struct format is built with no implicit padding;
+    # we insert explicit ``B`` bytes when alignment requires it.
+    _TY_FMT: Mapping[str, Tuple[str, int, int]] = {
+        "i32": ("i", 4, 4),
+        "i64": ("q", 8, 8),
+        "f32": ("f", 4, 4),
+    }
+    fmt_parts: List[str] = ["<"]
     packed: List[Any] = []
+    offset = 0
     for arg in signature:
         name = str(arg["name"])
         ty = str(arg["type"])
@@ -83,20 +110,25 @@ def pack_args(
             raise KeyError(f"missing kernel arg {name!r}")
         v = values[name]
         if ty.startswith("ptr<"):
-            fmt += "Q"
-            packed.append(_as_ptr(v))
-        elif ty == "i32":
-            fmt += "i"
-            packed.append(int(v))
-        elif ty == "i64":
-            fmt += "q"
-            packed.append(int(v))
-        elif ty == "f32":
-            fmt += "f"
-            packed.append(float(v))
+            fmt_char, size, align = "Q", 8, 8
+            arg_val: Any = _as_ptr(v)
+        elif ty in _TY_FMT:
+            fmt_char, size, align = _TY_FMT[ty]
+            if ty == "f32":
+                arg_val = float(v)
+            else:
+                arg_val = int(v)
         else:
             raise ValueError(f"unsupported torch arg type {ty!r} for {name}")
-    return struct.pack(fmt, *packed)
+        # Insert padding bytes so this arg lands at its natural alignment.
+        pad = (-offset) % align
+        if pad:
+            fmt_parts.append(f"{pad}x")
+            offset += pad
+        fmt_parts.append(fmt_char)
+        packed.append(arg_val)
+        offset += size
+    return struct.pack("".join(fmt_parts), *packed)
 
 
 def pack_args_kernelparams(

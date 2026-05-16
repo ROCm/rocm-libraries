@@ -55,6 +55,7 @@ from ..core.ir import (
     Type,
     Value,
 )
+from ..helpers.attention import PagedKvDescriptor
 
 
 MFMA_M = 16
@@ -535,14 +536,22 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         wave_lds_offset_i32 = b.mul(wave_id, b.const_i32(WAVE_BYTES))
         wave_lds_offset_i64 = b.zext(wave_lds_offset_i32, I64)
 
+    kv_desc = PagedKvDescriptor(
+        block_size=T,
+        stride_0=kv_stride_blk_b,
+        stride_1=kv_stride_tok_b,
+        stride_2=kv_stride_h_b,
+        stride_3=2,
+    )
+
     def _kv_base_bytes(kv_tile_idx: Value) -> Value:
-        physical_block = b.global_load_i32(
-            block_tables,
-            b.add(b.mul(seq_idx, bt_stride_p), kv_tile_idx),
-        )
-        return b.add(
-            b.mul(physical_block, b.const_i32(kv_stride_blk_b)),
-            b.mul(kv_head_idx, b.const_i32(kv_stride_h_b)),
+        return kv_desc.block_base_from_table(
+            b,
+            block_table=block_tables,
+            seq_idx=seq_idx,
+            tile_idx=kv_tile_idx,
+            block_table_stride=bt_stride_p,
+            kv_head=kv_head_idx,
         )
 
     def _issue_k_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:

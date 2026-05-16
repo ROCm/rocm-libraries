@@ -79,6 +79,7 @@ from ..core.ir import (
     PtrType,
     Value,
 )
+from ..transforms import TensorDescriptor
 
 
 @dataclass(frozen=True)
@@ -232,17 +233,15 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
     c_cpg = b.const_i32(p.cpg)
     c_kpg = b.const_i32(p.kpg)
     c_PAD = b.const_i32(p.PAD)
-    c_KH = b.const_i32(p.KH)
     c_W = b.const_i32(p.W)
     c_H = b.const_i32(p.H)
 
-    c_W_totalC = b.const_i32(p.W * p.total_c)
-    c_W_totalK = b.const_i32(p.W * p.total_k)
-    c_H_W_totalC = b.const_i32(p.H * p.W * p.total_c)
-    c_H_W_totalK = b.const_i32(p.H * p.W * p.total_k)
-    c_totalC = b.const_i32(p.total_c)
-    c_totalK = b.const_i32(p.total_k)
-    c_KW_cpg = b.const_i32(p.KW * p.cpg)
+    # The address constants previously hand-rolled here
+    # (``c_W_totalC``, ``c_H_W_totalC``, …) are now folded into the
+    # per-axis ``TensorDescriptor`` lookups below. Keep the LDS
+    # geometry constant (``c_BG_cpg``) because that one names a
+    # workgroup-shaped LDS stride and isn't part of any DRAM
+    # descriptor.
     c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg)
 
     tid = b.thread_id_x()
@@ -303,9 +302,20 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
     zero_acc = b.zero_vec_f32(4)
 
     # ---- weight loads (constant across H-loop) ----
-    # Per lane, per (R, S): weight at
-    #   ((g * kpg + q_in_lane) * KH + R) * KW * cpg + S * cpg + c4 * 4
-    # = (R, S) MFMA's per-lane <4 x half> input.
+    # Build a `TensorDescriptor` for B[K_OUT, KH, KW, CPG] -- the
+    # weight layout. Lower coords (k_out, r, s, c) compose into the
+    # naive linear offset
+    #   k_out * KH * KW * cpg + r * KW * cpg + s * cpg + c
+    # which is exactly what the hand-rolled math computed below. Using
+    # the transform DAG instead of stringing together ``add``/``mul``
+    # SSA ops keeps the addressing in one place and makes future
+    # fusion / boundary-check additions easier.
+    b_desc = TensorDescriptor.naive(
+        "B",
+        lengths=[p.total_k, p.KH, p.KW, p.cpg],
+        coord_names=("k_out", "r", "s", "c"),
+    )
+    k_out_val = b.add(b.mul(g, c_kpg), q_in_lane)
     weights: List[Value] = []
     weights_k32: List[Value] = []
     weights_k16: List[Value] = []
@@ -314,19 +324,24 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
             r_i = b.const_i32(r_const)
             # Fold S=0 and S=1 into one K=32 MFMA. Each lane reads
             # <8 x half> at s_lane_k32*cpg + ch_lane_k32.
-            w_base = b.add(b.mul(g, c_kpg), q_in_lane)
-            w_off_k32 = b.add(b.mul(w_base, c_KH), r_i)
-            w_off_k32 = b.mul(w_off_k32, c_KW_cpg)
-            w_off_k32 = b.add(w_off_k32, b.mul(s_lane_k32, c_cpg))
-            w_off_k32 = b.add(w_off_k32, ch_lane_k32)
+            w_off_k32, _ = b_desc.offset(
+                b,
+                k_out=k_out_val,
+                r=r_i,
+                s=s_lane_k32,
+                c=ch_lane_k32,
+            )
             weights_k32.append(
                 b.buffer_load_vN_f16(b_rsrc, b.mul(w_off_k32, c_half_bytes), c0, 4)
             )
             # Residual S=2 uses K=16, 4 channels per lane.
-            w_off_k16 = b.add(b.mul(w_base, c_KH), r_i)
-            w_off_k16 = b.mul(w_off_k16, c_KW_cpg)
-            w_off_k16 = b.add(w_off_k16, b.const_i32(2 * p.cpg))
-            w_off_k16 = b.add(w_off_k16, ch_lane_k16)
+            w_off_k16, _ = b_desc.offset(
+                b,
+                k_out=k_out_val,
+                r=r_i,
+                s=b.const_i32(2),
+                c=ch_lane_k16,
+            )
             weights_k16.append(
                 b.buffer_load_vN_f16(b_rsrc, b.mul(w_off_k16, c_half_bytes), c0, 2)
             )
@@ -335,19 +350,13 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
             for s_const in range(p.KW):
                 r_i = b.const_i32(r_const)
                 s_i = b.const_i32(s_const)
-                w_off = b.add(
-                    b.add(
-                        b.mul(
-                            b.add(b.mul(g, c_kpg), q_in_lane),
-                            c_KH,
-                        ),
-                        r_i,
-                    ),
-                    c0,
+                w_off, _ = b_desc.offset(
+                    b,
+                    k_out=k_out_val,
+                    r=r_i,
+                    s=s_i,
+                    c=ch_lane_k16,
                 )
-                w_off = b.mul(w_off, c_KW_cpg)
-                w_off = b.add(w_off, b.mul(s_i, c_cpg))
-                w_off = b.add(w_off, ch_lane_k16)
                 weights.append(
                     b.buffer_load_vN_f16(b_rsrc, b.mul(w_off, c_half_bytes), c0, 2)
                 )
@@ -385,6 +394,19 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
             }
         )
 
+    # Input descriptor: A[N, H, W, total_c] in NHWC. The channel axis
+    # is sub-divided into (group, ch_block, 4) at the per-thread load
+    # site via an :class:`Unmerge` over the existing ``c`` coord, but
+    # we compute the leaf offset directly on the (group * cpg + 4*block)
+    # composite to avoid an extra coord transform inside the hot loop.
+    # The descriptor still encodes the (N, H, W, C) layout cleanly so
+    # future migrations can add a Pad/Embed for boundary handling.
+    a_desc = TensorDescriptor.naive(
+        "A",
+        lengths=[p.N, p.H, p.W, p.total_c],
+        coord_names=("n", "h", "w", "c"),
+    )
+
     def issue_dram_load(hi_in: Value, hi_ok: Value):
         """Per-thread DRAM read of one vec4 of A.
 
@@ -399,18 +421,16 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
         out = []
         for cm in chunk_meta:
             valid = b.land(hi_ok, b.land(cm["W_ok"], cm["in_bounds"]))
-            a_off_elems = b.add(
-                b.add(
-                    b.add(
-                        b.mul(n, c_H_W_totalC),
-                        b.mul(hi_in, c_W_totalC),
-                    ),
-                    b.mul(cm["W_in"], c_totalC),
-                ),
-                b.add(
-                    b.mul(cm["abs_group"], c_cpg),
-                    b.mul(cm["ch_block"], b.const_i32(4)),
-                ),
+            c_val = b.add(
+                b.mul(cm["abs_group"], c_cpg),
+                b.mul(cm["ch_block"], b.const_i32(4)),
+            )
+            a_off_elems, _ = a_desc.offset(
+                b,
+                n=n,
+                h=hi_in,
+                w=cm["W_in"],
+                c=c_val,
             )
             a_off_bytes = b.mul(a_off_elems, c_half_bytes)
             safe_off = b.select(valid, a_off_bytes, oob_sentinel)
@@ -556,19 +576,25 @@ def build_direct_conv_16c(spec: DirectConv16cSpec) -> KernelDef:
         p_flush_val = y - (p.KH - 1)
         P_FLUSH = p_flush_val % p.KH
         if 0 <= p_flush_val < p.H:
+            # Output descriptor: D[N, H, W, total_k] in NHWK. Computing
+            # the flush address through the descriptor keeps the
+            # multi-axis stride math centralised.
+            d_desc = TensorDescriptor.naive(
+                "D",
+                lengths=[p.N, p.H, p.W, p.total_k],
+                coord_names=("n", "h", "w", "k"),
+            )
             for qt in range(q_subtiles):
                 acc_to_flush = acc_tiles[qt][P_FLUSH]
                 out_q = b.add(b.add(q_tile_start, b.const_i32(qt * 16)), q_in_lane)
                 out_q_valid = b.cmp_lt(out_q, c_W)
-                d_base = b.add(
-                    b.add(
-                        b.add(
-                            b.mul(n, c_H_W_totalK),
-                            b.mul(b.const_i32(p_flush_val), c_W_totalK),
-                        ),
-                        b.mul(out_q, c_totalK),
-                    ),
-                    b.add(b.mul(g, c_kpg), b.mul(c4, b.const_i32(4))),
+                k_val = b.add(b.mul(g, c_kpg), b.mul(c4, b.const_i32(4)))
+                d_base, _ = d_desc.offset(
+                    b,
+                    n=n,
+                    h=b.const_i32(p_flush_val),
+                    w=out_q,
+                    k=k_val,
                 )
                 d_base_bytes = b.mul(d_base, c_half_bytes)
                 safe_d_off = b.select(out_q_valid, d_base_bytes, oob_sentinel)
@@ -658,14 +684,10 @@ def build_direct_conv_4c(spec: DirectConv4cSpec) -> KernelDef:
     c_PAD = b.const_i32(p.PAD)
     c_cpg = b.const_i32(p.cpg)
     c_kpg = b.const_i32(p.kpg)
-    c_totalC = b.const_i32(p.total_c)
-    c_totalK = b.const_i32(p.total_k)
-    c_W_totalC = b.const_i32(p.W * p.total_c)
-    c_W_totalK = b.const_i32(p.W * p.total_k)
-    c_H_W_totalC = b.const_i32(p.H * p.W * p.total_c)
-    c_H_W_totalK = b.const_i32(p.H * p.W * p.total_k)
-    c_KH = b.const_i32(p.KH)
-    c_KW_cpg = b.const_i32(p.KW * p.cpg)
+    # Same addressing convention as the 16c kernel: the per-axis
+    # strides are encoded in the input/weight/output ``TensorDescriptor``s
+    # below, so the per-iteration body no longer carries pre-multiplied
+    # i32 constants like ``c_W_totalC``.
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
 
@@ -689,13 +711,26 @@ def build_direct_conv_4c(spec: DirectConv4cSpec) -> KernelDef:
     zero_acc = b.zero_vec_f32(4)
 
     # Weights: per (r, s), per lane: B[g*kpg + lane_q, r, s, 0:4].
+    # Same descriptor algebra as the 16c kernel but with the kpg=4
+    # layout; the leading channel coord is fixed at 0 because the
+    # 4c kernel's MFMA 4x4x4 atom processes all 4 channels of one
+    # group per lane.
+    b_desc = TensorDescriptor.naive(
+        "B",
+        lengths=[p.total_k, p.KH, p.KW, p.cpg],
+        coord_names=("k_out", "r", "s", "c"),
+    )
+    k_out_val = b.add(b.mul(g, c_kpg), lane_q)
     weights: List[Value] = []
     for r_const in range(p.KH):
         for s_const in range(p.KW):
-            w_off = b.add(b.mul(g, c_kpg), lane_q)
-            w_off = b.add(b.mul(w_off, c_KH), b.const_i32(r_const))
-            w_off = b.mul(w_off, c_KW_cpg)
-            w_off = b.add(w_off, b.const_i32(s_const * p.cpg))
+            w_off, _ = b_desc.offset(
+                b,
+                k_out=k_out_val,
+                r=b.const_i32(r_const),
+                s=b.const_i32(s_const),
+                c=c0,
+            )
             weights.append(
                 b.buffer_load_vN_f16(b_rsrc, b.mul(w_off, c_half_bytes), c0, 2)
             )
@@ -710,6 +745,12 @@ def build_direct_conv_4c(spec: DirectConv4cSpec) -> KernelDef:
         hi_in = b.sub(b.const_i32(y), c_PAD)
         hi_ok = b.land(b.cmp_ge(hi_in, c0), b.cmp_lt(hi_in, c_H))
 
+        # Input descriptor: A[N, H, W, total_c] in NHWC.
+        a_desc = TensorDescriptor.naive(
+            "A",
+            lengths=[p.N, p.H, p.W, p.total_c],
+            coord_names=("n", "h", "w", "c"),
+        )
         inputs_by_qtile: List[List[Value]] = []
         for qt in range(q_tiles_per_wave):
             q_base = b.add(q_tile_start, b.const_i32(qt * 4))
@@ -718,12 +759,12 @@ def build_direct_conv_4c(spec: DirectConv4cSpec) -> KernelDef:
                 wi = b.sub(b.add(q_base, b.add(lane_q, b.const_i32(s_const))), c_PAD)
                 wi_ok = b.land(b.cmp_ge(wi, c0), b.cmp_lt(wi, c_W))
                 valid = b.land(hi_ok, wi_ok)
-                a_off = b.add(
-                    b.add(
-                        b.add(b.mul(n, c_H_W_totalC), b.mul(hi_in, c_W_totalC)),
-                        b.mul(wi, c_totalC),
-                    ),
-                    b.mul(g, c_cpg),
+                a_off, _ = a_desc.offset(
+                    b,
+                    n=n,
+                    h=hi_in,
+                    w=wi,
+                    c=b.mul(g, c_cpg),
                 )
                 safe_a = b.select(valid, b.mul(a_off, c_half_bytes), oob_sentinel)
                 vec = b.buffer_load_vN_f16(a_rsrc, safe_a, c0, 2)
@@ -746,20 +787,22 @@ def build_direct_conv_4c(spec: DirectConv4cSpec) -> KernelDef:
         p_flush = y - (p.KH - 1)
         P_FLUSH = p_flush % p.KH
         if 0 <= p_flush < p.H:
+            d_desc = TensorDescriptor.naive(
+                "D",
+                lengths=[p.N, p.H, p.W, p.total_k],
+                coord_names=("n", "h", "w", "k"),
+            )
             for qt in range(q_tiles_per_wave):
                 acc = acc_tiles[qt][P_FLUSH]
                 q_base = b.add(q_tile_start, b.const_i32(qt * 4))
                 out_q = b.add(q_base, lane_q)
                 out_q_ok = b.cmp_lt(out_q, c_W)
-                d_base = b.add(
-                    b.add(
-                        b.add(
-                            b.mul(n, c_H_W_totalK),
-                            b.mul(b.const_i32(p_flush), c_W_totalK),
-                        ),
-                        b.mul(out_q, c_totalK),
-                    ),
-                    b.mul(g, c_kpg),
+                d_base, _ = d_desc.offset(
+                    b,
+                    n=n,
+                    h=b.const_i32(p_flush),
+                    w=out_q,
+                    k=b.mul(g, c_kpg),
                 )
                 safe_d = b.select(out_q_ok, b.mul(d_base, c_half_bytes), oob_sentinel)
                 # MFMA 4x4x4 wave64 per-lane output layout is

@@ -140,6 +140,39 @@ class PagedKvDescriptor:
         off = b.add(off, b.mul(dim, b.const_i32(self.stride_3)))
         return off
 
+    def block_base_from_table(
+        self,
+        b: IRBuilder,
+        *,
+        block_table: Value,
+        seq_idx: Value,
+        tile_idx: Value,
+        block_table_stride: Value,
+        kv_head: Value,
+    ) -> Value:
+        """Base offset for one logical KV tile through a page table.
+
+        This centralizes the common paged-attention transform:
+
+        ``(seq_idx, tile_idx, kv_head) -> physical_block -> base_offset``.
+
+        ``stride_*`` may be in elements or bytes; the method preserves
+        that unit. Attention async-DMA paths pass byte strides so the
+        returned offset can be used directly as a buffer-load byte
+        offset.
+        """
+        physical_block = b.global_load_i32(
+            block_table,
+            b.add(b.mul(seq_idx, block_table_stride), tile_idx),
+        )
+        return self.offset(
+            b,
+            physical_block=physical_block,
+            token_in_block=b.const_i32(0),
+            kv_head=kv_head,
+            dim=b.const_i32(0),
+        )
+
 
 @dataclass(frozen=True)
 class OnlineSoftmaxState:

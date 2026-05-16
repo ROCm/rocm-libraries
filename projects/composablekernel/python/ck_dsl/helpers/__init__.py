@@ -81,9 +81,11 @@ from __future__ import annotations
 from .atoms import MFMA_F16_ATOMS, MfmaAtom, mfma_atom
 from .autotune import (
     AutotuneConfig,
+    AutotuneKey,
     AutotuneResult,
     Autotuner,
     autotune_sweep,
+    make_autotune_key,
     spec_replace,
 )
 from .attention import (
@@ -111,6 +113,58 @@ from .distribution import (
     store_tile,
 )
 from .epilogues import CShuffleEpilogue, DirectEpilogue
+from .fuse import (
+    BiasAdd,
+    Cast,
+    Clamp,
+    EpilogueOp,
+    FusedEpilogue,
+    FusionMatchError,
+    FusionPlan,
+    GELU,
+    ReLU,
+    ResidualAdd,
+    ResidualMul,
+    Scale,
+    SiLU,
+    compile_fn,
+    dtype_to_ir,
+    explain_fn,
+    fuse_matmul_bias_relu,
+    ir_dtype_const,
+    ir_dtype_global_load,
+    ir_dtype_zero,
+)
+from .fusion_ir import (
+    FusionGraph,
+    FusionOp,
+    FusionRegion,
+    FusionTensor,
+    build_graph,
+)
+from .fusion_legalize import FusionLegalizer, LegalResult
+from .fusion_lowering import (
+    BuiltRegion,
+    ElementwiseLowerer,
+    ExplainOnlyLowerer,
+    GemmEpilogueLowerer,
+    LoweringRegistry,
+    ReductionLowerer,
+    default_lowering_registry,
+)
+from .fusion_memory import (
+    WorkspaceAllocation,
+    WorkspacePlanner,
+    materialize_plan,
+)
+from .fusion_scheduler import GreedyFusionScheduler, RegionCost
+from .fusion_validation import (
+    BackendTiming,
+    BenchmarkCase,
+    FusionMatrixRunner,
+    ValidationReport,
+    run_fusion_validation_matrix,
+)
 from .geometry import WarpGrid
 from .grid import (
     NUM_XCDS_MI300X,
@@ -210,9 +264,11 @@ __all__ = [
     "WarpGrid",
     # Autotuning
     "AutotuneConfig",
+    "AutotuneKey",
     "AutotuneResult",
     "Autotuner",
     "autotune_sweep",
+    "make_autotune_key",
     "spec_replace",
     # Chiplet / grid swizzle (multi-XCD L2 locality)
     "NUM_XCDS_MI300X",
@@ -239,6 +295,52 @@ __all__ = [
     # Epilogues
     "CShuffleEpilogue",
     "DirectEpilogue",
+    # Fusion (graph capture + pattern match + lower)
+    "BiasAdd",
+    "Cast",
+    "Clamp",
+    "EpilogueOp",
+    "FusedEpilogue",
+    "FusionMatchError",
+    "FusionPlan",
+    "GELU",
+    "ReLU",
+    "ResidualAdd",
+    "ResidualMul",
+    "Scale",
+    "SiLU",
+    "compile_fn",
+    "dtype_to_ir",
+    "explain_fn",
+    "fuse_matmul_bias_relu",
+    "ir_dtype_const",
+    "ir_dtype_global_load",
+    "ir_dtype_zero",
+    # Fusion IR / solver scaffolding
+    "FusionGraph",
+    "FusionOp",
+    "FusionRegion",
+    "FusionTensor",
+    "build_graph",
+    "FusionLegalizer",
+    "LegalResult",
+    "BuiltRegion",
+    "ElementwiseLowerer",
+    "ExplainOnlyLowerer",
+    "GemmEpilogueLowerer",
+    "LoweringRegistry",
+    "ReductionLowerer",
+    "default_lowering_registry",
+    "WorkspaceAllocation",
+    "WorkspacePlanner",
+    "materialize_plan",
+    "GreedyFusionScheduler",
+    "RegionCost",
+    "BackendTiming",
+    "BenchmarkCase",
+    "FusionMatrixRunner",
+    "ValidationReport",
+    "run_fusion_validation_matrix",
     # Compile
     "KernelArtifact",
     "compile_kernel",

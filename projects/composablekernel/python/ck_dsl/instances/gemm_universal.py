@@ -56,13 +56,16 @@ from dataclasses import dataclass, field
 from typing import Iterator, List, Literal, Optional, Sequence, Tuple
 
 from ..core.ir import (
+    BF16,
     F16,
     I32,
     IRBuilder,
     KernelDef,
     PtrType,
+    Type,
     Value,
 )
+from ..helpers.io import io_ir_type
 from ..helpers.tensor_view import make_global_view, make_tile_window
 
 
@@ -226,6 +229,38 @@ _F16_WARP_TILE_SHAPES_GFX950 = {
     (32, 32, 16),
 }
 
+_BF16_WARP_TILE_SHAPES_GFX950 = {
+    (16, 16, 16),
+    (16, 16, 32),
+}
+
+
+def _dtype_ir(name: str) -> Type:
+    """Resolve GEMM storage dtype strings to IR types.
+
+    Universal GEMM currently supports homogeneous A/B/C storage dtypes
+    for f16 and bf16 with f32 accumulation.
+    """
+    return io_ir_type(name)
+
+
+def _storage_dtype(spec: UniversalGemmSpec) -> Type:
+    d = spec.data
+    if d.dtype_a != d.dtype_b or d.dtype_a != d.dtype_c:
+        raise ValueError(
+            "UniversalGemmSpec currently requires homogeneous A/B/C dtypes; "
+            f"got A={d.dtype_a}, B={d.dtype_b}, C={d.dtype_c}"
+        )
+    if d.dtype_acc not in ("fp32", "f32"):
+        raise ValueError(
+            f"UniversalGemmSpec only supports fp32 accumulation, got {d.dtype_acc!r}"
+        )
+    if d.layout != "RCR":
+        raise ValueError(
+            f"UniversalGemmSpec only supports RCR layout, got {d.layout!r}"
+        )
+    return _dtype_ir(d.dtype_a)
+
 
 def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return `(ok, reason)`. The same predicate CK's dispatcher uses
@@ -235,10 +270,20 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         return False, f"only gfx950 is wired up today (got {arch!r})"
 
     t = spec.tile
+    try:
+        dtype_ir = _storage_dtype(spec)
+    except ValueError as e:
+        return False, str(e)
     # MFMA atom must be one of the supported shapes on this arch+dtype.
     atom = (t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
-    if atom not in _F16_WARP_TILE_SHAPES_GFX950:
-        return False, f"unsupported f16 warp_tile {atom} on gfx950"
+    if dtype_ir == F16:
+        valid_atoms = _F16_WARP_TILE_SHAPES_GFX950
+    elif dtype_ir == BF16:
+        valid_atoms = _BF16_WARP_TILE_SHAPES_GFX950
+    else:
+        return False, f"unsupported GEMM dtype {dtype_ir.name!r}"
+    if atom not in valid_atoms:
+        return False, f"unsupported {dtype_ir.name} warp_tile {atom} on gfx950"
 
     # Geometry divisibility.
     if t.tile_m % (t.warp_m * t.warp_tile_m):
@@ -310,15 +355,22 @@ def _emit_mfma(
 ) -> Value:
     t = spec.tile
     key = (t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
-    if key == (16, 16, 16):
-        return b.mfma_f32_16x16x16_f16(a, bb, c)
-    if key == (16, 16, 32):
-        return b.mfma_f32_16x16x32_f16(a, bb, c)
-    if key == (32, 32, 8):
-        return b.mfma_f32_32x32x8_f16(a, bb, c)
-    if key == (32, 32, 16):
-        return b.mfma_f32_32x32x16_f16(a, bb, c)
-    raise NotImplementedError(f"no MFMA emitter for warp_tile {key}")
+    dtype = _storage_dtype(spec)
+    if dtype == F16:
+        if key == (16, 16, 16):
+            return b.mfma_f32_16x16x16_f16(a, bb, c)
+        if key == (16, 16, 32):
+            return b.mfma_f32_16x16x32_f16(a, bb, c)
+        if key == (32, 32, 8):
+            return b.mfma_f32_32x32x8_f16(a, bb, c)
+        if key == (32, 32, 16):
+            return b.mfma_f32_32x32x16_f16(a, bb, c)
+    if dtype == BF16:
+        if key == (16, 16, 16):
+            return b.mfma_f32_16x16x16_bf16(a, bb, c)
+        if key == (16, 16, 32):
+            return b.mfma_f32_16x16x32_bf16(a, bb, c)
+    raise NotImplementedError(f"no MFMA emitter for {dtype.name} warp_tile {key}")
 
 
 def _emit_zero_acc(b: IRBuilder, spec: UniversalGemmSpec) -> Value:
@@ -346,10 +398,12 @@ def _choose_load_vec(spec: UniversalGemmSpec) -> int:
     raise ValueError(f"no usable load_vec for {spec}")
 
 
-def _emit_smem_load(b: IRBuilder, smem: Value, row: Value, col: Value, n: int) -> Value:
-    if n == 4:
+def _emit_smem_load(
+    b: IRBuilder, smem: Value, row: Value, col: Value, n: int, dtype: Type
+) -> Value:
+    if dtype == F16 and n == 4:
         return b.smem_load_v4_f16(smem, row, col)
-    return b.smem_load_vN_f16(smem, row, col, n=n)
+    return b.smem_load_vN(smem, row, col, dtype=dtype, n=n)
 
 
 # ---------------------------------------------------------------------
@@ -386,9 +440,16 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
     if spec.trait.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.trait.waves_per_eu
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    C = b.param("C", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    storage_dtype = _storage_dtype(spec)
+    A = b.param(
+        "A", PtrType(storage_dtype, "global"), noalias=True, readonly=True, align=16
+    )
+    Bp = b.param(
+        "B", PtrType(storage_dtype, "global"), noalias=True, readonly=True, align=16
+    )
+    C = b.param(
+        "C", PtrType(storage_dtype, "global"), noalias=True, writeonly=True, align=16
+    )
     M = b.param("M", I32)
     N = b.param("N", I32)
     K = b.param("K", I32)
@@ -472,8 +533,8 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
     # *reuses* the larger of (AB, C) since lifetimes don't overlap, but
     # for simplicity (and to match what CK's compv4 does — separate
     # allocations) we keep them distinct.
-    A_smem = b.smem_alloc(F16, [block_m, block_k], name_hint="A_smem")
-    B_smem = b.smem_alloc(F16, [block_n, block_k], name_hint="B_smem")
+    A_smem = b.smem_alloc(storage_dtype, [block_m, block_k], name_hint="A_smem")
+    B_smem = b.smem_alloc(storage_dtype, [block_n, block_k], name_hint="B_smem")
     # NOTE: a true double-buffered (`compv4`) pipeline would also allocate
     # `A_smem2 / B_smem2` here. We currently use a single LDS buffer per
     # operand in both single- and double-buffer modes; this kernel does
@@ -515,19 +576,23 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
     # which matches the prior hand-rolled IR byte-for-byte after
     # constant folding. ``batch_off_a == 0`` in non-batched mode, so
     # the lowered IR collapses to the unchanged 2D form.
-    a_view = make_global_view(A, shape=(1, 1, 1), dtype=F16, strides=(1, K, 1))
-    b_view = make_global_view(Bp, shape=(1, 1, 1), dtype=F16, strides=(1, K, 1))
+    a_view = make_global_view(
+        A, shape=(1, 1, 1), dtype=storage_dtype, strides=(1, K, 1)
+    )
+    b_view = make_global_view(
+        Bp, shape=(1, 1, 1), dtype=storage_dtype, strides=(1, K, 1)
+    )
     # LDS views are 2D packed (block_m, block_k) / (block_n, block_k).
     from ..helpers.tensor_view import TensorDescriptor, TensorView
 
     a_lds_view = TensorView(
         base=A_smem,
-        desc=TensorDescriptor.packed((block_m, block_k), F16),
+        desc=TensorDescriptor.packed((block_m, block_k), storage_dtype),
         addr_space="lds",
     )
     b_lds_view = TensorView(
         base=B_smem,
-        desc=TensorDescriptor.packed((block_n, block_k), F16),
+        desc=TensorDescriptor.packed((block_n, block_k), storage_dtype),
         addr_space="lds",
     )
 
@@ -619,7 +684,11 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
                 a_row = b.add(
                     warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_in_atom)
                 )
-                a_rows.append(_emit_smem_load(b, A_src, a_row, col_base, a_per_lane))
+                a_rows.append(
+                    _emit_smem_load(
+                        b, A_src, a_row, col_base, a_per_lane, storage_dtype
+                    )
+                )
 
             # B load per atom-col, reused across M.
             b_cols = []
@@ -627,7 +696,11 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
                 b_row = b.add(
                     warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom)
                 )
-                b_cols.append(_emit_smem_load(b, B_src, b_row, col_base, b_per_lane))
+                b_cols.append(
+                    _emit_smem_load(
+                        b, B_src, b_row, col_base, b_per_lane, storage_dtype
+                    )
+                )
 
             flat = 0
             for mi in range(mfmas_m):
@@ -665,6 +738,7 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
         b.scf_yield(*new_accs)
 
     # ---- epilogue ----
+    fused_ep = getattr(spec, "_fused_epilogue", None)
     if spec.trait.epilogue == "cshuffle":
         _emit_epilogue_cshuffle(
             b,
@@ -683,6 +757,7 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
             b_per_lane,
             c_per_lane,
             batch_off_c=batch_off_c,
+            fused_epilogue=fused_ep,
         )
     else:
         _emit_epilogue_default(
@@ -745,6 +820,7 @@ def _emit_epilogue_default(
     so the per-lane row stride between 4-element groups is 8 (not 4).
     """
     t = spec.tile
+    storage_dtype = _storage_dtype(spec)
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
     is_32x32 = (t.warp_tile_m, t.warp_tile_n) == (32, 32)
@@ -786,8 +862,8 @@ def _emit_epilogue_default(
                     if batch_off_c is not None:
                         c_off = b.add(batch_off_c, c_off)
                     v = b.vec_extract(acc, i)
-                    h = b.trunc_f32_to_f16(v)
-                    b.store_f16(C, c_off, h)
+                    h = b.cast_f32_to(v, storage_dtype)
+                    b.global_store(C, c_off, h, align=2)
     else:
         # 16x16 atoms: lane = (m_blk * 16 + n_in_atom)
         c_atom_n = b.const_i32(t.warp_tile_n)
@@ -814,8 +890,8 @@ def _emit_epilogue_default(
                     if batch_off_c is not None:
                         c_off = b.add(batch_off_c, c_off)
                     v = b.vec_extract(acc, i)
-                    h = b.trunc_f32_to_f16(v)
-                    b.store_f16(C, c_off, h)
+                    h = b.cast_f32_to(v, storage_dtype)
+                    b.global_store(C, c_off, h, align=2)
 
 
 def _emit_epilogue_cshuffle(
@@ -861,12 +937,26 @@ def _emit_epilogue_cshuffle(
     mapping, just an extra LDS pass).
     """
     t = spec.tile
+    storage_dtype = _storage_dtype(spec)
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
     is_32x32 = (t.warp_tile_m, t.warp_tile_n) == (32, 32)
 
-    # LDS staging tile: tile_m x tile_n of fp16.
-    Cs = b.smem_alloc(F16, [t.tile_m, t.tile_n], name_hint="C_smem")
+    # If a fused epilogue is attached (e.g. BiasAdd, ReLU), give it a
+    # chance to declare any extra kernel params (bias pointer, …). It
+    # caches the SSA values internally so apply_vec / apply_scalar
+    # can reach them at the per-element transform site below. The
+    # ``record_runtime`` call lets residual-style ops use the
+    # contiguous-(M, N) layout's row stride (= N) without an extra
+    # i32 kernel param.
+    if fused_epilogue is not None:
+        fused_epilogue.declare_params(b)
+        record_runtime = getattr(fused_epilogue, "record_runtime", None)
+        if record_runtime is not None:
+            record_runtime(b, N=N)
+
+    # LDS staging tile: tile_m x tile_n of output storage dtype.
+    Cs = b.smem_alloc(storage_dtype, [t.tile_m, t.tile_n], name_hint="C_smem")
 
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
@@ -881,7 +971,7 @@ def _emit_epilogue_cshuffle(
             for ni in range(mfmas_n):
                 acc = accs[flat]
                 flat += 1
-                acc_h = b.vec_trunc_f32_to_f16(acc)
+                acc_h = b.vec_cast_f32_to(acc, storage_dtype)
                 ld_n = b.add(
                     b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n)), n_in_atom
                 )
@@ -899,7 +989,7 @@ def _emit_epilogue_cshuffle(
                         b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m)), m_off
                     )
                     h = b.vec_extract(acc_h, i)
-                    b.smem_store_f16(Cs, [ld_m, ld_n], h)
+                    b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
     else:
         c_atom_n = b.const_i32(t.warp_tile_n)
         c_clen = b.const_i32(c_per_lane)
@@ -911,7 +1001,7 @@ def _emit_epilogue_cshuffle(
             for ni in range(mfmas_n):
                 acc = accs[flat]
                 flat += 1
-                acc_h = b.vec_trunc_f32_to_f16(acc)
+                acc_h = b.vec_cast_f32_to(acc, storage_dtype)
                 ld_n = b.add(
                     b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n)), n_in_atom
                 )
@@ -921,7 +1011,7 @@ def _emit_epilogue_cshuffle(
                         b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m)), m_off
                     )
                     h = b.vec_extract(acc_h, i)
-                    b.smem_store_f16(Cs, [ld_m, ld_n], h)
+                    b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
 
     # ---- step 3: barrier. ----
     b.sync()
@@ -959,24 +1049,36 @@ def _emit_epilogue_cshuffle(
             c_off = b.add(batch_off_c, c_off)
 
         if store_vec == 1:
-            h = _load_smem_scalar(b, Cs, row, col)
-            b.store_f16(C, c_off, h)
+            h = _load_smem_scalar(b, Cs, row, col, storage_dtype)
+            if fused_epilogue is not None:
+                # Treat the scalar as a length-1 vector for op uniformity.
+                # The fused epilogue may transform the value (bias-add,
+                # activation, scale, ...); we then unpack back to scalar
+                # before the global store.
+                h = fused_epilogue.apply_scalar(b, h, c_m, c_n)
+            b.global_store(C, c_off, h, align=2)
         else:
-            hv = _load_smem_vec(b, Cs, row, col, store_vec)
-            b.global_store_vN_f16(C, c_off, hv, store_vec)
+            hv = _load_smem_vec(b, Cs, row, col, store_vec, storage_dtype)
+            if fused_epilogue is not None:
+                hv = fused_epilogue.apply_vec(b, hv, c_m, c_n, n_elems=store_vec)
+            b.global_store_vN(C, c_off, hv, store_vec)
 
 
-def _load_smem_scalar(b: IRBuilder, smem: Value, row: Value, col: Value) -> Value:
+def _load_smem_scalar(
+    b: IRBuilder, smem: Value, row: Value, col: Value, dtype: Type
+) -> Value:
     # We expose vector loads but not a scalar half load from smem yet;
     # the v=1 path is rare. Emit as a 2-half vector and extract index 0.
-    v = b.smem_load_vN_f16(smem, row, col, n=2)
+    v = b.smem_load_vN(smem, row, col, dtype=dtype, n=2)
     return b.vec_extract(v, 0)
 
 
-def _load_smem_vec(b: IRBuilder, smem: Value, row: Value, col: Value, n: int) -> Value:
-    if n == 4:
+def _load_smem_vec(
+    b: IRBuilder, smem: Value, row: Value, col: Value, n: int, dtype: Type
+) -> Value:
+    if dtype == F16 and n == 4:
         return b.smem_load_v4_f16(smem, row, col)
-    return b.smem_load_vN_f16(smem, row, col, n=n)
+    return b.smem_load_vN(smem, row, col, dtype=dtype, n=n)
 
 
 # ---------------------------------------------------------------------

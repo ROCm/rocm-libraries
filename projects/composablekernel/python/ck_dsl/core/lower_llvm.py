@@ -72,7 +72,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "tanh.f32": "declare float @llvm.tanh.f32(float)",
     "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
+    "maxnum.f16": "declare half @llvm.maxnum.f16(half, half)",
+    "maxnum.bf16": "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)",
     "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
+    "minnum.f16": "declare half @llvm.minnum.f16(half, half)",
+    "minnum.bf16": "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)",
     "mfma.f32.16x16x16f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
         "<4 x half>, <4 x half>, <4 x float>, "
@@ -424,16 +428,39 @@ class _Lowerer:
 
     def _op_arith_fmax(self, op: Op) -> None:
         a, b = op.operands
-        self._need("maxnum.f32")
+        ty_name = a.type.name
+        # Dispatch on the operand FP width: half, float, bfloat each
+        # have their own maxnum intrinsic. The previous f32-only path
+        # silently mis-typed half operands as float and broke comgr.
+        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        intrin_key = {
+            "f32": "maxnum.f32",
+            "f16": "maxnum.f16",
+            "bf16": "maxnum.bf16",
+        }.get(ty_name)
+        if llvm_ty is None or intrin_key is None:
+            raise NotImplementedError(f"fmax: unsupported FP type {ty_name!r}")
+        self._need(intrin_key)
         self._current().emit(
-            f"  {op.result.name} = call float @llvm.maxnum.f32(float {self._operand(a)}, float {self._operand(b)})"
+            f"  {op.result.name} = call {llvm_ty} @llvm.maxnum.{ty_name}("
+            f"{llvm_ty} {self._operand(a)}, {llvm_ty} {self._operand(b)})"
         )
 
     def _op_arith_fmin(self, op: Op) -> None:
         a, b = op.operands
-        self._need("minnum.f32")
+        ty_name = a.type.name
+        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        intrin_key = {
+            "f32": "minnum.f32",
+            "f16": "minnum.f16",
+            "bf16": "minnum.bf16",
+        }.get(ty_name)
+        if llvm_ty is None or intrin_key is None:
+            raise NotImplementedError(f"fmin: unsupported FP type {ty_name!r}")
+        self._need(intrin_key)
         self._current().emit(
-            f"  {op.result.name} = call float @llvm.minnum.f32(float {self._operand(a)}, float {self._operand(b)})"
+            f"  {op.result.name} = call {llvm_ty} @llvm.minnum.{ty_name}("
+            f"{llvm_ty} {self._operand(a)}, {llvm_ty} {self._operand(b)})"
         )
 
     def _op_arith_select(self, op: Op) -> None:
@@ -1051,7 +1078,7 @@ class _Lowerer:
     def _op_tile_sync(self, op: Op) -> None:
         # Phase 4a: Check if this is the trailing sync to elide
         elide_info = getattr(self, "_unroll_elide_sync_op", None)
-        if elide_info and elide_info['op'] is op:
+        if elide_info and elide_info["op"] is op:
             # Skip this specific barrier (trailing sync in non-final iteration)
             return
 
@@ -1606,7 +1633,12 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
 
         # Check if we should unroll
-        if unroll and self._is_constant(lower) and self._is_constant(upper) and self._is_constant(step):
+        if (
+            unroll
+            and self._is_constant(lower)
+            and self._is_constant(upper)
+            and self._is_constant(step)
+        ):
             self._lower_unrolled_for(op)
         else:
             self._lower_normal_for(op)
@@ -1730,7 +1762,6 @@ class _Lowerer:
 
         # Create a fake op to hold IV and iter arg SSA values for each iteration
         # We'll temporarily replace the original op in each Value's op field
-        from ck_dsl.core.ir import Value, Op
 
         # Find the Value objects for IV and iter args
         # These are created when the scf.for was built and stored in the op
@@ -1740,7 +1771,7 @@ class _Lowerer:
         # The IV and iter arg Values are referenced by ops in the body region
         # We need to find them by scanning the region
         for body_op in op.regions[0].ops:
-            if hasattr(body_op, 'operands'):
+            if hasattr(body_op, "operands"):
                 for operand in body_op.operands:
                     if operand.name == iv_name and operand.op == op:
                         iv_value_obj = operand
@@ -1793,7 +1824,7 @@ class _Lowerer:
                 if len(body_op.results) > 0:
                     for result in body_op.results:
                         values_to_rename.append((result, result.name))
-                        base_name = result.name.lstrip('%')
+                        base_name = result.name.lstrip("%")
                         result.name = f"%{base_name}{iteration_suffix}"
 
             # Phase 4a: Mark trailing sync for elision in non-final iterations
@@ -1801,10 +1832,10 @@ class _Lowerer:
             # visible to NEXT iter's LDS reads. In iterations 0..N-2, the NEXT
             # iteration starts with its own barrier after global load, making this
             # trailing barrier redundant. Only the final iteration needs it.
-            is_final_iteration = (iteration == trip_count - 1)
+            is_final_iteration = iteration == trip_count - 1
             if trailing_sync_op and not is_final_iteration:
                 # Mark this specific op to be skipped (next iter has its own barrier)
-                self._unroll_elide_sync_op = {'op': trailing_sync_op}
+                self._unroll_elide_sync_op = {"op": trailing_sync_op}
             else:
                 self._unroll_elide_sync_op = None
 

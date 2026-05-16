@@ -918,18 +918,11 @@ def make_inputs(s: Scenario, seed: int = 0):
 # ---------------------------------------------------------------------------
 
 
-def _time_call_loop(call_once, warmup: int, attempts: int):
-    """Standard event-timer: ``warmup`` untimed + ``attempts`` timed launches.
+def _time_torch_call_loop(call_once, warmup: int, attempts: int) -> float:
+    """Time a torch/Triton lane with torch CUDA events.
 
-    Returns mean per-call ms. The caller owns the output tensor and the
-    streaming context. After timing we always do a full
-    ``hipDeviceSynchronize`` (via :func:`synchronize_and_release`) before
-    returning: on systems where torch's current stream is the legacy null
-    stream (`cuda_stream == 0`) and our raw ctypes kernels also target
-    stream 0, `torch.cuda.Event.synchronize()` does not always observe
-    the ctypes-issued work. Forcing a device sync at the lane boundary
-    is the only reliable way to guarantee the output tensor reflects all
-    of the launched kernels' writes before the caller reads them.
+    Triton launches on torch's current stream, so torch events are the
+    correct timer and observe exactly the queued Triton work.
     """
     for _ in range(warmup):
         call_once()
@@ -941,13 +934,26 @@ def _time_call_loop(call_once, warmup: int, attempts: int):
         call_once()
     t_end.record()
     t_end.synchronize()
-    try:
-        from ck_dsl.runtime import synchronize_and_release
-
-        synchronize_and_release()
-    except Exception:
-        torch.cuda.synchronize()
     return t_start.elapsed_time(t_end) / attempts
+
+
+def _time_ck_dsl_call_loop(
+    call_once, warmup: int, attempts: int, *, stream: int
+) -> float:
+    """Time a CK DSL lane with HIP events on the launch stream.
+
+    CK DSL kernels are issued through raw ``hipModuleLaunchKernel`` via
+    ctypes, not through torch. Timing them with ``torch.cuda.Event`` can
+    miss or misattribute raw HIP work on some ROCm stream setups; that
+    was the source of the old ``ck_2d_ms == ck_3d_ms`` harness artifact.
+    Use the CK DSL runtime's HIP-event timer instead, on the exact same
+    HIP stream passed to :func:`run_unified_attention_torch`.
+    """
+    from ck_dsl.runtime import synchronize_and_release, time_launches
+
+    ms = time_launches(call_once, warmup=warmup, iters=attempts, stream=stream)
+    synchronize_and_release(stream)
+    return ms
 
 
 def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
@@ -981,7 +987,7 @@ def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
                 backend="triton",
             )
 
-        ms = _time_call_loop(call_once, warmup, attempts)
+        ms = _time_torch_call_loop(call_once, warmup, attempts)
         return output, ms
     finally:
         _force_triton_path("auto")
@@ -1061,7 +1067,7 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
             stream=torch_stream,
         )
 
-    ms = _time_call_loop(call_once, warmup, attempts)
+    ms = _time_ck_dsl_call_loop(call_once, warmup, attempts, stream=torch_stream)
     return output, ms
 
 

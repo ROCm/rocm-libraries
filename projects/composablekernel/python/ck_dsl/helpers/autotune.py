@@ -74,9 +74,11 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 __all__ = [
     "AutotuneConfig",
+    "AutotuneKey",
     "AutotuneResult",
     "Autotuner",
     "autotune_sweep",
+    "make_autotune_key",
 ]
 
 
@@ -116,6 +118,57 @@ class AutotuneResult:
     @property
     def is_ok(self) -> bool:
         return self.error is None and math.isfinite(self.ms_per_iter)
+
+
+@dataclass(frozen=True)
+class AutotuneKey:
+    """Stable multi-level cache key for fusion/kernel autotuning."""
+
+    graph_hash: str
+    shape: Tuple[Any, ...]
+    dtype: str
+    layout: str = "RCR"
+    arch: str = "gfx950"
+    compiler: str = "comgr"
+    lowerer: str = "unknown"
+    spec_hash: str = "any"
+
+    def as_tuple(self) -> Tuple[Any, ...]:
+        return (
+            self.graph_hash,
+            tuple(self.shape),
+            self.dtype,
+            self.layout,
+            self.arch,
+            self.compiler,
+            self.lowerer,
+            self.spec_hash,
+        )
+
+
+def make_autotune_key(
+    *,
+    graph_hash: str,
+    shape: Tuple[Any, ...],
+    dtype: str,
+    layout: str = "RCR",
+    arch: str = "gfx950",
+    compiler: str = "comgr",
+    lowerer: str = "unknown",
+    spec_hash: str = "any",
+) -> Tuple[Any, ...]:
+    """Build the canonical autotune key tuple used by fusion planners."""
+
+    return AutotuneKey(
+        graph_hash=graph_hash,
+        shape=shape,
+        dtype=dtype,
+        layout=layout,
+        arch=arch,
+        compiler=compiler,
+        lowerer=lowerer,
+        spec_hash=spec_hash,
+    ).as_tuple()
 
 
 # ----- in-memory + on-disk cache -----------------------------------

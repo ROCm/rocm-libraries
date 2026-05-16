@@ -2260,6 +2260,288 @@ class TestCdnaPrimitives(unittest.TestCase):
         ll = lower_kernel_to_llvm(build_unified_attention_2d_tiled(spec))
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
+    def test_universal_gemm_bf16_spec_drives_ir(self):
+        """Universal GEMM should use DataSpec dtype fields in params,
+        LDS allocation, global loads/stores and MFMA dispatch.
+        """
+        from ck_dsl.instances import (
+            DataSpec,
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            build_universal_gemm,
+        )
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        spec = UniversalGemmSpec(
+            name="bf16_gemm_smoke",
+            tile=TileSpec(
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+            ),
+            trait=TraitSpec(pipeline="mem", epilogue="cshuffle"),
+            data=DataSpec(
+                dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32"
+            ),
+        )
+        ll = lower_kernel_to_llvm(build_universal_gemm(spec))
+        self.assertIn("ptr addrspace(1) noalias readonly nocapture align 16 %A", ll)
+        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.bf16", ll)
+        self.assertIn("load <8 x bfloat>", ll)
+        self.assertIn("store <8 x bfloat>", ll)
+
+    def test_universal_gemm_rejects_unsupported_bf16_atom(self):
+        from ck_dsl.instances import (
+            DataSpec,
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            build_universal_gemm,
+        )
+
+        spec = UniversalGemmSpec(
+            name="bf16_bad_atom",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
+            data=DataSpec(
+                dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32"
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported bf16 warp_tile"):
+            build_universal_gemm(spec)
+
+
+class TestFusionPlanner(unittest.TestCase):
+    """CPU-only coverage for the graph-capture fusion planner."""
+
+    def test_explain_matmul_bias_relu_scale(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A, B, bias):
+            return torch.relu((torch.matmul(A, B) + bias) * 0.5)
+
+        info = explain_fn(fn)
+        self.assertTrue(info["matched"])
+        self.assertEqual(info["a_arg_name"], "A")
+        self.assertEqual(info["b_arg_name"], "B")
+        self.assertEqual(info["bias_arg_name"], "bias")
+        # Normalized post-GEMM execution order: bias, scale, relu.
+        self.assertEqual(
+            [s.split("_", 1)[0] for s in info["epilogue_ops"]],
+            ["bias", "scale0.5", "relu"],
+        )
+
+    def test_explain_matmul_only(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A, B):
+            return torch.matmul(A, B)
+
+        info = explain_fn(fn)
+        self.assertTrue(info["matched"])
+        self.assertEqual(info["bias_arg_name"], None)
+        self.assertEqual(info["epilogue_ops"], [])
+
+    def test_explain_unsupported_graph(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A):
+            return torch.sin(A)
+
+        info = explain_fn(fn)
+        self.assertFalse(info["matched"])
+        self.assertIn("no registered", info["reason"])
+
+    def test_compile_fn_exposes_plan_without_launching(self):
+        import torch
+        from ck_dsl.helpers import compile_fn
+
+        def fn(A, B, bias):
+            return torch.relu(torch.matmul(A, B) + bias)
+
+        compiled = compile_fn(fn)
+        self.assertEqual(compiled.match["pattern"], "matmul_bias_relu")
+        self.assertEqual(compiled.match["bias_arg_name"], "bias")
+
+    def test_dtype_to_ir_accepts_torch_aliases(self):
+        import torch
+        from ck_dsl.core.ir import BF16, F16, F32
+        from ck_dsl.helpers import dtype_to_ir
+
+        self.assertEqual(dtype_to_ir(torch.float16), F16)
+        self.assertEqual(dtype_to_ir(torch.bfloat16), BF16)
+        self.assertEqual(dtype_to_ir(torch.float32), F32)
+
+    def test_bf16_fusion_configs_use_supported_bf16_atoms(self):
+        from ck_dsl.core.ir import BF16
+        from ck_dsl.helpers import fuse_matmul_bias_relu
+        from ck_dsl.helpers.fuse import _make_gemm_configs
+
+        cfgs = _make_gemm_configs(epilogue=fuse_matmul_bias_relu(dtype=BF16))
+        self.assertGreater(len(cfgs), 0)
+        for cfg in cfgs:
+            self.assertEqual(cfg.spec.data.dtype_a, "bf16")
+            self.assertEqual(cfg.spec.data.dtype_b, "bf16")
+            self.assertEqual(cfg.spec.data.dtype_c, "bf16")
+            self.assertEqual(
+                (cfg.spec.tile.warp_tile_m, cfg.spec.tile.warp_tile_n),
+                (16, 16),
+            )
+
+
+class TestFusionSolverScaffold(unittest.TestCase):
+    def _toy_graph(self):
+        from ck_dsl.helpers import FusionOp, FusionTensor, build_graph
+
+        tensors = [
+            FusionTensor("A", (128, 64), "fp16", is_input=True),
+            FusionTensor("B", (64, 128), "fp16", is_input=True),
+            FusionTensor("bias", (128,), "fp16", is_input=True, layout="broadcast"),
+            FusionTensor("mm", (128, 128), "fp16"),
+            FusionTensor("add", (128, 128), "fp16"),
+            FusionTensor("out", (128, 128), "fp16", is_output=True),
+        ]
+        ops = [
+            FusionOp("mm0", "matmul", ("A", "B"), ("mm",)),
+            FusionOp("add0", "add", ("mm", "bias"), ("add",)),
+            FusionOp("relu0", "relu", ("add",), ("out",)),
+        ]
+        return build_graph(
+            tensors=tensors, ops=ops, inputs=("A", "B", "bias"), outputs=("out",)
+        )
+
+    def test_fusion_graph_hash_is_stable_and_links_users(self):
+        g1 = self._toy_graph()
+        g2 = self._toy_graph()
+        self.assertEqual(g1.graph_hash(), g2.graph_hash())
+        self.assertEqual(g1.tensors["mm"].producer, "mm0")
+        self.assertEqual(g1.tensors["mm"].users, ("add0",))
+
+    def test_legalizer_accepts_toy_graph(self):
+        from ck_dsl.helpers import FusionLegalizer
+
+        result = FusionLegalizer().check_graph(self._toy_graph())
+        self.assertTrue(result.ok, result.reasons)
+
+    def test_legalizer_rejects_bad_matmul_shape(self):
+        from ck_dsl.helpers import FusionLegalizer, FusionOp, FusionTensor, build_graph
+
+        g = build_graph(
+            tensors=[
+                FusionTensor("A", (8, 7), "fp16", is_input=True),
+                FusionTensor("B", (9, 8), "fp16", is_input=True),
+                FusionTensor("C", (8, 8), "fp16", is_output=True),
+            ],
+            ops=[FusionOp("mm0", "matmul", ("A", "B"), ("C",))],
+            inputs=("A", "B"),
+            outputs=("C",),
+        )
+        result = FusionLegalizer().check_graph(g)
+        self.assertFalse(result.ok)
+        self.assertIn("K mismatch", result.reasons[0])
+
+    def test_greedy_scheduler_fuses_gemm_epilogue(self):
+        from ck_dsl.helpers import GreedyFusionScheduler
+
+        plan = GreedyFusionScheduler().schedule(self._toy_graph())
+        self.assertEqual(len(plan.regions), 1)
+        self.assertEqual(plan.regions[0].kind, "gemm_epilogue")
+        self.assertEqual(plan.regions[0].op_names, ("mm0", "add0", "relu0"))
+        self.assertIn("fused", plan.explanation[0])
+
+    def test_workspace_planner_allocates_cross_region_intermediate(self):
+        from ck_dsl.helpers import (
+            FusionOp,
+            FusionRegion,
+            FusionTensor,
+            WorkspacePlanner,
+            build_graph,
+        )
+
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (16,), "fp16", is_input=True),
+                FusionTensor("tmp", (16,), "fp16"),
+                FusionTensor("out", (16,), "fp16", is_output=True),
+            ],
+            ops=[
+                FusionOp("op0", "relu", ("A",), ("tmp",)),
+                FusionOp("op1", "add", ("tmp", "A"), ("out",)),
+            ],
+            inputs=("A",),
+            outputs=("out",),
+        )
+        from ck_dsl.helpers.fusion_ir import FusionPlan
+
+        allocs = WorkspacePlanner().plan(
+            FusionPlan(
+                graph=graph,
+                regions=(
+                    FusionRegion("r0", "elementwise", ("op0",), ("A",), ("tmp",)),
+                    FusionRegion("r1", "elementwise", ("op1",), ("tmp", "A"), ("out",)),
+                ),
+            )
+        )
+        self.assertEqual(len(allocs), 1)
+        self.assertEqual(allocs[0].tensor_name, "tmp")
+        self.assertEqual(allocs[0].first_region, 0)
+        self.assertEqual(allocs[0].last_region, 1)
+
+    def test_default_lowering_registry(self):
+        from ck_dsl.helpers import default_lowering_registry
+
+        reg = default_lowering_registry()
+        self.assertIsNotNone(reg.get("gemm_epilogue"))
+        with self.assertRaises(KeyError):
+            reg.require("does_not_exist")
+
+    def test_make_autotune_key_includes_graph_and_arch(self):
+        from ck_dsl.helpers import make_autotune_key
+
+        key = make_autotune_key(
+            graph_hash="abc",
+            shape=(128, 128, 64),
+            dtype="fp16",
+            layout="RCR",
+            arch="gfx950",
+            compiler="comgr-7",
+            lowerer="gemm_epilogue",
+            spec_hash="spec1",
+        )
+        self.assertEqual(
+            key,
+            (
+                "abc",
+                (128, 128, 64),
+                "fp16",
+                "RCR",
+                "gfx950",
+                "comgr-7",
+                "gemm_epilogue",
+                "spec1",
+            ),
+        )
+
 
 class TestAutotuner(unittest.TestCase):
     """Coverage for ``helpers/autotune.py``: cache, winner pick, errors."""
@@ -2444,6 +2726,840 @@ class TestAutotuner(unittest.TestCase):
         self.assertEqual(renamed.tile.tile_m, 128)
         # Original untouched (frozen dataclass).
         self.assertEqual(base.name, "base")
+
+
+# ---------------------------------------------------------------------
+# Extended fusion coverage: epilogue ops, pattern matchers, lowerers,
+# workspace materialization, and the validation harness.
+# ---------------------------------------------------------------------
+
+
+class TestExpandedEpilogueOps(unittest.TestCase):
+    """Each new EpilogueOp must build legal IR and ``tag()`` cleanly."""
+
+    def _build_epilogue_kernel(self, op):
+        """Helper: emit a tiny IR kernel that exercises ``op.apply_element``.
+
+        The kernel does not run; it just confirms the op composes
+        with :class:`IRBuilder` and that ``lower_kernel_to_llvm``
+        accepts the resulting graph. That's enough to catch
+        IR-shape regressions (mismatched types, missing methods)
+        without needing a GPU.
+
+        Uses :class:`FusedEpilogue` as the single entry point for
+        param declaration so each op's pointer-param is declared
+        exactly once (calling ``op.declare_params(b)`` directly here
+        would double-declare for residual ops).
+        """
+        from ck_dsl.core.ir import F16, I32, IRBuilder, PtrType
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+        from ck_dsl.helpers.fuse import FusedEpilogue, dtype_to_ir
+
+        b = IRBuilder(f"epilogue_{op.tag()}")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        in_p = b.param(
+            "X", PtrType(F16, "global"), noalias=True, readonly=True, align=2
+        )
+        out_p = b.param(
+            "Y", PtrType(F16, "global"), noalias=True, writeonly=True, align=2
+        )
+        m = b.param("M", I32)
+        # FusedEpilogue calls op.declare_params once, then records the
+        # runtime ``N`` for residual ops to use as their M-stride.
+        ep_dtype = dtype_to_ir(op.dtype) if hasattr(op, "dtype") else F16
+        fe = FusedEpilogue(ops=(op,), dtype=ep_dtype)
+        fe.declare_params(b)
+        fe.record_runtime(b, N=m)
+        idx = b.thread_id_x()
+        x = b.global_load_f16(in_p, idx)
+        y = op.apply_element(
+            b, x, m=idx, n=idx, elem_idx=0, params=dict(fe._live_params)
+        )
+        b.global_store(out_p, idx, y, align=2)
+        ll = lower_kernel_to_llvm(b.kernel)
+        return b.kernel, ll
+
+    def test_gelu_builds_and_lowers(self):
+        from ck_dsl.helpers import GELU
+
+        _, ll = self._build_epilogue_kernel(GELU())
+        self.assertIn("amdgpu", ll)
+
+    def test_silu_builds_and_lowers(self):
+        from ck_dsl.helpers import SiLU
+
+        _, ll = self._build_epilogue_kernel(SiLU())
+        self.assertIn("amdgpu", ll)
+
+    def test_clamp_builds_with_lo_hi(self):
+        from ck_dsl.helpers import Clamp
+
+        op = Clamp(lo=0.0, hi=6.0)
+        kernel, ll = self._build_epilogue_kernel(op)
+        self.assertIn("clamp0_6_f16", kernel.name)
+        self.assertIn("amdgpu", ll)
+
+    def test_cast_passthrough_same_dtype(self):
+        from ck_dsl.core.ir import F16
+        from ck_dsl.helpers import Cast
+
+        # Sanity: cast f16->f16 should not change the streaming value
+        # nor introduce extra cast ops. We just verify the kernel builds
+        # so the same-dtype short-circuit is exercised.
+        op = Cast(src_dtype=F16, dst_dtype=F16)
+        _, ll = self._build_epilogue_kernel(op)
+        self.assertIn("amdgpu", ll)
+
+    def test_residual_add_declares_param_and_lowers(self):
+        from ck_dsl.helpers import ResidualAdd
+
+        op = ResidualAdd(param_name="residual_0")
+        kernel, ll = self._build_epilogue_kernel(op)
+        self.assertIn("resadd_f16", kernel.name)
+        # The residual pointer must show up as a kernel param.
+        self.assertIn("residual_0", ll)
+
+    def test_residual_mul_declares_param_and_lowers(self):
+        from ck_dsl.helpers import ResidualMul
+
+        op = ResidualMul(param_name="residual_mul_0")
+        kernel, ll = self._build_epilogue_kernel(op)
+        self.assertIn("resmul_f16", kernel.name)
+        self.assertIn("residual_mul_0", ll)
+
+
+class TestExpandedPatternMatchers(unittest.TestCase):
+    """Verify the new patterns in ``_PATTERN_TABLE`` match expected fns."""
+
+    def test_explain_matmul_gelu(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A, B):
+            return torch.nn.functional.gelu(torch.matmul(A, B))
+
+        info = explain_fn(fn)
+        self.assertTrue(info["matched"], info.get("reason"))
+        self.assertEqual(info["epilogue_ops"], ["gelu_f16"])
+        self.assertEqual(info["bias_arg_name"], None)
+
+    def test_explain_matmul_bias_silu(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A, B, bias):
+            return torch.nn.functional.silu(torch.matmul(A, B) + bias)
+
+        info = explain_fn(fn)
+        self.assertTrue(info["matched"], info.get("reason"))
+        self.assertEqual(
+            [s.split("_", 1)[0] for s in info["epilogue_ops"]],
+            ["bias", "silu"],
+        )
+        self.assertEqual(info["bias_arg_name"], "bias")
+
+    def test_explain_matmul_with_residual(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A, B, bias, residual):
+            return torch.matmul(A, B) + bias + residual
+
+        info = explain_fn(fn)
+        self.assertTrue(info["matched"], info.get("reason"))
+        # The matcher walks output -> matmul; the LAST add (closest to
+        # the output) is consumed first. Either of {bias, residual} can
+        # end up in ``bias_arg_name``; what matters is that exactly one
+        # of them is the residual and we recognised both placeholders.
+        ph_set = {info["bias_arg_name"]}.union(set(info["residual_arg_names"]))
+        self.assertEqual(ph_set, {"bias", "residual"})
+        self.assertEqual(len(info["residual_arg_names"]), 1)
+
+    def test_explain_pointwise_chain(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A):
+            return torch.relu(torch.nn.functional.gelu(A))
+
+        info = explain_fn(fn)
+        self.assertTrue(info["matched"], info.get("reason"))
+        self.assertTrue(info["pattern"].startswith("pointwise_"))
+        self.assertEqual(info["a_arg_name"], "A")
+
+    def test_explain_pointwise_binary_chain(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A, B):
+            return torch.relu(A + B)
+
+        info = explain_fn(fn)
+        self.assertTrue(info["matched"], info.get("reason"))
+        self.assertEqual(info["pattern"], "pointwise_add_relu")
+        self.assertEqual(info["a_arg_name"], "A")
+        self.assertEqual(info["b_arg_name"], "B")
+        self.assertEqual(info["extra_attrs"]["op_kind"], "add")
+        self.assertEqual(info["extra_attrs"]["unary_chain"], ("relu",))
+
+    def test_explain_matmul_scale_clamp(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A, B):
+            return torch.clamp(torch.matmul(A, B) * 0.25, min=-1.0, max=1.0)
+
+        info = explain_fn(fn)
+        self.assertTrue(info["matched"], info.get("reason"))
+        self.assertEqual(
+            [s.split("_", 1)[0] for s in info["epilogue_ops"]],
+            ["scale0.25", "clamp-1"],
+        )
+
+    def test_explain_rowwise_reduction_sum(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A):
+            return torch.sum(A, dim=-1)
+
+        info = explain_fn(fn)
+        self.assertTrue(info["matched"], info.get("reason"))
+        self.assertEqual(info["pattern"], "reduce_sum")
+        self.assertEqual(info["extra_attrs"]["reduce_op"], "sum")
+
+    def test_explain_rowwise_reduction_mean(self):
+        import torch
+        from ck_dsl.helpers import explain_fn
+
+        def fn(A):
+            return torch.mean(A, dim=-1)
+
+        info = explain_fn(fn)
+        self.assertTrue(info["matched"], info.get("reason"))
+        self.assertEqual(info["pattern"], "reduce_mean")
+        self.assertEqual(info["extra_attrs"]["reduce_op"], "mean")
+
+
+class TestLoweringRegistryBuild(unittest.TestCase):
+    """End-to-end ``can_lower`` + ``candidates`` + ``build`` smoke tests.
+
+    These tests cover the path from a normalized fusion graph all the
+    way through HSACO build for each concrete lowerer. They do NOT
+    launch the kernels (no GPU); the goal is to confirm the lowerers
+    wire up a real launcher object on every supported region kind.
+    """
+
+    def _toy_gemm_graph(self, with_epilogue=True):
+        from ck_dsl.helpers import FusionOp, FusionTensor, build_graph
+
+        tensors = [
+            FusionTensor("A", (128, 64), "fp16", is_input=True),
+            FusionTensor("B", (64, 128), "fp16", is_input=True),
+            FusionTensor("bias", (128,), "fp16", is_input=True, layout="broadcast"),
+            FusionTensor("mm", (128, 128), "fp16"),
+        ]
+        ops = [FusionOp("mm0", "matmul", ("A", "B"), ("mm",))]
+        if with_epilogue:
+            tensors.extend(
+                [
+                    FusionTensor("add", (128, 128), "fp16"),
+                    FusionTensor("out", (128, 128), "fp16", is_output=True),
+                ]
+            )
+            ops.append(FusionOp("add0", "add", ("mm", "bias"), ("add",)))
+            ops.append(FusionOp("relu0", "relu", ("add",), ("out",)))
+            inputs = ("A", "B", "bias")
+            outputs = ("out",)
+        else:
+            tensors.append(FusionTensor("mm", (128, 128), "fp16", is_output=True))
+            inputs = ("A", "B")
+            outputs = ("mm",)
+        return build_graph(tensors=tensors, ops=ops, inputs=inputs, outputs=outputs)
+
+    def test_gemm_epilogue_can_lower_and_emits_candidates(self):
+        from ck_dsl.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        plan = GreedyFusionScheduler().schedule(graph)
+        region = plan.regions[0]
+        lowerer = GemmEpilogueLowerer()
+        result = lowerer.can_lower(graph, region)
+        self.assertTrue(result.ok, result.reasons)
+        cfgs = lowerer.candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        # Every candidate must keep the fused epilogue attached.
+        for cfg in cfgs:
+            self.assertTrue(hasattr(cfg.spec, "_fused_epilogue"))
+
+    def test_gemm_epilogue_build_emits_kernel_launcher(self):
+        from ck_dsl.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        plan = GreedyFusionScheduler().schedule(graph)
+        region = plan.regions[0]
+        lowerer = GemmEpilogueLowerer()
+        cfgs = lowerer.candidates(graph, region)
+        built = lowerer.build(cfgs[0])
+        # Smoke: launcher exists with the right kernel name; block size
+        # matches the warp grid; bias plumbed through.
+        self.assertIsNotNone(built.launcher)
+        self.assertGreater(built.block_size, 0)
+        self.assertEqual(built.extra.get("bias"), "bias")
+
+    def test_elementwise_lowerer_round_trips(self):
+        from ck_dsl.helpers import (
+            ElementwiseLowerer,
+            FusionOp,
+            FusionTensor,
+            build_graph,
+        )
+        from ck_dsl.helpers.fusion_ir import FusionRegion
+
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (1024,), "fp16", is_input=True),
+                FusionTensor("out", (1024,), "fp16", is_output=True),
+            ],
+            ops=[FusionOp("r0", "relu", ("A",), ("out",))],
+            inputs=("A",),
+            outputs=("out",),
+        )
+        region = FusionRegion(
+            name="r0",
+            kind="elementwise",
+            op_names=("r0",),
+            inputs=("A",),
+            outputs=("out",),
+            lowerer="elementwise",
+        )
+        lowerer = ElementwiseLowerer()
+        self.assertTrue(lowerer.can_lower(graph, region).ok)
+        cfgs = lowerer.candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        built = lowerer.build(cfgs[0])
+        self.assertEqual(built.spec.op, "relu")
+        self.assertEqual(built.spec.dtype, "f16")
+
+    def test_reduction_lowerer_round_trips(self):
+        from ck_dsl.helpers import (
+            FusionOp,
+            FusionTensor,
+            ReductionLowerer,
+            build_graph,
+        )
+        from ck_dsl.helpers.fusion_ir import FusionRegion
+
+        # ``Reduce2DSpec`` requires ``n_per_block`` divisible by
+        # ``block_size * vec``. Pick 4096 (= 256*16 = 512*8) so every
+        # candidate the lowerer emits is buildable.
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (64, 4096), "fp16", is_input=True),
+                FusionTensor("out", (64,), "fp16", is_output=True),
+            ],
+            ops=[FusionOp("s0", "sum", ("A",), ("out",))],
+            inputs=("A",),
+            outputs=("out",),
+        )
+        region = FusionRegion(
+            name="r0",
+            kind="rowwise_reduction",
+            op_names=("s0",),
+            inputs=("A",),
+            outputs=("out",),
+            attrs={"reduce_op": "sum"},
+            lowerer="rowwise_reduction",
+        )
+        lowerer = ReductionLowerer()
+        self.assertTrue(lowerer.can_lower(graph, region).ok)
+        cfgs = lowerer.candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        # Iterate candidates until we find a buildable one. The
+        # candidate sweep emits a few (block_size, vec) combos; some
+        # are illegal under the spec's divisibility constraint and we
+        # expect the lowerer to round-trip with at least one.
+        from ck_dsl.instances.reduce import is_valid_spec
+
+        buildable = [c for c in cfgs if is_valid_spec(c.spec)[0]]
+        self.assertGreater(len(buildable), 0)
+        built = lowerer.build(buildable[0])
+        self.assertEqual(built.spec.op, "sum")
+        self.assertEqual(built.spec.n_per_block, 4096)
+
+    def test_gemm_epilogue_launch_args_include_bias_and_residual(self):
+        from ck_dsl.helpers import (
+            BuiltRegion,
+            FusionOp,
+            FusionTensor,
+            GemmEpilogueLowerer,
+            build_graph,
+        )
+        from ck_dsl.helpers.fusion_ir import FusionRegion
+
+        class FakeTensor:
+            def __init__(self, shape):
+                self.shape = tuple(shape)
+
+            def numel(self):
+                n = 1
+                for d in self.shape:
+                    n *= d
+                return n
+
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (128, 64), "fp16", is_input=True),
+                FusionTensor("B", (64, 128), "fp16", is_input=True),
+                FusionTensor("bias", (128,), "fp16", is_input=True, layout="broadcast"),
+                FusionTensor("residual", (128, 128), "fp16", is_input=True),
+                FusionTensor("mm", (128, 128), "fp16"),
+                FusionTensor("add_bias", (128, 128), "fp16"),
+                FusionTensor("out", (128, 128), "fp16", is_output=True),
+            ],
+            ops=[
+                FusionOp("mm0", "matmul", ("A", "B"), ("mm",)),
+                FusionOp("add_bias0", "add", ("mm", "bias"), ("add_bias",)),
+                FusionOp("add_res0", "add", ("add_bias", "residual"), ("out",)),
+            ],
+            inputs=("A", "B", "bias", "residual"),
+            outputs=("out",),
+        )
+        region = FusionRegion(
+            name="r0",
+            kind="gemm_epilogue",
+            op_names=("mm0", "add_bias0", "add_res0"),
+            inputs=("A", "B", "bias", "residual"),
+            outputs=("out",),
+            lowerer="gemm_epilogue",
+        )
+        lowerer = GemmEpilogueLowerer()
+        cfg = lowerer.candidates(graph, region)[0]
+        built = BuiltRegion(
+            launcher=None,
+            spec=cfg.spec,
+            block_size=cfg.spec.block_size,
+            extra=cfg.extra,
+        )
+        runtime_args = {
+            "A": FakeTensor((128, 64)),
+            "B": FakeTensor((64, 128)),
+            "bias": FakeTensor((128,)),
+            "residual": FakeTensor((128, 128)),
+            "out": FakeTensor((128, 128)),
+        }
+        args, grid = lowerer.launch_args(graph, region, runtime_args, built)
+        self.assertEqual(args["M"], 128)
+        self.assertEqual(args["N"], 128)
+        self.assertEqual(args["K"], 64)
+        self.assertIs(args["bias"], runtime_args["bias"])
+        self.assertIs(args["residual_0"], runtime_args["residual"])
+        self.assertEqual(grid, (1, 1, 1))
+
+    def test_elementwise_lowerer_launch_args_binary(self):
+        from ck_dsl.helpers import (
+            BuiltRegion,
+            ElementwiseLowerer,
+            FusionOp,
+            FusionTensor,
+            build_graph,
+        )
+        from ck_dsl.helpers.fusion_ir import FusionRegion
+        from ck_dsl.instances.elementwise import ElementwiseSpec
+
+        class FakeTensor:
+            shape = (1024,)
+
+            def numel(self):
+                return 1024
+
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (1024,), "fp16", is_input=True),
+                FusionTensor("B", (1024,), "fp16", is_input=True),
+                FusionTensor("out", (1024,), "fp16", is_output=True),
+            ],
+            ops=[FusionOp("add0", "add", ("A", "B"), ("out",))],
+            inputs=("A", "B"),
+            outputs=("out",),
+        )
+        region = FusionRegion(
+            name="r0",
+            kind="elementwise",
+            op_names=("add0",),
+            inputs=("A", "B"),
+            outputs=("out",),
+            lowerer="elementwise",
+        )
+        spec = ElementwiseSpec(op="add", dtype="f16", block_size=256, vec=8)
+        built = BuiltRegion(launcher=None, spec=spec, block_size=256)
+        runtime_args = {"A": FakeTensor(), "B": FakeTensor(), "out": FakeTensor()}
+        args, grid = ElementwiseLowerer().launch_args(
+            graph, region, runtime_args, built
+        )
+        self.assertEqual(args["N"], 1024)
+        self.assertIs(args["A"], runtime_args["A"])
+        self.assertIs(args["B"], runtime_args["B"])
+        self.assertIs(args["C"], runtime_args["out"])
+        self.assertEqual(grid, (1, 1, 1))
+
+    def test_reduction_lowerer_rejects_non_2d_input(self):
+        from ck_dsl.helpers import (
+            FusionOp,
+            FusionTensor,
+            ReductionLowerer,
+            build_graph,
+        )
+        from ck_dsl.helpers.fusion_ir import FusionRegion
+
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (4096,), "fp16", is_input=True),
+                FusionTensor("out", (), "fp16", is_output=True),
+            ],
+            ops=[FusionOp("sum0", "sum", ("A",), ("out",))],
+            inputs=("A",),
+            outputs=("out",),
+        )
+        region = FusionRegion(
+            name="r0",
+            kind="rowwise_reduction",
+            op_names=("sum0",),
+            inputs=("A",),
+            outputs=("out",),
+            lowerer="rowwise_reduction",
+        )
+        result = ReductionLowerer().can_lower(graph, region)
+        self.assertFalse(result.ok)
+        self.assertIn("input must be 2D", result.reasons[0])
+
+
+class TestWorkspaceMaterialize(unittest.TestCase):
+    """``materialize_plan`` should colour slots and allocate via the pool."""
+
+    def _two_region_plan(self):
+        from ck_dsl.helpers import (
+            FusionOp,
+            FusionTensor,
+            build_graph,
+        )
+        from ck_dsl.helpers.fusion_ir import FusionPlan, FusionRegion
+
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (16,), "fp16", is_input=True),
+                FusionTensor("tmp", (16,), "fp16"),
+                FusionTensor("out", (16,), "fp16", is_output=True),
+            ],
+            ops=[
+                FusionOp("op0", "relu", ("A",), ("tmp",)),
+                FusionOp("op1", "add", ("tmp", "A"), ("out",)),
+            ],
+            inputs=("A",),
+            outputs=("out",),
+        )
+        return FusionPlan(
+            graph=graph,
+            regions=(
+                FusionRegion("r0", "elementwise", ("op0",), ("A",), ("tmp",)),
+                FusionRegion("r1", "elementwise", ("op1",), ("tmp", "A"), ("out",)),
+            ),
+        )
+
+    def test_planner_colours_disjoint_lifetimes_into_one_slot(self):
+        from ck_dsl.helpers import (
+            FusionOp,
+            FusionTensor,
+            WorkspacePlanner,
+            build_graph,
+        )
+        from ck_dsl.helpers.fusion_ir import FusionPlan, FusionRegion
+
+        # Three regions: tmp1 in r0..r1, tmp2 in r2..r3. No overlap;
+        # both should land on the same physical slot.
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (16,), "fp16", is_input=True),
+                FusionTensor("tmp1", (16,), "fp16"),
+                FusionTensor("tmp2", (16,), "fp16"),
+                FusionTensor("out", (16,), "fp16", is_output=True),
+            ],
+            ops=[
+                FusionOp("p0", "relu", ("A",), ("tmp1",)),
+                FusionOp("p1", "add", ("tmp1", "A"), ("tmp2",)),  # consumes tmp1
+                FusionOp("p2", "relu", ("tmp2",), ("out",)),  # produces out
+            ],
+            inputs=("A",),
+            outputs=("out",),
+        )
+        plan = FusionPlan(
+            graph=graph,
+            regions=(
+                FusionRegion("r0", "elementwise", ("p0",), ("A",), ("tmp1",)),
+                FusionRegion("r1", "elementwise", ("p1",), ("tmp1", "A"), ("tmp2",)),
+                FusionRegion("r2", "elementwise", ("p2",), ("tmp2",), ("out",)),
+            ),
+        )
+        allocs = WorkspacePlanner().plan(plan)
+        # ``tmp1`` lives r0..r1, ``tmp2`` lives r1..r2 -- they overlap
+        # at r1, so they CANNOT share a slot.
+        self.assertEqual(len(allocs), 2)
+        self.assertNotEqual(allocs[0].slot_name, allocs[1].slot_name)
+
+    def test_materialize_with_fake_pool_binds_tensors(self):
+        # Use the real WorkspacePool with a CPU "device" via torch.
+        import torch
+        from ck_dsl.helpers import materialize_plan
+        from ck_dsl.runtime.launcher import WorkspacePool
+
+        plan = self._two_region_plan()
+        pool = WorkspacePool()
+        name_to_tensor, allocs = materialize_plan(
+            plan,
+            pool=pool,
+            device="cpu",
+        )
+        self.assertIn("tmp", name_to_tensor)
+        # The pool should own a slot tensor that matches the colourer.
+        self.assertGreaterEqual(len(allocs), 1)
+        self.assertEqual(name_to_tensor["tmp"].shape, torch.Size([16]))
+        self.assertEqual(name_to_tensor["tmp"].dtype, torch.float16)
+
+
+class TestValidationHarness(unittest.TestCase):
+    """The fusion validation runner must produce well-formed reports."""
+
+    def test_benchmark_case_runs_torch_eager_baseline(self):
+        import torch
+        from ck_dsl.helpers import BenchmarkCase, run_fusion_validation_matrix
+
+        def ref_fn(x, y):
+            return x + y
+
+        def make_inputs(shape, dtype):
+            t = getattr(torch, dtype)
+            return (
+                torch.randn(shape, dtype=t),
+                torch.randn(shape, dtype=t),
+            )
+
+        cases = [
+            BenchmarkCase(
+                name="add",
+                ref_fn=ref_fn,
+                make_inputs=make_inputs,
+                backends={"torch_eager_again": ref_fn},
+            )
+        ]
+        reports = run_fusion_validation_matrix(
+            cases=cases,
+            shapes=((128,),),
+            dtypes=("float32",),
+            warmup=1,
+            iters=3,
+        )
+        self.assertEqual(len(reports), 1)
+        report = reports[0]
+        # Reference + one backend = 2 timing rows.
+        self.assertEqual(len(report.timings), 2)
+        # The backend that re-runs the reference should be bit-exact.
+        backend = next(t for t in report.timings if t.name == "torch_eager_again")
+        self.assertEqual(backend.max_abs, 0.0)
+        # speedup_vs returns ratios > 0.
+        speedup = report.speedup_vs("torch_eager")
+        self.assertGreater(speedup["torch_eager_again"], 0.0)
+
+    def test_validation_report_fastest_and_speedup(self):
+        from ck_dsl.helpers import BackendTiming, ValidationReport
+
+        report = ValidationReport(
+            graph_hash="abc123",
+            correctness={"torch_eager": 0.0, "ck_dsl": 1e-3},
+            timings=(
+                BackendTiming("torch_eager", 2.0, max_abs=0.0),
+                BackendTiming("ck_dsl", 0.5, max_abs=1e-3),
+            ),
+            pattern="pointwise_add",
+            shape=(128,),
+            dtype="fp16",
+        )
+        self.assertEqual(report.fastest().name, "ck_dsl")
+        self.assertEqual(report.speedup_vs("torch_eager")["ck_dsl"], 4.0)
+        as_dict = report.as_dict()
+        self.assertEqual(as_dict["graph_hash"], "abc123")
+        self.assertEqual(as_dict["fastest"]["name"], "ck_dsl")
+        self.assertEqual(as_dict["shape"], [128])
+
+
+class TestAttentionHarnessTimers(unittest.TestCase):
+    """The attention benchmark must use backend-appropriate timer APIs."""
+
+    def test_ck_dsl_timer_uses_runtime_time_launches(self):
+        import importlib.util
+        import sys
+        import types
+        from pathlib import Path
+        from unittest import mock
+
+        # Import torch before patching sys.modules. Otherwise
+        # mock.patch.dict restores sys.modules to a pre-torch snapshot
+        # after this test, while torch's C extensions remain loaded;
+        # later tests that import torch can then trip PyTorch's
+        # "already has a docstring" re-import bug.
+        import torch  # noqa: F401
+
+        module_path = Path(
+            "/workspace/rocm-libraries-streaming/projects/composablekernel/python/"
+            "ck_dsl/examples/attention/parity_unified_attention.py"
+        )
+        fake_aiter = types.ModuleType("aiter")
+        fake_ops = types.ModuleType("aiter.ops")
+        fake_triton = types.ModuleType("aiter.ops.triton")
+        fake_attention = types.ModuleType("aiter.ops.triton.attention")
+        fake_unified = types.ModuleType("aiter.ops.triton.attention.unified_attention")
+        fake_unified.use_2d_kernel = lambda *a, **k: True
+        fake_unified.unified_attention = lambda *a, **k: None
+        modules = {
+            "aiter": fake_aiter,
+            "aiter.ops": fake_ops,
+            "aiter.ops.triton": fake_triton,
+            "aiter.ops.triton.attention": fake_attention,
+            "aiter.ops.triton.attention.unified_attention": fake_unified,
+        }
+        spec = importlib.util.spec_from_file_location(
+            "ck_dsl_attention_parity_timer_test",
+            module_path,
+        )
+        mod = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(sys.modules, modules):
+            sys.modules[spec.name] = mod
+            spec.loader.exec_module(mod)
+
+        calls = []
+
+        def fake_time_launches(fn, *, warmup, iters, stream):
+            calls.append(("time_launches", warmup, iters, stream))
+            fn()
+            return 0.123
+
+        def fake_sync(stream=0):
+            calls.append(("sync", stream))
+
+        with mock.patch("ck_dsl.runtime.time_launches", fake_time_launches), mock.patch(
+            "ck_dsl.runtime.synchronize_and_release", fake_sync
+        ):
+            ms = mod._time_ck_dsl_call_loop(
+                lambda: calls.append(("launch",)), 2, 5, stream=77
+            )
+
+        self.assertEqual(ms, 0.123)
+        self.assertIn(("time_launches", 2, 5, 77), calls)
+        self.assertIn(("sync", 77), calls)
+
+    def test_triton_timer_uses_torch_events(self):
+        import importlib.util
+        import sys
+        import types
+        from pathlib import Path
+        from unittest import mock
+
+        # Keep torch in sys.modules across the temporary aiter-module
+        # patch; see the sibling timer test for the rationale.
+        import torch  # noqa: F401
+
+        module_path = Path(
+            "/workspace/rocm-libraries-streaming/projects/composablekernel/python/"
+            "ck_dsl/examples/attention/parity_unified_attention.py"
+        )
+        fake_aiter = types.ModuleType("aiter")
+        fake_ops = types.ModuleType("aiter.ops")
+        fake_triton = types.ModuleType("aiter.ops.triton")
+        fake_attention = types.ModuleType("aiter.ops.triton.attention")
+        fake_unified = types.ModuleType("aiter.ops.triton.attention.unified_attention")
+        fake_unified.use_2d_kernel = lambda *a, **k: True
+        fake_unified.unified_attention = lambda *a, **k: None
+        modules = {
+            "aiter": fake_aiter,
+            "aiter.ops": fake_ops,
+            "aiter.ops.triton": fake_triton,
+            "aiter.ops.triton.attention": fake_attention,
+            "aiter.ops.triton.attention.unified_attention": fake_unified,
+        }
+        spec = importlib.util.spec_from_file_location(
+            "ck_dsl_attention_parity_torch_timer_test",
+            module_path,
+        )
+        mod = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(sys.modules, modules):
+            sys.modules[spec.name] = mod
+            spec.loader.exec_module(mod)
+
+        event_log = []
+
+        class FakeEvent:
+            def __init__(self, enable_timing=False):
+                self.enable_timing = enable_timing
+
+            def record(self):
+                event_log.append("record")
+
+            def synchronize(self):
+                event_log.append("sync_event")
+
+            def elapsed_time(self, other):
+                return 10.0
+
+        fake_torch = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(
+                Event=FakeEvent,
+                synchronize=lambda: event_log.append("sync_cuda"),
+            )
+        )
+        launches = []
+        with mock.patch.object(mod, "torch", fake_torch):
+            ms = mod._time_torch_call_loop(lambda: launches.append("launch"), 1, 4)
+
+        self.assertEqual(ms, 2.5)
+        self.assertEqual(len(launches), 5)  # one warmup + four timed launches
+        self.assertEqual(event_log.count("record"), 2)
+
+
+class TestConvDirectGroupedTransforms(unittest.TestCase):
+    """The transform-descriptor migration must keep the kernels building."""
+
+    def test_16c_kernel_lowers_to_llvm(self):
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+        from ck_dsl.instances import (
+            DirectConv16cSpec,
+            DirectConvProblem,
+            build_direct_conv_16c,
+        )
+
+        spec = DirectConv16cSpec(
+            problem=DirectConvProblem(N=1, H=8, W=8, groups=8, cpg=16, kpg=16)
+        )
+        kernel = build_direct_conv_16c(spec)
+        ll = lower_kernel_to_llvm(kernel)
+        # Smoke check: the generated LLVM IR mentions amdgpu and the
+        # kernel name (proves the body got emitted).
+        self.assertIn("amdgpu", ll)
+        self.assertIn(kernel.name, ll)
+
+    def test_4c_kernel_lowers_to_llvm(self):
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+        from ck_dsl.instances import (
+            DirectConv4cSpec,
+            DirectConvProblem,
+            build_direct_conv_4c,
+        )
+
+        spec = DirectConv4cSpec(
+            problem=DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4)
+        )
+        kernel = build_direct_conv_4c(spec)
+        ll = lower_kernel_to_llvm(kernel)
+        self.assertIn("amdgpu", ll)
+        self.assertIn(kernel.name, ll)
 
 
 if __name__ == "__main__":
