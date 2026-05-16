@@ -113,6 +113,12 @@ namespace
                       << hipsparse_datatype2string(arg.compute_type);
                     break;
                 }
+                case hipsparse_test_dispatch_enum::scatter:
+                {
+                    s << hipsparse_indextype2string(arg.index_type_I) << '_'
+                      << hipsparse_datatype2string(arg.compute_type);
+                    break;
+                }
                 case hipsparse_test_dispatch_enum::axpby:
                 {
                     s << hipsparse_indextype2string(arg.index_type_I) << '_'
@@ -225,6 +231,29 @@ namespace
                          T,
                          typename std::enable_if<check_t::template is_valid_type<I, J, T>()>::type>
             : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, J, T>
+        {
+        };
+
+        struct test : hipsparse_test_template<ROUTINE>::template test_proxy<test, test_call>
+        {
+        };
+    };
+
+    template <hipsparse_test_enum::value_type ROUTINE>
+    struct hipsparse_test_scatter_template
+    {
+        using check_t = hipsparse_test_check<ROUTINE>;
+
+        template <typename T, typename I = int32_t, typename = void>
+        struct test_call : hipsparse_test_invalid
+        {
+        };
+
+        template <typename I, typename T>
+        struct test_call<I,
+                         T,
+                         typename std::enable_if<check_t::template is_valid_type<I, T>()>::type>
+            : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, T>
         {
         };
 
