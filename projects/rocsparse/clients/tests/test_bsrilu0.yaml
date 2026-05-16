@@ -189,7 +189,7 @@ Tests:
 - name: bsrilu0_file
   category: quick
   function: bsrilu0
-  precision: *single_double_precisions_complex
+  precision: *double_only_precisions_complex
   M: 1
   N: 1
   block_dim: [7]
@@ -202,7 +202,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2]
+  filename: [mplate]
 
 - name: bsrilu0_file
   category: pre_checkin

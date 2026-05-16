@@ -13,6 +13,8 @@ on:
         type: string
       test_runs_on:
         type: string
+      build_runs_on:
+        type: string
 
 permissions:
   contents: read
@@ -20,7 +22,7 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build (${{ inputs.amdgpu_families }})
-    runs-on: azure-linux-scale-rocm
+    runs-on: ${{ inputs.build_runs_on }}
     permissions:
       id-token: write
     container:
@@ -43,7 +45,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 70a6335b27d48f3781ba07eab89269f75a00f527 # 2026-05-03 commit
+          ref: 4e469b56368b633fad7e77b559db6607da0028eb # 2026-05-13 commit
 
       - name: Install python deps
         run: |
@@ -132,17 +134,16 @@ jobs:
             --build-dir TheRock/build \
             --upload
 
-      - name: Notify MIOpen Teams Channel on Failure
-        # Channel name "MIOpen CI Reporting"
-        if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && !github.event.pull_request.head.repo.fork }}
+      - name: Notify Teams Channel on Failure
+        if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
         run: |
           python3 .github/scripts/notify_teams.py \
-            --project miopen \
             --failure-stage build \
             --log-path TheRock/build/logs \
-            --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            --webhook-urls '{"miopen":"${{ secrets.MIOPEN_CI_WEBHOOK_URL }}","hipdnn":"${{ secrets.HIPDNN_CI_WEBHOOK_URL }}"}' \
             --pr-number "${{ github.event.pull_request.number }}" \
-            --pr-title "${{ github.event.pull_request.title }}"
+            --pr-title "${{ github.event.pull_request.title }}" \
+            --component-name "${{ inputs.projects_to_test }}"
 
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
