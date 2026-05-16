@@ -304,7 +304,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     RegisterWithSolver(registry, ++id, conv::ConvHipDirectFwd11x11{}, miopenConvolutionAlgoDirect);
     ++id; // removed ConvOclDirectFwdGen
     ++id; // removed ConvOclDirectFwd3x3
-    RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwd{}, miopenConvolutionAlgoDirect);
+    ++id; // removed ConvOclDirectFwd
     Register(registry,
              ++id,
              Primitive::Fusion,

@@ -1649,43 +1649,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvAsmImplicitGemmGTCDynamicBwdXdlops final : Co
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-/// Holds common member functions for the Solvers which share the same
-/// "legacy exhaustive search" machinery.
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwdLegacyExhaustiveSearch
-    : ConvTunableSolver<LegacyPerformanceConfig>
-{
-    LegacyPerformanceConfig
-    GetDefaultPerformanceConfig(const ExecutionContext&,
-                                const miopen::conv::ProblemDescription&) const override;
-    LegacyPerformanceConfig Search(const ExecutionContext&,
-                                   const miopen::conv::ProblemDescription&,
-                                   const AnyInvokeParams& invoke_ctx) const override;
-
-private:
-    template <typename Tgpu>
-    LegacyPerformanceConfig SearchImpl(const ExecutionContext&,
-                                       const miopen::conv::ProblemDescription&,
-                                       const AnyInvokeParams& invoke_ctx) const;
-};
-
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd final : ConvOclDirectFwdLegacyExhaustiveSearch
-{
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclDirectFwd>(); }
-
-    static ConvSolution BaseGetSolution(const ExecutionContext&,
-                                        const miopen::conv::ProblemDescription&,
-                                        const LegacyPerformanceConfig&);
-
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&,
-                             const LegacyPerformanceConfig&) const override;
-    bool IsValidPerformanceConfig(const ExecutionContext&,
-                                  const miopen::conv::ProblemDescription&,
-                                  const LegacyPerformanceConfig&) const override;
-};
-
 struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwdLegacyExhaustiveSearch
     : ConvTunableSolver<LegacyPerformanceConfig>
 {
@@ -1720,6 +1683,10 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwd final : ConvHipDirectFwdLegacyEx
                                   const miopen::conv::ProblemDescription&,
                                   const LegacyPerformanceConfig&) const override;
 };
+
+// Backward compatibility aliases (fused solver still uses old names)
+using ConvOclDirectFwdLegacyExhaustiveSearch = ConvHipDirectFwdLegacyExhaustiveSearch;
+using ConvOclDirectFwd                       = ConvHipDirectFwd;
 
 struct MIOPEN_INTERNALS_EXPORT ConvBinWinograd3x3U final : ConvSolver
 {
