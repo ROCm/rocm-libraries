@@ -71,6 +71,11 @@ from .core.ir import (
     VectorType,
 )
 from .core.ir_print import print_ir
+from .core.lower_cktile import (
+    lower_implicit_gemm_conv_to_cktile,
+    lower_spec_to_cktile,
+    lower_universal_gemm_to_cktile,
+)
 from .core.lower_hip import lower_kernel_to_hip
 from .core.lower_llvm import lower_kernel_to_llvm
 from .core.passes import PassStats, optimize_kernel
@@ -164,8 +169,11 @@ __all__ = [
     "Value",
     "VectorType",
     "print_ir",
+    "lower_implicit_gemm_conv_to_cktile",
     "lower_kernel_to_hip",
     "lower_kernel_to_llvm",
+    "lower_spec_to_cktile",
+    "lower_universal_gemm_to_cktile",
     "PassStats",
     "optimize_kernel",
     # runtime

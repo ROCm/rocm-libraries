@@ -3644,6 +3644,492 @@ class TestTransformsRuntimeAware(unittest.TestCase):
         self.assertIn("base", ll)
 
 
+class TestCkTileLowering(unittest.TestCase):
+    """``lower_spec_to_cktile`` must emit a CK Tile-shaped C++ source that
+    references the same template surface a hand-written CK Tile kernel
+    would: ``TileGemmShape<...>``, ``GemmSpatiallyLocalTilePartitioner``,
+    ``GemmPipelineAgBgCr*``, ``CShuffleEpilogue``, and -- for the kernel
+    composition -- ``GemmKernel<...>`` (for ``UniversalGemmSpec``) or
+    ``GroupedConvolutionForwardKernel<...>`` (for ``ImplicitGemmConvSpec``).
+
+    Pure-Python checks; the actual compile through hipcc happens in
+    `examples/lower_cktile_smoke` (out of scope here because it needs
+    a working amdclang + CK Tile include dir).
+    """
+
+    def _src_for_gemm(self, *, pipeline="compv4"):
+        from ck_dsl.core import lower_spec_to_cktile
+        from ck_dsl.instances import TileSpec, TraitSpec, UniversalGemmSpec
+
+        spec = UniversalGemmSpec(
+            name="t_gemm",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(
+                pipeline=pipeline,
+                scheduler="intrawave",
+                epilogue="cshuffle",
+            ),
+        )
+        return lower_spec_to_cktile(spec), spec
+
+    def test_gemm_source_references_cktile_template_surface(self):
+        src, spec = self._src_for_gemm()
+        # Required header set -- the emitted source must compile against
+        # a stock CK Tile install with these (and only these) includes.
+        for header in (
+            "#include <ck_tile/core.hpp>",
+            "#include <ck_tile/host.hpp>",
+            "#include <ck_tile/ops/gemm.hpp>",
+            "#include <ck_tile/ops/epilogue.hpp>",
+        ):
+            self.assertIn(header, src)
+        # Composition surface that distinguishes CK Tile output from the
+        # raw HIP IR lowering.
+        for token in (
+            "ck_tile::TileGemmShape",
+            "ck_tile::GemmSpatiallyLocalTilePartitioner",
+            "ck_tile::TileGemmUniversalTraits",
+            "ck_tile::UniversalGemmPipelineProblem",
+            "ck_tile::CShuffleEpilogue",
+            "ck_tile::CShuffleEpilogueProblem",
+            "ck_tile::GemmKernel<",
+            "ck_tile::make_kernel<",
+            "ck_tile::launch_kernel(",
+        ):
+            self.assertIn(token, src, f"emitted source missing {token!r}")
+        # The host launcher must expose the spec's mangled name as an
+        # extern "C" symbol so callers can dlsym it without C++ name
+        # mangling getting in the way.
+        self.assertIn(f'extern "C" float launch_{spec.kernel_name()}(', src)
+
+    def test_gemm_compv4_picks_compute_v4_pipeline(self):
+        src, _ = self._src_for_gemm(pipeline="compv4")
+        # The pipeline enum + the matching specialisation in the
+        # PipelineTypeTraits inline table must both reference COMPUTE_V4.
+        self.assertIn("ck_tile::GemmPipeline::COMPUTE_V4", src)
+        self.assertIn("GemmPipelineAgBgCrCompV4", src)
+        # compv4 doubles the LDS buffer.
+        self.assertIn("static constexpr bool DoubleSmemBuffer = true;", src)
+
+    def test_gemm_mem_picks_memory_pipeline_single_buffer(self):
+        src, _ = self._src_for_gemm(pipeline="mem")
+        self.assertIn("ck_tile::GemmPipeline::MEMORY", src)
+        self.assertIn("GemmPipelineAgBgCrMem", src)
+        self.assertIn("static constexpr bool DoubleSmemBuffer = false;", src)
+
+    def test_gemm_bakes_tile_shape_into_GemmConfig(self):
+        src, _ = self._src_for_gemm()
+        # Each tile / warp / MFMA value the spec carries must end up as a
+        # ``static constexpr ck_tile::index_t`` in GemmConfig so the
+        # downstream TileGemmShape<sequence<...>> picks them up at
+        # compile time.
+        for line in (
+            "static constexpr ck_tile::index_t M_Tile = 128;",
+            "static constexpr ck_tile::index_t N_Tile = 128;",
+            "static constexpr ck_tile::index_t K_Tile = 32;",
+            "static constexpr ck_tile::index_t M_Warp = 2;",
+            "static constexpr ck_tile::index_t N_Warp = 2;",
+            "static constexpr ck_tile::index_t K_Warp = 1;",
+            "static constexpr ck_tile::index_t M_Warp_Tile = 32;",
+            "static constexpr ck_tile::index_t N_Warp_Tile = 32;",
+            "static constexpr ck_tile::index_t K_Warp_Tile = 16;",
+        ):
+            self.assertIn(line, src)
+
+    def test_conv_source_references_grouped_convolution_kernel(self):
+        from ck_dsl.core import lower_spec_to_cktile
+        from ck_dsl.instances import (
+            ConvProblem,
+            ImplicitGemmConvSpec,
+        )
+
+        spec = ImplicitGemmConvSpec(
+            problem=ConvProblem(
+                N=8,
+                Hi=56,
+                Wi=56,
+                C=64,
+                K=64,
+                R=3,
+                S=3,
+                sH=1,
+                sW=1,
+                pH=1,
+                pW=1,
+                dH=1,
+                dW=1,
+            ),
+            name="t_conv",
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+        )
+        src = lower_spec_to_cktile(spec)
+        # Required include + the CK Tile-side type names that distinguish
+        # the conv composition from a plain GEMM.
+        for token in (
+            "#include <ck_tile/ops/grouped_convolution.hpp>",
+            "ck_tile::ConvolutionSpecialization::Default",
+            "ck_tile::GroupedConvTraits<",
+            "ck_tile::GroupedConvolutionForwardKernel<",
+            "GroupedConvTraitsType",
+            "tensor_layout::convolution::NHWGC",
+            "tensor_layout::convolution::GKYXC",
+            "tensor_layout::convolution::NHWGK",
+            "ck_tile::GroupedConvFwdHostArgs",
+            f'extern "C" float launch_{spec.kernel_name()}(',
+        ):
+            self.assertIn(token, src, f"emitted conv source missing {token!r}")
+
+    def test_unsupported_dtype_raises_NotImplemented(self):
+        from ck_dsl.core.lower_cktile import lower_universal_gemm_to_cktile
+        from ck_dsl.instances import (
+            DataSpec,
+            TileSpec,
+            UniversalGemmSpec,
+        )
+
+        spec = UniversalGemmSpec(
+            name="t",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            data=DataSpec(dtype_a="bf16", dtype_b="bf16", dtype_c="bf16"),
+        )
+        with self.assertRaises(NotImplementedError):
+            lower_universal_gemm_to_cktile(spec)
+
+    def test_unsupported_pipeline_raises_NotImplemented(self):
+        from ck_dsl.core.lower_cktile import lower_universal_gemm_to_cktile
+        from ck_dsl.instances import (
+            TileSpec,
+            TraitSpec,
+            UniversalGemmSpec,
+        )
+
+        bad = UniversalGemmSpec(
+            name="t",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            # ``compv3`` is in the IR builder but not yet wired through
+            # the PipelineTypeTraits inline switch in lower_cktile.py
+            # ... actually compv3 IS supported, so use a fake string.
+            trait=TraitSpec(pipeline="compv3", scheduler="intrawave"),
+        )
+        from ck_dsl.core.lower_cktile import _PIPELINE_MAP
+
+        self.assertIn("compv3", _PIPELINE_MAP)
+        # Force a real unsupported pipeline.
+        from dataclasses import replace
+
+        bad_pipeline = replace(bad, trait=replace(bad.trait, pipeline="not_a_pipeline"))  # type: ignore[arg-type]
+        with self.assertRaises(NotImplementedError):
+            lower_universal_gemm_to_cktile(bad_pipeline)
+
+    def test_dispatcher_handles_both_spec_types(self):
+        """``lower_spec_to_cktile`` must dispatch to gemm vs conv emitters
+        based on the spec type without the caller knowing about them.
+        """
+        from ck_dsl.core import lower_spec_to_cktile
+        from ck_dsl.instances import (
+            ConvProblem,
+            ImplicitGemmConvSpec,
+            TileSpec,
+            UniversalGemmSpec,
+        )
+
+        gemm = UniversalGemmSpec(
+            name="d_gemm",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+        )
+        conv = ImplicitGemmConvSpec(
+            problem=ConvProblem(
+                N=8,
+                Hi=56,
+                Wi=56,
+                C=64,
+                K=64,
+                R=3,
+                S=3,
+                sH=1,
+                sW=1,
+                pH=1,
+                pW=1,
+                dH=1,
+                dW=1,
+            ),
+            name="d_conv",
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+        )
+        # GEMM dispatches into ``GemmKernel<...>``; conv into
+        # ``GroupedConvolutionForwardKernel<...>``. The dispatcher must
+        # not cross-pollinate.
+        gemm_src = lower_spec_to_cktile(gemm)
+        conv_src = lower_spec_to_cktile(conv)
+        self.assertIn("ck_tile::GemmKernel<", gemm_src)
+        self.assertNotIn("ck_tile::GroupedConvolutionForwardKernel<", gemm_src)
+        self.assertIn("ck_tile::GroupedConvolutionForwardKernel<", conv_src)
+        self.assertNotIn("ck_tile::GemmKernel<", conv_src)
+
+    def test_dispatcher_rejects_unknown_spec(self):
+        from ck_dsl.core import lower_spec_to_cktile
+
+        with self.assertRaises(NotImplementedError) as cm:
+            lower_spec_to_cktile(object())
+        self.assertIn("UniversalGemmSpec", str(cm.exception))
+        self.assertIn("ImplicitGemmConvSpec", str(cm.exception))
+
+
+class TestHipLoweringCoverage(unittest.TestCase):
+    """:func:`ck_dsl.core.lower_kernel_to_hip` must lower every production
+    instance kernel without ``NotImplementedError``.
+
+    This pins the contract that the HIP debug lowering is a complete
+    one-to-one IR-to-C++ pass rather than a stub. Each test below
+    builds one of the in-tree kernel instances, lowers it, and verifies
+    the resulting source has the expected structural markers: the
+    typedef prologue, the ``__global__`` signature, and at least one
+    of the kernel's signature ops (MFMA / async DMA / smem_alloc /
+    arith.fmul / ...). Doesn't actually compile through hipcc -- that
+    requires a working AMDGPU toolchain and lives in
+    ``examples/ck_tile_parity`` / its peers.
+    """
+
+    def _lower_and_check(self, kernel, must_contain):
+        from ck_dsl.core.lower_hip import lower_kernel_to_hip
+
+        hip = lower_kernel_to_hip(kernel)
+        self.assertIn("#include <hip/hip_runtime.h>", hip)
+        self.assertIn("__global__", hip)
+        self.assertIn(f"void {kernel.name}(", hip)
+        for token in must_contain:
+            self.assertIn(
+                token,
+                hip,
+                f"lowered HIP source for {kernel.name!r} missing required token "
+                f"{token!r}",
+            )
+
+    def test_universal_gemm_mem_lowers(self):
+        from ck_dsl.instances import (
+            TileSpec,
+            TraitSpec,
+            UniversalGemmSpec,
+            build_universal_gemm,
+        )
+
+        spec = UniversalGemmSpec(
+            name="hip_gemm_mem",
+            tile=TileSpec(128, 128, 32, 2, 2, 1, 32, 32, 16),
+            trait=TraitSpec(pipeline="mem", scheduler="intrawave", epilogue="cshuffle"),
+        )
+        self._lower_and_check(
+            build_universal_gemm(spec),
+            must_contain=[
+                "__builtin_amdgcn_mfma_f32_32x32x16_f16",
+                "__syncthreads()",
+                "__shared__",
+            ],
+        )
+
+    def test_universal_gemm_compv4_lowers(self):
+        from ck_dsl.instances import (
+            TileSpec,
+            TraitSpec,
+            UniversalGemmSpec,
+            build_universal_gemm,
+        )
+
+        spec = UniversalGemmSpec(
+            name="hip_gemm_compv4",
+            tile=TileSpec(128, 128, 32, 2, 2, 1, 32, 32, 16),
+            trait=TraitSpec(
+                pipeline="compv4", scheduler="intrawave", epilogue="cshuffle"
+            ),
+        )
+        self._lower_and_check(
+            build_universal_gemm(spec),
+            must_contain=["__builtin_amdgcn_mfma_f32_32x32x16_f16", "__shared__"],
+        )
+
+    def test_implicit_gemm_conv_lowers(self):
+        from ck_dsl.instances import (
+            ConvProblem,
+            ImplicitGemmConvSpec,
+            build_implicit_gemm_conv,
+        )
+
+        p = ConvProblem(
+            N=8,
+            Hi=56,
+            Wi=56,
+            C=64,
+            K=64,
+            R=3,
+            S=3,
+            sH=1,
+            sW=1,
+            pH=1,
+            pW=1,
+            dH=1,
+            dW=1,
+        )
+        spec = ImplicitGemmConvSpec(
+            problem=p,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+        )
+        self._lower_and_check(
+            build_implicit_gemm_conv(spec),
+            must_contain=[
+                "__builtin_amdgcn_make_buffer_rsrc",
+                "__builtin_amdgcn_raw_buffer_load",
+                "__builtin_amdgcn_raw_buffer_store",
+                "__builtin_amdgcn_mfma_f32_32x32x16_f16",
+            ],
+        )
+
+    def test_layernorm2d_lowers(self):
+        from ck_dsl.instances import LayerNorm2DSpec, build_layernorm2d
+
+        self._lower_and_check(
+            build_layernorm2d(
+                LayerNorm2DSpec(n_per_block=4096, block_size=256, vec=8, dtype="f16")
+            ),
+            must_contain=[
+                "__builtin_amdgcn_rsqf",  # rsqrt for inv_stddev
+                "__syncthreads()",  # LDS tree reduction barrier
+                "__shared__",
+            ],
+        )
+
+    def test_rmsnorm2d_lowers(self):
+        from ck_dsl.instances import RMSNorm2DSpec, build_rmsnorm2d
+
+        self._lower_and_check(
+            build_rmsnorm2d(RMSNorm2DSpec(n_per_block=4096, block_size=256, vec=8)),
+            must_contain=["__builtin_amdgcn_rsqf", "__syncthreads()"],
+        )
+
+    def test_lower_to_hip_emits_prologue_typedefs(self):
+        """The prologue must define every typedef family referenced by
+        the handlers. Typedef instances are emitted via the
+        ``_CKDSL_VEC`` macro (so the literal ``f16x4`` only appears
+        post-preprocess); we assert the macro invocations are present
+        for each family + width we rely on, plus the named singleton
+        typedefs (``fp16``, ``bf16``, ``rsrc_t``, ``fp8e4m3``).
+        """
+        from ck_dsl.core.lower_hip import HIP_PROLOGUE
+
+        named = [
+            "using fp16 = _Float16;",
+            "using bf16 = __bf16;",
+            "using fp8e4m3 = signed char",
+            "using rsrc_t = __amdgpu_buffer_rsrc_t;",
+        ]
+        # Each (family, widths) tuple must yield a ``_CKDSL_VEC(elem, fam, N)``
+        # invocation in the prologue for every width.
+        vec_invocations = [
+            ("f16x", [1, 2, 4, 8, 16]),
+            ("bf16x", [1, 2, 4, 8, 16]),
+            ("f32x", [1, 2, 4, 8, 16]),
+            ("i32x", [1, 2, 3, 4, 8]),
+            ("i8x", [4, 8, 16]),
+        ]
+        for token in named:
+            self.assertIn(token, HIP_PROLOGUE, f"prologue missing {token!r}")
+        import re
+
+        for family, widths in vec_invocations:
+            for n in widths:
+                # The macro call form is ``_CKDSL_VEC(<elem>, <family>, <n>)``;
+                # internal whitespace varies for column alignment, so we
+                # match with a small regex that allows any spacing.
+                pattern = re.compile(
+                    rf"_CKDSL_VEC\(\s*\S+\s*,\s*{re.escape(family)}\s*,\s*{n}\s*\)"
+                )
+                self.assertRegex(
+                    HIP_PROLOGUE,
+                    pattern,
+                    f"prologue missing _CKDSL_VEC for {family}{n}",
+                )
+
+    def test_lower_to_hip_include_prologue_can_be_disabled(self):
+        """``include_prologue=False`` returns the bare kernel body so
+        callers can embed it into a larger translation unit that
+        already has the typedefs."""
+        from ck_dsl import IRBuilder, F16, I32, PtrType
+        from ck_dsl.core.lower_hip import lower_kernel_to_hip
+
+        b = IRBuilder("bare")
+        b.param("A", PtrType(F16, "global"))
+        b.param("N", I32)
+        b.ret()
+        out = lower_kernel_to_hip(b.kernel, include_prologue=False)
+        self.assertNotIn("#include <hip/hip_runtime.h>", out)
+        self.assertIn("__global__", out)
+        self.assertIn("void bare(", out)
+
+
 class TestLauncherFenceContract(unittest.TestCase):
     """Per-launch event-fence policy in :mod:`ck_dsl.runtime.launcher`.
 
