@@ -26,6 +26,7 @@
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -50,7 +51,7 @@ using namespace stinkytofu;
 static void collectSourcesRec(StinkyInstruction* inst,
                               std::unordered_set<StinkyInstruction*>& seenPhi,
                               std::unordered_set<StinkyInstruction*>& out,
-                              std::function<bool(StinkyInstruction*)> filter = nullptr) {
+                              const std::function<bool(StinkyInstruction*)>& filter = nullptr) {
     if (inst == nullptr) {
         return;
     }
@@ -81,7 +82,7 @@ std::unordered_set<StinkyInstruction*> collectSources(
     std::unordered_set<StinkyInstruction*> sources;
     std::unordered_set<StinkyInstruction*> seenPhi;
     if (inst != nullptr) {
-        collectSourcesRec(inst, seenPhi, sources, filter);
+        collectSourcesRec(inst, seenPhi, sources, std::move(filter));
     }
     return sources;
 }

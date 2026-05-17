@@ -686,7 +686,7 @@ bool genPythonBindings(const std::string& outdir) {
             std::string paramName = paramNames[i];
 
             // Check if this is an optional source parameter
-            bool isOptionalSrc = paramName.find("src") == 0 &&
+            bool isOptionalSrc = paramName.starts_with("src") &&
                                  paramTypes[i].find("std::optional") != std::string::npos;
 
             if (isOptionalSrc) {

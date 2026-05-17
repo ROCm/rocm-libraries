@@ -71,14 +71,14 @@ static Pattern inlineFunctionCalls(const Pattern& pattern,
                 IntrinsicInstruction inlinedInst = calleeInst;
 
                 // Remap destination register
-                if (argMapping.count(inlinedInst.destReg)) {
+                if (argMapping.contains(inlinedInst.destReg)) {
                     inlinedInst.destReg = argMapping[inlinedInst.destReg];
                 }
 
                 // Remap register operands (literals are not remapped)
                 for (auto& operand : inlinedInst.operands) {
                     if (operand.type == IntrinsicOperand::Register &&
-                        argMapping.count(operand.registerName)) {
+                        argMapping.contains(operand.registerName)) {
                         operand.registerName = argMapping[operand.registerName];
                     }
                 }

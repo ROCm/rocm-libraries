@@ -292,7 +292,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
         if (!inst.getHwInstDesc()) return profile;
 
         const std::string mnemonic = toUpperASCII(inst.getHwInstDesc()->mnemonic);
-        if (mnemonic.find("V_WMMA_") != 0) return profile;
+        if (!mnemonic.starts_with("V_WMMA_")) return profile;
 
         // Keep a valid default when latency is absent/invalid.
         if (inst.latencyCycles <= 0) return profile;
