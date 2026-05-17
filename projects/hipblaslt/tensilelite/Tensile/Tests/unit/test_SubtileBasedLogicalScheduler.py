@@ -698,9 +698,9 @@ class TestPlaceLRs:
 
 class TestAssignVgprTiles:
 
-    def _assert_no_conflict_and_unrolling(self, sched):
+    def _assert_no_conflict_and_unrolling(self, sched, schedule):
         """Validate vgprTileId invariants: no overlap, bounds, alternation, continuity."""
-        parts = sched._partitions
+        parts = schedule
         num_iters = sched.unroll_factor
 
         # 1. No MFMA/LR vgprTileId overlap
@@ -805,9 +805,9 @@ class TestAssignVgprTiles:
         """VgprTile allocation with scale tensors (design doc example)."""
         cfg = make_example_granularities_1()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='assign_vgpr_tiles')
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
-        parts = sched._partitions
+        parts = schedule
         s0, s1 = parts[0][0], parts[0][1]
 
         for tensor in ('A', 'B', 'SA', 'SB'):
@@ -823,7 +823,7 @@ class TestAssignVgprTiles:
         assert sched.tile_peaks['A'] > 0
         assert sched.tile_peaks['SA'] > 0
         assert sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     def test_no_scale_k1(self):
         """No scales, A/B k_gran=1 → tiles alternate every subIterK."""
@@ -837,36 +837,207 @@ class TestAssignVgprTiles:
         assert not cfg.hasScale
 
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='assign_vgpr_tiles')
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert 'SA' not in sched.tile_peaks
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     def test_DU512(self):
         """DU=512, FP4. numSubIterK=4, no unrolling needed."""
         cfg = make_cfg_256x256_fp4(depthU=512)
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='assign_vgpr_tiles')
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
-        for slot in sched._partitions[0]:
+        for slot in schedule[0]:
             assert len(slot.mfma.vgpr_tile_maps['A']) > 0
             assert len(slot.mfma.vgpr_tile_maps['SA']) > 0
 
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     def test_DU512_partition_2x2(self):
         """DU=512 + 2x2 partition. All partitions have tile maps."""
         cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='assign_vgpr_tiles')
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         for pi in range(4):
-            for slot in sched._partitions[pi]:
+            for slot in schedule[pi]:
                 assert len(slot.mfma.vgpr_tile_maps['A']) > 0
 
         assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched, schedule)
+
+    # ── Group 1: BF16 2x2 ──
+
+    @pytest.mark.parametrize("depthU", [64, 128])
+    def test_bf16_2x2(self, depthU):
+        """BF16 256x256 with default miWaveGroup=[2,2]."""
+        cfg = make_cfg_bf16(depthU=depthU)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 16, 'B': 16}
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched, schedule)
+
+    # ── Group 2: BF16 1x4 / 4x1 ──
+
+    @pytest.mark.parametrize("depthU", [64, 128])
+    def test_bf16_1x4(self, depthU):
+        """BF16 256x256 miWaveGroup=[1,4]: 16 M-tiles, 4 N-tiles."""
+        cfg = make_cfg_bf16(depthU=depthU, miWaveGroup=[1, 4])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 32, 'B': 8}
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched, schedule)
+
+    @pytest.mark.parametrize("depthU", [64, 128])
+    def test_bf16_4x1(self, depthU):
+        """BF16 256x256 miWaveGroup=[4,1]: 4 M-tiles, 16 N-tiles."""
+        cfg = make_cfg_bf16(depthU=depthU, miWaveGroup=[4, 1])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 8, 'B': 32}
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched, schedule)
+
+    # ── Group 3: BF16 multi-partition along N ──
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B", [
+        (4, 8),
+        (3, 6),
+        (2, 4),
+    ])
+    def test_bf16_partition_N(self, partSizeN, expected_peak_B):
+        """BF16 256x256 (tilesN=8) with partitions along N."""
+        cfg = make_cfg_bf16(depthU=64, partSizeN=partSizeN)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 16
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 3b: BF16 multi-partition on asymmetric macro tiles ──
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
+        (6, 12, [6, 6]),
+        (4, 8,  [4, 4, 4]),
+        (3, 6,  [3, 3, 3, 3]),
+        (5, 10, [5, 2, 5]),
+    ])
+    def test_bf16_partition_256x384(self, partSizeN, expected_peak_B, expected_partN):
+        """BF16 256x384 (tilesN=12) with partitions along N."""
+        cfg = make_cfg_bf16(MT1=384, depthU=64, partSizeN=partSizeN)
+        assert cfg.partitionSizesN == expected_partN
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 16
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
+        (4, 8,  [4, 3, 4]),
+        (3, 6,  [3, 2, 3, 3]),
+        (6, 12, [6, 5]),
+    ])
+    def test_bf16_partition_256x352(self, partSizeN, expected_peak_B, expected_partN):
+        """BF16 256x352 (tilesN=11, odd) with partitions along N."""
+        cfg = make_cfg_bf16(MT1=352, depthU=64, partSizeN=partSizeN)
+        assert cfg.partitionSizesN == expected_partN
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 16
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
+        (4, 8,  [4, 4, 3, 4, 4, 4]),
+        (6, 12, [6, 5, 6, 6]),
+        (8, 16, [8, 7, 8]),
+    ])
+    def test_bf16_partition_256x368(self, partSizeN, expected_peak_B, expected_partN):
+        """BF16 256x368 miWaveGroup=[4,1] (tilesM=4, tilesN=23) with partitions along N."""
+        cfg = make_cfg_bf16(MT1=368, depthU=64, miWaveGroup=[4, 1],
+                            partSizeN=partSizeN)
+        assert cfg.partitionSizesN == expected_partN
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks['A'] == 8
+        assert sched.tile_peaks['B'] == expected_peak_B
+        assert not sched.needs_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 4: FP4 2x2 ──
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
+    def test_fp4_2x2(self, depthU, expect_unrolling):
+        """FP4 256x256 with default miWaveGroup=[2,2]."""
+        cfg = make_cfg_256x256_fp4(depthU=depthU)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 16, 'B': 16, 'SA': 8, 'SB': 8}
+        assert sched.needs_unrolling == expect_unrolling
+
+        for pi in range(cfg.numPartitions):
+            for slot in sched._partitions[pi]:
+                if slot.mfma:
+                    assert len(slot.mfma.vgpr_tile_maps['SA']) > 0
+                    assert len(slot.mfma.vgpr_tile_maps['SB']) > 0
+
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 5: FP4 1x4 / 4x1 ──
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
+    def test_fp4_1x4(self, depthU, expect_unrolling):
+        """FP4 256x256 miWaveGroup=[1,4]: 16 M-tiles, 4 N-tiles."""
+        cfg = make_cfg_256x256_fp4(depthU=depthU, miWaveGroup=[1, 4])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 32, 'B': 8, 'SA': 16, 'SB': 4}
+        assert sched.needs_unrolling == expect_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
+    def test_fp4_4x1(self, depthU, expect_unrolling):
+        """FP4 256x256 miWaveGroup=[4,1]: 4 M-tiles, 16 N-tiles."""
+        cfg = make_cfg_256x256_fp4(depthU=depthU, miWaveGroup=[4, 1])
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 8, 'B': 32, 'SA': 4, 'SB': 16}
+        assert sched.needs_unrolling == expect_unrolling
+        self._assert_no_conflict_and_unrolling(sched)
+
+    # ── Group 6: BF16 with lrA/lrB k=2 granularity ──
+
+    @pytest.mark.parametrize("depthU,expect_unrolling", [(64, True), (128, False)])
+    def test_bf16_lr_k2(self, depthU, expect_unrolling):
+        """BF16 with LR k=2 granularity — odd k-groups trigger unrolling."""
+        cfg = make_cfg_bf16(
+            depthU=depthU,
+            lrA=ReadGranularity(mn=1, k=2),
+            lrB=ReadGranularity(mn=1, k=2),
+        )
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        assert sched.tile_peaks == {'A': 16, 'B': 16}
+        assert sched.needs_unrolling == expect_unrolling
         self._assert_no_conflict_and_unrolling(sched)
 
     # ── Group 1: BF16 2x2 ──
@@ -1053,8 +1224,8 @@ class TestPlaceGRs:
         """
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='place_GRs')
-        slots = sched._partitions[0]
+        schedule = sched.build(stop_after='place_GRs')
+        slots = schedule[0]
 
         _assert_slot_grs(slots[0], ['A', 'B'])
         _assert_gr(slots[0], 'A', 0, 2, 0, 8)
@@ -1071,8 +1242,8 @@ class TestPlaceGRs:
         """
         cfg = make_cfg_256x256_fp4(depthU=512)
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='place_GRs')
-        slots = sched._partitions[0]
+        schedule = sched.build(stop_after='place_GRs')
+        slots = schedule[0]
 
         _assert_slot_grs(slots[0], ['A', 'B'])
         _assert_gr(slots[0], 'A', 0, 2, 0, 8)
@@ -1093,9 +1264,9 @@ class TestPlaceGRs:
         """
         cfg = make_cfg_256x256_fp4(partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='place_GRs')
-        slots = sched._partitions[0]
-        parts = sched._partitions
+        schedule = sched.build(stop_after='place_GRs')
+        slots = schedule[0]
+        parts = schedule
 
         # P0: A n+1 split, B n+1 starts at s1
         _assert_slot_grs(parts[0][0], ['A'], "P0 s0")
@@ -1131,8 +1302,8 @@ class TestPlaceGRs:
         """
         cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='place_GRs')
-        parts = sched._partitions
+        schedule = sched.build(stop_after='place_GRs')
+        parts = schedule
 
         # P0 s0: A n+1 k=0-2 [4-7]
         _assert_slot_grs(parts[0][0], ['A'], "P0 s0")
@@ -1158,8 +1329,8 @@ class TestPlaceGRs:
         """320x320, BF16, 10x1 partition. No scales."""
         cfg = make_cfg_bf16(320, 320, partSizeM=1, partSizeN=10)
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='place_GRs')
-        parts = sched._partitions
+        schedule = sched.build(stop_after='place_GRs')
+        parts = schedule
 
         # P0..P4: A atoms
         for pi in range(4):
@@ -1205,8 +1376,7 @@ class TestPlaceGRs:
         """PGR=1: GR(T, mt=X) must be placed strictly before first LR(T, mt=X)."""
         cfg = make_cfg_bf16_pgr1()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='place_GRs')
-        parts = sched._partitions
+        parts = sched.build(stop_after='place_GRs')
         numK = cfg.numSubIterK
 
         # Build per-(tensor, mt) earliest LR flat index
@@ -1240,8 +1410,8 @@ class TestAnnotateDeps:
         """256x256, DU256, FP4. MFMA→LR, LR→GR, GR→LR collision deps."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="annotate_deps")
-        parts = sched._partitions
+        schedule = sched.build(stop_after="annotate_deps")
+        parts = schedule
         s0, s1 = parts[0][0], parts[0][1]
 
         # MFMA(k=0): all deps MT-1
@@ -1271,8 +1441,8 @@ class TestAnnotateDeps:
         """256x256, DU512, FP4, 2x2 partition. Per-partition deps."""
         cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="annotate_deps")
-        parts = sched._partitions
+        schedule = sched.build(stop_after="annotate_deps")
+        parts = schedule
 
         assert len(parts) == 4
         assert len(parts[0]) == 4
@@ -1298,15 +1468,15 @@ class TestRemoveUnnecessaryGrDeps:
         """MT-2 GR deps are removed when an MT-1 dep from a later LR guarantees the data."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="annotate_deps")
-        s0 = sched._partitions[0][0]
+        schedule = sched.build(stop_after="annotate_deps")
+        s0 = schedule[0][0]
 
         # Before: LR A @s0 has dep on GR A @s0 (MT-2)
         lr_a_before = _get_lr(s0, 'A')
         assert len(lr_a_before.deps) == 1
         assert lr_a_before.deps[0].mt_offset == -2
 
-        sched.remove_unnecessary_gr_deps()
+        sched.remove_unnecessary_gr_deps(schedule)
 
         # After: dep removed (guaranteed by LR A @s1's MT-1 dep)
         lr_a_after = _get_lr(s0, 'A')
@@ -1319,17 +1489,17 @@ class TestRemoveUnnecessaryLrDeps:
         """GR→LR collision deps removed when covered by earlier sync."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="annotate_deps")
-        sched.remove_unnecessary_gr_deps()
+        schedule = sched.build(stop_after="annotate_deps")
+        sched.remove_unnecessary_gr_deps(schedule)
 
         # Before remove_unnecessary_lr_deps: GR B @s1 has collision dep
-        s1 = sched._partitions[0][1]
+        s1 = schedule[0][1]
         gr_b1 = [gr for gr in s1.grs if gr.tensor == 'B'][0]
         deps_before = len(gr_b1.deps)
 
-        sched.remove_unnecessary_lr_deps()
+        sched.remove_unnecessary_lr_deps(schedule)
 
-        gr_b1_after = [gr for gr in sched._partitions[0][1].grs if gr.tensor == 'B'][0]
+        gr_b1_after = [gr for gr in schedule[0][1].grs if gr.tensor == 'B'][0]
         assert len(gr_b1_after.deps) == 0
 
 
@@ -1343,8 +1513,8 @@ class TestRemoveCrossDeps:
         """256x256, DU256, FP4. Cross deps → preOps, same-subIterK deps preserved."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="remove_cross_deps")
-        parts = sched._partitions
+        schedule = sched.build(stop_after="remove_cross_deps")
+        parts = schedule
         s0, s1 = parts[0][0], parts[0][1]
 
         # MFMA(k=0): all cross → wait_lr
@@ -1389,8 +1559,8 @@ class TestRemoveCrossDeps:
         """256x256, DU512, FP4, 2x2 partition. Spot checks."""
         cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="remove_cross_deps")
-        parts = sched._partitions
+        schedule = sched.build(stop_after="remove_cross_deps")
+        parts = schedule
 
         # All P0 MFMAs have wait_lr
         assert _preop_kinds(parts[0][0].mfma) == [('wait_lr', False, None)]
@@ -1418,8 +1588,8 @@ class TestInsertGrLrInc:
         """256x256, DU256, FP4. gr_inc at MT transitions, lr_inc on wrap-around."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="insert_gr_lr_inc")
-        parts = sched._partitions
+        schedule = sched.build(stop_after="insert_gr_lr_inc")
+        parts = schedule
         s0, s1 = parts[0][0], parts[0][1]
 
         # GR A @s0: mt=n+2, A was n → gr_inc(A)
@@ -1455,8 +1625,8 @@ class TestInsertGrLrInc:
         assert cfg.numPartitions == 4
 
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="insert_gr_lr_inc")
-        parts = sched._partitions
+        schedule = sched.build(stop_after="insert_gr_lr_inc")
+        parts = schedule
 
         # P0/P1: GR with tileId_start > 0 → no gr_inc
         for pi in [0, 1]:
@@ -1484,10 +1654,10 @@ class TestComputeInflightLoads:
         """Validate inflight load counts match remove_cross_deps output."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="remove_cross_deps")
+        schedule = sched.build(stop_after="remove_cross_deps")
 
-        s0 = sched._partitions[0][0]
-        s1 = sched._partitions[0][1]
+        s0 = schedule[0][0]
+        s1 = schedule[0][1]
 
         # LR A @s0: dep removed (guaranteed by prev MT)
         assert _preop_kinds(_get_lr(s0, 'A')) == []
@@ -1579,8 +1749,8 @@ class TestGroupLrGr:
         """256x256, DU256, FP4. Chain grouping with merged preOps."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="group_lr_gr")
-        parts = sched._partitions
+        schedule = sched.build(stop_after="group_lr_gr")
+        parts = schedule
         s0, s1 = parts[0][0], parts[0][1]
 
         # s0: LR chain A←B, no preOps (deps removed)
@@ -1629,11 +1799,11 @@ class TestRemoveUnnecessaryWaitLrSync:
         """256x256, BF16, 1x1. Verify wait_lr_sync handling."""
         cfg = make_cfg_bf16(256, 256)
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="group_lr_gr")
+        schedule = sched.build(stop_after="group_lr_gr")
 
         # After group_lr_gr, get the preOps state
-        sched.remove_unnecessary_wait_lr_sync()
-        parts = sched._partitions
+        sched.remove_unnecessary_wait_lr_sync(schedule)
+        parts = schedule
         # Verify no crash and GR preOps are present
         for slot in parts[0]:
             for gr in slot.grs:
@@ -1652,7 +1822,7 @@ class TestEmit:
         """256x256, DU256, FP4. EmittedModule chains with correct links."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="emit")
+        schedule = sched.build(stop_after="emit")
         result = sched._emitted
 
         assert len(result) == 1       # 1 partition
@@ -1695,7 +1865,7 @@ class TestBuildPreloop:
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
         sched.build()
-        sched.build_preloop()
+        sched.build_preloop(sched._augmented)
 
         preloop = sched._preloop_emitted
         assert len(preloop) > 0
@@ -2095,7 +2265,7 @@ class TestIntegration:
 
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="emit")
+        schedule = sched.build(stop_after="emit")
         sched.allocVgprTiles(writer, tiA, tiB,
                               scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
 
@@ -2119,7 +2289,7 @@ class TestIntegration:
                             f"P{pi} k={k} [{em.moduleId}] {em.opType}: no instructions"
 
             # MFMA/LR VGPR disjoint
-            for pi, slots in enumerate(sched._partitions):
+            for pi, slots in enumerate(sched._augmented):
                 for slot in slots:
                     if slot.mfma and slot.lrs:
                         for lr in slot.lrs:
@@ -2422,19 +2592,26 @@ if __name__ == "__main__":
     print()
 
     sched = LogicalScheduler(cfg)
+    schedule = None  # threaded through passes
+
+    def run_step(pass_fn, print_fn):
+        global schedule
+        result = pass_fn()
+        schedule = result
+        return (result, print_fn(schedule))
 
     steps = [
-        ("Place LRs",                     lambda: (sched.place_LRs(), sched.print_lr())),
-        ("Assign VGPR tiles",             lambda: (sched.assign_vgpr_tiles(), sched.print_vgpr())),
-        ("Place GRs",                     lambda: (sched.place_GRs(), sched.print_gr())),
-        ("Annotate deps",                 lambda: (sched.annotate_deps(), sched.print_deps())),
-        ("Remove unnecessary GR deps",    lambda: (sched.remove_unnecessary_gr_deps(), sched.print_deps())),
-        ("Remove unnecessary LR deps",    lambda: (sched.remove_unnecessary_lr_deps(), sched.print_deps())),
-        ("Remove cross deps",             lambda: (sched.remove_cross_deps(), sched.print_remove_deps())),
-        ("Insert gr/lr inc",              lambda: (sched.insert_gr_lr_inc(), sched.print_group_lr_gr())),
-        ("Group LR/GR",                   lambda: (sched.group_lr_gr(), sched.print_group_lr_gr())),
-        ("Remove unnecessary wait_lr_sync", lambda: (sched.remove_unnecessary_wait_lr_sync(), sched.print_group_lr_gr())),
-        ("Emit",                          lambda: (sched.emit(), sched.print_emit())),
+        ("Place LRs",                     lambda: run_step(lambda: sched.place_LRs(), sched.print_lr)),
+        ("Assign VGPR tiles",             lambda: run_step(lambda: sched.assign_vgpr_tiles(schedule), sched.print_vgpr)),
+        ("Place GRs",                     lambda: run_step(lambda: sched.place_GRs(schedule), sched.print_gr)),
+        ("Annotate deps",                 lambda: run_step(lambda: sched.annotate_deps(schedule), sched.print_deps)),
+        ("Remove unnecessary GR deps",    lambda: run_step(lambda: sched.remove_unnecessary_gr_deps(schedule), sched.print_deps)),
+        ("Remove unnecessary LR deps",    lambda: run_step(lambda: sched.remove_unnecessary_lr_deps(schedule), sched.print_deps)),
+        ("Remove cross deps",             lambda: run_step(lambda: sched.remove_cross_deps(schedule), sched.print_remove_deps)),
+        ("Insert gr/lr inc",              lambda: run_step(lambda: sched.insert_gr_lr_inc(schedule), sched.print_group_lr_gr)),
+        ("Group LR/GR",                   lambda: run_step(lambda: sched.group_lr_gr(schedule), sched.print_group_lr_gr)),
+        ("Remove unnecessary wait_lr_sync", lambda: run_step(lambda: sched.remove_unnecessary_wait_lr_sync(schedule), sched.print_group_lr_gr)),
+        ("Emit",                          lambda: (sched.emit(schedule), sched.print_emit())),
         ("Emit (dependency order)",       lambda: (None, sched.print_emit_dep_order())),
     ]
 
@@ -2501,7 +2678,7 @@ if __name__ == "__main__":
 
     sys.exit(0)
 
-    sched.build_preloop()
+    sched.build_preloop(schedule)
     preloop_output = sched.print_emit(sched._preloop_emitted)
     print(f"{'=' * 60}")
     print(f"  Preloop")
@@ -2581,8 +2758,8 @@ class TestMtIterationTypes:
     def test_mt_iteration_is_int_bf16(self):
         cfg = make_cfg_bf16()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='place_GRs')
-        for slots in sched._partitions:
+        schedule = sched.build(stop_after='place_GRs')
+        for slots in schedule:
             for slot in slots:
                 for lr in slot.lrs:
                     assert isinstance(lr.mtIteration, int), \
@@ -2594,8 +2771,8 @@ class TestMtIterationTypes:
     def test_mt_iteration_is_int_fp4(self):
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after='place_GRs')
-        for slots in sched._partitions:
+        schedule = sched.build(stop_after='place_GRs')
+        for slots in schedule:
             for slot in slots:
                 for lr in slot.lrs:
                     assert isinstance(lr.mtIteration, int), \
@@ -2609,8 +2786,8 @@ class TestPreloopMtIntegers:
     def test_preloop_uses_int_mt(self):
         cfg = make_cfg_bf16()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="emit")
-        preloop = sched.build_preloop()
+        schedule = sched.build(stop_after="emit")
+        preloop = sched.build_preloop(sched._augmented)
         for partition_emitted in preloop:
             for emitted in partition_emitted:
                 for em in emitted:
@@ -2627,7 +2804,7 @@ class TestBuildNll:
     def test_nll_removes_expected_ops(self):
         cfg = make_cfg_bf16()
         sched = LogicalScheduler(cfg)
-        sched.build(stop_after="emit")
+        schedule = sched.build(stop_after="emit")
         nll = sched.build_nll()
         for partition_emitted in nll:
             for emitted in partition_emitted:
@@ -2696,8 +2873,8 @@ class TestPlaceLRs_PLR0:
     def test_bf16_plr0_print_lr(self):
         cfg = make_cfg_bf16_pgr0()
         sched = LogicalScheduler(cfg)
-        sched.place_LRs()
-        output = sched.print_lr()
+        schedule = sched.place_LRs()
+        output = sched.print_lr(schedule)
 
         assert "MT n," in output
         assert "MT n+1" not in output
@@ -2708,9 +2885,9 @@ class TestPlaceGRs_PGR0:
     def test_bf16_pgr0_all_in_subIterK0(self):
         cfg = make_cfg_bf16_pgr0()
         sched = LogicalScheduler(cfg)
-        sched.place_LRs()
-        sched.place_GRs()
-        slots = sched._partitions[0]
+        schedule = sched.place_LRs()
+        sched.place_GRs(schedule)
+        slots = schedule[0]
 
         for gr in slots[0].grs:
             assert gr.subIterK_slot == 0
@@ -2722,9 +2899,9 @@ class TestPlaceGRs_PGR0:
     def test_bf16_pgr0_covers_full_k(self):
         cfg = make_cfg_bf16_pgr0()
         sched = LogicalScheduler(cfg)
-        sched.place_LRs()
-        sched.place_GRs()
-        slots = sched._partitions[0]
+        schedule = sched.place_LRs()
+        sched.place_GRs(schedule)
+        slots = schedule[0]
 
         gr_a = [gr for gr in slots[0].grs if gr.tensor == 'A']
         all_k = set()
@@ -2736,9 +2913,9 @@ class TestPlaceGRs_PGR0:
     def test_bf16_pgr0_print_gr(self):
         cfg = make_cfg_bf16_pgr0()
         sched = LogicalScheduler(cfg)
-        sched.place_LRs()
-        sched.place_GRs()
-        output = sched.print_gr()
+        schedule = sched.place_LRs()
+        sched.place_GRs(schedule)
+        output = sched.print_gr(schedule)
 
         assert "GR A (MT n," in output
         assert "GR B (MT n," in output
@@ -2751,17 +2928,17 @@ class TestAnnotateDeps_PGR0:
     def _build(self):
         cfg = make_cfg_bf16_pgr0()
         sched = LogicalScheduler(cfg)
-        sched.place_LRs()
-        sched.place_GRs()
-        sched.annotate_deps()
-        return cfg, sched
+        schedule = sched.place_LRs()
+        sched.place_GRs(schedule)
+        sched.annotate_deps(schedule)
+        return cfg, sched, schedule
 
     def test_no_crash(self):
         self._build()
 
     def test_gr_deps_on_lr_mt_minus2(self):
-        _, sched = self._build()
-        slots = sched._partitions[0]
+        _, sched, schedule = self._build()
+        slots = schedule[0]
         for slot in slots:
             for gr in slot.grs:
                 assert gr.deps, f"GR {gr.tensor} should have collision deps"
@@ -2770,8 +2947,8 @@ class TestAnnotateDeps_PGR0:
                     assert dep.mt_offset == -2
 
     def test_mfma_deps_on_lr_mt0(self):
-        _, sched = self._build()
-        slots = sched._partitions[0]
+        _, sched, schedule = self._build()
+        slots = schedule[0]
         for slot in slots:
             if slot.mfma:
                 for dep in slot.mfma.deps:
@@ -2779,8 +2956,8 @@ class TestAnnotateDeps_PGR0:
                     assert dep.ref.mtIteration == 0
 
     def test_lr_deps_on_gr_mt0(self):
-        _, sched = self._build()
-        slots = sched._partitions[0]
+        _, sched, schedule = self._build()
+        slots = schedule[0]
         for slot in slots:
             for lr in slot.lrs:
                 for dep in lr.deps:
@@ -2803,8 +2980,8 @@ class TestEmit_PGR0:
         sched = LogicalScheduler(cfg)
         sched.build()
         # Each tensor's INC should be on its own placement (not merged)
-        slot0 = sched._partitions[-1][0]  # subIterK=0
-        slot1 = sched._partitions[-1][-1]  # subIterK=1
+        slot0 = sched._augmented[-1][0]  # subIterK=0
+        slot1 = sched._augmented[-1][-1]  # subIterK=1
 
         # lr_inc(A) on LR A, lr_inc(B) on LR B
         lr_a = [lr for lr in slot1.lrs if lr.tensor == 'A'][0]
@@ -2825,7 +3002,7 @@ class TestBuildLoopVariants_PGR0:
         cfg = make_cfg_bf16_pgr0()
         sched = LogicalScheduler(cfg)
         sched.build()
-        preloop = sched.build_preloop()
+        preloop = sched.build_preloop(sched._augmented)
         assert preloop == [[[]]]
 
     def test_ngll_empty(self):

@@ -17,6 +17,12 @@ from Tensile.Components.Subtile.LogicalScheduler import (
     ReadGranularity,
     SchedulerConfig,
 )
+from Tensile.Components.Subtile.ScheduleTypes import (
+    AnnotatedSchedule,
+    AugmentedSchedule,
+    EmittedSchedule,
+    LogicalSchedule,
+)
 
 
 def _make_scheduler() -> LogicalScheduler:
@@ -49,10 +55,9 @@ def _all_placements(slot):
 def test_logical_schedule_has_no_deps_or_preops():
     """Post-place_GRs (LogicalSchedule): .deps and .preOps are empty everywhere."""
     sched = _make_scheduler()
-    sched.build(stop_after='place_GRs')
-    s = sched._partitions
-    assert s is not None and len(s) >= 1
-    for slots in s:
+    schedule: LogicalSchedule = sched.build(stop_after='place_GRs')
+    assert schedule is not None and len(schedule) >= 1
+    for slots in schedule:
         for slot in slots:
             for p in _all_placements(slot):
                 assert p.deps == [], \
@@ -64,10 +69,9 @@ def test_logical_schedule_has_no_deps_or_preops():
 def test_annotated_schedule_has_only_same_slot_deps():
     """Post-remove_cross_deps (AnnotatedSchedule): all .deps are same partition + same slot."""
     sched = _make_scheduler()
-    sched.build(stop_after='remove_cross_deps')
-    s = sched._partitions
-    assert s is not None
-    for pi, slots in enumerate(s):
+    schedule: AnnotatedSchedule = sched.build(stop_after='remove_cross_deps')
+    assert schedule is not None
+    for pi, slots in enumerate(schedule):
         for slot in slots:
             for p in _all_placements(slot):
                 for dep in p.deps:
@@ -90,11 +94,10 @@ def test_augmented_schedule_chains_lr_gr_in_tensor_order():
     """Post-remove_unnecessary_wait_lr_sync (AugmentedSchedule):
     LR/GR within a slot appear in canonical tensor order (A, B, SA, SB)."""
     sched = _make_scheduler()
-    sched.build(stop_after='remove_unnecessary_wait_lr_sync')
-    s = sched._partitions
-    assert s is not None
+    schedule: AugmentedSchedule = sched.build(stop_after='remove_unnecessary_wait_lr_sync')
+    assert schedule is not None
     order = LogicalScheduler._LR_GR_ORDER
-    for slots in s:
+    for slots in schedule:
         for slot in slots:
             lr_indices = [order.index(lr.tensor) for lr in slot.lrs]
             assert lr_indices == sorted(lr_indices), (
@@ -113,7 +116,7 @@ def test_emitted_schedule_is_three_level_with_valid_before_links():
     valid moduleId in the same subIterK list, and never self-referential."""
     sched = _make_scheduler()
     sched.build()
-    result = sched._emitted
+    result: EmittedSchedule = sched._emitted
     assert isinstance(result, list), "EmittedSchedule must be a list (level 1: partitions)"
     for partition in result:
         assert isinstance(partition, list), \

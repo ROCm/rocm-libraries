@@ -1265,7 +1265,7 @@ def test_256x256_fp4_preloop_1x1():
     cfg = make_256x256_fp4()
     sched = LogicalScheduler(cfg)
     sched.build()
-    preloop = sched.build_preloop()
+    preloop = sched.build_preloop(sched._augmented)
     actual = sched.print_emit(preloop)
     assert actual == EXPECTED_PRELOOP_256x256_FP4_1x1, (
         f"Preloop mismatch.\n"
@@ -1298,7 +1298,7 @@ def test_256x256_fp4_preloop_pgr1_1x1():
     cfg = make_256x256_fp4_pgr1()
     sched = LogicalScheduler(cfg)
     sched.build()
-    preloop = sched.build_preloop()
+    preloop = sched.build_preloop(sched._augmented)
     actual = sched.print_emit(preloop)
     assert actual == EXPECTED_PRELOOP_256x256_FP4_PGR1_1x1, (
         f"Preloop mismatch.\n"
@@ -1354,7 +1354,7 @@ def test_320x320_bf16_preloop_1x5_offset1():
     cfg.offsetPartition = 1
     sched = LogicalScheduler(cfg)
     sched.build()
-    preloop = sched.build_preloop()
+    preloop = sched.build_preloop(sched._augmented)
     actual = sched.print_emit(preloop)
     assert actual == EXPECTED_PRELOOP_320x320_BF16_1x5_OFFSET1, (
         f"Preloop mismatch.\n"
@@ -1370,7 +1370,7 @@ def test_320x320_bf16_preloop_1x5_offset_all():
     cfg.offsetPartition = cfg.numPartitions
     sched = LogicalScheduler(cfg)
     sched.build()
-    preloop = sched.build_preloop()
+    preloop = sched.build_preloop(sched._augmented)
     actual = sched.print_emit(preloop)
     assert actual == EXPECTED_PRELOOP_320x320_BF16_1x5_OFFSET_ALL, (
         f"Preloop mismatch.\n"
