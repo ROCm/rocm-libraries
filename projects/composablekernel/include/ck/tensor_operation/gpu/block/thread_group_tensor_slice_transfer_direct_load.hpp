@@ -50,7 +50,10 @@ template <typename ThreadGroup,
           typename SrcDimAccessOrder,
           index_t SrcVectorDim,
           index_t DstVectorDim,
-          index_t ScalarPerVector>
+          index_t ScalarPerVector,
+          bool SrcResetCoordinateAfterRun = false,
+          bool DstResetCoordinateAfterRun = true,
+          bool EnableMulticastToLds       = false>
 struct ThreadGroupTensorSliceTransfer_DirectLoad
 {
     static constexpr index_t nDim = remove_reference_t<SrcDesc>::GetNumOfDimension();
@@ -62,8 +65,9 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
     using SrcCoordStep = decltype(make_tensor_coordinate_step(SrcDesc{}, Index{}));
     using DstCoordStep = decltype(make_tensor_coordinate_step(DstDesc{}, Index{}));
 
-    static constexpr auto I0                     = Number<0>{};
-    static constexpr auto I1                     = Number<1>{};
+    static constexpr auto I0 = Number<0>{};
+    static constexpr auto I1 = Number<1>{};
+
     static constexpr auto block_slice_lengths    = BlockSliceLengths{};
     static constexpr auto thread_cluster_lengths = ThreadClusterLengths{};
 
@@ -164,7 +168,9 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
         //     " "wavefront to write contiguous DWORDs into LDS memory. ");
         const auto thread_cluster_idx =
             thread_cluster_desc_.CalculateBottomIndex(make_multi_index(ThreadGroup::GetThreadId()));
+
         const auto thread_data_idx_begin = thread_cluster_idx * thread_single_load_size;
+
         SetSrcSliceOrigin(src_desc, src_block_slice_origin + thread_data_idx_begin);
 #if defined(__gfx125__) || defined(__gfx13__)
         SetDstSliceOrigin(dst_desc, dst_block_slice_origin + thread_data_idx_begin);
@@ -210,6 +216,11 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
         dst_slice_origin_ = dst_slice_origin_idx;
     }
 
+    __device__ void ResetSrcSliceWindow(const SrcDesc& src_desc)
+    {
+        src_coord_ = make_tensor_coordinate(src_desc, src_slice_origin_);
+    }
+
     __device__ void ResetDstSliceWindow(const DstDesc& dst_desc)
     {
         dst_coord_ = make_tensor_coordinate(dst_desc, dst_slice_origin_);
@@ -221,18 +232,115 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
                         const DstDesc& dst_desc,
                         DstBuffer& dst_buf)
     {
+#if defined(__gfx13__)
+        static_assert(((SrcBuffer::GetAddressSpace() == AddressSpaceEnum::Global) &&
+                       (DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds)) ||
+                          ((SrcBuffer::GetAddressSpace() == AddressSpaceEnum::Lds) &&
+                           (DstBuffer::GetAddressSpace() == AddressSpaceEnum::Global)),
+                      "Source data must come from a global memory buffer or a LDS memory buffer.");
+#else
         static_assert(SrcBuffer::GetAddressSpace() == AddressSpaceEnum::Global,
                       "Source data must come from a global memory buffer.");
         static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
                       "Destination data must be stored in an LDS memory buffer.");
-
+#endif
         static_assert(
             ck::is_same_v<remove_cvref_t<typename SrcBuffer::type>, remove_cvref_t<SrcData>>,
             "SrcBuffer and SrcData data types must be consistent.");
         static_assert(
             ck::is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<DstData>>,
             "DstBuffer and DstData data types must be consistent.");
-#if defined(__gfx125__) || defined(__gfx13__)
+#if defined(__gfx13__)
+        constexpr bool isRead = (SrcBuffer::GetAddressSpace() == AddressSpaceEnum::Global) &&
+                                (DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds);
+
+        constexpr auto dst_access_lengths = thread_slice_lengths;
+
+        const auto dst_forward_steps  = generate_steps(dst_desc, 1);
+        const auto dst_backward_steps = generate_steps(dst_desc, -1);
+        const auto src_forward_steps  = generate_steps(src_desc, 1);
+        const auto src_backward_steps = generate_steps(src_desc, -1);
+
+        // Loop over the destination block and copy data.
+        static_ford<decltype(dst_access_lengths)>{}([&](auto ordered_dst_access_idx) {
+            const auto src_offset = src_coord_.GetOffset();
+            const auto dst_offset = dst_coord_.GetOffset();
+
+            // Check if src data is not in the logic padding area.
+            if constexpr(isRead)
+            {
+                const bool is_src_valid =
+                    coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc,
+                                                                                src_coord_);
+                const bool is_dst_valid = coordinate_has_valid_offset(dst_desc, dst_coord_);
+                src_buf.template AsyncCopyToLds<remove_cvref_t<decltype(dst_buf)>,
+                                                ScalarPerVector,
+                                                EnableMulticastToLds>(
+                    dst_buf, src_offset, dst_offset, is_src_valid, is_dst_valid);
+            }
+            else
+            {
+                const bool is_src_valid =
+                    coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc,
+                                                                                src_coord_);
+                const bool is_dst_valid =
+                    coordinate_has_valid_offset_assuming_visible_index_is_valid(dst_desc,
+                                                                                dst_coord_);
+                src_buf.template AsyncStoreToGlobal<remove_cvref_t<decltype(dst_buf)>,
+                                                    ScalarPerVector>(
+                    dst_buf, src_offset, dst_offset, is_src_valid, is_dst_valid);
+            }
+
+            constexpr auto move_on_dim = [&]() constexpr {
+                StaticallyIndexedArray<bool, nDim> move_on_dim_;
+
+                static_for<0, nDim, 1>{}([&](auto i) {
+                    move_on_dim_(i) = ordered_dst_access_idx[i] < dst_access_lengths[i] - 1;
+
+                    static_for<i + 1, nDim, 1>{}([&](auto j) {
+                        move_on_dim_(i) &= ordered_dst_access_idx[j] == dst_access_lengths[j] - 1;
+                    });
+                });
+
+                return move_on_dim_;
+            }();
+
+            // Decide whether to move forward or backward.
+            constexpr auto forward_sweep = [&]() {
+                StaticallyIndexedArray<bool, nDim> forward_sweep_;
+
+                forward_sweep_(I0) = true;
+
+                static_for<1, nDim, 1>{}([&](auto i) {
+                    index_t tmp = ordered_dst_access_idx[I0];
+
+                    static_for<1, i, 1>{}([&](auto j) {
+                        tmp = tmp * dst_access_lengths[j] + ordered_dst_access_idx[j];
+                    });
+
+                    forward_sweep_(i) = tmp % 2 == 0;
+                });
+
+                return forward_sweep_;
+            }();
+
+            static_for<0, nDim, 1>{}([&](auto i) {
+                if constexpr(move_on_dim[i])
+                {
+                    if constexpr(forward_sweep[i])
+                    {
+                        move_tensor_coordinate(dst_desc, dst_coord_, dst_forward_steps[i]);
+                        move_tensor_coordinate(src_desc, src_coord_, src_forward_steps[i]);
+                    }
+                    else
+                    {
+                        move_tensor_coordinate(dst_desc, dst_coord_, dst_backward_steps[i]);
+                        move_tensor_coordinate(src_desc, src_coord_, src_backward_steps[i]);
+                    }
+                }
+            });
+        });
+#elif defined(__gfx125__)
         ignore = dst_desc;
         constexpr auto scalar_per_access =
             generate_sequence(detail::lambda_scalar_per_access<DstVectorDim, 1>{}, Number<nDim>{});
@@ -334,16 +442,31 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
                 }
             });
         });
+#endif
+
+        if constexpr(SrcResetCoordinateAfterRun)
+        {
+            ResetSrcSliceWindow(src_desc);
+        }
 
         // Reset the destination slice since the entire buffer has been already filled.
-        ResetDstSliceWindow(dst_desc);
-#endif
+        // It has no effect for gfx1250 since dst_desc is not used.
+        if constexpr(DstResetCoordinateAfterRun)
+        {
+            ResetDstSliceWindow(dst_desc);
+        }
     }
 
     __device__ void MoveSrcSliceWindow(const SrcDesc& src_desc, const Index& step)
     {
         src_slice_origin_ = src_slice_origin_ + step;
         src_coord_        = make_tensor_coordinate(src_desc, src_slice_origin_);
+    }
+
+    __device__ void MoveDstSliceWindow(const DstDesc& dst_desc, const Index& step)
+    {
+        dst_slice_origin_ = dst_slice_origin_ + step;
+        dst_coord_        = make_tensor_coordinate(dst_desc, dst_slice_origin_);
     }
 
     template <typename DescType>

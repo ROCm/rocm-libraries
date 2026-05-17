@@ -13,7 +13,7 @@
 #include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_v4r1.hpp"
 #include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_v6r1.hpp"
 #include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_v7.hpp"
-#include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_async.hpp"
+#include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_direct_load.hpp"
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
@@ -783,6 +783,7 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
             return BlockwiseElementCvtTensor<true, relu, 0, clamp>{};
         }
     }
+
     static auto __device__ __host__
     MakeAccBlockwiseOp(const AccElementwiseOperation& acc_element_op)
     {
@@ -1553,7 +1554,7 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
               typename DThreadCoord,
               typename DWaveDescLength>
     __host__ __device__ static constexpr auto
-    MakeSignleDThreadwiseTransfer(const DLayout&,
+    MakeSingleDThreadwiseTransfer(const DLayout&,
                                   const DDataType&,
                                   const DGridBlockDesc& ds_grid_block_desc,
                                   const DBlockDesc&,
@@ -1659,7 +1660,7 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
 
     template <typename DIndex, typename DGridBlockDesc, typename DBlockDesc>
     __host__ __device__ static constexpr auto
-    MakeSignleDThreadgroupTransfer(const DIndex&,
+    MakeSingleDThreadgroupTransfer(const DIndex&,
                                    const DGridBlockDesc& d_grid_block_desc,
                                    const DBlockDesc&,
                                    index_t h_block_data_idx_on_grid,
@@ -1684,23 +1685,22 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
             static_assert(DBlockDesc{}.GetLength(I0) == KPerBlock);
             if constexpr(EnableAsync)
             {
-                return ThreadGroupTensorSliceTransferAsync<ThisThreadBlockGrid,
-                                                           Sequence<KPerBlock>,
-                                                           DBlockTransferThreadClusterLengths,
-                                                           DBlockTransferThreadClusterArrangeOrder,
-                                                           DDataType,
-                                                           DDataType,
-                                                           DGridBlockDesc,
-                                                           DBlockDesc,
-                                                           DBlockTransferVectorDim,
-                                                           DBlockTransferVectorDim,
-                                                           DBlockTransferDstScalarPerVector,
-                                                           false,
-                                                           true>(
-                    d_grid_block_desc,
-                    make_multi_index(k_block_data_idx_on_grid),
-                    DBlockDesc{},
-                    make_multi_index(0));
+                return ThreadGroupTensorSliceTransfer_DirectLoad<
+                    ThisThreadBlockGrid,
+                    Sequence<KPerBlock>,
+                    DBlockTransferThreadClusterLengths,
+                    DBlockTransferThreadClusterArrangeOrder,
+                    DDataType,
+                    DDataType,
+                    DGridBlockDesc,
+                    DBlockDesc,
+                    DBlockTransferAccessOrder,
+                    DBlockTransferVectorDim,
+                    DBlockTransferVectorDim,
+                    DBlockTransferDstScalarPerVector>(d_grid_block_desc,
+                                                      make_multi_index(k_block_data_idx_on_grid),
+                                                      DBlockDesc{},
+                                                      make_multi_index(0));
             }
             else
             {
@@ -1744,7 +1744,7 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
             static_assert(DBlockDesc{}.GetLength(I2) == KPerBlock);
             if constexpr(EnableAsync)
             {
-                return ThreadGroupTensorSliceTransferAsync<
+                return ThreadGroupTensorSliceTransfer_DirectLoad<
                     ThisThreadBlockGrid,
                     Sequence<HPerBlock, WPerBlock, KPerBlock>,
                     DBlockTransferThreadClusterLengths,
@@ -1753,16 +1753,15 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
                     DDataType,
                     DGridBlockDesc,
                     DBlockDesc,
+                    DBlockTransferAccessOrder,
                     DBlockTransferVectorDim,
                     DBlockTransferVectorDim,
-                    DBlockTransferDstScalarPerVector,
-                    false,
-                    true>(d_grid_block_desc,
-                          make_multi_index(h_block_data_idx_on_grid,
-                                           w_block_data_idx_on_grid,
-                                           k_block_data_idx_on_grid),
-                          DBlockDesc{},
-                          make_multi_index(0, 0, 0));
+                    DBlockTransferDstScalarPerVector>(d_grid_block_desc,
+                                                      make_multi_index(h_block_data_idx_on_grid,
+                                                                       w_block_data_idx_on_grid,
+                                                                       k_block_data_idx_on_grid),
+                                                      DBlockDesc{},
+                                                      make_multi_index(0, 0, 0));
             }
             else
             {
@@ -2119,7 +2118,7 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
 
                 if constexpr(EnableAsync)
                 {
-                    auto in_blockwise_copy = ThreadGroupTensorSliceTransferAsync<
+                    auto in_blockwise_copy = ThreadGroupTensorSliceTransfer_DirectLoad<
                         ThisThreadBlockGrid,
                         Sequence<HPerBlockIn, WPerBlockIn, CPerBlock>,
                         InBlockTransferThreadClusterLengths,
@@ -2128,11 +2127,10 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
                         InDataType,
                         decltype(in_grid_block_desc),
                         decltype(in_block_desc),
+                        InBlockTransferAccessOrder,
                         InBlockTransferVectorDim,
                         InBlockTransferVectorDim,
-                        InBlockTransferDstScalarPerVector,
-                        false,
-                        true>(
+                        InBlockTransferDstScalarPerVector>(
                         in_grid_block_desc,
                         make_multi_index(h_block_data_idx_on_grid, w_block_data_idx_on_grid, 0),
                         in_block_desc,
@@ -2261,7 +2259,7 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
 
                 if constexpr(EnableAsync)
                 {
-                    auto in_blockwise_copy = ThreadGroupTensorSliceTransferAsync<
+                    auto in_blockwise_copy = ThreadGroupTensorSliceTransfer_DirectLoad<
                         ThisThreadBlockGrid,
                         Sequence<HPerBlockIn, WPerBlockIn, CPerBlock>,
                         InBlockTransferThreadClusterLengths,
@@ -2270,11 +2268,10 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
                         InDataType,
                         decltype(in_grid_block_desc),
                         decltype(in_block_desc),
+                        InBlockTransferAccessOrder,
                         InBlockTransferVectorDim,
                         InBlockTransferVectorDim,
-                        InBlockTransferDstScalarPerVector,
-                        false,
-                        true>(
+                        InBlockTransferDstScalarPerVector>(
                         in_grid_block_desc,
                         make_multi_index(h_block_data_idx_on_grid, w_block_data_idx_on_grid, 0),
                         in_block_desc,
@@ -2367,7 +2364,7 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
 
                 if constexpr(EnableAsync)
                 {
-                    auto in_blockwise_copy = ThreadGroupTensorSliceTransferAsync<
+                    auto in_blockwise_copy = ThreadGroupTensorSliceTransfer_DirectLoad<
                         ThisThreadBlockGrid,
                         Sequence<HPerBlockIn, WPerBlockIn, CPerBlock>,
                         InBlockTransferThreadClusterLengths,
@@ -2376,11 +2373,10 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
                         InDataType,
                         decltype(in_grid_block_desc),
                         decltype(in_block_desc),
+                        InBlockTransferAccessOrder,
                         InBlockTransferVectorDim,
                         InBlockTransferVectorDim,
-                        InBlockTransferDstScalarPerVector,
-                        false,
-                        true>(
+                        InBlockTransferDstScalarPerVector>(
                         in_grid_block_desc,
                         make_multi_index(h_block_data_idx_on_grid, w_block_data_idx_on_grid, 0),
                         in_block_desc,
@@ -2474,20 +2470,20 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
                 constexpr auto NumWeiCopy                       = (FilterSize == 3) ? YX : 1;
                 if constexpr(EnableAsync)
                 {
-                    using WeiThreadGroupTensorSliceTransfer = ThreadGroupTensorSliceTransferAsync<
-                        ThisThreadBlockGrid,
-                        Sequence<KPerBlock, NumTapPerCopy, CPerBlock>,
-                        WeiBlockTransferThreadClusterLengths,
-                        WeiBlockTransferThreadClusterArrangeOrder,
-                        WeiDataType,
-                        WeiDataType,
-                        decltype(wei_grid_desc),
-                        decltype(wei_block_desc),
-                        WeiBlockTransferVectorDim,
-                        WeiBlockTransferVectorDim,
-                        WeiBlockTransferSrcScalarPerVector,
-                        false,
-                        true>;
+                    using WeiThreadGroupTensorSliceTransfer =
+                        ThreadGroupTensorSliceTransfer_DirectLoad<
+                            ThisThreadBlockGrid,
+                            Sequence<KPerBlock, NumTapPerCopy, CPerBlock>,
+                            WeiBlockTransferThreadClusterLengths,
+                            WeiBlockTransferThreadClusterArrangeOrder,
+                            WeiDataType,
+                            WeiDataType,
+                            decltype(wei_grid_desc),
+                            decltype(wei_block_desc),
+                            WeiBlockTransferAccessOrder,
+                            WeiBlockTransferVectorDim,
+                            WeiBlockTransferVectorDim,
+                            WeiBlockTransferSrcScalarPerVector>;
 
                     auto wei_blockwise_copy = generate_tuple(
                         [&](auto I) {
@@ -2660,7 +2656,7 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
 
                 auto ds_blockwise_copy = generate_tuple(
                     [&](auto i) {
-                        return MakeSignleDThreadgroupTransfer(i,
+                        return MakeSingleDThreadgroupTransfer(i,
                                                               ds_grid_block_desc[Number<i>{}],
                                                               ds_block_desc[Number<i>{}],
                                                               h_out_block_data_idx_on_grid,
@@ -2700,7 +2696,7 @@ struct GridwiseConvMultipleD_Wcnn_CShuffle
                     [&](auto i) {
                         using DLayout   = remove_cvref_t<tuple_element_t<i.value, DsLayout>>;
                         using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
-                        return MakeSignleDThreadwiseTransfer(DLayout{},
+                        return MakeSingleDThreadwiseTransfer(DLayout{},
                                                              DDataType{},
                                                              ds_grid_block_desc[Number<i>{}],
                                                              ds_wave_desc[Number<i>{}],

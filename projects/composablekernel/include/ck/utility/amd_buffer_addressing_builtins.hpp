@@ -1344,6 +1344,7 @@ template <typename T,
 __device__ void amd_async_copy_to_lds_impl(__attribute__((address_space(1))) const T* src_ptr,
                                            __attribute__((address_space(3))) T* dst_ptr)
 {
+#if defined(__gfx13__)
     // currently only support to b8, b32, b64, b128 when one async copy
     static_assert((is_same<T, double>::value && (N == 1 || N == 2)) ||
                       (is_same<T, float>::value && (N == 1 || N == 2 || N == 4)) ||
@@ -1352,11 +1353,18 @@ __device__ void amd_async_copy_to_lds_impl(__attribute__((address_space(1))) con
                       (is_same<T, bhalf_t>::value && (N == 2 || N == 4 || N == 8)) ||
                       (is_same<T, f8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
                       (is_same<T, bf8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+                      (is_same<T, f4x2_pk_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
                       (is_same<T, int8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
-                      (is_same<T, uint8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)),
-                  "wrong! not implemented");
+                      (is_same<T, uint8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+                      (is_same<T, f6x16_pk_t>::value && (N == 1 || N == 2 || N == 4 || N == 8)) ||
+                      (is_same<T, bf6x16_pk_t>::value && (N == 1 || N == 2 || N == 4 || N == 8)),
+                  "wrong! not yet supported");
 
     amd_async_copy_to_lds_impl_raw<T, sizeof(T) * N, coherence, multicast>(src_ptr, dst_ptr);
+#else
+    ignore = src_ptr;
+    ignore = dst_ptr;
+#endif
     return;
 }
 
@@ -1373,7 +1381,6 @@ __device__ void amd_async_load_global_to_lds(const T* global_base_ptr,
 {
     if(is_src_valid && is_dst_valid)
     {
-#if defined(__gfx13__)
         const index_t in_global_offset = global_offset;
         __attribute__((address_space(1))) const T* global_ptr =
             reinterpret_cast<__attribute__((address_space(1))) T*>(
@@ -1382,10 +1389,6 @@ __device__ void amd_async_load_global_to_lds(const T* global_base_ptr,
             reinterpret_cast<__attribute__((address_space(3))) T*>(
                 reinterpret_cast<uintptr_t>(lds_base_ptr + lds_offset));
         amd_async_copy_to_lds_impl<T, NumElemsPerThread, coherence, multicast>(global_ptr, lds_ptr);
-#else
-        ignore = global_base_ptr;
-        ignore = global_offset;
-#endif
     }
     else
     {
