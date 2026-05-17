@@ -296,6 +296,9 @@ def build(
         else:
             cmake_opts.append("-G Ninja")
     else:
+        if shutil.which("ninja"):
+            cmake_opts.append("-G Ninja")
+
         if gcc:
             _cxx = shutil.which("g++") or "g++"
             _cc = shutil.which("gcc") or "gcc"
