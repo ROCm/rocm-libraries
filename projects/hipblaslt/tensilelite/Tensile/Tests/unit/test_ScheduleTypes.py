@@ -49,7 +49,7 @@ def _all_placements(slot):
 def test_logical_schedule_has_no_deps_or_preops():
     """Post-place_GRs (LogicalSchedule): .deps and .preOps are empty everywhere."""
     sched = _make_scheduler()
-    sched.place_GRs()
+    sched.build(stop_after='place_GRs')
     s = sched._partitions
     assert s is not None and len(s) >= 1
     for slots in s:
@@ -64,7 +64,7 @@ def test_logical_schedule_has_no_deps_or_preops():
 def test_annotated_schedule_has_only_same_slot_deps():
     """Post-remove_cross_deps (AnnotatedSchedule): all .deps are same partition + same slot."""
     sched = _make_scheduler()
-    sched.remove_cross_deps()
+    sched.build(stop_after='remove_cross_deps')
     s = sched._partitions
     assert s is not None
     for pi, slots in enumerate(s):
@@ -90,7 +90,7 @@ def test_augmented_schedule_chains_lr_gr_in_tensor_order():
     """Post-remove_unnecessary_wait_lr_sync (AugmentedSchedule):
     LR/GR within a slot appear in canonical tensor order (A, B, SA, SB)."""
     sched = _make_scheduler()
-    sched.remove_unnecessary_wait_lr_sync()
+    sched.build(stop_after='remove_unnecessary_wait_lr_sync')
     s = sched._partitions
     assert s is not None
     order = LogicalScheduler._LR_GR_ORDER
@@ -112,7 +112,8 @@ def test_emitted_schedule_is_three_level_with_valid_before_links():
     """Post-emit (EmittedSchedule): 3-level list; every .before is None or a
     valid moduleId in the same subIterK list, and never self-referential."""
     sched = _make_scheduler()
-    result = sched.emit()
+    sched.build()
+    result = sched._emitted
     assert isinstance(result, list), "EmittedSchedule must be a list (level 1: partitions)"
     for partition in result:
         assert isinstance(partition, list), \
