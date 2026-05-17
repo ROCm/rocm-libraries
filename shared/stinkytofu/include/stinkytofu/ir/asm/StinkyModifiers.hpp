@@ -237,7 +237,8 @@ struct TypedModifier : public Modifier {
     }
 
    protected:
-    explicit TypedModifier() : Modifier(Derived::Type) {}
+    explicit TypedModifier()
+        : Modifier(Derived::Type) {}  // NOLINT(bugprone-crtp-constructor-accessibility)
 };
 
 struct DSModifiers : public TypedModifier<DSModifiers> {

@@ -312,3 +312,16 @@ def build(
     print(f"cmake command: {cmake_cmd}")
     c.run(cmake_cmd)
     c.run(f'cmake --build "{bld.as_posix()}" -j {jobs}')
+
+
+@task
+def tidy(c, build_dir=None):
+    """Run clang-tidy on all source files. Requires a prior 'invoke build'."""
+    bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
+    if not (bld / "compile_commands.json").exists():
+        print("No compile_commands.json found. Run 'invoke build' first.")
+        sys.exit(1)
+    c.run(
+        f'cmake -B "{bld.as_posix()}" -S "{ROOT_PATH.as_posix()}" -DENABLE_CLANG_TIDY=ON'
+    )
+    c.run(f'cmake --build "{bld.as_posix()}" --target tidy')
