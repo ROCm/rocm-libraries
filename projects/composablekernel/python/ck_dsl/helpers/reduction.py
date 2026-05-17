@@ -38,7 +38,20 @@ __all__ = [
 ]
 
 
-ReduceCombine = Literal["sum", "max"]
+ReduceCombine = Literal["sum", "max", "min", "prod"]
+
+
+def _emit_combine(b: IRBuilder, combine: ReduceCombine, a: Value, c: Value) -> Value:
+    """Apply the reduction combiner to two f32 partials."""
+    if combine == "sum":
+        return b.fadd(a, c)
+    if combine == "max":
+        return b.fmax(a, c)
+    if combine == "min":
+        return b.fmin(a, c)
+    if combine == "prod":
+        return b.fmul(a, c)
+    raise ValueError(f"unknown combine {combine!r}")
 
 
 def block_lds_reduce(
@@ -57,12 +70,20 @@ def block_lds_reduce(
     reduced value is broadcast back to every lane (i.e. the return
     value is the same across all threads in the workgroup).
 
+    Supported combiners: ``sum`` (LayerNorm / RMSNorm / Reduce-sum /
+    Reduce-mean), ``max`` (Reduce-max, attention online softmax),
+    ``min`` (Reduce-min), ``prod`` (Reduce-prod). The combiner is
+    applied in f32 regardless of the storage dtype the caller is
+    accumulating from.
+
     The barrier between halving steps is :func:`IRBuilder.sync`, which
     now correctly emits an ``s_waitcnt lgkmcnt(0) vmcnt(0)`` before
     ``s_barrier`` (see ``_op_tile_sync`` in ``core/lower_llvm.py``).
     """
-    if combine not in ("sum", "max"):
-        raise ValueError(f"unknown combine {combine!r}; expected 'sum' or 'max'")
+    if combine not in ("sum", "max", "min", "prod"):
+        raise ValueError(
+            f"unknown combine {combine!r}; expected one of {{'sum','max','min','prod'}}"
+        )
     if val.type.name != "f32":
         raise ValueError(f"block_lds_reduce expects f32 input, got {val.type.name}")
 
@@ -80,7 +101,7 @@ def block_lds_reduce(
             c_vec = b.smem_load_vN_f32(lds_buf, j, n=1)
             a = b.vec_extract(a_vec, 0)
             c = b.vec_extract(c_vec, 0)
-            combined = b.fadd(a, c) if combine == "sum" else b.fmax(a, c)
+            combined = _emit_combine(b, combine, a, c)
             b.smem_store_vN_f32(lds_buf, [tid], combined, 1)
         b.sync()
         n = half

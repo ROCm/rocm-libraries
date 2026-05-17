@@ -303,5 +303,46 @@ class TestCkDslExamples(unittest.TestCase):
                         self.fail(f"{ex.name}: unknown kind {kind!r}")
 
 
+class TestExtendedKernelParity(unittest.TestCase):
+    """GPU end-to-end parity for the extended kernel family.
+
+    Drives :mod:`ck_dsl.examples.parity_extended_kernels` to validate the
+    fused-MoE, FMHA expansion, Sage, and sparse-attention kernels against
+    torch references on the live GPU. Each case launches the kernel
+    scalar-per-CTA (``block=(1, 1, 1)``) -- the v1 scalar-inner bodies
+    don't distribute work across threads -- and verifies bit-exact or
+    within-tolerance match to a dense torch reference.
+    """
+
+    def test_parity_runner(self):
+        try:
+            import torch
+        except Exception:
+            self.skipTest("torch not available")
+        if not torch.cuda.is_available():
+            self.skipTest("HIP / CUDA device not available")
+
+        from ck_dsl.examples.parity_extended_kernels import ALL_CASES
+
+        failures = []
+        for name, fn in ALL_CASES.items():
+            with self.subTest(case=name):
+                try:
+                    result = fn()
+                except Exception as exc:
+                    failures.append(f"{name}: {exc}")
+                    raise
+                if not result.passed:
+                    failures.append(
+                        f"{name}: max_abs={result.max_abs_diff:.4g} ({result.note})"
+                    )
+                self.assertTrue(
+                    result.passed,
+                    f"{name}: max_abs={result.max_abs_diff:.4g} "
+                    f"range=({result.range_min}, {result.range_max}) "
+                    f"{result.note}",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

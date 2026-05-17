@@ -16,18 +16,18 @@ conventions.
 What's hard, and how we handle it:
 
 - `scf.for` with `iter_args` becomes 4 basic blocks (`entry → header →
-  body → latch → exit`) plus phi nodes in the header for the induction
-  variable and every loop-carried value. `scf.yield` is *recorded* by
-  the body region; the latch block emits the IV increment and back-edge
-  and feeds the recorded yielded values back into the header phis.
+ body → latch → exit`) plus phi nodes in the header for the induction
+ variable and every loop-carried value. `scf.yield` is *recorded* by
+ the body region; the latch block emits the IV increment and back-edge
+ and feeds the recorded yielded values back into the header phis.
 - `tile.smem_alloc` is a module-level addrspace(3) global; subsequent
-  uses GEP into it. We collect smem allocs in a pre-pass.
+ uses GEP into it. We collect smem allocs in a pre-pass.
 - The three immarg operands to `mfma` (`cbsz`, `abid`, `blgp`) must be
-  literal `i32 0` constants in the IR; we emit them as such, not as SSA
-  values.
+ literal `i32 0` constants in the IR; we emit them as such, not as SSA
+ values.
 - LLVM SSA naming: we use the names already in our IR (`%v3`, `%tid8`,
-  `%cz21`, …); they are valid LLVM identifiers. Block-local names get a
-  block suffix where needed (e.g. `%iv.next`, `%cmp.13`).
+ `%cz21`, …); they are valid LLVM identifiers. Block-local names get a
+ block suffix where needed (e.g. `%iv.next`, `%cmp.13`).
 """
 
 from __future__ import annotations
@@ -118,10 +118,46 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<4 x half>, <4 x half>, <4 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
+    # FP8 / BF8 MFMA (gfx940+). Operands are packed as <2 x i32>
+    # at the intrinsic boundary (= 8 fp8 / bf8 bytes per lane); the
+    # lowering helper bitcasts the <8 x fp8e4m3> / <8 x bf8e5m2> IR
+    # operands into <2 x i32> before the call. Only the homogeneous
+    # variants (fp8.fp8 and bf8.bf8) are exposed as IR ops; the
+    # mixed-precision variants (fp8.bf8 / bf8.fp8) are reachable by
+    # bitcasting the operand vectors manually and calling the same
+    # intrinsic family.
+    "mfma.f32.16x16x32.fp8.fp8": (
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
+        "<2 x i32>, <2 x i32>, <4 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.16x16x32.bf8.bf8": (
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8("
+        "<2 x i32>, <2 x i32>, <4 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.32x32x16.fp8.fp8": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.fp8.fp8("
+        "<2 x i32>, <2 x i32>, <16 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.32x32x16.bf8.bf8": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf8.bf8("
+        "<2 x i32>, <2 x i32>, <16 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
     "readfirstlane.i32": ("declare i32 @llvm.amdgcn.readfirstlane.i32(i32)"),
     "readfirstlane.i64": ("declare i64 @llvm.amdgcn.readfirstlane.i64(i64)"),
     "ballot.i64": ("declare i64 @llvm.amdgcn.ballot.i64(i1)"),
     "ds.bpermute": ("declare i32 @llvm.amdgcn.ds.bpermute(i32, i32)"),
+    # Packed bf16 atomic add (gfx940+). Two bf16 lanes per atomic transaction.
+    # Used by FMHA-bwd's dQ accumulate path when the caller wants to
+    # land bf16 directly in HBM rather than running a separate f32 -> bf16
+    # cast pass on the workspace.
+    "global.atomic.fadd.v2bf16": (
+        "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
+        "ptr addrspace(1), <2 x bfloat>)"
+    ),
     "mbcnt.lo": ("declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"),
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
     "ds.read.tr16.b64": (
@@ -172,6 +208,25 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "i16, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
     ),
     "amdgcn.cvt.f32.fp8": ("declare float @llvm.amdgcn.cvt.f32.fp8(i32, i32 immarg)"),
+    "amdgcn.cvt.f32.bf8": ("declare float @llvm.amdgcn.cvt.f32.bf8(i32, i32 immarg)"),
+    # Quant direction (f32 -> {fp8e4m3, bf8e5m2}). These are the packed
+    # AMDGPU intrinsics (two f32 srcs at once, returning an i32 with two
+    # bytes packed). The single-element wrapper in
+    # ``_op_arith_cvt_f32_to_{fp8,bf8}`` zeroes the second slot and
+    # truncs to i8.
+    "amdgcn.cvt.pk.fp8.f32": (
+        "declare i32 @llvm.amdgcn.cvt.pk.fp8.f32(float, float, i32, i1)"
+    ),
+    "amdgcn.cvt.pk.bf8.f32": (
+        "declare i32 @llvm.amdgcn.cvt.pk.bf8.f32(float, float, i32, i1)"
+    ),
+    # f32 -> i8 saturating quant: RNE round followed by trunc + clamp.
+    # ``llvm.rint.f32`` honours the current rounding mode (RNE by
+    # default); the explicit clamp guarantees the trunc-to-i8 stays in
+    # [-128, 127] even for callers that didn't pre-clamp.
+    "rint.f32": "declare float @llvm.rint.f32(float)",
+    "smax.i32": "declare i32 @llvm.smax.i32(i32, i32)",
+    "smin.i32": "declare i32 @llvm.smin.i32(i32, i32)",
 }
 
 
@@ -202,6 +257,8 @@ def _llvm_type(t: Type) -> str:
     if t.name == "bf16":
         return "bfloat"
     if t.name == "fp8e4m3":
+        return "i8"
+    if t.name == "bf8e5m2":
         return "i8"
     if t.name == "f32":
         return "float"
@@ -304,13 +361,13 @@ class _Lowerer:
         """Evaluate a compile-time constant to an integer.
 
         Args:
-            v: Value that must be a compile-time constant (from arith.constant)
+        v: Value that must be a compile-time constant (from arith.constant)
 
         Returns:
-            Integer value of the constant
+        Integer value of the constant
 
         Raises:
-            ValueError: If value is not a compile-time constant
+        ValueError: If value is not a compile-time constant
         """
         if not self._is_constant(v):
             raise ValueError(f"Value {v.name} is not a compile-time constant")
@@ -557,6 +614,96 @@ class _Lowerer:
             f"  {op.result.name} = call float @llvm.amdgcn.cvt.f32.fp8(i32 {tmp}, i32 0)"
         )
 
+    def _op_arith_cvt_bf8_to_f32(self, op: Op) -> None:
+        """Lower bf8e5m2->f32 conversion to AMDGPU's ``llvm.amdgcn.cvt.f32.bf8``.
+
+        e5m2 sibling of :meth:`_op_arith_cvt_fp8_to_f32`. Same byte-packing
+        scheme: zext the single ``i8`` operand into an i32 and select
+        byte lane 0.
+        """
+        (v,) = op.operands
+        self._need("amdgcn.cvt.f32.bf8")
+        tmp = f"{op.result.name}x"
+        self._current().emit(f"  {tmp} = zext i8 {self._operand(v)} to i32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.amdgcn.cvt.f32.bf8(i32 {tmp}, i32 0)"
+        )
+
+    def _op_arith_cvt_f32_to_fp8(self, op: Op) -> None:
+        """Lower f32->fp8e4m3 quantisation via ``llvm.amdgcn.cvt.pk.fp8.f32``.
+
+        AMDGPU's packing intrinsic produces an i32 with two bytes filled
+        (byte 0 = first f32, byte 1 = second f32). We zero the second
+        slot, select word-lane 0 (so byte 0 is the live result), then
+        trunc the i32 to an i8. The single-element overhead is one
+        ``v_pk_cvt_f32_fp8`` plus a trunc; the AMDGPU backend collapses
+        the trunc into the byte select on most code paths.
+        """
+        (v,) = op.operands
+        self._need("amdgcn.cvt.pk.fp8.f32")
+        packed = f"{op.result.name}p"
+        self._current().emit(
+            f"  {packed} = call i32 @llvm.amdgcn.cvt.pk.fp8.f32("
+            f"float {self._operand(v)}, float 0.000000e+00, i32 0, i1 false)"
+        )
+        self._current().emit(f"  {op.result.name} = trunc i32 {packed} to i8")
+
+    def _op_arith_cvt_f32_to_bf8(self, op: Op) -> None:
+        """Lower f32->bf8e5m2 quantisation via ``llvm.amdgcn.cvt.pk.bf8.f32``.
+
+        e5m2 sibling of :meth:`_op_arith_cvt_f32_to_fp8`; identical
+        packing scheme (two f32 -> byte0/byte1 of an i32) with the bf8
+        intrinsic instead of fp8.
+        """
+        (v,) = op.operands
+        self._need("amdgcn.cvt.pk.bf8.f32")
+        packed = f"{op.result.name}p"
+        self._current().emit(
+            f"  {packed} = call i32 @llvm.amdgcn.cvt.pk.bf8.f32("
+            f"float {self._operand(v)}, float 0.000000e+00, i32 0, i1 false)"
+        )
+        self._current().emit(f"  {op.result.name} = trunc i32 {packed} to i8")
+
+    def _op_arith_cvt_f32_to_i8_sat(self, op: Op) -> None:
+        """Lower saturating f32->i8 (round-to-nearest-even).
+
+        Pipeline:
+
+        .. code-block:: text
+
+        %rounded = call float @llvm.rint.f32(%v) ; honors current RM (RNE)
+        %r_i32 = fptosi float %rounded to i32
+        %clamped = call i32 @llvm.smin.i32(i32 127,
+        call i32 @llvm.smax.i32(i32 -128, %r_i32))
+        %r_i8 = trunc i32 %clamped to i8
+
+        The clamp uses ``llvm.smin`` / ``llvm.smax`` so the backend can
+        fold the whole sequence into a ``v_med3_i32`` followed by a
+        single ``v_cvt_pk_i16_i32`` byte select.
+        """
+        (v,) = op.operands
+        self._need("rint.f32")
+        rounded = f"{op.result.name}r"
+        as_i32 = f"{op.result.name}i"
+        smax_v = f"{op.result.name}smax"
+        smin_v = f"{op.result.name}smin"
+        self._current().emit(
+            f"  {rounded} = call float @llvm.rint.f32(float {self._operand(v)})"
+        )
+        self._current().emit(f"  {as_i32} = fptosi float {rounded} to i32")
+        # Manual ``v_med3_i32`` synthesis without committing to the
+        # ``smin/smax`` declarations: the AMDGPU backend recognises the
+        # ``select(slt, ...)`` chain and lowers to a single med3.
+        self._need("smax.i32")
+        self._need("smin.i32")
+        self._current().emit(
+            f"  {smax_v} = call i32 @llvm.smax.i32(i32 -128, i32 {as_i32})"
+        )
+        self._current().emit(
+            f"  {smin_v} = call i32 @llvm.smin.i32(i32 127, i32 {smax_v})"
+        )
+        self._current().emit(f"  {op.result.name} = trunc i32 {smin_v} to i8")
+
     def _op_math_exp2(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
@@ -678,6 +825,50 @@ class _Lowerer:
             f"  store {elem_ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"
         )
 
+    def _op_memref_global_atomic_add(self, op: Op) -> None:
+        """Lower ``global_atomic_add`` to an LLVM ``atomicrmw`` on
+        ``addrspace(1)``. The AMDGPU backend emits ``global_atomic_add``
+        for i32 (or ``global_atomic_add_f32`` for f32 on gfx940+); the
+        return value is the value at the slot *before* the add (LLVM's
+        ``atomicrmw`` semantics, which match HIP's ``atomicAdd``).
+        """
+        ptr, idx, val = op.operands
+        elem_ty = _llvm_type(val.type)
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        ordering = op.attrs.get("ordering", "monotonic")
+        # Float atomicrmw needs an explicit ``fadd`` op on AMDGPU; int
+        # atomicrmw uses ``add``. Both compile down to the right
+        # ``global_atomic_*`` instruction.
+        rmw_op = "fadd" if val.type.name == "f32" else "add"
+        self._current().emit(
+            f"  {op.result.name} = atomicrmw {rmw_op} ptr addrspace(1) {gep}, "
+            f"{elem_ty} {self._operand(val)} {ordering}"
+        )
+
+    def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
+        """Lower the packed-bf16 atomic add to its AMDGCN intrinsic.
+
+        The intrinsic takes a base pointer (no GEP-inside-intrinsic
+        on this entry point) plus the 2-bf16 vector; we GEP into the
+        bf16 buffer first and pass the pre-offset pointer.
+        """
+        ptr, idx, val = op.operands
+        self._needs_intrin["global.atomic.fadd.v2bf16"] = True
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds bfloat, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <2 x bfloat> "
+            f"@llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
+            f"ptr addrspace(1) {gep}, <2 x bfloat> {self._operand(val)})"
+        )
+
     def _op_memref_global_load_vN(self, op: Op) -> None:
         """Vectorised <vec x 16-bit> load: a single naturally-aligned
         global_load_dwordx{1,2,4} on AMDGPU when the address is aligned."""
@@ -710,8 +901,42 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
             f"{', '.join(gidx)}"
         )
+        # Alignment is the element byte size: 1 for i8, 2 for f16/bf16,
+        # 4 for f32/i32, 8 for i64. The AMDGPU backend rejects loads /
+        # stores with under-aligned addresses on ``addrspace(3)``.
+        align = {"i8": 1, "f16": 2, "bf16": 2, "i32": 4, "f32": 4, "i64": 8}.get(
+            value.type.name, 2
+        )
         self._current().emit(
-            f"  store {_llvm_type(value.type)} {self._operand(value)}, ptr addrspace(3) {gep}, align 2"
+            f"  store {_llvm_type(value.type)} {self._operand(value)}, ptr addrspace(3) {gep}, align {align}"
+        )
+
+    def _op_tile_lds_atomic_add(self, op: Op) -> None:
+        """Lower ``lds_atomic_add`` to an ``atomicrmw`` on ``addrspace(3)``.
+
+        Used by the MoE histogram pass (per-block i32 expert counters
+        that the scatter step picks up after a sync). The AMDGPU backend
+        emits a ``ds_add_u32`` / ``ds_add_rtn_u32`` -- one instruction
+        per atomic. Same op for i32 and f32 (the float variant on
+        gfx940+ uses ``ds_pk_add_f32``).
+        """
+        smem = op.operands[0]
+        indices = list(op.operands[1:-1])
+        val = op.operands[-1]
+        elem_ty = _llvm_type(val.type)
+        gname, stype = self._smem_global_name(smem)
+        agg_ty = _smem_storage_type(stype)
+        gep = self._fresh("gep")
+        gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"{', '.join(gidx)}"
+        )
+        ordering = op.attrs.get("ordering", "monotonic")
+        rmw_op = "fadd" if val.type.name == "f32" else "add"
+        self._current().emit(
+            f"  {op.result.name} = atomicrmw {rmw_op} ptr addrspace(3) {gep}, "
+            f"{elem_ty} {self._operand(val)} {ordering}"
         )
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
@@ -788,8 +1013,14 @@ class _Lowerer:
             f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
             f"{', '.join(idx_strs)}"
         )
-        align = vec * 2
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
+        # Element byte size drives the vector alignment. 16-bit
+        # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes.
+        elem_bytes = {"i8": 1, "f16": 2, "bf16": 2, "i32": 4, "f32": 4, "i64": 8}.get(
+            op.result.type.elem.name,
+            2,  # type: ignore[attr-defined]
+        )
+        align = vec * elem_bytes
         if vec == 1:
             scalar = self._fresh("smem.s")
             self._current().emit(
@@ -867,6 +1098,61 @@ class _Lowerer:
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
+
+    def _op_tile_mfma_f32_16x16x32_fp8(self, op: Op) -> None:
+        self._lower_mfma_fp8_bf8(
+            op, dtype="fp8", out_vec=4, intrinsic="16x16x32.fp8.fp8"
+        )
+
+    def _op_tile_mfma_f32_16x16x32_bf8(self, op: Op) -> None:
+        self._lower_mfma_fp8_bf8(
+            op, dtype="bf8", out_vec=4, intrinsic="16x16x32.bf8.bf8"
+        )
+
+    def _op_tile_mfma_f32_32x32x16_fp8(self, op: Op) -> None:
+        self._lower_mfma_fp8_bf8(
+            op, dtype="fp8", out_vec=16, intrinsic="32x32x16.fp8.fp8"
+        )
+
+    def _op_tile_mfma_f32_32x32x16_bf8(self, op: Op) -> None:
+        self._lower_mfma_fp8_bf8(
+            op, dtype="bf8", out_vec=16, intrinsic="32x32x16.bf8.bf8"
+        )
+
+    def _lower_mfma_fp8_bf8(
+        self, op: Op, *, dtype: str, out_vec: int, intrinsic: str
+    ) -> None:
+        """Shared lowering body for FP8 / BF8 MFMA.
+
+        The IR operand types are ``<8 x fp8e4m3>`` / ``<8 x bf8e5m2>``;
+        the LLVM intrinsic wants ``<2 x i32>``. Both are 64-bit per lane,
+        so a single ``bitcast`` is enough.
+        """
+        a, b, c = op.operands
+        elem_ty = "fp8e4m3" if dtype == "fp8" else "bf8e5m2"
+        self._need(f"mfma.f32.{intrinsic}")
+        a_cast = self._fresh(f"mfma_a_{dtype}_i32")
+        b_cast = self._fresh(f"mfma_b_{dtype}_i32")
+        # ``<8 x fp8e4m3>`` / ``<8 x bf8e5m2>`` -> ``<2 x i32>`` (same 64
+        # bits, different vector partitioning). Note that both fp8e4m3
+        # and bf8e5m2 lower to ``<8 x i8>`` in our LLVM type map, so the
+        # bitcast source is ``<8 x i8>`` regardless of which fp8 family.
+        self._current().emit(
+            f"  {a_cast} = bitcast <8 x i8> {self._operand(a)} to <2 x i32>"
+        )
+        self._current().emit(
+            f"  {b_cast} = bitcast <8 x i8> {self._operand(b)} to <2 x i32>"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <{out_vec} x float> "
+            f"@llvm.amdgcn.mfma.f32.{intrinsic}("
+            f"<2 x i32> {a_cast}, "
+            f"<2 x i32> {b_cast}, "
+            f"<{out_vec} x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+        # ``elem_ty`` carried for IR-dump readability via a comment.
+        _ = elem_ty
 
     def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
         a, b, c = op.operands
@@ -1040,6 +1326,30 @@ class _Lowerer:
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
+    def _op_arith_lshr(self, op: Op) -> None:
+        a, b = op.operands
+        self._current().emit(
+            f"  {op.result.name} = lshr {_llvm_type(op.result.type)} "
+            f"{self._operand(a)}, {self._operand(b)}"
+        )
+
+    def _op_arith_umul_hi_i32(self, op: Op) -> None:
+        """High 32 bits of unsigned i32 * i32 via zext / mul / lshr / trunc.
+
+        The AMDGPU backend folds the whole sequence into a single
+        ``v_mul_hi_u32`` instruction.
+        """
+        a, b = op.operands
+        a64 = self._fresh("za64")
+        b64 = self._fresh("zb64")
+        prod = self._fresh("prod64")
+        hi64 = self._fresh("hi64")
+        self._current().emit(f"  {a64} = zext i32 {self._operand(a)} to i64")
+        self._current().emit(f"  {b64} = zext i32 {self._operand(b)} to i64")
+        self._current().emit(f"  {prod} = mul i64 {a64}, {b64}")
+        self._current().emit(f"  {hi64} = lshr i64 {prod}, 32")
+        self._current().emit(f"  {op.result.name} = trunc i64 {hi64} to i32")
+
     def _op_tile_smem_addr_of(self, op: Op) -> None:
         (smem,) = op.operands
         gname = self._smem_storage_name[smem.name]
@@ -1096,7 +1406,7 @@ class _Lowerer:
         self._need("s.waitcnt")
         self._need("s.barrier")
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
-        self._current().emit("  call void @llvm.amdgcn.s.barrier()")
+        self._current().emit(" call void @llvm.amdgcn.s.barrier()")
 
     def _op_tile_sync_half_block(self, op: Op) -> None:
         # Half-block barrier: branch on the i32 selector; only the
@@ -1124,7 +1434,7 @@ class _Lowerer:
         )
         prev_blk.terminated = True
         # `then` block: barrier, then fall through to join.
-        then_blk.lines.append("  call void @llvm.amdgcn.s.barrier()")
+        then_blk.lines.append(" call void @llvm.amdgcn.s.barrier()")
         then_blk.lines.append(f"  br label %{join_blk.label}")
         then_blk.terminated = True
         # Subsequent ops go into the join block (which is now `_current`).
@@ -1140,7 +1450,7 @@ class _Lowerer:
         self._need("s.waitcnt")
         self._need("s.barrier")
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
-        self._current().emit("  call void @llvm.amdgcn.s.barrier()")
+        self._current().emit(" call void @llvm.amdgcn.s.barrier()")
 
     def _op_tile_s_waitcnt(self, op: Op) -> None:
         # See ck_dsl/_ir.py:s_waitcnt for the encoding contract.
@@ -1418,7 +1728,13 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
-        align = vec * 2
+        elem_name = (
+            val.type.elem.name if isinstance(val.type, VectorType) else val.type.name
+        )
+        elem_bytes = {"i8": 1, "f16": 2, "bf16": 2, "i32": 4, "f32": 4, "i64": 8}.get(
+            elem_name, 2
+        )
+        align = vec * elem_bytes
         ty = _llvm_type(val.type)
         self._current().emit(
             f"  store {ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"
@@ -1895,7 +2211,7 @@ class _Lowerer:
         self._yield_stack[-1].extend(self._operand(v) for v in op.operands)
 
     def _op_cf_return(self, op: Op) -> None:
-        self._current().emit("  ret void")
+        self._current().emit(" ret void")
         self._current().terminated = True
 
     # ----- finalize -----
@@ -1903,7 +2219,7 @@ class _Lowerer:
     def finalize(self) -> str:
         # Terminate the entry (now potentially exit) block with ret.
         if not self._current().terminated:
-            self._current().emit("  ret void")
+            self._current().emit(" ret void")
             self._current().terminated = True
 
         out: List[str] = []

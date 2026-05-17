@@ -17,9 +17,9 @@ IR to emit HIP.
 Design constraints:
 - No external dependencies; standard library only.
 - Each Op records its source span (file/line) so the lowering can emit
-  comments tying generated lines back to the Python authoring site.
+ comments tying generated lines back to the Python authoring site.
 - SSA values are uniquely named per kernel; the builder hands out
-  `%vN` style identifiers.
+ `%vN` style identifiers.
 """
 
 from __future__ import annotations
@@ -47,6 +47,7 @@ BF16 = Type("bf16")
 F16 = Type("f16")
 F32 = Type("f32")
 FP8E4M3 = Type("fp8e4m3")
+BF8E5M2 = Type("bf8e5m2")
 
 
 # AMDGPU buffer-load AUX-byte cache-coherency hints. The AUX field of
@@ -463,6 +464,195 @@ class IRBuilder:
             "arith.cvt_fp8_to_f32", [v], [F32], result_name_hint="dq8"
         ).result
 
+    def cvt_bf8_to_f32(self, v: Value) -> Value:
+        """Convert one bf8e5m2 element to f32. Lowers to
+        ``llvm.amdgcn.cvt.f32.bf8`` (the e5m2 sibling of cvt_fp8_to_f32).
+        """
+        if v.type.name != "bf8e5m2":
+            raise ValueError(f"cvt_bf8_to_f32 expects bf8e5m2 input, got {v.type.name}")
+        return self._op(
+            "arith.cvt_bf8_to_f32", [v], [F32], result_name_hint="dqb8"
+        ).result
+
+    def cvt_f32_to_fp8(self, v: Value) -> Value:
+        """Round + saturate one f32 element to fp8e4m3 (round-to-nearest-even).
+
+        Lowers to AMDGPU's ``llvm.amdgcn.cvt.pk.fp8.f32`` packing
+        intrinsic (two f32 per call), with the second slot held at
+        +0.0f and the low byte extracted as the single-element
+        result. Out-of-range inputs are clamped to the fp8e4m3 range.
+        """
+        if v.type.name != "f32":
+            raise ValueError(f"cvt_f32_to_fp8 expects f32 input, got {v.type.name}")
+        return self._op(
+            "arith.cvt_f32_to_fp8", [v], [FP8E4M3], result_name_hint="q8"
+        ).result
+
+    def cvt_f32_to_bf8(self, v: Value) -> Value:
+        """Round + saturate one f32 element to bf8e5m2 (round-to-nearest-even).
+
+        Lowers to ``llvm.amdgcn.cvt.pk.bf8.f32``; the e5m2 sibling of
+        cvt_f32_to_fp8. ``bf8e5m2`` carries 5 exponent bits so its
+        representable range reaches ~57344 at the cost of 1 mantissa bit.
+        """
+        if v.type.name != "f32":
+            raise ValueError(f"cvt_f32_to_bf8 expects f32 input, got {v.type.name}")
+        return self._op(
+            "arith.cvt_f32_to_bf8", [v], [BF8E5M2], result_name_hint="qb8"
+        ).result
+
+    def cvt_f32_to_i8_sat(self, v: Value) -> Value:
+        """Round + saturate one f32 element to i8 (round-to-nearest-even).
+
+        ``(int8_t) min(127, max(-128, lrintf(v)))`` -- the canonical
+        int8 dynamic-range quantisation primitive used by SmoothQuant
+        and every per-row int8-quant epilogue.
+        """
+        if v.type.name != "f32":
+            raise ValueError(f"cvt_f32_to_i8_sat expects f32 input, got {v.type.name}")
+        return self._op(
+            "arith.cvt_f32_to_i8_sat", [v], [I8], result_name_hint="qi8"
+        ).result
+
+    def clamp_f32(self, v: Value, lo: Value, hi: Value) -> Value:
+        """``min(hi, max(lo, v))`` for f32 -- saturating clamp every
+        quantisation path needs before rounding. The two ``fmin`` /
+        ``fmax`` emissions fold into a single ``v_med3_f32`` on AMDGPU.
+        """
+        if v.type.name != "f32":
+            raise ValueError(f"clamp_f32 expects f32 input, got {v.type.name}")
+        return self.fmin(hi, self.fmax(lo, v))
+
+    def xor(self, a: Value, b_v: Value) -> Value:
+        """Bitwise XOR. Same type for both operands."""
+        return self._op("arith.xor", [a, b_v], [a.type], result_name_hint="xor").result
+
+    def shl(self, a: Value, b_v: Value) -> Value:
+        """Logical left shift ``a << b_v``. Lowers to LLVM ``shl``.
+        AMDGPU folds constant shifts into ``v_lshlrev_b32`` with the
+        immediate baked in.
+        """
+        return self._op("arith.shl", [a, b_v], [a.type], result_name_hint="shl").result
+
+    def lshr(self, a: Value, b_v: Value) -> Value:
+        """Logical right shift ``a >> b_v`` (zero-fill). Lowers to
+        LLVM ``lshr``; AMDGPU folds to ``v_lshrrev_b{32,64}``.
+        """
+        return self._op(
+            "arith.lshr", [a, b_v], [a.type], result_name_hint="lshr"
+        ).result
+
+    def umul_hi_i32(self, a: Value, b_v: Value) -> Value:
+        """Unsigned high 32 bits of an i32 * i32 product.
+
+        Returns ``((u64)a * (u64)b) >> 32`` as an i32. Used by
+        Philox4x32 RNG; the AMDGPU backend lowers it to ``v_mul_hi_u32``
+        (a single instruction).
+        """
+        if a.type.name != "i32" or b_v.type.name != "i32":
+            raise ValueError(
+                f"umul_hi_i32 expects i32 operands, got {a.type.name} / {b_v.type.name}"
+            )
+        return self._op(
+            "arith.umul_hi_i32", [a, b_v], [I32], result_name_hint="umh"
+        ).result
+
+    def global_atomic_add(
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        ordering: str = "monotonic",
+    ) -> Value:
+        """Atomic add into a global tensor; returns the value at the slot
+        *before* the add (LLVM ``atomicrmw add`` semantics).
+
+        Supports ``i32`` and ``f32`` operands. Used by the MoE sort
+        kernel and FMHA backward (fp32 dQ accumulate across the K loop).
+        """
+        if value.type.name not in ("i32", "f32"):
+            raise ValueError(
+                f"global_atomic_add supports i32 / f32, got {value.type.name}"
+            )
+        if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
+            raise ValueError(f"unknown ordering {ordering!r}")
+        return self._op(
+            "memref.global_atomic_add",
+            [ptr, idx, value],
+            [value.type],
+            attrs={"elem_type": value.type.name, "ordering": ordering},
+            result_name_hint="atom_add",
+        ).result
+
+    def lds_atomic_add(
+        self,
+        smem: Value,
+        indices: Sequence[Value],
+        value: Value,
+        *,
+        ordering: str = "monotonic",
+    ) -> Value:
+        """Atomic add into an LDS slot; returns the pre-add value.
+
+        Used by the MoE sort histogram pass (per-block per-expert
+        local counters). Lowers to ``ds_add_u32`` / ``ds_pk_add_f32``.
+        """
+        if value.type.name not in ("i32", "f32"):
+            raise ValueError(
+                f"lds_atomic_add supports i32 / f32, got {value.type.name}"
+            )
+        if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
+            raise ValueError(f"unknown ordering {ordering!r}")
+        return self._op(
+            "tile.lds_atomic_add",
+            [smem, *indices, value],
+            [value.type],
+            attrs={
+                "elem_type": value.type.name,
+                "rank": len(indices),
+                "ordering": ordering,
+            },
+            result_name_hint="lds_atom",
+        ).result
+
+    def global_atomic_add_pk_bf16(
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        ordering: str = "monotonic",
+    ) -> Value:
+        """Packed-bf16 atomic add: two bf16 lanes per transaction.
+
+        Lowers to AMDGPU's ``llvm.amdgcn.global.atomic.fadd.v2bf16``
+        intrinsic (gfx940+); returns the pre-add value. ``value``
+        must be a ``<2 x bf16>`` vector and the pointer must reach
+        into a bf16 buffer with an even element index. Used by the
+        FMHA-backward kernel's dQ accumulate path for direct-to-bf16
+        landing.
+        """
+        if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
+            raise ValueError(f"unknown ordering {ordering!r}")
+        if not isinstance(value.type, VectorType):
+            raise ValueError(
+                f"global_atomic_add_pk_bf16 expects <2 x bf16> input, "
+                f"got {value.type.name}"
+            )
+        if value.type.elem != BF16 or value.type.count != 2:
+            raise ValueError(
+                f"global_atomic_add_pk_bf16 expects <2 x bf16> input, "
+                f"got {value.type.name}"
+            )
+        return self._op(
+            "memref.global_atomic_add_pk_bf16",
+            [ptr, idx, value],
+            [value.type],
+            attrs={"elem_type": "bf16", "vec": 2, "ordering": ordering},
+            result_name_hint="atom_bf16",
+        ).result
+
     def fp16_zero(self) -> Value:
         return self._op(
             "arith.constant",
@@ -495,7 +685,7 @@ class IRBuilder:
     def zero_vec(self, elem: Type, n: int) -> Value:
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16):
+        if elem in (F16, BF16, FP8E4M3, BF8E5M2, I8, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
@@ -759,9 +949,15 @@ class IRBuilder:
         return self.smem_load_vN(smem, *indices, dtype=F16, n=n)
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
-        """LDS load of <N x dtype> for 16-bit f16/bf16 values."""
-        if dtype.name not in ("f16", "bf16"):
-            raise ValueError(f"smem_load_vN supports f16/bf16, got {dtype.name}")
+        """LDS load of ``<N x dtype>``. Supports 16-bit (f16 / bf16) and
+        32-bit (f32 / i32) element types; AMDGPU lowers 16-bit vector
+        loads to ``ds_read_b{16, 32, 64, 128}`` and 32-bit vector loads
+        to ``ds_read_b{32, 64, 128}``.
+        """
+        if dtype.name not in ("f16", "bf16", "f32", "i32"):
+            raise ValueError(
+                f"smem_load_vN supports f16 / bf16 / f32 / i32, got {dtype.name}"
+            )
         if n not in (1, 2, 4, 8):
             raise ValueError(f"unsupported vector width for smem_load_vN: {n}")
         if not indices:
@@ -813,6 +1009,22 @@ class IRBuilder:
             result_name_hint="acc",
         ).result
 
+    def mfma_f32_16x16x32_fp8(self, a: Value, b: Value, c: Value) -> Value:
+        return self._op(
+            "tile.mfma_f32_16x16x32_fp8",
+            [a, b, c],
+            [VectorType(F32, 4)],
+            result_name_hint="acc",
+        ).result
+
+    def mfma_f32_16x16x32_bf8(self, a: Value, b: Value, c: Value) -> Value:
+        return self._op(
+            "tile.mfma_f32_16x16x32_bf8",
+            [a, b, c],
+            [VectorType(F32, 4)],
+            result_name_hint="acc",
+        ).result
+
     def mfma_f32_32x32x8_f16(self, a: Value, b: Value, c: Value) -> Value:
         """The 32x32x8 f16 MFMA atom — the default warp-tile every CK
         Tile dispatcher config from `default_config.json` uses on wave64.
@@ -838,6 +1050,22 @@ class IRBuilder:
         """
         return self._op(
             "tile.mfma_f32_32x32x16_f16",
+            [a, b, c],
+            [VectorType(F32, 16)],
+            result_name_hint="acc",
+        ).result
+
+    def mfma_f32_32x32x16_fp8(self, a: Value, b: Value, c: Value) -> Value:
+        return self._op(
+            "tile.mfma_f32_32x32x16_fp8",
+            [a, b, c],
+            [VectorType(F32, 16)],
+            result_name_hint="acc",
+        ).result
+
+    def mfma_f32_32x32x16_bf8(self, a: Value, b: Value, c: Value) -> Value:
+        return self._op(
+            "tile.mfma_f32_32x32x16_bf8",
             [a, b, c],
             [VectorType(F32, 16)],
             result_name_hint="acc",
@@ -914,8 +1142,8 @@ class IRBuilder:
 
         Typical usage::
 
-            lds_base = b.pin_sgpr(b.readfirstlane(b.cast_i32(addr)))
-            # ... subsequent uses of lds_base land in SGPR-only paths ...
+        lds_base = b.pin_sgpr(b.readfirstlane(b.cast_i32(addr)))
+        # ... subsequent uses of lds_base land in SGPR-only paths ...
         """
         return self._op(
             "tile.pin_sgpr",
@@ -1064,16 +1292,16 @@ class IRBuilder:
         from LDS, returning the MFMA B-operand layout directly.
 
         Semantics (gfx950 wave64):
-          - The LDS region at `smem[indices..., 0]` is interpreted as a
-            16-row x 16-column matrix of fp16 (row-major, 32 bytes per row,
-            256 bytes total).
-          - After the read, lane `l = 16 * k_chunk + n` (k_chunk in 0..3,
-            n in 0..15) holds 4 fp16 values:
-                tile[k_chunk*4 + 0, n],
-                tile[k_chunk*4 + 1, n],
-                tile[k_chunk*4 + 2, n],
-                tile[k_chunk*4 + 3, n]
-          - Exactly the per-lane B operand of `v_mfma_f32_16x16x16_f16`.
+        - The LDS region at `smem[indices..., 0]` is interpreted as a
+        16-row x 16-column matrix of fp16 (row-major, 32 bytes per row,
+        256 bytes total).
+        - After the read, lane `l = 16 * k_chunk + n` (k_chunk in 0..3,
+        n in 0..15) holds 4 fp16 values:
+        tile[k_chunk*4 + 0, n],
+        tile[k_chunk*4 + 1, n],
+        tile[k_chunk*4 + 2, n],
+        tile[k_chunk*4 + 3, n]
+        - Exactly the per-lane B operand of `v_mfma_f32_16x16x16_f16`.
 
         Use case: PV gemm where `V[T, HD]` is in LDS row-major and we want
         `B[k_chunk*4 + 0..3, n]` per lane without 4 strided `ds_read_u16`.
@@ -1134,15 +1362,15 @@ class IRBuilder:
         intrinsic.
 
         Args:
-            coherency: AMDGPU buffer-load AUX bits (0..3). One of
-                :data:`CACHE_ALL` (0, default), :data:`CACHE_GLOBAL`
-                (1, GLC set — skip L2), :data:`CACHE_STREAM` (2, SLC
-                set), :data:`NON_TEMPORAL` (3, GLC|SLC). The AUX field
-                lives in the last argument of
-                ``llvm.amdgcn.raw.ptr.buffer.load[.lds]`` and biases
-                the L1/L2 caching policy. ``CACHE_STREAM`` is the
-                right hint for one-shot streaming loads in a
-                ping-pong pipeline that won't reuse the data.
+        coherency: AMDGPU buffer-load AUX bits (0..3). One of
+        :data:`CACHE_ALL` (0, default), :data:`CACHE_GLOBAL`
+        (1, GLC set — skip L2), :data:`CACHE_STREAM` (2, SLC
+        set), :data:`NON_TEMPORAL` (3, GLC|SLC). The AUX field
+        lives in the last argument of
+        ``llvm.amdgcn.raw.ptr.buffer.load[.lds]`` and biases
+        the L1/L2 caching policy. ``CACHE_STREAM`` is the
+        right hint for one-shot streaming loads in a
+        ping-pong pipeline that won't reuse the data.
         """
         if dwords not in (1, 3, 4):
             raise ValueError(
@@ -1174,20 +1402,20 @@ class IRBuilder:
         block to converge.
 
         Caveats:
-          * The non-participating waves must NOT reach this point — the
-            caller is responsible for ensuring all waves either enter
-            this barrier or the matching companion barrier (e.g. on the
-            ``stagger=0`` half). If only some waves reach an unmatched
-            half-block barrier the HW will deadlock.
-          * Always pair with a full :meth:`sync` at the start and end
-            of the cluster so the two halves rejoin cleanly.
+        * The non-participating waves must NOT reach this point — the
+        caller is responsible for ensuring all waves either enter
+        this barrier or the matching companion barrier (e.g. on the
+        ``stagger=0`` half). If only some waves reach an unmatched
+        half-block barrier the HW will deadlock.
+        * Always pair with a full :meth:`sync` at the start and end
+        of the cluster so the two halves rejoin cleanly.
 
         Parameters
         ----------
         half_selector
-            i32 SSA. Non-zero -> this wave participates in the barrier.
-            Typical use: ``b.cmp_ne(stagger, b.const_i32(0))`` where
-            ``stagger = warpid() / (num_warps / 2)``.
+        i32 SSA. Non-zero -> this wave participates in the barrier.
+        Typical use: ``b.cmp_ne(stagger, b.const_i32(0))`` where
+        ``stagger = warpid() / (num_warps / 2)``.
         """
         self._op("tile.sync_half_block", [half_selector])
 
@@ -1213,11 +1441,11 @@ class IRBuilder:
         wait); pass 0 to fully drain that counter.
 
         Usage in the compv4 pipeline:
-          - after issuing the async DRAM->LDS loads for the next K-tile,
-            insert `s_waitcnt(vmcnt=0)` *just before* the MFMAs that
-            consume the freshly-arrived data;
-          - after issuing `ds_read`s, `s_waitcnt(lgkmcnt=0)` ensures
-            the LDS data is in registers before MFMA.
+        - after issuing the async DRAM->LDS loads for the next K-tile,
+        insert `s_waitcnt(vmcnt=0)` *just before* the MFMAs that
+        consume the freshly-arrived data;
+        - after issuing `ds_read`s, `s_waitcnt(lgkmcnt=0)` ensures
+        the LDS data is in registers before MFMA.
 
         AMDGPU bit encoding is handled by the lowerers. For gfx950 the
         important detail is that VMCNT is 6 bits split across bits [3:0]
@@ -1248,11 +1476,11 @@ class IRBuilder:
         reads/writes, and VMEM reads.
 
         AMD mask bits:
-          0x008 = MFMA
-          0x020 = VMEM read
-          0x040 = VMEM write
-          0x100 = DS read
-          0x200 = DS write
+        0x008 = MFMA
+        0x020 = VMEM read
+        0x040 = VMEM write
+        0x100 = DS read
+        0x200 = DS write
         """
         self._op(
             "tile.sched_group_barrier",
@@ -1591,17 +1819,17 @@ class IRBuilder:
         """Create a scf.for loop with iteration arguments.
 
         Args:
-            lower: Loop lower bound
-            upper: Loop upper bound
-            step: Loop step
-            iter_args: Sequence of (name, init_value) for iteration variables
-            iv_name: Induction variable name (default: "k0")
-            unroll: Loop unrolling hint (default: False)
-                - False: emit normal loop
-                - True: fully unroll if trip count is compile-time constant
-            elide_trailing_barrier: Phase 4 optimization (default: True)
-                - True: automatically elide trailing sync() in non-final iterations
-                - False: preserve all barriers (for manually optimized kernels)
+        lower: Loop lower bound
+        upper: Loop upper bound
+        step: Loop step
+        iter_args: Sequence of (name, init_value) for iteration variables
+        iv_name: Induction variable name (default: "k0")
+        unroll: Loop unrolling hint (default: False)
+        - False: emit normal loop
+        - True: fully unroll if trip count is compile-time constant
+        elide_trailing_barrier: Phase 4 optimization (default: True)
+        - True: automatically elide trailing sync() in non-final iterations
+        - False: preserve all barriers (for manually optimized kernels)
         """
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
@@ -1732,6 +1960,12 @@ PURE_OP_NAMES = {
     "arith.bitcast",
     "arith.xor",
     "arith.shl",
+    "arith.lshr",
+    "arith.umul_hi_i32",
+    "arith.cvt_bf8_to_f32",
+    "arith.cvt_f32_to_fp8",
+    "arith.cvt_f32_to_bf8",
+    "arith.cvt_f32_to_i8_sat",
 }
 
 

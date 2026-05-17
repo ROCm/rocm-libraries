@@ -37,6 +37,7 @@ _HIP_TYPE = {
     "bf16": "bf16",
     "f32": "float",
     "fp8e4m3": "fp8e4m3",
+    "bf8e5m2": "bf8e5m2",
 }
 
 
@@ -59,7 +60,9 @@ def _type_to_hip(t) -> str:
         if elem == "i8":
             return f"i8x{t.count}"
         if elem == "fp8e4m3":
-            return f"i8x{t.count}"  # fp8 is stored as bytes
+            return f"i8x{t.count}"  # fp8e4m3 is stored as bytes
+        if elem == "bf8e5m2":
+            return f"i8x{t.count}"  # bf8e5m2 is stored as bytes
         if elem == "i1":
             # i1 vectors materialise per-element predicates; lower as
             # ``boolxN`` from the prologue. The AMDGPU backend folds
@@ -92,23 +95,24 @@ using bf16 = __bf16;
 #else
 using bf16 = __bf16;
 #endif
-using fp8e4m3 = signed char;  // raw byte storage; converted via amdgcn intrinsics
+using fp8e4m3 = signed char; // raw byte storage; converted via amdgcn intrinsics
+using bf8e5m2 = signed char; // raw byte storage; e5m2 variant (different cvt intrinsic)
 
 // AMDGPU vector typedefs via Clang's ext_vector_type. Names match the
 // fNxM convention used throughout the handlers below.
 #define _CKDSL_VEC(elem_t, name, n) \\
-    using name##n = elem_t __attribute__((ext_vector_type(n)))
-_CKDSL_VEC(fp16,  f16x, 1); _CKDSL_VEC(fp16,  f16x, 2); _CKDSL_VEC(fp16,  f16x, 4);
-_CKDSL_VEC(fp16,  f16x, 8); _CKDSL_VEC(fp16,  f16x, 16);
-_CKDSL_VEC(bf16,  bf16x, 1); _CKDSL_VEC(bf16,  bf16x, 2); _CKDSL_VEC(bf16,  bf16x, 4);
-_CKDSL_VEC(bf16,  bf16x, 8); _CKDSL_VEC(bf16,  bf16x, 16);
+ using name##n = elem_t __attribute__((ext_vector_type(n)))
+_CKDSL_VEC(fp16, f16x, 1); _CKDSL_VEC(fp16, f16x, 2); _CKDSL_VEC(fp16, f16x, 4);
+_CKDSL_VEC(fp16, f16x, 8); _CKDSL_VEC(fp16, f16x, 16);
+_CKDSL_VEC(bf16, bf16x, 1); _CKDSL_VEC(bf16, bf16x, 2); _CKDSL_VEC(bf16, bf16x, 4);
+_CKDSL_VEC(bf16, bf16x, 8); _CKDSL_VEC(bf16, bf16x, 16);
 _CKDSL_VEC(float, f32x, 1); _CKDSL_VEC(float, f32x, 2); _CKDSL_VEC(float, f32x, 4);
 _CKDSL_VEC(float, f32x, 8); _CKDSL_VEC(float, f32x, 16);
-_CKDSL_VEC(int,   i32x, 1); _CKDSL_VEC(int,   i32x, 2); _CKDSL_VEC(int,   i32x, 3);
-_CKDSL_VEC(int,   i32x, 4); _CKDSL_VEC(int,   i32x, 8);
-_CKDSL_VEC(int8_t, i8x,  4); _CKDSL_VEC(int8_t, i8x,  8); _CKDSL_VEC(int8_t, i8x, 16);
-_CKDSL_VEC(bool,  boolx, 2); _CKDSL_VEC(bool,  boolx, 4); _CKDSL_VEC(bool,  boolx, 8);
-_CKDSL_VEC(bool,  boolx, 16);
+_CKDSL_VEC(int, i32x, 1); _CKDSL_VEC(int, i32x, 2); _CKDSL_VEC(int, i32x, 3);
+_CKDSL_VEC(int, i32x, 4); _CKDSL_VEC(int, i32x, 8);
+_CKDSL_VEC(int8_t, i8x, 4); _CKDSL_VEC(int8_t, i8x, 8); _CKDSL_VEC(int8_t, i8x, 16);
+_CKDSL_VEC(bool, boolx, 2); _CKDSL_VEC(bool, boolx, 4); _CKDSL_VEC(bool, boolx, 8);
+_CKDSL_VEC(bool, boolx, 16);
 #undef _CKDSL_VEC
 
 // Buffer-resource descriptor opaque type. ``__builtin_amdgcn_make_buffer_rsrc``
@@ -127,21 +131,21 @@ using rsrc_t = __amdgpu_buffer_rsrc_t;
 // kernel context.
 typedef short i16x4_raw __attribute__((ext_vector_type(4)));
 __device__ extern "C" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(
-    const __attribute__((address_space(3))) void*)
-    __asm("llvm.amdgcn.ds.read.tr16.b64");
+ const __attribute__((address_space(3))) void*)
+ __asm("llvm.amdgcn.ds.read.tr16.b64");
 // ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to
 // {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},
 // which is what async-DMA pipelines (compv4 / split-KV attention) need.
 // Calling the intrinsic directly bypasses the builtin's validation.
 __device__ extern "C" void _llvm_amdgcn_raw_ptr_buffer_load_lds(
-    __amdgpu_buffer_rsrc_t,
-    __attribute__((address_space(3))) void*,
-    int /*size_bytes*/,
-    int /*voffset*/,
-    int /*soffset*/,
-    int /*offset_imm*/,
-    int /*aux_imm*/)
-    __asm("llvm.amdgcn.raw.ptr.buffer.load.lds");
+ __amdgpu_buffer_rsrc_t,
+ __attribute__((address_space(3))) void*,
+ int /*size_bytes*/,
+ int /*voffset*/,
+ int /*soffset*/,
+ int /*offset_imm*/,
+ int /*aux_imm*/)
+ __asm("llvm.amdgcn.raw.ptr.buffer.load.lds");
 """
 
 
@@ -189,7 +193,7 @@ class _Lowerer:
         self._smem_counter = 0
 
     def _emit(self, text: str) -> None:
-        self.lines.append("    " * self._indent + text)
+        self.lines.append(" " * self._indent + text)
 
     def _push_indent(self) -> None:
         self._indent += 1
@@ -229,9 +233,13 @@ class _Lowerer:
         if not isinstance(res.type, VectorType):
             raise NotImplementedError("constant_vec result must be a vector")
         count = res.type.count
+        cpp_t = _type_to_hip(res.type)
         elem_name = res.type.elem.name
-        cpp_t = f"f{16 if elem_name == 'f16' else 32}x{count}"
-        items = ", ".join(f"{fill}f" for _ in range(count))
+        if elem_name in ("f16", "bf16", "f32"):
+            item = _f32_literal(float(fill))
+        else:
+            item = str(int(fill))
+        items = ", ".join(item for _ in range(count))
         self._emit(f"{cpp_t} {_name(res)} = {{{items}}};")
 
     def _binary(self, op: Op, c_op: str) -> None:
@@ -333,9 +341,11 @@ class _Lowerer:
     def _op_memref_global_load_vN(self, op: Op) -> None:
         ptr, idx = op.operands
         vec = int(op.attrs["vec"])
+        elem_name = op.attrs.get("elem_type", "f16")
+        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
         self._emit(
-            f"f16x{vec} {_name(op.result)} = "
-            f"*reinterpret_cast<const f16x{vec}*>({_name(ptr)} + {_name(idx)});"
+            f"{prefix}{vec} {_name(op.result)} = "
+            f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
         )
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
@@ -347,8 +357,10 @@ class _Lowerer:
         if storage is None:
             raise RuntimeError("smem store_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
+        elem_name = op.attrs.get("elem_type", "f16")
+        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
         self._emit(
-            f"*reinterpret_cast<f16x{vec}*>(&{storage}[{idx_str}]) = {_name(value)};"
+            f"*reinterpret_cast<{prefix}{vec}*>(&{storage}[{idx_str}]) = {_name(value)};"
         )
 
     def _op_tile_smem_store(self, op: Op) -> None:
@@ -404,6 +416,50 @@ class _Lowerer:
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4f16("
             f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+        )
+
+    # ---- FP8 / BF8 MFMA (gfx940+) ----
+    #
+    # IR operand types are ``<8 x fp8e4m3>`` / ``<8 x bf8e5m2>`` --
+    # both map to ``i8x8`` in the HIP prologue. On ROCm clang the FP8 /
+    # BF8 MFMA builtins take the packed 64-bit operand as ``long``. We
+    # ``__builtin_memcpy`` the byte vector into that scalar type so the
+    # generated source preserves the raw bits without relying on aliasing.
+
+    def _emit_fp8_mfma(self, op: Op, *, out_vec: int, builtin: str) -> None:
+        a, b, c = op.operands
+        a_pk = f"{_name(op.result)}_a_pk"
+        b_pk = f"{_name(op.result)}_b_pk"
+        out_t = f"f32x{out_vec}"
+        self._emit(
+            f"long {a_pk}; __builtin_memcpy(&{a_pk}, &{_name(a)}, sizeof({a_pk}));"
+        )
+        self._emit(
+            f"long {b_pk}; __builtin_memcpy(&{b_pk}, &{_name(b)}, sizeof({b_pk}));"
+        )
+        self._emit(
+            f"{out_t} {_name(op.result)} = {builtin}("
+            f"{a_pk}, {b_pk}, {_name(c)}, 0, 0, 0);"
+        )
+
+    def _op_tile_mfma_f32_16x16x32_fp8(self, op: Op) -> None:
+        self._emit_fp8_mfma(
+            op, out_vec=4, builtin="__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8"
+        )
+
+    def _op_tile_mfma_f32_16x16x32_bf8(self, op: Op) -> None:
+        self._emit_fp8_mfma(
+            op, out_vec=4, builtin="__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8"
+        )
+
+    def _op_tile_mfma_f32_32x32x16_fp8(self, op: Op) -> None:
+        self._emit_fp8_mfma(
+            op, out_vec=16, builtin="__builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8"
+        )
+
+    def _op_tile_mfma_f32_32x32x16_bf8(self, op: Op) -> None:
+        self._emit_fp8_mfma(
+            op, out_vec=16, builtin="__builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8"
         )
 
     def _op_vector_bitcast(self, op: Op) -> None:
@@ -779,6 +835,52 @@ class _Lowerer:
             f"(unsigned int)(unsigned char){_name(v)}, 0);"
         )
 
+    def _op_arith_cvt_bf8_to_f32(self, op: Op) -> None:
+        # AMDGPU's per-byte bf8e5m2 -> f32 builtin.
+        (v,) = op.operands
+        self._emit(
+            f"float {_name(op.result)} = __builtin_amdgcn_cvt_f32_bf8("
+            f"(unsigned int)(unsigned char){_name(v)}, 0);"
+        )
+
+    def _op_arith_cvt_f32_to_fp8(self, op: Op) -> None:
+        # AMDGPU's packed f32 -> fp8e4m3 builtin. We feed one live f32
+        # plus a +0.0f filler into the second slot, select word-lane 0,
+        # and extract the low byte as the single-element result.
+        (v,) = op.operands
+        tmp = f"{_name(op.result)}_pk"
+        self._emit(
+            f"unsigned int {tmp} = __builtin_amdgcn_cvt_pk_fp8_f32("
+            f"{_name(v)}, 0.0f, 0u, false);"
+        )
+        self._emit(f"fp8e4m3 {_name(op.result)} = (fp8e4m3)({tmp} & 0xffu);")
+
+    def _op_arith_cvt_f32_to_bf8(self, op: Op) -> None:
+        # AMDGPU's packed f32 -> bf8e5m2 builtin (e5m2 sibling).
+        (v,) = op.operands
+        tmp = f"{_name(op.result)}_pk"
+        self._emit(
+            f"unsigned int {tmp} = __builtin_amdgcn_cvt_pk_bf8_f32("
+            f"{_name(v)}, 0.0f, 0u, false);"
+        )
+        self._emit(f"bf8e5m2 {_name(op.result)} = (bf8e5m2)({tmp} & 0xffu);")
+
+    def _op_arith_cvt_f32_to_i8_sat(self, op: Op) -> None:
+        # Saturating f32 -> i8 round-to-nearest-even. ``rintf`` honours
+        # the current rounding mode (RNE by default), the explicit
+        # clamp into [-128, 127] makes the trunc-to-i8 fully defined,
+        # and the resulting sequence folds into a ``v_med3_i32`` plus a
+        # ``v_cvt_pk_i16_i32`` byte select on the AMDGPU backend.
+        (v,) = op.operands
+        rounded = f"{_name(op.result)}_r"
+        as_i32 = f"{_name(op.result)}_i"
+        self._emit(f"float {rounded} = rintf({_name(v)});")
+        self._emit(f"int {as_i32} = (int){rounded};")
+        self._emit(
+            f"int8_t {_name(op.result)} = (int8_t)({as_i32} < -128 ? -128 : "
+            f"({as_i32} > 127 ? 127 : {as_i32}));"
+        )
+
     def _op_arith_bitcast(self, op: Op) -> None:
         (v,) = op.operands
         tgt = _type_to_hip(op.result.type)
@@ -801,12 +903,75 @@ class _Lowerer:
     def _op_arith_shl(self, op: Op) -> None:
         self._binary(op, "<<")
 
+    def _op_arith_lshr(self, op: Op) -> None:
+        """``a >> b`` with the unsigned-shift cast pair so HIP doesn't
+        emit a signed arithmetic shift.
+        """
+        a, b = op.operands
+        self._emit(
+            f"int {_name(op.result)} = (int)((unsigned)({_name(a)}) >> {_name(b)});"
+        )
+
+    def _op_arith_umul_hi_i32(self, op: Op) -> None:
+        """High 32 bits of i32 * i32 via HIP's ``__umulhi`` builtin."""
+        a, b = op.operands
+        self._emit(
+            f"int {_name(op.result)} = "
+            f"(int)__umulhi((unsigned){_name(a)}, (unsigned){_name(b)});"
+        )
+
     # -------------------- memref: typed loads / stores / atomics --------------------
 
     def _op_memref_global_load_typed(self, op: Op) -> None:
         ptr, idx = op.operands
         cpp_t = _type_to_hip(op.result.type)
         self._emit(f"{cpp_t} {_name(op.result)} = {_name(ptr)}[{_name(idx)}];")
+
+    def _op_memref_global_atomic_add(self, op: Op) -> None:
+        """Lower ``global_atomic_add`` via HIP's ``atomicAdd``.
+
+        HIP's ``atomicAdd(ptr, val)`` returns the value at the slot
+        before the add -- matches our IR contract (LLVM atomicrmw add
+        semantics). Supports i32 and f32; the f32 variant uses the
+        gfx940+ ``global_atomic_add_f32`` instruction under the hood.
+        """
+        ptr, idx, val = op.operands
+        cpp_t = _type_to_hip(val.type)
+        self._emit(
+            f"{cpp_t} {_name(op.result)} = atomicAdd(&{_name(ptr)}[{_name(idx)}], "
+            f"{_name(val)});"
+        )
+
+    def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
+        """Lower the packed-bf16 atomic add via the AMDGPU builtin.
+
+        Emits ``__builtin_amdgcn_global_atomic_fadd_v2bf16``, the HIP
+        counterpart of LLVM's ``llvm.amdgcn.global.atomic.fadd.v2bf16``
+        intrinsic. The input is a ``bf16x2`` and the result is the
+        pre-add value at the slot.
+        """
+        ptr, idx, val = op.operands
+        self._emit(
+            f"bf16x2 {_name(op.result)} = "
+            f"__builtin_amdgcn_global_atomic_fadd_v2bf16("
+            f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
+        )
+
+    def _op_tile_lds_atomic_add(self, op: Op) -> None:
+        """Lower ``lds_atomic_add`` via HIP's ``atomicAdd`` on a
+        ``__shared__`` slot. The pointer is the LDS base + the rank-N
+        linear index; ``atomicAdd`` selects the ``ds_add_u32`` /
+        ``ds_pk_add_f32`` instruction at codegen.
+        """
+        smem = op.operands[0]
+        indices = list(op.operands[1:-1])
+        val = op.operands[-1]
+        cpp_t = _type_to_hip(val.type)
+        idx_expr = "][".join(_name(i) for i in indices)
+        self._emit(
+            f"{cpp_t} {_name(op.result)} = atomicAdd(&{_name(smem)}[{idx_expr}], "
+            f"{_name(val)});"
+        )
 
     def _op_memref_global_store_typed(self, op: Op) -> None:
         ptr, idx, val = op.operands
@@ -884,8 +1049,8 @@ class _Lowerer:
         # Using the opaque type keeps the bitcast pun out of the user code.
         #
         # Signature on ROCm 7 amdclang:
-        #   ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
-        #                                       int num_records, int flags)``
+        # ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
+        # int num_records, int flags)``
         #
         # The flags word is the rsrc DWORD3: it encodes
         # ``TYPE=BUFFER_RESOURCE, DATA_FORMAT=32-bit dword, NUM_FORMAT=UINT``.
@@ -1171,18 +1336,18 @@ def lower_kernel_to_hip(
     """Return a compilable HIP source for ``kernel``.
 
     The output is:
-      1. The :data:`HIP_PROLOGUE` (typedefs + ``<hip/hip_runtime.h>``
-         include + AMDGPU vector typedefs). Disable with
-         ``include_prologue=False`` when you want only the body text
-         (e.g. for embedding into a larger TU that already has these
-         typedefs).
-      2. The kernel's ``__global__`` signature, derived from
-         :attr:`KernelDef.params`. Pointer params get ``__restrict__``;
-         ``__launch_bounds__`` is taken from
-         :attr:`KernelDef.max_workgroup_size` unless the caller
-         overrides via ``launch_bounds``.
-      3. The lowered kernel body, including any ``__shared__`` declarations
-         emitted by ``tile.smem_alloc`` ops.
+    1. The :data:`HIP_PROLOGUE` (typedefs + ``<hip/hip_runtime.h>``
+    include + AMDGPU vector typedefs). Disable with
+    ``include_prologue=False`` when you want only the body text
+    (e.g. for embedding into a larger TU that already has these
+    typedefs).
+    2. The kernel's ``__global__`` signature, derived from
+    :attr:`KernelDef.params`. Pointer params get ``__restrict__``;
+    ``__launch_bounds__`` is taken from
+    :attr:`KernelDef.max_workgroup_size` unless the caller
+    overrides via ``launch_bounds``.
+    3. The lowered kernel body, including any ``__shared__`` declarations
+    emitted by ``tile.smem_alloc`` ops.
 
     Mirrors what CK Tile templates expand to after the
     instantiator runs: a single ``__global__`` function with explicit

@@ -4365,5 +4365,581 @@ class TestRuntimeEventLifecycle(unittest.TestCase):
             self._restore_pending(prior)
 
 
+# ---------------------------------------------------------------------
+# Build smoke tests for the FMHA / Sage / sparse-attention instance
+# family. These are IR-build + LLVM-lower smoke tests (no GPU); the
+# intent is to catch regressions in the builders + their lowering
+# vocabulary, NOT to validate numerical correctness. End-to-end
+# correctness + perf parity for these kernels is not covered by
+# this suite yet -- see test_ck_dsl_examples.py for the GPU-bound
+# parity tests on the pre-existing kernels.
+# ---------------------------------------------------------------------
+
+
+class TestExtendedAttentionBuilds(unittest.TestCase):
+    def _common(self, *, dtype="f16", mask_mode="none"):
+        from ck_dsl.instances import FmhaCommonSpec, FmhaShape
+
+        return FmhaCommonSpec(
+            shape=FmhaShape(head_size=64, num_query_heads=8, num_kv_heads=8),
+            dtype=dtype,
+            mask_mode=mask_mode,
+        )
+
+    def _gqa_common(self):
+        from ck_dsl.instances import FmhaCommonSpec, FmhaShape
+
+        return FmhaCommonSpec(
+            shape=FmhaShape(head_size=64, num_query_heads=8, num_kv_heads=2),
+            dtype="f16",
+            mask_mode="causal",
+        )
+
+    def test_fmha_fwd_varlen_builds_and_lowers(self):
+        from ck_dsl.instances import FmhaFwdVarlenSpec, build_fmha_fwd_varlen
+
+        spec = FmhaFwdVarlenSpec(
+            common=self._common(mask_mode="causal"),
+            max_seqlen_q=256,
+            max_seqlen_k=256,
+            batch=2,
+        )
+        ll = lower_kernel_to_llvm(build_fmha_fwd_varlen(spec))
+        self.assertIn("@llvm.exp2.f32", ll)
+        self.assertIn("define amdgpu_kernel", ll)
+
+    def test_fmha_appendkv_with_rotary_emits_cos_sin_loads(self):
+        from ck_dsl.helpers.rotary import RotarySpec
+        from ck_dsl.instances import FmhaAppendKvSpec, build_fmha_fwd_appendkv
+
+        spec = FmhaAppendKvSpec(
+            common=self._common(),
+            batch=2,
+            rotary=RotarySpec(head_size=64, layout="half"),
+        )
+        ll = lower_kernel_to_llvm(build_fmha_fwd_appendkv(spec))
+        self.assertGreaterEqual(ll.count("load float"), 32)
+
+    def test_fmha_paged_prefill_builds(self):
+        from ck_dsl.instances import (
+            FmhaFwdPagedPrefillSpec,
+            build_fmha_fwd_paged_prefill,
+        )
+
+        spec = FmhaFwdPagedPrefillSpec(
+            common=self._common(mask_mode="causal"),
+            page_block_size=16,
+            max_blocks_per_seq=32,
+            batch=2,
+        )
+        kernel = build_fmha_fwd_paged_prefill(spec)
+        self.assertIn("block_table", [p.name for p in kernel.params])
+
+    def test_fmha_splitkv_decode_two_kernel_pipeline(self):
+        from ck_dsl.instances import (
+            FmhaFwdSplitKvDecodeSpec,
+            build_fmha_fwd_splitkv_decode_reduce,
+            build_fmha_fwd_splitkv_decode_segment,
+        )
+
+        spec = FmhaFwdSplitKvDecodeSpec(
+            common=self._common(),
+            batch=4,
+            num_segments=8,
+        )
+        seg = build_fmha_fwd_splitkv_decode_segment(spec)
+        red = build_fmha_fwd_splitkv_decode_reduce(spec)
+        self.assertEqual(
+            sorted(p.name for p in seg.params)[:3],
+            sorted(["Q", "K", "V"])[:3],
+        )
+        ll_red = lower_kernel_to_llvm(red)
+        self.assertIn("@llvm.exp2.f32", ll_red)
+
+    def test_fmha_head_grouping_builds_for_gqa(self):
+        from ck_dsl.instances import (
+            FmhaFwdHeadGroupingSpec,
+            build_fmha_fwd_head_grouping,
+        )
+
+        spec = FmhaFwdHeadGroupingSpec(
+            common=self._gqa_common(),
+            seqlen_q=128,
+            seqlen_k=128,
+        )
+        ll = lower_kernel_to_llvm(build_fmha_fwd_head_grouping(spec))
+        self.assertIn("@llvm.amdgcn.workgroup.id.z", ll)
+
+    def test_fmha_bwd_uses_atomic_fadd(self):
+        from ck_dsl.instances import FmhaBwdSpec, build_fmha_bwd
+
+        spec = FmhaBwdSpec(
+            common=self._common(),
+            seqlen_q=64,
+            seqlen_k=64,
+        )
+        ll = lower_kernel_to_llvm(build_fmha_bwd(spec))
+        # 3 atomic accumulators (dQ, dK, dV) per K-step per head dim.
+        self.assertGreaterEqual(ll.count("atomicrmw fadd ptr addrspace(1)"), 3)
+
+    def test_fmha_fwd_fp8_emits_cvt_fp8_intrinsic(self):
+        from ck_dsl.instances import FmhaFwdFp8Spec, build_fmha_fwd_fp8
+
+        spec = FmhaFwdFp8Spec(
+            common=self._common(),
+            kv_dtype="fp8e4m3",
+            seqlen_q=32,
+        )
+        ll = lower_kernel_to_llvm(build_fmha_fwd_fp8(spec))
+        self.assertIn("@llvm.amdgcn.cvt.f32.fp8", ll)
+
+
+class TestSageAttentionBuilds(unittest.TestCase):
+    def _spec(self, quant_mode, *, head_size=64):
+        from ck_dsl.helpers.qk_scale import QkScaleSpec
+        from ck_dsl.instances import (
+            FmhaCommonSpec,
+            FmhaShape,
+            SageAttentionSpec,
+        )
+
+        common = FmhaCommonSpec(
+            shape=FmhaShape(head_size=head_size, num_query_heads=8, num_kv_heads=8),
+            dtype="f16",
+            mask_mode="none",
+        )
+        return SageAttentionSpec(
+            common=common,
+            quant_mode=quant_mode,
+            q_scale=QkScaleSpec(
+                layout="per_block",
+                scale_block=16,
+                stride_batch=128,
+                stride_head=8,
+                stride_block=1,
+            ),
+            k_scale=QkScaleSpec(
+                layout="per_block",
+                scale_block=64,
+                stride_batch=128,
+                stride_head=8,
+                stride_block=1,
+            ),
+            seqlen_q=16,
+            seqlen_k=64,
+        )
+
+    def test_fp16_baseline_no_fp8_cvt(self):
+        from ck_dsl.instances import build_sage_attention
+
+        ll = lower_kernel_to_llvm(build_sage_attention(self._spec("fp16_bf16")))
+        self.assertNotIn("@llvm.amdgcn.cvt.f32.fp8", ll)
+
+    def test_fp8_variant_uses_fp8_cvt(self):
+        from ck_dsl.instances import build_sage_attention
+
+        ll = lower_kernel_to_llvm(build_sage_attention(self._spec("fp8_bf16")))
+        self.assertIn("@llvm.amdgcn.cvt.f32.fp8", ll)
+
+    def test_int_variants_add_codebook_params(self):
+        from ck_dsl.instances import build_sage_attention
+
+        # i4 sage needs head_size=128 (each lane owns one packed byte =
+        # two nibbles); i8 sage works at head_size=64.
+        for qm, hs in (("i8_fp8_bf16", 64), ("i4_fp8_bf16", 128)):
+            kernel = build_sage_attention(self._spec(qm, head_size=hs))
+            names = [p.name for p in kernel.params]
+            self.assertIn("codebook_k", names, f"qm={qm}")
+            self.assertIn("codebook_v", names, f"qm={qm}")
+
+
+class TestSparseAttentionBuilds(unittest.TestCase):
+    def _common(self):
+        from ck_dsl.instances import FmhaCommonSpec, FmhaShape
+
+        return FmhaCommonSpec(
+            shape=FmhaShape(head_size=64, num_query_heads=8, num_kv_heads=8),
+            dtype="f16",
+            mask_mode="none",
+        )
+
+    def test_jenga_emits_mask_byte_guard(self):
+        from ck_dsl.instances import (
+            JengaSparseSpec,
+            build_jenga_sparse_attention,
+        )
+
+        spec = JengaSparseSpec(
+            common=self._common(),
+            seqlen_q=32,
+            seqlen_k=128,
+            block_q=1,
+            block_k=32,
+        )
+        ll = lower_kernel_to_llvm(build_jenga_sparse_attention(spec))
+        self.assertIn("load i8", ll)
+        self.assertIn("icmp ne i8", ll)
+
+    def test_vsa_loads_block_count_then_lut(self):
+        from ck_dsl.instances import (
+            VsaSparseSpec,
+            build_vsa_sparse_attention,
+        )
+
+        spec = VsaSparseSpec(
+            common=self._common(),
+            seqlen_q=32,
+            seqlen_k=256,
+            block_q=1,
+            block_k=32,
+            max_blocks_per_q=4,
+        )
+        ll = lower_kernel_to_llvm(build_vsa_sparse_attention(spec))
+        self.assertGreaterEqual(ll.count("load i32"), 2)
+
+
+class TestExtendedHelperBuilds(unittest.TestCase):
+    def test_global_atomic_add_pk_bf16_intrinsic(self):
+        from ck_dsl.core.ir import BF16, I32, IRBuilder, PtrType
+
+        b = IRBuilder("pk_bf16")
+        ptr = b.param("p", PtrType(BF16, "global"))
+        idx = b.param("i", I32)
+        b.global_atomic_add_pk_bf16(ptr, idx, b.zero_vec(BF16, 2))
+        b.ret()
+        ll = lower_kernel_to_llvm(b.kernel)
+        self.assertIn("@llvm.amdgcn.global.atomic.fadd.v2bf16", ll)
+
+    def test_umul_hi_i32_lowers_via_zext_mul_lshr_trunc(self):
+        from ck_dsl.core.ir import I32, IRBuilder
+
+        b = IRBuilder("umh")
+        a = b.param("a", I32)
+        c = b.param("c", I32)
+        b.umul_hi_i32(a, c)
+        b.ret()
+        ll = lower_kernel_to_llvm(b.kernel)
+        self.assertIn("zext i32", ll)
+        self.assertIn("mul i64", ll)
+        self.assertIn("lshr i64", ll)
+
+    def test_rotary_apply_emits_fma_chain(self):
+        from ck_dsl.core.ir import F32, I32, IRBuilder, PtrType
+        from ck_dsl.helpers.rotary import (
+            RotarySpec,
+            apply_rotary_pair_f32,
+            load_cos_sin,
+        )
+
+        b = IRBuilder("rot")
+        cos_t = b.param("cos_t", PtrType(F32, "global"))
+        sin_t = b.param("sin_t", PtrType(F32, "global"))
+        pos = b.param("pos", I32)
+        pair = b.param("pair", I32)
+        cos_v, sin_v = load_cos_sin(
+            b,
+            cos_t,
+            sin_t,
+            token_pos=pos,
+            pair_idx=pair,
+            spec=RotarySpec(head_size=64, layout="half"),
+        )
+        apply_rotary_pair_f32(b, b.const_f32(1.0), b.const_f32(2.0), cos_v, sin_v)
+        b.ret()
+        ll = lower_kernel_to_llvm(b.kernel)
+        self.assertIn("fmul float", ll)
+        self.assertIn("fsub float", ll)
+
+    def test_dropout_mask_pair_runs_full_philox(self):
+        from ck_dsl.core.ir import F32, I32, IRBuilder
+        from ck_dsl.helpers.rng import dropout_mask_pair_f32
+
+        b = IRBuilder("drop")
+        seed_lo = b.param("sl", I32)
+        seed_hi = b.param("sh", I32)
+        subseq = b.param("ss", I32)
+        offset = b.param("off", I32)
+        keep = b.param("keep", F32)
+        dropout_mask_pair_f32(
+            b,
+            seed_lo=seed_lo,
+            seed_hi=seed_hi,
+            subseq=subseq,
+            offset=offset,
+            keep_prob_f32=keep,
+        )
+        b.ret()
+        ll = lower_kernel_to_llvm(b.kernel)
+        # 10 rounds of mulhilo = 20 mul i64 operations.
+        self.assertGreaterEqual(ll.count("mul i64"), 20)
+
+    def test_codebook_i8_emits_fp8_round(self):
+        from ck_dsl.core.ir import F32, I32, IRBuilder, PtrType
+        from ck_dsl.helpers.codebook import codebook_lookup_i8_to_fp8
+
+        b = IRBuilder("cb")
+        cb = b.param("cb", PtrType(F32, "global"))
+        v = b.param("v", I32)
+        codebook_lookup_i8_to_fp8(b, cb, v)
+        b.ret()
+        ll = lower_kernel_to_llvm(b.kernel)
+        self.assertIn("@llvm.amdgcn.cvt.pk.fp8.f32", ll)
+
+
+class TestFmhaKernelBuilder(unittest.TestCase):
+    """Tests for the FmhaKernelBuilder boilerplate-killer."""
+
+    def _common(self):
+        from ck_dsl.instances._fmha_common import FmhaCommonSpec, FmhaShape
+
+        return FmhaCommonSpec(
+            shape=FmhaShape(head_size=64, num_query_heads=8, num_kv_heads=2),
+            dtype="f16",
+            mask_mode="causal",
+        )
+
+    def test_signature_matches_old_varlen(self):
+        """The builder-generated signature for fmha_varlen must match
+        the canonical Q/K/V/O/cu/scale/total/batch/strides ABI exactly."""
+        from ck_dsl.instances._fmha_common import FmhaKernelBuilder
+
+        kb = FmhaKernelBuilder("probe", self._common())
+        kb.add_tensor("Q")
+        kb.add_tensor("K")
+        kb.add_tensor("V")
+        kb.add_tensor("O")
+        kb.add_ptr("cu_seqlens_q", dtype="i32")
+        kb.add_ptr("cu_seqlens_k", dtype="i32")
+        kb.add_scalar("scale_log2", "f32")
+        kb.add_scalar("total_q", "i32")
+        kb.add_scalar("batch", "i32")
+        kb.add_strides("q", "k", "v", "o")
+        sig = kb.signature()
+        names = [item["name"] for item in sig]
+        self.assertEqual(
+            names,
+            [
+                "Q",
+                "K",
+                "V",
+                "O",
+                "cu_seqlens_q",
+                "cu_seqlens_k",
+                "scale_log2",
+                "total_q",
+                "batch",
+                "stride_q_token",
+                "stride_q_head",
+                "stride_k_token",
+                "stride_k_head",
+                "stride_v_token",
+                "stride_v_head",
+                "stride_o_token",
+                "stride_o_head",
+            ],
+        )
+
+    def test_decode_grid_emits_gqa_div(self):
+        """When ``num_queries_per_kv > 1`` the grid decode emits a
+        divide on head_idx (otherwise it short-circuits to identity).
+        """
+        from ck_dsl.instances._fmha_common import FmhaKernelBuilder
+
+        kb = FmhaKernelBuilder("probe_grid", self._common())
+        kb.add_scalar("scale_log2", "f32")
+        kb.decode_grid()
+        # head_idx = block_id_y, kv_head_idx = head_idx // 4 (HQ=8 / HK=2).
+        # Lower and check the IR shows the divide.
+        kb.builder.ret()
+        ll = lower_kernel_to_llvm(kb.kernel)
+        # The arith.div lowers to ``sdiv i32 ..., 4``.
+        self.assertIn("sdiv i32", ll)
+
+    def test_add_tensor_accepts_fp8_kv_dtype(self):
+        """add_tensor with dtype='fp8e4m3' produces an fp8 pointer
+        (used by fmha_fwd_fp8 / sage)."""
+        from ck_dsl.instances._fmha_common import FmhaKernelBuilder
+
+        kb = FmhaKernelBuilder("probe_fp8", self._common())
+        kb.add_tensor("K", dtype="fp8e4m3", align=8)
+        sig = kb.signature()
+        k_entry = next(item for item in sig if item["name"] == "K")
+        # The "type" field renders as "ptr<fp8e4m3, global>".
+        self.assertIn("fp8e4m3", k_entry["type"])
+
+    def test_tensor_descriptor_naive_3d(self):
+        """tensor_descriptor returns a 3-coord descriptor whose
+        offset() works for an (token, head, d) triple."""
+        from ck_dsl.instances._fmha_common import FmhaKernelBuilder
+
+        kb = FmhaKernelBuilder("probe_desc", self._common())
+        kb.add_tensor("Q")
+        kb.add_strides("q")
+        desc = kb.tensor_descriptor("q")
+        self.assertEqual(desc.upper_names, ("token", "head", "d"))
+
+
+class TestMfmaGemm(unittest.TestCase):
+    """Tests for the MFMA GEMM kernel."""
+
+    def test_builds_emits_mfma_intrinsic(self):
+        """The kernel IR must reference the mfma_f32_16x16x16 intrinsic.
+
+        AMDGPU's intrinsic spelling is ``f32.16x16x16f16`` (no dot
+        between the last shape value and the dtype suffix); the test
+        guards against accidentally dispatching to a different MFMA
+        shape via the atom factory.
+        """
+        from ck_dsl.instances import MfmaGemmSpec, build_mfma_gemm
+
+        spec = MfmaGemmSpec(M=32, N=32, K=32, dtype="f16")
+        kernel = build_mfma_gemm(spec)
+        ll = lower_kernel_to_llvm(kernel)
+        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
+
+    def test_grid_one_cta_per_tile(self):
+        """Grid math: (N//16, M//16, 1)."""
+        from ck_dsl.instances import MfmaGemmSpec, mfma_gemm_grid
+
+        spec = MfmaGemmSpec(M=64, N=48, K=32)
+        self.assertEqual(mfma_gemm_grid(spec), (3, 4, 1))
+
+    def test_block_size_is_one_warp(self):
+        """v1: one wave64 warp per CTA."""
+        from ck_dsl.instances import MfmaGemmSpec
+
+        spec = MfmaGemmSpec(M=32, N=32, K=32)
+        self.assertEqual(spec.block_size, 64)
+
+    def test_spec_validation_rejects_non_atom_shape(self):
+        """M / N / K must divide the 16x16x16 atom shape."""
+        from ck_dsl.instances import MfmaGemmSpec
+        from ck_dsl.instances.mfma_gemm import is_valid_spec
+
+        spec = MfmaGemmSpec(M=17, N=32, K=32)
+        ok, why = is_valid_spec(spec)
+        self.assertFalse(ok)
+        self.assertIn("16x16x16", why)
+
+
+class TestEveryKernelUsesMfma(unittest.TestCase):
+    """The gremlin: assert every GEMM-shaped + attention kernel emits a
+    real ``@llvm.amdgcn.mfma.*`` intrinsic in its LLVM IR.
+
+    The kernels MUST use MFMA -- the warp-distributed scalar inner is
+    not acceptable for production. This test scans the LLVM output and
+    fails if the intrinsic is missing.
+    """
+
+    def _llvm_for(self, build_fn, spec):
+        return lower_kernel_to_llvm(build_fn(spec))
+
+    def test_mfma_gemm_uses_mfma(self):
+        from ck_dsl.instances import MfmaGemmSpec, build_mfma_gemm
+
+        ll = self._llvm_for(
+            build_mfma_gemm,
+            MfmaGemmSpec(M=32, N=32, K=32, dtype="f16"),
+        )
+        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16", ll)
+
+    def test_streamk_gemm_uses_mfma(self):
+        from ck_dsl.instances import StreamKGemmSpec, build_streamk_gemm
+
+        spec = StreamKGemmSpec(
+            M=32,
+            N=32,
+            K=32,
+            tile_m=16,
+            tile_n=16,
+            tile_k=16,
+            dtype="f16",
+            num_cus=8,
+            blocks_per_cu=1,
+        )
+        ll = self._llvm_for(build_streamk_gemm, spec)
+        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16", ll)
+
+    def test_block_scale_gemm_fp8_uses_mfma(self):
+        from ck_dsl.instances import BlockScaleGemmSpec
+        from ck_dsl.instances.block_scale_gemm import build_block_scale_gemm
+
+        spec = BlockScaleGemmSpec(
+            M=32,
+            N=32,
+            K=64,
+            block_tile_m=16,
+            block_tile_n=16,
+            quant_mode="abquant",
+            mantissa_dtype="fp8e4m3",
+            group_size_mnk=(1, 1, 64),
+        )
+        ll = self._llvm_for(build_block_scale_gemm, spec)
+        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.fp8", ll)
+
+    def test_mx_gemm_fp8_uses_mfma(self):
+        from ck_dsl.instances import MxGemmSpec
+        from ck_dsl.instances.mx_gemm import build_mx_gemm
+
+        spec = MxGemmSpec(M=16, N=16, K=64, mantissa_dtype="fp8e4m3")
+        ll = self._llvm_for(build_mx_gemm, spec)
+        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.fp8", ll)
+
+    def test_fmha_mfma_uses_mfma(self):
+        from ck_dsl.instances import FmhaMfmaSpec, build_fmha_fwd_mfma
+        from ck_dsl.instances._fmha_common import FmhaCommonSpec, FmhaShape
+
+        spec = FmhaMfmaSpec(
+            common=FmhaCommonSpec(
+                shape=FmhaShape(head_size=64, num_query_heads=2, num_kv_heads=2),
+                dtype="f16",
+                mask_mode="none",
+            ),
+            seqlen_q=16,
+            seqlen_k=16,
+        )
+        ll = self._llvm_for(build_fmha_fwd_mfma, spec)
+        # Expect MFMA invocations for both QK and PV chains.
+        n_mfma = ll.count("@llvm.amdgcn.mfma.f32.16x16x16")
+        # head_size=64, atom.k=16 -> 4 QK atoms per K-tile + 4 PV atoms
+        # per K-tile. Counting at least one is enough; the parity test
+        # verifies the chain is correct.
+        self.assertGreaterEqual(n_mfma, 1, f"got {n_mfma} MFMA calls")
+
+    def test_universal_gemm_uses_mfma(self):
+        """The pre-existing gemm_universal kernel underpins
+        batched_gemm / grouped_gemm / flatmm / img2col (via implicit
+        GEMM) / fused_moe; it must continue to emit MFMA."""
+        from ck_dsl.instances.gemm_universal import (
+            DataSpec,
+            TileSpec,
+            TraitSpec,
+            UniversalGemmSpec,
+            build_universal_gemm,
+        )
+
+        spec = UniversalGemmSpec(
+            name="ugemm_smoke",
+            tile=TileSpec(
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(),
+            data=DataSpec(),
+        )
+        ll = self._llvm_for(build_universal_gemm, spec)
+        self.assertTrue(
+            "@llvm.amdgcn.mfma.f32" in ll,
+            "gemm_universal must emit MFMA",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

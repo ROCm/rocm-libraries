@@ -35,8 +35,20 @@ from ..helpers.spec import SignatureBuilder, kernel_name_join
 from ..helpers.tensor_view import make_global_view
 
 
-UnaryOp = Literal["copy", "neg", "abs", "relu", "gelu_tanh", "silu", "exp2"]
-BinaryOp = Literal["add", "sub", "mul", "max", "min"]
+UnaryOp = Literal[
+    "copy",
+    "neg",
+    "abs",
+    "relu",
+    "gelu_tanh",
+    "quick_gelu",
+    "silu",
+    "swish",
+    "tanh",
+    "sigmoid",
+    "exp2",
+]
+BinaryOp = Literal["add", "sub", "mul", "max", "min", "swiglu", "geglu"]
 DType = Literal["f16", "bf16"]
 
 
@@ -51,10 +63,22 @@ class ElementwiseSpec:
     name: str = "ck_dsl_elementwise"
 
     def is_unary(self) -> bool:
-        return self.op in ("copy", "neg", "abs", "relu", "gelu_tanh", "silu", "exp2")
+        return self.op in (
+            "copy",
+            "neg",
+            "abs",
+            "relu",
+            "gelu_tanh",
+            "quick_gelu",
+            "silu",
+            "swish",
+            "tanh",
+            "sigmoid",
+            "exp2",
+        )
 
     def is_binary(self) -> bool:
-        return self.op in ("add", "sub", "mul", "max", "min")
+        return self.op in ("add", "sub", "mul", "max", "min", "swiglu", "geglu")
 
     def kernel_name(self) -> str:
         return kernel_name_join(
@@ -118,8 +142,22 @@ def _apply_unary(b: IRBuilder, x: Value, op: str) -> Value:
         return b.fmax(x, b.const_f32(0.0))
     if op == "exp2":
         return b.exp2(x)
-    if op == "silu":
+    if op == "tanh":
+        return _tanh_via_exp2(b, x)
+    if op == "sigmoid":
+        return _sigmoid_via_exp2(b, x)
+    if op in ("silu", "swish"):
+        # SiLU / Swish: x * sigmoid(x). The two names are interchangeable
+        # in the literature; ``swish`` is the original Google paper name
+        # and ``silu`` is the variant adopted by PyTorch.
         return b.fmul(x, _sigmoid_via_exp2(b, x))
+    if op == "quick_gelu":
+        # Quick GELU: x * sigmoid(1.702 * x). The activation used by
+        # OpenAI's GPT-2 / CLIP era models -- a numerically cheap
+        # approximation of the exact GELU that's a single sigmoid plus
+        # one multiply.
+        c_1702 = b.const_f32(1.702)
+        return b.fmul(x, _sigmoid_via_exp2(b, b.fmul(c_1702, x)))
     if op == "gelu_tanh":
         # GELU (tanh approx): 0.5 * x * (1 + tanh(sqrt(2/pi)*(x + 0.044715*x^3)))
         c_half = b.const_f32(0.5)
@@ -143,6 +181,25 @@ def _apply_binary(b: IRBuilder, a: Value, c: Value, op: str) -> Value:
         return b.fmax(a, c)
     if op == "min":
         return b.fmin(a, c)
+    if op == "swiglu":
+        # SwiGLU: silu(a) * c. The "Swish-Gated Linear Unit" used in
+        # LLaMA-style FFNs; we keep ``a`` on the activation side and
+        # ``c`` on the gate side to match PyTorch's
+        # ``F.silu(gate) * value`` convention when ``a == gate`` and
+        # ``c == value``.
+        return b.fmul(b.fmul(a, _sigmoid_via_exp2(b, a)), c)
+    if op == "geglu":
+        # GeGLU: gelu(a) * c -- same gating shape as SwiGLU but with
+        # tanh-approx GELU on the activation side. Used in PaLM and
+        # GLU-variant T5 papers.
+        c_half = b.const_f32(0.5)
+        c_one = b.const_f32(1.0)
+        c_sq2_over_pi = b.const_f32(0.7978845608028654)
+        c_a = b.const_f32(0.044715)
+        a3 = b.fmul(b.fmul(a, a), a)
+        inner = b.fmul(c_sq2_over_pi, b.fadd(a, b.fmul(c_a, a3)))
+        gelu_a = b.fmul(b.fmul(c_half, a), b.fadd(c_one, _tanh_via_exp2(b, inner)))
+        return b.fmul(gelu_a, c)
     raise ValueError(f"unsupported binary op {op!r}")
 
 

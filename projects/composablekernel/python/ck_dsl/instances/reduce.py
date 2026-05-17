@@ -43,7 +43,7 @@ from ..helpers.tensor_view import (
 
 
 DType = Literal["f16", "bf16"]
-ReduceOp = Literal["sum", "max", "mean"]
+ReduceOp = Literal["sum", "max", "min", "mean", "prod"]
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ class Reduce2DSpec:
 
 
 def is_valid_spec(spec: Reduce2DSpec) -> Tuple[bool, str]:
-    if spec.op not in ("sum", "max", "mean"):
+    if spec.op not in ("sum", "max", "min", "mean", "prod"):
         return False, f"unsupported op {spec.op!r}"
     return validate_io(
         IOSpecRule(
@@ -86,6 +86,7 @@ def is_valid_spec(spec: Reduce2DSpec) -> Tuple[bool, str]:
 
 
 _NEG_INF_F32 = -3.4028234663852886e38
+_POS_INF_F32 = 3.4028234663852886e38
 
 
 def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
@@ -119,12 +120,21 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
 
     lds = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_red").base
 
+    # Pick the f32 identity element + the combiner for each op.
     if spec.op in ("sum", "mean"):
         acc = b.const_f32(0.0)
-        combine: Literal["sum", "max"] = "sum"
-    else:
+        combine: Literal["sum", "max", "min", "prod"] = "sum"
+    elif spec.op == "max":
         acc = b.const_f32(_NEG_INF_F32)
         combine = "max"
+    elif spec.op == "min":
+        acc = b.const_f32(_POS_INF_F32)
+        combine = "min"
+    elif spec.op == "prod":
+        acc = b.const_f32(1.0)
+        combine = "prod"
+    else:  # validated earlier; defensive
+        raise ValueError(f"unsupported reduce op {spec.op!r}")
 
     # sweep_row_chunks plays the role of CK Tile's ``sweep_tile``: it
     # invokes ``body(n_off, x_scalars)`` once per per-thread chunk and
@@ -134,7 +144,14 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
     def body(_n_off, x_scalars):
         nonlocal acc
         for xi in x_scalars:
-            acc = b.fadd(acc, xi) if combine == "sum" else b.fmax(acc, xi)
+            if combine == "sum":
+                acc = b.fadd(acc, xi)
+            elif combine == "max":
+                acc = b.fmax(acc, xi)
+            elif combine == "min":
+                acc = b.fmin(acc, xi)
+            else:  # prod
+                acc = b.fmul(acc, xi)
 
     sweep_row_chunks(
         b,

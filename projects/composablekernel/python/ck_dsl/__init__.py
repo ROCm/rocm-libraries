@@ -52,6 +52,7 @@ from __future__ import annotations
 
 # ---- core ----
 from .core.ir import (
+    BF8E5M2,
     BF16,
     F16,
     F32,
@@ -151,6 +152,7 @@ from .transforms import (
 
 __all__ = [
     # core
+    "BF8E5M2",
     "BF16",
     "F16",
     "F32",

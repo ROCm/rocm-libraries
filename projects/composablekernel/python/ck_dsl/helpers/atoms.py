@@ -7,21 +7,21 @@ The `MfmaAtom` dataclass collapses everything a kernel author needs to
 know about a single matrix-multiply-accumulate intrinsic into one
 object:
 
-  - The (m, n, k) shape of the matrix tile this MFMA computes.
-  - The per-lane operand widths (a_per_lane, b_per_lane, c_per_lane).
-    On wave64 these equal m*k/64, k*n/64, m*n/64 respectively, which
-    determines how big a vector each lane has to load and how big the
-    accumulator is. This is the number that drives VGPR pressure.
-  - The dispatch to the right `IRBuilder` method, hiding the
-    `b.mfma_f32_16x16x16_f16` vs `b.mfma_f32_4x4x4_f16` vs ... choice
-    behind one `atom.emit(b, a, b, c)` call.
-  - The lane -> output (row, col) mapping that the epilogue uses to
-    figure out where each accumulator slot belongs in the result tile.
-    AMD's output layouts are not uniform across atom shapes (16x16
-    atoms have one layout, 32x32 atoms split the M dimension across
-    accumulator slot index, 4x4 atoms put a whole independent batch
-    on lane >> 2), so this is the most error-prone piece of any GEMM
-    or direct-conv epilogue.
+ - The (m, n, k) shape of the matrix tile this MFMA computes.
+ - The per-lane operand widths (a_per_lane, b_per_lane, c_per_lane).
+ On wave64 these equal m*k/64, k*n/64, m*n/64 respectively, which
+ determines how big a vector each lane has to load and how big the
+ accumulator is. This is the number that drives VGPR pressure.
+ - The dispatch to the right `IRBuilder` method, hiding the
+ `b.mfma_f32_16x16x16_f16` vs `b.mfma_f32_4x4x4_f16` vs ... choice
+ behind one `atom.emit(b, a, b, c)` call.
+ - The lane -> output (row, col) mapping that the epilogue uses to
+ figure out where each accumulator slot belongs in the result tile.
+ AMD's output layouts are not uniform across atom shapes (16x16
+ atoms have one layout, 32x32 atoms split the M dimension across
+ accumulator slot index, 4x4 atoms put a whole independent batch
+ on lane >> 2), so this is the most error-prone piece of any GEMM
+ or direct-conv epilogue.
 
 CK Tile uses MfmaAtom equivalents per (in_dtype, m, n, k) tuple
 (`mfma_type` in `mfma_instr.hpp`). We keep the same structure here so
@@ -49,10 +49,10 @@ class MfmaAtom:
     helper.
 
     Lane-output mapping convention (for the 4-tuple `lane_to_output`):
-      Given a per-lane `lane: i32` (0..63 on wave64) and a per-lane
-      accumulator slot index `i` (0..c_per_lane-1), the helper returns
-      the (row_offset_within_atom, col_offset_within_atom) of that
-      output element.
+    Given a per-lane `lane: i32` (0..63 on wave64) and a per-lane
+    accumulator slot index `i` (0..c_per_lane-1), the helper returns
+    the (row_offset_within_atom, col_offset_within_atom) of that
+    output element.
     """
 
     m: int
@@ -73,14 +73,14 @@ class MfmaAtom:
         """The legacy CDNA f16 atom. K=16/atom, c_per_lane=4 floats.
 
         Per-lane layout on wave64:
-          A: <4 x half>, B: <4 x half>, C: <4 x float>
+        A: <4 x half>, B: <4 x half>, C: <4 x float>
         Lane mapping:
-          lane = (k_blk * 16 + m_in_atom)
-            with k_blk = lane / 16 ∈ {0..3},
-                 m_in_atom = lane % 16 ∈ {0..15}
-          A lane holds K = [k_blk*4 : k_blk*4 + 4]
-          C lane[i] -> output (m_blk * 4 + i, n_in_atom)
-            with m_blk = lane / 16, n_in_atom = lane % 16
+        lane = (k_blk * 16 + m_in_atom)
+        with k_blk = lane / 16 ∈ {0..3},
+        m_in_atom = lane % 16 ∈ {0..15}
+        A lane holds K = [k_blk*4 : k_blk*4 + 4]
+        C lane[i] -> output (m_blk * 4 + i, n_in_atom)
+        with m_blk = lane / 16, n_in_atom = lane % 16
         """
         return cls(
             m=16,
@@ -99,12 +99,12 @@ class MfmaAtom:
         """K-packed f16 atom on gfx950+ (CDNA3). K=32/atom in two halves.
 
         Per-lane layout on wave64:
-          A: <8 x half>, B: <8 x half>, C: <4 x float>
+        A: <8 x half>, B: <8 x half>, C: <4 x float>
         K-pack lane mapping (per runbook §7.2):
-          A lane `c4 = lane / 16` holds K = [c4 * 8 : c4 * 8 + 8]
-          (NOT the flat-concat layout [c4*4 : c4*4 + 4] + [c4*4 +
-          16 : c4*4 + 20]; the wrong packing compiles, runs, and
-          validates within 1e-2 but fails at 1e-3).
+        A lane `c4 = lane / 16` holds K = [c4 * 8 : c4 * 8 + 8]
+        (NOT the flat-concat layout [c4*4 : c4*4 + 4] + [c4*4 +
+        16 : c4*4 + 20]; the wrong packing compiles, runs, and
+        validates within 1e-2 but fails at 1e-3).
         Output layout: same as 16x16x16 (`(m_blk*4 + i, n_in_atom)`).
         """
         return cls(
@@ -124,16 +124,16 @@ class MfmaAtom:
         """The canonical 32x32 f16 atom (every CK dispatcher default tile uses it).
 
         Per-lane layout on wave64:
-          A: <4 x half>, B: <4 x half>, C: <16 x float>
+        A: <4 x half>, B: <4 x half>, C: <16 x float>
         Lane mapping:
-          lane = (k_blk * 32 + m_in_atom)
-            with k_blk = lane / 32 ∈ {0,1},
-                 m_in_atom = lane % 32 ∈ {0..31}
-          A lane holds K = [k_blk*4 : k_blk*4 + 4]
-          C lane[i] -> output:
-            row = (i // 4) * 8 + (lane / 32) * 4 + (i % 4)
-            col = lane % 32
-          (16 outputs per lane spread over a 32x32 tile.)
+        lane = (k_blk * 32 + m_in_atom)
+        with k_blk = lane / 32 ∈ {0,1},
+        m_in_atom = lane % 32 ∈ {0..31}
+        A lane holds K = [k_blk*4 : k_blk*4 + 4]
+        C lane[i] -> output:
+        row = (i // 4) * 8 + (lane / 32) * 4 + (i % 4)
+        col = lane % 32
+        (16 outputs per lane spread over a 32x32 tile.)
         """
         return cls(
             m=32,
@@ -152,7 +152,7 @@ class MfmaAtom:
         """K-packed 32x32 f16 atom on gfx950+. K=16/atom.
 
         Per-lane layout on wave64:
-          A: <8 x half>, B: <8 x half>, C: <16 x float>
+        A: <8 x half>, B: <8 x half>, C: <16 x float>
         Output layout: same as 32x32x8.
         """
         return cls(
@@ -167,6 +167,89 @@ class MfmaAtom:
             name="mfma_f32_32x32x16_f16",
         )
 
+    # ---- FP8 / BF8 atoms (gfx940+) ----
+    #
+    # FP8E4M3 and BF8E5M2 share the same MFMA shape catalog: the
+    # 16x16x32 atom (small-tile, 4-float accumulator) and the
+    # 32x32x16 atom (canonical hero, 16-float accumulator). Both pack
+    # 8 fp8 bytes per lane = ``<2 x i32>`` at the LLVM intrinsic
+    # boundary. The mixed-precision variants (.fp8.bf8 / .bf8.fp8)
+    # are reachable by bitcasting the operand vectors and calling
+    # the same intrinsic family; we expose the homogeneous variants
+    # as atoms today and treat mixed as a manual op.
+
+    @classmethod
+    def fp8_16x16x32(cls) -> "MfmaAtom":
+        """FP8 (e4m3) MFMA, 16x16 output, K=32 per atom.
+
+        Per-lane: A = <8 x fp8e4m3>, B = <8 x fp8e4m3>,
+        C = <4 x float>.
+        Output layout: same as ``f16_16x16x32`` -- 4 floats per lane,
+        row = ``(m_blk * 4 + i)``, col = ``n_in_atom``.
+        """
+        return cls(
+            m=16,
+            n=16,
+            k=32,
+            a_per_lane=8,
+            b_per_lane=8,
+            c_per_lane=4,
+            dtype_in="fp8e4m3",
+            dtype_out="f32",
+            name="mfma_f32_16x16x32_fp8",
+        )
+
+    @classmethod
+    def bf8_16x16x32(cls) -> "MfmaAtom":
+        """BF8 (e5m2) sibling of :meth:`fp8_16x16x32`."""
+        return cls(
+            m=16,
+            n=16,
+            k=32,
+            a_per_lane=8,
+            b_per_lane=8,
+            c_per_lane=4,
+            dtype_in="bf8e5m2",
+            dtype_out="f32",
+            name="mfma_f32_16x16x32_bf8",
+        )
+
+    @classmethod
+    def fp8_32x32x16(cls) -> "MfmaAtom":
+        """FP8 MFMA at the 32x32 hero tile, K=16 per atom.
+
+        Per-lane: A = <8 x fp8e4m3>, B = <8 x fp8e4m3>,
+        C = <16 x float>.
+        Output layout: same as ``f16_32x32x16`` -- 16 floats per lane
+        spread across 4 row-groups of 4 floats each.
+        """
+        return cls(
+            m=32,
+            n=32,
+            k=16,
+            a_per_lane=8,
+            b_per_lane=8,
+            c_per_lane=16,
+            dtype_in="fp8e4m3",
+            dtype_out="f32",
+            name="mfma_f32_32x32x16_fp8",
+        )
+
+    @classmethod
+    def bf8_32x32x16(cls) -> "MfmaAtom":
+        """BF8 (e5m2) sibling of :meth:`fp8_32x32x16`."""
+        return cls(
+            m=32,
+            n=32,
+            k=16,
+            a_per_lane=8,
+            b_per_lane=8,
+            c_per_lane=16,
+            dtype_in="bf8e5m2",
+            dtype_out="f32",
+            name="mfma_f32_32x32x16_bf8",
+        )
+
     @classmethod
     def f16_4x4x4(cls) -> "MfmaAtom":
         """The tiny f16 atom. One MFMA emits 16 independent 4x4x4 matmuls per wave.
@@ -176,12 +259,12 @@ class MfmaAtom:
         `batch = lane / 4`.
 
         Per-lane layout on wave64:
-          A: <4 x half>, B: <4 x half>, C: <4 x float>
-          batch_idx = lane / 4 ∈ {0..15}
-          lane_in_batch = lane % 4 ∈ {0..3}
-          A holds the 4 K-elements of row `lane_in_batch` of matrix A
-          B holds the 4 K-elements of column `lane_in_batch` of matrix B
-          C lane[i] -> output (i, lane_in_batch) of independent 4x4 #batch_idx.
+        A: <4 x half>, B: <4 x half>, C: <4 x float>
+        batch_idx = lane / 4 ∈ {0..15}
+        lane_in_batch = lane % 4 ∈ {0..3}
+        A holds the 4 K-elements of row `lane_in_batch` of matrix A
+        B holds the 4 K-elements of column `lane_in_batch` of matrix B
+        C lane[i] -> output (i, lane_in_batch) of independent 4x4 #batch_idx.
         """
         return cls(
             m=4,
@@ -209,6 +292,14 @@ class MfmaAtom:
             return b.mfma_f32_32x32x16_f16(a, bb, c)
         if (self.m, self.n, self.k, self.dtype_in) == (4, 4, 4, "f16"):
             return b.mfma_f32_4x4x4_f16(a, bb, c)
+        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 32, "fp8e4m3"):
+            return b.mfma_f32_16x16x32_fp8(a, bb, c)
+        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 32, "bf8e5m2"):
+            return b.mfma_f32_16x16x32_bf8(a, bb, c)
+        if (self.m, self.n, self.k, self.dtype_in) == (32, 32, 16, "fp8e4m3"):
+            return b.mfma_f32_32x32x16_fp8(a, bb, c)
+        if (self.m, self.n, self.k, self.dtype_in) == (32, 32, 16, "bf8e5m2"):
+            return b.mfma_f32_32x32x16_bf8(a, bb, c)
         raise NotImplementedError(
             f"no MFMA dispatch for atom {self.dtype_in} {self.m}x{self.n}x{self.k}"
         )
@@ -237,23 +328,23 @@ class MfmaAtom:
         gives the final global row/col.
 
         16x16 atoms (c_per_lane=4):
-          m_blk = lane / 16
-          n_in_atom = lane % 16
-          row = m_blk * 4 + i
-          col = n_in_atom
+        m_blk = lane / 16
+        n_in_atom = lane % 16
+        row = m_blk * 4 + i
+        col = n_in_atom
 
         32x32 atoms (c_per_lane=16):
-          m_blk = lane / 32  (0 or 1)
-          n_in_atom = lane % 32
-          row = (i // 4) * 8 + m_blk * 4 + (i % 4)
-          col = n_in_atom
+        m_blk = lane / 32 (0 or 1)
+        n_in_atom = lane % 32
+        row = (i // 4) * 8 + m_blk * 4 + (i % 4)
+        col = n_in_atom
 
         4x4 atoms (c_per_lane=4):
-          # All 16 batches share the same (row,col) layout within their
-          # own 4x4. Caller composes `batch_idx = lane / 4` separately.
-          lane_in_batch = lane % 4
-          row = i
-          col = lane_in_batch
+        # All 16 batches share the same (row,col) layout within their
+        # own 4x4. Caller composes `batch_idx = lane / 4` separately.
+        lane_in_batch = lane % 4
+        row = i
+        col = lane_in_batch
         """
         if (self.m, self.n) == (16, 16):
             c_atom_n = b.const_i32(self.n)
@@ -294,15 +385,46 @@ MFMA_F16_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.f16_32x32x16(),
 )
 
+MFMA_FP8_ATOMS: Tuple[MfmaAtom, ...] = (
+    MfmaAtom.fp8_16x16x32(),
+    MfmaAtom.fp8_32x32x16(),
+    MfmaAtom.bf8_16x16x32(),
+    MfmaAtom.bf8_32x32x16(),
+)
+
+# Unified catalog covering every shipped MFMA shape. Used by
+# ``mfma_atom("<dtype>", m, n, k)`` to dispatch into the right
+# factory; ``MFMA_F16_ATOMS`` and ``MFMA_FP8_ATOMS`` are kept as
+# narrower subset accessors for callers that want to walk only the
+# fp16 or fp8/bf8 families.
+MFMA_ATOMS: Tuple[MfmaAtom, ...] = MFMA_F16_ATOMS + MFMA_FP8_ATOMS
+
+# Accept aliases on the dtype lookup key: ``fp8`` -> ``fp8e4m3``,
+# ``bf8`` -> ``bf8e5m2``. Keeps Triton-ported and CK Tile-ported
+# call sites working without translation.
+_DTYPE_ALIAS = {
+    "fp8": "fp8e4m3",
+    "fp8e4m3": "fp8e4m3",
+    "bf8": "bf8e5m2",
+    "bf8e5m2": "bf8e5m2",
+    "f16": "f16",
+    "fp16": "f16",
+}
+
 _BY_SHAPE: Dict[Tuple[str, int, int, int], MfmaAtom] = {
-    (a.dtype_in, a.m, a.n, a.k): a for a in MFMA_F16_ATOMS
+    (a.dtype_in, a.m, a.n, a.k): a for a in MFMA_ATOMS
 }
 
 
 def mfma_atom(dtype: str, m: int, n: int, k: int) -> MfmaAtom:
-    """Lookup an atom by (dtype_in, m, n, k). Raises if unknown."""
-    key = (dtype, m, n, k)
+    """Lookup an atom by (dtype_in, m, n, k). Raises if unknown.
+
+    Accepts ``fp8`` / ``fp8e4m3``, ``bf8`` / ``bf8e5m2``, and
+    ``f16`` / ``fp16`` aliases on the dtype key.
+    """
+    canon = _DTYPE_ALIAS.get(dtype, dtype)
+    key = (canon, m, n, k)
     if key not in _BY_SHAPE:
-        valid = sorted((a.dtype_in, a.m, a.n, a.k) for a in MFMA_F16_ATOMS)
+        valid = sorted((a.dtype_in, a.m, a.n, a.k) for a in MFMA_ATOMS)
         raise ValueError(f"no MFMA atom for {key}; valid: {valid}")
     return _BY_SHAPE[key]

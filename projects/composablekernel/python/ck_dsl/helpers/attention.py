@@ -239,6 +239,57 @@ def sliding_window_mask(
     return b.cmp_lt(dist, b.const_i32(sliding_window))
 
 
+def apply_attention_mask(
+    b: IRBuilder,
+    score_log2: Value,
+    *,
+    mask_mode: str,
+    k_idx: Value,
+    query_pos: Value,
+    sliding_window: int = 0,
+    context_len: Value = None,
+    neg_inf: Value = None,
+) -> Value:
+    """Apply one of CK Tile's standard attention mask modes to a score.
+
+    Maps the ``mask_mode`` string (one of ``"none"`` / ``"causal"`` /
+    ``"sliding_window"``) to the right :func:`causal_mask` /
+    :func:`sliding_window_mask` predicate and uses :meth:`select` to
+    force masked-out positions to ``-inf`` so the softmax exponential
+    collapses to zero.
+
+    ``query_pos`` is the row's query position (relative to the start
+    of the sequence for varlen, global token id for self-attention).
+    ``context_len`` (typically ``0`` for fresh prefill, the prior
+    cache length for paged-KV decode) shifts the mask boundary; pass
+    ``None`` to default to ``b.const_i32(0)``.
+
+    The helper is a no-op for ``mask_mode == "none"``: the score is
+    returned unchanged. Composes with the warp-distributed FMHA body
+    and the MFMA-tiled body alike -- both pass the *post-reduction*
+    score and expect a single i1 predicate per (q_pos, k_idx) pair.
+    """
+    if mask_mode == "none":
+        return score_log2
+    if neg_inf is None:
+        neg_inf = b.const_f32(-1e30)
+    if context_len is None:
+        context_len = b.const_i32(0)
+    if mask_mode == "causal":
+        keep = causal_mask(b, k_idx, context_len, query_pos)
+    elif mask_mode == "sliding_window":
+        keep = sliding_window_mask(
+            b,
+            k_idx,
+            context_len,
+            query_pos,
+            sliding_window,
+        )
+    else:
+        raise ValueError(f"unknown mask_mode {mask_mode!r}")
+    return b.select(keep, score_log2, neg_inf)
+
+
 def apply_softcap_scalar(b: IRBuilder, score: Value, softcap: Value) -> Value:
     """softcap * tanh(score / softcap)."""
     return b.fmul(softcap, b.tanh(b.fdiv(score, softcap)))
@@ -300,10 +351,10 @@ def apply_softcap_log2(b: IRBuilder, score_log2: Value, softcap: Value) -> Value
 
     .. code-block:: text
 
-        Sdiv = score_log2 / softcap
-        p1   = exp2(Sdiv)           = e^( score_natural / softcap)
-        p2   = exp2(-Sdiv)          = e^(-score_natural / softcap)
-        out  = softcap * (p1 - p2) / (p1 + p2)
+    Sdiv = score_log2 / softcap
+    p1 = exp2(Sdiv) = e^( score_natural / softcap)
+    p2 = exp2(-Sdiv) = e^(-score_natural / softcap)
+    out = softcap * (p1 - p2) / (p1 + p2)
     """
     sdiv = b.fdiv(score_log2, softcap)
     p1 = b.exp2(sdiv)

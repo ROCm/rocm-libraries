@@ -435,6 +435,17 @@ class TensorView:
         off = self.desc.offset(b, indices)
         if self.dtype.name in ("f16", "bf16"):
             return b.global_load_vN(self.base, off, self.dtype, n)
+        if self.dtype.name == "f32":
+            # f32 global vec loads aren't wired through ``global_load_vN``
+            # yet (the IR primitive only covers 16-bit elements). Fall
+            # back to n scalar loads + a vec_pack: same number of dwords
+            # touched, the AMDGPU backend coalesces neighbouring lane
+            # loads into ``global_load_dwordx{n}`` when they're aligned.
+            scalars = [
+                b.global_load_f32(self.base, b.add(off, b.const_i32(i)))
+                for i in range(n)
+            ]
+            return b.vec_pack(scalars, self.dtype)
         raise NotImplementedError(
             f"global vec load not yet wired for dtype {self.dtype.name}"
         )
@@ -682,11 +693,18 @@ class TensorView:
         the IR-level vector ops only support ``n in {2, 4, 8}``. This
         keeps :func:`load_tile` uniform across vector and scalar
         :class:`LoadStoreTraits` paths.
+
+        When the view's dtype is already ``f32`` the per-lane cast is a
+        no-op; we just extract the elements out of the vec load.
         """
         if n == 1:
             scalar = self.load_scalar(b, indices)
+            if self.dtype.name == "f32":
+                return [scalar]
             return [b.cast_to_f32(scalar)]
         v = self.load_vec(b, indices, n=n)
+        if self.dtype.name == "f32":
+            return [b.vec_extract(v, i) for i in range(n)]
         return [b.cast_to_f32(b.vec_extract(v, i)) for i in range(n)]
 
     def store_vec_from_f32(
