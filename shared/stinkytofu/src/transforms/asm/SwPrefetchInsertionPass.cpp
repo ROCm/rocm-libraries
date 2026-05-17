@@ -166,7 +166,7 @@ int64_t insertSwPrefetchInstPcRelBefore(
 
     bb.insertIR(anchorIt, movInst);
     bb.insertIR(anchorIt, prefetchInst);
-    return static_cast<int64_t>(movB + pfB);
+    return static_cast<int64_t>(movB) + static_cast<int64_t>(pfB);
 }
 
 /// One mov+prefetch pair before \p anchorIt (`s_getpc_b64`), chaining \p

@@ -240,6 +240,7 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
         if (!firstInst) firstInst = lastInst;
     }
 
+    assert(lastInst && "legalizeWaitCnt: no wait instruction created");
     lastInst->addModifier<SWaitCntData>(*waitData);
 
     // Remove the original s_waitcnt instruction

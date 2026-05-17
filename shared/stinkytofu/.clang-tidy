@@ -1,0 +1,22 @@
+# clang-tidy configuration for stinkytofu
+# All checks report as warnings only — nothing fails the build.
+# Run: clang-tidy -p build src/core/File.cpp
+
+WarningsAsErrors: ''
+
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  modernize-use-override,
+  modernize-use-starts-ends-with,
+  modernize-use-equals-default,
+  performance-unnecessary-value-param,
+  performance-for-range-copy,
+  performance-inefficient-string-concatenation,
+  readability-container-contains,
+  readability-convert-member-functions-to-static,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+
+HeaderFilterRegex: 'include/stinkytofu/.*'

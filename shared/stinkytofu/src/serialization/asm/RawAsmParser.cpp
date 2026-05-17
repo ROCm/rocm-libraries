@@ -773,7 +773,7 @@ static std::optional<int> parseDirectiveInt(const std::string& line, const std::
     trimStr(rest);
     if (rest.empty()) return std::nullopt;
     auto v = safeAtoiStr(rest);
-    return v ? std::optional<int>(*v) : std::nullopt;
+    return v;
 }
 
 /// Determine the isaVersion array from the arch ID.

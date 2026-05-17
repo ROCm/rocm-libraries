@@ -637,9 +637,6 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         // Initialize thread IDs (v[vgprSerial])
         std::string vgprSerial = "vgprSerial";
-        std::string vgprLocalReadAddrA = "vgprLocalReadAddrA";
-        std::string vgprLocalReadAddrB = "vgprLocalReadAddrB";
-
         // parse the basic block to find the local read addresses
         std::vector<StinkyInstruction*> instructions;
         for (IRBase& irNode : bb) {
@@ -874,7 +871,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (waitCntData != nullptr) {
                     int dlcnt = waitCntData->dlcnt;
                     int dscnt = waitCntData->dscnt;
-                    std::size_t numWaits = static_cast<std::size_t>(dlcnt + dscnt);
+                    std::size_t numWaits =
+                        static_cast<std::size_t>(dlcnt) + static_cast<std::size_t>(dscnt);
                     cycles = asmCycleEstimator.getLocalReadCompletionCycle(cycles + 1, lgkmLRFIFO,
                                                                            numWaits);
                 } else if (tensorCntData != nullptr) {

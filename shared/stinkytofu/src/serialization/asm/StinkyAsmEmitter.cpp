@@ -574,7 +574,7 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
 
         // Check VOP3 modifiers for this source operand
         if (vop3Mod) {
-            switch (nonSkippedIndex) {
+            switch (nonSkippedIndex) {  // NOLINT(bugprone-switch-missing-default-case)
                 case 0:
                     needsNeg = vop3Mod->neg_src0;
                     needsAbs = vop3Mod->abs_src0;
