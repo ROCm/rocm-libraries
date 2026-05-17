@@ -129,7 +129,7 @@ namespace TensileLite
             m_errorInSolution   = false;
             m_executedSolution  = false;
 
-            // MXFP4 data can depend on the selected solution (e.g. MI-based preSwizzle when
+            // MXFP4/MXFP8 data can depend on the selected solution (e.g. MI-based preSwizzle when
             // enabled). prepareCPUInputs runs in preProblem before preSolution, so the initial
             // SolveCPU may not match GPU inputs refreshed in DataInitialization::preSolution.
             // Re-run the CPU reference after that refresh (CPU "current" buffers are synced there
@@ -140,7 +140,8 @@ namespace TensileLite
 
             if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
-                if(!isMXFP4Problem(*gemm))
+                // Must mirror DataInitialization::preSolution's gate.
+                if(!isMXProblem(*gemm))
                     return;
                 ScopedTimer timer("cpu_reference_gemm_per_solution");
                 SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
