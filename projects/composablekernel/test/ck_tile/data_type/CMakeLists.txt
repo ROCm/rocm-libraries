@@ -37,7 +37,7 @@ if(GPU_TARGETS MATCHES "gfx125")
     " HOST_HAS_AVX512F)
     set(CMAKE_REQUIRED_FLAGS "")
     
-    add_gtest_executable(test_ck_tile_pk_fp6 test_pk_fp6.cpp)
+    add_gtest_executable(test_ck_tile_pk_fp6 test_pk_f6.cpp)
     if(result EQUAL 0)
       if(HOST_HAS_AVX512F)
         message(STATUS "Host CPU supports AVX-512F, enabling -mavx512f for test_ck_tile_pk_fp6")
