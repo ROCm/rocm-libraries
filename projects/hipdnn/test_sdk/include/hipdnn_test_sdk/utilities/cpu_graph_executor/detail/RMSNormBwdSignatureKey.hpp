@@ -55,9 +55,10 @@ struct RMSNormBwdSignatureKey
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
         auto dxTensorAttr = tensorMap.at(nodeAttributes->dx_tensor_uid());
+        auto invRmsTensorAttr = tensorMap.at(nodeAttributes->inv_rms_tensor_uid());
 
         if(dyTensorAttr == nullptr || xTensorAttr == nullptr || scaleTensorAttr == nullptr
-           || dxTensorAttr == nullptr)
+           || dxTensorAttr == nullptr || invRmsTensorAttr == nullptr)
         {
             throw std::runtime_error("One or more tensor attributes could not be found in the map, "
                                      "failed to construct key");
