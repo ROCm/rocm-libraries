@@ -237,6 +237,8 @@ set( MIOpen_Source
     solver/conv/conv_hip_dir2D11x11.cpp
     solver/conv/conv_ocl_dir2Dfwd.cpp
     solver/conv/conv_ocl_dir2Dfwd_exhaustive_search.cpp
+    solver/conv/conv_hip_dir2Dfwd.cpp
+    solver/conv/conv_hip_dir2Dfwd_exhaustive_search.cpp
     solver/conv/conv_wino_fury_RxS.cpp
     solver/conv/conv_wino_rage_RxS.cpp
     solver/conv/conv_winoRxS.cpp
@@ -546,6 +548,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenBatchNormBwdSpatial.cpp
         kernels/MIOpenBatchNormBwdPerAct.cpp
         kernels/MIOpenConvDirUni.cl
+        kernels/MIOpenConvDirUniHip.cpp
         kernels/MIOpenConvDirBatchNormActiv.cl
         kernels/MIOpenGLU.cpp
         kernels/MIOpenGroupNorm.cpp
