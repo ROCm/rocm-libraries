@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -28,9 +28,10 @@
 # rocSOLVER Test Categories Configuration
 # Aligned with rocJenkins job types and Test Filter Standardization.
 #
-# rocSOLVER uses a simple two-tier naming convention:
+# rocSOLVER uses a three-tier naming convention:
 #   checkin_* - Fast tests for precheckin validation
 #   daily_*   - Comprehensive tests for nightly/extended runs
+#   weekly_*  - Very large matrix size tests
 
 test_categories:
   quick:
@@ -67,10 +68,11 @@ test_categories:
       - "extended"
 
   full:
-    description: "Complete test suite - all tests including daily"
+    description: "Complete test suite - all tests including daily and weekly"
     test_patterns:
       - "checkin_*"
       - "daily_*"
+      - "weekly_*"
     exclude:
       - "*DISABLED*"
     labels:
