@@ -519,13 +519,13 @@ bool genIRClasses(const std::string& outdir) {
 
         // Set modifiers
         if (inst.supportsDPP) {
-            out << "        inst->dpp = dpp;\n";
+            out << "        inst->dpp = std::move(dpp);\n";
         }
         if (inst.supportsSDWA) {
-            out << "        inst->sdwa = sdwa;\n";
+            out << "        inst->sdwa = std::move(sdwa);\n";
         }
         if (inst.hasDS) {
-            out << "        inst->ds = ds;\n";
+            out << "        inst->ds = std::move(ds);\n";
         }
 
         // Set comment

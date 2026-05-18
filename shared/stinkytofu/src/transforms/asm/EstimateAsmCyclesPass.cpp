@@ -380,7 +380,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                                   std::unordered_map<std::string, int64_t>& vgprState,
                                   const std::unordered_map<std::string, int64_t>& sgprState) {
         // Try to cast to CommonInstruction first (most VALU instructions inherit from this)
-        auto dstReg = inst->getDestRegs();
+        const auto& dstReg = inst->getDestRegs();
 
         // v_add_co_u32: dst = src0 + src1 (with carry out, dst1 is vcc)
         if (GFX::v_add_co_u32 == inst->getUnifiedOpcode()) {
@@ -859,7 +859,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (labelData != nullptr) {
                     const std::string& labelName = labelData->label;
                     auto pos = labelName.find("label_LoopBeginL");
-                    if (pos != std::string::npos && pos == 0) {
+                    if (pos == 0) {
                         break;
                     }
                 }
@@ -909,7 +909,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                     // std::cout<<"srcReg: "<<srcReg.getSymbolicName()<<std::endl;
                     if (srcReg.isRegister()) {
                         auto srcStr = srcReg.getSymbolicName();
-                        if (srcStr.find("s") != std::string::npos) {
+                        if (srcStr.find('s') != std::string::npos) {
                             hasSgprOffset = true;
                         }
                     }

@@ -167,6 +167,7 @@ std::vector<IntrinsicIRModule> IntrinsicPatternConverter::patternsToIR(
 std::vector<Pattern> IntrinsicPatternConverter::irToPatterns(
     const std::vector<IntrinsicIRModule>& irModules) {
     std::vector<Pattern> patterns;
+    patterns.reserve(irModules.size());
     for (const auto& irModule : irModules) {
         patterns.push_back(irToPattern(irModule));
     }

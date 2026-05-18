@@ -1288,7 +1288,10 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
         // (e.g. `.long X // hi`) and unparsable instructions still round-trip.
         auto textBlockWithComment = [&](const std::string& base) {
             if (lineComment.empty()) return makeTextBlock(base);
-            return makeTextBlock(base + "  // " + lineComment);
+            std::string withComment = base;
+            withComment += "  // ";
+            withComment += lineComment;
+            return makeTextBlock(withComment);
         };
 
         // Directives: lines starting with '.'

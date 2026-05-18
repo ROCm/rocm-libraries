@@ -78,11 +78,11 @@ static void collectSourcesRec(StinkyInstruction* inst,
 
 /// Entry point for source collection. PHIs are flattened to their incoming values.
 std::unordered_set<StinkyInstruction*> collectSources(
-    StinkyInstruction* inst, std::function<bool(StinkyInstruction*)> filter = nullptr) {
+    StinkyInstruction* inst, const std::function<bool(StinkyInstruction*)>& filter = nullptr) {
     std::unordered_set<StinkyInstruction*> sources;
     std::unordered_set<StinkyInstruction*> seenPhi;
     if (inst != nullptr) {
-        collectSourcesRec(inst, seenPhi, sources, std::move(filter));
+        collectSourcesRec(inst, seenPhi, sources, filter);
     }
     return sources;
 }

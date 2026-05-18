@@ -289,7 +289,7 @@ static int16_t getVgprMsbOffsetForIdx(RegType type, uint32_t regIdx, bool hasVgp
 }
 
 /// Helper function to adjust symbolic register name for split instructions
-std::string adjustSymbolicRegName(const std::string& symbolicName, int offsetAdjust = 0) {
+static std::string adjustSymbolicRegName(const std::string& symbolicName, int offsetAdjust = 0) {
     if (symbolicName.empty()) return "";
 
     // Pattern: ${name}+${digitBase}

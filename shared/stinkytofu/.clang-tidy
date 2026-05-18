@@ -1,9 +1,14 @@
 # clang-tidy configuration for stinkytofu
 #
-# Bug-finding checks only — no style or formatting checks.
-# Explicit positive list; upgrading clang-tidy does not auto-enable new checks.
+# Bug-finding + performance checks. No style-enforcement checks.
+# Follows LLVM's approach: misc-* with targeted exclusions, plus
+# performance-* for JIT-readiness.
 #
-# Removed bugprone checks (false positives or too noisy for this codebase):
+# Explicit positive list with wildcard categories; upgrading clang-tidy
+# may auto-enable new checks within these categories (desired: new bug
+# finders are welcome). Noisy checks are excluded individually below.
+#
+# Excluded bugprone checks (false positives or too noisy for this codebase):
 #   -bugprone-easily-swappable-parameters (too noisy, low signal)
 #   -bugprone-unchecked-optional-access   (false positives on if-auto)
 #   -bugprone-narrowing-conversions       (too noisy, pervasive int/size_t mixing)
@@ -13,90 +18,44 @@
 #   -bugprone-multi-level-implicit-pointer-conversion (ErrorHandling.hpp pattern)
 #   -bugprone-string-literal-with-embedded-nul (fuzz test data)
 #   -bugprone-macro-parentheses              (X-macro patterns can't be parenthesized)
+#
+# Excluded misc checks (LLVM-style exclusions):
+#   -misc-const-correctness              (too verbose, LLVM excludes)
+#   -misc-include-cleaner                (LLVM excludes)
+#   -misc-no-recursion                   (LLVM excludes)
+#   -misc-non-private-member-variables-in-classes (LLVM excludes)
+#   -misc-unused-parameters              (LLVM excludes)
+#   -misc-use-anonymous-namespace        (LLVM excludes)
+#
+# Excluded performance checks:
+#   -performance-enum-size               (too noisy, low value)
+#
+# Not included (style enforcement, not bug-finding):
+#   readability-*, modernize-*, google-*, fuchsia-*
 Checks: >
   -*,
-  bugprone-assert-side-effect,
-  bugprone-assignment-in-if-condition,
-  bugprone-bad-signal-to-kill-thread,
-  bugprone-bitwise-pointer-cast,
-  bugprone-bool-pointer-implicit-conversion,
-  bugprone-casting-through-void,
-  bugprone-chained-comparison,
-  bugprone-compare-pointer-to-member-virtual-function,
-  bugprone-copy-constructor-init,
-  bugprone-crtp-constructor-accessibility,
-  bugprone-dangling-handle,
-  bugprone-dynamic-static-initializers,
-  bugprone-empty-catch,
-  bugprone-fold-init-type,
-  bugprone-forward-declaration-namespace,
-  bugprone-forwarding-reference-overload,
-  bugprone-implicit-widening-of-multiplication-result,
-  bugprone-inaccurate-erase,
-  bugprone-inc-dec-in-conditions,
-  bugprone-incorrect-enable-if,
-  bugprone-incorrect-enable-shared-from-this,
-  bugprone-incorrect-roundings,
-  bugprone-infinite-loop,
-  bugprone-integer-division,
-  bugprone-lambda-function-name,
-  bugprone-macro-repeated-side-effects,
-  bugprone-misplaced-operator-in-strlen-in-alloc,
-  bugprone-misplaced-pointer-arithmetic-in-alloc,
-  bugprone-misplaced-widening-cast,
-  bugprone-move-forwarding-reference,
-  bugprone-multiple-new-in-one-expression,
-  bugprone-multiple-statement-macro,
-  bugprone-no-escape,
-  bugprone-non-zero-enum-to-bool-conversion,
-  bugprone-nondeterministic-pointer-iteration-order,
-  bugprone-not-null-terminated-result,
-  bugprone-optional-value-conversion,
-  bugprone-parent-virtual-call,
-  bugprone-pointer-arithmetic-on-polymorphic-object,
-  bugprone-posix-return,
-  bugprone-redundant-branch-condition,
-  bugprone-reserved-identifier,
-  bugprone-return-const-ref-from-parameter,
-  bugprone-shared-ptr-array-mismatch,
-  bugprone-signal-handler,
-  bugprone-signed-char-misuse,
-  bugprone-sizeof-container,
-  bugprone-sizeof-expression,
-  bugprone-spuriously-wake-up-functions,
-  bugprone-standalone-empty,
-  bugprone-string-constructor,
-  bugprone-string-integer-assignment,
-  bugprone-stringview-nullptr,
-  bugprone-suspicious-enum-usage,
-  bugprone-suspicious-include,
-  bugprone-suspicious-memory-comparison,
-  bugprone-suspicious-memset-usage,
-  bugprone-suspicious-missing-comma,
-  bugprone-suspicious-realloc-usage,
-  bugprone-suspicious-semicolon,
-  bugprone-suspicious-string-compare,
-  bugprone-suspicious-stringview-data-usage,
-  bugprone-swapped-arguments,
-  bugprone-switch-missing-default-case,
-  bugprone-tagged-union-member-count,
-  bugprone-terminating-continue,
-  bugprone-throw-keyword-missing,
-  bugprone-too-small-loop-variable,
-  bugprone-undefined-memory-manipulation,
-  bugprone-undelegated-constructor,
-  bugprone-unhandled-exception-at-new,
-  bugprone-unhandled-self-assignment,
-  bugprone-unique-ptr-array-mismatch,
-  bugprone-unsafe-functions,
-  bugprone-unused-local-non-trivial-variable,
-  bugprone-unused-raii,
-  bugprone-unused-return-value,
-  bugprone-use-after-move,
-  bugprone-virtual-near-miss,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-unchecked-optional-access,
+  -bugprone-narrowing-conversions,
+  -bugprone-branch-clone,
+  -bugprone-argument-comment,
+  -bugprone-exception-escape,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-string-literal-with-embedded-nul,
+  -bugprone-macro-parentheses,
   clang-analyzer-*,
   -clang-analyzer-optin.performance.Padding,
-  -clang-analyzer-optin.core.EnumCastOutOfRange
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
+  misc-*,
+  -misc-const-correctness,
+  -misc-include-cleaner,
+  -misc-no-recursion,
+  -misc-non-private-member-variables-in-classes,
+  -misc-unused-parameters,
+  -misc-use-anonymous-namespace,
+  performance-*,
+  -performance-enum-size
 
 WarningsAsErrors: ''
 

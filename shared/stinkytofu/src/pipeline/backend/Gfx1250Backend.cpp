@@ -149,6 +149,6 @@ struct Gfx1250Registrar {
 static Gfx1250Registrar s_gfx1250Registrar;
 }  // namespace
 
-void anchorGfx1250Backend() {}
+void anchorGfx1250Backend() {}  // NOLINT(misc-use-internal-linkage)
 
 }  // namespace stinkytofu
