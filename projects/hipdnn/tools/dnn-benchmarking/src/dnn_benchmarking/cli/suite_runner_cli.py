@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from ..common.exceptions import ExecutionError, GraphLoadError
-from ..config.benchmark_config import SuiteConfig
+from ..config.benchmark_config import MetricsConfig, SuiteConfig
 from ..execution.suite_runner import run_graph_all_providers
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
@@ -95,7 +95,11 @@ def run_suite_benchmark(
             )
             return 1
 
-    reporter.print_suite_header(total, tarball_source=tarball_source)
+    reporter.print_suite_header(
+        total,
+        tarball_source=tarball_source,
+        extra_profiling_runs=config.metrics.extra_runs_per_engine,
+    )
 
     reporter.print_hipdnn_init_start()
     try:
@@ -152,6 +156,12 @@ def run_suite_cli(
 ) -> int:
     """Validate suite CLI args, build config, and delegate to run_suite_benchmark."""
     try:
+        metrics_config = MetricsConfig(
+            tier=getattr(args, "metrics_tier", "basic"),
+            emit_trace=getattr(args, "emit_trace", None),
+            perf=getattr(args, "perf", False),
+            profiling_output_dir=getattr(args, "profiling_output_dir", None),
+        )
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,
@@ -162,6 +172,8 @@ def run_suite_cli(
             gpu_backend="auto",
             reference_provider=args.validate,
             verbose=args.verbose,
+            metrics=metrics_config,
+            plugin_path=args.plugin_path,
         )
     except ValueError as e:
         reporter.print_error(f"Suite configuration error: {e}")
