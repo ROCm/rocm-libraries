@@ -190,7 +190,7 @@ class GlobalWriteBatchWriter:
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0)):
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
-      module.add(SBarrier("sync waves before subtile paired stores"))
+      module.add(SBarrier(comment="sync waves before subtile paired stores"))
     self._epilog(module)
     return module
 

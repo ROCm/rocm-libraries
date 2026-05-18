@@ -3060,7 +3060,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if isNGLL:
       self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
-      self.codes.clusterBarrier = [ Module() for i in range (kernel["LoopIters"]) ]
+      if kernel["ClusterBarrier"]:
+        self.codes.clusterBarrier = [ Module() for i in range (kernel["LoopIters"]) ]
 
     for uIdx in range(0, kernel["LoopIters"]):
       u = uIdx % kernel["LoopIters"]    #   u: index in compute loop (in contrast to the notion of global read loop)
@@ -3931,7 +3932,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         if not unrollLoopHeaderCodeScheduled:
           if kernel["PrefetchGlobalRead"] != 2 and kernel["ClusterBarrier"]:
-            module.add(SBarrier(comment="sync within cluster before clustr barrier"))
+            module.add(SBarrier(comment="sync within cluster before cluster barrier"))
             module.add(SBarrier(True, True, True, "cluster_barrier wait"))
             module.add(self.clusterBarrierPreSignal(kernel))
           self.makeSchedule(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter=firstIter, lastLoop=False, lastLc=(lc==loopCopies-1))

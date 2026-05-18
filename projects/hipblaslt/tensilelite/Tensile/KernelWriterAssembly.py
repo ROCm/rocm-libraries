@@ -2391,55 +2391,55 @@ class KernelWriterAssembly(KernelWriter):
                                comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
             moduleRegInit.add(label_calculate_workgroup_done)
 
-          if kernel["enableTDMA"] or kernel["enableTDMB"]:
-            with self.allocTmpSgpr(1) as tmpSgprRes:
-              wavelen: int = kernel["WavefrontSize"]
-              sgprIdx: int = tmpSgprRes.idx
-              moduleRegInit.add(VReadfirstlaneB32(sgpr(sgprIdx), vgpr("Serial"), "first tId"))
-              moduleRegInit.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(sgprIdx), "wId=fTid // wavelen"))
+        tdmA: bool = kernel["enableTDMA"]
+        tdmB: bool = kernel["enableTDMB"]
+        # WaveIdx is allocated when TDM is enabled
+        if tdmA or tdmB:
+          with self.allocTmpSgpr(1) as tmpSgprRes:
+            wavelen: int = kernel["WavefrontSize"]
+            sgprIdx: int = tmpSgprRes.idx
+            moduleRegInit.add(VReadfirstlaneB32(sgpr(sgprIdx), vgpr("Serial"), "first tId"))
+            moduleRegInit.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(sgprIdx), "wId=fTid // wavelen"))
 
-          if kernel["Multicast"]:
-            moduleRegInit.addComment0("Calculate multicast mask")
-            sgprWgX = sTmp+1
-            sgprWgY = sTmp+2
-            sgprNWgX = sTmp+3
+        if kernel["Multicast"]:
+          moduleRegInit.addComment0("Calculate multicast mask")
+          sgprWgX = sTmp+1
+          sgprWgY = sTmp+2
+          sgprNWgX = sTmp+3
 
-              maskA = 1
-              for idx in range(kernel["ClusterDim"][1]):
-                maskA |= (1 << (idx * kernel["ClusterDim"][0]))
+          maskA = 1
+          for idx in range(kernel["ClusterDim"][1]):
+            maskA |= (1 << (idx * kernel["ClusterDim"][0]))
 
-              maskB = (1 << kernel["ClusterDim"][0]) - 1
+          maskB = (1 << kernel["ClusterDim"][0]) - 1
 
-              tdmA: bool = kernel["enableTDMA"]
-              tdmB: bool = kernel["enableTDMB"]
+          if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
+            setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
+            setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
+            setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
 
-              if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
-                setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
-                setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
-                setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
+            moduleRegInit.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+            moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
 
-                moduleRegInit.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
-                moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
+            moduleRegInit.add(setMulticastMaskLblEven)
+            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
+                                              comment="Setting maskA for even wave"))
+            moduleRegInit.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
+            moduleRegInit.add(setMulticastMaskLblOdd)
+            moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                      comment="Shift factor: wg_y * nwg_x"))
+            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
+                                              comment="Setting maskB for odd wave"))
+            moduleRegInit.add(setMulticastMaskLblEnd)
 
-                moduleRegInit.add(setMulticastMaskLblEven)
-                moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                                 comment="Setting maskA for even wave"))
-                moduleRegInit.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
-                moduleRegInit.add(setMulticastMaskLblOdd)
-                moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                          comment="Shift factor: wg_y * nwg_x"))
-                moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
-                                                 comment="Setting maskB for odd wave"))
-                moduleRegInit.add(setMulticastMaskLblEnd)
+          else:
+            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskA"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
+                                              comment="Setting maskA"))
 
-              else:
-                moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskA"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                                 comment="Setting maskA"))
-
-                moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                          comment="Shift factor: wg_y * nwg_x"))
-                moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
-                                                 comment="Setting maskB"))
+            moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                      comment="Shift factor: wg_y * nwg_x"))
+            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
+                                              comment="Setting maskB"))
 
       # SrdD can be used as temp sgprs for a bit
       if self.states.doShadowInit and kernel["BufferStore"]:
@@ -6792,7 +6792,6 @@ class KernelWriterAssembly(KernelWriter):
             jumpLabel = Label("LoopEnd%s_evenexit"%(loopChar), "" )
 
         if kernel["ClusterBarrier"]:
-          skipClusterBarrierWait = Label("skipCBWait", "")
           module.add(SCBranchSCC0(loopLabelBegin.getLabelName(), "skip cluster wait if LoopCounterL > 1"))
           module.add(SBarrier(True, True, True, "cluster_barrier wait"))
           module.add(SBranch(labelName=jumpLabel.getLabelName(), \
