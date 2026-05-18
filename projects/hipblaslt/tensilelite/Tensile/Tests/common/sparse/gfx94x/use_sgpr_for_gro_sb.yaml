@@ -22,7 +22,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   NumWarmups: 0
   EnqueuesPerSync: 0
-  SyncsPerBenchmark: 1
+  SyncsPerBenchmark: 0
   NumBenchmarks: 1
   # KernelTime: False
   MinKForGSU: 1

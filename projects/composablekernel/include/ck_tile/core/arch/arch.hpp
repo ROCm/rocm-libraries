@@ -105,6 +105,7 @@ enum struct amdgcn_target_id
     GFX1200        = 0x1200,
     GFX1201        = 0x1201,
     GFX12_GENERIC  = 0x12FF,
+    GFX1250        = 0x1250,
     AMDGCN_SPIRV   = 0xFFFF, // Target-agnostic SPIR-V (JIT to native at runtime)
     HOST           = 0x0000,
 };
@@ -313,6 +314,7 @@ constexpr auto get_compiler_target()
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1200, GFX1200);
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1201, GFX1201);
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX12_GENERIC, GFX12_GENERIC);
+    MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1250, GFX1250);
 
     // SPIR-V: target-agnostic, resolved at runtime
     if constexpr(amdgcn_compiler_target_state::CK_TILE_ARCH_SPIRV)
@@ -387,6 +389,7 @@ CK_TILE_HOST auto hip_device_prop_gcn_arch_name_to_amdgcn_target_id(char const* 
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1200", GFX1200);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1201", GFX1201);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx12_generic", GFX12_GENERIC);
+    MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1250", GFX1250);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("amdgcnspirv", AMDGCN_SPIRV);
 
     // Default case: return HOST target if no match is found
@@ -645,6 +648,7 @@ CK_TILE_HOST_DEVICE constexpr auto get_compiler_target()
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1200, GFX1200);
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1201, GFX1201);
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX12_GENERIC, GFX12_GENERIC);
+    MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1250, GFX1250);
 
     // Default to HOST
     return amdgcn_target{};
@@ -727,7 +731,7 @@ CK_TILE_HOST auto hip_device_prop_gcn_arch_name_to_amdgcn_target(char const* tes
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX12_TARGET("gfx1200", GFX1200);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX12_TARGET("gfx1201", GFX1201);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX12_TARGET("gfx12_generic", GFX12_GENERIC);
-
+    MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX12_TARGET("gfx1250", GFX1250);
     // Default case
     return amdgcn_target{};
 }
@@ -928,6 +932,62 @@ CK_TILE_DEVICE void block_sync_load_raw(index_t cnt = 0)
 #endif
 }
 
+// cluster related builtins
+CK_TILE_DEVICE auto get_cluster_id_x()
+{
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+    return __builtin_amdgcn_cluster_id_x();
+#else
+    return 0;
+#endif
+}
+
+CK_TILE_DEVICE auto get_cluster_id_y()
+{
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+    return __builtin_amdgcn_cluster_id_y();
+#else
+    return 0;
+#endif
+}
+
+CK_TILE_DEVICE auto get_cluster_id_z()
+{
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+    return __builtin_amdgcn_cluster_id_z();
+#else
+    return 0;
+#endif
+}
+
+CK_TILE_DEVICE uint32_t get_cluster_workgroup_id_x()
+{
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+    return static_cast<uint32_t>(__builtin_amdgcn_cluster_workgroup_id_x());
+#else
+    return 0;
+#endif
+}
+
+CK_TILE_DEVICE uint32_t get_cluster_workgroup_id_y()
+{
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+    return static_cast<uint32_t>(__builtin_amdgcn_cluster_workgroup_id_y());
+#else
+    return 0;
+#endif
+}
+
+CK_TILE_DEVICE uint32_t get_cluster_workgroup_id_z()
+{
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+    return static_cast<uint32_t>(__builtin_amdgcn_cluster_workgroup_id_z());
+#else
+    return 0;
+#endif
+}
+
+// https://llvm.org/docs/AMDGPU/gfx9_waitcnt.html
 struct WaitcntLayoutGfx12
 { // s_wait_loadcnt_dscnt: mem[13:8], ds[5:0]
     CK_TILE_DEVICE static constexpr index_t VM_MASK   = 0x3F; // mem
@@ -1032,6 +1092,14 @@ struct waitcnt_arg
     }
 };
 
+#if defined(__gfx12__)
+extern "C" CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_s_wait_dscnt(unsigned short count) asm("llvm.amdgcn.s.wait.dscnt");
+
+extern "C" CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_s_wait_loadcnt(unsigned short count) asm("llvm.amdgcn.s.wait.loadcnt");
+#endif
+
 template <index_t vmcnt   = waitcnt_arg::kMaxVmCnt,
           index_t expcnt  = waitcnt_arg::kMaxExpCnt,
           index_t lgkmcnt = waitcnt_arg::kMaxLgkmCnt>
@@ -1039,11 +1107,16 @@ CK_TILE_DEVICE void s_waitcnt()
 {
 #if defined(__gfx12__)
     // GFX12 do't use __builtin_amdgcn_s_waitcnt
-    constexpr index_t wait_mask = waitcnt_arg::from_vmcnt<vmcnt>() |
-                                  waitcnt_arg::from_expcnt<expcnt>() |
-                                  waitcnt_arg::from_lgkmcnt<lgkmcnt>();
-
-    asm volatile("s_wait_loadcnt_dscnt %0" : : "n"(wait_mask) : "memory");
+    if constexpr(lgkmcnt != waitcnt_arg::kMaxLgkmCnt)
+    {
+        constexpr index_t dscnt_val = waitcnt_arg::from_lgkmcnt<lgkmcnt>();
+        llvm_amdgcn_s_wait_dscnt(dscnt_val);
+    }
+    if constexpr(vmcnt != waitcnt_arg::kMaxVmCnt)
+    {
+        constexpr index_t loadcnt_val = waitcnt_arg::from_vmcnt<vmcnt>();
+        llvm_amdgcn_s_wait_loadcnt(loadcnt_val);
+    }
 #else
     __builtin_amdgcn_s_waitcnt(waitcnt_arg::from_vmcnt<vmcnt>() |
                                waitcnt_arg::from_expcnt<expcnt>() |
@@ -1056,6 +1129,27 @@ CK_TILE_DEVICE void s_waitcnt_lgkm()
     s_waitcnt<waitcnt_arg::kMaxVmCnt, waitcnt_arg::kMaxExpCnt, lgkmcnt>();
 }
 
+template <index_t N = 0>
+CK_TILE_DEVICE void s_wait_dscnt()
+{
+#if defined(__gfx12__)
+    constexpr index_t dscnt_val = waitcnt_arg::from_lgkmcnt<N>();
+    llvm_amdgcn_s_wait_dscnt(dscnt_val);
+#else
+    __builtin_amdgcn_s_waitcnt(waitcnt_arg::from_lgkmcnt<N>());
+#endif
+}
+
+template <index_t N = 0>
+CK_TILE_DEVICE void s_wait_asynccnt()
+{
+#if defined(__gfx125__)
+    __builtin_amdgcn_s_wait_asynccnt(N);
+#else
+    (void)N;
+#endif
+}
+
 template <index_t vmcnt   = waitcnt_arg::kMaxVmCnt,
           index_t expcnt  = waitcnt_arg::kMaxExpCnt,
           index_t lgkmcnt = waitcnt_arg::kMaxLgkmCnt>
@@ -1064,16 +1158,18 @@ CK_TILE_DEVICE void s_waitcnt_barrier()
 #if defined(__gfx12__)
     // GFX12 optimization: Manual barrier implementation avoids performance penalty
     // from __builtin_amdgcn_s_barrier which inserts extra s_wait_loadcnt_dscnt 0x0
-    constexpr index_t wait_mask = waitcnt_arg::from_vmcnt<vmcnt>() |
-                                  waitcnt_arg::from_expcnt<expcnt>() |
-                                  waitcnt_arg::from_lgkmcnt<lgkmcnt>();
-
-    asm volatile("s_wait_loadcnt_dscnt %0\n"
-                 "s_barrier_signal -1\n"
-                 "s_barrier_wait -1"
-                 :
-                 : "n"(wait_mask)
-                 : "memory");
+    if constexpr(lgkmcnt != waitcnt_arg::kMaxLgkmCnt)
+    {
+        constexpr index_t dscnt_val = waitcnt_arg::from_lgkmcnt<lgkmcnt>();
+        llvm_amdgcn_s_wait_dscnt(dscnt_val);
+    }
+    if constexpr(vmcnt != waitcnt_arg::kMaxVmCnt)
+    {
+        constexpr index_t loadcnt_val = waitcnt_arg::from_vmcnt<vmcnt>();
+        llvm_amdgcn_s_wait_loadcnt(loadcnt_val);
+    }
+    __builtin_amdgcn_s_barrier_signal(-1);
+    __builtin_amdgcn_s_barrier_wait(-1);
 #else
     s_waitcnt<vmcnt, expcnt, lgkmcnt>();
     __builtin_amdgcn_s_barrier();
@@ -1086,10 +1182,31 @@ CK_TILE_DEVICE void block_sync_lds()
     s_waitcnt_barrier<waitcnt_arg::kMaxVmCnt, waitcnt_arg::kMaxExpCnt, lgkmcnt>();
 }
 
+template <index_t tensorcnt = 0>
+CK_TILE_DEVICE void s_wait_tensorcnt()
+{
+#if CK_TILE_ENABLE_TDM_FEATURE
+    __builtin_amdgcn_s_wait_tensorcnt(tensorcnt);
+#endif
+}
+
+template <index_t tensorcnt = 0, index_t lgkmcnt = waitcnt_arg::kMaxLgkmCnt>
+CK_TILE_DEVICE void s_wait_tensorcnt_barrier()
+{
+    s_wait_tensorcnt<tensorcnt>();
+    block_sync_lds<lgkmcnt>();
+}
+
 template <index_t vmcnt = 0>
 CK_TILE_DEVICE void block_sync_lds_direct_load()
 {
+#if defined(__gfx125__)
+    __builtin_amdgcn_s_wait_asynccnt(vmcnt);
+    __builtin_amdgcn_s_barrier_signal(-1);
+    __builtin_amdgcn_s_barrier_wait(-1);
+#else
     s_waitcnt_barrier<vmcnt, waitcnt_arg::kMaxExpCnt, waitcnt_arg::kMaxLgkmCnt>();
+#endif
 }
 
 CK_TILE_DEVICE void s_nop(index_t cnt = 0)
@@ -1111,6 +1228,7 @@ __device__ T* cast_pointer_to_generic_address_space(T CK_TILE_CONSTANT_ADDRESS_S
     // cast a pointer in "Constant" address space (4) to "Generic" address space (0)
     // only c-style pointer cast seems be able to be compiled
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
     return (T*)(p); // NOLINT(old-style-cast)
 #pragma clang diagnostic pop
@@ -1122,6 +1240,7 @@ __host__ __device__ T CK_TILE_CONSTANT_ADDRESS_SPACE* cast_pointer_to_constant_a
     // cast a pointer in "Generic" address space (0) to "Constant" address space (4)
     // only c-style pointer cast seems be able to be compiled;
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
     return (T CK_TILE_CONSTANT_ADDRESS_SPACE*)p; // NOLINT(old-style-cast)
 #pragma clang diagnostic pop
@@ -1170,6 +1289,12 @@ struct gfx115_t
 struct gfx12_t
 {
 };
+struct gfx120_t
+{
+};
+struct gfx125_t
+{
+};
 struct gfx_invalid_t
 {
 };
@@ -1182,12 +1307,14 @@ CK_TILE_DEVICE static constexpr auto get_device_arch()
     return gfx103_t{};
 #elif defined(__gfx11__)
     return gfx11_t{};
+#elif defined(__gfx125__)
+    return gfx125_t{};
 #elif defined(__gfx950__)
     return gfx950_t{};
 #elif defined(__gfx9__)
     return gfx9_t{};
 #else
-    return gfx12_t{};
+    return gfx120_t{};
 #endif
 }
 
@@ -1202,11 +1329,43 @@ CK_TILE_DEVICE static constexpr auto get_n_lds_banks(gfx11_t) { return 32; }
 
 CK_TILE_DEVICE static constexpr auto get_n_lds_banks(gfx115_t) { return 32; }
 
-CK_TILE_DEVICE static constexpr auto get_n_lds_banks(gfx12_t) { return 32; }
+CK_TILE_DEVICE static constexpr auto get_n_lds_banks(gfx120_t) { return 32; }
+
+CK_TILE_DEVICE static constexpr auto get_n_lds_banks(gfx125_t) { return 64; }
 
 CK_TILE_DEVICE static constexpr auto get_n_lds_banks(gfx950_t) { return 64; }
 
 CK_TILE_DEVICE static constexpr auto get_n_lds_banks(gfx_invalid_t) { return 0; }
+
+// the below is for vgpr count per arch
+CK_TILE_DEVICE static constexpr auto get_max_vgpr_count(gfx9_t) { return 512; }
+
+CK_TILE_DEVICE static constexpr auto get_max_vgpr_count(gfx103_t) { return 256; }
+
+CK_TILE_DEVICE static constexpr auto get_max_vgpr_count(gfx11_t) { return 256; }
+
+CK_TILE_DEVICE static constexpr auto get_max_vgpr_count(gfx120_t) { return 256; }
+
+CK_TILE_DEVICE static constexpr auto get_max_vgpr_count(gfx125_t) { return 1024; }
+
+CK_TILE_DEVICE static constexpr auto get_max_vgpr_count(gfx950_t) { return 512; }
+
+CK_TILE_DEVICE static constexpr auto get_max_vgpr_count(gfx_invalid_t) { return 0; }
+
+// the below is for lds size per arch
+CK_TILE_DEVICE static constexpr auto get_lds_size(gfx9_t) { return 64 * 1024; }
+
+CK_TILE_DEVICE static constexpr auto get_lds_size(gfx103_t) { return 64 * 1024; }
+
+CK_TILE_DEVICE static constexpr auto get_lds_size(gfx11_t) { return 64 * 1024; }
+
+CK_TILE_DEVICE static constexpr auto get_lds_size(gfx120_t) { return 64 * 1024; }
+
+CK_TILE_DEVICE static constexpr auto get_lds_size(gfx125_t) { return 320 * 1024; }
+
+CK_TILE_DEVICE static constexpr auto get_lds_size(gfx950_t) { return 160 * 1024; }
+
+CK_TILE_DEVICE static constexpr auto get_lds_size(gfx_invalid_t) { return 0; }
 
 } // namespace detail
 CK_TILE_DEVICE static constexpr auto get_n_lds_banks()
@@ -1230,6 +1389,16 @@ enum LLVMSchedGroupMask : int32_t
     TRANS      = 1 << 10,
     ALL        = (TRANS << 1) - 1,
 };
+
+CK_TILE_DEVICE static constexpr auto get_max_vgpr_count()
+{
+    return detail::get_max_vgpr_count(get_device_arch());
+}
+
+CK_TILE_DEVICE static constexpr auto get_lds_size()
+{
+    return detail::get_lds_size(get_device_arch());
+}
 
 CK_TILE_HOST_DEVICE static constexpr auto get_max_mem_vec_inst_width()
 {

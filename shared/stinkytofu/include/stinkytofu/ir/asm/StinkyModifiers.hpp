@@ -22,17 +22,161 @@
  * ************************************************************************ */
 #pragma once
 
+#include <array>
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
+
+#include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
 // Enum for selecting high or low 16 bits in True16 instructions
 enum class HighBitSel : int { NONE = -1, LOW = 0, HIGH = 1 };
 
-enum class MatrixFmt : uint8_t { FP4 = 0, FP6 = 1, FP8 = 2 };
+// Matrix data format for MFMA/WMMA F8F6F4 instructions.
+enum class MatrixFmt : uint8_t {
+    FP8 = 0,
+    BF8 = 1,
+    FP6 = 2,
+    BF6 = 3,
+    FP4 = 4,
+    NONE = 0xFF,
+};
+
+// Scale format for MXMFMA / scaled-WMMA instructions.
+enum class MatrixScaleFmt : uint8_t {
+    E8 = 0,
+    E5M3 = 1,
+    E4M3 = 2,
+    NONE = 0xFF,
+};
+
+// Convert MatrixFmt enum to assembly string (e.g. FP8 -> "MATRIX_FMT_FP8").
+STINKYTOFU_EXPORT std::string matrixFmtToStr(MatrixFmt fmt);
+
+// Parse assembly string to MatrixFmt enum (e.g. "MATRIX_FMT_FP8" -> FP8).
+STINKYTOFU_EXPORT MatrixFmt parseMatrixFmt(std::string_view s);
+
+// Convert MatrixScaleFmt enum to assembly string.
+STINKYTOFU_EXPORT std::string matrixScaleFmtToStr(MatrixScaleFmt fmt);
+
+// Parse assembly string to MatrixScaleFmt enum.
+STINKYTOFU_EXPORT MatrixScaleFmt parseMatrixScaleFmt(std::string_view s);
+
+enum class MUBUFScope : uint8_t {
+    SCOPE_NONE = 0,
+    SCOPE_CU = 1,
+    SCOPE_SE = 2,
+    SCOPE_DEV = 3,
+    SCOPE_SYS = 4
+};
+
+inline std::string_view toString(MUBUFScope scope) {
+    switch (scope) {
+        case MUBUFScope::SCOPE_CU:
+            return "SCOPE_CU";
+        case MUBUFScope::SCOPE_SE:
+            return "SCOPE_SE";
+        case MUBUFScope::SCOPE_DEV:
+            return "SCOPE_DEV";
+        case MUBUFScope::SCOPE_SYS:
+            return "SCOPE_SYS";
+        default:
+            return "";
+    }
+}
+
+inline MUBUFScope parseMUBUFScope(std::string_view scope) {
+    if (scope == "SCOPE_CU") return MUBUFScope::SCOPE_CU;
+    if (scope == "SCOPE_SE") return MUBUFScope::SCOPE_SE;
+    if (scope == "SCOPE_DEV") return MUBUFScope::SCOPE_DEV;
+    if (scope == "SCOPE_SYS") return MUBUFScope::SCOPE_SYS;
+    return MUBUFScope::SCOPE_NONE;
+}
+
+// 9-bit DPP permutation control selector (matches the hardware dpp_ctrl field).
+// Three encoding shapes:
+//   singleton     — the named value IS the encoding   (e.g. ROW_MIRROR = 0x140)
+//   parameterized — base + amount                     (e.g. row_shl:N = ROW_SHL0 + N;
+//                                                      see dppRowShl() / dppRowShr() / ...)
+//   bit-packed    — quad_perm:[p0..p3] packs 4x2 bits (see dppQuadPerm())
+// *_FIRST / *_LAST constants mark each parameterized range for validity checks.
+enum class DppCtrl : uint16_t {
+    // clang-format off
+
+    // --- quad_perm:[p0,p1,p2,p3] ---
+    // Encoding: 8-bit value = p0 | (p1<<2) | (p2<<4) | (p3<<6)
+    QUAD_PERM_FIRST    = 0x000,
+    QUAD_PERM_ID       = 0x0E4,  // identity [0,1,2,3]
+    QUAD_PERM_LAST     = 0x0FF,
+
+    // --- row_shl:[1..15] --- shifts lanes left within each 16-lane row
+    ROW_SHL0           = 0x100,  // base; row_shl:0 itself is no-op (reserved)
+    ROW_SHL_FIRST      = 0x101,
+    ROW_SHL_LAST       = 0x10F,
+
+    // --- row_shr:[1..15] --- shifts lanes right within each 16-lane row
+    ROW_SHR0           = 0x110,  // base; row_shr:0 itself is no-op (reserved)
+    ROW_SHR_FIRST      = 0x111,
+    ROW_SHR_LAST       = 0x11F,
+
+    // --- row_ror:[1..15] --- rotates lanes right within each 16-lane row
+    ROW_ROR0           = 0x120,  // base; row_ror:0 itself is no-op (reserved)
+    ROW_ROR_FIRST      = 0x121,
+    ROW_ROR_LAST       = 0x12F,
+
+    // --- wave_shl:1, wave_rol:1, wave_shr:1, wave_ror:1 ---
+    // GFX8 (VI) and GFX9 only.
+    // Slots 0x131-0x133, 0x135-0x137, 0x139-0x13B, 0x13D-0x13F are reserved.
+    WAVE_SHL1          = 0x130,
+    WAVE_ROL1          = 0x134,
+    WAVE_SHR1          = 0x138,
+    WAVE_ROR1          = 0x13C,
+
+    // --- row_mirror --- mirrors lanes within each row.
+    // Deprecated; equivalent to row_xmask:15.
+    ROW_MIRROR         = 0x140,
+
+    // --- row_half_mirror --- mirrors lanes within each 8-lane half-row.
+    // Deprecated; equivalent to row_xmask:7.
+    ROW_HALF_MIRROR    = 0x141,
+
+    // --- row_bcast:15, row_bcast:31 ---
+    // GFX8 (VI) and GFX9 only.
+    // Slots 0x144-0x14F are reserved.
+    BCAST15            = 0x142,  // broadcast lane 15 to row
+    BCAST31            = 0x143,  // broadcast lane 31 to row
+
+    // --- row_newbcast:[0..15] (GFX90A) / row_share:[0..15] (GFX10+) ---
+    // Same encoding, different mnemonic per arch. Selects one lane within each
+    // row and shares its value with all lanes in the row.
+    ROW_NEWBCAST_FIRST = 0x150,  // GFX90A name for ROW_SHARE
+    ROW_NEWBCAST_LAST  = 0x15F,
+    ROW_SHARE0         = 0x150,
+    ROW_SHARE_FIRST    = 0x150,
+    ROW_SHARE_LAST     = 0x15F,
+
+    // --- row_xmask:[0..15] (GFX10+) ---
+    // Lane reads from lane (self XOR mask) within each row.
+    ROW_XMASK0         = 0x160,
+    ROW_XMASK_FIRST    = 0x160,
+    ROW_XMASK_LAST     = 0x16F,
+
+    DPP_LAST           = ROW_XMASK_LAST,
+    NONE               = 0xFFFF,
+    // clang-format on
+};
+
+// Classify a DppCtrl value into a human-readable assembly string.
+// E.g. DppCtrl(0x113) -> "row_shr:3", DppCtrl(0x140) -> "row_mirror".
+STINKYTOFU_EXPORT std::string dppCtrlToAsmStr(DppCtrl ctrl);
+
+// Parse an assembly DPP control token like "row_shr:3" or "quad_perm:[0,1,2,3]".
+STINKYTOFU_EXPORT DppCtrl parseDppCtrlFromAsm(std::string_view s);
 
 struct Modifier {
     enum class Type : uint8_t {
@@ -93,7 +237,8 @@ struct TypedModifier : public Modifier {
     }
 
    protected:
-    explicit TypedModifier() : Modifier(Derived::Type) {}
+    explicit TypedModifier()  // NOLINT(bugprone-crtp-constructor-accessibility)
+        : Modifier(Derived::Type) {}
 };
 
 struct DSModifiers : public TypedModifier<DSModifiers> {
@@ -151,7 +296,7 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     MUBUFModifiers(bool offen = false, int offset12 = 0, bool glc = false, bool slc = false,
                    bool nt = false, bool lds = false, bool isStore = false,
                    bool hasMUBUFConst = false, bool hasGLCModifier = false,
-                   bool hasSC0Modifier = false)
+                   bool hasSC0Modifier = false, MUBUFScope scope = MUBUFScope::SCOPE_NONE)
         : TypedModifier<MUBUFModifiers>(),
           offset12(offset12),
           offen(offen),
@@ -162,7 +307,8 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
           isStore(isStore),
           hasMUBUFConst(hasMUBUFConst),
           hasGLCModifier(hasGLCModifier),
-          hasSC0Modifier(hasSC0Modifier) {}
+          hasSC0Modifier(hasSC0Modifier),
+          scope(scope) {}
 
     int offset12;
     uint32_t offen : 1;
@@ -174,6 +320,7 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     uint32_t hasMUBUFConst : 1;
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
+    MUBUFScope scope;
 };
 
 struct SMEMModifiers : public TypedModifier<SMEMModifiers> {
@@ -230,20 +377,72 @@ struct SDWAModifiers : public TypedModifier<SDWAModifiers> {
     SelectBit src1_sel;
 };
 
-// dot2: for WaveSplitK reduction. Only a subset of DPP modifiers are used here
+// DPP (Data Parallel Primitives) modifier: cross-lane permutation for VOP ALU instructions.
 struct DPPModifiers : public TypedModifier<DPPModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::DPP;
 
-    int row_shr;
-    int row_bcast;
-    int bound_ctrl;
+    DppCtrl dppCtrl = DppCtrl::NONE;  // 9-bit permutation selector (DPP16)
+    uint8_t rowMask = 0xF;            // 4-bit row participation mask
+    uint8_t bankMask = 0xF;           // 4-bit bank participation mask
+    uint8_t boundCtrl = 0;            // 0 = keep old value, 1 = zero
+    uint8_t fi = 0;                   // fetch-inactive lane data
 
-    DPPModifiers(int row_shr = -1, int row_bcast = -1, int bound_ctrl = -1)
+    // DPP8 permutation (8 x 3-bit lane selectors). Empty means DPP16 mode.
+    std::array<uint8_t, 8> dpp8 = {0, 0, 0, 0, 0, 0, 0, 0};
+    bool isDPP8 = false;  // true = DPP8 mode (use dpp8 array), false = DPP16 (use dppCtrl)
+
+    // Default constructor (empty / no-DPP sentinel).
+    DPPModifiers() : TypedModifier<DPPModifiers>() {}
+
+    // DPP16 constructor.
+    DPPModifiers(DppCtrl ctrl, uint8_t rowMask = 0xF, uint8_t bankMask = 0xF, uint8_t boundCtrl = 0,
+                 uint8_t fi = 0)
         : TypedModifier<DPPModifiers>(),
-          row_shr(row_shr),
-          row_bcast(row_bcast),
-          bound_ctrl(bound_ctrl) {}
+          dppCtrl(ctrl),
+          rowMask(rowMask),
+          bankMask(bankMask),
+          boundCtrl(boundCtrl),
+          fi(fi) {}
+
+    // DPP8 constructor.
+    DPPModifiers(const std::array<uint8_t, 8>& dpp8Perm, uint8_t fi = 0)
+        : TypedModifier<DPPModifiers>(), fi(fi), dpp8(dpp8Perm), isDPP8(true) {}
+
+    bool empty() const {
+        return !isDPP8 && dppCtrl == DppCtrl::NONE;
+    }
 };
+
+// Build a DPP16 DppCtrl for row_shr:N (N in 1..15).
+inline DppCtrl dppRowShr(unsigned n) {
+    assert(n >= 1 && n <= 15 && "row_shr amount must be in [1,15]");
+    return static_cast<DppCtrl>(static_cast<uint16_t>(DppCtrl::ROW_SHR0) + n);
+}
+// Build a DPP16 DppCtrl for row_shl:N (N in 1..15).
+inline DppCtrl dppRowShl(unsigned n) {
+    assert(n >= 1 && n <= 15 && "row_shl amount must be in [1,15]");
+    return static_cast<DppCtrl>(static_cast<uint16_t>(DppCtrl::ROW_SHL0) + n);
+}
+// Build a DPP16 DppCtrl for row_ror:N (N in 1..15).
+inline DppCtrl dppRowRor(unsigned n) {
+    assert(n >= 1 && n <= 15 && "row_ror amount must be in [1,15]");
+    return static_cast<DppCtrl>(static_cast<uint16_t>(DppCtrl::ROW_ROR0) + n);
+}
+// Encode a quad_perm:[a,b,c,d] into a DppCtrl value (each lane in 0..3).
+inline DppCtrl dppQuadPerm(uint8_t p0, uint8_t p1, uint8_t p2, uint8_t p3) {
+    assert(p0 <= 3 && p1 <= 3 && p2 <= 3 && p3 <= 3 && "quad_perm lane must be in [0,3]");
+    return static_cast<DppCtrl>((p0 & 3) | ((p1 & 3) << 2) | ((p2 & 3) << 4) | ((p3 & 3) << 6));
+}
+// Build a DPP16 DppCtrl for row_share:N (N in 0..15).
+inline DppCtrl dppRowShare(unsigned n) {
+    assert(n <= 15 && "row_share lane must be in [0,15]");
+    return static_cast<DppCtrl>(static_cast<uint16_t>(DppCtrl::ROW_SHARE_FIRST) + n);
+}
+// Build a DPP16 DppCtrl for row_xmask:N (N in 0..15).
+inline DppCtrl dppRowXmask(unsigned n) {
+    assert(n <= 15 && "row_xmask must be in [0,15]");
+    return static_cast<DppCtrl>(static_cast<uint16_t>(DppCtrl::ROW_XMASK_FIRST) + n);
+}
 
 struct VOP3Modifiers : public TypedModifier<VOP3Modifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::VOP3;
@@ -537,17 +736,7 @@ struct SWaitAluData : public TypedModifier<SWaitAluData> {
         uint16_t va_sdst : 3;   // Bits 11-9
         uint16_t va_vdst : 4;   // Bits 15-12
 
-        HwValue& operator=(HwValue const& other) {
-            sa_sdst = other.sa_sdst;
-            va_vcc = other.va_vcc;
-            vm_vsrc = other.vm_vsrc;
-            reserved = other.reserved;
-            hold_cnt = other.hold_cnt;
-            va_ssrc = other.va_ssrc;
-            va_sdst = other.va_sdst;
-            va_vdst = other.va_vdst;
-            return *this;
-        }
+        HwValue& operator=(HwValue const& other) = default;
     };
 
     // Field enumeration
@@ -624,56 +813,65 @@ struct SWaitAluData : public TypedModifier<SWaitAluData> {
     uint8_t validFields;  // Bitmask indicating which fields are valid (not -1)
 };
 
-// MFMA modifiers
+// Per-source neg_lo/neg_hi bits for MFMA/WMMA instructions.
+// neg_lo and neg_hi are 3-bit fields (one bit per source: src0, src1, src2).
+// For IU8/IU4 data types, negation bits indicate signed vs unsigned.
+struct MFMANegBits {
+    std::array<uint8_t, 3> negLo = {0, 0, 0};
+    std::array<uint8_t, 3> negHi = {0, 0, 0};
+    uint8_t numSrcs = 0;  // 0 = unset, 2 or 3
+
+    bool hasNegLo() const {
+        return numSrcs > 0 && (negLo[0] || negLo[1] || negLo[2]);
+    }
+    bool hasNegHi() const {
+        return numSrcs > 0 && (negHi[0] || negHi[1] || negHi[2]);
+    }
+    bool empty() const {
+        return numSrcs == 0;
+    }
+};
+
+// MFMA modifiers - per-source neg_lo/neg_hi bits and matrix reuse hints.
+// Matrix data/scale formats live in MatrixFmtModifiers (its own TypedModifier)
+// so the cost-override table can match on it as a first-class Modifier type.
 struct MFMAModifiers : public TypedModifier<MFMAModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::MFMA_DATA;
 
-    MFMAModifiers(const std::string& inputPermute = "", const std::string& scaleStr = "",
-                  const std::string& negStr = "", bool reuseA = false, bool reuseB = false,
-                  bool neg_lo = false, bool neg_hi = false)
-        : TypedModifier<MFMAModifiers>(),
-          inputPermute(inputPermute),
-          scaleStr(scaleStr),
-          negStr(negStr),
-          reuseA(reuseA),
-          reuseB(reuseB),
-          neg_lo(neg_lo),
-          neg_hi(neg_hi),
-          isMXMFMA(false),
-          mxInstType(0),
-          mxScaleAType(0),
-          mxScaleBType(0) {}
+    MFMAModifiers() : TypedModifier<MFMAModifiers>() {}
 
-    // Constructor for MXMFMA instructions
-    MFMAModifiers(const std::string& inputPermute, const std::string& scaleStr,
-                  const std::string& negStr, bool reuseA, bool reuseB, int mxInstType,
-                  int mxScaleAType, int mxScaleBType, bool neg_lo = false, bool neg_hi = false)
-        : TypedModifier<MFMAModifiers>(),
-          inputPermute(inputPermute),
-          scaleStr(scaleStr),
-          negStr(negStr),
-          reuseA(reuseA),
-          reuseB(reuseB),
-          neg_lo(neg_lo),
-          neg_hi(neg_hi),
-          isMXMFMA(true),
-          mxInstType(mxInstType),
-          mxScaleAType(mxScaleAType),
-          mxScaleBType(mxScaleBType) {}
+    MFMANegBits negBits;  // Per-source neg_lo/neg_hi bits
+    bool reuseA = false;
+    bool reuseB = false;
+};
 
-    std::string inputPermute;
-    std::string scaleStr;
-    std::string negStr;
-    bool reuseA;
-    bool reuseB;
-    bool neg_lo;  // Indicates if neg_lo modifier is present
-    bool neg_hi;  // Indicates if neg_hi modifier is present
+// Matrix format modifier for F8F6F4-family WMMA/MFMA instructions.
+// Carries the per-matrix data format (fmtA/fmtB) and, for scaled (MXMFMA)
+// instructions, the per-matrix scale numeric format (scaleFmtA/scaleFmtB).
+// Used both for assembly emission (matrix_a_fmt:..., matrix_a_scale_fmt:...)
+// and as the match key for cost-override entries in *_Instructions.def.
+struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
+    static constexpr Modifier::Type Type = Modifier::Type::MATRIX_FMT;
 
-    // MXMFMA-specific fields
-    bool isMXMFMA;     // Flag to indicate if this is a MXMFMA modifier
-    int mxInstType;    // MXMFMA instruction type (rocisa::InstType)
-    int mxScaleAType;  // Scale type for matrix A (rocisa::InstType)
-    int mxScaleBType;  // Scale type for matrix B (rocisa::InstType)
+    MatrixFmt fmtA = MatrixFmt::NONE;
+    MatrixFmt fmtB = MatrixFmt::NONE;
+    MatrixScaleFmt scaleFmtA = MatrixScaleFmt::NONE;
+    MatrixScaleFmt scaleFmtB = MatrixScaleFmt::NONE;
+
+    MatrixFmtModifiers() : TypedModifier<MatrixFmtModifiers>() {}
+    MatrixFmtModifiers(MatrixFmt a, MatrixFmt b)
+        : TypedModifier<MatrixFmtModifiers>(), fmtA(a), fmtB(b) {}
+    MatrixFmtModifiers(MatrixFmt a, MatrixFmt b, MatrixScaleFmt sa, MatrixScaleFmt sb)
+        : TypedModifier<MatrixFmtModifiers>(), fmtA(a), fmtB(b), scaleFmtA(sa), scaleFmtB(sb) {}
+
+    // True for scaled F8F6F4 / MXMFMA (scale_fmt fields set).
+    bool isMXMFMA() const {
+        return scaleFmtA != MatrixScaleFmt::NONE;
+    }
+    // True when no format info is set (instance carries nothing useful).
+    bool empty() const {
+        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE;
+    }
 };
 
 struct CommentData : public TypedModifier<CommentData> {
@@ -682,16 +880,6 @@ struct CommentData : public TypedModifier<CommentData> {
     CommentData(const std::string& comment) : TypedModifier<CommentData>(), comment(comment) {}
 
     std::string comment;
-};
-
-struct MatrixFmtData : public TypedModifier<MatrixFmtData> {
-    static constexpr Modifier::Type Type = Modifier::Type::MATRIX_FMT;
-
-    MatrixFmtData(MatrixFmt fmtA, MatrixFmt fmtB)
-        : TypedModifier<MatrixFmtData>(), a(fmtA), b(fmtB) {}
-
-    MatrixFmt a;
-    MatrixFmt b;
 };
 
 struct MemTokenData : public TypedModifier<MemTokenData> {

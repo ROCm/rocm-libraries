@@ -5,6 +5,7 @@
 
 #include "ck/utility/amd_lds.hpp"
 #include "ck/utility/common_header.hpp"
+#include "ck/host_utility/device_prop.hpp"
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
@@ -19,6 +20,10 @@
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 #include "ck/tensor_operation/gpu/device/matrix_padder.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck {
 
@@ -39,7 +44,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
                                               const BElementwiseOperation b_element_op,
                                               const CElementwiseOperation c_element_op)
 {
-#if defined(__gfx9__)
+#if defined(__gfx9__) || defined(__gfx125__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         constexpr index_t shared_size = GridwiseGemm::GetSharedMemoryNumberOfByte();
@@ -448,9 +453,28 @@ struct GridwiseGemm_xdlops_splitk_lds_direct_load
             get_device_arch());
     }
 
-    static constexpr index_t MXdlPerWave = MRepeat;
-    static constexpr index_t NXdlPerWave = NRepeat;
-    IS_VALID_COMPILATION_PARAMETER_IMPL(FloatC)
+    template <
+        InMemoryDataOperationEnum CGlobalMemoryDataOperation_ = InMemoryDataOperationEnum::Set>
+    __device__ static bool constexpr IsValidCompilationParameter()
+    {
+        if constexpr((K0PerBlock * K1Value) %
+                         MfmaSelector<ComputeType, MPerXdl, NPerXdl, ComputeType, true>::
+                             GetKPerXdlops() !=
+                     0)
+        {
+            return false;
+        }
+        return ck::tensor_operation::device::IsValidGemmCompilationParameter<
+            BlockSize,
+            MPerBlock,
+            NPerBlock,
+            MPerXdl,
+            NPerXdl,
+            MRepeat,
+            NRepeat,
+            FloatC,
+            CGlobalMemoryDataOperation_>();
+    }
 
     __host__ __device__ static constexpr bool CheckValidity(const Argument& karg)
     {
@@ -540,6 +564,10 @@ struct GridwiseGemm_xdlops_splitk_lds_direct_load
             return false;
         }
 
+        if(!is_xdl_wmma_k_supported<ComputeType, K0PerBlock * K1Value>())
+        {
+            return false;
+        }
         return true;
     }
 
@@ -704,6 +732,11 @@ struct GridwiseGemm_xdlops_splitk_lds_direct_load
                 b_b_k0_n_k1_block_desc,
                 make_multi_index(0, 0, 0, 0));
 
+        constexpr index_t KPack =
+            math::max(K1Value,
+                      MfmaSelector<ComputeType, MPerXdl, NPerXdl, ComputeType, true>::selected_mfma
+                          .k_per_blk);
+
         auto blockwise_gemm = BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_Selector<
             BlockSize,
             ComputeType, // ComputeType A
@@ -715,7 +748,7 @@ struct GridwiseGemm_xdlops_splitk_lds_direct_load
             NPerXdl,
             MRepeat,
             NRepeat,
-            K1,
+            KPack,
             LoopSched>();
 
         auto c_thread_buf = blockwise_gemm.GetCThreadBuffer();
@@ -778,3 +811,5 @@ struct GridwiseGemm_xdlops_splitk_lds_direct_load
 };
 
 } // namespace ck
+
+#pragma clang diagnostic pop

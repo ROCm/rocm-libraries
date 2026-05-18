@@ -7,6 +7,9 @@
 
 #include "ck/ck.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
 using Row = ck::tensor_layout::gemm::RowMajor;
 using Col = ck::tensor_layout::gemm::ColumnMajor;
 
@@ -81,3 +84,4 @@ assign_default_strides(Col, std::vector<ck::index_t>& strides, std::vector<ck::i
         stride *= dims[s];
     }
 }
+#pragma clang diagnostic pop

@@ -146,6 +146,11 @@ std::vector<StinkyInstruction*> lowerRocisaWaitAlu(rocisa::Instruction& inst,
     return {stinkyInst};
 }
 
+std::vector<StinkyInstruction*> lowerRocisaSchedulingFence(rocisa::Instruction& /*inst*/,
+                                                           AsmIRBuilder& irBuilder) {
+    return {irBuilder.createFence()};
+}
+
 };  // anonymous namespace
 
 // Include all Rocisa hardware mapping tables
@@ -157,12 +162,12 @@ struct HwInstDescConversionMapping {
         nullptr;
 };
 
-const std::unordered_map<std::type_index, uint16_t>* getRocisaToHwInstMap(GfxArchID arch) {
+static const std::unordered_map<std::type_index, uint16_t>* getRocisaToHwInstMap(GfxArchID arch) {
     return vecRocisaToHwInstMap[static_cast<size_t>(arch)]();
 }
 
-const std::unordered_map<std::type_index, ConvertRocisaToHwInstFunc>* getConvRocisaToHwInstFMap(
-    GfxArchID arch) {
+static const std::unordered_map<std::type_index, ConvertRocisaToHwInstFunc>*
+getConvRocisaToHwInstFMap(GfxArchID arch) {
     return vecRocisaToHwInstLoweringMap[static_cast<size_t>(arch)]();
 }
 

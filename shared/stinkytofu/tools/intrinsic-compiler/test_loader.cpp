@@ -31,6 +31,8 @@
  *   3. Query and display intrinsic definitions
  */
 
+#include <bit>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
 
@@ -72,7 +74,7 @@ void printIntrinsicDetails(const IntrinsicLibrary& lib, const std::string& name)
                 std::cout << op.floatValue;
             } else if (op.type == IntrinsicOperand::HexLiteral) {
                 float floatVal = static_cast<float>(op.floatValue);
-                uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
+                uint32_t bits = std::bit_cast<uint32_t>(floatVal);
                 std::cout << "0x" << std::hex << bits << std::dec;
             }
         }

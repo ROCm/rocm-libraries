@@ -108,6 +108,12 @@ typedef enum
     /** @brief Reduce tensor operator enumeration (hipdnnReduceTensorOp_t) */
     HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE = 28,
 
+    /** @brief Resample mode enumeration (hipdnnResampleMode_t) */
+    HIPDNN_TYPE_RESAMPLE_MODE = 29,
+
+    /** @brief Padding mode enumeration (hipdnnPaddingMode_t) */
+    HIPDNN_TYPE_PADDING_MODE = 30,
+
     /**
      * @name Extension Types
      * hipDNN-specific extension types

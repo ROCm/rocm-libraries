@@ -76,6 +76,7 @@ endfunction()
 set(KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdInferSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdTrainSpatial.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormBwdSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchnormFunctions.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/DefaultConfiguration.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/Configuration.hpp

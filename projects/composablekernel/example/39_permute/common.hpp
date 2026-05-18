@@ -26,6 +26,10 @@
 #include "ck/library/utility/host_tensor.hpp"
 #include "ck/library/utility/host_tensor_generator.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 using ::ck::DeviceMem;
 using ::ck::HostTensorDescriptor;
 using ::ck::Tensor;
@@ -459,3 +463,4 @@ auto host_permute(const Tensor<Src>& src, const Axes& axes, Functor functor, Ten
 
     return true;
 }
+#pragma clang diagnostic pop

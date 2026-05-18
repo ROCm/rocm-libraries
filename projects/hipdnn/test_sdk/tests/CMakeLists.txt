@@ -30,11 +30,14 @@ add_executable(
     utilities/TestCpuTypeUtilities.cpp
     utilities/TestSdkFrontendTypeConversions.cpp
     utilities/TestCpuReferencePointwise.cpp
+    utilities/TestDynamicTolerancesBatchNorm.cpp
     utilities/TestDynamicTolerancesCommon.cpp
     utilities/TestDynamicTolerancesConv.cpp
+    utilities/TestDynamicTolerancesLayerNorm.cpp
     utilities/TestDynamicTolerancesMatmul.cpp
     utilities/TestDynamicTolerancesPointwise.cpp
     utilities/TestDynamicTolerancesRMSNorm.cpp
+    utilities/TestDynamicTolerancesSdpa.cpp
     utilities/TestGraphTestHelpers.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
     utilities/TestFlatbufferTensorAttributesUtils.cpp
