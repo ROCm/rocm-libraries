@@ -133,6 +133,7 @@
 #include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/ResampleBwdNode.hpp>
 #include <hipdnn_frontend/node/ResampleFwdNode.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
@@ -5723,6 +5724,38 @@ public:
             std::make_shared<ResampleFwdNode>(std::move(attributes), graph_attributes));
 
         return y;
+    }
+
+    /**
+     * @brief Add a resample backward (pooling gradient) operation to the graph
+     *
+     * @param dy: Input gradient tensor
+     * @param attributes: Resample backward operation attributes
+     * @return dx: Output gradient tensor
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> resample_bwd(std::shared_ptr<TensorAttributes> dy,
+                                                   ResampleBwdAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("ResampleBwd_" + std::to_string(_sub_nodes.size()));
+        }
+        if(dy->get_name().empty())
+        {
+            dy->set_name(attributes.get_name() + "::DY");
+        }
+
+        auto dx = outputTensor(attributes.get_name() + "::DX");
+
+        attributes.set_dy(std::move(dy));
+        attributes.set_dx(dx);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ResampleBwdNode>(std::move(attributes), graph_attributes));
+
+        return dx;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
