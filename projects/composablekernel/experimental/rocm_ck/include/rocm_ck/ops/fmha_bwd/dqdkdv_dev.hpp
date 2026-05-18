@@ -100,46 +100,44 @@ struct FmhaBwdDQDKDVTypes
                                               K.has_bias_grad, // kHasBiasGrad
                                               K.block_per_cu>; // kBlockPerCu
 
-    // Guard: tile geometry is only valid for d128. Other hdim values need
-    // different tile configs (see fmha_bwd.py get_dq_dk_dv_tiles()).
-    static_assert(K.hdim_q == 128 && K.hdim_v == 128,
-                  "Tile geometry is hardcoded for d128. Other hdim values "
-                  "require different tile configs.");
-
-    // Guard: BlockSize=256 with NumWarps=4 assumes wave64 (gfx9). On wave32
-    // targets (gfx10/11/12) the same NumWarps would yield BlockSize=128,
-    // breaking the BlockTile arithmetic and warp-level intrinsics encoded
-    // into the pipeline. Refuse to compile this bridge on non-gfx9 targets.
+    // Guard: wave64 (gfx9) only. The tile configs currently populated in
+    // getTileConfig() assume wavefrontSize=64. On wave32 targets (gfx10/11/12)
+    // the block_size arithmetic and warp-level intrinsics would be wrong.
     static_assert(__AMDGCN_WAVEFRONT_SIZE == 64,
-                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). The hardcoded "
-                  "BlockSize=256 / NumWarps=4 tile config assumes warp_size=64.");
+                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). "
+                  "Add GFX11/GFX12 tile configs to enable wave32 targets.");
 
-    // --- Tile shape (hardcoded for d128 gfx9 -- Config 4 from fmha_bwd.py) ---
+    // --- Tile shape (from consteval lookup table) ---
     //
-    // From the gfx9 tile table for fp16/bf16 d128:
-    //   bm0=16, bn0=128, bk0=128, bk1=16, bk2=128, bk3=16, bk4=32
-    //   bhdq=128, bhdv=128
-    //
-    //   Gemm0/Gemm2 block_warps: <1, 4, 1>  warp_tile: <16, 16, 32>
-    //   Gemm1/Gemm3 block_warps: <4, 1, 1>  warp_tile: <16, 16, 16>
-    //   Gemm4       block_warps: <1, 4, 1>  warp_tile: <16, 16, min(32, 32)>
-    //
-    //   NumWarps = 4, BlockSize = 256, maxSeqLenQ = 0 (unlimited)
-    //
+    // getTileConfig() returns the architecture-specific tile geometry for
+    // the given (hdim_q, hdim_v, dtype). The device bridge reads plain
+    // integer fields and converts them to CK Tile sequence<> types.
+    static constexpr auto kTile = getTileConfig(K.hdim_q, K.hdim_v, K.dtype, GpuTarget::gfx942);
+
     // BlockTile: sequence<bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv>
-    using BlockTile = ck_tile::sequence<16, 128, 128, 16, 128, 16, 32, 128, 128>;
+    using BlockTile = ck_tile::sequence<kTile.bm0,
+                                        kTile.bn0,
+                                        kTile.bk0,
+                                        kTile.bk1,
+                                        kTile.bk2,
+                                        kTile.bk3,
+                                        kTile.bk4,
+                                        K.hdim_q,
+                                        K.hdim_v>;
 
     // Gemm0 & Gemm2: compute S = Q @ K^T and dP = dO @ V^T
-    using Gemm0BlockWarps = ck_tile::sequence<1, 4, 1>;
-    using Gemm0WarpTile   = ck_tile::sequence<16, 16, 32>;
+    using Gemm0BlockWarps = ck_tile::sequence<kTile.rm0, kTile.rn0, kTile.rk0>;
+    using Gemm0WarpTile   = ck_tile::sequence<kTile.wm0, kTile.wn0, kTile.wk0>;
 
     // Gemm1 & Gemm3: compute dV = P^T @ dO and dK = dS^T @ Q
-    using Gemm1BlockWarps = ck_tile::sequence<4, 1, 1>;
-    using Gemm1WarpTile   = ck_tile::sequence<16, 16, 16>;
+    using Gemm1BlockWarps = ck_tile::sequence<kTile.rm1, kTile.rn1, kTile.rk1>;
+    using Gemm1WarpTile   = ck_tile::sequence<kTile.wm1, kTile.wn1, kTile.wk1>;
 
     // Gemm4: compute dQ = dS @ K
-    using Gemm4BlockWarps = ck_tile::sequence<1, 4, 1>;
-    using Gemm4WarpTile   = ck_tile::sequence<16, 16, 32>;
+    using Gemm4BlockWarps = ck_tile::sequence<kTile.rm2, kTile.rn2, kTile.rk2>;
+    // GEMM4 warp tile = (wm0, wn0, min(wk0, bk4)) per fmha_bwd.py
+    static constexpr int kWk4 = (kTile.wk0 < kTile.bk4) ? kTile.wk0 : kTile.bk4;
+    using Gemm4WarpTile       = ck_tile::sequence<kTile.wm0, kTile.wn0, kWk4>;
 
     // TileFmhaBwdShape: 5 GEMMs with their block_warps and warp_tiles
     //   G0=G2 (S/dP), G1=G3 (dV/dK), G4 (dQ)
@@ -154,7 +152,7 @@ struct FmhaBwdDQDKDVTypes
                                                 Gemm1WarpTile, // Gemm3 (same as G1)
                                                 Gemm4BlockWarps,
                                                 Gemm4WarpTile, // Gemm4
-                                                0>;            // kMaxSeqLenQ (0 = unlimited)
+                                                kTile.max_seq_q>;
 
     // --- Mask type ---
     // has_mask=true  -> GenericAttentionMask<true, true> (full masking)
@@ -165,11 +163,11 @@ struct FmhaBwdDQDKDVTypes
 
     // --- Dropout type ---
     // BlockDropoutBwd<IsDropout, IsWG32, IsStoreRandval>
-    // For d128 the warp tile wm0=16, so IsWG32=false -> wg16 variant.
+    // IsWG32 = (wm0 >= 32). All current gfx9 configs use wm0=16 → false.
     // We never store randval in backward (IsStoreRandval=false).
     using Dropout = ck_tile::BlockDropoutBwd<K.has_dropout,
-                                             false,  // IsWG32 = false (wm0=16 for d128 config)
-                                             false>; // IsStoreRandval = false
+                                             (kTile.wm0 >= 32), // IsWG32
+                                             false>;            // IsStoreRandval = false
 
     // --- Pipeline problem ---
     static constexpr bool kIsGroupMode = (K.mode == FmhaMode::GROUP);

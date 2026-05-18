@@ -18,11 +18,84 @@
 
 #include <rocm_ck/ops/fmha_bwd/common.hpp>
 
+#include <rocm_ck/arch_properties.hpp>
 #include <rocm_ck/datatype_utils.hpp>
 
 #include <cstdint>
 
 namespace rocm_ck {
+
+// ---------------------------------------------------------------------------
+// Tile geometry config (consteval table)
+// ---------------------------------------------------------------------------
+
+/// Tile geometry for the dQ/dK/dV backward kernel.
+/// All fields are plain integers; the device bridge converts them to
+/// CK Tile sequence<> types. Source of truth: fmha_bwd.py get_dq_dk_dv_tiles().
+struct FmhaBwdDQDKDVTileConfig
+{
+    int hdim_q; // head dimension for Q (lookup key)
+    int hdim_v; // head dimension for V (lookup key)
+
+    // Block tile: <bm0, bn0, bk0, bk1, bk2, bk3, bk4, hdim_q, hdim_v>
+    int bm0, bn0, bk0, bk1, bk2, bk3, bk4;
+
+    // GEMM0/2 (S = Q@K^T, dP = dO@V^T): block warps + warp tile
+    int rm0, rn0, rk0;
+    int wm0, wn0, wk0;
+
+    // GEMM1/3 (dV = P^T@dO, dK = dS^T@Q): block warps + warp tile
+    int rm1, rn1, rk1;
+    int wm1, wn1, wk1;
+
+    // GEMM4 (dQ = dS@K): block warps
+    // GEMM4 warp tile = (wm0, wn0, min(wk0, bk4)) per fmha_bwd.py
+    int rm2, rn2, rk2;
+
+    // Tuning
+    int occupancy; // target occupancy (-1 = auto)
+    int max_seq_q; // maximum Q sequence length (0 = unlimited)
+
+    // Derived quantities
+    constexpr int num_warps() const { return rm0 * rn0 * rk0; }
+    constexpr int block_size(GpuTarget target) const { return num_warps() * wavefrontSize(target); }
+};
+
+/// GFX9 tile configs for fp16/bf16, indexed by (hdim_q, hdim_v).
+/// Source: fmha_bwd.py KernelComponentFactoryGfx9.get_dq_dk_dv_tiles("fp16", "f")
+// clang-format off
+inline constexpr FmhaBwdDQDKDVTileConfig GFX9_FP16_DQDKDV_TILES[] = {
+    //                      hdq hdv  bm0  bn0  bk0  bk1  bk2  bk3  bk4  rm0 rn0 rk0  wm0 wn0 wk0  rm1 rn1 rk1  wm1 wn1 wk1  rm2 rn2 rk2  occ msq
+    FmhaBwdDQDKDVTileConfig{ 32, 32,  32, 128,  32,  32,  32,  32,  64,   1,  4,  1,  16, 16, 32,   4,  1,  1,  16, 16, 16,   2,  2,  1,    1,  0},
+    FmhaBwdDQDKDVTileConfig{ 64, 64,  32, 128,  64,  32,  64,  32,  32,   1,  4,  1,  16, 16, 32,   4,  1,  1,  16, 16, 16,   1,  4,  1,    1,  0},
+    FmhaBwdDQDKDVTileConfig{ 96, 96,  32, 128,  96,  32,  96,  32,  32,   1,  4,  1,  16, 16, 32,   4,  1,  1,  16, 16, 16,   2,  2,  1,    1,  0},
+    FmhaBwdDQDKDVTileConfig{128,128,  16, 128, 128,  16, 128,  16,  32,   1,  4,  1,  16, 16, 32,   4,  1,  1,  16, 16, 16,   1,  4,  1,    1,  0},
+    FmhaBwdDQDKDVTileConfig{256,256,  16,  64, 256,  16, 256,  16,  32,   1,  4,  1,  16, 16, 32,   4,  1,  1,  16, 16, 16,   1,  4,  1,    1,  0},
+};
+// clang-format on
+
+inline constexpr int GFX9_FP16_DQDKDV_TILES_COUNT =
+    sizeof(GFX9_FP16_DQDKDV_TILES) / sizeof(GFX9_FP16_DQDKDV_TILES[0]);
+
+/// Look up tile geometry for dQ/dK/dV given problem shape and target arch.
+/// Returns the matching tile config. Throws at compile time if no config exists.
+consteval FmhaBwdDQDKDVTileConfig
+getTileConfig(int hdim_q, int hdim_v, DataType dtype, GpuTarget target)
+{
+    // GFX9 (gfx90a, gfx942): fp16/bf16 tile configs
+    constexpr auto gfx9_targets = TargetSet::only(GpuTarget::gfx90a, GpuTarget::gfx942);
+    if(gfx9_targets.contains(target) && (dtype == DataType::FP16 || dtype == DataType::BF16))
+    {
+        for(int i = 0; i < GFX9_FP16_DQDKDV_TILES_COUNT; ++i)
+        {
+            const auto& t = GFX9_FP16_DQDKDV_TILES[i];
+            if(t.hdim_q == hdim_q && t.hdim_v == hdim_v)
+                return t;
+        }
+    }
+
+    throw "no tile config for this (hdim_q, hdim_v, dtype, arch) combination";
+}
 
 // ---------------------------------------------------------------------------
 // Signature / Algorithm / Config / Kernel
@@ -241,16 +314,17 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
     if(algo.pad_hdim_v != 0 && algo.pad_hdim_v != 1 && algo.pad_hdim_v != 8)
         throw "pad_hdim_v must be 0, 1, or 8";
 
-    // --- tile geometry (hardcoded for d128 gfx9 demo) ---
-    // Config 4 from fmha_bwd.py: num_warps=4, warp_size=64, bn0=128.
-    // Production would derive these from architecture + hdim.
-    constexpr int demo_block_size = 256; // 4 warps * 64
-    constexpr int demo_block_n0   = 128; // kN0 = bn0
+    // --- tile geometry (from consteval lookup table) ---
+    // getTileConfig() returns the architecture-specific tile geometry for
+    // the given (hdim_q, hdim_v, dtype, target). Currently only GFX9 fp16/bf16
+    // configs are populated.
+    constexpr GpuTarget target = GpuTarget::gfx942;
+    auto tile                  = getTileConfig(sig.hdim_q, sig.hdim_v, sig.dtype, target);
 
     // --- block_per_cu default ---
     int resolved_block_per_cu = algo.block_per_cu;
     if(resolved_block_per_cu == -1)
-        resolved_block_per_cu = 1; // d128 dQ/dK/dV is register-heavy
+        resolved_block_per_cu = tile.occupancy;
 
     if(resolved_block_per_cu <= 0)
         throw "block_per_cu must be positive (or -1 for auto)";
@@ -269,8 +343,8 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
         .pad_hdim_q       = algo.pad_hdim_q,
         .pad_hdim_v       = algo.pad_hdim_v,
         .block_per_cu     = resolved_block_per_cu,
-        .block_size       = demo_block_size,
-        .block_n0         = demo_block_n0,
+        .block_size       = tile.block_size(target),
+        .block_n0         = tile.bn0,
     };
 
     return k;
