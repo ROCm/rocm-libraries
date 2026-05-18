@@ -2074,7 +2074,6 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                 if(arg.bias_stride > 0)
                 {
-                    //hipblaslt_cout<< "Using bias stride of " << arg.bias_stride << " for batch count of " << num_batches[i] << std::endl;
                     size_bias[i] = arg.bias_stride * num_batches[i];
                 }
             }
@@ -2984,27 +2983,29 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                 if(arg.dump_matrix)
                 {
-                    hipblasltDispatchValuesToFile(transA,
-                                                  TiA,
-                                                  M[i],
-                                                  K[i],
-                                                  lda[i],
-                                                  hA[i].buf(),
-                                                  "batch_" + std::to_string(i) + "_A_input.txt");
-                    hipblasltDispatchValuesToFile(transB,
-                                                  TiB,
-                                                  K[i],
-                                                  N[i],
-                                                  ldb[i],
-                                                  hB[i].buf(),
-                                                  "batch_" + std::to_string(i) + "_B_input.txt");
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                  To,
-                                                  M[i],
-                                                  N[i],
-                                                  ldc[i],
-                                                  hC[i].buf(),
-                                                  "batch_" + std::to_string(i) + "_C_input.txt");
+                    for(int batchId = 0; batchId < num_batches[i]; batchId++){
+                        hipblasltDispatchValuesToFile(transA,
+                                                    TiA,
+                                                    M[i],
+                                                    K[i],
+                                                    lda[i],
+                                                    hA[i].buf(),
+                                                    "batch_" + std::to_string(batchId) + "_" + std::to_string(i) + "_A_input.txt");
+                        hipblasltDispatchValuesToFile(transB,
+                                                    TiB,
+                                                    K[i],
+                                                    N[i],
+                                                    ldb[i],
+                                                    hB[i].buf(),
+                                                    "batch_" + std::to_string(batchId) + "_" + std::to_string(i) + "_B_input.txt");
+                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                    To,
+                                                    M[i],
+                                                    N[i],
+                                                    ldc[i],
+                                                    hC[i].buf(),
+                                                    "batch_" + std::to_string(batchId) + "_" + std::to_string(i) + "_C_input.txt");
+                    }
                 }
             }
 
@@ -3033,7 +3034,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 // Filling up unique bias values for each batch in Strided Batch
                 if(arg.bias_stride > 0)
-                    hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias, arg.bias_stride, num_batches[i]);
+                    hipblaslt_init(hBias[i].buf(), arg.bias_stride, 1, arg.bias_stride, Tbias, arg.bias_stride, num_batches[i]);
                 else
                     hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
             }
@@ -4818,85 +4819,85 @@ void testing_matmul_with_bias(const Arguments& arg,
                     void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
                     if(applyBias && arg.bias_stride > 0)
                     {
-                        hBias_buf = (char*)hBias_buf + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
+                        hBias_buf = ((char*)hBias_buf) + (arg.bias_stride * batchIdx * realDataTypeSize(Tbias));
                     }
                     switch(arg.activation_type)
                     {
-                    case hipblaslt_activation_type::gelu:
-                        if(arg.gradient)
+                        case hipblaslt_activation_type::gelu:
+                            if(arg.gradient)
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_dgelu,
+                                            true,
+                                            To,
+                                            Talpha);
+                            else
+                            {
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_gelu,
+                                            false,
+                                            To,
+                                            Talpha);
+                            }
+                            break;
+                        case hipblaslt_activation_type::relu:
+                            if(arg.gradient)
+                            {
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_drelu,
+                                            true,
+                                            To,
+                                            Talpha);
+                            }
+                            else
+                            {
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_relu,
+                                            false,
+                                            To,
+                                            Talpha);
+                            }
+                            break;
+                        case hipblaslt_activation_type::swish:
                             epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_dgelu,
-                                          true,
-                                          To,
-                                          Talpha);
-                        else
-                        {
+                                        hBias_buf,
+                                        Tbias,
+                                        arg.activation_arg1,
+                                        arg.activation_arg2,
+                                        ::_silu,
+                                        arg.gradient,
+                                        To,
+                                        Talpha);
+                            break;
+                        case hipblaslt_activation_type::clamp:
                             epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_gelu,
-                                          false,
-                                          To,
-                                          Talpha);
-                        }
-                        break;
-                    case hipblaslt_activation_type::relu:
-                        if(arg.gradient)
-                        {
-                            epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_drelu,
-                                          true,
-                                          To,
-                                          Talpha);
-                        }
-                        else
-                        {
-                            epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_relu,
-                                          false,
-                                          To,
-                                          Talpha);
-                        }
-                        break;
-                    case hipblaslt_activation_type::swish:
-                        epilogue_func(epilogue_param,
-                                      hBias_buf,
-                                      Tbias,
-                                      arg.activation_arg1,
-                                      arg.activation_arg2,
-                                      ::_silu,
-                                      arg.gradient,
-                                      To,
-                                      Talpha);
-                        break;
-                    case hipblaslt_activation_type::clamp:
-                        epilogue_func(epilogue_param,
-                                      hBias_buf,
-                                      Tbias,
-                                      arg.activation_arg1,
-                                      arg.activation_arg2,
-                                      ::_clamp,
-                                      arg.gradient,
-                                      To,
-                                      Talpha);
-                        break;
-                    default:
-                        epilogue_func(epilogue_param, hBias_buf, Tbias, false, To, Talpha);
-                        break;
+                                        hBias_buf,
+                                        Tbias,
+                                        arg.activation_arg1,
+                                        arg.activation_arg2,
+                                        ::_clamp,
+                                        arg.gradient,
+                                        To,
+                                        Talpha);
+                            break;
+                        default:
+                            epilogue_func(epilogue_param, hBias_buf, Tbias, false, To, Talpha);
+                            break;
                     }
 
                     if(arg.gradient && arg.bias_vector && batchIdx == num_batches[gemmIdx] - 1)
@@ -5793,20 +5794,23 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 if(arg.dump_matrix)
                 {
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                  To,
-                                                  M[0],
-                                                  N[0],
-                                                  ldd[0],
-                                                  hD_1[0].buf(),
-                                                  "batch_0_D_output.txt");
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                  To,
-                                                  M[0],
-                                                  N[0],
-                                                  ldd[0],
-                                                  hD_gold[0].buf(),
-                                                  "batch_0_D_Gold_output.txt");
+                    for(int batchId = 0; batchId < num_batches[0]; batchId++)
+                    {
+                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                    To,
+                                                    M[0],
+                                                    N[0],
+                                                    ldd[0],
+                                                    hD_1[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
+                                                    "batch_" + std::to_string(batchId) + "_D_output.txt");
+                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                    To,
+                                                    M[0],
+                                                    N[0],
+                                                    ldd[0],
+                                                    hD_gold[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
+                                                    "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
+                    }
                 }
                 check(stream,
                       arg,
