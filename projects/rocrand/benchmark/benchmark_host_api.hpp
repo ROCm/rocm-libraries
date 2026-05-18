@@ -22,7 +22,15 @@
 
 #include "benchmark_utils.hpp"
 
+#include "rng/threefry.hpp"
+
+#include "rng/distribution/log_normal.hpp"
+#include "rng/distribution/normal.hpp"
+#include "rng/distribution/poisson.hpp"
+#include "rng/distribution/uniform.hpp"
+
 #include <optional>
+#include <type_traits>
 
 #ifdef __HIP__
 constexpr rocrand_status RAND_STATUS_TYPE_ERROR = ROCRAND_STATUS_TYPE_ERROR;
@@ -31,21 +39,19 @@ constexpr curandStatus_t RAND_STATUS_TYPE_ERROR = CURAND_STATUS_TYPE_ERROR;
 #endif
 
 #ifdef __HIP__
-using rand_ordering_t                                  = rocrand_ordering;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DEFAULT = ROCRAND_ORDERING_PSEUDO_DEFAULT;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_LEGACY  = ROCRAND_ORDERING_PSEUDO_LEGACY;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_BEST    = ROCRAND_ORDERING_PSEUDO_BEST;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DYNAMIC = ROCRAND_ORDERING_PSEUDO_DYNAMIC;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_SEEDED  = ROCRAND_ORDERING_PSEUDO_SEEDED;
-constexpr rand_ordering_t RAND_ORDERING_QUASI_DEFAULT  = ROCRAND_ORDERING_QUASI_DEFAULT;
+constexpr ordering_t RAND_ORDERING_PSEUDO_DEFAULT = ROCRAND_ORDERING_PSEUDO_DEFAULT;
+constexpr ordering_t RAND_ORDERING_PSEUDO_LEGACY  = ROCRAND_ORDERING_PSEUDO_LEGACY;
+constexpr ordering_t RAND_ORDERING_PSEUDO_BEST    = ROCRAND_ORDERING_PSEUDO_BEST;
+constexpr ordering_t RAND_ORDERING_PSEUDO_DYNAMIC = ROCRAND_ORDERING_PSEUDO_DYNAMIC;
+constexpr ordering_t RAND_ORDERING_PSEUDO_SEEDED  = ROCRAND_ORDERING_PSEUDO_SEEDED;
+constexpr ordering_t RAND_ORDERING_QUASI_DEFAULT  = ROCRAND_ORDERING_QUASI_DEFAULT;
 #elif defined(__CUDACC__)
-using rand_ordering_t                                  = curandOrdering_t;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DEFAULT = CURAND_ORDERING_PSEUDO_DEFAULT;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_LEGACY  = CURAND_ORDERING_PSEUDO_LEGACY;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_BEST    = CURAND_ORDERING_PSEUDO_BEST;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DYNAMIC = CURAND_ORDERING_PSEUDO_DYNAMIC;
-constexpr rand_ordering_t RAND_ORDERING_PSEUDO_SEEDED  = CURAND_ORDERING_PSEUDO_SEEDED;
-constexpr rand_ordering_t RAND_ORDERING_QUASI_DEFAULT  = CURAND_ORDERING_QUASI_DEFAULT;
+constexpr ordering_t RAND_ORDERING_PSEUDO_DEFAULT = CURAND_ORDERING_PSEUDO_DEFAULT;
+constexpr ordering_t RAND_ORDERING_PSEUDO_LEGACY  = CURAND_ORDERING_PSEUDO_LEGACY;
+constexpr ordering_t RAND_ORDERING_PSEUDO_BEST    = CURAND_ORDERING_PSEUDO_BEST;
+constexpr ordering_t RAND_ORDERING_PSEUDO_DYNAMIC = CURAND_ORDERING_PSEUDO_DYNAMIC;
+constexpr ordering_t RAND_ORDERING_PSEUDO_SEEDED  = CURAND_ORDERING_PSEUDO_SEEDED;
+constexpr ordering_t RAND_ORDERING_QUASI_DEFAULT  = CURAND_ORDERING_QUASI_DEFAULT;
 #endif
 
 constexpr const char* ordering_name(ordering_t order)
@@ -62,9 +68,75 @@ constexpr const char* ordering_name(ordering_t order)
     return "unknown";
 }
 
-template<typename T, distribution Distribution>
+template<typename>
+struct config_provider_of
+{
+    using type = void;
+};
+
+// Generators of shape Generator<System, ConfigProvider>
+template<template<typename, typename> class Generator, typename System, typename ConfigProvider>
+struct config_provider_of<Generator<System, ConfigProvider>>
+{
+    using type = ConfigProvider;
+};
+
+// Generators of shape Generator<System, Engine, ConfigProvider>
+template<template<typename, typename, typename> class Generator,
+         typename System,
+         typename Engine,
+         typename ConfigProvider>
+struct config_provider_of<Generator<System, Engine, ConfigProvider>>
+{
+    using type = ConfigProvider;
+};
+
+template<typename T>
+using config_provider_of_t = typename config_provider_of<T>::type;
+
+template<typename Generator>
+struct distribution_input
+{
+    using type = unsigned int;
+};
+
+template<template<typename, typename, typename...> class GeneratorTemplate,
+         typename System,
+         typename ConfigProvider,
+         typename Engine>
+struct distribution_input<GeneratorTemplate<System, ConfigProvider, Engine>>
+{
+    using type = unsigned int;
+};
+
+template<typename System, typename ConfigProvider>
+struct distribution_input<rocrand_impl::host::threefry_generator_template<
+    System,
+    rocrand_impl::host::threefry_device_engine<rocrand_device::threefry2x64_20_engine>,
+    ConfigProvider>>
+{
+    using type = unsigned long long;
+};
+
+template<typename System, typename ConfigProvider>
+struct distribution_input<rocrand_impl::host::threefry_generator_template<
+    System,
+    rocrand_impl::host::threefry_device_engine<rocrand_device::threefry4x64_20_engine>,
+    ConfigProvider>>
+{
+    using type = unsigned long long;
+};
+
+template<typename Generator>
+using distribution_input_t = typename distribution_input<Generator>::type;
+
+template<typename T, distribution Distribution, typename Generator = void>
 struct host_api_benchmark : public primbench::benchmark_interface
 {
+    using Config = config_provider_of_t<Generator>;
+
+    static constexpr bool is_autotuning = !std::is_void_v<Generator>;
+
     host_api_benchmark(rng_type_t            engine,
                        ordering_t            ordering,
                        size_t                dimensions,
@@ -77,7 +149,7 @@ struct host_api_benchmark : public primbench::benchmark_interface
         , m_offset(offset)
         , m_benchmark_host(benchmark_host)
         , m_poisson_lambda(poisson_lambda)
-    {}
+    { }
 
     primbench::json meta() const override
     {
@@ -93,10 +165,106 @@ struct host_api_benchmark : public primbench::benchmark_interface
             json.add("poisson_lambda", *m_poisson_lambda);
         }
 
+        if constexpr(is_autotuning)
+        {
+            json.add("cfg",
+                     primbench::json{}
+                         .add("threads", Config::static_config.threads)
+                         .add("blocks", Config::static_config.blocks));
+        }
+
         return json;
     }
 
     void run(primbench::state& state) override
+    {
+        if constexpr(is_autotuning)
+        {
+            run_tuning(state);
+        }
+        else
+        {
+            run_benchmark(state);
+        }
+    }
+
+private:
+    template<typename GeneratorT>
+    auto make_distribution()
+    {
+        using input_type = distribution_input_t<GeneratorT>;
+
+        constexpr rocrand_rng_type rng_type = GeneratorT::type();
+
+        if constexpr(Distribution == DISTRIBUTION_UNIFORM)
+        {
+            return rocrand_impl::host::uniform_distribution<T, input_type>{};
+        }
+        else if constexpr(Distribution == DISTRIBUTION_NORMAL)
+        {
+            constexpr unsigned int width
+                = rocrand_impl::host::normal_distribution_max_input_width<rng_type, T>;
+
+            return rocrand_impl::host::normal_distribution<T, input_type, width>(0, 1);
+        }
+        else if constexpr(Distribution == DISTRIBUTION_LOG_NORMAL)
+        {
+            constexpr unsigned int width
+                = rocrand_impl::host::log_normal_distribution_max_input_width<rng_type, T>;
+
+            return rocrand_impl::host::log_normal_distribution<T, input_type, width>(0, 1);
+        }
+        else if constexpr(Distribution == DISTRIBUTION_POISSON)
+        {
+            using discrete_poisson_t = rocrand_impl::host::poisson_distribution<
+                rocrand_impl::host::DISCRETE_METHOD_ALIAS>;
+
+            constexpr bool is_mrg = rng_type == ROCRAND_RNG_PSEUDO_MRG31K3P
+                                    || rng_type == ROCRAND_RNG_PSEUDO_MRG32K3A;
+
+            static rocrand_impl::host::poisson_distribution_manager<
+                rocrand_impl::host::DISCRETE_METHOD_ALIAS>
+                manager;
+
+            auto poisson_dist
+                = std::get<discrete_poisson_t>(manager.get_distribution(*m_poisson_lambda));
+
+            if constexpr(is_mrg)
+            {
+                return rocrand_impl::host::mrg_poisson_distribution(poisson_dist);
+            }
+            else
+            {
+                return poisson_dist;
+            }
+        }
+    }
+
+    void run_tuning(primbench::state& state)
+    {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.size;
+
+        const size_t items = bytes / sizeof(T);
+
+        T* data;
+
+        PRIMBENCH_CHECK(gpu_malloc(&data, items * sizeof(T)));
+
+        Generator generator;
+        generator.set_stream(stream);
+
+        auto distribution = make_distribution<Generator>();
+
+        state.set_items(items);
+        state.add_writes<T>(items);
+
+        state.run([&] { RAND_CHECK(generator.generate(data, items, distribution)); });
+
+        PRIMBENCH_CHECK(gpu_free(data));
+    }
+
+    void run_benchmark(primbench::state& state)
     {
         const auto& stream      = state.stream;
         const auto& input_items = state.size;
@@ -231,7 +399,6 @@ struct host_api_benchmark : public primbench::benchmark_interface
         }
     }
 
-private:
     rng_type_t            m_engine;
     ordering_t            m_ordering;
     size_t                m_dimensions;

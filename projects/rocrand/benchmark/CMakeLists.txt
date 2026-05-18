@@ -51,21 +51,24 @@ function(add_benchmark benchmark_src)
       PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
     )
-    target_link_libraries(${BENCHMARK_TARGET} ${CUDA_curand_LIBRARY})
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE ${CUDA_curand_LIBRARY})
   else()
-    target_link_libraries(${BENCHMARK_TARGET} rocrand hip::device)
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE rocrand hip::device)
   endif()
 
-  target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
+  target_include_directories(${BENCHMARK_TARGET} PRIVATE
+    "${PROJECT_SOURCE_DIR}/library/src"
+    "${PROJECT_SOURCE_DIR}/../../shared/primbench")
 
   target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BRANCH_NAME="${BRANCH_NAME}")
   target_compile_definitions(${BENCHMARK_TARGET} PUBLIC COMMIT_HASH="${COMMIT_HASH}")
 
-  if(HIP_COMPILER STREQUAL "nvcc")
-    target_link_libraries(${BENCHMARK_TARGET} nvidia-ml)
+  if(WIN32)
+    target_compile_definitions(${BENCHMARK_TARGET} PRIVATE PRIMBENCH_NO_MONITORING)
+  elseif(HIP_COMPILER STREQUAL "nvcc")
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE nvidia-ml)
   else()
-    find_library(AMDSMI_LIB NAMES amd_smi REQUIRED)
-    target_link_libraries(${BENCHMARK_TARGET} ${AMDSMI_LIB})
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
   endif()
 
   set_target_properties(${BENCHMARK_TARGET}

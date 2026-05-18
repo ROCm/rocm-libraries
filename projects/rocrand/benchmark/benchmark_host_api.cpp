@@ -20,13 +20,13 @@
 
 #include "benchmark_host_api.hpp"
 
-#define QUEUE_POISSON(engine, ordering, poisson_lambda)                                    \
-    executor.queue<host_api_benchmark<unsigned int, DISTRIBUTION_POISSON>>(engine,         \
-                                                                           ordering,       \
-                                                                           dimensions,     \
-                                                                           offset,         \
-                                                                           benchmark_host, \
-                                                                           poisson_lambda)
+#define QUEUE_POISSON(engine, ordering, poisson_lambda)                                \
+    executor.queue<host_api_benchmark<uint32_t, DISTRIBUTION_POISSON>>(engine,         \
+                                                                       ordering,       \
+                                                                       dimensions,     \
+                                                                       offset,         \
+                                                                       benchmark_host, \
+                                                                       poisson_lambda)
 
 #define QUEUE(T, engine, ordering, Distribution)                    \
     executor.queue<host_api_benchmark<T, Distribution>>(engine,     \
@@ -36,30 +36,30 @@
                                                         benchmark_host)
 
 #ifdef __HIP__
-    #define QUEUE_DISTRIBUTIONS(engine, ordering)                          \
-        do                                                                 \
-        {                                                                  \
-            QUEUE(unsigned int, engine, ordering, DISTRIBUTION_UNIFORM);   \
-            QUEUE(unsigned char, engine, ordering, DISTRIBUTION_UNIFORM);  \
-            QUEUE(unsigned short, engine, ordering, DISTRIBUTION_UNIFORM); \
-                                                                           \
-            QUEUE(__half, engine, ordering, DISTRIBUTION_UNIFORM);         \
-            QUEUE(float, engine, ordering, DISTRIBUTION_UNIFORM);          \
-            QUEUE(double, engine, ordering, DISTRIBUTION_UNIFORM);         \
-                                                                           \
-            QUEUE(__half, engine, ordering, DISTRIBUTION_NORMAL);          \
-            QUEUE(float, engine, ordering, DISTRIBUTION_NORMAL);           \
-            QUEUE(double, engine, ordering, DISTRIBUTION_NORMAL);          \
-                                                                           \
-            QUEUE(__half, engine, ordering, DISTRIBUTION_LOG_NORMAL);      \
-            QUEUE(float, engine, ordering, DISTRIBUTION_LOG_NORMAL);       \
-            QUEUE(double, engine, ordering, DISTRIBUTION_LOG_NORMAL);      \
-                                                                           \
-            for(auto poisson_lambda : poisson_lambdas)                     \
-            {                                                              \
-                QUEUE_POISSON(engine, ordering, poisson_lambda);           \
-            }                                                              \
-        }                                                                  \
+    #define QUEUE_DISTRIBUTIONS(engine, ordering)                     \
+        do                                                            \
+        {                                                             \
+            QUEUE(uint32_t, engine, ordering, DISTRIBUTION_UNIFORM);  \
+            QUEUE(uint8_t, engine, ordering, DISTRIBUTION_UNIFORM);   \
+            QUEUE(uint16_t, engine, ordering, DISTRIBUTION_UNIFORM);  \
+                                                                      \
+            QUEUE(__half, engine, ordering, DISTRIBUTION_UNIFORM);    \
+            QUEUE(float, engine, ordering, DISTRIBUTION_UNIFORM);     \
+            QUEUE(double, engine, ordering, DISTRIBUTION_UNIFORM);    \
+                                                                      \
+            QUEUE(__half, engine, ordering, DISTRIBUTION_NORMAL);     \
+            QUEUE(float, engine, ordering, DISTRIBUTION_NORMAL);      \
+            QUEUE(double, engine, ordering, DISTRIBUTION_NORMAL);     \
+                                                                      \
+            QUEUE(__half, engine, ordering, DISTRIBUTION_LOG_NORMAL); \
+            QUEUE(float, engine, ordering, DISTRIBUTION_LOG_NORMAL);  \
+            QUEUE(double, engine, ordering, DISTRIBUTION_LOG_NORMAL); \
+                                                                      \
+            for(auto poisson_lambda : poisson_lambdas)                \
+            {                                                         \
+                QUEUE_POISSON(engine, ordering, poisson_lambda);      \
+            }                                                         \
+        }                                                             \
         while(0)
 #elif defined(__CUDACC__)
     #define QUEUE_DISTRIBUTIONS(engine, ordering)                                                  \
@@ -67,7 +67,7 @@
         {                                                                                          \
             if(engine != CURAND_RNG_QUASI_SOBOL64 && engine != CURAND_RNG_QUASI_SCRAMBLED_SOBOL64) \
             {                                                                                      \
-                QUEUE(unsigned int, engine, ordering, DISTRIBUTION_UNIFORM);                       \
+                QUEUE(uint32_t, engine, ordering, DISTRIBUTION_UNIFORM);                           \
             }                                                                                      \
             else                                                                                   \
             {                                                                                      \
@@ -110,7 +110,7 @@
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.size                    = 128 * 1024 * 1024; // In items
+    settings.size                    = 128 * primbench::MiB; // In items
     settings.min_gpu_ms_per_batch    = 1000;
     settings.batch_window_size       = 3;
     settings.noise_tolerance_percent = 3;
@@ -126,6 +126,7 @@ int main(int argc, char* argv[])
         "lambda",
         {10.0},
         "Space-separated list of lambdas of Poisson distribution");
+
     auto benchmark_host
         = executor.get<bool>("host", false, "Run benchmarks on the host instead of on the device");
 
