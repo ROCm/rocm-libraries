@@ -28,7 +28,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   KernelTime: True
-  PrintSolutionRejectionReason: True
+  # PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
 

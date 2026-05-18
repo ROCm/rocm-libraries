@@ -952,24 +952,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
     elif scheduleIterAlg == 1:
       iterCode.add(waitLWCode)
       iterCode.add(syncCode)
-      #import pdb
-      #pdb.set_trace()
+
+      # ForceUnrollSubIter + single buffer + complex GEMM: defer next-loop local
+      # reads until after MFMAs to prevent WAR hazard on shared VGPR buffer X0.
+      # F32X emulation kernels have ForceUnrollSubIter but no WAR hazard (reads
+      # and MFMAs target disjoint VGPR ranges within the buffer).
+      deferNextLoopReads = (kernel["ForceUnrollSubIter"] and self.states.numVgprBuffer == 1
+                            and not kernel["UseF32XEmulation"]
+                            and self.states.numItersPLR and iteration >= isBarrier)
+      deferredReadItems = []
+
       # simple algorithm - do half the reads first:
       # TODO: remove this half logic after stinkytofu works.
       readsToSchedule = countLocalRead(localReadCode) / 2
       #localReadCode.prettyPrint()
       readItems = localReadCode.flatitems()
-      while readItems:
-        item = readItems.pop(0)
-        #print "readsToSchedule=", readsToSchedule, "item=", item
-        item.name += " iter%s"%(iteration)  # tag for group
-        iterCode.add(item)
-        readsThisItem = countLocalRead(item)
-        if readsThisItem:
-          assert readsThisItem==1, "Scheduler assumes 1 read per item"
-          readsToSchedule = readsToSchedule - 1
-          if readsToSchedule == 0:
-            break
+      if not deferNextLoopReads:
+        while readItems:
+          item = readItems.pop(0)
+          #print "readsToSchedule=", readsToSchedule, "item=", item
+          item.name += " iter%s"%(iteration)  # tag for group
+          iterCode.add(item)
+          readsThisItem = countLocalRead(item)
+          if readsThisItem:
+            assert readsThisItem==1, "Scheduler assumes 1 read per item"
+            readsToSchedule = readsToSchedule - 1
+            if readsToSchedule == 0:
+              break
+      else:
+        deferredReadItems = readItems
+        readItems = []
 
       iterCode.add(globalReadCode)
 
@@ -996,6 +1008,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       iterCode.add(packPreCode)
       iterCode.add(packCode)
       iterCode.add(macIterCode)
+      # Flush deferred next-loop reads after MFMAs
+      for item in deferredReadItems:
+        iterCode.add(item)
     elif scheduleIterAlg == 2:
     # SIA2 use only 1 iteration and separate compute and fetch by raising compute priority
     # 2 workgroup interleave, while WG0/WG1 doing compute, WG1/WG0 doing fetch
@@ -1888,12 +1903,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
             startLR = numMfmaPerIter - numMfmaForLR
             if self.states.doPackPreSchedulingNextLoop:
               startLR = min(numMfmaPerIter -1 , (self.states.syncPlrMfmaIndex % numMfmaPerIter) + 1)
+            if kernel["ForceUnrollSubIter"] and self.states.numVgprBuffer == 1 and not kernel["UseF32XEmulation"]:
+              startLR = numMfmaPerIter
             if i < startLR:
               readLeftLREven = 0
               readLeftLROPT = 0
             # rest mfma help to schedule those localReads
             else:
               readLeftLREven = numReadsInst / (numMfmaPerIter - i)
+          # ForceUnrollSubIter + single buffer + complex GEMM: suppress ALL
+          # next-loop reads at iterations after barrier to avoid WAR hazard.
+          # Reads will be flushed after MFMAs complete for this iteration.
+          # F32X emulation excluded: reads and MFMAs use disjoint VGPR ranges.
+          if kernel["ForceUnrollSubIter"] and self.states.numVgprBuffer == 1 and not kernel["UseF32XEmulation"] and iteration > isBarrier:
+            readLeftLREven = 0
+            readLeftLROPT = 0
           # if there are too many localreads, change strategy to even.
           readLeft = checkLocalReadFIFOFull(mfmaIndex, self.localReadNextLoopFIFO, localReadItemsNextLoop, readLeftLROPT, readLeftLREven)
         for j in range(readLeft):
@@ -2425,6 +2449,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
             iterCode.add(SSetPrior(prior=0, comment="store optimization"))
       while macIterItems:
         iterCode.add(macIterItems.pop(0))
+      if kernel["ForceUnrollSubIter"] and self.states.numVgprBuffer == 1 and not kernel["UseF32XEmulation"]:
+        while localReadItemsNextLoop:
+          iterCode.add(localReadItemsNextLoop.pop(0))
     else:
       assert 0, "Unsupported scheduleIterAlg=%u"%scheduleIterAlg
 
@@ -6535,6 +6562,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
       kernel["LoopIters"] = kernel["numSubTiles"] * kernel["numSubTiles"]
       self.states.numMfmaPerIter = self.states.numMfmaPerIter//kernel["LoopIters"]
       self.states.numItersPLR = 1
+      # All sub-iterations share a single ds_read load into one buffer.
+      # Use numVgprBuffer=1 so m = u % 1 = 0 for all sub-iters,
+      # ensuring MFMAs always reference the loaded buffer (X0).
+      self.states.numVgprBuffer = 1
+      self.states.numVgprBufferPackA = 1
+      self.states.numVgprBufferPackB = 1
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.states.numVgprBufferPackMXSA = 2
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.states.numVgprBufferPackMXSB = 2
+      if kernel["enableLDSTrA"]:
+        self.states.numVgprBufferPackA = 0
+      if kernel["enableLDSTrB"]:
+        self.states.numVgprBufferPackB = 0
 
     # set number of LDS Block
     self.states.numLDSBlk = kernel["NumLdsBlk"]
