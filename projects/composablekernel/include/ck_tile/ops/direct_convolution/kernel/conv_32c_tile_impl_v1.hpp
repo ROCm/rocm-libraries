@@ -553,7 +553,7 @@ __device__ void ck_tile_conv2d_32c_nhwc_impl(const ToType<cfg.data_type>* __rest
     using OutputWriterType = std::conditional_t<use_lds_epilogue,
         OutputWriterLds<cfg>, OutputWriter<cfg>>;
 
-    conv_compute_loop<
+    conv_compute_loop_v4<
         TC, cfg, MfmaFn,
         ConvBlockCoordsT<cfg>, ConvInputLoader<cfg>, WeightLoader<cfg>, OutputWriterType,
         ElementType>(
