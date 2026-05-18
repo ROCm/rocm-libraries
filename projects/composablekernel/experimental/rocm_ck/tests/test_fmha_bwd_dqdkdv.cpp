@@ -76,24 +76,16 @@ TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsQ)
 {
     // Test all supported hdim_q values. Each must be a separate constexpr
     // variable because makeSpec is consteval -- cannot use a runtime loop.
-    constexpr auto k32 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 32,
-                                                   .hdim_v = 128,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    constexpr auto k64 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 64,
-                                                   .hdim_v = 128,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    constexpr auto k96 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 96,
-                                                   .hdim_v = 128,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    // Tile configs only exist for hdim_q == hdim_v, so both must match.
+    constexpr auto k32 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 32, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k64 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k96 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 96, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     constexpr auto k128 =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
                                                    .hdim_q = 128,
@@ -103,7 +95,7 @@ TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsQ)
     constexpr auto k256 =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
                                                    .hdim_q = 256,
-                                                   .hdim_v = 128,
+                                                   .hdim_v = 256,
                                                    .mode   = FmhaMode::BATCH},
                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
@@ -118,24 +110,16 @@ TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsV)
 {
     // Test all supported hdim_v values. Each must be a separate constexpr
     // variable because makeSpec is consteval -- cannot use a runtime loop.
-    constexpr auto k32 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 128,
-                                                   .hdim_v = 32,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    constexpr auto k64 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 128,
-                                                   .hdim_v = 64,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    constexpr auto k96 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 128,
-                                                   .hdim_v = 96,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    // Tile configs only exist for hdim_q == hdim_v, so both must match.
+    constexpr auto k32 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 32, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k64 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k96 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 96, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     constexpr auto k128 =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
                                                    .hdim_q = 128,
@@ -144,7 +128,7 @@ TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsV)
                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     constexpr auto k256 =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 128,
+                                                   .hdim_q = 256,
                                                    .hdim_v = 256,
                                                    .mode   = FmhaMode::BATCH},
                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});

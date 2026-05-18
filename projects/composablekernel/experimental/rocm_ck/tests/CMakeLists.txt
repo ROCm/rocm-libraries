@@ -94,6 +94,18 @@ set_tests_properties(test_fmha_bwd_compat PROPERTIES LABELS "rocm_ck")
 add_dependencies(rocm_ck_tests test_fmha_bwd_compat)
 
 # =============================================================================
+# FMHA BWD consteval test (tile config dispatch)
+# =============================================================================
+
+add_executable(test_fmha_bwd_consteval test_fmha_bwd_consteval.cpp)
+target_link_libraries(test_fmha_bwd_consteval PRIVATE rocm_ck GTest::gtest_main)
+target_compile_options(test_fmha_bwd_consteval PRIVATE
+    -Wno-global-constructors -Wno-undef)
+add_test(NAME test_fmha_bwd_consteval COMMAND test_fmha_bwd_consteval)
+set_tests_properties(test_fmha_bwd_consteval PROPERTIES LABELS "rocm_ck")
+add_dependencies(rocm_ck_tests test_fmha_bwd_consteval)
+
+# =============================================================================
 # Compile-error tests (expected failures)
 # =============================================================================
 
