@@ -32,6 +32,7 @@ template <> struct DataTypeTraits<int8_t> { static constexpr const char * name =
 template <> struct DataTypeTraits<pk_int4_t> { static constexpr const char * name = "pk_int4"; };
 template <> struct DataTypeTraits<pk_fp4_t> { static constexpr const char * name = "pk_fp4"; };
 template <> struct DataTypeTraits<pk_fp6x16_t> { static constexpr const char * name = "pk_fp6x16"; };
+template <> struct DataTypeTraits<pk_bf6x16_t> { static constexpr const char * name = "pk_bf6x16"; };
 template <> struct DataTypeTraits<pk_fp4_raw_t> { static constexpr const char * name = "pk_fp4_raw"; };
 template <> struct DataTypeTraits<e8m0_t> { static constexpr const char * name = "e8m0"; };
 template <> struct DataTypeTraits<ck_tile::tf32_t>{ static constexpr const char* name = "tf32"; };
