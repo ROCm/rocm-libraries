@@ -1,9 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
-
 #include <hip/hip_runtime.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/Graph.hpp>
