@@ -1,7 +1,8 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-include(KernelEmbedding)
+include("${CMAKE_SOURCE_DIR}/src/cmake/KernelEmbedding.cmake")
+
 
 # List kernel files to embed
 add_kernels_for_embedding(${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdInferSpatial.cpp
