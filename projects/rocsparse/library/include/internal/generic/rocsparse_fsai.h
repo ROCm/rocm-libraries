@@ -95,16 +95,24 @@ rocsparse_status rocsparse_fsai_buffer_size(rocsparse_handle            handle,
  *  Conjugate Gradient (CG) or GMRES. The sparsity pattern of \f$M\f$ is provided by the user.
  *
  *  Performing the above operation requires two stages:
- *  - \ref rocsparse_fsai_stage_analysis: Analyzes the sparsity pattern
- *  - \ref rocsparse_fsai_stage_compute: Computes the values of the approximate inverse
+ *  - \ref rocsparse_fsai_stage_analysis : Analyzes the sparsity pattern
+ *  - \ref rocsparse_fsai_stage_compute : Computes the values of the approximate inverse
  *
  *  The analysis stage only needs to be called once for a given sparsity pattern of \f$A\f$ and \f$M\f$,
  *  while the compute stage can be repeatedly used with different values of \f$A\f$ that have
  *  the same sparsity pattern.
  *
- *  \p rocsparse_fsai supports the following data types for \p A:
- *  \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
- *  \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c.
+ *  \p rocsparse_fsai supports the following uniform-precision data types for the sparse matrix \p A.
+ *
+ *  \par Uniform Precisions:
+ *  <table>
+ *  <caption id="fsai_uniform">Uniform Precisions</caption>
+ *  <tr><th>A
+ *  <tr><td>rocsparse_datatype_f32_r
+ *  <tr><td>rocsparse_datatype_f64_r
+ *  <tr><td>rocsparse_datatype_f32_c
+ *  <tr><td>rocsparse_datatype_f64_c
+ *  </table>
  *
  *  \note The descriptor \p descr needs to be configured with \ref rocsparse_fsai_descr_set_input.
  *  \note The sparse matrix format currently supported is \ref rocsparse_format_csr.

@@ -315,6 +315,8 @@ Function name                                        yes no
 :cpp:func:`rocsparse_sparse_to_sparse()`             x
 :cpp:func:`rocsparse_extract_buffer_size()`          x
 :cpp:func:`rocsparse_extract()`                      x
+:cpp:func:`rocsparse_fsai_buffer_size()`             x
+:cpp:func:`rocsparse_fsai()`                         x
 ==================================================== === ==
 
 The reproducibility of :cpp:func:`rocsparse_spmv()` and :cpp:func:`rocsparse_v2_spmv()` is more complicated because these generic routines

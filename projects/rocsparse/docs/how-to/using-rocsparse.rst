@@ -353,6 +353,8 @@ Function name                                        yes no
 :cpp:func:`rocsparse_extract_buffer_size()`          x
 :cpp:func:`rocsparse_extract_nnz()`                  x
 :cpp:func:`rocsparse_extract()`                      x
+:cpp:func:`rocsparse_fsai_buffer_size()`                 x
+:cpp:func:`rocsparse_fsai`                               x
 ==================================================== === ==
 
 For :cpp:func:`rocsparse_spmv()`, :cpp:func:`rocsparse_spmm()`, :cpp:func:`rocsparse_spsv()`, and :cpp:func:`rocsparse_spsm()`,

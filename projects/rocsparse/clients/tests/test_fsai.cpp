@@ -31,5 +31,6 @@ TEST_ROUTINE_WITH_CONFIG(fsai,
                          arg.formatA,
                          arg.M,
                          arg.baseA,
+                         arg.fsai_alg,
                          arg.matrix,
                          arg.graph_test);

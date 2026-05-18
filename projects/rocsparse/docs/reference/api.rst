@@ -220,6 +220,12 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spilu0_descr_destroy`           |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_fsai_descr_create`              |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_fsai_descr_destroy`             |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_fsai_descr_set_input`           |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_sptrsm_descr`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_sptrsm_descr`           |
@@ -633,4 +639,8 @@ documentation for details about the supported data types and compute types.
 |:cpp:func:`rocsparse_check_spmat()`                  |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spitsv()`                       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_fsai_buffer_size()`             |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_fsai()`                         |
 +-----------------------------------------------------+

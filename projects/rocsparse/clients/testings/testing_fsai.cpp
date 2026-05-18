@@ -30,29 +30,14 @@
 
 namespace rocsparse_clients
 {
-    class fsai_descr
+    class local_fsai_descr
     {
     private:
         rocsparse_handle     m_handle{};
         rocsparse_fsai_descr m_descr{};
 
     public:
-        struct config
-        {
-            rocsparse_fsai_alg alg{};
-            rocsparse_datatype compute_datatype{};
-        };
-
-    protected:
-        config* m_config;
-
-    public:
-        const config* get_config() const
-        {
-            return this->m_config;
-        }
-
-        fsai_descr(rocsparse_handle handle)
+        local_fsai_descr(rocsparse_handle handle)
             : m_handle(handle)
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
@@ -65,7 +50,7 @@ namespace rocsparse_clients
             }
         }
 
-        ~fsai_descr()
+        ~local_fsai_descr()
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
             rocsparse_error* p_error = nullptr;
@@ -191,7 +176,7 @@ void testing_fsai(const Arguments& arg)
     rocsparse_local_handle local_handle;
     rocsparse_handle       handle = local_handle;
 
-    rocsparse_clients::fsai_descr fsai(handle);
+    rocsparse_clients::local_fsai_descr fsai(handle);
 
     // Set algorithm
     {

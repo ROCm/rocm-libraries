@@ -432,6 +432,22 @@ rocsparse_spilu0_get_output
 .. doxygenfunction:: rocsparse_spilu0_get_output
 
 
+rocsparse_fsai_descr_create
+---------------------------
+
+.. doxygenfunction:: rocsparse_fsai_descr_create
+
+rocsparse_fsai_descr_destroy
+----------------------------
+
+.. doxygenfunction:: rocsparse_fsai_descr_destroy
+
+rocsparse_fsai_descr_set_input
+------------------------------
+
+.. doxygenfunction:: rocsparse_fsai_descr_set_input
+
+
 rocsparse_sptrsv_descr_create
 -----------------------------
 
