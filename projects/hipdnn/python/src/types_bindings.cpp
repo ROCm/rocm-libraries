@@ -94,6 +94,15 @@ void types_bindings(nb::module_& m)
     // Bind HeuristicMode enum
     nb::enum_<HeuristicMode>(m, "HeuristicMode").value("FALLBACK", HeuristicMode::FALLBACK);
 
+    // Bind BehaviorNote enum
+    nb::enum_<BehaviorNote>(m, "BehaviorNote")
+        .value("RUNTIME_COMPILATION", BehaviorNote::RUNTIME_COMPILATION)
+        .value("REQUIRES_LAYOUT_TRANSFORM", BehaviorNote::REQUIRES_LAYOUT_TRANSFORM)
+        .value("SUPPORTS_GRAPH_CAPTURE", BehaviorNote::SUPPORTS_GRAPH_CAPTURE)
+        .value("EXTERNAL_LIBRARY_DEPENDENCY", BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY)
+        .value("SUPPORTS_EXECUTION_PLAN_SERIALIZATION",
+               BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+
     // Bind ErrorCode enum
     nb::enum_<ErrorCode>(m, "ErrorCode")
         .value("OK", ErrorCode::OK)
