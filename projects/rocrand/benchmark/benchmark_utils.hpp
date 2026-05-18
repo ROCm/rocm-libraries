@@ -346,7 +346,10 @@ using namespace wrappers;
 PRIMBENCH_REGISTER_TYPE(uint8_t, "u8")
 PRIMBENCH_REGISTER_TYPE(uint16_t, "u16")
 PRIMBENCH_REGISTER_TYPE(uint32_t, "u32")
-PRIMBENCH_REGISTER_TYPE(unsigned long long, "u64")
 PRIMBENCH_REGISTER_TYPE(float, "f32")
 PRIMBENCH_REGISTER_TYPE(double, "f64")
 PRIMBENCH_REGISTER_TYPE(__half, "half")
+
+// rocRAND and cuRAND functions expect `unsigned long long`,
+// so we can't use `uint64_t` unfortunately.
+PRIMBENCH_REGISTER_TYPE(unsigned long long, "u64")
