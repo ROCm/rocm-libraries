@@ -648,3 +648,14 @@ TEST(RocprimDeviceRunLengthEncode, LargeSizesEncode)
 
     large_sizes_rle_test<>();
 }
+
+TEST(RocprimDeviceRunLengthEncode, LargeSizesNonTrivialRuns)
+{
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeSizesEncode test under Valgrind";
+#endif // HAS_VALGRIND_H
+
+    large_sizes_rle_test<true /*non_trivial_runs*/>();
+}
