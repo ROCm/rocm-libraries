@@ -750,7 +750,8 @@ static auto GetFusedNonConvSolvers()
 static auto GetFusedDirectSolvers()
 {
     return solver::SolverContainer<solver::fusion::ConvBiasActivAsm1x1U,
-                                   solver::fusion::ConvOclDirectFwdFused>{};
+                                   solver::fusion::ConvOclDirectFwdFused,
+                                   solver::fusion::ConvHipDirectFwdFused>{};
 }
 
 static auto GetFusedIGemmSolvers()

@@ -171,6 +171,10 @@ TEST_P(GPU_ConvBiasActivInfer_FP32, ConvOclDirectFwdFused)
 {
     RunTunableSolver<miopen::solver::fusion::ConvOclDirectFwdFused>();
 }
+TEST_P(GPU_ConvBiasActivInfer_FP32, ConvHipDirectFwdFused)
+{
+    RunTunableSolver<miopen::solver::fusion::ConvHipDirectFwdFused>();
+}
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvBinWinogradRxSFused)
 {
     RunSolver(miopen::solver::fusion::ConvBinWinogradRxSFused{});
