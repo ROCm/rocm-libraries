@@ -338,7 +338,7 @@ class GemmKernelBuilder:
         layout = self.layout
 
         # Special handling for certain data types
-        if self.datatype in ["fp8", "bf8"]:
+        if self.datatype in ["fp4", "fp8", "bf8"]:
             c_datatype = "fp16"
 
         # Use the comprehensive validation function
@@ -529,7 +529,7 @@ class GemmKernelBuilder:
 
         # Determine output type
         c_type = self.datatype
-        if self.datatype in ["fp8", "bf8"]:
+        if self.datatype in ["fp4", "fp8", "bf8"]:
             c_type = "fp16"
 
         # Assign layouts based on self.layout

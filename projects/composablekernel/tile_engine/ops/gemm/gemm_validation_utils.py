@@ -22,6 +22,7 @@ ELEMENT_SIZE_MAP = {
     "fp8": 1,
     "bf8": 1,
     "int4": 0.5,
+    "fp4": 0.5,
     "int32": 4,
     "fp32": 4,
     "fp64": 8,
@@ -592,6 +593,7 @@ def get_dtype_string(datatype: str) -> str:
     """Get C++ type string for datatype"""
     dtype_map = {
         "fp16": "ck_tile::fp16_t",
+        "fp4": "ck_tile::pk_fp4_t",
         "fp8": "ck_tile::fp8_t",
         "bf8": "ck_tile::bf8_t",
         "bf16": "ck_tile::bf16_t",
