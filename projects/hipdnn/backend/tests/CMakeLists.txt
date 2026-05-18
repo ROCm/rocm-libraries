@@ -86,6 +86,9 @@ add_executable(
     descriptors/TestResampleFwdOperationDescriptor.cpp
     descriptors/TestResampleFwdOperationFromNode.cpp
     descriptors/TestGraphDescriptorResampleFwd.cpp
+    descriptors/TestResampleBwdOperationDescriptor.cpp
+    descriptors/TestResampleBwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorResampleBwd.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp

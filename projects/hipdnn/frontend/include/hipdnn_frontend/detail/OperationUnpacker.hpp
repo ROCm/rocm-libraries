@@ -26,6 +26,7 @@
 #include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/ResampleBwdNode.hpp>
 #include <hipdnn_frontend/node/ResampleFwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
@@ -133,6 +134,10 @@ namespace hipdnn_frontend::detail
     case HIPDNN_OPERATION_TYPE_RESAMPLE_FWD:
         return {
             std::make_shared<graph::ResampleFwdNode>(graph::ResampleFwdAttributes{}, graphAttrs),
+            {}};
+    case HIPDNN_OPERATION_TYPE_RESAMPLE_BWD:
+        return {
+            std::make_shared<graph::ResampleBwdNode>(graph::ResampleBwdAttributes{}, graphAttrs),
             {}};
     default:
         return {nullptr,

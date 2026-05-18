@@ -26,6 +26,8 @@
 #include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/ResampleBwdNode.hpp>
+#include <hipdnn_frontend/node/ResampleFwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 
@@ -474,6 +476,26 @@ TEST(TestCreateNodeForType, CreatesReductionNode)
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
     auto typedNode = std::dynamic_pointer_cast<ReductionNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
+
+TEST(TestCreateNodeForType, CreatesResampleFwdNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RESAMPLE_FWD, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<ResampleFwdNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
+
+TEST(TestCreateNodeForType, CreatesResampleBwdNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RESAMPLE_BWD, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<ResampleBwdNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 

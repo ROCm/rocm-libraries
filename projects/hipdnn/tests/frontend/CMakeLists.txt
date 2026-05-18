@@ -54,6 +54,8 @@ add_executable(
     IntegrationPointwiseDescriptorLowering.cpp
     IntegrationResampleFwdDescriptorLifting.cpp
     IntegrationResampleFwdDescriptorLowering.cpp
+    IntegrationResampleBwdDescriptorLifting.cpp
+    IntegrationResampleBwdDescriptorLowering.cpp
     IntegrationReductionDescriptorLifting.cpp
     IntegrationReductionDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLifting.cpp

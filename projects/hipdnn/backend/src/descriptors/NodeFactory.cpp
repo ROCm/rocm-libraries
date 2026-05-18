@@ -55,6 +55,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return SdpaBwdOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::ResampleFwdAttributes:
         return ResampleFwdOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::ResampleBwdAttributes:
+        return ResampleBwdOperationDescriptor::fromNode(nodeT, tensorMap);
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
