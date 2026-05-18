@@ -37,8 +37,6 @@ class PointwiseReluForward : public IntegrationGraphVerificationHarness<DataType
 protected:
     void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
-        SKIP_IF_WINDOWS();
-
         const PointwiseTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;
