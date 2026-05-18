@@ -27,6 +27,10 @@ dependencies = [
     "numpy>=1.19.0",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    # psutil powers the always-on host RAM / process RSS probes in
+    # metrics/host.py. Soft requirement at runtime: a missing module is
+    # logged once via warn_once and the corresponding fields stay None.
+    "psutil>=5.9.0",
 ]
 
 [project.scripts]
@@ -47,4 +51,6 @@ markers = [
     "amd: marks tests requiring AMD ROCm GPUs",
     "nvidia: marks tests requiring NVIDIA CUDA GPUs",
     "slow: marks slow integration tests",
+    "rocprofv3: requires rocprofv3 binary on PATH",
+    "perf: requires Linux perf binary on PATH and perf_event_paranoid <= 1",
 ]

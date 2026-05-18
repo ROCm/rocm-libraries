@@ -87,15 +87,21 @@ HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
     HIPDNN_PLUGIN_LOG_INFO("Kernel compiled and loaded: " << kernelFileName);
 }
 
-HipCompiledProgram::~HipCompiledProgram()
+HipCompiledProgram::~HipCompiledProgram() noexcept
 {
-    if(_module != nullptr)
+    try
     {
-        auto result = hipModuleUnload(_module);
-        if(result != hipSuccess)
+        if(_module != nullptr)
         {
-            HIPDNN_PLUGIN_LOG_WARN("hipModuleUnload failed: " << hipGetErrorString(result));
+            auto result = hipModuleUnload(_module);
+            if(result != hipSuccess)
+            {
+                HIPDNN_PLUGIN_LOG_WARN("hipModuleUnload failed: " << hipGetErrorString(result));
+            }
         }
+    }
+    catch(...) // NOLINT(bugprone-empty-catch)
+    {
     }
 }
 

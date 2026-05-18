@@ -499,6 +499,14 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
+    rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
+    rv["SgprPreloadPad"]     = checkInList(isaVersion, {{9, 5, 0}}) || checkInList(isaVersion, {{9, 0, 10}}) || (isaVersion[0] == 9 && isaVersion[1] == 4);
+
+    // True on archs whose MFMA-scale path can consume a swizzled MX scale
+    // layout: gfx950 (HostPreSwizzle via the subtile path) and gfx1250
+    // (InMemorySwizzle via TDM). The kernel-side MXScaleFormat enum and the
+    // Solution.py guards decide which concrete layout is in use.
+    rv["HasMXScaleSwizzle"]            = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
 
     // Cross-CU/L2 release+acquire fences for device-scope inter-workgroup
     // synchronization (e.g. StreamK partial-tile handshake). When set, a
@@ -513,17 +521,9 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.
     rv["RequiresXCntForVolatileVMEM"]  = checkInList(isaVersion, {{12, 5, 0}});
 
-    // Vector L1 Data cache line size (bytes) used for alignment-sensitive optimizations in codegen.
-    // NOTE: This is a *codegen-time* (compile-time) constant selected by target ISA.
-    //
-    // Per project convention:
-    // - MI100 (gfx908 / ISA 9.0.8) : 64B
-    // - MI200 (gfx90a / ISA 9.0.10): 64B
-    // - Others                      : 128B
-    int vL1DCacheLineBytes = 128;
-    if(checkInList(isaVersion, {{9, 0, 8}, {9, 0, 10}}))
-        vL1DCacheLineBytes = 64;
-    rv["vL1DCacheLineBytes"] = vL1DCacheLineBytes;
+    // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.
+    rv["LDSBankCount"] = 64;
+    rv["LDSBankWidth"] = 4; // bytes per bank
 
     return rv;
 }

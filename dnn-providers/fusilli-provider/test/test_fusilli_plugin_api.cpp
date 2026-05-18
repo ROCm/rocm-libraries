@@ -838,10 +838,10 @@ TEST(TestFusilliPluginApi,
   hipdnnPluginConstData_t incompatibleSerializedContext{
       incompatiblePayload.data(), incompatiblePayload.size()};
   hipdnnEnginePluginExecutionContext_t restoredExecutionContext = nullptr;
-  EXPECT_EQ(hipdnnEnginePluginCreateExecutionContextFromSerialized(
-                handle, &engineConfig, &incompatibleSerializedContext,
-                &restoredExecutionContext),
-            HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+  EXPECT_EQ(
+      hipdnnEnginePluginCreateExecutionContextFromSerialized(
+          handle, &incompatibleSerializedContext, &restoredExecutionContext),
+      HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
   EXPECT_EQ(restoredExecutionContext, nullptr);
 
   EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
@@ -858,13 +858,9 @@ TEST(TestFusilliPluginApi,
   hipdnnPluginConstData_t rawGraphPayload{serializedGraph.data(),
                                           serializedGraph.size()};
 
-  auto engineConfigBuffer = buildFusilliEngineConfig();
-  hipdnnPluginConstData_t engineConfig{engineConfigBuffer.data(),
-                                       engineConfigBuffer.size()};
-
   hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
   EXPECT_EQ(hipdnnEnginePluginCreateExecutionContextFromSerialized(
-                handle, &engineConfig, &rawGraphPayload, &executionContext),
+                handle, &rawGraphPayload, &executionContext),
             HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
   EXPECT_EQ(executionContext, nullptr);
 

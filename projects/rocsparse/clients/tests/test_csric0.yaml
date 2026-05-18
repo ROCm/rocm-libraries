@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,7 @@ Tests:
   precision: *single_double_precisions_complex_real
 
 - name: csric0_extra
-  category: quick
+  category: pre_checkin
   M_N: *M_N_range_extra
   apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
   spol: [rocsparse_solve_policy_auto]
@@ -116,7 +116,7 @@ Tests:
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos4,
              nos6,
              scircuit]
