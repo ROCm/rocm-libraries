@@ -128,7 +128,7 @@ class Component(metaclass=ComponentMeta):
     """
 
     @classmethod
-    def matches(cls, writer, debug=False):
+    def matches(cls, writer, debug=False, **kwargs):
         if hasattr(cls, "versions"):
             if not writer.version in cls.versions:
                 return False

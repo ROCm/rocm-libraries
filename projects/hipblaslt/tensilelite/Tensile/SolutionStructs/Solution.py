@@ -1614,6 +1614,9 @@ class Solution(collections.abc.Mapping):
       if not hasLDSTrans:
         return False
 
+      if dtv:
+        return False
+
       if numBytes == 0.5:
         return asmCaps["HasLDSTrB64B4"]
       elif numBytes == 0.75:

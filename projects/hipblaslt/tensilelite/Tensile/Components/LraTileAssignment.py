@@ -125,15 +125,19 @@ class LraTileAssignmentVALU(LraTileAssignment):
 
 class LraTileAssignmentTransposedMFMA(LraTileAssignment):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("b")
               }}
-    asmCaps = {
-        "HasLDSTrB128B16": True
-    }
+
+    @classmethod
+    def matches(cls, writer, debug=False, isLDSTrAB=False, **kwargs):
+        if not super().matches(writer, debug):
+            return False
+        
+        if not isLDSTrAB:
+            return False
+        
+        return True
 
     NUM_CONT_READ_ELEMENTS = 8
     NUM_READ_ELEMENT_PER_THREAD = 16
@@ -270,36 +274,20 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
 
 class LraTileAssignmentTransposedMFMAFP32(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("s")
               }}
 
 class LraTileAssignmentTransposedMFMAFP16(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("h")
               }}
-    asmCaps = {
-        "HasLDSTrB128B16": True
-    }
-
 class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("I8")
               }}
-    asmCaps = {
-        "HasLDSTrB64B8": True
-    }
     NUM_CONT_READ_ELEMENTS = 4
     NUM_READ_ELEMENT_PER_THREAD = 8
     NUM_UNROLLED_STRIDE_ELEMENTS = 16
@@ -467,69 +455,37 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
 
 class LraTileAssignmentTransposedMFMA_FP8(LraTileAssignmentTransposedMFMAB8):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("F8"),
                   "isMixMode": False,
               }}
-    asmCaps = {
-        "HasLDSTrB64B8": True
-    }
 
 class LraTileAssignmentTransposedMFMA_BF8(LraTileAssignmentTransposedMFMA_FP8):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("B8"),
                   "isMixMode": False,
               }}
-    asmCaps = {
-        "HasLDSTrB64B8": True
-    }
 
 class LraTileAssignmentTransposedMFMA_FP8BF8(LraTileAssignmentTransposedMFMA_FP8):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("F8B8"),
                   "isMixMode": False,
               }}
-    asmCaps = {
-        "HasLDSTrB64B8": True
-    }
 
 class LraTileAssignmentTransposedMFMA_BF8FP8(LraTileAssignmentTransposedMFMA_FP8):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("B8F8"),
                   "isMixMode": False,
               }}
-    asmCaps = {
-        "HasLDSTrB64B8": True
-    }
       
 class LraTileAssignmentTransposedMFMAMixMode(LraTileAssignmentTransposedMFMAB8):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "isMixMode": True,
               }}
-    asmCaps = {
-        "HasLDSTrB64B8": True,
-        "HasLDSTrB64B4": True,
-        "HasLDSTrB96B6": True,
-    }
     def __call__(self, writer, kernel, tP):
         # TODO: check correctness of this condition
         MacDataType = f"MacDataType{tP['tensorChar']}" if(tP['tensorChar']=="A" or tP['tensorChar']=="B") else "DataType"
@@ -550,16 +506,10 @@ class LraTileAssignmentTransposedMFMAMixMode(LraTileAssignmentTransposedMFMAB8):
 
 class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("F4"),
                   "isMixMode": False,
               }}
-    asmCaps = {
-        "HasLDSTrB64B4": True
-    }
 
     NUM_CONT_READ_ELEMENTS = 8
     NUM_READ_ELEMENT_PER_THREAD = 16
@@ -661,16 +611,10 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
 
 class LraTileAssignmentTransposedMFMAF6(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("F6"),
                   "isMixMode": False,
               }}
-    asmCaps = {
-        "HasLDSTrB96B6": True
-    }
 
     NUM_CONT_READ_ELEMENTS = 8
     NUM_READ_ELEMENT_PER_THREAD = 4
@@ -769,21 +713,23 @@ class LraTileAssignmentTransposedMFMAF6(LraTileAssignmentTransposedMFMA):
 
 class LraTileAssignmentTransposedMFMAB6(LraTileAssignmentTransposedMFMAF6):
     kernel = {"EnableMatrixInstruction": True,
-              "DirectToVgprA": False,
-              "DirectToVgprB": False,
-              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("B6"),
                   "isMixMode": False,
               }}
-    asmCaps = {
-        "HasLDSTrB96B6": True
-    }
 
 class LraTileAssignmentMFMA(LraTileAssignment):
-    kernel = {"EnableMatrixInstruction": True, 
-              "LDSTrInst": False,
-              }
+    kernel = {"EnableMatrixInstruction": True, }
+
+    @classmethod
+    def matches(cls, writer, debug=False, isLDSTrAB=False, **kwargs):
+        if not super().matches(writer, debug):
+            return False
+        
+        if isLDSTrAB:
+            return False
+        
+        return True
 
     """
     Local Read Addresses: Tile Assignment A/B

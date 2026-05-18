@@ -4498,6 +4498,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # DTV case, use tlu path
     isDTVAB = (tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]
+    isLDSTrAB = (tc in ("A", "B", "MXSA", "MXSB")) and kernel["enableLDSTr%s"%tc]
     isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
     isSwizzledOrTr = tP["isSwizzled"] or isTr
     swizzledOrTrName = ""
@@ -4598,7 +4599,7 @@ class KernelWriterAssembly(KernelWriter):
       # offset calculation for DirectToVgpr
       # call function from LraTileAssignmentMFMA for DirectToVgpr
       module.addComment0("TileAssignment for DirectToVgpr%s" % tc)
-      component = Component.LraTileAssignment.find(self)
+      component = Component.LraTileAssignment.find(self, isLDSTrAB=isLDSTrAB)
       module.add(component.LraTileAssignmentCode(self, kernel, tP, tReg, uReg, tmpVgprRes, dividendReg=dividendReg, isDTVAB=True))
 
       # The other side of lrvw
@@ -4870,7 +4871,11 @@ class KernelWriterAssembly(KernelWriter):
   def lraTileAssignment(self, kernel, tPA, tPB):
     module = Module("lraTileAssignment")
 
-    component = Component.LraTileAssignment.find(self)
+    def _dispatch(tP):
+      isLDSTrAB = tP["enableLDSTr"]
+      component = Component.LraTileAssignment.find(self, isLDSTrAB=isLDSTrAB)
+      assert component, "Component lraTileAssignment Not Found"
+      module.add(component(self, kernel, tP))
 
     tPMXSA = tPA["MX"] if kernel["ProblemType"]["MXBlockA"] else None
     tPMXSB = tPB["MX"] if kernel["ProblemType"]["MXBlockB"] else None
@@ -4880,24 +4885,19 @@ class KernelWriterAssembly(KernelWriter):
     tP1    = tPB    if tPB["tile01Idx"] else tPA
     tPMXS1 = tPMXSB if tPB["tile01Idx"] else tPMXSA
 
-    if component:
-      # do not generate local read code if DirectToVgpr is enabled
-      tc = tP0["tensorChar"]
-      if not kernel["DirectToVgpr%s"%tc]:
-        module.add(component(self, kernel, tP0))
-        if tPMXS0:
-          module.add(component(self, kernel, tPMXS0))
-      # do not generate local read code if DirectToVgpr is enabled
-      tc = tP1["tensorChar"]
-      if not kernel["DirectToVgpr%s"%tc]:
-        module.add(component(self, kernel, tP1))
-        if tPMXS1:
-          module.add(component(self, kernel, tPMXS1))
-      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-        tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
-        module.add(component(self, kernel, tPM))
-    else:
-      assert 0, "Compoment lraTileAssignment Not Found"
+    # do not generate local read code if DirectToVgpr is enabled
+    if not kernel["DirectToVgpr%s"%tP0["tensorChar"]]:
+      _dispatch(tP0)
+      if tPMXS0:
+        _dispatch(tPMXS0)
+    # do not generate local read code if DirectToVgpr is enabled
+    if not kernel["DirectToVgpr%s"%tP1["tensorChar"]]:
+      _dispatch(tP1)
+      if tPMXS1:
+        _dispatch(tPMXS1)
+    if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+      tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
+      _dispatch(tPM)
 
     return module
 
