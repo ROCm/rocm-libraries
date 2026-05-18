@@ -53,8 +53,7 @@ function(add_benchmark benchmark_src)
     )
     target_link_libraries(${BENCHMARK_TARGET} ${CUDA_curand_LIBRARY})
   else()
-    target_link_libraries(${BENCHMARK_TARGET} hip::device)
-    target_link_libraries(${BENCHMARK_TARGET} rocrand)
+    target_link_libraries(${BENCHMARK_TARGET} rocrand hip::device)
   endif()
 
   target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
@@ -98,5 +97,33 @@ add_benchmark("benchmark_device_api.cpp")
 add_benchmark("benchmark_host_api.cpp")
 
 if(BUILD_BENCHMARK_TUNING)
-  add_subdirectory(tuning)
+  if(HIP_COMPILER STREQUAL "nvcc")
+    message(FATAL_ERROR "Configuration tuning is currently supported for AMD GPUs only")
+  endif()
+
+  set(BENCHMARK_TUNING_MIN_GRID_SIZE 32768 CACHE STRING
+    "Configurations with fewer total number of threads are omitted")
+  set(BENCHMARK_TUNING_THREAD_OPTIONS "64, 128, 256, 512, 1024" CACHE STRING
+    "Comma-separated list of benchmarked block sizes")
+  set(BENCHMARK_TUNING_BLOCK_OPTIONS "64, 128, 256, 512, 1024, 2048" CACHE STRING
+    "Comma-separated list of benchmarked grid sizes")
+
+  configure_file("${PROJECT_SOURCE_DIR}/benchmark/benchmark_tuning_setup.hpp.in"
+    "${CMAKE_BINARY_DIR}/benchmark/benchmark_tuning_setup.hpp")
+
+  set(CMAKE_CXX_STANDARD 17)
+  add_executable(benchmark_rocrand_tuning tuning_host_api.cpp)
+  target_link_libraries(benchmark_rocrand_tuning PRIVATE rocrand hip::device)
+  target_link_libraries(benchmark_rocrand_tuning PRIVATE benchmark::benchmark) # TODO: REMOVE!
+  target_include_directories(benchmark_rocrand_tuning PRIVATE
+    "${CMAKE_BINARY_DIR}/benchmark"
+    "${PROJECT_SOURCE_DIR}/benchmark"
+    "${PROJECT_SOURCE_DIR}/library/src"
+    ../../../shared/primbench)
+
+  if(NOT WIN32)
+    foreach(amdgpu_target ${AMDGPU_TARGETS})
+        target_compile_options(rocrand PRIVATE --offload-arch=${amdgpu_target})
+    endforeach()
+  endif()
 endif()
