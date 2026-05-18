@@ -144,6 +144,7 @@ struct OutputWriter
             }
         }
     }
+
 };
 
 // Shared OutputWriterLds for grouped convolution kernels.
@@ -323,6 +324,7 @@ struct OutputWriterLds
                 k_valid_in_vec_ = 8;
             }
         }
+
     }
 
     // Convert fp32x4 accumulator to element type and write through LDS to global memory.
@@ -369,6 +371,12 @@ struct OutputWriterLds
             }
         }
 
+        // Sync after LDS reads to prevent the next flush() call from
+        // overwriting LDS before all threads have finished reading.
+        // Without this, non-store-valid threads skip the read/write and
+        // immediately enter the next flush(), writing new data to LDS
+        // while store-valid threads are still reading the current data.
+        __syncthreads();
     }
 };
 
