@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -359,6 +360,10 @@ void SignatureKernelDescriptor::setGprs(int totalVgprs, int totalAgprs, int tota
     this->totalSgprs = totalSgprs;
 }
 
+void SignatureKernelDescriptor::setTotalInstructionBytes(int64_t totalBytes) {
+    totalInstructionBytes = totalBytes;
+}
+
 void SignatureKernelDescriptor::setOptimizationConfig(const std::array<int, 2>& tt,
                                                       const std::array<int, 2>& sg,
                                                       const std::array<int, 2>& wg, int vwA,
@@ -422,6 +427,12 @@ std::string SignatureKernelDescriptor::toString() const {
     kStr += kdIndent + ".amdhsa_system_vgpr_workitem_id " + std::to_string(vgprWorkItem) + "\n";
     kStr += kdIndent + ".amdhsa_float_denorm_mode_32 3\n";
     kStr += kdIndent + ".amdhsa_float_denorm_mode_16_64 3\n";
+
+    if (totalInstructionBytes >= 0) {
+        uint64_t prefSize =
+            std::min(static_cast<uint64_t>(totalInstructionBytes) / 128, uint64_t(255));
+        kStr += kdIndent + ".amdhsa_inst_pref_size " + std::to_string(prefSize) + "\n";
+    }
 
     if (numSgprPreload > 0) {
         kStr += kdIndent + ".amdhsa_user_sgpr_count " + std::to_string(numSgprPreload + 2) + "\n";
@@ -584,6 +595,10 @@ void SignatureBase::setOptimizationConfig(const std::array<int, 2>& tt,
                                           int glvwB, bool d2lA, bool d2lB, int useSgprForGRO) {
     kernelDescriptor.setOptimizationConfig(tt, sg, wg, vwA, vwB, glvwA, glvwB, d2lA, d2lB,
                                            useSgprForGRO);
+}
+
+void SignatureBase::setTotalInstructionBytes(int64_t totalBytes) {
+    kernelDescriptor.setTotalInstructionBytes(totalBytes);
 }
 
 std::string SignatureBase::toString() const {
