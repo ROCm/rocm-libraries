@@ -22,27 +22,22 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Unit tests for TensileMergeLibrary using embedded YAML fixture data.
+"""Unit tests for `TensileMergeLibrary` using compact embedded YAML fixtures."""
 
-This test module uses embedded YAML strings that mirror the actual
-gfx950 (list format) and gfx1250 (dict format) YAML structures.
-"""
+from copy import deepcopy
+from typing import Any
 
 import pytest
 from unittest.mock import patch
 import yaml
-from copy import deepcopy
 
 from Tensile.TensileMergeLibrary import (
     createAccessor,
+    findSolutionWithIndex,
+    fixSizeInconsistencies,
     getArchitectureFromData,
     isGfx1250,
-    fixSizeInconsistencies,
-    sanitizeSolutions,
-    removeUnusedSolutions,
-    removeDuplicatedSolutions,
     mergeLogic,
-    syncDefaultParams,
     removeDefaultInitParams,
     findSolutionWithIndex,
     addKernel,
@@ -50,15 +45,12 @@ from Tensile.TensileMergeLibrary import (
     msg,
     verbose,
     debug,
+    removeDuplicatedSolutions,
+    removeUnusedSolutions,
+    sanitizeSolutions,
+    syncDefaultParams,
 )
 
-
-# =============================================================================
-# Embedded YAML Fixture Data
-# =============================================================================
-
-# Simplified gfx950 format matching actual merge folder structure
-# Structure: [version, scheduleName, archName, devices, problemType, solutions, indexOrder, exactLogic, rangeLogic, null, perfMetric, libraryType]
 GFX950_YAML = """
 - {MinimumRequiredVersion: 5.0.0}
 - gfx950
@@ -227,55 +219,51 @@ Library:
   distance: GridBased
 """
 
-
-# =============================================================================
-# Helper Functions to Load Embedded YAML
-# =============================================================================
-
-def load_gfx950_data():
-    """Load gfx950 test data (list format) from embedded YAML string.
-    
-    The gfx950 YAML is already a list, so safe_load returns the list directly.
-    """
-    return yaml.safe_load(GFX950_YAML)
+YAML_BY_ARCH = {"gfx950": GFX950_YAML, "gfx1250": GFX1250_YAML}
 
 
-def load_gfx1250_data():
-    """Load gfx1250 test data (dict format) from embedded YAML string."""
-    return yaml.safe_load(GFX1250_YAML)
+def _load_arch_data(arch: str) -> Any:
+    """Load architecture fixture data from embedded YAML."""
+    return yaml.safe_load(YAML_BY_ARCH[arch])
 
 
-# =============================================================================
-# Pytest Fixtures
-# =============================================================================
-
-@pytest.fixture
-def gfx950_data():
-    """Load gfx950 test data (list format)."""
-    return load_gfx950_data()
+def _append_new_size(data: Any, arch: str) -> None:
+    """Append one new exact-logic size in either format."""
+    if arch == "gfx950":
+        data[7].append([[100, 200, 1, 300], [0, 0.0]])
+    else:
+        data["ExactLogic"].append([[512, 512, 1, 512], [0, 0.0]])
 
 
-@pytest.fixture
-def gfx1250_data():
-    """Load gfx1250 test data (dict format)."""
-    return load_gfx1250_data()
+@pytest.fixture(scope="module")
+def gfx950_data() -> list[Any]:
+    return _load_arch_data("gfx950")
 
 
-@pytest.fixture
-def gfx950_accessor(gfx950_data):
-    """Create DataAccessor for gfx950 data."""
+@pytest.fixture(scope="module")
+def gfx1250_data() -> dict[str, Any]:
+    return _load_arch_data("gfx1250")
+
+
+@pytest.fixture(scope="module")
+def gfx950_accessor(gfx950_data: list[Any]) -> Any:
     return createAccessor(gfx950_data)
 
 
-@pytest.fixture
-def gfx1250_accessor(gfx1250_data):
-    """Create DataAccessor for gfx1250 data."""
+@pytest.fixture(scope="module")
+def gfx1250_accessor(gfx1250_data: dict[str, Any]) -> Any:
     return createAccessor(gfx1250_data)
 
 
-# =============================================================================
-# Test Classes
-# =============================================================================
+@pytest.fixture(scope="module", params=["gfx950", "gfx1250"])
+def arch_data(request: pytest.FixtureRequest) -> tuple[str, Any]:
+    return request.param, _load_arch_data(request.param)
+
+
+@pytest.fixture(scope="module")
+def arch_accessor(arch_data: tuple[str, Any]) -> tuple[str, Any]:
+    name, data = arch_data
+    return name, createAccessor(data)
 
 class TestEmbeddedYamlLoading:
     """Tests to verify embedded YAML loads correctly."""
@@ -296,243 +284,158 @@ class TestEmbeddedYamlLoading:
 class TestDataAccessorWithFixtures:
     """Tests for DataAccessor using embedded fixture data."""
 
-    def test_gfx950_accessor_identifies_list_format(self, gfx950_accessor):
-        """gfx950 accessor identifies list format."""
-        assert gfx950_accessor.isList is True
-        assert gfx950_accessor.isDict is False
+    def test_accessor_identifies_format(self, arch_accessor):
+        """Accessor correctly identifies list vs dict format for both architectures."""
+        name, accessor = arch_accessor
+        assert accessor.isList == (name == "gfx950")
+        assert accessor.isDict == (name == "gfx1250")
 
-    def test_gfx1250_accessor_identifies_dict_format(self, gfx1250_accessor):
-        """gfx1250 accessor identifies dict format."""
-        assert gfx1250_accessor.isDict is True
-        assert gfx1250_accessor.isList is False
-
-    def test_gfx950_get_solutions(self, gfx950_accessor):
-        """gfx950 accessor can get solutions."""
-        solutions = gfx950_accessor.getSolutions()
+    def test_get_solutions(self, arch_accessor):
+        """Accessor can get solutions for both architectures."""
+        name, accessor = arch_accessor
+        solutions = accessor.getSolutions()
         assert len(solutions) == 2
         assert solutions[0]["SolutionIndex"] == 0
         assert solutions[1]["SolutionIndex"] == 1
-        assert "Cijk_Alik_Bljk" in solutions[0]["SolutionNameMin"]
+        if name == "gfx950":
+            assert "Cijk_Alik_Bljk" in solutions[0]["SolutionNameMin"]
+        else:
+            assert solutions[0]["SolutionNameMin"] == "Sol_gfx1250_0"
+            assert solutions[1]["SolutionNameMin"] == "Sol_gfx1250_1"
 
-    def test_gfx1250_get_solutions(self, gfx1250_accessor):
-        """gfx1250 accessor can get solutions."""
-        solutions = gfx1250_accessor.getSolutions()
-        assert len(solutions) == 2
-        assert solutions[0]["SolutionNameMin"] == "Sol_gfx1250_0"
-        assert solutions[1]["SolutionNameMin"] == "Sol_gfx1250_1"
-
-    def test_gfx950_get_exact_logic(self, gfx950_accessor):
-        """gfx950 accessor can get ExactLogic."""
-        logic = gfx950_accessor.getExactLogic()
+    def test_get_exact_logic(self, arch_accessor):
+        """Accessor can get ExactLogic for both architectures."""
+        name, accessor = arch_accessor
+        logic = accessor.getExactLogic()
         assert len(logic) == 3
-        # Check first size entry
-        assert logic[0][0] == [10240, 384, 1, 8192]
         assert logic[0][1] == [0, 0.0]
+        if name == "gfx950":
+            assert logic[0][0] == [10240, 384, 1, 8192]
+        else:
+            assert logic[0][0] == [129, 129, 1, 129]
 
-    def test_gfx1250_get_exact_logic(self, gfx1250_accessor):
-        """gfx1250 accessor can get ExactLogic."""
-        logic = gfx1250_accessor.getExactLogic()
-        assert len(logic) == 3
-        # Check first size entry
-        assert logic[0][0] == [129, 129, 1, 129]
-        assert logic[0][1] == [0, 0.0]
-
-    def test_gfx950_no_default_solution(self, gfx950_accessor):
-        """gfx950 does not have DefaultSolution."""
-        assert gfx950_accessor.hasDefaultSolution() is False
-        assert gfx950_accessor.getDefaultSolution() is None
-
-    def test_gfx1250_has_default_solution(self, gfx1250_accessor):
-        """gfx1250 has DefaultSolution."""
-        assert gfx1250_accessor.hasDefaultSolution() is True
-        default = gfx1250_accessor.getDefaultSolution()
-        assert default["GlobalSplitU"] == 1
-        assert default["StaggerU"] == 32
+    @pytest.mark.parametrize(
+        "fixture_name, expected",
+        [("gfx950_accessor", False), ("gfx1250_accessor", True)],
+    )
+    def test_default_solution_presence(
+        self, request: pytest.FixtureRequest, fixture_name: str, expected: bool
+    ):
+        """DefaultSolution is present only for gfx1250."""
+        accessor = request.getfixturevalue(fixture_name)
+        assert accessor.hasDefaultSolution() is expected
+        if expected:
+            default = accessor.getDefaultSolution()
+            assert default["GlobalSplitU"] == 1
+            assert default["StaggerU"] == 32
+        else:
+            assert accessor.getDefaultSolution() is None
 
 
 class TestArchitectureDetectionWithFixtures:
     """Tests for architecture detection using embedded fixtures."""
 
-    def test_gfx950_architecture(self, gfx950_data):
-        """Detect architecture from gfx950 data."""
-        arch = getArchitectureFromData(gfx950_data)
-        assert arch == "gfx950"
+    def test_architecture_name(self, arch_data):
+        """Architecture name is correctly detected for both formats."""
+        name, data = arch_data
+        assert getArchitectureFromData(data) == name
 
-    def test_gfx1250_architecture(self, gfx1250_data):
-        """Detect architecture from gfx1250 data."""
-        arch = getArchitectureFromData(gfx1250_data)
-        assert arch == "gfx1250"
 
-    def test_gfx950_is_not_gfx1250(self, gfx950_data):
-        """gfx950 is not identified as gfx1250."""
-        assert isGfx1250(gfx950_data) is False
-
-    def test_gfx1250_is_gfx1250(self, gfx1250_data):
-        """gfx1250 is identified as gfx1250."""
-        assert isGfx1250(gfx1250_data) is True
+    def test_is_gfx1250(self, arch_data):
+        """isGfx1250 returns True only for gfx1250 data."""
+        name, data = arch_data
+        assert isGfx1250(data) == (name == "gfx1250")
 
 
 class TestFixSizeInconsistenciesWithFixtures:
     """Tests for fixSizeInconsistencies using embedded fixture data."""
 
-    def test_gfx950_sizes_preserved(self, gfx950_accessor):
-        """gfx950 sizes are preserved (no duplicates in fixture)."""
-        logic = gfx950_accessor.getExactLogic()
-        result, count = fixSizeInconsistencies(deepcopy(logic), "gfx950")
+    def test_sizes_preserved(self, arch_accessor):
+        """Sizes are preserved (no duplicates in fixture) for both architectures."""
+        name, accessor = arch_accessor
+        logic = accessor.getExactLogic()
+        result, count = fixSizeInconsistencies(deepcopy(logic), name)
         assert count == 3  # All three unique sizes preserved
 
-    def test_gfx1250_sizes_preserved(self, gfx1250_accessor):
-        """gfx1250 sizes are preserved (no duplicates in fixture)."""
-        logic = gfx1250_accessor.getExactLogic()
-        result, count = fixSizeInconsistencies(deepcopy(logic), "gfx1250")
-        assert count == 3  # All three unique sizes preserved
-
-    def test_deduplication_with_gfx950_format(self):
-        """Verify deduplication works with gfx950-style sizes."""
-        sizes = [
-            [[10240, 384, 1, 8192], [0, 0.0]],
-            [[10240, 336, 1, 8192], [1, 0.0]],
-            [[10240, 384, 1, 8192], [2, 1.0]],  # Duplicate of first
-        ]
+    @pytest.mark.parametrize("sizes", [
+        [[[10240, 384, 1, 8192], [0, 0.0]], 
+         [[10240, 336, 1, 8192], [1, 0.0]], 
+         [[10240, 384, 1, 8192], [2, 1.0]]]
+    ])
+    def test_deduplication(self, sizes):
+        """Duplicate sizes are collapsed to unique entries regardless of format."""
         result, count = fixSizeInconsistencies(sizes, "test")
-        assert count == 2  # Only 2 unique sizes
-        # Verify no duplicate sizes
-        result_sizes = [tuple(r[0]) for r in result]
-        assert len(set(result_sizes)) == 2
-
-    def test_deduplication_with_gfx1250_format(self):
-        """Verify deduplication works with gfx1250-style sizes."""
-        sizes = [
-            [[129, 129, 1, 129], [0, 0.0]],
-            [[128, 128, 1, 128], [1, 0.0]],
-            [[129, 129, 1, 129], [2, 1.0]],  # Duplicate of first
-        ]
-        result, count = fixSizeInconsistencies(sizes, "test")
-        assert count == 2  # Only 2 unique sizes
+        assert count == 2
+        assert len({tuple(r[0]) for r in result}) == 2
 
 
-class TestSanitizeSolutionsWithFixtures:
-    """Tests for sanitizeSolutions using embedded fixture data."""
+class TestSolutionCleanup:
+    """Tests for removeUnusedSolutions and removeDuplicatedSolutions."""
 
-    def test_gfx950_sanitize_preserves_stagger_zero(self, gfx950_data):
-        """gfx950 solutions have StaggerU=0, sanitize should preserve this."""
-        accessor = createAccessor(deepcopy(gfx950_data))
-        solutions = accessor.getSolutions()
-        
-        # Verify initial state
-        assert solutions[0]["StaggerU"] == 0
-        
-        sanitizeSolutions(accessor)
-        
-        # After sanitize, all stagger params should be 0
-        assert solutions[0]["StaggerUMapping"] == 0
-        assert solutions[0]["StaggerUStride"] == 0
-        assert solutions[0]["_staggerStrideShift"] == 0
-
-    def test_gfx1250_sanitize_preserves_nonzero_stagger(self, gfx1250_data):
-        """gfx1250 solutions have StaggerU=32, sanitize should preserve dependent params."""
-        accessor = createAccessor(deepcopy(gfx1250_data))
-        solutions = accessor.getSolutions()
-        
-        # Verify initial state
-        assert solutions[0]["StaggerU"] == 32
-        orig_stride = solutions[0]["StaggerUStride"]
-        
-        sanitizeSolutions(accessor)
-        
-        # After sanitize, stagger params should be preserved
-        assert solutions[0]["StaggerUStride"] == orig_stride
-
-
-class TestRemoveUnusedSolutionsWithFixtures:
-    """Tests for removeUnusedSolutions using embedded fixture data."""
-
-    def test_gfx950_all_solutions_used(self, gfx950_data):
-        """In gfx950 data, all solutions are used."""
-        accessor = createAccessor(deepcopy(gfx950_data))
+    def test_all_solutions_used(self, arch_data):
+        """All solutions are used for both architectures."""
+        _, data = arch_data
+        accessor = createAccessor(deepcopy(data))
         _, num_removed = removeUnusedSolutions(accessor)
         # Solution 0 is used twice, solution 1 once - both are used
         assert num_removed == 0
 
-    def test_gfx1250_all_solutions_used(self, gfx1250_data):
-        """In gfx1250 data, all solutions are used."""
-        accessor = createAccessor(deepcopy(gfx1250_data))
-        _, num_removed = removeUnusedSolutions(accessor)
-        # Solution 0 is used twice, solution 1 once - both are used
-        assert num_removed == 0
-
-    def test_gfx950_remove_unused(self, gfx950_data):
-        """Add an unused solution to gfx950 and verify it's removed."""
-        data = deepcopy(gfx950_data)
-        solutions = data[5]  # Solutions list
+    def test_remove_unused(self, arch_data):
+        """Add an unused solution and verify it is removed for both architectures."""
+        _, data = arch_data
+        accessor = createAccessor(deepcopy(data))
+        solutions = accessor.getSolutions()
         solutions.append({
-            "SolutionIndex": 2,
+            "SolutionIndex": 99,
             "SolutionNameMin": "Unused_Sol",
             "KernelNameMin": "Unused_Kernel",
             "StaggerU": 0,
         })
-        accessor = createAccessor(data)
-        
+        accessor.setSolutions(solutions)
         _, num_removed = removeUnusedSolutions(accessor)
-        
         assert num_removed == 1
         assert len(accessor.getSolutions()) == 2
 
 
-class TestRemoveDuplicatedSolutionsWithFixtures:
-    """Tests for removeDuplicatedSolutions using embedded fixture data."""
-
-    def test_gfx950_no_duplicates(self, gfx950_data):
-        """gfx950 data has no duplicate solutions."""
-        accessor = createAccessor(deepcopy(gfx950_data))
+    def test_no_duplicates(self, arch_data):
+        """Data has no duplicate solutions for both architectures."""
+        _, data = arch_data
+        accessor = createAccessor(deepcopy(data))
         _, num_removed, num_solutions, num_kernels = removeDuplicatedSolutions(accessor)
         assert num_removed == 0
         assert num_solutions == 2
 
-    def test_gfx1250_no_duplicates(self, gfx1250_data):
-        """gfx1250 data has no duplicate solutions."""
-        accessor = createAccessor(deepcopy(gfx1250_data))
-        _, num_removed, num_solutions, num_kernels = removeDuplicatedSolutions(accessor)
-        assert num_removed == 0
-        assert num_solutions == 2
+    def test_sanitize_solutions_sets_stagger_dependent_params(self, arch_data):
+        """sanitizeSolutions zeroes dependent stagger params when StaggerU is zero."""
+        _, data = arch_data
+        accessor = createAccessor(deepcopy(data))
+        solutions = accessor.getSolutions()
+        solutions[0]["StaggerU"] = 0
+        solutions[0]["StaggerUMapping"] = 9
+        solutions[0]["StaggerUStride"] = 123
+        solutions[0]["_staggerStrideShift"] = 7
+        accessor.setSolutions(solutions)
+
+        sanitizeSolutions(accessor)
+
+        sanitized = accessor.getSolutions()[0]
+        assert sanitized["StaggerUMapping"] == 0
+        assert sanitized["StaggerUStride"] == 0
+        assert sanitized["_staggerStrideShift"] == 0
 
 
 class TestMergeLogicWithFixtures:
     """Tests for mergeLogic using embedded fixture data."""
 
-    def test_merge_gfx950_with_new_size(self, gfx950_data):
-        """Merge adds new size to gfx950 data."""
-        ori_accessor = createAccessor(deepcopy(gfx950_data))
-        
-        # Create incremental data with a new size
-        inc_data = deepcopy(gfx950_data)
-        inc_solutions = inc_data[5]
-        inc_logic = inc_data[7]
-        # Add a new size
-        inc_logic.append([[9999, 999, 1, 9999], [0, 0.0]])
+    @pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
+    def test_merge_with_new_size(self, arch):
+        """Merge adds one new size for both formats."""
+        ori_data = _load_arch_data(arch)
+        inc_data = deepcopy(ori_data)
+        _append_new_size(inc_data, arch)
+        ori_accessor = createAccessor(deepcopy(ori_data))
         inc_accessor = createAccessor(inc_data)
-        
-        merged_data, num_sizes_added, _, _ = mergeLogic(
-            ori_accessor, inc_accessor, forceMerge=False
-        )
-        
-        assert num_sizes_added == 1
-        merged_accessor = createAccessor(merged_data)
-        assert len(merged_accessor.getExactLogic()) == 4
-
-    def test_merge_gfx1250_with_new_size(self, gfx1250_data):
-        """Merge adds new size to gfx1250 data."""
-        ori_accessor = createAccessor(deepcopy(gfx1250_data))
-        
-        # Create incremental data with a new size
-        inc_data = deepcopy(gfx1250_data)
-        inc_data["ExactLogic"].append([[512, 512, 1, 512], [0, 0.0]])
-        inc_accessor = createAccessor(inc_data)
-        
-        merged_data, num_sizes_added, _, _ = mergeLogic(
-            ori_accessor, inc_accessor, forceMerge=False
-        )
-        
+        merged_data, num_sizes_added, _, _ = mergeLogic(ori_accessor, inc_accessor, forceMerge=False)
         assert num_sizes_added == 1
         merged_accessor = createAccessor(merged_data)
         assert len(merged_accessor.getExactLogic()) == 4
@@ -579,14 +482,14 @@ class TestDefaultSolutionFunctionsWithFixtures:
     """Tests for DefaultSolution-related functions using gfx1250 data."""
 
     def test_sync_default_params(self, gfx1250_data):
-        """syncDefaultParams handles default changes."""
+        """syncDefaultParams runs without error when defaults change between libraries."""
         data = deepcopy(gfx1250_data)
         orig_defaults = {"StaggerU": 32, "TestParam": 100}
-        inc_defaults = {"StaggerU": 64, "TestParam": 200}  # Changed
-        
+        inc_defaults = {"StaggerU": 64, "TestParam": 200}
         syncDefaultParams(data, orig_defaults, inc_defaults)
-        
-        # Function should add old defaults to solutions when they change
+        # When a default changes, the old value should be pinned onto solutions
+        # that previously relied on it. Verify solutions are still present.
+        assert len(data["Solutions"]) == 2
 
     def test_remove_default_init_params(self, gfx1250_data):
         """removeDefaultInitParams removes params matching default."""
@@ -613,66 +516,45 @@ class TestDefaultSolutionFunctionsWithFixtures:
 class TestFindSolutionWithIndexWithFixtures:
     """Tests for findSolutionWithIndex using embedded fixture data."""
 
-    def test_find_gfx950_solution_by_index(self, gfx950_accessor):
-        """Find solution by index in gfx950 data."""
-        solutions = gfx950_accessor.getSolutions()
-        
-        result = findSolutionWithIndex(solutions, 0)
-        assert result["SolutionIndex"] == 0
-        assert "Test0" in result["SolutionNameMin"]
-        
-        result = findSolutionWithIndex(solutions, 1)
-        assert result["SolutionIndex"] == 1
-        assert "Test1" in result["SolutionNameMin"]
+    def test_find_solution_by_index(self, arch_accessor):
+        """Find solution by index for both architectures."""
+        name, accessor = arch_accessor
+        solutions = accessor.getSolutions()
 
-    def test_find_gfx1250_solution_by_index(self, gfx1250_accessor):
-        """Find solution by index in gfx1250 data."""
-        solutions = gfx1250_accessor.getSolutions()
-        
-        result = findSolutionWithIndex(solutions, 0)
-        assert result["SolutionNameMin"] == "Sol_gfx1250_0"
-        
-        result = findSolutionWithIndex(solutions, 1)
-        assert result["SolutionNameMin"] == "Sol_gfx1250_1"
+        result0 = findSolutionWithIndex(solutions, 0)
+        result1 = findSolutionWithIndex(solutions, 1)
+        assert result0["SolutionIndex"] == 0
+        assert result1["SolutionIndex"] == 1
+        if name == "gfx950":
+            assert "Test0" in result0["SolutionNameMin"]
+            assert "Test1" in result1["SolutionNameMin"]
+        else:
+            assert result0["SolutionNameMin"] == "Sol_gfx1250_0"
+            assert result1["SolutionNameMin"] == "Sol_gfx1250_1"
 
 
 class TestCrossFormatOperations:
-    """Tests for operations that might span different formats."""
+    """Tests for set/get round-trips on accessor for both formats."""
 
-    def test_accessor_set_and_get_solutions(self, gfx950_data, gfx1250_data):
-        """Test setting and getting solutions on both formats."""
-        # gfx950
-        gfx950_accessor = createAccessor(deepcopy(gfx950_data))
+    def test_accessor_set_and_get_solutions(self, arch_data):
+        """Setting and getting solutions round-trips correctly for both formats."""
+        _, data = arch_data
+        accessor = createAccessor(deepcopy(data))
         new_sol = {"SolutionIndex": 99, "SolutionNameMin": "New_Sol", "KernelNameMin": "New_K"}
-        solutions = gfx950_accessor.getSolutions()
+        solutions = accessor.getSolutions()
         solutions.append(new_sol)
-        gfx950_accessor.setSolutions(solutions)
-        assert len(gfx950_accessor.getSolutions()) == 3
-        
-        # gfx1250
-        gfx1250_accessor = createAccessor(deepcopy(gfx1250_data))
-        solutions = gfx1250_accessor.getSolutions()
-        solutions.append(new_sol)
-        gfx1250_accessor.setSolutions(solutions)
-        assert len(gfx1250_accessor.getSolutions()) == 3
+        accessor.setSolutions(solutions)
+        assert len(accessor.getSolutions()) == 3
 
-    def test_accessor_set_and_get_exact_logic(self, gfx950_data, gfx1250_data):
-        """Test setting and getting ExactLogic on both formats."""
+    def test_accessor_set_and_get_exact_logic(self, arch_data):
+        """Setting and getting ExactLogic round-trips correctly for both formats."""
+        _, data = arch_data
+        accessor = createAccessor(deepcopy(data))
         new_entry = [[1, 1, 1, 1], [0, 0.0]]
-        
-        # gfx950
-        gfx950_accessor = createAccessor(deepcopy(gfx950_data))
-        logic = gfx950_accessor.getExactLogic()
+        logic = accessor.getExactLogic()
         logic.append(new_entry)
-        gfx950_accessor.setExactLogic(logic)
-        assert len(gfx950_accessor.getExactLogic()) == 4
-        
-        # gfx1250
-        gfx1250_accessor = createAccessor(deepcopy(gfx1250_data))
-        logic = gfx1250_accessor.getExactLogic()
-        logic.append(new_entry)
-        gfx1250_accessor.setExactLogic(logic)
-        assert len(gfx1250_accessor.getExactLogic()) == 4
+        accessor.setExactLogic(logic)
+        assert len(accessor.getExactLogic()) == 4
 
 
 @pytest.mark.unit

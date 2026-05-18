@@ -91,3 +91,10 @@ BenchmarkProblems:
         #- BiasTypeArgs: ['s']
         #- ActivationArgs:
         #  - [Enum: none]
+
+#LibraryLogic:
+#    ScheduleName: "aquavanjaram"
+#    DeviceNames: ["Device 0049", "Device 0050"]
+#    ArchitectureName: "gfx950"
+
+# LibraryClient:

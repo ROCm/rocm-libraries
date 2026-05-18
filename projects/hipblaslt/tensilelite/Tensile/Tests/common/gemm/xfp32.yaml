@@ -82,3 +82,11 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128]
+
+LibraryLogic:
+    ScheduleName: "aquavanjaram"
+    DeviceNames: ["Device 0049", "Device 0050"]
+    ArchitectureName: "gfx942"
+    LibraryType: "GridBased"
+
+LibraryClient:
