@@ -1,9 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
-
 #include <hip/hip_runtime.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -28,11 +26,11 @@ struct UnhappyBnTrainingSpatialCase
 
 /// Builds a minimal BatchNorm training graph that should fail when
 /// batch × spatial ≤ 1.
-Graph makeGraph(const UnhappyBnTrainingSpatialCase& tc)
+Graph makeUnhappySpatialGraph(const UnhappyBnTrainingSpatialCase& tc)
 {
     Graph g;
 
-    g.set_name("IntegrationGpuBatchnormUnhappySpatial");
+    g.set_name("IntegrationGpuBatchnormTrainingUnhappySpatial");
     g.set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
@@ -66,20 +64,18 @@ Graph makeGraph(const UnhappyBnTrainingSpatialCase& tc)
 }
 
 // Test fixture
-class IntegrationGpuBatchnormUnhappySpatial
+class IntegrationGpuBatchnormTrainingUnhappySpatial
     : public ::testing::TestWithParam<UnhappyBnTrainingSpatialCase>
 {
 protected:
     hipdnnHandle_t _handle = nullptr;
     hipStream_t _stream = nullptr;
-    int _deviceId = 0;
 
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
 
         ASSERT_EQ(hipInit(0), hipSuccess);
-        ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
         auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
@@ -99,21 +95,25 @@ protected:
     void TearDown() override
     {
         if(_handle != nullptr)
+        {
             ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
+        }
 
         if(_stream != nullptr)
+        {
             ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
+        }
     }
 };
 
 } // anonymous namespace
 
 // Test body
-TEST_P(IntegrationGpuBatchnormUnhappySpatial, RejectsInsufficientSpatial)
+TEST_P(IntegrationGpuBatchnormTrainingUnhappySpatial, RejectsInsufficientSpatial)
 {
     const auto& tc = GetParam();
 
-    auto graph = makeGraph(tc);
+    auto graph = makeUnhappySpatialGraph(tc);
     auto result = graph.build(_handle);
 
     // Must fail
@@ -124,14 +124,27 @@ TEST_P(IntegrationGpuBatchnormUnhappySpatial, RejectsInsufficientSpatial)
 }
 
 // Test cases
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormUnhappySpatial,
-                         ::testing::Values(
-                             // batch * spatial = 1
-                             UnhappyBnTrainingSpatialCase{{1, 4, 1, 1}, "SingleElement"},
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormTrainingUnhappySpatial,
+    ::testing::Values(
+        // batch * spatial = 1
+        UnhappyBnTrainingSpatialCase{{1, 4, 1, 1}, "SingleElement"},
 
-                             // batch = 0
-                             UnhappyBnTrainingSpatialCase{{0, 4, 8, 8}, "ZeroBatch"}),
-                         [](const ::testing::TestParamInfo<UnhappyBnTrainingSpatialCase>& info) {
-                             return std::string(info.param.name);
-                         });
+        // batch = 0
+        UnhappyBnTrainingSpatialCase{{0, 4, 8, 8}, "ZeroBatch"},
+
+        // zero spatial dimensions
+        UnhappyBnTrainingSpatialCase{{2, 4, 0, 8}, "ZeroHeight"},
+        UnhappyBnTrainingSpatialCase{{2, 4, 8, 0}, "ZeroWidth"},
+        UnhappyBnTrainingSpatialCase{{2, 4, 0, 0}, "ZeroSpatial"},
+
+        // combined edge case
+        UnhappyBnTrainingSpatialCase{{0, 4, 1, 1}, "ZeroBatchSingleSpatial"},
+
+        // rank-3 input case
+        UnhappyBnTrainingSpatialCase{{2, 4, 1}, "Rank3SingleSpatial"}
+    ),
+    [](const ::testing::TestParamInfo<UnhappyBnTrainingSpatialCase>& info) {
+        return info.param.name;
+    }); 
