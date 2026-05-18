@@ -57,6 +57,15 @@ struct MXfp4_FlatmmConfig16 : public MXFlatmmConfigBase16
     static constexpr ck_tile::index_t N_Tile = 512;
 };
 
+// fp6 sync 3xdwordx4 path: 48-byte chunk requires K_Tile to make K0 integer.
+// K_Tile=256 gives K0=0.5 (static_assert fires); K_Tile=512 gives K0=1; K_Tile=1024
+// gives K0=2. K_Tile=512 chosen because K_Tile=1024 pushes Bload_num+Scale vmcnt
+// total to 88 (>63 = VM_MASK on gfx950, see arch.hpp:984).
+struct MXfp6_FlatmmConfig16 : public MXFlatmmConfigBase16
+{
+    static constexpr ck_tile::index_t K_Tile = 512;
+};
+
 // Architecture traits for MX Flatmm - Primary template (gfx950 implementation)
 template <ck_tile::core::arch::TargetId Arch, typename FlatmmConfig>
 struct MXFlatmmArchTraits
@@ -171,7 +180,7 @@ using MXFlatmm_GFX950_FP4FP4_Traits =
 using MXFlatmm_GFX950_FP8FP8_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
 using MXFlatmm_GFX950_FP6FP6_Traits =
-    MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
+    MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXfp6_FlatmmConfig16>;
 using MXFlatmm_GFX950_FP8FP4_Traits =
     MXFlatmmArchTraits<ck_tile::core::arch::TargetId::GFX950, MXFlatmmConfigBase16>;
 using MXFlatmm_GFX950_FP4FP8_Traits =

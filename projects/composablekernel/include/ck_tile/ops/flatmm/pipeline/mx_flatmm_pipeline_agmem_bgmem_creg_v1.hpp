@@ -620,10 +620,20 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         auto async_load_tile_ = [](auto lds, auto dram) {
             async_load_tile(lds, dram, number<-1>{}, true_type{}, true_type{});
         };
+        // fp6 sync path: dram window emits 3xbuffer_load_dwordx4 (48B chunk via
+        // Step 1's N==48 primitive), then ds_write to LDS. Step 3 wrapper used in
+        // place of async_load_tile_ when ADataType == pk_fp6x16_t.
+        auto sync_load_tile_ = [](auto& lds_win, auto& dram_win) {
+            auto reg_tile = load_tile(dram_win);
+            store_tile(lds_win, reg_tile);
+        };
 
         // HEAD
         // Prefetch A0
-        async_load_tile_(a_store_lds_window_ping, a_dram_window);
+        if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+            sync_load_tile_(a_store_lds_window_ping, a_dram_window);
+        else
+            async_load_tile_(a_store_lds_window_ping, a_dram_window);
         move_tile_window(a_dram_window, {0, kKPerBlock * sizeof(ADataType) / APackedSize});
 
         // prefetch B
@@ -664,7 +674,10 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         // Prefetch A1
         if constexpr(HasHotLoop || TailNum == TailNumber::Even)
         {
-            async_load_tile_(a_store_lds_window_pong, a_dram_window);
+            if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+                sync_load_tile_(a_store_lds_window_pong, a_dram_window);
+            else
+                async_load_tile_(a_store_lds_window_pong, a_dram_window);
             move_tile_window(a_dram_window, {0, sizeof(ADataType) * kKPerBlock / APackedSize});
         }
         // initialize C
@@ -762,7 +775,10 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             block_sync_lds();
 
             // Prefetch A(2i+2)
-            async_load_tile_(a_store_lds_window_ping, a_dram_window);
+            if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+                sync_load_tile_(a_store_lds_window_ping, a_dram_window);
+            else
+                async_load_tile_(a_store_lds_window_ping, a_dram_window);
             move_tile_window(a_dram_window, {0, kKPerBlock * sizeof(ADataType) / APackedSize});
 
             // move B window to next flat K
@@ -852,7 +868,10 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             block_sync_lds();
 
             // Prefetch A(2i+3)
-            async_load_tile_(a_store_lds_window_pong, a_dram_window);
+            if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+                sync_load_tile_(a_store_lds_window_pong, a_dram_window);
+            else
+                async_load_tile_(a_store_lds_window_pong, a_dram_window);
             move_tile_window(a_dram_window, {0, sizeof(ADataType) * kKPerBlock / APackedSize});
             // move B window to next flat K
             move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});

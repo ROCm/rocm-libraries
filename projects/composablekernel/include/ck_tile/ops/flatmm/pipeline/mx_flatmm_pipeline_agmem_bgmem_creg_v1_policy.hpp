@@ -78,7 +78,8 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
 
     CK_TILE_DEVICE static constexpr auto MakeMX_ABytesDramTileDistribution()
     {
-        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? DWORDx3 : DWORDx4;
+        // fp6: 48-byte sync chunk (3 dwordx4). fp4/fp8: 16-byte dwordx4.
+        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? 48 : DWORDx4;
         constexpr index_t K1 = kDramLoadPackBytes / DWORDx4; // fp8/fp6/fp4 K1 equal to 8
         constexpr index_t K0 =
             KPerBlock / APackedSize * sizeof(ADataType) / (K1 * K2); // KPerBlock/256/packsize
@@ -109,7 +110,8 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         auto&& tensor_view_tmp  = window_tmp.get_bottom_tensor_view();
         const auto [rows, cols] = tensor_view_tmp.get_tensor_descriptor().get_lengths();
 
-        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? DWORDx3 : DWORDx4;
+        // fp6: 48-byte sync chunk (3 dwordx4). fp4/fp8: 16-byte dwordx4.
+        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? 48 : DWORDx4;
         constexpr index_t K1 = kDramLoadPackBytes / DWORDx4; // fp8/fp6/fp4 K1 equal to 8
         const index_t K0     = cols / (K1 * K2 / sizeof(ADataType) * APackedSize);
         const auto col_lens  = make_tuple(K0, number<K1>{}, number<K2>{});
@@ -150,8 +152,11 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
 
     CK_TILE_DEVICE static constexpr auto MakeMX_ALdsBytesBlockDescriptor()
     {
-        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? DWORDx3 : AK1 / APackedSize;
-        constexpr index_t K2_Pad = 16;
+        // fp6 sync path: K2=48 (3 dwordx4) is naturally 16-byte aligned so no
+        // extra padding is needed; K2_Pad collapses to K2 in that case.
+        // fp4/fp8 async path: K2_Pad=16 preserved for byte-identical behavior.
+        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? 48 : AK1 / APackedSize;
+        constexpr index_t K2_Pad = std::is_same_v<ADataType, pk_fp6x16_t> ? K2 : 16;
         constexpr index_t K1     = kDramLoadPackBytes / DWORDx4; // 8
         constexpr index_t K0     = std::is_same_v<ADataType, pk_fp6x16_t>
                                        ? KPerBlock / (K1 * K2 / sizeof(ADataType) * APackedSize)
@@ -242,7 +247,9 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                     sequence<2, 2>,
                     sequence<0, 2>>{});
         else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
-            // K_Lane=4, K_Thread=32
+            // K_Lane=4, K_Thread=32. Rank stays 3 (matches WG::AWarpTensor=24B
+            // per-thread per inner-iter). Rank +1 here breaks bit_cast in
+            // pipeline:741 (mfma feeder expects fixed shape); deferred to Step 3.
             return make_static_tile_distribution(
                 tile_distribution_encoding< //
                     sequence<NWarps>,
@@ -285,6 +292,9 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                     sequence<2, 2>,
                     sequence<0, 3>>{});
         else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+            // Rank stays 3 (matches WG::BWarpTensor). Rank +1 here breaks
+            // bit_cast in pipeline:743 (same root cause as A-side L250);
+            // deferred to Step 3.
             return make_static_tile_distribution(
                 tile_distribution_encoding< //
                     sequence<WaveRepeat>,
@@ -412,14 +422,13 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeA()
     {
+        // MakeMX_ALdsBytesBlockDescriptor returns element count in BYTES (name
+        // says so). For fp4/fp8 sizeof()==1 makes the multiply a no-op; for fp6
+        // sizeof(pk_fp6x16_t)==12 would 12x over-allocate (exceeds gfx950 LDS).
         if constexpr(!std::is_same_v<ADataType, pk_fp6x16_t>)
-        {
             return sizeof(ADataType) * MakeMX_ALdsBytesBlockDescriptor().get_element_space_size();
-        }
         else
-        {
             return MakeMX_ALdsBytesBlockDescriptor().get_element_space_size();
-        }
     }
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return GetSmemSizeA(); }
