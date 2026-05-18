@@ -22,15 +22,19 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static constexpr auto I2             = number<2>{};
     static constexpr auto WGAccessDouble = WGAttrNumAccessEnum::Double;
 
-    using ALayout         = remove_cvref_t<typename Problem::ALayout>;
-    using BLayout         = remove_cvref_t<typename Problem::BLayout>;
-    using ADataType       = remove_cvref_t<typename Problem::ADataType>;
-    using BDataType       = remove_cvref_t<typename Problem::BDataType>;
-    using CDataType       = remove_cvref_t<typename Problem::CDataType>;
-    using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
+    using ALayout          = remove_cvref_t<typename Problem::ALayout>;
+    using BLayout          = remove_cvref_t<typename Problem::BLayout>;
+    using ADataType        = remove_cvref_t<typename Problem::ADataType>;
+    using BDataType        = remove_cvref_t<typename Problem::BDataType>;
+    using CDataType        = remove_cvref_t<typename Problem::CDataType>;
+    using AComputeDataType = remove_cvref_t<typename Problem::AComputeDataType>;
+    using BComputeDataType = remove_cvref_t<typename Problem::BComputeDataType>;
     static_assert(std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>, "Wrong!");
     static_assert(std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::ColumnMajor>, "Wrong!");
-    static_assert(std::is_same_v<ComputeDataType, fp8_t> || std::is_same_v<ComputeDataType, bf8_t>);
+    static_assert(std::is_same_v<AComputeDataType, fp8_t> ||
+                  std::is_same_v<AComputeDataType, bf8_t>);
+    static_assert(std::is_same_v<BComputeDataType, fp8_t> ||
+                  std::is_same_v<BComputeDataType, bf8_t>);
     static_assert(std::is_same_v<CDataType, float>);
 
     using BlockGemmShape = typename Problem::BlockGemmShape;
@@ -176,10 +180,15 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
         const index_t M0     = integer_divide_ceil(rows, M1);
         const auto row_lens  = make_tuple(M0, number<M1>{});
 
-        const auto d0 = make_naive_tensor_descriptor_packed(container_concat(row_lens, col_lens));
-        const auto desc_0 = decltype(d0)( // set correct size (without padding)
-            d0.get_transforms(),
-            tensor_view_tmp.get_tensor_descriptor().get_element_space_size());
+        // Build the 6D view by composing unmerge transforms on top of the
+        // input view's existing descriptor. This preserves the input's actual
+        // strides (so a non-packed leading-dim stride is honored) and inherits
+        // its element_space_size for bounds checking.
+        const auto desc_0 = transform_tensor_descriptor(
+            tensor_view_tmp.get_tensor_descriptor(),
+            make_tuple(make_unmerge_transform(row_lens), make_unmerge_transform(col_lens)),
+            make_tuple(sequence<0>{}, sequence<1>{}),
+            make_tuple(sequence<0, 1>{}, sequence<2, 3, 4, 5>{}));
         const auto desc_1 = transform_tensor_descriptor(
             desc_0,
             make_tuple(make_pass_through_transform(M0),
@@ -377,8 +386,11 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
 } // namespace detail
 
 struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
+    : public UniversalGemmBasePolicy<GemmPipelineAgBgCrCompAsyncEightWavesPolicy>
 {
-
+    using Base = UniversalGemmBasePolicy<GemmPipelineAgBgCrCompAsyncEightWavesPolicy>;
+    using Base::is_a_load_tr;
+    using Base::is_b_load_tr;
 #define FORWARD_METHOD_(method)                                                      \
     template <typename Problem, typename... Args>                                    \
     CK_TILE_HOST_DEVICE static constexpr auto method(Args&&... args)                 \

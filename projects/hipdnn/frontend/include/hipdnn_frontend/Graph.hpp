@@ -84,9 +84,12 @@
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
+#ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
+#endif
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ConvolutionFpropUnpacker.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
@@ -113,10 +116,14 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/ResampleFwdNode.hpp>
+#ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
+#endif
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
@@ -995,8 +1002,10 @@ public:
      *
      * @param rankedEngineIds Output vector of engine IDs, ranked by expected performance
      * @param modes Heuristic modes to use for ranking
-     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
-     *         on failure. Call get_message() for the specific failure reason.
+     * @return ErrorCode::OK on success; ErrorCode::GRAPH_NOT_SUPPORTED if no
+     *         engine has an applicable solution for this graph on the current
+     *         device; ErrorCode::HIPDNN_BACKEND_ERROR on other backend failure.
+     *         Call get_message() for the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
@@ -1027,9 +1036,11 @@ public:
      * specified heuristic modes.
      *
      * @param modes Heuristic modes to use for engine selection
-     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
-     *         if the graph has not been built. Call get_message() for the
-     *         specific failure reason.
+     * @return ErrorCode::OK on success; ErrorCode::GRAPH_NOT_SUPPORTED if no
+     *         engine has an applicable solution for this graph on the current
+     *         device; ErrorCode::HIPDNN_BACKEND_ERROR if the graph has not
+     *         been built or on other backend failure. Call get_message() for
+     *         the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plans(const std::vector<HeuristicMode>& modes
@@ -1125,7 +1136,9 @@ public:
      * @brief Check if the graph is supported by any available engine plugin
      * @param handle The hipDNN handle
      * @param modes Heuristic modes for engine ranking
-     * @return Error with OK if supported, HIPDNN_BACKEND_ERROR if not
+     * @return Error with OK if supported; GRAPH_NOT_SUPPORTED if no engine
+     *         has an applicable solution for this graph on the current device;
+     *         HIPDNN_BACKEND_ERROR on other backend failure
      *
      * Performs a lightweight check to determine if any engine plugin can
      * handle this graph. If the graph has not yet been validated and built,
@@ -1304,6 +1317,79 @@ public:
     Error deserialize(const std::vector<uint8_t>& data)
     {
         return deserialize(nullptr, data);
+    }
+
+    /** @brief Serialize the compiled backend execution plan to a byte vector.
+     *
+     * Requires build_plans() or build() to have finalized the execution plan.
+     * The returned data is intended for from_compiled_plan_binary().
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error serialize_compiled_plan(std::vector<uint8_t>& data) const
+    {
+        if(!_executionPlanDesc || !_executionPlanDesc->valid())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has no compiled execution plan. Call build() or build_plans() first."};
+        }
+
+        size_t planByteSize = 0;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendGetSerializedExecutionPlanExt(
+                _executionPlanDesc->get(), 0, &planByteSize, nullptr),
+            "Failed to query serialized compiled plan size");
+
+        if(planByteSize == 0)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR, "Backend returned zero-length compiled plan"};
+        }
+
+        data.resize(planByteSize);
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendGetSerializedExecutionPlanExt(
+                _executionPlanDesc->get(), planByteSize, &planByteSize, data.data()),
+            "Failed to serialize compiled plan");
+        data.resize(planByteSize);
+
+        return {};
+    }
+
+    /** @brief Serialize the compiled backend execution plan to a byte vector. */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::pair<std::vector<uint8_t>, Error> to_compiled_plan_binary() const
+    {
+        std::vector<uint8_t> data;
+        auto err = serialize_compiled_plan(data);
+        return {std::move(data), std::move(err)};
+    }
+
+    /** @brief Deserialize a compiled backend execution plan for execution.
+     *
+     * This restores only the compiled plan. It does not restore the frontend
+     * operation graph structure; execute using UID-based variant packs.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error deserialize_compiled_plan(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    {
+        hipdnnBackendDescriptor_t executionPlan = nullptr;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendCreateAndDeserializeExecutionPlanExt(
+                handle, &executionPlan, data.data(), data.size()),
+            "Failed to deserialize compiled plan");
+
+        _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
+        _engineConfigDesc.reset();
+        resetGraphDesc();
+        _sub_nodes.clear();
+
+        return {};
+    }
+
+    /** @brief Deserialize a compiled backend execution plan for execution. */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error from_compiled_plan_binary(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    {
+        return deserialize_compiled_plan(handle, data);
     }
 
     // ── JSON string serialization (always available) ────────────────────
@@ -1571,8 +1657,10 @@ public:
      * @param policy Build plan policy (currently only HEURISTICS_CHOICE is used)
      * @param do_multithreaded_builds Reserved for future use
      * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
-     *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR
-     *         on failure. Call get_message() for the specific failure reason.
+     *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR /
+     *         ErrorCode::GRAPH_NOT_SUPPORTED (when no engine has an applicable
+     *         solution on the current device) on failure. Call get_message() for
+     *         the specific failure reason.
      */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
@@ -1684,6 +1772,13 @@ public:
                   void* workspace) const
     {
         HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name());
+
+        if(!_executionPlanDesc || !_executionPlanDesc->valid())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has no compiled execution plan. Call build() or "
+                    "from_compiled_plan_binary() first."};
+        }
 
         auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
@@ -2184,6 +2279,61 @@ public:
         return {y, invRmsOut};
     }
 
+    /** @brief RMS normalization backward pass
+     *
+     * Computes gradients with respect to input, scale, and optionally bias.
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. output, same shape as x)
+     * @param x Original input from forward pass
+     * @param scale Per-channel scale (gamma)
+     * @param inv_rms Saved inv_rms from the forward pass
+     * @param attributes Configuration; optionally include dbias
+     *        computation via set_compute_dbias(true)
+     * @return Array of 3 output tensors:
+     *         - [0] dx: Gradient w.r.t. input (same shape as x)
+     *         - [1] dscale: Per-channel gradient w.r.t. scale
+     *         - [2] dbias: Per-channel gradient w.r.t. bias; nullptr unless
+     *           attributes.set_compute_dbias(true) was called before this
+     *
+     * @see hipdnn_frontend::graph::RMSNormBackwardAttributes
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        rmsnorm_backward(std::shared_ptr<TensorAttributes> dy,
+                         std::shared_ptr<TensorAttributes> x,
+                         std::shared_ptr<TensorAttributes> scale,
+                         std::shared_ptr<TensorAttributes> inv_rms,
+                         RMSNormBackwardAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("RMSNormBackward_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto dx = outputTensor(attributes.get_name() + "::DX");
+        auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
+
+        std::shared_ptr<TensorAttributes> dbias;
+        if(attributes.get_compute_dbias())
+        {
+            dbias = outputTensor(attributes.get_name() + "::DBIAS");
+            attributes.set_dbias(dbias);
+        }
+
+        attributes.set_dy(std::move(dy));
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_inv_rms(std::move(inv_rms));
+        attributes.set_dx(dx);
+        attributes.set_dscale(dscale);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<RMSNormBackwardNode>(std::move(attributes), graph_attributes));
+
+        return {dx, dscale, dbias};
+    }
+
     /** @brief Block-scale dequantization
      *
      * Dequantizes a blocked low-precision tensor using per-block scale factors.
@@ -2557,6 +2707,7 @@ public:
         return outputTensors;
     }
 
+#ifdef HIPDNN_ENABLE_SDPA
     /** @brief Scaled dot-product attention forward pass
      *
      * Computes scaled dot-product attention:
@@ -2697,6 +2848,7 @@ public:
 
         return {dq, dk, dv};
     }
+#endif // HIPDNN_ENABLE_SDPA
 
     /** @brief Convolution forward pass
      *
@@ -2720,6 +2872,31 @@ public:
      *
      * @see hipdnn_frontend::graph::ConvFpropAttributes
      */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> resample_fwd(std::shared_ptr<TensorAttributes> x,
+                                                   ResampleFwdAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("ResampleFwd_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ResampleFwdNode>(std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_fprop(std::shared_ptr<TensorAttributes> x,
                                                  std::shared_ptr<TensorAttributes> w,
@@ -2769,6 +2946,12 @@ public:
      * @param attributes Convolution parameters: padding, stride, dilation
      *        (must match forward pass)
      * @return dx: Gradient w.r.t. input (same shape as forward input)
+     *
+     * @note If `dx` dimensions are not provided, the channel count is
+     *       inferred assuming `groups = 1`. For grouped convolutions,
+     *       set dimensions on the returned `dx` tensor before graph
+     *       validation/finalization to avoid an incorrect channel count
+     *       on the inferred input-gradient tensor.
      *
      * @see hipdnn_frontend::graph::ConvDgradAttributes
      */
@@ -2821,6 +3004,12 @@ public:
      * @param attributes Convolution parameters: padding, stride, dilation
      *        (must match forward pass)
      * @return dw: Gradient w.r.t. filter weights (same shape as forward weights)
+     *
+     * @note If `dw` dimensions are not provided, the channel count is
+     *       inferred assuming `groups = 1`. For grouped convolutions,
+     *       set dimensions on the returned `dw` tensor before graph
+     *       validation/finalization to avoid an incorrect channel count
+     *       on the inferred weight tensor.
      *
      * @see hipdnn_frontend::graph::ConvWgradAttributes
      */

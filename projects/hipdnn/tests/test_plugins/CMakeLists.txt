@@ -18,6 +18,11 @@ set(TEST_KNOBS_PLUGIN_NAME "test_knobs_plugin")
 set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "test_knob_constraint_validation_plugin")
 set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "test_incompatible_version_plugin")
 
+# Heuristic plugin test names (RFC 0007)
+set(TEST_GOOD_HEURISTIC_PLUGIN_NAME "test_good_heuristic_plugin")
+set(TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME "test_incomplete_heuristic_api_plugin")
+set(TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME "test_no_optional_heuristic_plugin")
+
 # Function to create a test plugin with common configuration
 function(add_test_plugin target_name)
     set(source_files ${ARGN})
@@ -91,6 +96,16 @@ set(test_good_default_plugin_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/default")
 set(test_good_default_plugin_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/default")
 add_test_plugin(${TEST_GOOD_DEFAULT_PLUGIN_NAME} TestGoodDefaultPlugin.cpp)
 
+# Heuristic test plugins (RFC 0007 Part 1)
+# test_good_heuristic_plugin implements the full heuristic plugin API
+add_test_plugin(${TEST_GOOD_HEURISTIC_PLUGIN_NAME} TestGoodHeuristicPlugin.cpp)
+
+# test_incomplete_heuristic_api_plugin is missing required symbols (for error testing)
+add_test_plugin(${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME} TestIncompleteHeuristicApiPlugin.cpp)
+
+# test_no_optional_heuristic_plugin omits optional symbols (GetPolicyName, SetLogLevel)
+add_test_plugin(${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME} TestNoOptionalHeuristicPlugin.cpp)
+
 # Export plugin names to parent scope for use in test compilation
 set(TEST_GOOD_PLUGIN_NAME "${TEST_GOOD_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_EXECUTE_FAILS_PLUGIN_NAME "${TEST_EXECUTE_FAILS_PLUGIN_NAME}" PARENT_SCOPE)
@@ -107,3 +122,6 @@ set(TEST_GOOD_DEFAULT_PLUGIN_NAME "${TEST_GOOD_DEFAULT_PLUGIN_NAME}" PARENT_SCOP
 set(TEST_KNOBS_PLUGIN_NAME "${TEST_KNOBS_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}" PARENT_SCOPE)
+set(TEST_GOOD_HEURISTIC_PLUGIN_NAME "${TEST_GOOD_HEURISTIC_PLUGIN_NAME}" PARENT_SCOPE)
+set(TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME "${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME}" PARENT_SCOPE)
+set(TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME "${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME}" PARENT_SCOPE)

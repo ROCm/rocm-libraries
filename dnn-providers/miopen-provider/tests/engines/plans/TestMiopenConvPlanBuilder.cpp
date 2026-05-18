@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <memory>
+#include <optional>
+
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -14,6 +17,7 @@
 #include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
+#include "common/ConvolutionCommon.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
 
 using namespace miopen_plugin;
@@ -23,8 +27,14 @@ using namespace hipdnn_test_sdk::utilities;
 class TestMiopenConvPlanBuilder : public ::testing::Test
 {
 protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
+    }
+
     MiopenConvPlanBuilder _planBuilder;
-    HipdnnMiopenHandle _dummyHandle;
+    std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
 };
 
 class TestGpuMiopenConvPlanBuilder : public TestMiopenConvPlanBuilder
@@ -32,14 +42,22 @@ class TestGpuMiopenConvPlanBuilder : public TestMiopenConvPlanBuilder
 protected:
     void SetUp() override
     {
-        SKIP_IF_NO_DEVICES();
+        TestMiopenConvPlanBuilder::SetUp();
+        // GTEST_SKIP() in the base only unwinds the base SetUp() frame; without this
+        // guard, _handle would still be constructed and miopenCreate() would throw on
+        // no-device, turning the intended skip into a fixture failure.
+        if(IsSkipped())
+        {
+            return;
+        }
+        _handle = std::make_unique<HipdnnMiopenHandle>();
     }
 
     void executePlan(const hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>& plan,
                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
     {
-        size_t workspaceSize = plan.getWorkspaceSize(_handle);
-        hipdnn_data_sdk::utilities::Workspace workspace(workspaceSize);
+        const size_t workspaceSize = plan.getWorkspaceSize(*_handle);
+        const hipdnn_data_sdk::utilities::Workspace workspace(workspaceSize);
 
         std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
         std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensors;
@@ -63,31 +81,66 @@ protected:
             }
         }
 
-        EXPECT_NO_THROW(plan.execute(_handle,
+        EXPECT_NO_THROW(plan.execute(*_handle,
                                      deviceBuffers.data(),
                                      static_cast<uint32_t>(deviceBuffers.size()),
                                      workspace.get()));
     }
 
-    HipdnnMiopenHandle _handle;
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
 };
+
+class TestGpuMiopenConvPlanBuilderShapes
+    : public TestGpuMiopenConvPlanBuilder,
+      public ::testing::WithParamInterface<test_conv_common::ConvTestCase>
+{
+protected:
+    void buildAndExecute(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                         std::optional<size_t> workspaceLimit)
+    {
+        const MockEngineConfig mockEngineConfig;
+        HipdnnMiopenSettings settings;
+        if(workspaceLimit.has_value())
+        {
+            settings.setWorkspaceSizeLimit(*workspaceLimit);
+        }
+        HipdnnMiopenContext ctx;
+        ctx.setExecutionSettings(settings);
+        _planBuilder.buildPlan(*_handle, graph, mockEngineConfig, ctx);
+        executePlan(ctx.plan(), graph);
+    }
+};
+
+static std::vector<test_conv_common::ConvTestCase> getWorkspaceRangeShapes()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+    return {
+        {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
+        {{1, 16, 16, 16}, {1, 16, 3, 3}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
+        {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+        {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1}, seed},
+        {{1, 16, 16, 16}, {1, 16, 3, 3}, {2, 2}, {2, 2}, {1, 1}, {2, 2}, seed},
+        {{8, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
+        {{1, 16, 16, 8}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+    };
+}
 
 TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForMultiNodeGraph)
 {
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
     EXPECT_FALSE(applicable);
 }
 
 TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
     EXPECT_FALSE(applicable);
 }
 
@@ -95,69 +148,69 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForSupportedGraph)
 {
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(_handle, graph);
+        const bool applicable = _planBuilder.isApplicable(*_handle, graph);
         EXPECT_TRUE(applicable);
     }
 
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(_handle, graph);
+        const bool applicable = _planBuilder.isApplicable(*_handle, graph);
         EXPECT_TRUE(applicable);
     }
 
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(_handle, graph);
+        const bool applicable = _planBuilder.isApplicable(*_handle, graph);
         EXPECT_TRUE(applicable);
     }
 }
 
 TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeThrowsForMultiNodeGraph)
 {
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
 
-    HipdnnMiopenSettings settings;
-    EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings),
+    const HipdnnMiopenSettings settings;
+    EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(*_dummyHandle, mockGraph, settings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeRangeThrowsForMultiNodeGraph)
 {
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
 
-    EXPECT_THROW(_planBuilder.getWorkspaceSizeRange(_dummyHandle, mockGraph),
+    EXPECT_THROW(_planBuilder.getWorkspaceSizeRange(*_dummyHandle, mockGraph),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeThrowsForUnsupportedGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    HipdnnMiopenSettings settings;
-    EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings),
+    const HipdnnMiopenSettings settings;
+    EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(*_dummyHandle, graph, settings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeRangeThrowsForUnsupportedGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    EXPECT_THROW(_planBuilder.getWorkspaceSizeRange(_dummyHandle, graph),
+    EXPECT_THROW(_planBuilder.getWorkspaceSizeRange(*_dummyHandle, graph),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -165,40 +218,40 @@ TEST_F(TestGpuMiopenConvPlanBuilder, GetWorkspaceSizeReturnsValueForSupportedGra
 {
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        HipdnnMiopenSettings settings;
-        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(_handle, graph, settings));
+        const HipdnnMiopenSettings settings;
+        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(*_handle, graph, settings));
     }
 
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        HipdnnMiopenSettings settings;
-        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(_handle, graph, settings));
+        const HipdnnMiopenSettings settings;
+        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(*_handle, graph, settings));
     }
 
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
 
-        HipdnnMiopenSettings settings;
-        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(_handle, graph, settings));
+        const HipdnnMiopenSettings settings;
+        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(*_handle, graph, settings));
     }
 }
 
 TEST_F(TestMiopenConvPlanBuilder, BuildPlanThrowsForMultiNodeGraph)
 {
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
-    MockEngineConfig mockEngineConfig;
+    const MockEngineConfig mockEngineConfig;
     HipdnnMiopenContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, mockGraph, mockEngineConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -206,19 +259,19 @@ TEST_F(TestMiopenConvPlanBuilder, BuildPlanThrowsForMultiNodeGraph)
 TEST_F(TestMiopenConvPlanBuilder, BuildPlanThrowsForUnsupportedGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
-    MockEngineConfig mockEngineConfig;
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const MockEngineConfig mockEngineConfig;
     HipdnnMiopenContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, mockEngineConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
 TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeType)
 {
-    flatbuffers::FlatBufferBuilder builder
+    const flatbuffers::FlatBufferBuilder builder
         = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
     auto mutableGraph
@@ -226,43 +279,43 @@ TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeT
     mutableGraph->mutable_nodes()->GetMutableObject(0)->mutate_compute_data_type(
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
 {
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
-        MockEngineConfig mockEngineConfig;
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        const MockEngineConfig mockEngineConfig;
         HipdnnMiopenContext ctx;
 
-        EXPECT_NO_THROW(_planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx));
+        EXPECT_NO_THROW(_planBuilder.buildPlan(*_handle, graph, mockEngineConfig, ctx));
         EXPECT_TRUE(ctx.hasValidPlan());
     }
 
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
-        MockEngineConfig mockEngineConfig;
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        const MockEngineConfig mockEngineConfig;
         HipdnnMiopenContext ctx;
 
-        EXPECT_NO_THROW(_planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx));
+        EXPECT_NO_THROW(_planBuilder.buildPlan(*_handle, graph, mockEngineConfig, ctx));
         EXPECT_TRUE(ctx.hasValidPlan());
     }
 
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                         builder.GetSize());
-        MockEngineConfig mockEngineConfig;
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        const MockEngineConfig mockEngineConfig;
         HipdnnMiopenContext ctx;
 
-        EXPECT_NO_THROW(_planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx));
+        EXPECT_NO_THROW(_planBuilder.buildPlan(*_handle, graph, mockEngineConfig, ctx));
         EXPECT_TRUE(ctx.hasValidPlan());
     }
 }
@@ -270,16 +323,16 @@ TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
 TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeFwd)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
 
-    MockEngineConfig mockEngineConfig;
+    const MockEngineConfig mockEngineConfig;
     HipdnnMiopenContext ctx;
-    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx);
+    _planBuilder.buildPlan(*_handle, graph, mockEngineConfig, ctx);
 
-    size_t actualWorkspace = ctx.plan().getWorkspaceSize(_handle);
+    const size_t actualWorkspace = ctx.plan().getWorkspaceSize(*_handle);
 
     EXPECT_GE(actualWorkspace, range.min);
     EXPECT_LE(actualWorkspace, range.max);
@@ -288,16 +341,16 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeFwd)
 TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeBwd)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
 
-    MockEngineConfig mockEngineConfig;
+    const MockEngineConfig mockEngineConfig;
     HipdnnMiopenContext ctx;
-    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx);
+    _planBuilder.buildPlan(*_handle, graph, mockEngineConfig, ctx);
 
-    size_t actualWorkspace = ctx.plan().getWorkspaceSize(_handle);
+    const size_t actualWorkspace = ctx.plan().getWorkspaceSize(*_handle);
 
     EXPECT_GE(actualWorkspace, range.min);
     EXPECT_LE(actualWorkspace, range.max);
@@ -306,164 +359,119 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeBwd)
 TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
 
-    MockEngineConfig mockEngineConfig;
+    const MockEngineConfig mockEngineConfig;
     HipdnnMiopenContext ctx;
-    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx);
+    _planBuilder.buildPlan(*_handle, graph, mockEngineConfig, ctx);
 
-    size_t actualWorkspace = ctx.plan().getWorkspaceSize(_handle);
+    const size_t actualWorkspace = ctx.plan().getWorkspaceSize(*_handle);
 
     EXPECT_GE(actualWorkspace, range.min);
     EXPECT_LE(actualWorkspace, range.max);
 }
 
-TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
+TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableFwd)
 {
-    // Configuration matching multiple MIOpen solvers with different workspace requirements
-    std::vector<int64_t> xDims = {2, 16, 28, 28};
-    auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-    std::vector<int64_t> wDims = {32, 16, 3, 3};
-    auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
-    std::vector<int64_t> yDims = {2, 32, 28, 28};
-    auto yStrides = hipdnn_data_sdk::utilities::generateStrides(yDims);
-    std::vector<int64_t> convPrePadding = {1, 1};
-    std::vector<int64_t> convPostPadding = {1, 1};
-    std::vector<int64_t> convStrides = {1, 1};
-    std::vector<int64_t> convDilation = {1, 1};
+    const auto& tc = GetParam();
+    auto xStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
+    auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
+    auto yStrides = hipdnn_data_sdk::utilities::generateStrides(tc.yDims);
 
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(tc.xDims,
                                                                        xStrides,
-                                                                       wDims,
+                                                                       tc.wDims,
                                                                        wStrides,
-                                                                       yDims,
+                                                                       tc.yDims,
                                                                        yStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+                                                                       tc.convPrePadding,
+                                                                       tc.convPostPadding,
+                                                                       tc.convStride,
+                                                                       tc.convDilation);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
-    ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
+    auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
+    EXPECT_LE(range.min, range.max);
 
-    MockEngineConfig mockEngineConfig;
-    HipdnnMiopenSettings executionSettings1;
-    HipdnnMiopenContext ctx1;
-    ctx1.setExecutionSettings(executionSettings1);
-    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx1);
-    executePlan(ctx1.plan(), graph);
-
-    HipdnnMiopenSettings executionSettings2;
-    executionSettings2.setWorkspaceSizeLimit(range.min);
-    HipdnnMiopenContext ctx2;
-    ctx2.setExecutionSettings(executionSettings2);
-    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx2);
-    executePlan(ctx2.plan(), graph);
+    buildAndExecute(graph, std::nullopt);
+    buildAndExecute(graph, range.min);
+    buildAndExecute(graph, range.max);
 }
 
-TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitBwd)
+TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableBwd)
 {
-    // Configuration matching multiple MIOpen solvers with different workspace requirements
-    std::vector<int64_t> dxDims = {2, 16, 28, 28};
-    auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(dxDims);
-    std::vector<int64_t> wDims = {32, 16, 3, 3};
-    auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
-    std::vector<int64_t> dyDims = {2, 32, 28, 28};
-    auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
-    std::vector<int64_t> convPrePadding = {1, 1};
-    std::vector<int64_t> convPostPadding = {1, 1};
-    std::vector<int64_t> convStrides = {1, 1};
-    std::vector<int64_t> convDilation = {1, 1};
+    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+    SKIP_IF_ASAN();
+    const auto& tc = GetParam();
+    auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
+    auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
+    auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(tc.yDims);
 
-    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(dxDims,
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(tc.xDims,
                                                                        dxStrides,
-                                                                       wDims,
+                                                                       tc.wDims,
                                                                        wStrides,
-                                                                       dyDims,
+                                                                       tc.yDims,
                                                                        dyStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+                                                                       tc.convPrePadding,
+                                                                       tc.convPostPadding,
+                                                                       tc.convStride,
+                                                                       tc.convDilation);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
-    ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
+    auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
+    EXPECT_LE(range.min, range.max);
 
-    MockEngineConfig mockEngineConfig;
-    HipdnnMiopenSettings executionSettings1;
-    HipdnnMiopenContext ctx1;
-    ctx1.setExecutionSettings(executionSettings1);
-    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx1);
-    executePlan(ctx1.plan(), graph);
-
-    HipdnnMiopenSettings executionSettings2;
-    executionSettings2.setWorkspaceSizeLimit(range.min);
-    HipdnnMiopenContext ctx2;
-    ctx2.setExecutionSettings(executionSettings2);
-    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx2);
-    executePlan(ctx2.plan(), graph);
+    buildAndExecute(graph, std::nullopt);
+    buildAndExecute(graph, range.min);
+    buildAndExecute(graph, range.max);
 }
 
-TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitWrw)
+TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableWrw)
 {
-    // Configuration matching multiple MIOpen solvers with different workspace requirements
-    std::vector<int64_t> xDims = {2, 16, 28, 28};
-    auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-    std::vector<int64_t> dwDims = {32, 16, 3, 3};
-    auto dwStrides = hipdnn_data_sdk::utilities::generateStrides(dwDims);
-    std::vector<int64_t> dyDims = {2, 32, 28, 28};
-    auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
-    std::vector<int64_t> convPrePadding = {1, 1};
-    std::vector<int64_t> convPostPadding = {1, 1};
-    std::vector<int64_t> convStrides = {1, 1};
-    std::vector<int64_t> convDilation = {1, 1};
+    const auto& tc = GetParam();
+    auto xStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
+    auto dwStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
+    auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(tc.yDims);
 
-    auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph(xDims,
+    auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph(tc.xDims,
                                                                        xStrides,
-                                                                       dwDims,
+                                                                       tc.wDims,
                                                                        dwStrides,
-                                                                       dyDims,
+                                                                       tc.yDims,
                                                                        dyStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+                                                                       tc.convPrePadding,
+                                                                       tc.convPostPadding,
+                                                                       tc.convStride,
+                                                                       tc.convDilation);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
-    ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
+    auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
+    EXPECT_LE(range.min, range.max);
 
-    MockEngineConfig mockEngineConfig;
-    HipdnnMiopenSettings executionSettings1;
-    HipdnnMiopenContext ctx1;
-    ctx1.setExecutionSettings(executionSettings1);
-    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx1);
-    executePlan(ctx1.plan(), graph);
-
-    HipdnnMiopenSettings executionSettings2;
-    executionSettings2.setWorkspaceSizeLimit(range.min);
-    HipdnnMiopenContext ctx2;
-    ctx2.setExecutionSettings(executionSettings2);
-    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx2);
-    executePlan(ctx2.plan(), graph);
+    buildAndExecute(graph, std::nullopt);
+    buildAndExecute(graph, range.min);
+    buildAndExecute(graph, range.max);
 }
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuMiopenConvPlanBuilderShapes,
+                         ::testing::ValuesIn(getWorkspaceRangeShapes()));
 
 TEST_F(TestGpuMiopenConvPlanBuilder, GetCustomKnobsReturnsWorkspaceSizeLimitKnob)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    auto customKnobs = _planBuilder.getCustomKnobs(_handle, graph);
-    const auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto customKnobs = _planBuilder.getCustomKnobs(*_handle, graph);
+    const auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
 
     auto workspaceKnobIt
         = std::find_if(customKnobs.begin(),
@@ -491,10 +499,10 @@ TEST_F(TestGpuMiopenConvPlanBuilder, GetCustomKnobsReturnsWorkspaceSizeLimitKnob
 
 TEST_F(TestMiopenConvPlanBuilder, GetCustomKnobsReturnsEmptyWhenNotApplicable)
 {
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(0));
 
-    auto customKnobs = _planBuilder.getCustomKnobs(_dummyHandle, mockGraph);
+    auto customKnobs = _planBuilder.getCustomKnobs(*_dummyHandle, mockGraph);
 
     EXPECT_TRUE(customKnobs.empty());
 }
@@ -503,8 +511,8 @@ TEST_F(TestGpuMiopenConvPlanBuilder,
        InitializeExecutionSettingsThrowsOnInvalidWorkspaceSizeLimitKnobType)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     flatbuffers::FlatBufferBuilder configBuilder;
     auto knobIdOffset = configBuilder.CreateString("global.workspace_size_limit");
@@ -526,20 +534,20 @@ TEST_F(TestGpuMiopenConvPlanBuilder,
     configBuilder.Finish(engineConfig);
 
     auto buffer = configBuilder.Release();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                                    buffer.size());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
 
     HipdnnMiopenSettings executionSettings;
     EXPECT_THROW(
-        _planBuilder.initializeExecutionSettings(_handle, graph, configWrapper, executionSettings),
+        _planBuilder.initializeExecutionSettings(*_handle, graph, configWrapper, executionSettings),
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsThrowsOnNegativeWorkspaceSizeLimit)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     flatbuffers::FlatBufferBuilder configBuilder;
     auto knobIdOffset = configBuilder.CreateString("global.workspace_size_limit");
@@ -559,12 +567,12 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsThrowsOnNegative
     configBuilder.Finish(engineConfig);
 
     auto buffer = configBuilder.Release();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                                    buffer.size());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
 
     HipdnnMiopenSettings executionSettings;
     EXPECT_THROW(
-        _planBuilder.initializeExecutionSettings(_handle, graph, configWrapper, executionSettings),
+        _planBuilder.initializeExecutionSettings(*_handle, graph, configWrapper, executionSettings),
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -572,10 +580,10 @@ TEST_F(TestGpuMiopenConvPlanBuilder,
        InitializeExecutionSettingsThrowsOnWorkspaceSizeLimitBelowRange)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    const auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    const auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
 
     // Skip if min is 0 (already tested in BuildPlanThrowsOnNegativeWorkspaceSizeLimit)
     if(range.min == 0)
@@ -602,12 +610,12 @@ TEST_F(TestGpuMiopenConvPlanBuilder,
     configBuilder.Finish(engineConfig);
 
     auto buffer = configBuilder.Release();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                                    buffer.size());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
 
     HipdnnMiopenSettings executionSettings;
     EXPECT_THROW(
-        _planBuilder.initializeExecutionSettings(_handle, graph, configWrapper, executionSettings),
+        _planBuilder.initializeExecutionSettings(*_handle, graph, configWrapper, executionSettings),
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -615,10 +623,10 @@ TEST_F(TestGpuMiopenConvPlanBuilder,
        InitializeExecutionSettingsThrowsOnWorkspaceSizeLimitAboveRange)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    const auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    const auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
 
     if(range.max >= std::numeric_limits<int64_t>::max())
     {
@@ -644,22 +652,22 @@ TEST_F(TestGpuMiopenConvPlanBuilder,
     configBuilder.Finish(engineConfig);
 
     auto buffer = configBuilder.Release();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                                    buffer.size());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
 
     HipdnnMiopenSettings executionSettings;
     EXPECT_THROW(
-        _planBuilder.initializeExecutionSettings(_handle, graph, configWrapper, executionSettings),
+        _planBuilder.initializeExecutionSettings(*_handle, graph, configWrapper, executionSettings),
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsWorkspaceSizeLimit)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    const auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    const auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
     const auto testWorkspaceSize = range.min + ((range.max - range.min) / 2);
 
     flatbuffers::FlatBufferBuilder configBuilder;
@@ -681,18 +689,18 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsWorkspaceSiz
     configBuilder.Finish(engineConfig);
 
     auto buffer = configBuilder.Release();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                                    buffer.size());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
 
     HipdnnMiopenSettings executionSettings;
-    EXPECT_NO_THROW(
-        _planBuilder.initializeExecutionSettings(_handle, graph, configWrapper, executionSettings));
+    EXPECT_NO_THROW(_planBuilder.initializeExecutionSettings(
+        *_handle, graph, configWrapper, executionSettings));
 
-    MockEngineConfig mockEngineConfig;
+    const MockEngineConfig mockEngineConfig;
     HipdnnMiopenContext ctx;
     ctx.setExecutionSettings(executionSettings);
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_handle, graph, mockEngineConfig, ctx));
     auto workspaceLimit = executionSettings.workspaceSizeLimit();
     ASSERT_TRUE(workspaceLimit.has_value());
     if(workspaceLimit.has_value())
@@ -705,8 +713,8 @@ TEST_F(TestGpuMiopenConvPlanBuilder,
        InitializeExecutionSettingsDefaultsWorkspaceSizeLimitWhenNoKnob)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     flatbuffers::FlatBufferBuilder configBuilder;
     auto engineConfig
@@ -714,26 +722,26 @@ TEST_F(TestGpuMiopenConvPlanBuilder,
     configBuilder.Finish(engineConfig);
 
     auto buffer = configBuilder.Release();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                                    buffer.size());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
 
     HipdnnMiopenSettings executionSettings;
-    EXPECT_NO_THROW(
-        _planBuilder.initializeExecutionSettings(_handle, graph, configWrapper, executionSettings));
+    EXPECT_NO_THROW(_planBuilder.initializeExecutionSettings(
+        *_handle, graph, configWrapper, executionSettings));
 
-    MockEngineConfig mockEngineConfig;
+    const MockEngineConfig mockEngineConfig;
     HipdnnMiopenContext ctx;
     ctx.setExecutionSettings(executionSettings);
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_handle, graph, mockEngineConfig, ctx));
     EXPECT_FALSE(executionSettings.workspaceSizeLimit().has_value());
 }
 
 TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorkspaceSize)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     flatbuffers::FlatBufferBuilder configBuilder;
     auto engineConfig
@@ -741,16 +749,16 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorks
     configBuilder.Finish(engineConfig);
 
     auto buffer = configBuilder.Release();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                                    buffer.size());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
 
     HipdnnMiopenSettings settings;
-    _planBuilder.initializeExecutionSettings(_handle, graph, configWrapper, settings);
+    _planBuilder.initializeExecutionSettings(*_handle, graph, configWrapper, settings);
 
     ASSERT_TRUE(settings.defaultWorkspaceSize().has_value());
 
-    HipdnnMiopenSettings freshSettings;
-    auto expected = _planBuilder.getMaxWorkspaceSize(_handle, graph, freshSettings);
+    const HipdnnMiopenSettings freshSettings;
+    auto expected = _planBuilder.getMaxWorkspaceSize(*_handle, graph, freshSettings);
 
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access,-warnings-as-errors)
     EXPECT_EQ(settings.defaultWorkspaceSize().value(), expected);
@@ -759,10 +767,10 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorks
 TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetDefaultWhenLimitIsSet)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    const auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    const auto range = _planBuilder.getWorkspaceSizeRange(*_handle, graph);
 
     flatbuffers::FlatBufferBuilder configBuilder;
     auto knobIdOffset = configBuilder.CreateString("global.workspace_size_limit");
@@ -783,11 +791,11 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetDefaultWhenLi
     configBuilder.Finish(engineConfig);
 
     auto buffer = configBuilder.Release();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                                    buffer.size());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
 
     HipdnnMiopenSettings settings;
-    _planBuilder.initializeExecutionSettings(_handle, graph, configWrapper, settings);
+    _planBuilder.initializeExecutionSettings(*_handle, graph, configWrapper, settings);
 
     EXPECT_TRUE(settings.defaultWorkspaceSize().has_value());
 }
@@ -795,20 +803,20 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetDefaultWhenLi
 TEST_F(TestGpuMiopenConvPlanBuilder, GetMaxWorkspaceSizeReturnsCachedDefault)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const size_t cachedValue = 42;
     HipdnnMiopenSettings settings;
     settings.setDefaultWorkspaceSize(cachedValue);
 
-    auto result = _planBuilder.getMaxWorkspaceSize(_handle, graph, settings);
+    auto result = _planBuilder.getMaxWorkspaceSize(*_handle, graph, settings);
     EXPECT_EQ(result, cachedValue);
 }
 
 TEST(TestHipdnnMiopenSettings, SelectedWorkspaceSizeReturnsZeroWhenNothingSet)
 {
-    HipdnnMiopenSettings settings;
+    const HipdnnMiopenSettings settings;
     EXPECT_EQ(settings.selectedWorkspaceSize(), 0u);
 }
 
@@ -837,8 +845,8 @@ TEST(TestHipdnnMiopenSettings, SelectedWorkspaceSizeReturnsLimitWhenBothSet)
 TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorkspaceSizeBwd)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     flatbuffers::FlatBufferBuilder configBuilder;
     auto engineConfig
@@ -846,16 +854,16 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorks
     configBuilder.Finish(engineConfig);
 
     auto buffer = configBuilder.Release();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                                    buffer.size());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
 
     HipdnnMiopenSettings settings;
-    _planBuilder.initializeExecutionSettings(_handle, graph, configWrapper, settings);
+    _planBuilder.initializeExecutionSettings(*_handle, graph, configWrapper, settings);
 
     ASSERT_TRUE(settings.defaultWorkspaceSize().has_value());
 
-    HipdnnMiopenSettings freshSettings;
-    auto expected = _planBuilder.getMaxWorkspaceSize(_handle, graph, freshSettings);
+    const HipdnnMiopenSettings freshSettings;
+    auto expected = _planBuilder.getMaxWorkspaceSize(*_handle, graph, freshSettings);
 
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access,-warnings-as-errors)
     EXPECT_EQ(settings.defaultWorkspaceSize().value(), expected);
@@ -864,8 +872,8 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorks
 TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorkspaceSizeWrw)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     flatbuffers::FlatBufferBuilder configBuilder;
     auto engineConfig
@@ -873,16 +881,16 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorks
     configBuilder.Finish(engineConfig);
 
     auto buffer = configBuilder.Release();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
-                                                                                    buffer.size());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
 
     HipdnnMiopenSettings settings;
-    _planBuilder.initializeExecutionSettings(_handle, graph, configWrapper, settings);
+    _planBuilder.initializeExecutionSettings(*_handle, graph, configWrapper, settings);
 
     ASSERT_TRUE(settings.defaultWorkspaceSize().has_value());
 
-    HipdnnMiopenSettings freshSettings;
-    auto expected = _planBuilder.getMaxWorkspaceSize(_handle, graph, freshSettings);
+    const HipdnnMiopenSettings freshSettings;
+    auto expected = _planBuilder.getMaxWorkspaceSize(*_handle, graph, freshSettings);
 
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access,-warnings-as-errors)
     EXPECT_EQ(settings.defaultWorkspaceSize().value(), expected);
@@ -891,27 +899,27 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorks
 TEST_F(TestGpuMiopenConvPlanBuilder, GetMaxWorkspaceSizeReturnsCachedDefaultBwd)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const size_t cachedValue = 42;
     HipdnnMiopenSettings settings;
     settings.setDefaultWorkspaceSize(cachedValue);
 
-    auto result = _planBuilder.getMaxWorkspaceSize(_handle, graph, settings);
+    auto result = _planBuilder.getMaxWorkspaceSize(*_handle, graph, settings);
     EXPECT_EQ(result, cachedValue);
 }
 
 TEST_F(TestGpuMiopenConvPlanBuilder, GetMaxWorkspaceSizeReturnsCachedDefaultWrw)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const size_t cachedValue = 42;
     HipdnnMiopenSettings settings;
     settings.setDefaultWorkspaceSize(cachedValue);
 
-    auto result = _planBuilder.getMaxWorkspaceSize(_handle, graph, settings);
+    auto result = _planBuilder.getMaxWorkspaceSize(*_handle, graph, settings);
     EXPECT_EQ(result, cachedValue);
 }

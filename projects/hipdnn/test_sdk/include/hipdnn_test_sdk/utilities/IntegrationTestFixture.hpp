@@ -29,6 +29,7 @@ namespace hipdnn_tests
 class IntegrationTestFixture : public ::testing::Test
 {
 protected:
+    // NOTE: derived SetUp() overrides must check IsSkipped() after calling the base — GTEST_SKIP() does not unwind into the derived frame.
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();

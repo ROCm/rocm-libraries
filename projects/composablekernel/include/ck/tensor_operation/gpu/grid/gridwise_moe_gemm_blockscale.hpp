@@ -15,6 +15,10 @@
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 #define DEBUG_LOG 0
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -288,6 +292,12 @@ struct GridwiseMoeGemmBlockScale
     static constexpr index_t KPack =
         math::max(math::lcm(AK1Number, BK1Number), mfma_selector::selected_mfma.k_per_blk);
     static constexpr index_t KGroup = []() {
+#if defined(__gfx125__)
+        // A memory instruction can only read 16 bytes at a time. If K1PerXdlops *
+        // sizeof(ComputeDataType) > 16, memory read will not conitnues in a wave in B preshuffle
+        // mode. So, we need split K into mutiple groups.
+        return mfma_selector::GetK1PerXdlops() * sizeof(ComputeTypeA) > 16 ? 2 : 1;
+#else
         if constexpr(is_same_v<remove_cvref_t<BDataType>, f8_t>)
             // On gfx950, we have a mfma that required 32 f8 elements as input,
             // splited into 2 groups of 16 f8 elements.
@@ -297,6 +307,7 @@ struct GridwiseMoeGemmBlockScale
             return mfma_selector::selected_mfma.k_per_blk == 32 ? 2 : 1;
         else
             return 1;
+#endif
     }();
     static constexpr index_t KLane =
         mfma_selector::GetKPerXdlops() / mfma_selector::GetK1PerXdlops();
@@ -1592,6 +1603,25 @@ struct GridwiseMoeGemmBlockScale
                                 tensor_operation::element_wise::Silu{}(gate, gate);
                                 c_thread_buf(cidx) = gate * up;
                             }
+                            else if constexpr(ActivationOperation == Activation::swiglustep_and_mul)
+                            {
+                                float gate = c_thread_buf[cidx];
+                                float up   = c_thread_buf_up[cidx];
+                                if constexpr(MulRoutedWeight)
+                                {
+                                    gate = gate * topk_weight;
+                                    up   = up * topk_weight;
+                                }
+                                if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+                                {
+                                    gate *= 16;
+                                    up *= 16;
+                                }
+                                tensor_operation::element_wise::Silu{}(gate, gate);
+                                gate               = gate < 7.0f ? gate : 7.0f;
+                                up                 = up < 7.0f ? (up > -7.0f ? up : -7.0f) : 7.0f;
+                                c_thread_buf(cidx) = gate * up;
+                            }
                             else if(ActivationOperation == Activation::gelu_and_mul)
                             {
                                 float gate = c_thread_buf[cidx];
@@ -2118,6 +2148,25 @@ struct GridwiseMoeGemmBlockScale
                                 tensor_operation::element_wise::Silu{}(gate, gate);
                                 c_thread_buf(cidx) = gate * up;
                             }
+                            else if constexpr(ActivationOperation == Activation::swiglustep_and_mul)
+                            {
+                                float gate = c_thread_buf[cidx];
+                                float up   = c_thread_buf_up[cidx];
+                                if constexpr(MulRoutedWeight)
+                                {
+                                    gate = gate * topk_weight;
+                                    up   = up * topk_weight;
+                                }
+                                if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+                                {
+                                    gate *= 16;
+                                    up *= 16;
+                                }
+                                tensor_operation::element_wise::Silu{}(gate, gate);
+                                gate               = gate < 7.0f ? gate : 7.0f;
+                                up                 = up < 7.0f ? (up > -7.0f ? up : -7.0f) : 7.0f;
+                                c_thread_buf(cidx) = gate * up;
+                            }
                             else if(ActivationOperation == Activation::gelu_and_mul)
                             {
                                 float gate = c_thread_buf[cidx];
@@ -2175,3 +2224,4 @@ struct GridwiseMoeGemmBlockScale
 };
 
 } // namespace ck
+#pragma clang diagnostic pop

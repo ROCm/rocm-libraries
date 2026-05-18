@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -67,24 +67,6 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename T>
-    static rocsparse_status conjugate_batched_kernel_launch(rocsparse_handle handle,
-                                                            int64_t          batch_count,
-                                                            int64_t          length,
-                                                            void**           array,
-                                                            int64_t          array_dist)
-    {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::conjugate_kernel<256, T, T**>),
-                                           dim3((length - 1) / 256 + 1, batch_count),
-                                           dim3(256),
-                                           0,
-                                           handle->stream,
-                                           length,
-                                           reinterpret_cast<T**>(array),
-                                           array_dist);
-        return rocsparse_status_success;
-    }
-
     typedef rocsparse_status (*conjugate_strided_batched_kernel_launch_t)(rocsparse_handle handle,
                                                                           int64_t batch_count,
                                                                           int64_t length,
@@ -119,37 +101,6 @@ namespace rocsparse
         }
     }
 
-    typedef rocsparse_status (*conjugate_batched_kernel_launch_t)(
-        rocsparse_handle, int64_t, int64_t, void**, int64_t);
-
-    rocsparse::conjugate_batched_kernel_launch_t
-        find_conjugate_batched_kernel_launch(rocsparse_datatype datatype)
-    {
-        switch(datatype)
-        {
-        case rocsparse_datatype_f32_r:
-        {
-            return conjugate_batched_kernel_launch<float>;
-        }
-        case rocsparse_datatype_f64_r:
-        {
-            return conjugate_batched_kernel_launch<double>;
-        }
-        case rocsparse_datatype_f32_c:
-        {
-            return conjugate_batched_kernel_launch<rocsparse_float_complex>;
-        }
-        case rocsparse_datatype_f64_c:
-        {
-            return conjugate_batched_kernel_launch<rocsparse_double_complex>;
-        }
-        default:
-        {
-            return nullptr;
-        }
-        }
-    }
-
 }
 
 rocsparse_status rocsparse::conjugate_strided_batched(rocsparse_handle   handle,
@@ -166,23 +117,6 @@ rocsparse_status rocsparse::conjugate_strided_batched(rocsparse_handle   handle,
                                                "find_conjugate_launch failed");
     }
     RETURN_IF_ROCSPARSE_ERROR(launch_kernel(handle, batch_count, length, array, array_stride));
-    return rocsparse_status_success;
-}
-
-rocsparse_status rocsparse::conjugate_batched(rocsparse_handle   handle,
-                                              int64_t            batch_count,
-                                              int64_t            length,
-                                              rocsparse_datatype datatype,
-                                              void**             array,
-                                              int64_t            array_inc)
-{
-    auto launch_kernel = rocsparse::find_conjugate_batched_kernel_launch(datatype);
-    if(launch_kernel == nullptr)
-    {
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                               "find_conjugate_launch failed");
-    }
-    RETURN_IF_ROCSPARSE_ERROR(launch_kernel(handle, batch_count, length, array, array_inc));
     return rocsparse_status_success;
 }
 

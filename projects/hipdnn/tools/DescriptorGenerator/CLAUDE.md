@@ -16,13 +16,13 @@ Existing code takes precedence. When generated code conflicts with hand-written 
 
 Adding a new operation follows this sequence:
 
-1. **Create the FBS schema** — Define the operation's FlatBuffer schema (e.g., `matmul_attributes.fbs`) in `data_sdk/schemas/` and run `flatc` to generate the C++ header
+1. **Create the FBS schema** — Define the operation's FlatBuffer schema (e.g., `matmul_attributes.fbs`) in `flatbuffers_sdk/schemas/` and run `flatc` to generate the C++ header
 2. **Create or update the YAML config** — Write `configs/<operation>.yaml` referencing the schema fields
 3. **Run the generator** — `python generate.py --config configs/<op>.yaml --output-dir /tmp/output`
 4. **Add enums** — Insert new enum values into the backend headers (see steps below)
 5. **Add enum test coverage** — Add `EXPECT_STREQ` entries to `TestBackendEnumStringUtils.cpp`
 6. **Place generated files** — Copy generated source and test files into the project tree
-7. **Add lifting support** — For operations that need lifting (graph → descriptor → frontend), run `--lift-only` to generate unpacker, fromNode test, and fragment templates. Apply changes from `fragments/descriptor_lifting_additions.txt` to existing descriptor files.
+7. **Add lifting support** — For operations that need lifting (graph → descriptor → frontend), the backend run already produces the unpacker, fromNode test, lifting integration test, and the lifting fragment templates. Apply changes from `fragments/descriptor_lifting_additions.txt` to existing descriptor files.
 8. **Update CMake** — Add new source and test files to the build
 9. **Review and build** — Compile, run tests, review generated code
 10. **Extract test constants** — Replace inline test literals with named constants (see Step 10 below)
@@ -140,13 +140,7 @@ Use `ConvolutionFpropNode.hpp` as the reference for this pattern. The `create_op
 
 ## Step 7: Add Lifting Support
 
-For operations that need lifting (reconstructing frontend graph attributes from backend C API descriptors), use the `--lift-only` flag:
-
-```bash
-.venv/bin/python generate.py --config configs/<op>.yaml --output-dir /tmp/lift-output --lift-only
-```
-
-This generates lifting-related files including the unpacker, fromNode tests, lifting integration tests, and fragment templates:
+For operations that need lifting (reconstructing frontend graph attributes from backend C API descriptors), no extra command is required: a single `--mode backend` run produces the unpacker, fromNode tests, lifting integration tests, and all lifting fragment templates alongside the rest of the backend output. (The previous `--mode lift-only` flag has been folded into `--mode backend`; see "Recent Changes" at the end of this document.)
 
 | Generated File | Purpose |
 |----------------|---------|
@@ -206,7 +200,7 @@ Add the new test file to `backend/tests/CMakeLists.txt`. The cmake_entries.txt f
 
 ### 7f. Update Packer for Name Support
 
-The lift-only path adds `_name` and `HIPDNN_ATTR_OPERATION_NAME_EXT` handling to the descriptor, but the **existing packer** must also be updated to pack the name. Apply the code from `fragments/packer_name_addition.txt` — add the name-setting block before the `finalizeDescriptor()` call in the packer.
+The lifting additions add `_name` and `HIPDNN_ATTR_OPERATION_NAME_EXT` handling to the descriptor, but the **existing packer** must also be updated to pack the name. Apply the code from `fragments/packer_name_addition.txt` — add the name-setting block before the `finalizeDescriptor()` call in the packer.
 
 Without this change, frontend→backend→frontend round-trips will silently lose the operation name.
 
@@ -383,7 +377,16 @@ operation:
     packer_function: "createConvWgradOperation"    # Function name in the generated packer
     node_class: "ConvolutionWgradNode"              # The frontend node class (if it exists)
     attributes_class: "ConvWgradAttributes"         # The frontend attributes class (if it exists)
-    # Lifting support (optional, required for --lift-only mode)
+    attributes_filename: "ConvolutionWgrad"         # Optional: basename for generated Attributes
+                                                    # header and matching test files. Use when the
+                                                    # in-tree filename diverges from the class name
+                                                    # (e.g., class ConvFpropAttributes lives in
+                                                    # ConvolutionFpropAttributes.hpp). When unset
+                                                    # the basename is derived from attributes_class.
+                                                    # Example: attributes_filename: "ConvolutionFprop"
+                                                    # → emits ConvolutionFpropAttributes.hpp and
+                                                    # TestConvolutionFpropAttributes.cpp.
+    # Lifting support (used by the lifting outputs generated alongside backend mode)
     unpacker_function: "unpackConvFprop"             # Function name in the generated unpacker
     unpacker_include: ""                              # Override derived include file name (optional)
 
@@ -419,6 +422,8 @@ operation:
 | `build_node_check` | bool | `true` | Whether this field is verified in the buildNode round-trip test. |
 | `default_value` | string | `""` | Default value expression for the field (e.g., `"ConvolutionMode::CROSS_CORRELATION"`). |
 | `frontend_inverse_converter` | string | `""` | Conversion function from backend C-API value back to frontend enum (used in unpacker). Only needed for `mode` fields. Example: `toFrontendConvMode` |
+| `fbs_optional` | bool | `false` | Set `true` for FBS optional scalar fields (i.e., the FBS schema marks the field as optional/nullable rather than providing a default). When `true`, the generated frontend getter returns `std::optional<T>` and the packer/unpacker emit `has_value()` / `value()` plumbing. Replaces the legacy `frontend_getter_returns_optional` field — derive optional-return shape solely from `fbs_optional`. |
+| `mode_sentinel` | string | unset | (Mode fields only.) Controls whether `finalize()` emits the sentinel-not-set check for this mode field. One of `"required"` (always emit; sentinel must exist in `enum_def`), `"optional"` (emit only when a sentinel exists; silently skip otherwise — the soft mode for in-flight migrations), or `"none"` (never emit; the enum has no sentinel by design). When unset, the loader auto-detects: emits the check when the linked `enum_def` contains a `NOT_SET` / `UNSET` entry (or any entry with `sentinel: true`), otherwise warns and falls back to `"none"`. Use `"none"` for SDPA-style enums (`DiagonalAlignment`, `AttentionImplementation`) where every value is meaningful. |
 
 #### `shared` and `enum_def` Coexistence
 
@@ -435,7 +440,7 @@ Mode fields (data fields with `type: mode`) require additional properties to wir
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `cpp_enum` | string | Yes | Fully-qualified SDK enum type (e.g., `hipdnn_data_sdk::data_objects::ConvMode`) |
+| `cpp_enum` | string | Yes | Fully-qualified SDK enum type (e.g., `hipdnn_flatbuffers_sdk::data_objects::ConvMode`) |
 | `frontend_type` | string | No | Frontend enum name when different from SDK short name (e.g., `ConvolutionMode` for SDK `ConvMode`) |
 | `backend_type_name` | string | Yes | Backend type tag (e.g., `HIPDNN_TYPE_CONVOLUTION_MODE`) |
 | `backend_setter` | string | Yes | Setter helper name (e.g., `setConvMode`) |
@@ -474,7 +479,7 @@ tensor_array_fields:
 - **Use `convolution_fwd.yaml` as the reference** -- it's the most complete and validated config
 - **Shared attributes**: Convolution ops all share `HIPDNN_ATTR_CONVOLUTION_*` attributes. Matmul, pointwise, and batchnorm each have their own attribute namespaces. Use `shared: true` on data fields and `compute_data_type_shared: true` at operation level for operations that reuse another operation's attribute enums.
 - **Frontend naming**: The packer function, node class, and attributes class names must match the existing frontend code. Check `frontend/include/hipdnn_frontend/` for the actual class names
-- **Enum fields**: Set `cpp_enum` to the fully-qualified FBS enum type (e.g., `hipdnn_data_sdk::data_objects::ConvMode`). Set `required: false` if the FBS has a default value. Always set `test_enum_value` to a valid enum constant.
+- **Enum fields**: Set `cpp_enum` to the fully-qualified FBS enum type (e.g., `hipdnn_flatbuffers_sdk::data_objects::ConvMode`). Set `required: false` if the FBS has a default value. Always set `test_enum_value` to a valid enum constant.
 
 ---
 
@@ -524,7 +529,7 @@ When an operation introduces an enum not already in the backend, the `enum_def` 
 | `value` | int | (required) | Backend C-API numeric value |
 | `sentinel` | bool | `false` | If true, excluded from backend C-API enum. Appears as `NOT_SET = 0` in frontend |
 | `description` | string | `""` | Doxygen description rendered as `///< text` on enum members |
-| `sdk_name` | string | `""` | SDK enum constant name when it differs from `name` (e.g., `MAX_OP` for backend `MAX`) |
+| `sdk_name` | string | `""` | SDK (FlatBuffer) enum constant name when it differs from `name`. Use this whenever the generated SDK header uses a different identifier than the backend C-API constant (e.g., backend `NOT_SET` paired with SDK `UNSET` for PointwiseMode, or backend `MAX` paired with SDK `MAX_OP`). The backend templates now consistently honor this override when emitting SDK→backend converter cases, finalize-time sentinel checks, and packer/unpacker calls — earlier templates fell back to `name` in some places, leading to compile errors. |
 | `frontend_name` | string | `""` | Frontend enum member name when it differs from `name` (e.g., `TOP_LEFT` for backend `TOP_LEFT_EXT`) |
 | `frontend_value` | int or null | `null` | Frontend numeric value when it differs from `value`. Omit when frontend matches backend (the common case). Example: ConvMode backend `CONVOLUTION=0` but frontend `CONVOLUTION=2` |
 
@@ -633,3 +638,78 @@ Generated code and post-generation edits MUST use existing utilities rather than
 - The fromNode test file is complete and ready to compile
 - Fragment files for lifting (NodeFactory, OperationUnpacker, operation type enum, node unpack override) contain comments indicating where to insert each snippet
 - When `enum_def` is present on a mode field, the generator produces a backend C-API header, a backend plumbing fragment, and a frontend plumbing fragment. Fragment sections are labeled with their target file for easy insertion.
+
+---
+
+## Frontend Fragment Apply Paths
+
+`--mode frontend` (and `--mode full`) emits four fragment files plus a per-mode-field test fragment. None of them are insertable verbatim — each must land at a specific spot in an in-tree file. The table below is the canonical reference; verify each insertion point against the current file before pasting (line numbers drift).
+
+The generated frontend fragments and their targets:
+
+| Fragment output | Target in-tree file | Insertion point | Fix-ups |
+|---|---|---|---|
+| `fragments/graph_method.txt` | `projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp` | New method body inside the `Graph` class. Place alphabetically among existing op methods (find the pattern `_sub_nodes.emplace_back(` to anchor). | None; verify the return type matches caller expectations (`std::shared_ptr<<Op>Node>` or `Error`). |
+| `fragments/graph_includes.txt` | `projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp` (top of file) | The `#include` block. Place alphabetically among other `node/` and `attributes/` headers. | None. |
+| `fragments/frontend_cmake_entries.txt` | `projects/hipdnn/frontend/tests/CMakeLists.txt` | Inside the `target_sources(...)` call for the frontend test target. Place alphabetically among existing `Test*.cpp` entries. | None. |
+| `fragments/node_type_enum.txt` | `projects/hipdnn/frontend/include/hipdnn_frontend/node/NodeType.hpp` | Inside the `enum class NodeType { ... }` block, before the closing brace. | If inserting at the end, the trailing comma on the previous entry may need adjustment. |
+| `fragments/mode_frontend_tests_<field>.txt` | `projects/hipdnn/frontend/tests/TestTypes.cpp` | Append the generated test functions at the end of the file (or alphabetically within existing test groupings). One fragment per mode field. | Verify GTest fixture names don't collide with existing `Test*` suites. |
+
+Notes on the targets:
+
+- `Graph.hpp` and `NodeType.hpp` are the only frontend headers that aggregate every operation. `Graph.hpp` includes per-op headers and exposes per-op factory methods; `NodeType.hpp` enumerates every concrete node class. Both must be updated for any new op visible at the frontend.
+- `frontend/tests/CMakeLists.txt` owns the frontend test target's source list. The integration tests (`tests/frontend/CMakeLists.txt`) are a separate target — frontend unit tests live with the headers, not the lowering integration tests.
+- The per-mode-field test fragment is named `mode_frontend_tests_<field>.txt` (one per mode `data_field` in the YAML). For example, ConvFwd emits `mode_frontend_tests_conv_mode.txt`.
+
+The complete-file outputs from `--mode frontend` (`<Op>Attributes.hpp`, `<Op>Node.hpp`, and `Test*.cpp`) drop directly into their canonical locations and need no insertion-point judgment — see the SKILL.md placement table.
+
+---
+
+## Recent Changes
+
+This section tracks YAML keys, CLI flags, and template behaviors that have been added, removed, or had their semantics narrowed by the codegen overhaul. Use it to interpret older configs and to stay consistent with current generator output.
+
+### Added
+
+- **`frontend.attributes_filename`** (string, optional) — basename for the generated frontend Attributes header and matching test files. Documented above; use when the in-tree filename diverges from the class name.
+- **`data_fields[].mode_sentinel`** (string, optional) — explicit control over `finalize()` sentinel-not-set checks. Documented above.
+- **`data_fields[].fbs_optional`** (bool, default `false`) — replaces `frontend_getter_returns_optional`. Documented above.
+- **`enum_def[].sdk_name`** (string, optional) — already existed but is now consistently honored across all backend templates (SDK→backend converters, sentinel checks, packer/unpacker). Documented above.
+
+### Restored / Honored Again
+
+- **`tensor_fields[].frontend_getter`** (string, optional) — acts as a per-tensor accessor override that beats name-matching (restored after a previous round of cleanup removed it). Resolution order is now: explicit `frontend_getter` override → exact match against `frontend.inputs[].name` / `frontend.outputs[].name` → abbreviation-aware fallback. The override is required for backend tensors whose names diverge from any frontend tensor (e.g., SDPA's `attn_mask` which the hand-written `SdpaAttributes` exposes via `get_bias()` / `set_bias()`). When set, the value is the bare frontend getter name (e.g., `"get_bias"` or `"get_bias()"` — trailing parens are stripped). The setter name is derived as `set_<rest>` when the getter starts with `get_`; otherwise the synthesized FrontendTensorConfig has a blank setter (which is fine for getter-only flows). Companion change: an unresolved tensor_field is now a hard `ConfigError` at load time (it was previously a soft warning), so misconfigurations fail loudly instead of silently emitting `attributes.()` in the packer.
+
+### Removed
+
+These keys / flags / behaviors are no longer honored. The loader now hard-rejects the previously soft-accepted keys; configs that still carry them will fail to load.
+
+| Removed surface | Replacement | Status |
+|---|---|---|
+| `data_fields[].frontend_getter_returns_optional` | `data_fields[].fbs_optional` controls optional-return shape. | Hard-rejected at config load time. |
+| `infer_properties.strategy` non-stub values (`broadcast`, `custom`) | Only `stub` (default) and `match_input` are honored. Other strings silently fall through to the stub branch — no broadcast or custom-formula codegen exists. | Silently ignored. If you need broadcast/custom inference, write the body by hand on the generated stub. |
+| `validation.dim_consistency_checks` | Field hard-removed from the model; the only effect was emitting a `// TODO` comment. Hand-write per-op validation checks via `validation.custom_checks` or directly in `pre_validate_node()`. | Hard-removed. Loader rejects the key. |
+| `--mode lift-only` | Folded into `--mode backend`. A single `--mode backend` run now produces the unpacker, fromNode tests, lifting integration tests, and the lifting fragment templates (notably `packer_name_addition.txt` and the complete unpacker output) alongside the descriptor and packer outputs. | Removed from the CLI. |
+
+### `data_fields[].frontend_getter` is still honored
+
+Note that `frontend_getter` on **`data_fields[]`** and **`tensor_array_fields[]`** is unchanged — only the `tensor_fields[]` variant was removed. Data-field and tensor-array getters are still derived from the YAML directly because there is no `frontend.inputs[]` analogue for non-tensor / variable-length fields.
+
+---
+
+## Hand-maintained ops (no codegen target)
+
+A small number of frontend ops are intentionally hand-maintained.
+
+**SDPA backward** — fully hand-maintained, no YAML config in `configs/`:
+
+- `projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp`
+- `projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaBwdNode.hpp`
+
+There is no `configs/sdpa_backward.yaml`, and that omission is intentional — not a codegen gap. If codegen coverage for SDPA backward becomes desirable in the future, a follow-up PR may add `sdpa_backward.yaml` and migrate these files to the generated form.
+
+**SDPA forward** — partially codegen, partially hand-maintained:
+
+- `configs/sdpa.yaml` exists and drives **packer/unpacker** codegen only.
+- `projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp` is hand-maintained: it exposes its data fields as **public `std::optional<T>` members** (e.g. `dropout_probability`) rather than getter methods. The `data_fields[].frontend_getter` entries in `sdpa.yaml` therefore use bare member-name syntax to match the existing class.
+- `--mode frontend` regeneration is **not supported** for SDPA — running it would emit an Attributes class with getter methods that does not match the hand-written class or the existing packer.

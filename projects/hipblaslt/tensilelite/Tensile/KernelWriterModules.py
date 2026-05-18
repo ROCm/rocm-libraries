@@ -21,7 +21,7 @@
 ################################################################################
 
 from rocisa.code import Label, Module
-from rocisa.container import vgpr, sgpr, accvgpr, Holder
+from rocisa.container import vgpr, sgpr, accvgpr, Holder, MemTokenData
 from rocisa.instruction import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, SWaitTensorcnt,\
   VAccvgprReadB32, VAccvgprWriteB32, VFmaF32, VFmaF64, VLShiftLeftB64, VMovB32, \
   VMulF32, VMulF64, VMulLOU32, VMulPKF16
@@ -135,7 +135,7 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
 ##############################################################################
 # SyncThreads
 ##############################################################################
-def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False):
+def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, memoryToken=None):
     imod = Module("syncThreads")
     if kernel["NumThreads"] > kernel["WavefrontSize"]:
         if asmCaps["SeparateVscnt"]:
@@ -147,7 +147,10 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False):
         elif archCaps["Waitcnt0Disabled"]:
             imod.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0, comment="force waitcnt0"))
 
-        imod.add(SBarrier(comment=comment))
+        _barrier = SBarrier(comment=comment)
+        if memoryToken != None:
+            _barrier.setMemToken(MemTokenData(memoryToken))
+        imod.add(_barrier)
     else:
         imod.addComment("Skip barrier: NumThreads=%s"%(kernel["NumThreads"]) + \
                 comment)
@@ -209,7 +212,7 @@ def accVgprImagNumOffset(kernel):
 # MapAcctoArch
 # function to map MFMA Acc  Registers to Arch VGPR register
 ##############################################################################
-def mapAcctoArchRegs(kernel, maxAgpr=256, write=False):
+def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, spilledVgprBase=None):
   acc2arch, _ = accToArchMapper(kernel)
 
   complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
@@ -228,13 +231,23 @@ def mapAcctoArchRegs(kernel, maxAgpr=256, write=False):
               return accvgpr(idx)
           accStr = gprfunc(srcIdx)
           if srcIdx >= maxAgpr:
+            # Spilled accumulator: lives in an arch vgpr, not an accvgpr.
+            # For subtile kernels the spilled D-tile vgprs are allocated from
+            # the pool at spilledVgprBase (not at ValuC+N), so reference them
+            # directly.  For non-subtile kernels spilledVgprBase is None and
+            # the legacy "ValuC+N" addressing is used (vgprValuC == 0 there).
+            spill_offset = srcIdx - maxAgpr
+            if spilledVgprBase is not None:
+              spilledVgpr = vgpr(spilledVgprBase + spill_offset)
+            else:
+              spilledVgpr = vgpr("ValuC+%u" % spill_offset)
             if write:
-              itemList[destIdx] = VMovB32(dst=vgpr("ValuC+%u"%(srcIdx-maxAgpr)),
+              itemList[destIdx] = VMovB32(dst=spilledVgpr,
                                              src=vgpr(Holder(name="ValuC")),
                                              comment="copy vreg[%u] to MI out reg" % destIdx)
             else:
               itemList[destIdx] = VMovB32(dst=vgpr(Holder(name="ValuC")),
-                                              src=vgpr("ValuC+%u"%(srcIdx-maxAgpr)),
+                                              src=spilledVgpr,
                                               comment="copy MI out reg to vreg[%u]" % destIdx)
           else:
             if write:

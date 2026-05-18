@@ -12,6 +12,20 @@
 
 namespace ck_tile {
 
+// `always_false_v<T...>` — a value-template that is always `false` but whose
+// evaluation is deferred until template instantiation. The canonical use is
+// inside the `else` arm of an `if constexpr` chain or under an arch-gated
+// `#if` to fire a `static_assert` ONLY when the offending instantiation is
+// actually requested, e.g.:
+//
+//     if constexpr (...) { ... }
+//     else { static_assert(always_false_v<T>, "unsupported T"); }
+//
+// A bare `static_assert(false, ...)` would fire at template-definition
+// parse time on conforming compilers, breaking the whole TU.
+template <typename...>
+inline constexpr bool always_false_v = false;
+
 // remove_cvref_t
 template <typename T>
 using remove_reference_t = typename std::remove_reference<T>::type;
@@ -103,9 +117,10 @@ template <
     typename PY,
     typename PX,
     typename std::enable_if<std::is_pointer_v<PY> && std::is_pointer_v<PX>, bool>::type = false>
-CK_TILE_HOST_DEVICE PY c_style_pointer_cast(PX p_x)
+CK_TILE_HOST_DEVICE PY c_style_pointer_cast([[clang::lifetimebound]] PX p_x)
 {
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wcast-align"
     return (PY)p_x; // NOLINT(old-style-cast, cast-align)
@@ -194,6 +209,97 @@ template <typename Tuple_, std::size_t Idx, typename DefaultType>
 using tuple_element_or_default_t =
     typename tuple_element_or_default<Tuple_, Idx, DefaultType>::type;
 
+// =====================================================================
+// Problem member detection traits (SFINAE-based)
+// =====================================================================
+
+// traits for detecting type members
+#define CK_TILE_DEFINE_HAS_TYPE_MEMBER(trait_name, member_name)                 \
+    template <typename T, typename = void>                                      \
+    struct trait_name : std::false_type                                         \
+    {                                                                           \
+    };                                                                          \
+    template <typename T>                                                       \
+    struct trait_name<T, std::void_t<typename T::member_name>> : std::true_type \
+    {                                                                           \
+    };                                                                          \
+    template <typename T>                                                       \
+    inline constexpr bool trait_name##_v = trait_name<T>::value
+
+// traits for detecting value members
+#define CK_TILE_DEFINE_HAS_VALUE_MEMBER(trait_name, member_name)                 \
+    template <typename T, typename = void>                                       \
+    struct trait_name : std::false_type                                          \
+    {                                                                            \
+    };                                                                           \
+    template <typename T>                                                        \
+    struct trait_name<T, std::void_t<decltype(T::member_name)>> : std::true_type \
+    {                                                                            \
+    };                                                                           \
+    template <typename T>                                                        \
+    inline constexpr bool trait_name##_v = trait_name<T>::value
+
+// Detection traits for Problem types
+CK_TILE_DEFINE_HAS_TYPE_MEMBER(has_as_data_type_tuple, AsDataTypeTuple);
+CK_TILE_DEFINE_HAS_TYPE_MEMBER(has_as_layout_tuple, AsLayoutTuple);
+CK_TILE_DEFINE_HAS_VALUE_MEMBER(has_fixed_vector_size, FixedVectorSize);
+
+#undef CK_TILE_DEFINE_HAS_TYPE_MEMBER
+#undef CK_TILE_DEFINE_HAS_VALUE_MEMBER
+
+namespace detail {
+template <typename Problem, bool HasTuple = has_as_data_type_tuple_v<Problem>>
+struct ProblemDataTypeSelector
+{
+    using AsType = remove_cvref_t<typename Problem::AsDataTypeTuple>;
+    using BsType = remove_cvref_t<typename Problem::BsDataTypeTuple>;
+};
+
+template <typename Problem>
+struct ProblemDataTypeSelector<Problem, false>
+{
+    using AsType = remove_cvref_t<std::tuple<typename Problem::ADataType>>;
+    using BsType = remove_cvref_t<std::tuple<typename Problem::BDataType>>;
+};
+
+template <typename Problem, bool HasTuple = has_as_layout_tuple_v<Problem>>
+struct ProblemLayoutSelector
+{
+    using AsType = remove_cvref_t<typename Problem::AsLayoutTuple>;
+    using BsType = remove_cvref_t<typename Problem::BsLayoutTuple>;
+};
+
+template <typename Problem>
+struct ProblemLayoutSelector<Problem, false>
+{
+    using AsType = remove_cvref_t<std::tuple<typename Problem::ALayout>>;
+    using BsType = remove_cvref_t<std::tuple<typename Problem::BLayout>>;
+};
+
+} // namespace detail
+
+template <typename Problem>
+using problem_as_data_type_t = typename detail::ProblemDataTypeSelector<Problem>::AsType;
+
+template <typename Problem>
+using problem_bs_data_type_t = typename detail::ProblemDataTypeSelector<Problem>::BsType;
+
+// Layout aliases
+template <typename Problem>
+using problem_as_layout_t = typename detail::ProblemLayoutSelector<Problem>::AsType;
+
+template <typename Problem>
+using problem_bs_layout_t = typename detail::ProblemLayoutSelector<Problem>::BsType;
+
+// FixedVectorSize helper: returns Problem::FixedVectorSize if present, false otherwise
+template <typename Problem>
+inline constexpr bool problem_fixed_vector_size_v = []() {
+    if constexpr(has_fixed_vector_size_v<Problem>)
+        return Problem::FixedVectorSize;
+    else
+        return false;
+}();
+
 // Helper struct to determine if a type is packed (more than 1 element per byte)
 template <typename T>
 struct is_packed_type
@@ -207,7 +313,10 @@ static constexpr bool is_packed_type_v = is_packed_type<T>::value;
 // Helper definition to take the largest sizes type
 template <typename ADataType, typename BDataType>
 using largest_type_t =
-    std::conditional_t<sizeof(ADataType) >= sizeof(BDataType), ADataType, BDataType>;
+    std::conditional_t<sizeof(ADataType) * 8 / numeric_traits<ADataType>::PackedSize >=
+                           sizeof(BDataType) * 8 / numeric_traits<BDataType>::PackedSize,
+                       ADataType,
+                       BDataType>;
 
 /**
  * @brief Type trait to detect whether a type is a @c std::tuple specialization.

@@ -57,7 +57,7 @@ endfunction()
 function(example_provider_generate_version_header COMPONENT_NAME TARGET_NAME)
     example_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
     configure_file(
-        "${_version_dir}/version.h.in"
+        "${_version_dir}/templates/version.h.in"
         "${CMAKE_CURRENT_BINARY_DIR}/include/version.h"
         @ONLY
     )

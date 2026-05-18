@@ -111,6 +111,23 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
+    hipdnnStatus_t backendGetSerializedExecutionPlanExt(hipdnnBackendDescriptor_t /*descriptor*/,
+                                                        size_t /*requestedByteSize*/,
+                                                        size_t* /*planByteSize*/,
+                                                        uint8_t* /*serializedPlan*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t
+        backendCreateAndDeserializeExecutionPlanExt(hipdnnHandle_t /*handle*/,
+                                                    hipdnnBackendDescriptor_t* /*descriptor*/,
+                                                    const uint8_t* /*serializedPlan*/,
+                                                    size_t /*planByteSize*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
     hipdnn_data_sdk::utilities::Version version() override
     {
         return hipdnn_data_sdk::utilities::Version{-1, 0, 0};
