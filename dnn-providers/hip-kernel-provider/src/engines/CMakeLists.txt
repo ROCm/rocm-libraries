@@ -24,7 +24,6 @@ embed_kernel_sources(
     ${CMAKE_CURRENT_BINARY_DIR}/kernel_includes.hpp
 )
 
-
 set(HIP_KERNEL_ENGINE_GENERATED_SOURCES
     ${CMAKE_CURRENT_BINARY_DIR}/kernel_sources.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/kernel_includes.cpp)
