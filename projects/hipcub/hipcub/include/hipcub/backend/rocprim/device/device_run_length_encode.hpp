@@ -96,15 +96,17 @@ public:
     template<typename InputIteratorT,
              typename OffsetsOutputIteratorT,
              typename LengthsOutputIteratorT,
-             typename NumRunsOutputIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t NonTrivialRuns(void*          d_temp_storage,
-                                                             size_t&        temp_storage_bytes,
-                                                             InputIteratorT d_in,
-                                                             OffsetsOutputIteratorT d_offsets_out,
-                                                             LengthsOutputIteratorT d_lengths_out,
-                                                             NumRunsOutputIteratorT d_num_runs_out,
-                                                             int                    num_items,
-                                                             hipStream_t            stream = 0)
+             typename NumRunsOutputIteratorT,
+             typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t NonTrivialRuns(void*                  d_temp_storage,
+                                     size_t&                temp_storage_bytes,
+                                     InputIteratorT         d_in,
+                                     OffsetsOutputIteratorT d_offsets_out,
+                                     LengthsOutputIteratorT d_lengths_out,
+                                     NumRunsOutputIteratorT d_num_runs_out,
+                                     NumItemsT              num_items,
+                                     hipStream_t            stream = 0)
     {
         return ::rocprim::run_length_encode_non_trivial_runs(d_temp_storage,
                                                              temp_storage_bytes,
@@ -120,17 +122,18 @@ public:
     template<typename InputIteratorT,
              typename OffsetsOutputIteratorT,
              typename LengthsOutputIteratorT,
-             typename NumRunsOutputIteratorT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        NonTrivialRuns(void*                  d_temp_storage,
-                       size_t&                temp_storage_bytes,
-                       InputIteratorT         d_in,
-                       OffsetsOutputIteratorT d_offsets_out,
-                       LengthsOutputIteratorT d_lengths_out,
-                       NumRunsOutputIteratorT d_num_runs_out,
-                       int                    num_items,
-                       hipStream_t            stream,
-                       bool                   debug_synchronous)
+             typename NumRunsOutputIteratorT,
+             typename NumItemsT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t NonTrivialRuns(void*                  d_temp_storage,
+                                     size_t&                temp_storage_bytes,
+                                     InputIteratorT         d_in,
+                                     OffsetsOutputIteratorT d_offsets_out,
+                                     LengthsOutputIteratorT d_lengths_out,
+                                     NumRunsOutputIteratorT d_num_runs_out,
+                                     NumItemsT              num_items,
+                                     hipStream_t            stream,
+                                     bool                   debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return NonTrivialRuns(d_temp_storage,
