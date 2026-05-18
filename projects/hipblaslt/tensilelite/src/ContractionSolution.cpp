@@ -733,17 +733,16 @@ namespace TensileLite
 
         if(sizeMapping.expertSchedulingMode > 0)
         {
-            AMDGPU const* amdgpu = dynamic_cast<AMDGPU const*>(hardware);
-            if(amdgpu
-               && (amdgpu->processor == AMDGPU::Processor::gfx1200
-                   || amdgpu->processor == AMDGPU::Processor::gfx1201))
+            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+            if(hipAMDGPU
+               && (hipAMDGPU->processor == AMDGPU::Processor::gfx1200
+                   || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
             {
                 int32_t esmRuntimeSupported = 0;
 #if HIP_VERSION >= 70353390
-                int deviceId = 0;
-                HIP_CHECK_EXC(hipGetDevice(&deviceId));
-                HIP_CHECK_EXC(hipDeviceGetAttribute(
-                    &esmRuntimeSupported, hipDeviceAttributeExpertSchedMode, deviceId));
+                HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
+                                                    hipDeviceAttributeExpertSchedMode,
+                                                    hipAMDGPU->deviceId));
 #endif
                 args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
             }
