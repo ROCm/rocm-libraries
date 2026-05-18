@@ -151,6 +151,9 @@ struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, CtrlFlags, C
 : amdgcn_mma_base<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, 64u, 32, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
 //               | A B C DataTypes                | MNK + WaveSize     |AParams  |BPar |CPar |
 {
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
@@ -186,6 +189,9 @@ struct amdgcn_mma<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 16u, 16u, 128u, CtrlFlags, C
 : amdgcn_mma_base<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 16u, 16u, 128u, 64u, 32, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
 //               | A B C DataTypes                | MNK + WaveSize     |AParams  |BPar |CPar |
 {
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4";
+        
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
@@ -338,6 +344,9 @@ struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 32u, 32u, 64u, CtrlFlags, Co
 : amdgcn_mma_base<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 32u, 32u, 64u, 64u, 32, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
 //               | A B C DataTypes                | MNK + WaveSize    |AParams  |BPar |CPar  |
 {
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
@@ -373,6 +382,9 @@ struct amdgcn_mma<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 32u, 32u, 64u, CtrlFlags, Co
 : amdgcn_mma_base<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 32u, 32u, 64u, 64u, 32, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
 //               | A B C DataTypes                | MNK + WaveSize    |AParams  |BPar |CPar  |
 {
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4";
+
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int scale_A, int scale_B)
     {
