@@ -24,7 +24,7 @@ struct vector_traits
 {
     using scalar_type = std::conditional_t<
         std::is_same_v<remove_cvref_t<T>, pk_int4_t>,
-                           int8_t,
+        int8_t,
         std::conditional_t<std::is_same_v<remove_cvref_t<T>, e8m0_t>, uint8_t, remove_cvref_t<T>>>;
     static constexpr index_t vector_size = 1;
 };
@@ -35,7 +35,7 @@ struct vector_traits<T __attribute__((ext_vector_type(N))), void>
 {
     using scalar_type =
         std::conditional_t<std::is_same_v<T, pk_int4_t>,
-        int8_t,
+                           int8_t,
                            std::conditional_t<std::is_same_v<T, e8m0_t>, uint8_t, T>>;
     static constexpr index_t vector_size = N;
 };
