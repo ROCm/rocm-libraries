@@ -10,7 +10,7 @@ if(ENABLE_HIP_KERNEL_ENGINE)
 endif()
 
 # Add to the hip_kernel_provider_impl target the inlined kernels
-include("${CMAKE_SOURCE_DIR}/src/cmake/KernelEmbedding.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/KernelEmbedding.cmake")
 
 # Basic kernel to test the infrastructure
 add_kernels_for_embedding(${CMAKE_CURRENT_SOURCE_DIR}/dummy_engine/kernels/vector_add.cpp)
