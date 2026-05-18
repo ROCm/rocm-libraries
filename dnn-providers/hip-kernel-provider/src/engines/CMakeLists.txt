@@ -14,7 +14,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 include(KernelEmbedding)
 
 # Basic kernel to test the infrastructure
-add_kernels_for_embedding(${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel/vector_add.cpp)
+add_kernels_for_embedding(${CMAKE_CURRENT_SOURCE_DIR}/dummy_engine/kernels/vector_add.cpp)
 
 # Generate embedded kernel sources and includes at configure time
 embed_kernel_sources(
