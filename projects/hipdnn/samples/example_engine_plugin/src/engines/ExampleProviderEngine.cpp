@@ -1,9 +1,9 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include "ExampleProviderEngine.hpp"
 
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -22,7 +22,7 @@ int64_t ExampleProviderEngine::id() const
 
 bool ExampleProviderEngine::isApplicable(
     ExampleProviderHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     for(const auto& planBuilder : _planBuilders)
     {
@@ -34,14 +34,15 @@ bool ExampleProviderEngine::isApplicable(
     return false;
 }
 
-void ExampleProviderEngine::getDetails(ExampleProviderHandle& handle,
-                                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                                       hipdnnPluginConstData_t& detailsOut) const
+void ExampleProviderEngine::getDetails(
+    ExampleProviderHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
 
     // Collect custom knobs from applicable plan builders
-    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobsVector;
 
     for(const auto& planBuilder : _planBuilders)
     {
@@ -53,7 +54,7 @@ void ExampleProviderEngine::getDetails(ExampleProviderHandle& handle,
 
         for(const auto& knobT : customKnobs)
         {
-            auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobT);
+            auto knobOffset = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
             knobsVector.push_back(knobOffset);
         }
 
@@ -62,7 +63,8 @@ void ExampleProviderEngine::getDetails(ExampleProviderHandle& handle,
     }
 
     auto knobs = builder.CreateVector(knobsVector);
-    auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
+    auto engineDetails
+        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
     builder.Finish(engineDetails);
 
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
@@ -74,8 +76,8 @@ void ExampleProviderEngine::getDetails(ExampleProviderHandle& handle,
 
 size_t ExampleProviderEngine::getMaxWorkspaceSize(
     const ExampleProviderHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
     ExampleProviderSettings executionSettings;
     size_t workspaceSize = 0;
@@ -97,8 +99,8 @@ size_t ExampleProviderEngine::getMaxWorkspaceSize(
 
 void ExampleProviderEngine::initializeExecutionContext(
     const ExampleProviderHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     ExampleProviderContext& executionContext) const
 {
     for(const auto& planBuilder : _planBuilders)
@@ -113,6 +115,10 @@ void ExampleProviderEngine::initializeExecutionContext(
             return;
         }
     }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        "No applicable PlanBuilder found in initializeExecutionContext");
 }
 
 void ExampleProviderEngine::addPlanBuilder(

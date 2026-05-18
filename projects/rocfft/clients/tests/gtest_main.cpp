@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -110,7 +110,7 @@ bool use_fftw_wisdom = false;
 bool fftw_compare = true;
 
 // Cache the last cpu fft that was requested
-last_cpu_fft_cache last_cpu_fft_data;
+reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
 
 // Number of devices to distribute the FFT to for manual tests
 int manual_devices = 1;
@@ -360,7 +360,7 @@ int main(int argc, char* argv[])
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.1)
+        ->default_val(0.0)
         ->check(CLI::PositiveNumber);
 
     constexpr std::array<std::string_view, 4> emulation_types
@@ -843,7 +843,7 @@ TEST(manual, vs_fftw) // MANUAL TESTS HERE
     catch(const HOSTBUF_MEM_USAGE& e)
     {
         // explicitly clear test cache
-        last_cpu_fft_data = last_cpu_fft_cache();
+        reference_fft_data_t::clear_cache();
         GTEST_SKIP() << e.what();
     }
     catch(const DEVICEBUF_MEM_USAGE& e)

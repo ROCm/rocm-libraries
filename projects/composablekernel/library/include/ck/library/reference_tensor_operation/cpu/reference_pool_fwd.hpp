@@ -14,6 +14,10 @@
 #include "ck/library/utility/host_tensor.hpp"
 #include "ck/library/utility/host_tensor_generator.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 namespace tensor_operation {
 namespace host {
@@ -358,3 +362,5 @@ struct ReferencePoolingFwd : public device::BaseOperator
 } // namespace host
 } // namespace tensor_operation
 } // namespace ck
+
+#pragma clang diagnostic pop

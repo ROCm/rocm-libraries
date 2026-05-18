@@ -17,6 +17,7 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/include/rocblaslt-types.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/include/rocblaslt.h"
 
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/check_numerics_matrix.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/debug.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/definitions.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/handle.h"

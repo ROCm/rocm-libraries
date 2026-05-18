@@ -29,16 +29,17 @@ namespace
 {
 
 bool isApplicableFwd(const HipdnnMiopenHandle& handle,
-                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                      bool deterministicEnabled)
 {
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
+    const auto& attr
+        = opGraph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
 
     size_t solutionCount = 0;
     try
     {
-        ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -66,16 +67,17 @@ bool isApplicableFwd(const HipdnnMiopenHandle& handle,
 }
 
 bool isApplicableBwd(const HipdnnMiopenHandle& handle,
-                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                      bool deterministicEnabled)
 {
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
+    const auto& attr
+        = opGraph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes>();
 
     size_t solutionCount = 0;
     try
     {
-        ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -103,16 +105,17 @@ bool isApplicableBwd(const HipdnnMiopenHandle& handle,
 }
 
 bool isApplicableWrw(const HipdnnMiopenHandle& handle,
-                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                      bool deterministicEnabled)
 {
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
+    const auto& attr
+        = opGraph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes>();
 
     size_t solutionCount = 0;
     try
     {
-        ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -140,14 +143,74 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
     return solutionCount != 0;
 }
 
+// =============================================================================
+// Workspace size range computation — hybrid query strategy
+// =============================================================================
+//
+// MIOpen exposes two non-allocating, query-only APIs that both report something
+// about workspace requirements, but neither alone gives us the {min, max} range
+// we need for the workspace-size-limit knob:
+//
+//   1. miopenConvolution*GetWorkSpaceSize
+//        Per its header doc, this returns "the minimum size of the workspace
+//        that must be provided to miopenFindConvolutionForwardAlgorithm() in
+//        order for the latter to find the best candidate" — i.e. the workspace
+//        of the single fastest solver MIOpen would pick, not a maximum across
+//        the applicable solver set. In default Fast/Hybrid Find mode the
+//        implementation calls GetSolutions(maxSolutionCount=1) and returns
+//        that solver's workspace (projects/miopen/src/convolution.cpp:387);
+//        only when Fast/Hybrid Find fails to return a solution does it fall
+//        through to a std::max over algorithm classes. We use it here as
+//        `range.max` because plan execution sizes its workspace by calling
+//        the same API, so by construction the value matches what MIOpen will
+//        actually request.
+//
+//   2. miopenConvolution*GetSolutionCount / *GetSolution
+//        Return a subset of applicable solutions sourced from find-db (if a
+//        record exists for this problem) or from a heuristic / TunaNet fallback
+//        otherwise. The header explicitly notes the result "might be based on
+//        heuristics" and recommends Find for consistent performance results.
+//        Each returned miopenConvSolution_t carries a per-solver workspace_size
+//        field, which is reliable for the entries that ARE returned but only
+//        covers the heuristic / find-db subset, NOT the full solver set.
+//
+// There is no public API for a true minimum across the applicable solver
+// set. miopenFind*Algorithm comes closest but still deduplicates by
+// algorithm class (ShrinkToFind10Results in convolutionocl.cpp:238) and
+// silently drops solvers exceeding the caller-provided workspace cap; it
+// also needs real device buffers and launches GPU kernels, so it isn't
+// affordable at engine-selection time anyway. We therefore combine both
+// query-only signals:
+//
+//   * Seed `range.min` and `range.max` with the GetWorkSpaceSize result,
+//     then iterate the GetSolution subset updating each bound with
+//     std::min / std::max. Both bounds start at the same value and only
+//     move outward, so `min ≤ max` is guaranteed.
+//
+// If MIOpen ever exposes a direct minimum-workspace API for the full applicable
+// solver set, this whole helper collapses into a single call alongside
+// GetWorkSpaceSize.
+// =============================================================================
+
 MiopenConvPlanBuilder::WorkspaceSizeRange
     getWorkspaceSizeRangeFwd(const HipdnnMiopenHandle& handle,
-                             const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                              bool deterministicEnabled)
 {
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
-    ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+    const auto& attr
+        = opGraph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
+    const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+
+    // Seed both bounds with GetWorkSpaceSize; the loop below extends them with
+    // std::min / std::max over the GetSolution subset.
+    size_t maxWorkspace = 0;
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
+                                                                     params.w().tensorDescriptor(),
+                                                                     params.x().tensorDescriptor(),
+                                                                     params.conv().convDescriptor(),
+                                                                     params.y().tensorDescriptor(),
+                                                                     &maxWorkspace));
 
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
@@ -174,11 +237,23 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                                                                 &returnedSolutionCount,
                                                                 solutions.data()));
 
+    if(returnedSolutionCount == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "Convolution Fwd: GetSolutionCount reported "
+                                                           + std::to_string(solutionCount)
+                                                           + " but GetSolution returned 0");
+    }
+
+    // GetSolution may write fewer entries than solutionCount (the MIOpen header documents the
+    // latter as a maximum).
+    solutions.resize(returnedSolutionCount);
+
     HIPDNN_PLUGIN_LOG_INFO("Getting workspace size range for Convolution Fwd: Found "
                            << returnedSolutionCount << " solutions");
 
-    size_t minWorkspace = std::numeric_limits<size_t>::max();
-    size_t maxWorkspace = 0;
+    // Seeded with the GetWorkSpaceSize result so min ≤ max is structurally guaranteed.
+    size_t minWorkspace = maxWorkspace;
     for(const auto& solution : solutions)
     {
         HIPDNN_PLUGIN_LOG_INFO("Convolution Fwd: solution_id="
@@ -197,12 +272,24 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
 
 MiopenConvPlanBuilder::WorkspaceSizeRange
     getWorkspaceSizeRangeBwd(const HipdnnMiopenHandle& handle,
-                             const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                              bool deterministicEnabled)
 {
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
-    ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+    const auto& attr
+        = opGraph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes>();
+    const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+
+    // Seed both bounds with GetWorkSpaceSize; the loop below extends them with
+    // std::min / std::max over the GetSolution subset.
+    size_t maxWorkspace = 0;
+    THROW_ON_MIOPEN_FAILURE(
+        miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
+                                                      params.dy().tensorDescriptor(),
+                                                      params.w().tensorDescriptor(),
+                                                      params.conv().convDescriptor(),
+                                                      params.dx().tensorDescriptor(),
+                                                      &maxWorkspace));
 
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(
@@ -230,11 +317,23 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                                                                      &returnedSolutionCount,
                                                                      solutions.data()));
 
+    if(returnedSolutionCount == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "Convolution Bwd: GetSolutionCount reported "
+                                                           + std::to_string(solutionCount)
+                                                           + " but GetSolution returned 0");
+    }
+
+    // GetSolution may write fewer entries than solutionCount (the MIOpen header documents the
+    // latter as a maximum).
+    solutions.resize(returnedSolutionCount);
+
     HIPDNN_PLUGIN_LOG_INFO("Getting workspace size range for Convolution Bwd: Found "
                            << returnedSolutionCount << " solutions");
 
-    size_t minWorkspace = std::numeric_limits<size_t>::max();
-    size_t maxWorkspace = 0;
+    // Seeded with the GetWorkSpaceSize result so min ≤ max is structurally guaranteed.
+    size_t minWorkspace = maxWorkspace;
     for(const auto& solution : solutions)
     {
         HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: solution_id="
@@ -253,12 +352,24 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
 
 MiopenConvPlanBuilder::WorkspaceSizeRange
     getWorkspaceSizeRangeWrw(const HipdnnMiopenHandle& handle,
-                             const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                              bool deterministicEnabled)
 {
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
-    ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+    const auto& attr
+        = opGraph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes>();
+    const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+
+    // Seed both bounds with GetWorkSpaceSize; the loop below extends them with
+    // std::min / std::max over the GetSolution subset.
+    size_t maxWorkspace = 0;
+    THROW_ON_MIOPEN_FAILURE(
+        miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
+                                                         params.dy().tensorDescriptor(),
+                                                         params.x().tensorDescriptor(),
+                                                         params.conv().convDescriptor(),
+                                                         params.dw().tensorDescriptor(),
+                                                         &maxWorkspace));
 
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(
@@ -287,11 +398,23 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                                                     &returnedSolutionCount,
                                                     solutions.data()));
 
+    if(returnedSolutionCount == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "Convolution Wrw: GetSolutionCount reported "
+                                                           + std::to_string(solutionCount)
+                                                           + " but GetSolution returned 0");
+    }
+
+    // GetSolution may write fewer entries than solutionCount (the MIOpen header documents the
+    // latter as a maximum).
+    solutions.resize(returnedSolutionCount);
+
     HIPDNN_PLUGIN_LOG_INFO("Getting workspace size range for Convolution Wrw: Found "
                            << returnedSolutionCount << " solutions");
 
-    size_t minWorkspace = std::numeric_limits<size_t>::max();
-    size_t maxWorkspace = 0;
+    // Seeded with the GetWorkSpaceSize result so min ≤ max is structurally guaranteed.
+    size_t minWorkspace = maxWorkspace;
     for(const auto& solution : solutions)
     {
         HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: solution_id="
@@ -309,7 +432,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
 }
 
 size_t getMaxWorkspaceSizeFwd(const HipdnnMiopenHandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                              const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                               const HipdnnMiopenSettings& executionSettings,
                               bool deterministicEnabled)
 {
@@ -319,8 +442,8 @@ size_t getMaxWorkspaceSizeFwd(const HipdnnMiopenHandle& handle,
     {
         const auto& attr
             = opGraph.getNodeWrapper(0)
-                  .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
-        ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
+        const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
         THROW_ON_MIOPEN_FAILURE(
             miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
                                                      params.w().tensorDescriptor(),
@@ -334,7 +457,7 @@ size_t getMaxWorkspaceSizeFwd(const HipdnnMiopenHandle& handle,
 }
 
 size_t getMaxWorkspaceSizeBwd(const HipdnnMiopenHandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                              const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                               const HipdnnMiopenSettings& executionSettings,
                               bool deterministicEnabled)
 {
@@ -344,8 +467,8 @@ size_t getMaxWorkspaceSizeBwd(const HipdnnMiopenHandle& handle,
     {
         const auto& attr
             = opGraph.getNodeWrapper(0)
-                  .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
-        ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes>();
+        const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         THROW_ON_MIOPEN_FAILURE(
             miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
@@ -360,7 +483,7 @@ size_t getMaxWorkspaceSizeBwd(const HipdnnMiopenHandle& handle,
 }
 
 size_t getMaxWorkspaceSizeWrw(const HipdnnMiopenHandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                              const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                               const HipdnnMiopenSettings& executionSettings,
                               bool deterministicEnabled)
 {
@@ -370,8 +493,8 @@ size_t getMaxWorkspaceSizeWrw(const HipdnnMiopenHandle& handle,
     {
         const auto& attr
             = opGraph.getNodeWrapper(0)
-                  .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
-        ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes>();
+        const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         THROW_ON_MIOPEN_FAILURE(
             miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
@@ -386,12 +509,13 @@ size_t getMaxWorkspaceSizeWrw(const HipdnnMiopenHandle& handle,
 }
 
 void buildPlanFwd(const HipdnnMiopenHandle& handle,
-                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                  const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                   HipdnnMiopenContext& executionContext,
                   bool deterministicEnabled)
 {
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
+    const auto& attr
+        = opGraph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvFwdPlan>(
         handle, std::move(params), executionContext.executionSettings());
@@ -399,12 +523,13 @@ void buildPlanFwd(const HipdnnMiopenHandle& handle,
 }
 
 void buildPlanBwd(const HipdnnMiopenHandle& handle,
-                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                  const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                   HipdnnMiopenContext& executionContext,
                   bool deterministicEnabled)
 {
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
+    const auto& attr
+        = opGraph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvBwdPlan>(
         handle, std::move(params), executionContext.executionSettings());
@@ -412,12 +537,13 @@ void buildPlanBwd(const HipdnnMiopenHandle& handle,
 }
 
 void buildPlanWrw(const HipdnnMiopenHandle& handle,
-                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                  const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                   HipdnnMiopenContext& executionContext,
                   bool deterministicEnabled)
 {
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
+    const auto& attr
+        = opGraph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes>();
     ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvWrwPlan>(
         handle, std::move(params), executionContext.executionSettings());
@@ -428,7 +554,7 @@ void buildPlanWrw(const HipdnnMiopenHandle& handle,
 
 bool MiopenConvPlanBuilder::isApplicable(
     const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -439,7 +565,8 @@ bool MiopenConvPlanBuilder::isApplicable(
         return false;
     }
 
-    if(opGraph.getNode(0).compute_data_type() != hipdnn_data_sdk::data_objects::DataType::FLOAT)
+    if(opGraph.getNode(0).compute_data_type()
+       != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Convolution plan builder only supports nodes with an fp32 "
                                 "compute_data_type");
@@ -451,13 +578,13 @@ bool MiopenConvPlanBuilder::isApplicable(
 
     switch(node.attributes_type())
     {
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         ret = isApplicableFwd(handle, opGraph, _deterministic);
         break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         ret = isApplicableBwd(handle, opGraph, _deterministic);
         break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
         ret = isApplicableWrw(handle, opGraph, _deterministic);
         break;
     default:
@@ -473,7 +600,7 @@ bool MiopenConvPlanBuilder::isApplicable(
 
 MiopenConvPlanBuilder::WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSizeRange(
     const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -487,23 +614,24 @@ MiopenConvPlanBuilder::WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSiz
 
     switch(node.attributes_type())
     {
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         return getWorkspaceSizeRangeFwd(handle, opGraph, _deterministic);
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         return getWorkspaceSizeRangeBwd(handle, opGraph, _deterministic);
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
         return getWorkspaceSizeRangeWrw(handle, opGraph, _deterministic);
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported node type for convolution plan builder: "
-                + std::string(hipdnn_data_sdk::data_objects::toString(node.attributes_type())));
+                + std::string(
+                    hipdnn_flatbuffers_sdk::data_objects::toString(node.attributes_type())));
     }
 }
 
 size_t MiopenConvPlanBuilder::getMaxWorkspaceSize(
     const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const HipdnnMiopenSettings& executionSettings) const
 {
     if(opGraph.nodeCount() != 1)
@@ -518,24 +646,25 @@ size_t MiopenConvPlanBuilder::getMaxWorkspaceSize(
 
     switch(node.attributes_type())
     {
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         return getMaxWorkspaceSizeFwd(handle, opGraph, executionSettings, _deterministic);
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         return getMaxWorkspaceSizeBwd(handle, opGraph, executionSettings, _deterministic);
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
         return getMaxWorkspaceSizeWrw(handle, opGraph, executionSettings, _deterministic);
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported node type for convolution plan builder: "
-                + std::string(hipdnn_data_sdk::data_objects::toString(node.attributes_type())));
+                + std::string(
+                    hipdnn_flatbuffers_sdk::data_objects::toString(node.attributes_type())));
     }
 }
 
 void MiopenConvPlanBuilder::initializeExecutionSettings(
     const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnMiopenSettings& executionSettings) const
 {
     // Read workspace size limit knob setting
@@ -545,16 +674,16 @@ void MiopenConvPlanBuilder::initializeExecutionSettings(
         const auto& knobSetting
             = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME);
 
-        if(knobSetting.valueType() != hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+        if(knobSetting.valueType() != hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Workspace size limit knob setting value is not an integer. Type: "
-                    + std::string(
-                        hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType())));
+                    + std::string(hipdnn_flatbuffers_sdk::data_objects::EnumNameKnobValue(
+                        knobSetting.valueType())));
         }
 
-        auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+        auto value = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value();
 
         if(value < 0)
         {
@@ -587,8 +716,9 @@ void MiopenConvPlanBuilder::initializeExecutionSettings(
 
 void MiopenConvPlanBuilder::buildPlan(
     const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+        engineConfig,
     HipdnnMiopenContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)
@@ -604,15 +734,15 @@ void MiopenConvPlanBuilder::buildPlan(
 
     switch(nodeWrapper.attributesType())
     {
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         HIPDNN_PLUGIN_LOG_INFO("Building convolution fwd plan for node: " << nodeName);
         buildPlanFwd(handle, opGraph, executionContext, _deterministic);
         break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         HIPDNN_PLUGIN_LOG_INFO("Building convolution bwd plan for node: " << nodeName);
         buildPlanBwd(handle, opGraph, executionContext, _deterministic);
         break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
         HIPDNN_PLUGIN_LOG_INFO("Building convolution wrw plan for node: " << nodeName);
         buildPlanWrw(handle, opGraph, executionContext, _deterministic);
         break;
@@ -621,15 +751,15 @@ void MiopenConvPlanBuilder::buildPlan(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported node type for convolution plan builder: "
                 + std::string(
-                    hipdnn_data_sdk::data_objects::toString(nodeWrapper.attributesType())));
+                    hipdnn_flatbuffers_sdk::data_objects::toString(nodeWrapper.attributesType())));
     }
 }
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvPlanBuilder::getCustomKnobs(
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> MiopenConvPlanBuilder::getCustomKnobs(
     const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> knobs;
 
     if(!isApplicable(handle, opGraph))
     {
@@ -658,15 +788,15 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvPlanBuilder::getCust
     const auto minWorkspace = static_cast<int64_t>(range.min);
     const auto maxWorkspace = static_cast<int64_t>(range.max);
 
-    hipdnn_data_sdk::data_objects::KnobT workspaceKnob;
+    hipdnn_flatbuffers_sdk::data_objects::KnobT workspaceKnob;
     workspaceKnob.knob_id = hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME;
     workspaceKnob.description = "Workspace size limit in bytes";
 
-    hipdnn_data_sdk::data_objects::IntValueT workspaceDefaultValue;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT workspaceDefaultValue;
     workspaceDefaultValue.value = maxWorkspace;
     workspaceKnob.default_value.Set(workspaceDefaultValue);
 
-    hipdnn_data_sdk::data_objects::IntConstraintT workspaceConstraint;
+    hipdnn_flatbuffers_sdk::data_objects::IntConstraintT workspaceConstraint;
     workspaceConstraint.min_value = minWorkspace;
     workspaceConstraint.max_value = maxWorkspace;
     workspaceConstraint.step = 1;

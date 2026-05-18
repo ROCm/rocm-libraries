@@ -9,9 +9,10 @@
 namespace hip_kernel_provider::hip_kernel_utils
 {
 
-ActivationParams parseActivation(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs)
+ActivationParams
+    parseActivation(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs)
 {
-    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     switch(attrs.operation())
     {
@@ -56,7 +57,7 @@ ActivationParams parseActivation(const hipdnn_data_sdk::data_objects::PointwiseA
     case PM::ELU_FWD:
     case PM::ELU_BWD:
     {
-        double alpha = attrs.elu_alpha() ? static_cast<double>(*attrs.elu_alpha()) : 1.0;
+        const double alpha = attrs.elu_alpha() ? static_cast<double>(*attrs.elu_alpha()) : 1.0;
         return ActivationParams{ActivationMode::ELU, alpha, 0.0, 0.0};
     }
     case PM::SOFTPLUS_FWD:
@@ -98,8 +99,9 @@ hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
             + " not found in the provided device buffers.");
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttributes(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid)
 {
@@ -113,15 +115,16 @@ const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
                                                        + std::to_string(uid));
 }
 
-bool isChannelLastLayout(const hipdnn_data_sdk::data_objects::TensorAttributes* tensor)
+bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor)
 {
     const auto* strides = tensor->strides();
     const auto* dims = tensor->dims();
     const size_t numDims = dims->size();
 
     // Extract stride order from strides
-    std::vector<int64_t> stridesVec(strides->begin(), strides->end());
-    std::vector<int64_t> strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(stridesVec);
+    const std::vector<int64_t> stridesVec(strides->begin(), strides->end());
+    const std::vector<int64_t> strideOrder
+        = hipdnn_data_sdk::utilities::extractStrideOrder(stridesVec);
 
     // Compare against known layouts
     if(numDims == 4)

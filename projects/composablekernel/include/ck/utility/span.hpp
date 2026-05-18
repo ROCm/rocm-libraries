@@ -7,6 +7,10 @@
 #include <array>
 #include <type_traits>
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 
 template <typename T>
@@ -65,3 +69,5 @@ class span
 };
 
 } // namespace ck
+
+#pragma clang diagnostic pop

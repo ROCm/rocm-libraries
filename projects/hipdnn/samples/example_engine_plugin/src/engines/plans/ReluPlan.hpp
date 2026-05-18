@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 // TEMPLATE REFERENCE: This file demonstrates the Plan pattern, compile() for HIPRTC kernel
@@ -32,7 +32,7 @@ class IKernelCompiler;
 class ReluPlan : public hipdnn_plugin_sdk::IPlan<ExampleProviderHandle>
 {
 public:
-    explicit ReluPlan(ReluParams&& params);
+    explicit ReluPlan(const ReluParams& params);
 
     ~ReluPlan() override = default;
 

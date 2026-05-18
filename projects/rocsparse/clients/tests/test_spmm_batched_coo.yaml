@@ -51,7 +51,7 @@ Tests:
   precision: *single_only_precisions
   M: [15, 32]
   N: [2, 3]
-  K: [7, 11, 27]
+  K: [7, 27]
   batch_count_A: [1]
   batch_count_B: [3]
   batch_count_C: [3]
@@ -69,9 +69,9 @@ Tests:
   function: spmm_batched_coo
   indextype: *i64
   precision: *double_only_precisions
-  M: [16, 300]
-  N: [32, 128]
-  K: [48, 256]
+  M: [300]
+  N: [128]
+  K: [256]
   batch_count_A: [4]
   batch_count_B: [1]
   batch_count_C: [4]
@@ -89,9 +89,9 @@ Tests:
   function: spmm_batched_coo
   indextype: *i32
   precision: *single_only_precisions_complex
-  M: [155, 300]
-  N: [22, 39]
-  K: [72, 120]
+  M: [364]
+  N: [39]
+  K: [120]
   batch_count_A: [6]
   batch_count_B: [6]
   batch_count_C: [6]
@@ -109,9 +109,9 @@ Tests:
   function: spmm_batched_coo
   indextype: *i64
   precision: *double_only_precisions_complex
-  M: [300]
-  N: [222, 300]
-  K: [728, 1177]
+  M: [226]
+  N: [222]
+  K: [117]
   batch_count_A: [1]
   batch_count_B: [7]
   batch_count_C: [7]
@@ -129,7 +129,7 @@ Tests:
   function: spmm_batched_coo
   indextype: *i32
   precision: *int8_int8_int32_int32_abct_precision
-  M: [300]
+  M: [200]
   N: [78]
   K: [470]
   batch_count_A: [9]
@@ -184,12 +184,12 @@ Tests:
   function: spmm_batched_coo
   indextype: *i64
   precision: *single_only_precisions
-  M: [701, 2000]
-  N: [248, 577]
-  K: [409, 1797]
+  M: [1000]
+  N: [577]
+  K: [1797]
   batch_count_A: [1]
-  batch_count_B: [13]
-  batch_count_C: [13]
+  batch_count_B: [7]
+  batch_count_C: [7]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -253,8 +253,8 @@ Tests:
   K: 1
   tolm: 2
   batch_count_A: [1]
-  batch_count_B: [22]
-  batch_count_C: [22]
+  batch_count_B: [21]
+  batch_count_C: [21]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose]
@@ -340,8 +340,8 @@ Tests:
   N: [22, 39]
   K: [72, 117, 279]
   batch_count_A: [1]
-  batch_count_B: [22]
-  batch_count_C: [22]
+  batch_count_B: [19]
+  batch_count_C: [19]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]

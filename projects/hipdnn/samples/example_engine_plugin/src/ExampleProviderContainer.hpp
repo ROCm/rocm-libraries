@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #pragma once
@@ -27,7 +27,7 @@ class ExampleProviderContainer
 {
 public:
     ExampleProviderContainer();
-    ~ExampleProviderContainer();
+    ~ExampleProviderContainer() noexcept;
 
     /// Copy engine IDs into a buffer.
     /// If maxEngines == 0: Does not copy, only queries total count.

@@ -4,12 +4,12 @@ root: index
 subtrees:
 - caption: Installation
   entries:
-    - file: install/prerequisites
-      title: hipBLAS prerequisites
+    - file: install/install
+      title: Install hipBLAS
     - file: install/Linux_Install_Guide
-      title: Install hipBLAS on Linux
+      title: Build hipBLAS on Linux
     - file: install/Windows_Install_Guide
-      title: Install hipBLAS on Windows
+      title: Build hipBLAS on Windows
 - caption: Conceptual
   entries:
     - file: conceptual/library-source-code-organization

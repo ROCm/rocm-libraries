@@ -29,7 +29,10 @@ void types_bindings(nb::module_& m)
         .value("INT4", DataType::INT4)
         .value("FP6_E2M3", DataType::FP6_E2M3)
         .value("FP6_E3M2", DataType::FP6_E3M2)
-        .value("INT64", DataType::INT64);
+        .value("INT64", DataType::INT64)
+        .value("BOOLEAN", DataType::BOOLEAN)
+        .value("FP8_E4M3_FNUZ", DataType::FP8_E4M3_FNUZ)
+        .value("FP8_E5M2_FNUZ", DataType::FP8_E5M2_FNUZ);
 
     // Bind ConvolutionMode enum
     nb::enum_<ConvolutionMode>(m, "ConvolutionMode")

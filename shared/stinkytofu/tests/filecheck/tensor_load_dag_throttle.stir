@@ -1,0 +1,22 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+#
+# GlobalRead throttle: tensor_loads go to globalReadQueue with
+# globalReadPerWMMA = 1. VALU instructions are in a separate valuQueue
+# and do not suppress the tensor_load throttle.
+#
+# BuildImplicitDependencyPass adds LDS pseudo-reg dests so tensor_loads
+# participate correctly in the DAG. Different tokens keep them independent.
+#
+# Input order:  tensor_A, tensor_B, v_add
+# Expected:     tensor_A, tensor_B, v_add
+#
+# CHECK: tensor_load_to_lds{{.*}}s[0:3]
+# CHECK: tensor_load_to_lds{{.*}}s[12:15]
+# CHECK: v_add_f32
+
+st.func @test() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+}

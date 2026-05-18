@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@ void testing_bsr2csr_bad_arg(const Arguments& arg)
     // Create rocsparse handle
     rocsparse_local_handle local_handle;
 
-    // Create rocsparse decriptors
+    // Create rocsparse descriptors
     rocsparse_local_mat_descr local_bsr_descr;
     rocsparse_local_mat_descr local_csr_descr;
 

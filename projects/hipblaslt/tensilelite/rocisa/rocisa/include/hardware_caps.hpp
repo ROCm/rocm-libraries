@@ -387,7 +387,7 @@ inline std::map<std::string, int>
           || tryAssembler(
               isaVersion,
               assemblerPath,
-              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, scope:SCOPE_DEV",
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0, scope:SCOPE_DEV",
               isDebug);
     rv["HasMUBUFConst"] = tryAssembler(isaVersion,
                                        assemblerPath,
@@ -417,6 +417,12 @@ inline std::map<std::string, int>
     rv["s_delay_alu"]
         = tryAssembler(isaVersion, assemblerPath, "s_delay_alu instid0(VALU_DEP_1)", isDebug);
     rv["HasVgprMSB"] = tryAssembler(isaVersion, assemblerPath, "s_set_vgpr_msb 0", isDebug);
+    // 16-bit MSB form packs the previous-instruction MSB in the high byte
+    // (e.g. 0x0101). Some assemblers accept only the 8-bit form, so probe
+    // the wider encoding separately.
+    rv["HasVgprMSB16"]
+        = rv["HasVgprMSB"]
+          && tryAssembler(isaVersion, assemblerPath, "s_set_vgpr_msb 0x0101", isDebug);
     // workaround: as we generate s_set_vgpr_msb in toString(), we can't calculate inst len correctly.
     rv["ShortBranchMaxLength"] = rv["HasVgprMSB"]? 8192 : 16384;
 
@@ -483,28 +489,41 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
-    rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
-    rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
+    rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
+    rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
     rv["DSLow16NotPreserve"] = isaVersion[0] == 12;
     rv["WorkGroupIdFromTTM"] = isaVersion[0] == 12;
-    rv["NoSDWA"]             = isaVersion[0] == 12;
+    rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12});
     rv["VOP3ByteSel"]        = isaVersion[0] == 12;
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
+    rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
+    rv["SgprPreloadPad"]     = checkInList(isaVersion, {{9, 5, 0}}) || checkInList(isaVersion, {{9, 0, 10}}) || (isaVersion[0] == 9 && isaVersion[1] == 4);
 
-    // Vector L1 Data cache line size (bytes) used for alignment-sensitive optimizations in codegen.
-    // NOTE: This is a *codegen-time* (compile-time) constant selected by target ISA.
-    //
-    // Per project convention:
-    // - MI100 (gfx908 / ISA 9.0.8) : 64B
-    // - MI200 (gfx90a / ISA 9.0.10): 64B
-    // - Others                      : 128B
-    int vL1DCacheLineBytes = 128;
-    if(checkInList(isaVersion, {{9, 0, 8}, {9, 0, 10}}))
-        vL1DCacheLineBytes = 64;
-    rv["vL1DCacheLineBytes"] = vL1DCacheLineBytes;
+    // True on archs whose MFMA-scale path can consume a swizzled MX scale
+    // layout: gfx950 (HostPreSwizzle via the subtile path) and gfx1250
+    // (InMemorySwizzle via TDM). The kernel-side MXScaleFormat enum and the
+    // Solution.py guards decide which concrete layout is in use.
+    rv["HasMXScaleSwizzle"]            = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
+
+    // Cross-CU/L2 release+acquire fences for device-scope inter-workgroup
+    // synchronization (e.g. StreamK partial-tile handshake). When set, a
+    // store-release sequence must emit `s_wait_loadcnt 0; s_wait_storecnt 0;
+    // global_wb scope:SCOPE_DEV` before the flag store, and a load-acquire
+    // sequence must emit `global_inv scope:SCOPE_DEV; s_wait_loadcnt 0` after
+    // the flag load.
+    rv["HasInvWbDevFences"]            = checkInList(isaVersion, {{12, 5, 0}});
+
+    // XNACK-replay drain. When set, in-flight VMEM ops can be replayed and
+    // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An
+    // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.
+    rv["RequiresXCntForVolatileVMEM"]  = checkInList(isaVersion, {{12, 5, 0}});
+
+    // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.
+    rv["LDSBankCount"] = 64;
+    rv["LDSBankWidth"] = 4; // bytes per bank
 
     return rv;
 }
@@ -524,7 +543,18 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     if(isaVersion[0] == 10)
         rv["PhysicalMaxVgprCU"] = 1024 * 32;
     else if(isaVersion[0] == 11)
-        if(isaVersion[2] == 2)
+        // Code path for gfx11XX
+        if(isaVersion[1] == 5)
+        {
+            // Code path for gfx115X
+            if(isaVersion[2] == 0 || isaVersion[2] == 2 || isaVersion[2] == 3)
+                // gfx1150, gfx1152, gfx1153
+                rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * 1024 * 32;
+            if(isaVersion[2] == 1)
+                // gfx1151
+                rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * 1536 * 32;
+        }
+        else if(isaVersion[2] == 2)
             rv["PhysicalMaxVgprCU"] = 1024 * 32;
         else
             rv["PhysicalMaxVgprCU"] = 1536 * 32;
