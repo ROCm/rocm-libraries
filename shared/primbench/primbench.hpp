@@ -430,7 +430,7 @@ using namespace gpu_backend;
 
 #ifdef __HIP__
 /// Serializes information about the used GPU.
-std::string serialize_gpu_info()
+inline std::string serialize_gpu_info()
 {
     std::ostringstream ss;
     ss << "{";
@@ -459,7 +459,7 @@ std::string serialize_gpu_info()
 }
 #elif defined(__CUDACC__)
 /// Serializes information about the used GPU.
-std::string serialize_gpu_info()
+inline std::string serialize_gpu_info()
 {
     std::ostringstream ss;
     ss << "{";
@@ -1799,7 +1799,7 @@ inline void print_progress(uint64_t         iteration,
 #ifdef __HIP__
 
 /// Kernel that blocks the GPU stream until unblocked or timeout occurs.
-__global__
+static __global__
 void block_stream_kernel(volatile int32_t* is_blocked,
                          volatile int32_t* timeout_flag,
                          double            timeout_seconds,
@@ -1822,7 +1822,7 @@ void block_stream_kernel(volatile int32_t* is_blocked,
 #elif defined(__CUDACC__)
 
 /// Kernel that blocks the GPU stream until unblocked or timeout occurs.
-__global__
+static __global__
 void block_stream_kernel(volatile int32_t* is_blocked,
                          volatile int32_t* timeout_flag,
                          double            timeout_seconds)
@@ -2196,7 +2196,7 @@ private:
 
 /// Warms the GPU, using complex enough dummy kernel code
 /// that the compiler can't optimize it away.
-__global__
+static __global__
 void warmup_kernel(float* data, int n)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
