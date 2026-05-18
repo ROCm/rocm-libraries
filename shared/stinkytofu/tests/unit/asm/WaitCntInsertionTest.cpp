@@ -967,6 +967,13 @@ st.func @test_multi_pred2() {
 // DS read whose tokens overlap. The SSA def-use chain does not encode
 // these hazards; the pass detects them via the in-flight DS-read queue
 // and the writer's MemTokenData modifier.
+//
+// collectLdsWarDependencies applies a per-pair same-pipeline filter
+// (isOnSameDSPipeline): if the writer and a candidate reader share the same
+// hardware memory pipeline, the pair is dropped because FIFO retirement on
+// the shared counter already orders them. In practice this means a ds_store
+// writer skips prior ds_load / ds_atomic readers (both on dlcnt), while
+// tensor_load_to_lds (on tlcnt) still synthesizes WAR against DS readers.
 // ============================================================================
 
 /**
@@ -1104,22 +1111,25 @@ st.func @test_lds_war_disjoint_tokens() {
 }
 
 /**
- * @brief Symmetric writer: ds_store with token-overlapping prior reads.
+ * @brief Same-pipeline filter: ds_store with token-overlapping prior reads
+ *        emits NO synthetic WAR wait.
  *
  * IR (single block):
  *   v[0:1] = ds_load_b64 v10           tokens=[0]
  *   v[2:3] = ds_load_b64 v10           tokens=[0]
  *   v[4:5] = ds_load_b64 v10           tokens=[0]
- *   ds_store_b64 v100, v[20:21]        tokens=[0]    (LDS writer)
+ *   ds_store_b64 v100, v[20:21]        tokens=[0]    (LDS writer, same DS pipe)
  *
- * Recording is now deferred until after the wait is emitted, so the WAR scan
- * and the DS-counter computation both see the queue WITHOUT ds_store. The
- * youngest conflicting read r2 sits at pendingDSCountFrom(r2) = 1, giving
- * wait = count - 1 = 0: all three reads drain before ds_store issues.
+ * collectLdsWarDependencies runs the per-pair isOnSameDSPipeline filter:
+ * writer (ds_store) and each candidate reader (ds_load) are both DS memory
+ * ops, so every (writer, reader) pair is dropped from the WAR set. The
+ * hardware retires them FIFO on dlcnt, so no synthetic s_wait_dscnt is
+ * required. The data operand v[20:21] is independent of the prior reads,
+ * so there is also no RAW dependency to emit.
  */
-TEST_F(WaitCntInsertionTest, LdsWarBeforeDsStore) {
+TEST_F(WaitCntInsertionTest, DsStoreWithPriorDsLoadsNoExplicitWar) {
     std::string irString = R"(
-st.func @test_lds_war_ds_store() {
+st.func @test_ds_store_no_war() {
 ^entry:
   v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
   v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
@@ -1139,18 +1149,12 @@ st.func @test_lds_war_ds_store() {
     ASSERT_NE(dsStore, nullptr);
 
     SWaitCntData* waitBeforeWriter = findWaitCntBefore(entryBB, dsStore);
-    ASSERT_NE(waitBeforeWriter, nullptr)
-        << "Pass must insert s_wait_dscnt before ds_store (WAR-on-LDS, symmetric writer)";
-    EXPECT_EQ(waitBeforeWriter->dlcnt, 0)
-        << "ds_store is recorded after the wait is emitted; the youngest conflicting "
-           "reader r2 has count=1 -> wait = count - 1 = 0, draining all three reads "
-           "before the writer issues";
-    EXPECT_EQ(waitBeforeWriter->vlcnt, -1);
-    EXPECT_EQ(waitBeforeWriter->vscnt, -1);
-    EXPECT_EQ(waitBeforeWriter->dscnt, -1);
-    EXPECT_EQ(waitBeforeWriter->kmcnt, -1);
+    EXPECT_EQ(waitBeforeWriter, nullptr)
+        << "isOnSameDSPipeline filters every (ds_store, ds_load) pair out of the "
+           "WAR set; hardware FIFO on dlcnt already enforces ordering, so no "
+           "synthetic s_wait_dscnt should be emitted";
 
-    EXPECT_EQ(countWaitCnt(entryBB), 1);
+    EXPECT_EQ(countWaitCnt(entryBB), 0);
     EXPECT_EQ(countTensorWaitCnt(entryBB), 0);
 }
 

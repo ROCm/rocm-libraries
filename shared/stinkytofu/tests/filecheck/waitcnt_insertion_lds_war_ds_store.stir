@@ -1,19 +1,21 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
 #
-# StinkyWaitCntInsertionPass (gfx1250): WAR-on-LDS with a ds_store writer.
+# StinkyWaitCntInsertionPass (gfx1250): same-DS-pipeline filter in
+# collectLdsWarDependencies skips ds_store writers vs prior ds_load readers.
+#
 # Three ds_load_b64 with token 0 are followed by a ds_store_b64 with token 0.
-# DS recording is deferred until after the wait is emitted, so the WAR scan
-# and the DS-counter computation see the queue without ds_store. The youngest
-# token-0 reader sits at count = 1, giving wait = count - 1 = 0; all three
-# prior reads drain before the writer issues.
+# Inside collectLdsWarDependencies, the per-pair isOnSameDSPipeline filter
+# drops every (ds_store, ds_load) candidate because both are DS memory ops
+# that retire FIFO on dlcnt. The hardware orders them implicitly, so no
+# synthetic s_wait_dscnt is required. The data operand v[20:21] is also
+# independent of the prior reads, so the RAW path emits nothing either.
 #
 # CHECK-LABEL: @waitcnt_insertion_lds_war_ds_store
 # CHECK: ds_load_b64
 # CHECK-NEXT: ds_load_b64
 # CHECK-NEXT: ds_load_b64
-# CHECK-NEXT: s_wait_dscnt
-# CHECK-SAME: dlcnt = 0
 # CHECK-NEXT: ds_store_b64
+# CHECK-NOT: s_wait_dscnt
 # CHECK-NOT: s_wait_loadcnt
 # CHECK-NOT: s_wait_tensorcnt
 

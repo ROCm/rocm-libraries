@@ -110,6 +110,18 @@ bool isLdsWriterWithTokens(const StinkyInstruction& inst) {
     return inst.getModifier<MemTokenData>() != nullptr;
 }
 
+/// True when @p a and @p b share the same hardware memory pipeline, so the
+/// hardware-side FIFO retirement orders them implicitly and no synthetic wait
+/// is required between them.
+///
+/// Today this only covers the DS (dlcnt) pipeline: ds_read, ds_write and
+/// ds_atomic all issue and retire FIFO on dlcnt. tensor_load_to_lds is NOT a
+/// DS op (it lives on tlcnt), so a tensor_load_to_lds / ds_read pair is not
+/// on the same pipeline.
+bool isOnSameDSPipeline(const StinkyInstruction& a, const StinkyInstruction& b) {
+    return isDSMemoryOp(a) && isDSMemoryOp(b);
+}
+
 // ----------------------------------------------------------------------------
 // Data structures
 // ----------------------------------------------------------------------------
@@ -355,6 +367,13 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     /// Collect prior DS reads/atomics whose MemTokenData tokens overlap @p writer's.
     /// Scans @p localState (current block) and each predecessor's exit state to
     /// surface the WAR-on-LDS hazard that the SSA def-use chain does not encode.
+    ///
+    /// Per-pair pipeline filter: if a candidate reader is on the same hardware
+    /// memory pipeline as @p writer (see isOnSameDSPipeline), it is skipped --
+    /// the hardware FIFO-retires the pair on the shared counter, so no
+    /// synthetic wait is required. In practice this excludes all candidates
+    /// when @p writer is a ds_write (both writer and readers live on dlcnt),
+    /// while leaving tensor_load_to_lds writers (on tlcnt) fully covered.
     std::unordered_set<StinkyInstruction*> collectLdsWarDependencies(
         StinkyInstruction* writer, BasicBlock& bb, const PendingMemOpTracker& localState) {
         std::unordered_set<StinkyInstruction*> warDeps;
@@ -368,6 +387,12 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                 return false;
             }
             if (!isDSRead(*op) && !isDSAtomic(*op)) {
+                return false;
+            }
+            // Same-pipeline pairs are FIFO-ordered by hardware, so no synthetic
+            // WAR wait is needed. Today this matches ds_write writer paired
+            // with ds_read / ds_atomic readers on the DS (dlcnt) pipeline.
+            if (isOnSameDSPipeline(*writer, *op)) {
                 return false;
             }
             const MemTokenData* mt = op->getModifier<MemTokenData>();
