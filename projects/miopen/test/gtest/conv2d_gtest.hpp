@@ -4,6 +4,7 @@
 #pragma once
 
 #include "conv_common_gtest.hpp"
+#include <vector>
 
 template <typename... TParams>
 using Conv2DBaseTestCase =
@@ -22,6 +23,8 @@ using Conv2DBaseTestCase =
                          NamedParameter<size_t>,              // vector_length
                          NamedParameter<std::string>,         // output_type
                          NamedParameter<bool>,                // int8_vectorize
+                         NamedParameter<bool>,                // use_input_dims
+                         NamedParameter<bool>,                // use_weight_tensor_dims
                          TParams...>;
 
 template <typename T, ConvApi api = ConvApi::Find_1_0>
@@ -40,15 +43,15 @@ struct Conv2DBaseTestParameters
               generate_data_limited(ct::get_2d_pads_strides_dilations(), 2, !smoke_test)),
           trans_output_pads(
               smoke_test ? std::vector<std::vector<int>>{*ct::get_2d_trans_output_pads().begin()}
-                         : ct::get_2d_trans_output_pads()),
-          in_layout({std::string{"NCHW"}}),
-          fil_layout({std::string{"NCHW"}}),
-          out_layout({std::string{"NCHW"}}),
-          deterministic({false}),
-          tensor_vect({0}),
-          vector_length({1}),
-          output_type({std::string{"int32"}}),
-          int8_vectorize({false})
+                         : ct::get_2d_trans_output_pads()) //,
+    //   in_layout({std::string{"NCHW"}}),
+    //   fil_layout({std::string{"NCHW"}}),
+    //   out_layout({std::string{"NCHW"}}),
+    //   deterministic({false}),
+    //   tensor_vect({0}),
+    //   vector_length({1}),
+    //   output_type({std::string{"int32"}}),
+    //   int8_vectorize({false})
     {
     }
 
@@ -60,14 +63,20 @@ struct Conv2DBaseTestParameters
     std::vector<std::vector<size_t>> filter_dims;
     std::vector<std::vector<int>> pads_strides_dilations;
     std::vector<std::vector<int>> trans_output_pads;
-    std::vector<std::string> in_layout;
-    std::vector<std::string> fil_layout;
-    std::vector<std::string> out_layout;
-    std::vector<bool> deterministic;
-    std::vector<size_t> tensor_vect;
-    std::vector<size_t> vector_length;
-    std::vector<std::string> output_type;
-    std::vector<bool> int8_vectorize;
+    std::vector<std::string> in_layout{std::string{"NCHW"}};
+    std::vector<std::string> fil_layout{std::string{"NCHW"}};
+    std::vector<std::string> out_layout{std::string{"NCHW"}};
+    std::vector<bool> deterministic{false};
+    std::vector<size_t> tensor_vect{0};
+    std::vector<size_t> vector_length{1};
+    std::vector<std::string> output_type{std::string{"int32"}};
+    std::vector<bool> int8_vectorize{false};
+
+    // Dummy values have to be supplied to avoid empty parameter lists in the test instantiations.
+    std::vector<std::vector<std::size_t>> input_dims{{0}};
+    std::vector<std::vector<std::size_t>> weight_tensor_dims{{0}};
+    bool use_input_dims{false};
+    bool use_weight_tensor_dims{false};
 };
 
 template <typename T, typename TestCase = Conv2DBaseTestCase<>, ConvApi api = ConvApi::Find_1_0>
@@ -93,6 +102,8 @@ struct conv2d_test_base : public conv_test<T, TestCase, api>
                                                    this->vector_length,
                                                    this->output_type,
                                                    this->int8_vectorize,
+                                                   this->use_input_dims,
+                                                   this->use_weight_tensor_dims,
                                                    params...);
     }
 
@@ -130,6 +141,9 @@ struct conv2d_test_base : public conv_test<T, TestCase, api>
                                                             conv2dBaseParams.output_type),
             MakeNamedParameterCollectionValues<bool>("int8_vectorize",
                                                      conv2dBaseParams.int8_vectorize),
+            MakeNamedParameterCollectionValues<bool>("use_input_dims", std::vector<bool>{conv2dBaseParams.use_input_dims}),
+            MakeNamedParameterCollectionValues<bool>("use_weight_tensor_dims",
+                                           std::vector<bool>{conv2dBaseParams.use_weight_tensor_dims}),
             std::forward<TParams>(params)...);
     }
 };

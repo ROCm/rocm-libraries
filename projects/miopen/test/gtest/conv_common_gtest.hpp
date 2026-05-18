@@ -26,11 +26,8 @@
 #include "workspace.hpp"
 
 template <typename T>
-concept ISStream = std::is_convertible_v<T, std::istringstream&>;
-
-template <typename T>
 concept ISStreamable = requires(std::istringstream& iss, T value) {
-    { iss >> value } -> ISStream;
+    { iss >> value } -> std::same_as<std::istream&>;
 };
 
 #define TEST_DIRECT_SUPPORTED_CONFIG_ONLY (!MIOPEN_USE_ROCBLAS)
@@ -1979,6 +1976,12 @@ struct conv_test : public testing::TestWithParam<TestCase>
     bool deterministic       = false;
     bool preallocate         = false;
 
+    // The following two members are used to discard the values stored in
+    // 'input_dims' and 'weight_tensor_dims' when empty vectors should be supplied instead.
+    // This is necessary as GTest does not support empty parameter vectors.
+    bool use_input_dims         = true;
+    bool use_weight_tensor_dims = true;
+
     const std::unordered_map<std::string, miopenConvolutionMode_t> cmode_lookup{
         {"CONV", miopenConvolution},
         {"TRANS", miopenTranspose},
@@ -1999,10 +2002,14 @@ struct conv_test : public testing::TestWithParam<TestCase>
         return cmdline_args;
     }
 
+    static bool has_commandline_arg(const std::string& arg_name)
+    {
+        return get_commandline_args().contains(arg_name);
+    }
+
     template <typename V>
         requires ISStreamable<V>
-    static V get_commandline_arg_as_value(const std::string& arg_name,
-                                          const V& default_value = V{}) const
+    static V get_commandline_arg_as_value(const std::string& arg_name, const V& default_value = V{})
     {
         const auto& cmdline_args = get_commandline_args();
         auto it                  = cmdline_args.find(arg_name);
@@ -2027,9 +2034,8 @@ struct conv_test : public testing::TestWithParam<TestCase>
 
     template <typename V>
         requires ISStreamable<V>
-    static std::vector<V>
-    get_commandline_arg_as_vector(const std::string& arg_name,
-                                  const std::vector<V>& default_value = {}) const
+    static std::vector<V> get_commandline_arg_as_vector(const std::string& arg_name,
+                                                        const std::vector<V>& default_value = {})
     {
         const auto& cmdline_args = get_commandline_args();
         auto it                  = cmdline_args.find(arg_name);
@@ -2202,6 +2208,16 @@ struct conv_test : public testing::TestWithParam<TestCase>
                  enable_fdb,
                  preallocate,
                  params...) = this->GetParam();
+
+        if(!use_input_dims)
+        {
+            input_dims.clear();
+        }
+
+        if(!use_weight_tensor_dims)
+        {
+            weight_tensor_dims.clear();
+        }
     }
 
     void run()
