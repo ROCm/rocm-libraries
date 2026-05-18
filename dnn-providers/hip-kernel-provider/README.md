@@ -24,7 +24,8 @@ HipKernelEngine
 ### Key Components
 
 - **Engines** (`src/engines/`): High-level operation orchestration
-- **Plans** (`src/engines/hip_kernel_engine/plans/`): Kernel-specific execution logic
+    - **HIP kernel engine** (`src/engines/hip_kernel_engine/`): Kernel-specific execution logic. Enabled via the compile flag `ENABLE_HIP_KERNEL_ENGINE` (on by default)
+    - **ASM SDPA engine** (`src/engines/asm_sdpa_engine/`): Assembly kernels to do scaled dot-product attention (SDPA). Enabled via `ENABLE_ASM_SDPA_ENGINE` (on by default)
 - **HIP Infrastructure** (`src/hip/`): HIPRTC wrapper classes for compilation and execution
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces
@@ -51,6 +52,7 @@ Either approach works as long as the installed SDK version is compatible with th
 1. Navigate to the `dnn-providers/hip-kernel-provider` directory.
 2. Make a build directory using `mkdir build && cd build`.
 3. Configure the build using `cmake -GNinja -DCMAKE_CXX_COMPILER=<path to amdclang>/clang++ ..`.
+    - If you would like to enable/disable a specific engine, add the argument `-DENABLE_<engine>=0` (example: `-DENABLE_ASM_SDPA_ENGINE=0`)
 4. Finally, run `ninja` to build the plugin.
 
 ### Build Requirements
