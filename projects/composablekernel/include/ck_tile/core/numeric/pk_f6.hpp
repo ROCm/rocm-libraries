@@ -21,6 +21,7 @@
 
 namespace ck_tile {
 using uint32x3_t = uint32_t __attribute__((ext_vector_type(3)));
+using fp32x8_t   = float __attribute__((ext_vector_type(8)));
 using fp32x16_t  = float __attribute__((ext_vector_type(16)));
 using fp16x16_t  = _Float16 __attribute__((ext_vector_type(16)));
 using bf16x16_t  = bfloat16_t __attribute__((ext_vector_type(16)));
