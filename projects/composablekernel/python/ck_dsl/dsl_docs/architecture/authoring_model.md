@@ -266,7 +266,7 @@ manifest = make_gemm_manifest(artifact=art, block_m=..., block_n=..., block_k=..
                               threads_per_block=spec.block_size,
                               default_shape=(3328, 4096, 4096),
                               atoms=["mfma_f32_32x32x16_f16"])
-paths = write_artifact(art, Path("/tmp/ex"), manifest)
+paths = write_artifact(art, Path("build/ck_dsl_example"), manifest)
 ```
 
 `python -m ck_dsl.run_manifest` is the portable execution path for the resulting `(hsaco, manifest.json)`.

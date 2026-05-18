@@ -1,8 +1,7 @@
 # Optimization Playbook
 
-This is the practical loop for optimizing a `ck_dsl` kernel.
-
-It is based on `/workspace/OPTIMIZATION_RUNBOOK (1).md`, but narrowed to this DSL.
+This is the practical loop for optimizing a `ck_dsl` kernel. It is scoped to
+the DSL's compile, launch, verification, and inspection tools.
 
 ## The Loop
 

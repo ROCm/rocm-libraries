@@ -88,49 +88,23 @@ Hard facts:
 
 ## Validation Status
 
-The docs in this folder were written against the current code and validated against the live repo using the following commands (see `development/testing.md` for the full procedure and measured results):
+The docs in this folder are written against the current code. Run commands
+from the Composable Kernel repository root with the Python interpreter for
+your ROCm environment:
 
 ```bash
-# Static, in-process unit suite (no GPU required).
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
- /workspace/dsl_bake_off/venv/bin/python python/test/test_ck_dsl.py
-# -> 359 tests, OK (~1.8 s)
-# (count grows with each wave; +10 in for fused MoE,
-# +28 in for FMHA expansion + infra,
-# +20 in for Sage attention + sparse attention + infra)
+export PYTHONPATH=python
 
-# Generated example harness (builds HSACO, runs HIP).
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
- /workspace/dsl_bake_off/venv/bin/python python/test/test_ck_dsl_examples.py
-# -> 1 test (multi-subtest), OK (~204 s)
+PYTHONDONTWRITEBYTECODE=1 python python/test/test_ck_dsl.py
+PYTHONDONTWRITEBYTECODE=1 python python/test/test_ck_dsl_examples.py
 
-# Read-style implicit-GEMM conv repro: build HSACO then verify.
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
- -m ck_dsl.examples.bake_off_implicit_gemm --output-dir /tmp/ex08
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
- -m ck_dsl.run_manifest /tmp/ex08/*.hsaco /tmp/ex08/manifest.json --verify
-# -> verify max_abs_diff=7.6e-06 bad=0/1605632 Perf: 230.61 TFlops
-
-# Distribution-driven helpers (validates TileDistributionEncoding path).
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
- python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
- python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
-# -> max_abs=0.000e+00 (both)
-
-# CK Tile parity (small-op family vs torch reference).
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
- python/ck_dsl/examples/ck_tile_parity.py --op all
-# -> all OK on MI355X (see optimization/measured_results.md for the table)
-
-# Attention smoke (CK DSL vs AITER Triton, 2D + 3D paths).
-PYTHONPATH=python:/workspace/aiter /workspace/dsl_bake_off/venv/bin/python \
- python/ck_dsl/examples/attention/parity_unified_attention.py \
- --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
-# -> max_abs=0.0001831 in all lanes; CK 3D 132.88us vs Triton 3D 203.52us
+OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
+python -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
-Numbers are MI355X / gfx950 / ROCm 7.0.2 + torch 2.8.0+rocm7.0.2.
+See `development/testing.md` for the full procedure and
+`optimization/measured_results.md` for one recorded validation pass.
 
 ## Source Material
 
@@ -150,7 +124,7 @@ Conventional anchors:
 - Torch arg packing: `python/ck_dsl/runtime/torch_module.py`.
 - High-level compile: `python/ck_dsl/helpers/compile.py`.
 - Manifest schema: `python/ck_dsl/helpers/manifest.py`.
-- Optimization runbook: `/workspace/OPTIMIZATION_RUNBOOK (1).md`.
+- Optimization runbook: `gpu-op-optimization-runbook` Cursor skill.
 - DSL runbook compliance table: `python/ck_dsl/RUNBOOK_COMPLIANCE.md`.
 - Coordinate-transform DAG walkthrough: `python/ck_dsl/TRANSFORM_DAG.md`.
 - Helpers reference: `python/ck_dsl/helpers/README.md`.

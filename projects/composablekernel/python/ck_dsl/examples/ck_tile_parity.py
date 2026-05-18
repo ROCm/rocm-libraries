@@ -17,7 +17,7 @@ reference implementations and reports::
 
 Usage::
 
-    sudo -n /workspace/dsl_bake_off/venv/bin/python3 \\
+    PYTHONPATH=python python \\
         python/ck_dsl/examples/ck_tile_parity.py [--op all]
 
 The harness exits non-zero if any op's ``max_abs`` exceeds the per-op

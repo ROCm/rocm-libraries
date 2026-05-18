@@ -174,4 +174,4 @@ Each `gen.py` wraps a generator from `ck_dsl.examples` or `ck_dsl.instances`. Th
 | `python/ck_dsl/RUNBOOK_COMPLIANCE.md` | Runbook section -> DSL primitive mapping, plus measured pass results. |
 | `python/ck_dsl/dsl_docs/` | This documentation tree. |
 | `python/ck_dsl/examples/attention/README.md` | Attention parity methodology and numbers. |
-| `/workspace/OPTIMIZATION_RUNBOOK (1).md`| Long-form runbook (referenced throughout). |
+| `gpu-op-optimization-runbook` Cursor skill | Long-form GPU optimization runbook referenced throughout. |

@@ -50,7 +50,6 @@ from ..core.ir import (
 from ..helpers.atoms import MfmaAtom, mfma_atom
 from ..helpers.layouts import LdsLayout
 from ..helpers.loads import AsyncTileLoader
-from ..helpers.pipeline import SoftwarePipeline
 from ..helpers.schedule import SchedulePolicy
 from ..transforms import TensorDescriptor, embed, pad, unmerge
 
@@ -64,7 +63,7 @@ from ..transforms import TensorDescriptor, embed, pad, unmerge
 class ConvProblem:
     """The convolution shape parameters.
 
-    Layouts (matching `/workspace/dsl_bake_off/src/conv_problem.hpp`):
+    Layouts:
       A: NHWC fp16, shape `[N, Hi, Wi, C]`
       B: KRSC fp16, shape `[K, R, S, C]`
       D: NHWK fp16, shape `[N, Ho, Wo, K]`
@@ -477,21 +476,6 @@ def build_implicit_gemm_conv_auto(spec: ImplicitGemmConvSpec) -> KernelDef:
         lds_layout.validate_for_async()
     A_smem = b.smem_alloc(F16, lds_layout.storage_shape(block_m), name_hint="A_smem")
     B_smem = b.smem_alloc(F16, lds_layout.storage_shape(block_n), name_hint="B_smem")
-    # Async DMA only buys overlap when there is a second buffer to
-    # write into while the MFMA phase reads from the first. Force
-    # double-buffering whenever the pipeline opts into async DMA,
-    # regardless of the chosen `compv*` flag.
-    double_buffer = spec.pipeline == "compv4" or spec.async_dma
-    if double_buffer:
-        A_smem2 = b.smem_alloc(
-            F16, lds_layout.storage_shape(block_m), name_hint="A_smem2"
-        )
-        B_smem2 = b.smem_alloc(
-            F16, lds_layout.storage_shape(block_n), name_hint="B_smem2"
-        )
-    else:
-        A_smem2 = A_smem
-        B_smem2 = B_smem
 
     mfmas_m = spec.mfmas_per_warp_m
     mfmas_n = spec.mfmas_per_warp_n
@@ -724,18 +708,8 @@ def build_implicit_gemm_conv_auto(spec: ImplicitGemmConvSpec) -> KernelDef:
     #    body that runs the load + barrier + MFMA + barrier sequence.
     #    No software pipelining; each iter waits for its own load.
     #
-    # 2) Async path (`async_dma=True`): Python-unroll the K loop and
-    #    ping-pong between `A_smem`/`A_smem2` (and `B_smem`/`B_smem2`)
-    #    so that the load for iter `t+1` is issued while the MFMA for
-    #    iter `t` runs. This is the runbook §8.1 software-pipeline
-    #    pattern. The `s_waitcnt(vmcnt=0)` drains only the *previous*
-    #    iter's DMA before consumers read its LDS buffer; the next
-    #    iter's DMA is already in flight against the other buffer.
-    #
-    #    K_gemm / block_k is the number of unrolled iters; for the
-    #    bake-off shape this is 9 (576 / 64), generating ~9x more IR
-    #    but staying well under the 160 KiB LDS budget and the
-    #    per-kernel ISA size limits.
+    # 2) Async path (`async_dma=True`) is intentionally rejected below;
+    #    the current optimized path uses DSL-managed K-loop unrolling.
     # ---- K-loop: DSL AUTOMATIC OPTIMIZATION VERSION ----
     # This version uses a SINGLE unified loop body.
     # The DSL automatically:
@@ -747,10 +721,13 @@ def build_implicit_gemm_conv_auto(spec: ImplicitGemmConvSpec) -> KernelDef:
     if spec.unroll_k:
         # DSL automatic unrolling + barrier optimization
         for_op = b.scf_for_iter(
-            c0, c_K_gemm, c_block_k, accs,
+            c0,
+            c_K_gemm,
+            c_block_k,
+            accs,
             iv_name="k0",
             unroll=True,  # Phase 3: emit straight-line code
-            elide_trailing_barrier=True  # Phase 4a: elide inter-iteration barriers
+            elide_trailing_barrier=True,  # Phase 4a: elide inter-iteration barriers
         )
         with for_op as (k0, iter_vars):
             # Load phase: global load → LDS write
@@ -762,7 +739,7 @@ def build_implicit_gemm_conv_auto(spec: ImplicitGemmConvSpec) -> KernelDef:
 
             # Trailing barrier for correctness
             b.sync()  # DSL automatically elides this in iterations 0..N-2!
-                      # Kept only in final iteration for safety
+            # Kept only in final iteration for safety
 
             b.scf_yield(*new_accs)
         final_accs = for_op.results

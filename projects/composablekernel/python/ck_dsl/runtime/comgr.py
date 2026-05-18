@@ -15,8 +15,8 @@ The resulting HSACO bytes are returned to Python and can be handed
 straight to `hipModuleLoadData` (see `_hip_module.py`). No subprocesses,
 no `<hip/hip_runtime.h>` parsing, no clang spawn.
 
-The library is `/opt/rocm/lib/libamd_comgr.so`. ABI definitions come from
-`/opt/rocm/include/amd_comgr/amd_comgr.h`.
+The library is loaded from the default ROCm library locations or the dynamic
+linker search path. ABI definitions mirror ROCm's `amd_comgr.h`.
 """
 
 from __future__ import annotations

@@ -11,9 +11,9 @@ Per the validation pass on this checkout, every shipped example builds and verif
 
 | File                                              | Purpose                                                          | Reproduction command |
 |---------------------------------------------------|------------------------------------------------------------------|----------------------|
-| `bake_off_implicit_gemm.py`                       | Implicit-GEMM conv (bake-off 1). 230+ TFLOPS on MI355X.          | `python -m ck_dsl.examples.bake_off_implicit_gemm --output-dir /tmp/x` |
-| `bake_off_direct_conv_16c.py`                     | Direct grouped 16c conv (bake-off 2).                            | `python -m ck_dsl.examples.bake_off_direct_conv_16c --output-dir /tmp/x` |
-| `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv.                                          | `python -m ck_dsl.examples.bake_off_direct_conv_4c --output-dir /tmp/x` |
+| `bake_off_implicit_gemm.py`                       | Implicit-GEMM conv generator.                                    | `python -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"` |
+| `bake_off_direct_conv_16c.py`                     | Direct grouped 16c conv generator.                               | `python -m ck_dsl.examples.bake_off_direct_conv_16c --output-dir "$OUT_DIR"` |
+| `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv generator.                                | `python -m ck_dsl.examples.bake_off_direct_conv_4c --output-dir "$OUT_DIR"` |
 | `distribution_reduce_demo.py`                     | 1D distribution-driven row-reduce.                               | `python python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096` |
 | `distribution_2d_add_demo.py`                     | 2D distribution-driven elementwise add.                          | `python python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128` |
 | `ck_tile_parity.py`                               | Small-op parity harness vs torch reference. Returns non-zero if any op exceeds its tolerance gate. | `python python/ck_dsl/examples/ck_tile_parity.py --op all` |
@@ -42,10 +42,11 @@ Each directory has `gen.py` (builds the artifact) and `expected.json` (correctne
 Build + verify one example by hand:
 
 ```bash
+OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 PYTHONPATH=python python example/ck_tile/dsl/08_bake_off_implicit_gemm/gen.py \
-    --output-dir /tmp/ex08
+    --output-dir "$OUT_DIR"
 PYTHONPATH=python python -m ck_dsl.run_manifest \
-    /tmp/ex08/*.hsaco /tmp/ex08/manifest.json --verify
+    "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
 `expected.json` schema (per example, used by `test_ck_dsl_examples.py`):
@@ -66,11 +67,11 @@ The harness asserts `max_abs_diff = 0` for bit-exact kernels, `bad = 0` for conv
 ```bash
 # Generate dispatcher-set HSACOs for the hero subset, in parallel.
 PYTHONPATH=python python example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
-    --output-dir /tmp/sweep --subset compute --parallel 16
+    --output-dir "$OUT_DIR" --subset compute --parallel 16
 
 # Benchmark each entry with median + spread reporting.
-PYTHONPATH=python python -m ck_dsl.sweep_bench /tmp/sweep/sweep_manifest.json \
-    --attempts 3 --csv /tmp/sweep/results.csv
+PYTHONPATH=python python -m ck_dsl.sweep_bench "$OUT_DIR"/sweep_manifest.json \
+    --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
 
 `07_gemm_universal_sweep/gen.py` accepts:
@@ -105,30 +106,31 @@ The published 5-run mean numbers (`auto` geomean ~1.799x, `3D vs 3D` ~1.743x) co
 The full validation flow used during this docs pass:
 
 ```bash
-cd /workspace/rocm-libraries-streaming/projects/composablekernel
-VENV=/workspace/dsl_bake_off/venv/bin/python
+cd <composablekernel-checkout>
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH=python
+OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 # 1. Static unit suite.
-$VENV python/test/test_ck_dsl.py
+python python/test/test_ck_dsl.py
 
 # 2. Generated example harness (all CK Tile parity examples).
-$VENV python/test/test_ck_dsl_examples.py
+python python/test/test_ck_dsl_examples.py
 
 # 3. README-style implicit-GEMM conv build + verify.
-$VENV -m ck_dsl.examples.bake_off_implicit_gemm --output-dir /tmp/ex08
-$VENV -m ck_dsl.run_manifest /tmp/ex08/*.hsaco /tmp/ex08/manifest.json --verify
+python -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
 # 4. Distribution demos.
-$VENV python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
-$VENV python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
+python python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
+python python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
 
 # 5. Small-op parity.
-$VENV python/ck_dsl/examples/ck_tile_parity.py --op all
+python python/ck_dsl/examples/ck_tile_parity.py --op all
 
 # 6. Attention smoke.
-PYTHONPATH=python:/workspace/aiter $VENV \
+export AITER_PATH=<aiter-checkout>
+PYTHONPATH="python:${AITER_PATH}" python \
   python/ck_dsl/examples/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```

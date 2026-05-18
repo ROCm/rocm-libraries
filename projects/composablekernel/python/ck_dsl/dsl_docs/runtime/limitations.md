@@ -164,8 +164,8 @@ Do not dismiss large error as "fp16 noise" without evidence.
 
 Runtime launchers assume:
 
-- ROCm HIP runtime available (`/opt/rocm/lib/libamdhip64.so`).
-- libamd_comgr available for compile (`/opt/rocm/lib/libamd_comgr.so`).
+- ROCm HIP runtime available through the dynamic linker.
+- `libamd_comgr` available for compile through the dynamic linker.
 - torch stream resolution is valid for torch launch flows.
 - packed-args ctypes buffers and tensors remain alive until launch completion (`Runtime._pending_args` queue handles this when launches go through `KernelLauncher`).
 - workspace lifetimes are managed for pipelines (use `WorkspacePool` for stage intermediates).

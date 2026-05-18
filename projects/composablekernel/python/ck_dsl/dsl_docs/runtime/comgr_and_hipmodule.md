@@ -30,7 +30,8 @@ AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE  = 0x7
 AMD_COMGR_STATUS_SUCCESS                         = 0
 ```
 
-Library loading: the runtime tries `/opt/rocm/lib/libamd_comgr.so`, `/opt/rocm/lib/libamd_comgr.so.3`, then bare `libamd_comgr.so` via dlopen. Failure raises `ComgrError`.
+Library loading: the runtime checks the default ROCm library locations, then
+falls back to bare `libamd_comgr.so` via dlopen. Failure raises `ComgrError`.
 
 ## Entry Point
 
@@ -75,11 +76,8 @@ This is not currently exposed through `compile_kernel`; call `build_hsaco_from_l
 
 ### Library loading
 
-```text
-/opt/rocm/lib/libamdhip64.so
-/opt/rocm/lib/libamdhip64.so.7
-libamdhip64.so
-```
+The HIP module loader follows the same pattern: default ROCm library
+locations first, then bare `libamdhip64.so` via dlopen.
 
 Failure raises `HipError`.
 

@@ -1,7 +1,6 @@
 # RUNBOOK_COMPLIANCE.md — Optimization Runbook ⇄ DSL Primitive Mapping
 
-This doc maps each section of
-`/workspace/.cursor/skills/gpu-op-optimization-runbook/OPTIMIZATION_RUNBOOK.md`
+This doc maps each section of the `gpu-op-optimization-runbook` Cursor skill
 to the DSL primitive(s) that implement it. Use it as a checklist
 when authoring a new kernel: "section X says use lever Y → use
 helper Z".

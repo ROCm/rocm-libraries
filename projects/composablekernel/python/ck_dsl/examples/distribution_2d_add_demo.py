@@ -31,7 +31,7 @@ distributions) where the simpler sweep helper is insufficient.
 
 Run with::
 
-    sudo -n /workspace/dsl_bake_off/venv/bin/python3 \\
+    PYTHONPATH=python python \\
         python/ck_dsl/examples/distribution_2d_add_demo.py [--H ...] [--W ...]
 """
 

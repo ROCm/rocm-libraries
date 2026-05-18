@@ -153,4 +153,4 @@ For int8 GEMM:
  for `max(|x * gamma|)`.
 - `attention_unified.py` and `attention_tiled_*` for FP8 K/V cache integration (in progress).
 - `RUNBOOK_COMPLIANCE.md` §10 for the compiler-flag and metadata coverage.
-- `/workspace/OPTIMIZATION_RUNBOOK (1).md` §1.4 (Dtypes And Numerics) for tolerance policy.
+- `gpu-op-optimization-runbook` §1.4 (Dtypes And Numerics) for tolerance policy.

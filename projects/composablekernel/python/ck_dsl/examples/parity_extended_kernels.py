@@ -37,7 +37,7 @@ Caveats:
 
 Usage::
 
-    /workspace/dsl_bake_off/venv/bin/python3 \\
+    PYTHONPATH=python python \\
         python/ck_dsl/examples/parity_extended_kernels.py [--op all]
 
 The harness exits non-zero if any kernel's max abs diff exceeds the

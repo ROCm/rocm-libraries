@@ -31,7 +31,7 @@ encoding.
 
 Run with::
 
-    sudo -n /workspace/dsl_bake_off/venv/bin/python3 \\
+    PYTHONPATH=python python \\
         python/ck_dsl/examples/distribution_reduce_demo.py [--M ...] [--N ...]
 """
 

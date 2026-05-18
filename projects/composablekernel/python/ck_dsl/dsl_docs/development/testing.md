@@ -15,22 +15,22 @@ python/ck_dsl/examples/ck_tile_parity.py                       # small-op parity
 
 ## Environment
 
-Default venv used by the README and this doc tree:
+Use the Python interpreter from your ROCm development environment:
 
 ```text
-/workspace/dsl_bake_off/venv/bin/python
+python
 ```
 
 Required environment:
 
-- ROCm 7.x at `/opt/rocm` (libamd_comgr, libamdhip64).
+- ROCm 7.x with `libamd_comgr` and `libamdhip64` discoverable by the dynamic linker.
 - Python 3.12 with `torch` built for ROCm.
 - AMDGPU device visible to HIP (e.g. MI300X, MI325X, MI350X, MI355X for the gfx950 default ISA).
 
 Verify quickly:
 
 ```bash
-/workspace/dsl_bake_off/venv/bin/python - <<'PY'
+python - <<'PY'
 import sys
 print("python", sys.version)
 import torch
@@ -44,7 +44,7 @@ PY
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
-  /workspace/dsl_bake_off/venv/bin/python python/test/test_ck_dsl.py
+  python python/test/test_ck_dsl.py
 ```
 
 In-process. Tests:
@@ -63,7 +63,7 @@ These tests do not require a GPU. They prove IR builds, LLVM text shape, and hel
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
-  /workspace/dsl_bake_off/venv/bin/python python/test/test_ck_dsl_examples.py
+  python python/test/test_ck_dsl_examples.py
 ```
 
 Discovers every `example/ck_tile/dsl/<N>_*/gen.py` with an `expected.json`. For each:
@@ -81,21 +81,22 @@ Expected runtime: ~3-4 minutes.
 ## Manual Build + Verify One Instance
 
 ```bash
-cd /workspace/rocm-libraries-streaming/projects/composablekernel
+cd <composablekernel-checkout>
 
 # Build the implicit-GEMM conv example.
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
-    -m ck_dsl.examples.bake_off_implicit_gemm --output-dir /tmp/ex08
+OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
+PYTHONPATH=python python \
+    -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 
 # Inspect what was emitted.
-ls /tmp/ex08
+ls "$OUT_DIR"
 # ck_dsl_ex08_bake_off_implicit_gemm_*.hsaco
 # manifest.json
 # (and .ir.txt / .ll if write_ir_text / write_llvm_text are on)
 
 # Run + verify.
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
-    -m ck_dsl.run_manifest /tmp/ex08/*.hsaco /tmp/ex08/manifest.json --verify
+PYTHONPATH=python python \
+    -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
 The runner prints `verify max_abs_diff=... bad=K/N` and `Perf: <ms>, <TFlops>, <GB/s>`.
@@ -103,10 +104,10 @@ The runner prints `verify max_abs_diff=... bad=K/N` and `Perf: <ms>, <TFlops>, <
 ## Distribution Demos
 
 ```bash
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
+PYTHONPATH=python python \
   python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
 
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
+PYTHONPATH=python python \
   python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
 ```
 
@@ -115,7 +116,7 @@ These exercise the distribution-driven `load_tile` / `store_tile` path end-to-en
 ## Small-Op Parity
 
 ```bash
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
+PYTHONPATH=python python \
   python/ck_dsl/examples/ck_tile_parity.py --op all
 ```
 
@@ -124,16 +125,18 @@ Runs every shipped small-op against a torch reference with per-op tolerance gate
 ## Attention Parity
 
 ```bash
-PYTHONPATH=python:/workspace/aiter \
-  /workspace/dsl_bake_off/venv/bin/python \
+export AITER_PATH=<aiter-checkout>
+PYTHONPATH="python:${AITER_PATH}" \
+  python \
   python/ck_dsl/examples/attention/parity_unified_attention.py \
   --attempts 10 --warmup 5 \
   --paths auto,2d,3d \
   --set default \
-  --report /tmp/parity.json
+  --report "${OUT_DIR:-$(mktemp -d)}"/parity.json
 ```
 
-Requires AITER (`/workspace/aiter`) for the Triton baseline and the reference attention path. The harness:
+Requires AITER for the Triton baseline and the reference attention path. Set
+`AITER_PATH` to that checkout before running the harness. The harness:
 
 1. Builds AITER unified-attention inputs (paged KV, GQA).
 2. Runs Triton with the matching kernel path.
@@ -148,17 +151,17 @@ The harness writes a JSON report. Use the `--scenario` filter for targeted rerun
 Build many configs in parallel:
 
 ```bash
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
+PYTHONPATH=python python \
   example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
-  --output-dir /tmp/sweep --subset compute --parallel 16
+  --output-dir "$OUT_DIR" --subset compute --parallel 16
 ```
 
 Benchmark each with median + spread:
 
 ```bash
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
-  -m ck_dsl.sweep_bench /tmp/sweep/sweep_manifest.json \
-  --attempts 3 --csv /tmp/sweep/results.csv
+PYTHONPATH=python python \
+  -m ck_dsl.sweep_bench "$OUT_DIR"/sweep_manifest.json \
+  --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
 
 The benchmark driver writes a CSV: one row per `(kernel, shape)` with `median_tflops, min_tflops, max_tflops, spread_pct, max_abs_diff`. Use `benchmark_manifest(..., attempts=5, discard_first=True, verify_first=True)` for one manifest.
@@ -184,11 +187,10 @@ ir_stats = analyze_llvm_ir(art.llvm_text)
 print(ir_stats.as_dict())
 
 from pathlib import Path
-Path("/tmp/k.hsaco").write_bytes(art.hsaco)
+out = Path.cwd() / "k.hsaco"
+out.write_bytes(art.hsaco)
 hsaco_stats = analyze_hsaco(
-    "/tmp/k.hsaco",
-    objdump="/opt/rocm/llvm/bin/llvm-objdump",
-    readelf="/opt/rocm/llvm/bin/llvm-readelf",
+    str(out),
 )
 print(hsaco_stats.isa.as_dict())
 print(hsaco_stats.resources.as_dict())
@@ -254,17 +256,17 @@ Reports MFMA delta, vector store delta, VGPR delta, LDS delta — the runbook-re
 A two-minute smoke for a clean clone:
 
 ```bash
-cd /workspace/rocm-libraries-streaming/projects/composablekernel
-VENV=/workspace/dsl_bake_off/venv/bin/python
+cd <composablekernel-checkout>
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH=python
+OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-$VENV python/test/test_ck_dsl.py                       # static
-$VENV -m ck_dsl.examples.bake_off_implicit_gemm \
-    --output-dir /tmp/ckdsl_smoke
-$VENV -m ck_dsl.run_manifest \
-    /tmp/ckdsl_smoke/*.hsaco /tmp/ckdsl_smoke/manifest.json --verify
-$VENV python/ck_dsl/examples/ck_tile_parity.py --op elementwise
+python python/test/test_ck_dsl.py                       # static
+python -m ck_dsl.examples.bake_off_implicit_gemm \
+    --output-dir "$OUT_DIR"
+python -m ck_dsl.run_manifest \
+    "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
+python python/ck_dsl/examples/ck_tile_parity.py --op elementwise
 ```
 
 If all four pass, the build, COMGR, HIP module, launcher, manifest, and at least one production instance work end-to-end.

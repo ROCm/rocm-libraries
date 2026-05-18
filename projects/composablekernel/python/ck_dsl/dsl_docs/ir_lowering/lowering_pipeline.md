@@ -164,7 +164,8 @@ amd_comgr_do_action(LINK_RELOCATABLE_TO_EXECUTABLE)  # HSACO
 amd_comgr_action_data_get_data(EXECUTABLE)           # extract bytes
 ```
 
-Libraries are loaded by path; the runtime tries `/opt/rocm/lib/libamd_comgr.so`, `.so.3`, then bare `libamd_comgr.so`. The HSACO bytes returned are ready for `hipModuleLoadData`.
+Libraries are loaded from the default ROCm library locations or the dynamic
+linker search path. The HSACO bytes returned are ready for `hipModuleLoadData`.
 
 `ComgrTimings(bc, relocatable, executable)` returns per-stage seconds; `compile_kernel` converts to ms in the artifact.
 
@@ -230,9 +231,7 @@ The runbook requires evidence that a speed claim maps to real generated code. Us
 from ck_dsl import analyze_llvm_ir, analyze_hsaco
 
 ir_stats   = analyze_llvm_ir(art.llvm_text)
-hsaco_stats = analyze_hsaco(hsaco_path,
-                            objdump="/opt/rocm/llvm/bin/llvm-objdump",
-                            readelf="/opt/rocm/llvm/bin/llvm-readelf")
+hsaco_stats = analyze_hsaco(hsaco_path)
 ```
 
 Look for:

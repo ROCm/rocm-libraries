@@ -23,7 +23,7 @@ Usage::
 
     python -m ck_dsl.examples.hip_lowering_parity
     python -m ck_dsl.examples.hip_lowering_parity --compile-hip --case gemm
-    /workspace/dsl_bake_off/venv/bin/python3 \\
+    PYTHONPATH=python python \\
         python/ck_dsl/examples/hip_lowering_parity.py --bench-smoke
 """
 

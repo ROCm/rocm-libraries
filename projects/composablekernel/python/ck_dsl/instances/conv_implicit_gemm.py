@@ -3,8 +3,7 @@
 
 """Implicit-GEMM convolution kernel instance (NHWC × KRSC -> NHWK).
 
-This is bake-off 1: the same convolution problem as
-`/workspace/dsl_bake_off/src/conv_problem.hpp`, but authored entirely
+This is the standard implicit-GEMM convolution problem authored entirely
 through the ck_dsl IR + coordinate-transform DAG. It mirrors how CK
 Tile expresses convolution (`tensor_descriptor` with
 `unmerge_transform` for `(m -> n, ho, wo)`, `embed_transform` for
@@ -80,7 +79,7 @@ from ..transforms import TensorDescriptor, embed, pad, unmerge
 class ConvProblem:
     """The convolution shape parameters.
 
-    Layouts (matching `/workspace/dsl_bake_off/src/conv_problem.hpp`):
+    Layouts:
       A: NHWC fp16, shape `[N, Hi, Wi, C]`
       B: KRSC fp16, shape `[K, R, S, C]`
       D: NHWK fp16, shape `[N, Ho, Wo, K]`

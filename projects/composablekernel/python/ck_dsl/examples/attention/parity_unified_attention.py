@@ -3,9 +3,10 @@
 
 """Parity + benchmark harness comparing Triton and CK DSL unified attention.
 
-Run with the venv's python interpreter (it has torch + triton + aiter installed):
+Run with a Python interpreter that has torch, triton, and AITER available:
 
-    sudo -n /workspace/dsl_bake_off/venv/bin/python3 \\
+    export AITER_PATH=<aiter-checkout>
+    PYTHONPATH="python:${AITER_PATH}" python \\
         python/ck_dsl/examples/attention/parity_unified_attention.py [--scenario name]
 
 The harness:
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +34,15 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[5]  # composablekernel/
 sys.path.insert(0, str(ROOT / "python"))
-sys.path.insert(0, "/workspace/aiter")
+aiter_path = os.environ.get("AITER_PATH")
+if aiter_path:
+    sys.path.insert(0, aiter_path)
+else:
+    for parent in ROOT.parents:
+        candidate = parent / "aiter"
+        if candidate.exists():
+            sys.path.insert(0, str(candidate))
+            break
 
 import aiter.ops.triton.attention.unified_attention as _uam  # noqa: E402
 from aiter.ops.triton.attention.unified_attention import unified_attention  # noqa: E402

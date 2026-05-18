@@ -54,7 +54,10 @@ hsaco, timings = build_hsaco_from_llvm_ir(
 )
 ```
 
-The driver loads `libamd_comgr.so` via ctypes from `/opt/rocm/lib/libamd_comgr.so`, `.so.3`, or bare lookup; passes the IR text through `COMPILE_SOURCE_TO_BC -> CODEGEN_BC_TO_RELOCATABLE -> LINK_RELOCATABLE_TO_EXECUTABLE`; and extracts the executable bytes.
+The driver loads `libamd_comgr.so` via ctypes from the default ROCm library
+locations or the dynamic linker search path; passes the IR text through
+`COMPILE_SOURCE_TO_BC -> CODEGEN_BC_TO_RELOCATABLE -> LINK_RELOCATABLE_TO_EXECUTABLE`;
+and extracts the executable bytes.
 
 `ComgrTimings(bc, relocatable, executable)` returns per-stage seconds. `compile_kernel` converts to milliseconds for `KernelArtifact.timings`.
 
@@ -254,8 +257,6 @@ from ck_dsl import analyze_llvm_ir, analyze_hsaco
 ir_stats   = analyze_llvm_ir(art.llvm_text)
 hsaco_stats = analyze_hsaco(
     hsaco_path,
-    objdump="/opt/rocm/llvm/bin/llvm-objdump",
-    readelf="/opt/rocm/llvm/bin/llvm-readelf",
 )
 print(hsaco_stats.isa.as_dict())
 print(hsaco_stats.resources.as_dict())
@@ -303,10 +304,11 @@ PYTHONPATH=python python -m ck_dsl.run_manifest out.hsaco manifest.json --verify
 ### Sweep + benchmark
 
 ```bash
+OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 PYTHONPATH=python python example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
-    --output-dir /tmp/sweep --subset compute --parallel 16
-PYTHONPATH=python python -m ck_dsl.sweep_bench /tmp/sweep/sweep_manifest.json \
-    --attempts 3 --csv /tmp/sweep/results.csv
+    --output-dir "$OUT_DIR" --subset compute --parallel 16
+PYTHONPATH=python python -m ck_dsl.sweep_bench "$OUT_DIR"/sweep_manifest.json \
+    --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
 
 ## Runtime Failure Modes

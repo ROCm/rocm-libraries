@@ -1,6 +1,6 @@
 # Measured Results From The Validation Pass
 
-This page records the measurements that landed during the documentation validation pass on this checkout. All numbers are MI355X / gfx950 / ROCm 7.0.2 / torch 2.8.0+rocm7.0.2.git245bf6ed / Python 3.12.3 with `PYTHONPATH=python:/workspace/aiter` and the venv at `/workspace/dsl_bake_off/venv/bin/python`. Reproduction commands are below each table.
+This page records the measurements that landed during the documentation validation pass on this checkout. All numbers are MI355X / gfx950 / ROCm 7.0.2 / torch 2.8.0+rocm7.0.2.git245bf6ed / Python 3.12.3. Reproduction commands are below each table; run them from the Composable Kernel repository root with the Python interpreter for your ROCm environment.
 
 These numbers are smoke-grade — they confirm the kernels build, verify, and reach a sane TFLOPS / latency band. They are **not** the hero numbers; for that, run the full `examples/attention/parity_unified_attention.py --attempts 10 --warmup 5` harness or the `RUNBOOK_COMPLIANCE.md` empirical sweeps with median + spread reporting.
 
@@ -8,7 +8,7 @@ These numbers are smoke-grade — they confirm the kernels build, verify, and re
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
-  /workspace/dsl_bake_off/venv/bin/python python/test/test_ck_dsl.py
+  python python/test/test_ck_dsl.py
 ```
 
 Result on this checkout: **286 tests, OK** in ~1.7 s. Covers IR construction, LLVM lowering text shape, transform DAG, helpers, and instance smoke tests.
@@ -18,7 +18,7 @@ Result on this checkout: **286 tests, OK** in ~1.7 s. Covers IR construction, LL
 `python/ck_dsl/dsl_docs/development/verify_dsl_docs.py` imports every symbol referenced by this documentation tree, exercises every IR builder method, lowers every spec dataclass to LLVM / HIP / CK Tile, builds HSACO via libamd_comgr, and launches small kernels via `KernelLauncher`, `PipelineLauncher`, and `time_launches`. It exits non-zero if any check fails.
 
 ```bash
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
+PYTHONPATH=python python \
   python/ck_dsl/dsl_docs/development/verify_dsl_docs.py
 ```
 
@@ -51,7 +51,7 @@ A small handful of doc inaccuracies surfaced during this verification and were c
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
-  /workspace/dsl_bake_off/venv/bin/python python/test/test_ck_dsl_examples.py
+  python python/test/test_ck_dsl_examples.py
 ```
 
 Result: **1 test (multi-subtest), OK** in 204.231 s.
@@ -67,16 +67,17 @@ The harness discovers every `example/ck_tile/dsl/<N>_*/gen.py` with an adjacent 
 Build + verify in one shot from the README-style entry:
 
 ```bash
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
-  -m ck_dsl.examples.bake_off_implicit_gemm --output-dir /tmp/ex08
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
-  -m ck_dsl.run_manifest /tmp/ex08/*.hsaco /tmp/ex08/manifest.json --verify
+OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
+PYTHONPATH=python python \
+  -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+PYTHONPATH=python python \
+  -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
 Output:
 
 ```text
-emitted /tmp/ex08/ck_dsl_ex08_bake_off_implicit_gemm_N8H56W56C64_K64R3S3_t64x64x64_w2x2_a32x32x16_mem_cshuffle.hsaco
+emitted $OUT_DIR/ck_dsl_ex08_bake_off_implicit_gemm_N8H56W56C64_K64R3S3_t64x64x64_w2x2_a32x32x16_mem_cshuffle.hsaco
   (7656 bytes) in 17.21 ms total
   ir_build=0.6ms  lower=0.4ms  comgr_bc=12.8ms  reloc=1.8ms  exe=1.5ms
 verify max_abs_diff=7.6293945e-06  bad=0/1605632
@@ -90,11 +91,11 @@ Shape: N=8, Hi=Wi=56, C=K=64, R=S=3, pad=1, stride=1, dilation=1. Implicit-GEMM 
 ## Distribution-Driven Helpers
 
 ```bash
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
+PYTHONPATH=python python \
   python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
 # -> distribution-driven reduce  M=32 N=4096 bs=256 vec=8  max_abs=0.000e+00
 
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
+PYTHONPATH=python python \
   python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
 # -> 2D distribution-driven add  H=64 W=128 tile=(32,64) vec=8  max_abs=0.000e+00
 ```
@@ -104,7 +105,7 @@ Both demos go through the full `TileDistributionEncoding -> make_static_tile_dis
 ## CK Tile Small-Op Parity
 
 ```bash
-PYTHONPATH=python /workspace/dsl_bake_off/venv/bin/python \
+PYTHONPATH=python python \
   python/ck_dsl/examples/ck_tile_parity.py --op all
 ```
 
@@ -147,11 +148,13 @@ All passes within the per-op tolerance table (`examples/ck_tile_parity.py::TOL`)
 ## Attention Smoke
 
 ```bash
-PYTHONPATH=python:/workspace/aiter \
-  /workspace/dsl_bake_off/venv/bin/python \
+OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
+export AITER_PATH=<aiter-checkout>
+PYTHONPATH="python:${AITER_PATH}" \
+  python \
   python/ck_dsl/examples/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d \
-  --report /tmp/ckdsl_attention_smoke.json
+  --report "$OUT_DIR"/ckdsl_attention_smoke.json
 ```
 
 Scenario `decode_d128_b16`: `head_size=128`, `block_size=16`, `num_query_heads=16`, `num_kv_heads=2`, `seq_lens=[(1,1024),(1,2048),(1,4096),(1,512)]`, fp16.
@@ -213,21 +216,21 @@ These are listed not as gaps in the DSL, but as places where additional measurem
 Single command to reproduce the full validation pass in this doc:
 
 ```bash
-cd /workspace/rocm-libraries-streaming/projects/composablekernel
-VENV=/workspace/dsl_bake_off/venv/bin/python
+cd <composablekernel-checkout>
+OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python $VENV python/test/test_ck_dsl.py
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python $VENV python/test/test_ck_dsl_examples.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python python/test/test_ck_dsl.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python python/test/test_ck_dsl_examples.py
 
-rm -rf /tmp/ckdsl_ex08
-PYTHONPATH=python $VENV -m ck_dsl.examples.bake_off_implicit_gemm --output-dir /tmp/ckdsl_ex08
-PYTHONPATH=python $VENV -m ck_dsl.run_manifest /tmp/ckdsl_ex08/*.hsaco /tmp/ckdsl_ex08/manifest.json --verify
+PYTHONPATH=python python -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+PYTHONPATH=python python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-PYTHONPATH=python $VENV python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
-PYTHONPATH=python $VENV python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
-PYTHONPATH=python $VENV python/ck_dsl/examples/ck_tile_parity.py --op all
+PYTHONPATH=python python python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
+PYTHONPATH=python python python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
+PYTHONPATH=python python python/ck_dsl/examples/ck_tile_parity.py --op all
 
-PYTHONPATH=python:/workspace/aiter $VENV \
+export AITER_PATH=<aiter-checkout>
+PYTHONPATH="python:${AITER_PATH}" python \
   python/ck_dsl/examples/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```

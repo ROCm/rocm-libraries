@@ -1,6 +1,6 @@
 # Optimization Runbook Mapping
 
-This page maps `/workspace/OPTIMIZATION_RUNBOOK (1).md` to concrete `ck_dsl` practices and primitives.
+This page maps the `gpu-op-optimization-runbook` Cursor skill to concrete `ck_dsl` practices and primitives.
 
 The runbook's core rule applies directly:
 

@@ -42,10 +42,9 @@ CK-3D, which is **not** apples-to-apples. The three tables resolve that:
 ## Running
 
 ```bash
-cd /workspace/rocm-libraries-streaming/projects/composablekernel
-sudo -n env \
-  "PYTHONPATH=$(pwd)/python:/workspace/aiter" \
-  /workspace/dsl_bake_off/venv/bin/python3 \
+cd <composablekernel-checkout>
+export AITER_PATH=<aiter-checkout>
+PYTHONPATH="python:${AITER_PATH}" python \
   python/ck_dsl/examples/attention/parity_unified_attention.py \
   --attempts 10 --warmup 5 \
   --report ck/dsl/unified_attention_parity.json
@@ -107,8 +106,7 @@ setup (torch CUDA events for Triton, HIP events for CK DSL), which
 under-measured CK lanes for some shapes.
 
 Numbers below are the **mean of 5 full harness runs** (each run uses
-10 timed iterations after 5 warmups), written to
-`/tmp/ckdsl_attention_5x/summary_mean.json` in the validation run.
+10 timed iterations after 5 warmups).
 
 ### Auto vs Auto — each backend's own selector
 
