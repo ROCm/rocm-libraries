@@ -291,12 +291,12 @@
       __builtin_amdgcn_processor_is("gfx1150") || __builtin_amdgcn_processor_is("gfx1151") ||     \
       __builtin_amdgcn_processor_is("gfx1152") || __builtin_amdgcn_processor_is("gfx1153") ||     \
       __builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201"))       \
-         ? 0x31004000                                                                              \
+         ? 0x31004000u                                                                             \
      : ((__builtin_amdgcn_processor_is("gfx1030") || __builtin_amdgcn_processor_is("gfx1031") ||  \
          __builtin_amdgcn_processor_is("gfx1032") || __builtin_amdgcn_processor_is("gfx1034") ||  \
          __builtin_amdgcn_processor_is("gfx1035") || __builtin_amdgcn_processor_is("gfx1036"))    \
-            ? 0x31014000                                                                           \
-            : 0x00020000))
+            ? 0x31014000u                                                                          \
+            : 0x00020000u))
 #else
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0xffffffff // Unknown device
 #endif
