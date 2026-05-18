@@ -104,6 +104,30 @@ if(BUILD_BENCHMARK_TUNING)
     message(FATAL_ERROR "Configuration tuning is currently supported for AMD GPUs only")
   endif()
 
+  set(CMAKE_CXX_STANDARD 17)
+
+  add_executable(benchmark_rocrand_tuning
+    tuning_host_api.cpp
+    tuning/lfsr113.cpp
+    tuning/mrg31k3p.cpp
+    tuning/mrg32k3a.cpp
+    tuning/mt19937.cpp
+    tuning/mtgp32.cpp
+    tuning/philox.cpp
+    tuning/threefry2x32_20.cpp
+    tuning/threefry2x64_20.cpp
+    tuning/threefry4x32_20.cpp
+    tuning/threefry4x64_20.cpp
+    tuning/xorwow.cpp
+  )
+
+  target_link_libraries(benchmark_rocrand_tuning PRIVATE rocrand hip::device)
+  target_include_directories(benchmark_rocrand_tuning PRIVATE
+    "${CMAKE_BINARY_DIR}/benchmark"
+    "${PROJECT_SOURCE_DIR}/benchmark"
+    "${PROJECT_SOURCE_DIR}/library/src"
+    "${PROJECT_SOURCE_DIR}/../../shared/primbench")
+
   set(BENCHMARK_TUNING_MIN_GRID_SIZE 32768 CACHE STRING
     "Configurations with fewer total number of threads are omitted")
   set(BENCHMARK_TUNING_THREAD_OPTIONS "64, 128, 256, 512, 1024" CACHE STRING
@@ -111,18 +135,20 @@ if(BUILD_BENCHMARK_TUNING)
   set(BENCHMARK_TUNING_BLOCK_OPTIONS "64, 128, 256, 512, 1024, 2048" CACHE STRING
     "Comma-separated list of benchmarked grid sizes")
 
-  configure_file("${PROJECT_SOURCE_DIR}/benchmark/benchmark_tuning_setup.hpp.in"
-    "${CMAKE_BINARY_DIR}/benchmark/benchmark_tuning_setup.hpp")
+  target_compile_definitions(benchmark_rocrand_tuning PRIVATE
+      BENCHMARK_TUNING_MIN_GRID_SIZE=${BENCHMARK_TUNING_MIN_GRID_SIZE}
+      BENCHMARK_TUNING_THREAD_OPTIONS=${BENCHMARK_TUNING_THREAD_OPTIONS}
+      BENCHMARK_TUNING_BLOCK_OPTIONS=${BENCHMARK_TUNING_BLOCK_OPTIONS}
+  )
 
-  set(CMAKE_CXX_STANDARD 17)
-  add_executable(benchmark_rocrand_tuning tuning_host_api.cpp)
-  target_link_libraries(benchmark_rocrand_tuning PRIVATE rocrand hip::device)
-  target_link_libraries(benchmark_rocrand_tuning PRIVATE benchmark::benchmark) # TODO: REMOVE!
-  target_include_directories(benchmark_rocrand_tuning PRIVATE
-    "${CMAKE_BINARY_DIR}/benchmark"
-    "${PROJECT_SOURCE_DIR}/benchmark"
-    "${PROJECT_SOURCE_DIR}/library/src"
-    ../../../shared/primbench)
+  target_compile_definitions(benchmark_rocrand_tuning PUBLIC BRANCH_NAME="${BRANCH_NAME}")
+  target_compile_definitions(benchmark_rocrand_tuning PUBLIC COMMIT_HASH="${COMMIT_HASH}")
+
+  if(WIN32)
+    target_compile_definitions(benchmark_rocrand_tuning PRIVATE PRIMBENCH_NO_MONITORING)
+  else()
+    target_link_libraries(benchmark_rocrand_tuning PRIVATE amd_smi)
+  endif()
 
   if(NOT WIN32)
     foreach(amdgpu_target ${AMDGPU_TARGETS})

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,23 +18,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#pragma once
-
-#include <array>
+#include "tuning_utils.hpp"
 
 namespace benchmark_tuning
 {
 
-template<class... Ts>
-constexpr auto unsigned_array(const Ts... args)
+void queue_mrg31k3p(primbench::executor&       executor,
+                    size_t                     dimensions,
+                    size_t                     offset,
+                    bool                       benchmark_host,
+                    const std::vector<double>& poisson_lambdas)
 {
-    return std::array{static_cast<unsigned int>(args)...};
+    queue_generator<mrg31k3p_generator_template>(executor,
+                                                 dimensions,
+                                                 offset,
+                                                 benchmark_host,
+                                                 poisson_lambdas);
 }
-
-// clang-format off
-constexpr inline unsigned int min_benchmarked_grid_size = @BENCHMARK_TUNING_MIN_GRID_SIZE@;
-constexpr inline auto thread_options = unsigned_array(@BENCHMARK_TUNING_THREAD_OPTIONS@);
-constexpr inline auto block_options = unsigned_array(@BENCHMARK_TUNING_BLOCK_OPTIONS@);
-// clang-format on
 
 } // namespace benchmark_tuning

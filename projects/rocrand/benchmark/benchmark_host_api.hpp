@@ -149,7 +149,7 @@ struct host_api_benchmark : public primbench::benchmark_interface
         , m_offset(offset)
         , m_benchmark_host(benchmark_host)
         , m_poisson_lambda(poisson_lambda)
-    { }
+    {}
 
     primbench::json meta() const override
     {

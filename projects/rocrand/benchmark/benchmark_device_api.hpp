@@ -641,9 +641,9 @@ struct runner<rand_state_scrambled_sobol64_t>
 // Provide optional create and destroy functions for the generators.
 struct generator_type
 {
-    static void create() { }
+    static void create() {}
 
-    static void destroy() { }
+    static void destroy() {}
 };
 
 template<typename Engine>
@@ -745,7 +745,7 @@ struct generator_log_normal_double : public generator_type
 template<typename Engine>
 struct generator_poisson : public generator_type
 {
-    generator_poisson(double l) : lambda(l) { }
+    generator_poisson(double l) : lambda(l) {}
 
     typedef unsigned int data_type;
 
@@ -761,7 +761,7 @@ struct generator_poisson : public generator_type
 template<typename Engine>
 struct generator_discrete_poisson : public generator_type
 {
-    generator_discrete_poisson(double l) : lambda(l) { }
+    generator_discrete_poisson(double l) : lambda(l) {}
 
     typedef unsigned int data_type;
 
@@ -839,7 +839,7 @@ struct device_api_benchmark : public primbench::benchmark_interface
         , m_dimensions(dimensions)
         , m_offset(offset)
         , m_poisson_lambda(poisson_lambda)
-    { }
+    {}
 
     primbench::json meta() const override
     {
