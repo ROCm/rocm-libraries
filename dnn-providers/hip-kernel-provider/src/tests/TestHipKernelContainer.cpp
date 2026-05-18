@@ -57,7 +57,7 @@ TEST(TestHipKernelContainer, CopyEngineIdsWithBufferContainsHipKernelEngineId)
     EXPECT_EQ(numEngines, EXPECTED_ENGINES);
 
     bool containsHipKernelEngine = false;
-    for(int64_t engine : engineIds)
+    for(const int64_t engine : engineIds)
     {
         containsHipKernelEngine |= (engine == hipdnn_data_sdk::utilities::HIP_KERNEL_ENGINE_ID);
     }
