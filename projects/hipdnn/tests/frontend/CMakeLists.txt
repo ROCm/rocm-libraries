@@ -50,11 +50,15 @@ add_executable(
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationResampleFwdDescriptorLifting.cpp
+    IntegrationResampleFwdDescriptorLowering.cpp
     IntegrationReductionDescriptorLifting.cpp
     IntegrationReductionDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLifting.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
+    IntegrationRMSNormBackwardDescriptorLowering.cpp
+    IntegrationRMSNormBackwardDescriptorLifting.cpp
     IntegrationSetPluginPathsExt.cpp
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaBwdDescriptorLowering.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaBwdLifting.cpp>

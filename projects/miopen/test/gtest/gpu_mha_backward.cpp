@@ -376,6 +376,11 @@ protected:
             checkOutput(miopenTensorMhaDK, "tensor dK", dKDesc_ref);
             checkOutput(miopenTensorMhaDV, "tensor dV", dVDesc_ref);
         }
+
+        for(auto& solution : solutions)
+        {
+            ASSERT_EQ(miopenDestroySolution(solution), miopenStatusSuccess);
+        }
     }
 
     void TearDown() override

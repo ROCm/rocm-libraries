@@ -906,6 +906,79 @@ TEST_F(TestGraph, RMSNormNodeCreationWithBias)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
+TEST_F(TestGraph, RMSNormBackwardNodeCreation)
+{
+    Graph graph;
+    graph.set_compute_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    // Create input tensors
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto invRms = std::make_shared<TensorAttributes>();
+    invRms->set_dim({1, 1, 1, 1}).set_stride({1, 1, 1, 1}).set_data_type(DataType::FLOAT);
+
+    // Create attributes (default: no dbias)
+    RMSNormBackwardAttributes attributes;
+    attributes.set_name("RMSNormBackwardNode");
+
+    // Call graph method
+    auto [dx, dscale, dbias] = graph.rmsnorm_backward(dy, x, scale, invRms, attributes);
+
+    EXPECT_EQ(dx->get_name(), "RMSNormBackwardNode::DX");
+    EXPECT_TRUE(dx->get_is_virtual());
+
+    EXPECT_EQ(dscale->get_name(), "RMSNormBackwardNode::DSCALE");
+    EXPECT_TRUE(dscale->get_is_virtual());
+
+    // dbias is not computed by default
+    EXPECT_EQ(dbias, nullptr);
+
+    // Verify graph validates successfully
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, RMSNormBackwardNodeCreationWithDbias)
+{
+    Graph graph;
+    graph.set_compute_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto invRms = std::make_shared<TensorAttributes>();
+    invRms->set_dim({1, 1, 1, 1}).set_stride({1, 1, 1, 1}).set_data_type(DataType::FLOAT);
+
+    RMSNormBackwardAttributes attributes;
+    attributes.set_name("RMSNormBackwardNode").set_compute_dbias(true);
+
+    auto [dx, dscale, dbias] = graph.rmsnorm_backward(dy, x, scale, invRms, attributes);
+
+    ASSERT_NE(dbias, nullptr);
+    EXPECT_EQ(dbias->get_name(), "RMSNormBackwardNode::DBIAS");
+    EXPECT_TRUE(dbias->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
 TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
 {
     Graph graph;

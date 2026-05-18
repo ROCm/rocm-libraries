@@ -26,6 +26,7 @@ import math
 from functools import lru_cache
 
 from .Architectures import SUPPORTED_ISA
+from .Types import IsaVersion
 
 ################################################################################
 # Enumerate Valid Solution Parameters
@@ -63,7 +64,7 @@ validMacroTileSides = [
     768,
 ]
 validMacroTiles = []
-validISA = [(0, 0, 0)]
+validISA = [IsaVersion(0, 0, 0)]
 validISA.extend(SUPPORTED_ISA)
 for i in validMacroTileSides:
     for j in validMacroTileSides:
@@ -312,6 +313,16 @@ validParameters = { # we need to make sure this matches develop
     # don't create a whole copy of the Unroll loop with loads removed - instead
     # use buffer limits to suppress global loads and ignore unnecessary ds_reads
     "SuppressNoLoadLoop": [False, True],
+    # StinkyTofu: whether SwPrefetchInsertionPass may insert software instruction prefetch.
+    # True: Turn on StinkyTofu instruction prefetch for this solution (extra SGPR on supported ISAs only).
+    # False: no prefetch SGPR, prefetch pass disabled for this kernel.
+    #
+    # Purpose: command-processor (CP) prefetch only covers a bounded amount of code. When
+    # the kernel's assembly footprint is large enough to exceed that window, the front of the
+    # kernel can fall out of the I-cache before execution reaches it, causing misses. Software
+    # prefetch instructions bring hot code back under software control so execution stays ahead of
+    # the fetch pointer and avoids those misses.
+    "SwInstructionPrefetch": [False, True],
     # For PrefetchGlobalRead=1, create a second copy of the unroll loop with
     # the LDS pointer swaps expanded into inline constants for LDS read and write instructions
     # This eliminates 4 vector XOR instructions used for pointer swap
@@ -327,7 +338,7 @@ validParameters = { # we need to make sure this matches develop
     # Scheduling algorithm to use for each iteration:
     # 0 = minimal/no scheduling.  Global Read and increments, followed by local reads,
     # followed by local writes, followed by MACs
-    "ScheduleIterAlg": [0, 1, 2, 3],
+    "ScheduleIterAlg": [0, 1, 2, 3, 4],
     # For MatrixInstruction and SIA3, number of GlobalReadInstruction between mfma
     # the purpose of this parameter is to control density of global read instruction scheduling
     # Scheduling global read back to back can have better memory efficiency
@@ -375,14 +386,6 @@ validParameters = { # we need to make sure this matches develop
     "DirectToVgprMXSA": [False, True],
     "DirectToVgprMXSB": [False, True],
     "DirectToVgprSparseMetadata": [False, True],
-    # B address interleave (restricted): non-contiguous tile columns for TN/NN-like B (TLUB == False),
-    # with runtime G chosen as the largest power-of-two factor of (N/MT1), capped by LVCB.
-    # Requires SizeJ % MT1 == 0 at runtime; otherwise falls back to original mapping.
-    "BAddrInterleave": [False, True],
-    # K ring-shift (restricted): apply a per-WG shift along the summation (K) dimension so that
-    # the B-side base K address for each workgroup is cacheline-aligned/congruent, while preserving
-    # correctness via tail-loop ring wrap. Intended for TN/NN-like B (TLUB == False).
-    "KRingShift": [False, True],
     # Attempt to load directly from global memory into LDS.
     # Assembly only
     # Requires BufferLoad, assembler support for lds modifier on buffer
@@ -498,16 +501,6 @@ validParameters = { # we need to make sure this matches develop
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
     "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32],
-    # Address-interleave restriction:
-    # If >0, require tiles1=(Free1Size / MT1) to have lowbit(tiles1)>1 (i.e. G>1).
-    # This matches the kernel's initBInterleaveG logic:
-    #   - require Free1Size % MT1 == 0
-    #   - compute lowbit(tiles1)
-    #   - enable only if min(lowbit, LVCB) > 1
-    "AssertFree1DivByMT1LowbitGT1": -1,
-    # KRingShift wrap restriction (packed integer; see Solution.py for encoding):
-    # If >0, require any (k + KRingShift) wrap to occur only in tail loop (no main-loop wrap).
-    "AssertKRingShiftTailWrapOnly": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -990,7 +983,37 @@ validParameters = { # we need to make sure this matches develop
     # 1: Use TDM for A
     # 2: Use TDM for B
     # 3: Use TDM for both A and B
-    "TDMInst": [0, 1, 2, 3]
+    "TDMInst": [0, 1, 2, 3],
+    # Split each TDM data tensor (A or B) load across two tensor_load_to_lds instructions,
+    # each covering half the macro-tile in the M/N dimension. MX scale tensors (MXSA/MXSB)
+    # are not split regardless of this flag. When True, two extra SGPRs are allocated to
+    # hold the per-iteration LDS and global address increments for the split loads.
+    "TDMSplit": [False, True],
+    # In-device layout of the MX scale tensors (MXSA/MXSB).
+    # User-facing values:
+    #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default
+    #                      unless TDMInst != 0, in which case InMemorySwizzle is the default).
+    #   "HostPreSwizzle":  scales pre-swizzled on the host (gfx950 subtile pipeline);
+    #                      requires MXLoadInst="BufferLoad" and gfx950 host pipeline.
+    #   "InMemorySwizzle": scales swizzled in device memory by TDM;
+    #                      requires MXLoadInst="TDM".
+    # Internal sentinel (do NOT use in yamls):
+    #   "Auto":            triggers conditional defaulting in Solution.assignDerivedParameters.
+    #                      The defaultBenchmarkCommonParameters entry is "Auto" so the
+    #                      derivation fires; users should write one of the concrete values above.
+    # Codegen + rejection logic combine MXScaleFormat with MXLoadInst and
+    # archCaps["HasMXScaleSwizzle"].
+    "MXScaleFormat": ["Auto", "NoSwizzle", "HostPreSwizzle", "InMemorySwizzle"],
+    # How A/MXSA and B/MXSB are loaded from VRAM to LDS.
+    # User-facing values:
+    #   "TDM":         tensor_load_to_lds (requires asmCaps["HasTDM"]; today always implies
+    #                  InMemorySwizzle MX scale layout).
+    #   "BufferLoad":  buffer_load_* (compatible with NoSwizzle or HostPreSwizzle MX scale layouts).
+    #   "GlobalLoad":  reserved for a future flat/global_load MX path; rejected for now.
+    # Internal sentinel (do NOT use in yamls):
+    #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
+    #                  TDM iff TDMInst != 0, otherwise BufferLoad.
+    "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
 }
 
 newMIValidParameters = {
