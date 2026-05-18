@@ -4,7 +4,6 @@ from datetime import datetime
 import json
 import json5
 import os
-import re
 import pandas
 from pandas import DataFrame
 import seaborn as sns
@@ -23,47 +22,38 @@ def load_default_configs_json(in_dir: str) -> dict:
     """
     Reads the config_defaults.json object for rocRAND's generators and returns them as dict.
     """
-
     with open(os.path.join(in_dir, "config_defaults.json")) as f:
         json_data = json5.load(f)
 
     return json_data
 
+
 def load_benchmark_result_json(path: str) -> DataFrame:
     """
     Reads and processes a JSON file produced by rocRAND's tuning benchmark.
     """
-    def guess_gcn_architecture(path: str, raw_json_data: dict):
-        arch_regex = re.compile(r'gfx[0-9a-f]+')
-        arch_name = raw_json_data['context']['hdp_gcn_arch_name']
-        _, filename = os.path.split(path)
-        for name in (arch_name, filename):
-            gfx_match = re.search(arch_regex, name)
-            if gfx_match:
-                return gfx_match.group(0)
-        return 'unknown'
-
     with open(path) as f:
         raw_json_data = json.load(f)
-    benchmark_data = DataFrame(raw_json_data['benchmarks'])
 
-    gb_per_s_series = benchmark_data['bytes_per_second'] / 1000 / 1000 / 1000
-    gb_per_s_series.name = 'gb_per_s'
+    general_ctx = raw_json_data.get('context', {}).get('general', {})
+    arch = general_ctx.get('gpu', {}).get('arch', 'unknown')
 
-    # Extract the groups of the regex match to a DataFrame
-    
-    name_regex = r'^(?P<generator>\S+?)_(?P<distribution>uniform|normal|log_normal|poisson)_(?P<value_type>(unsigned_)?(int|short|char|long_long|float|half|double))_t(?P<block_size>\d+)_b(?P<grid_size>\d+)'
+    rows = []
+    for spec in raw_json_data.get('specializations', []):
+        meta = spec.get('meta', {})
+        cfg = meta.get('cfg', {})
 
-    extracted_data = benchmark_data['name'].str.extract(name_regex)
-    extracted_data['block_size'] = extracted_data['block_size'].astype(int)
-    extracted_data['grid_size']  = extracted_data['grid_size'].astype(int)
+        rows.append({
+            'generator': meta.get('engine'),
+            'distribution': meta.get('distribution'),
+            'value_type': meta.get('type'),
+            'block_size': int(cfg.get('threads', 0)),
+            'grid_size': int(cfg.get('blocks', 0)),
+            'gb_per_s': float(spec.get('bytes_per_second', 0.0)) / 1000 / 1000 / 1000,
+            'arch': arch
+        })
 
-    # Merge the regex matches and the gb_per_s series
-    benchmark_data = pandas.concat([extracted_data, gb_per_s_series], axis=1)
-
-    # Figure out architecture
-    benchmark_data['arch'] = guess_gcn_architecture(path, raw_json_data)
-    return benchmark_data
+    return DataFrame(rows)
 
 
 def get_best_config_for_arch(benchmark_data: DataFrame, default_configs: dict):
@@ -72,8 +62,7 @@ def get_best_config_for_arch(benchmark_data: DataFrame, default_configs: dict):
     performance across generated types and distributions.
     """
     def config_to_goodness(subf: DataFrame) -> pandas.Series:
-        relative_perfs = subf['normalized_perf'].reset_index(
-            drop=True)
+        relative_perfs = subf['normalized_perf'].reset_index(drop=True)
         # Averages the performance over the different distribution/value_types
         # to get a single average performance per configuration of the generator
         return relative_perfs.sum() / relative_perfs.count()
@@ -106,6 +95,8 @@ def get_best_config_for_arch(benchmark_data: DataFrame, default_configs: dict):
             best_block_size = config_goodness.iloc[0]['block_size'].astype(int)
             best_grid_size  = config_goodness.iloc[0]['grid_size'].astype(int)
             best_perf       = config_goodness.iloc[0]['normalized_perf']
+
+            print(f"{gen} {arch}: best=({best_block_size}, {best_grid_size}) avg={best_perf}")
 
             # check for performance regressions and possible alternative configurations
             detailed_performance = arch_df[(arch_df['block_size'] == best_block_size) &
