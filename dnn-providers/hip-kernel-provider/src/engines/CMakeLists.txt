@@ -25,7 +25,7 @@ embed_kernel_sources(
 )
 
 
-set(HIP_KERNEL_ENGINE_GENERATED_SOURCES 
+set(HIP_KERNEL_ENGINE_GENERATED_SOURCES
     ${CMAKE_CURRENT_BINARY_DIR}/kernel_sources.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/kernel_includes.cpp)
 
@@ -35,5 +35,3 @@ target_sources(hip_kernel_provider_impl PRIVATE "${HIP_KERNEL_ENGINE_GENERATED_S
 
 define_property(GLOBAL PROPERTY INLINED_KERNELS)
 set_property(GLOBAL PROPERTY INLINED_KERNELS "${HIP_KERNEL_ENGINE_GENERATED_SOURCES}")
-
-

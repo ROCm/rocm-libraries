@@ -4,16 +4,16 @@
 # This module is responsible for inling the kernels into a single source file,
 # from which kernels are retrieved when running any of them from HipProgram.
 # It defines a global property that contains a list of all kernel source files
-# from any of the available engines. 
+# from any of the available engines.
 #
 # Usage:
 # within the engine that contains HIP kernel kernels,
-# call the function add_kernels_for_embedding with arguments being the paths 
+# call the function add_kernels_for_embedding with arguments being the paths
 # to the kernels within the directory (see hip_kernel_engine for an example)
-# 
+#
 
 # Keep a list of kernel files to be inlined
-define_property(GLOBAL PROPERTY KERNELEMBEDDING_KERNEL_FILES) 
+define_property(GLOBAL PROPERTY KERNELEMBEDDING_KERNEL_FILES)
 # CMake ignores attempts to redefine an already defined property,
 # so the value in this property won't be overwritten when including
 # this module anywhere else in the repo

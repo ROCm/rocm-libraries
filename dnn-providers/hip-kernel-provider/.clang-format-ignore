@@ -1,5 +1,5 @@
 # List of files to be ignored by clang-format
 
-# templates for the kernel inlining -- clang-format breaks the 
+# templates for the kernel inlining -- clang-format breaks the
 # syntax of varialbes by adding a space after the second @ character
 src/cmake/templates/*
