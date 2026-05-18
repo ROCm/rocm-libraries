@@ -2104,6 +2104,7 @@ class Solution(collections.abc.Mapping):
     tdmInst: int = state["TDMInst"]
     state["enableTDMA"] = bool(tdmInst & 0x01)
     state["enableTDMB"] = bool(tdmInst & 0x02)
+    state["enableTDMMetadata"] = bool(state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"] and tdmInst > 0)
 
     if tdmInst not in (0, 3):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")

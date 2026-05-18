@@ -99,6 +99,12 @@ struct hipsparse_test_config_axpby
 {
 };
 
+struct hipsparse_test_config_gather
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::gather,
+                                     hipsparse_test_numeric_types_enum::gather>
+{
+};
+
 struct hipsparse_test_config_ijabct_spmv
     : hipsparse_test_config_template<hipsparse_test_dispatch_enum::ijabct_spmv,
                                      hipsparse_test_numeric_types_enum::spmv>
