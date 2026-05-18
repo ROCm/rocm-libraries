@@ -10,7 +10,6 @@ if(ENABLE_HIP_KERNEL_ENGINE)
 endif()
 
 # Add to the hip_kernel_provider_impl target the inlined kernels
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 include(KernelEmbedding)
 
 # Basic kernel to test the infrastructure

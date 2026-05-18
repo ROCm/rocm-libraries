@@ -1,7 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/src/cmake")
 include(KernelEmbedding)
 
 # List kernel files to embed
