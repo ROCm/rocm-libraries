@@ -1407,3 +1407,292 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
     if(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
+
+template<bool Inclusive,
+         bool WithInitValue,
+         class InputIterator,
+         class OutputIterator,
+         class BinaryFunction,
+         class InitValueType>
+void invoke_scan(void*          d_temp_storage,
+                 size_t&        temp_storage_size_bytes,
+                 InputIterator  input,
+                 OutputIterator output,
+                 BinaryFunction scan_op,
+                 InitValueType  init,
+                 size_t         size,
+                 hipStream_t    stream)
+{
+    if constexpr(Inclusive)
+    {
+        if constexpr(WithInitValue)
+        {
+            HIP_CHECK(hipcub::DeviceScan::InclusiveScanInit(d_temp_storage,
+                                                            temp_storage_size_bytes,
+                                                            input,
+                                                            output,
+                                                            scan_op,
+                                                            init,
+                                                            size,
+                                                            stream));
+        }
+        else
+        {
+
+            HIP_CHECK(hipcub::DeviceScan::InclusiveScan(d_temp_storage,
+                                                        temp_storage_size_bytes,
+                                                        input,
+                                                        output,
+                                                        scan_op,
+                                                        size,
+                                                        stream));
+        }
+    }
+    else
+    {
+        HIP_CHECK(hipcub::DeviceScan::ExclusiveScan(d_temp_storage,
+                                                    temp_storage_size_bytes,
+                                                    input,
+                                                    output,
+                                                    scan_op,
+                                                    init,
+                                                    size,
+                                                    stream));
+    }
+}
+
+template<typename SegmentOffsetT>
+struct segment
+{
+    // Make sure that default constructed segments can not be merged
+    SegmentOffsetT begin = _HIPCUB_STD::numeric_limits<SegmentOffsetT>::min();
+    SegmentOffsetT end = _HIPCUB_STD::numeric_limits<SegmentOffsetT>::max();
+
+    HIPCUB_HOST_DEVICE segment() = default;
+
+    HIPCUB_HOST_DEVICE segment(SegmentOffsetT b, SegmentOffsetT e) : begin{b}, end{e} {}
+
+    HIPCUB_HOST_DEVICE
+    friend bool
+        operator==(segment left, segment right)
+    {
+        return left.begin == right.begin && left.end == right.end;
+    }
+};
+
+template<typename SegmentOffsetT>
+struct tuple_to_segment_op
+{
+    HIPCUB_HOST_DEVICE
+    segment<SegmentOffsetT>
+        operator()(test_utils::tuple<SegmentOffsetT, SegmentOffsetT> interval) const
+    {
+#if defined(__HIP_PLATFORM_AMD__)
+        SegmentOffsetT begin = rocprim::get<0>(interval);
+        SegmentOffsetT end   = rocprim::get<1>(interval);
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+        const auto [begin, end] = interval;
+#endif
+        return segment{begin, end};
+    }
+};
+
+template<typename CountT, typename SegmentOffsetT>
+struct segments_op
+{
+    using seg_t = segment<SegmentOffsetT>;
+    CountT* count;
+
+    HIPCUB_DEVICE
+    seg_t operator()(seg_t left, seg_t right) const
+    {
+        if(left.end != right.begin)
+        {
+            atomicAdd(count, 1);
+        }
+        return {left.begin, right.end};
+    }
+};
+
+template<typename SegmentOffsetT>
+struct segments_host_op
+{
+    using seg_t = segment<SegmentOffsetT>;
+
+    HIPCUB_HOST
+    seg_t operator()(seg_t left, seg_t right) const
+    {
+        return {left.begin, right.end};
+    }
+};
+
+template<bool Inclusive, bool WithInitValue>
+void invalid_data_test()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using segment_offset_t = int32_t;
+    using segment_t        = segment<segment_offset_t>;
+    using T                = segment_t;
+    using U                = T;
+
+    using count_t           = unsigned int;
+    using scan_op_type      = segments_op<count_t, segment_offset_t>;
+    using scan_host_op_type = segments_host_op<segment_offset_t>;
+
+    using counting_it_t    = test_utils::counting_iterator<segment_offset_t>;
+    using iterator_tuple_t = test_utils::tuple<counting_it_t, counting_it_t>;
+    using zip_iterator_t   = test_utils::zip_iterator<iterator_tuple_t>;
+    using transform_op_t   = tuple_to_segment_op<segment_offset_t>;
+    using transform_it_t
+        = test_utils::transform_iterator<zip_iterator_t, transform_op_t, segment_t>;
+
+    hipStream_t stream = 0; // default
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+            // Generate data
+            const auto initial_value  = (Inclusive && !WithInitValue)
+                                            ? segment{segment_offset_t{0}, segment_offset_t{0}}
+                                            : segment{segment_offset_t{0}, segment_offset_t{1}};
+            const auto input_iterator = transform_it_t(
+                zip_iterator_t(test_utils::make_tuple(counting_it_t{1}, counting_it_t{2})),
+                transform_op_t());
+            U* d_output;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(U)));
+
+            count_t* d_count;
+            HIP_CHECK(hipMalloc(&d_count, sizeof(count_t)));
+            HIP_CHECK(hipMemset(d_count, 0, sizeof(count_t)));
+
+            // scan function
+            scan_op_type scan_op{d_count};
+
+            const auto h_input_iterator = transform_it_t(
+                zip_iterator_t(test_utils::make_tuple(counting_it_t{1}, counting_it_t{2})),
+                transform_op_t());
+
+            // Calculate expected results on host
+            scan_host_op_type scan_host_op{};
+            std::vector<U>    expected(size);
+            if constexpr(Inclusive)
+            {
+                if constexpr(WithInitValue)
+                {
+                    test_utils::host_inclusive_scan_init(h_input_iterator,
+                                                         h_input_iterator + size,
+                                                         expected.begin(),
+                                                         initial_value,
+                                                         scan_host_op);
+                }
+                else
+                {
+                    test_utils::host_inclusive_scan(h_input_iterator,
+                                                    h_input_iterator + size,
+                                                    expected.begin(),
+                                                    scan_host_op);
+                }
+            }
+            else
+            {
+                test_utils::host_exclusive_scan(h_input_iterator,
+                                                h_input_iterator + size,
+                                                initial_value,
+                                                expected.begin(),
+                                                scan_host_op);
+            }
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            void*  d_temp_storage = nullptr;
+
+            // Get size of d_temp_storage
+            invoke_scan<Inclusive, WithInitValue>(d_temp_storage,
+                                                  temp_storage_size_bytes,
+                                                  input_iterator,
+                                                  d_output,
+                                                  scan_op,
+                                                  initial_value,
+                                                  size,
+                                                  stream);
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0U);
+
+            // allocate temporary storage
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Run
+            invoke_scan<Inclusive, WithInitValue>(d_temp_storage,
+                                                  temp_storage_size_bytes,
+                                                  input_iterator,
+                                                  d_output,
+                                                  scan_op,
+                                                  initial_value,
+                                                  size,
+                                                  stream);
+
+            HIP_CHECK(hipDeviceSynchronize());
+            HIP_CHECK(hipFree(d_temp_storage));
+
+            // Copy output to host
+            std::vector<U> output(size);
+            count_t        count = 0;
+            HIP_CHECK(hipMemcpy(&count, d_count, sizeof(count_t), hipMemcpyDeviceToHost));
+            HIP_CHECK(hipMemcpy(output.data(),
+                                d_output,
+                                output.size() * sizeof(U),
+                                hipMemcpyDeviceToHost));
+            HIP_CHECK(hipDeviceSynchronize());
+            HIP_CHECK(hipFree(d_count));
+            HIP_CHECK(hipFree(d_output));
+
+            // Output values should still be as expected
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+
+            // The actual core requirement expected to fail
+            if(count)
+            {
+                printf("This test is allowed to fail (and it does), because device_*_scan calls "
+                       "the scan operator on non-consecutive partial results\n");
+                break;
+            }
+            else
+            {
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(count, count_t{0}));
+            }
+        }
+    }
+}
+
+TEST(HipcubDeviceScanTests, InvalidDataInclusiveScan)
+{
+    invalid_data_test<true /*Inclusive*/, false /*WithInitValue*/>();
+}
+
+TEST(HipcubDeviceScanTests, InvalidDataInclusiveScanInit)
+{
+    invalid_data_test<true /*Inclusive*/, true /*WithInitValue*/>();
+}
+
+TEST(HipcubDeviceScanTests, InvalidDataExclusiveScan)
+{
+    invalid_data_test<false /*Inclusive*/, false /*WithInitValue*/>();
+}
+
+TEST(HipcubDeviceScanTests, InvalidDataExclusiveScanInit)
+{
+    invalid_data_test<false /*Inclusive*/, true /*WithInitValue*/>();
+}
