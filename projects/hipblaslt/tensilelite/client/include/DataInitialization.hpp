@@ -54,6 +54,27 @@ namespace TensileLite
                 || isMXFP4Tensor(problem.b(), problem.mxBlockB());
         }
 
+        inline bool isMXTensor(const TensorDescriptor& tensor, size_t mxBlock)
+        {
+            if(mxBlock == 0)
+                return false;
+            auto dt = tensor.dataType();
+            if(dt == rocisa::DataType::Float6 or
+                    dt == rocisa::DataType::BFloat6)
+            {
+                 throw std::runtime_error("Float6 and BFloat6 currently are not supported");
+            }
+            return dt == rocisa::DataType::Float4
+                || dt == rocisa::DataType::Float8
+                || dt == rocisa::DataType::BFloat8;
+        }
+
+        inline bool isMXProblem(const ContractionProblemGemm& problem)
+        {
+            return isMXTensor(problem.a(), problem.mxBlockA())
+                || isMXTensor(problem.b(), problem.mxBlockB());
+        }
+
         // Problem-indept. from 0~7, and 16, and 23~26 (fixed values for every problem)
         // And problem-dept. from 8~15 (values depend on problem)
         // RandomNegPosLimited: integer -128~128. fp -1.0~1.0
@@ -881,7 +902,7 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX FP4 inputs once the solution is known (MI-based preSwizzle when enabled).
+                // Re-init MX FP4/FP8 inputs once the solution is known (MI-based preSwizzle when enabled).
                 // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
                 // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
                 if(m_currentSolution != nullptr
@@ -889,10 +910,10 @@ namespace TensileLite
                    && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty())
                 {
-                    bool isMXFP4 = isMXFP4Problem(*m_currentGemmProblem);
-                    if(isMXFP4)
+                    bool isMX = isMXProblem(*m_currentGemmProblem);
+                    if(isMX)
                     {
-                        initializeMXDataForFP4(*m_currentGemmProblem);
+                        initializeMXData(*m_currentGemmProblem);
                         copyValidToGPUBuffer(*m_currentGemmProblem);
                         copyInputs(m_gpuPtrs,
                                    m_gpuBatchPtrs,
@@ -1019,7 +1040,7 @@ namespace TensileLite
 
             void initializeConstantInputs(ContractionProblemGemm const& problem);
 
-            void initializeMXDataForFP4(ContractionProblemGemm const& problem);
+            void initializeMXData(ContractionProblemGemm const& problem);
 
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,

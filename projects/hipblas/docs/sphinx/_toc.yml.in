@@ -2,7 +2,7 @@ defaults:
   numbered: False
 root: index
 subtrees:
-- caption: Installation
+- caption: Install
   entries:
     - file: install/install
       title: Install hipBLAS
