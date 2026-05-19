@@ -608,6 +608,33 @@ static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(makeSpec(
                       .hdim_q = 128, .hdim_v = 128,
                       .mode = FmhaMode::GROUP},
         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})) == 16);
+
+// Multi-hdim canaries: verify makeSpec() succeeds for all supported head
+// dimensions and produces architecture-correct tile geometry.
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 32, .hdim_v = 32,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 64, .hdim_v = 64,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 96, .hdim_v = 96,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 256, .hdim_v = 256,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 64);
 // clang-format on
 
 } // namespace rocm_ck

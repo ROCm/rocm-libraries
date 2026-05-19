@@ -7,9 +7,9 @@
 // registry and asserts ALL fields. If a schema change breaks a test,
 // the change is not backwards-compatible.
 //
-// NOTE: block_size and block_n0 in DqDkDv are demo constants
-// (dqdkdv_spec.hpp:200-204). Update when architecture-dependent tile
-// selection is implemented.
+// NOTE: block_size and block_n0 in DqDkDv come from the consteval tile
+// config table (GFX9_FP16_DQDKDV_TILES in dqdkdv_spec.hpp). Values
+// differ by hdim (e.g. block_n0=128 for d128, block_n0=64 for d256).
 //
 // The findVariant() tests require the registry header from the example
 // directory, which is added to the include path by CMakeLists.txt.
@@ -111,6 +111,68 @@ TEST(FmhaBwdCompat, OGradDotO_FP16_D128_Batch_NoPad)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_FALSE(k.pad_seqlen_q);
     EXPECT_FALSE(k.pad_hdim_v);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 64);
+}
+
+// ============================================================================
+// OGradDotO multi-hdim frozen baselines
+// (d64 is covered by OGradDotO_FP16_D64_Batch above)
+// ============================================================================
+
+TEST(FmhaBwdCompat, OGradDotO_FP16_D32_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_v, 32);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_v);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 64);
+}
+
+TEST(FmhaBwdCompat, OGradDotO_FP16_D96_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_v, 96);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_v);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 64);
+}
+
+TEST(FmhaBwdCompat, OGradDotO_FP16_D256_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 256, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_v, 256);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_v);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 64);
+}
+
+TEST(FmhaBwdCompat, OGradDotO_BF16_D64_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+
+    EXPECT_EQ(k.dtype, DataType::BF16);
+    EXPECT_EQ(k.hdim_v, 64);
     EXPECT_EQ(k.block_per_cu, 2);
     EXPECT_EQ(k.block_size, 64);
 }
@@ -392,6 +454,99 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask_Det)
 }
 
 // ============================================================================
+// DqDkDv multi-hdim frozen baselines
+// ============================================================================
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D32_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 32, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 32);
+    EXPECT_EQ(k.hdim_v, 32);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D64_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 64);
+    EXPECT_EQ(k.hdim_v, 64);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D96_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 96, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 96);
+    EXPECT_EQ(k.hdim_v, 96);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D256_Batch)
+{
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 256,
+                                                   .hdim_v = 256,
+                                                   .mode   = FmhaMode::BATCH},
+                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 256);
+    EXPECT_EQ(k.hdim_v, 256);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 64);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_BF16_D64_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::BF16);
+    EXPECT_EQ(k.hdim_q, 64);
+    EXPECT_EQ(k.hdim_v, 64);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D64_Group)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::GROUP},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+// ============================================================================
 // ConvertDQ frozen baselines
 // ============================================================================
 
@@ -423,6 +578,86 @@ TEST(FmhaBwdCompat, ConvertDQ_FP16_D128_Group)
     EXPECT_TRUE(k.is_deterministic);
     EXPECT_TRUE(k.pad_seqlen_q);
     EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
+
+// ============================================================================
+// ConvertDQ multi-hdim frozen baselines
+// ============================================================================
+
+TEST(FmhaBwdCompat, ConvertDQ_FP16_D32_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 32);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
+
+TEST(FmhaBwdCompat, ConvertDQ_FP16_D64_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 64);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
+
+TEST(FmhaBwdCompat, ConvertDQ_FP16_D96_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 96);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
+
+TEST(FmhaBwdCompat, ConvertDQ_FP16_D256_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 256);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
+
+TEST(FmhaBwdCompat, ConvertDQ_BF16_D64_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::BF16);
+    EXPECT_EQ(k.hdim_q, 64);
     EXPECT_EQ(k.block_per_cu, 2);
     EXPECT_EQ(k.block_size, 256);
 }
