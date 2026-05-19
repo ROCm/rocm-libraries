@@ -39,7 +39,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["hipdnn_frontend*"]
+include = ["hipdnn_frontend"]
 
 [tool.cibuildwheel]
 skip = ["pp*", "cp36-*", "cp37-*"]
