@@ -58,6 +58,7 @@ jobs:
           export CXX=/opt/rocm/llvm/bin/clang++
           cmake -B build -GNinja \
             -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;miopen-provider" \
+            -DHIPDNN_BUILD_PYTHON_BINDINGS=ON \
             -DROCM_PATH=/opt/rocm \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DHIP_PLATFORM=amd
