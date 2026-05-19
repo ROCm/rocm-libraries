@@ -1197,7 +1197,7 @@ def preLoop(writer, kernel):
 # Subroutine entry point for main loop
 #
 #
-def mainLoop(writer, kernel):
+def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
   module = Module()
   pgr = kernel["PrefetchGlobalRead"]
   assert pgr in (0, 1, 2), "SubtileBasedKernel only supports PGR=0, PGR=1, and PGR=2, got PGR=%d" % pgr
@@ -1258,7 +1258,18 @@ def mainLoop(writer, kernel):
       tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
       scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
 
-  module.add(scheduler.emitAllLoops(writer, kernel))
+  module.add(scheduler.emitMainAndExitLoops(writer, kernel))
+
+  # Wrap the tail loop with the runtime K%DU counter setup and skip branch,
+  # mirroring the legacy KernelWriter pattern (KernelWriter.py:5237 / 5618).
+  if not kernel["NoTailLoop"]:
+    module.add(writer.calculateLoopNumIter(
+        kernel, tensorParametersA, tensorParametersB, -1))
+    module.add(scheduler.emitTailLoop(writer, kernel))
+    module.add(writer.closeLoop(
+        kernel, tensorParametersA, tensorParametersB,
+        -1, None, emitEndLabelOnly=True))
+
   scheduler.deallocVgprTiles(writer)
 
   return module

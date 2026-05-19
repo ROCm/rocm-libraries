@@ -31,6 +31,8 @@ import copy
 import io
 import math
 
+from rocisa.code import Module
+
 
 class Pass(IntEnum):
     """Scheduler passes in dependency order.
@@ -2244,12 +2246,15 @@ class LogicalScheduler:
         module.addComment0(f"{label} end")
         return module
 
-    def emitAllLoops(self, writer, kernel):
-        """Emit complete loop structure: preloop + mainloop + NGLL + NLL.
+    def emitMainAndExitLoops(self, writer, kernel):
+        """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
 
-        Owns all control flow (labels, branches, counter management).
-        For unroll_factor > 1, emits per-unroll copies with correct vgpr tiles.
-        Each mainloop exit jumps to its corresponding NGLL→NLL pair.
+        Owns all control flow (labels, branches, counter management) for the
+        main unrolled pipeline. For unroll_factor > 1, emits per-unroll copies
+        with correct vgpr tiles. Each mainloop exit jumps to its corresponding
+        NGLL→NLL pair. The tail loop is emitted separately by emitTailLoop()
+        so the orchestrator (Subtile.Kernel.mainLoop) can wrap it with the
+        runtime K%DU counter setup and skip branch.
         """
         from rocisa.code import Module, Label
         from rocisa.instruction import (SSubU32, SCmpEQU32, SCBranchSCC0,
@@ -2257,9 +2262,9 @@ class LogicalScheduler:
         from rocisa.container import sgpr
 
         assert Pass.POPULATE in self._completed, \
-            "populate_instructions() must be called before emitAllLoops()"
+            "populate_instructions() must be called before emitMainAndExitLoops()"
 
-        module = Module("AllLoops")
+        module = Module("MainAndExitLoops")
         uf = self.unroll_factor
 
         # ── Preloop ──
@@ -2338,16 +2343,28 @@ class LogicalScheduler:
 
         module.add(endLabel)
 
-        # ── TailLoop ──
-        hasTailLoop = True#not kernel["NoTailLoop"]
-        tailEndLabel = Label("TailLoopEnd", "")
-        if hasTailLoop:
-            module.addComment0(f"TAILLOOP")
-            module.add(self._emitLoop(writer, kernel, f"TAILLOOP",
-                                          self._tailloop_emitted,
-                                          schedule=False))
-            module.add(tailEndLabel)
+        return module
 
+    def emitTailLoop(self, writer, kernel):
+        """Emit the tail loop body only (no counter setup, no skip branch).
+
+        Returns an empty Module when NoTailLoop is set. The caller is
+        responsible for emitting calculateLoopNumIter(-1) before this and
+        closeLoop(emitEndLabelOnly=True) after, mirroring the legacy
+        KernelWriter pattern.
+        """
+        assert Pass.POPULATE in self._completed, \
+            "populate_instructions() must be called before emitTailLoop()"
+
+        module = Module("TailLoop")
+
+        if kernel["NoTailLoop"]:
+            return module
+
+        module.addComment0("TAILLOOP")
+        module.add(self._emitLoop(writer, kernel, "TAILLOOP",
+                                  self._tailloop_emitted,
+                                  schedule=False))
         return module
 
     # ── VGPR tile allocation ──────────────────────────────

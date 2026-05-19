@@ -91,6 +91,7 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "NonTemporalB": 0,
         "NonTemporalMXSA": 0,
         "NonTemporalMXSB": 0,
+        "NoTailLoop": False,
         "ProblemType": problemType,
     }
     if fp4:
@@ -1990,8 +1991,8 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
-    def test_emitAllLoops_256x256_fp4(self):
-        """emitAllLoops: label structure and per-unroll VGPR differences."""
+    def test_emitLoops_256x256_fp4(self):
+        """emitMainAndExitLoops + emitTailLoop: label structure and per-unroll VGPR differences."""
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
 
@@ -2010,8 +2011,8 @@ class TestIntegration:
             )
 
             uf = sched.unroll_factor
-            module = sched.emitAllLoops(writer, kernel)
-            asm = str(module)
+            asm = str(sched.emitMainAndExitLoops(writer, kernel)) \
+                + str(sched.emitTailLoop(writer, kernel))
 
             assert "LoopBeginL:" in asm
             assert "SkipToNGLL:" in asm
@@ -2227,6 +2228,13 @@ if __name__ == "__main__":
         scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
     )
 
+    print(f"{'=' * 60}")
+    print(f"  Build tailloop (PGR0 template)")
+    print(f"{'=' * 60}")
+    print(sched.print_emit(sched._tailloop_emitted).replace("MAINLOOP:", "TAILLOOP:"))
+    if args.interactive:
+        input("Press Enter for next step...")
+
     def _print_emitLoop(label, emitted_3d, schedule=True):
         module = sched._emitLoop(writer, kernel, label, emitted_3d, schedule=schedule)
         buf = io.StringIO()
@@ -2240,9 +2248,13 @@ if __name__ == "__main__":
             ("MAINLOOP", sched._emitted_per_unroll[0]),
             ("NGLL",     sched._ngll_per_unroll[0]),
             ("NLL",      sched._nll_per_unroll[0]),
+            ("TAILLOOP", sched._tailloop_emitted, False),
         ]
     else:
-        loop_sections = [("MAINLOOP", sched._emitted_per_unroll[0])]
+        loop_sections = [
+            ("MAINLOOP", sched._emitted_per_unroll[0]),
+            ("TAILLOOP", sched._tailloop_emitted, False),
+        ]
 
     for section in loop_sections:
         label, emitted_3d = section[0], section[1]
