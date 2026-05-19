@@ -188,8 +188,7 @@ using KernelTypes = ::testing::Types<
     Test_Intra_V6<dtypes<F8, F16, F32>, layouts<R, R, R>>,
     Test_Intra_V6<dtypes<F8, F16, F32>, layouts<R, C, R>>,
     Test_Intra_V6<dtypes<F8, F16, F32>, layouts<C, R, R>>,
-    Test_Intra_V6<dtypes<F8, F16, F32>, layouts<C, C, R>>
-    >;
+    Test_Intra_V6<dtypes<F8, F16, F32>, layouts<C, C, R>>>;
 } // namespace ck_tile
 
 TYPED_TEST_SUITE(TestCkTileSwiGLU, ck_tile::KernelTypes);
