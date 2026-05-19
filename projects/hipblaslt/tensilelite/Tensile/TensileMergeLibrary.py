@@ -28,6 +28,7 @@ import sys
 import shutil
 import argparse
 from copy import deepcopy
+from typing import Any
 
 from Tensile import __version__
 from Tensile.SolutionStructs.Naming import getSolutionNameMin
@@ -36,6 +37,7 @@ from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 from Tensile.Common import ParallelMap2
 
 verbosity = 1
+dictBasedArchitectures: list[str] = ["gfx1250"]
 
 class DataAccessor:
     """
@@ -150,10 +152,24 @@ def getArchitectureFromData(data):
     return accessor.get("ArchitectureName") or ""
 
 
-def isGfx1250(data):
-    """Check if the architecture is gfx1250."""
-    arch = getArchitectureFromData(data)
-    return "gfx1250" in str(arch).lower() if arch else False
+def isDictBasedArchitecture(data: Any, dictArchs: list[str] | None = None) -> bool:
+    """Check whether an architecture should use dict-based processing.
+
+    Args:
+        data: Loaded logic data in list or dict form.
+        dictArchs: Optional list of architecture tags that should use dict format.
+            If None, falls back to global ``dictBasedArchitectures``.
+
+    Returns:
+        bool: True when architecture matches one of the configured dict-based tags.
+
+    Raises:
+        None.
+    """
+    arch = str(getArchitectureFromData(data)).lower()
+    archs = dictArchs if dictArchs is not None else dictBasedArchitectures
+    normalized = [str(name).lower() for name in archs]
+    return any(name in arch for name in normalized) if arch else False
 
 
 def ensurePath(path):
@@ -340,12 +356,22 @@ def convertToDict(data: list | dict, filename) -> dict:
 
 from .CustomYamlLoader import load_yaml_stream
 
-def loadData(filename):
-    """Load data from file. For gfx1250, convert to dict format; otherwise keep as list."""
+def loadData(filename: str) -> list[Any]:
+    """Load data from file and convert configured architectures to dict format.
+
+    Args:
+        filename: Path to YAML logic file.
+
+    Returns:
+        list: A pair [filename, loaded_or_converted_data].
+
+    Raises:
+        None.
+    """
     data = load_yaml_stream(filename, yaml.CSafeLoader)
 
     # Check architecture before converting
-    if isGfx1250(data):
+    if isDictBasedArchitecture(data):
         data = convertToDict(data, filename)
 
     return [filename, data]
@@ -559,8 +585,8 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         oriAccessor = createAccessor(oriData)
         incAccessor = createAccessor(incData)
 
-        # Check if this is gfx1250 architecture - use dict-based processing
-        useGfx1250 = isGfx1250(oriData) or isGfx1250(incData)
+        # Check if this architecture should use dict-based processing
+        useDictBased = isDictBasedArchitecture(oriData) or isDictBasedArchitecture(incData)
 
         # Terminate when the destination folder doesn't match Incremental logic yaml
         compareDestFolderToYaml(originalDir, incFile, incAccessor)
@@ -568,8 +594,8 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         # Terminate when ProblemType of originalFiles and incrementalFiles mismatch
         compareProblemType(oriAccessor, incAccessor)
 
-        if useGfx1250:
-            # gfx1250: Additional dict-specific processing
+        if useDictBased:
+            # Dict-based architecture: additional dict-specific processing
             origDefaultValues = deepcopy(oriAccessor.getDefaultSolution())
             incDefaultValues = deepcopy(incAccessor.getDefaultSolution())
             syncDefaultParams(oriData, origDefaultValues, incDefaultValues)
@@ -591,8 +617,8 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         mergedData, *stats = mergeLogic(oriAccessor, incAccessor, forceMerge, noEff)
         mergedAccessor = createAccessor(mergedData)
 
-        if useGfx1250:
-            # gfx1250: Dict-specific post-processing
+        if useDictBased:
+            # Dict-based architecture: dict-specific post-processing
             mergedData["MinimumRequiredVersion"] = f"{__version__}"
             mergedData["DefaultSolution"] = incAccessor.getDefaultSolution()
 
@@ -603,7 +629,7 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
             mergedData["Library"]["table"] = mergedAccessor.getExactLogic()
             LibraryIO.writeYAML(os.path.join(outputPath, basename), mergedData, explicit_start=False, explicit_end=False, sort_keys=False)
         else:
-            # Non-gfx1250: List-specific post-processing
+            # Non dict-based architecture: list-specific post-processing
             mergedAccessor.set("MinimumRequiredVersion", {"MinimumRequiredVersion": "%s" % __version__})
 
             msg(stats[0], "size(s) and", stats[1], "solution(s) added,", stats[2], "solution(s) removed.",

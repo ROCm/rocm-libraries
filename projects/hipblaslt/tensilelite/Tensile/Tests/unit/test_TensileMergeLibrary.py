@@ -36,7 +36,7 @@ from Tensile.TensileMergeLibrary import (
     findSolutionWithIndex,
     fixSizeInconsistencies,
     getArchitectureFromData,
-    isGfx1250,
+    isDictBasedArchitecture,
     mergeLogic,
     removeDefaultInitParams,
     findSolutionWithIndex,
@@ -341,10 +341,10 @@ class TestArchitectureDetectionWithFixtures:
         assert getArchitectureFromData(data) == name
 
 
-    def test_is_gfx1250(self, arch_data):
-        """isGfx1250 returns True only for gfx1250 data."""
+    def test_is_dict_based_architecture(self, arch_data):
+        """isDictBasedArchitecture returns True only for configured dict-based architectures."""
         name, data = arch_data
-        assert isGfx1250(data) == (name == "gfx1250")
+        assert isDictBasedArchitecture(data) == (name == "gfx1250")
 
 
 class TestFixSizeInconsistenciesWithFixtures:
