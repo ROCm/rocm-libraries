@@ -207,7 +207,6 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
             // First chunk uses original beta; subsequent use beta=1 to accumulate
             const Tc* chunk_beta = (k_base == 0) ? beta : &one_val;
 
-                    m, n, k, batches, (long)k_base, (long)(k_base + kblock), kblock, (long)k_chunk);
 
             RocblasContractionProblem<Ti, To, Tc> problem{handle,
                                                           trans_a,
