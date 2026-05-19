@@ -453,6 +453,7 @@ namespace TensileLite
             if(startEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
 
+#ifdef HIP_HAS_CLUSTER_LAUNCH
             bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
             if(enableCluster)
             {
@@ -499,6 +500,7 @@ namespace TensileLite
                 );
             }
             else
+#endif
             {
                 HIP_CHECK_RETURN_WITH_LOG(hipExtModuleLaunchKernel(function,
                                                           kernel.numWorkItems.x,
