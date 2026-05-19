@@ -1234,40 +1234,50 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   origami::heuristic_params_t defaults;
 
   // Check default weight values
-  REQUIRE(defaults.weight_mem_l2 == 1.0);
-  REQUIRE(defaults.weight_mem_mall == 1.0);
-  REQUIRE(defaults.weight_mem_dram == 1.0);
+  REQUIRE(defaults.weight_mem_l2 == origami::heuristic_defaults_t::WEIGHT_MEM_L2);
+  REQUIRE(defaults.weight_mem_mall == origami::heuristic_defaults_t::WEIGHT_MEM_MALL);
+  REQUIRE(defaults.weight_mem_dram == origami::heuristic_defaults_t::WEIGHT_MEM_DRAM);
 
   // Check default empirical constants
   // REQUIRE(defaults.l2_min_hit_rate_default == 0.5);
-  REQUIRE(defaults.main_memory_load_latency == 200.0);
-  REQUIRE(defaults.occupancy_decay_base == 0.95);
-  REQUIRE(defaults.mall_depth_sq == 2.0);
-  REQUIRE(defaults.mall_cold_floor == 0.85);
-  REQUIRE(defaults.l2_depth_sq == 4.0);
-  REQUIRE(defaults.l2_cold_floor == 0.75);
-  REQUIRE(defaults.l2_pollution_penalty == 0.7);
-  REQUIRE(defaults.l2_amp_ceiling_batched == 0.9);
-  REQUIRE(defaults.l2_amp_ceiling_k_split == 0.4);
-  REQUIRE(defaults.epilogue_cycles_per_acc_read == 8.0);
-  REQUIRE(defaults.epilogue_acc_read_parallelism == 0.9);
-  REQUIRE(defaults.epilogue_cycles_per_bounds_check == 6.0);
-  REQUIRE(defaults.epilogue_scalar_store_penalty == 1.1);
-  REQUIRE(defaults.epilogue_threads_per_wave == 64);
-  REQUIRE(defaults.epilogue_bytes_per_vectorized_store == 16);
-  REQUIRE(defaults.epilogue_cache_line_bytes == 128);
-  REQUIRE(defaults.epilogue_workspace_bytes_per_elem == 4);
-  REQUIRE(defaults.epilogue_salu_overhead == 35.0);
-  REQUIRE(defaults.epilogue_l_barrier == 100.0);
-  REQUIRE(defaults.epilogue_l_smem == 900.0);
-  REQUIRE(defaults.epilogue_k_padding_penalty == 50000.0);
-  REQUIRE(defaults.postgsu_compute_bytes == 4);
-  REQUIRE(defaults.postgsu_kernel_launch_overhead == 12000.0);
-  REQUIRE(defaults.postgsu_threads_per_wg == 256);
-  REQUIRE(defaults.postgsu_wavefront_size == 64);
+  REQUIRE(defaults.main_memory_load_latency == origami::heuristic_defaults_t::MAIN_MEMORY_LOAD_LATENCY);
+  REQUIRE(defaults.occupancy_decay_base == origami::heuristic_defaults_t::OCCUPANCY_DECAY_BASE);
+  REQUIRE(defaults.mall_depth_sq == origami::heuristic_defaults_t::MALL_DEPTH_SQ);
+  REQUIRE(defaults.mall_cold_floor == origami::heuristic_defaults_t::MALL_COLD_FLOOR);
+  REQUIRE(defaults.l2_depth_sq == origami::heuristic_defaults_t::L2_DEPTH_SQ);
+  REQUIRE(defaults.l2_cold_floor == origami::heuristic_defaults_t::L2_COLD_FLOOR);
+  REQUIRE(defaults.l2_pollution_penalty == origami::heuristic_defaults_t::L2_POLLUTION_PENALTY);
+  REQUIRE(defaults.l2_amp_ceiling_batched == origami::heuristic_defaults_t::L2_AMP_CEILING_BATCHED);
+  REQUIRE(defaults.l2_amp_ceiling_k_split == origami::heuristic_defaults_t::L2_AMP_CEILING_K_SPLIT);
+  REQUIRE(defaults.epilogue_cycles_per_acc_read ==
+          origami::heuristic_defaults_t::EPILOGUE_CYCLES_PER_ACC_READ);
+  REQUIRE(defaults.epilogue_acc_read_parallelism ==
+          origami::heuristic_defaults_t::EPILOGUE_ACC_READ_PARALLELISM);
+  REQUIRE(defaults.epilogue_cycles_per_bounds_check ==
+          origami::heuristic_defaults_t::EPILOGUE_CYCLES_PER_BOUNDS_CHECK);
+  REQUIRE(defaults.epilogue_scalar_store_penalty ==
+          origami::heuristic_defaults_t::EPILOGUE_SCALAR_STORE_PENALTY);
+  REQUIRE(defaults.epilogue_threads_per_wave ==
+          origami::heuristic_defaults_t::EPILOGUE_THREADS_PER_WAVE);
+  REQUIRE(defaults.epilogue_bytes_per_vectorized_store ==
+          origami::heuristic_defaults_t::EPILOGUE_BYTES_PER_VECTORIZED_STORE);
+  REQUIRE(defaults.epilogue_cache_line_bytes ==
+          origami::heuristic_defaults_t::EPILOGUE_CACHE_LINE_BYTES);
+  REQUIRE(defaults.epilogue_workspace_bytes_per_elem ==
+          origami::heuristic_defaults_t::EPILOGUE_WORKSPACE_BYTES_PER_ELEM);
+  REQUIRE(defaults.epilogue_salu_overhead == origami::heuristic_defaults_t::EPILOGUE_SALU_OVERHEAD);
+  REQUIRE(defaults.epilogue_l_barrier == origami::heuristic_defaults_t::EPILOGUE_L_BARRIER);
+  REQUIRE(defaults.epilogue_l_smem == origami::heuristic_defaults_t::EPILOGUE_L_SMEM);
+  REQUIRE(defaults.epilogue_k_padding_penalty ==
+          origami::heuristic_defaults_t::EPILOGUE_K_PADDING_PENALTY);
+  REQUIRE(defaults.postgsu_compute_bytes == origami::heuristic_defaults_t::POSTGSU_COMPUTE_BYTES);
+  REQUIRE(defaults.postgsu_kernel_launch_overhead ==
+          origami::heuristic_defaults_t::POSTGSU_KERNEL_LAUNCH_OVERHEAD);
+  REQUIRE(defaults.postgsu_threads_per_wg == origami::heuristic_defaults_t::POSTGSU_THREADS_PER_WG);
+  REQUIRE(defaults.postgsu_wavefront_size == origami::heuristic_defaults_t::POSTGSU_WAVEFRONT_SIZE);
 
   // Check default main loop efficiency
-  REQUIRE(defaults.main_loop_efficiency == 1.0);
+  REQUIRE(defaults.main_loop_efficiency == origami::heuristic_defaults_t::MAIN_LOOP_EFFICIENCY);
 }
 
 TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {

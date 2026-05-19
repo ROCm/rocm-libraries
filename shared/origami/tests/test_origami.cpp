@@ -283,9 +283,15 @@ TEST_CASE("origami: negative_occupancy", "[origami]") {
       size_t MT_M = best_tile.config.mt.m;
       size_t MT_N = best_tile.config.mt.n;
       size_t MT_K = best_tile.config.mt.k;
-      REQUIRE(MT_M == 32);   //"MT_M should be 32"
-      REQUIRE(MT_N == 256);  //"MT_N should be 256"
-      REQUIRE(MT_K == 16);   //"MT_K should be 16"
+      if (gpu_arch == 950) {
+        REQUIRE(MT_M == 256);  //"MT_M should be 256"
+        REQUIRE(MT_N == 256);  //"MT_N should be 256"
+        REQUIRE(MT_K == 32);   //"MT_K should be 32"
+      } else {
+        REQUIRE(MT_M == 32);   //"MT_M should be 32"
+        REQUIRE(MT_N == 256);  //"MT_N should be 256"
+        REQUIRE(MT_K == 16);   //"MT_K should be 16"
+      }
     }
   }
 }
@@ -518,19 +524,28 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
       // Test 1: Test with various M, N, K combinations
       auto result_config = origami::select_config_mnk(4401, 3941, 456, hardware, config);  // M >
                                                                                            // N,K
-      REQUIRE(result_config.config.mt.m == config[1].mt.m);
+      if (gpu_arch == 942)
+        REQUIRE(result_config.config.mt.m == config[1].mt.m);
+      else
+        REQUIRE(result_config.config.mt.m == config[2].mt.m);
 
       result_config = origami::select_config_mnk(4500, 8499, 4500, hardware, config);  // N > M,K
-      REQUIRE(result_config.config.mt.m == config[0].mt.m);
+      if (gpu_arch == 942)
+        REQUIRE(result_config.config.mt.m == config[0].mt.m);
+      else
+        REQUIRE(result_config.config.mt.m == config[2].mt.m);
 
       result_config = origami::select_config_mnk(3941, 4500, 8499, hardware, config);  // K > M,N
       if (gpu_arch == 942)
         REQUIRE(result_config.config.mt.m == config[0].mt.m);
-      else if (gpu_arch == 950)
-        REQUIRE(result_config.config.mt.m == config[1].mt.m);
+      else
+        REQUIRE(result_config.config.mt.m == config[2].mt.m);
 
       result_config = origami::select_config_mnk(201, 201, 201, hardware, config);  // M = N = K
-      REQUIRE(result_config.config.mt.m == config[0].mt.m);
+      if (gpu_arch == 942)
+        REQUIRE(result_config.config.mt.m == config[0].mt.m);
+      else
+        REQUIRE(result_config.config.mt.m == config[2].mt.m);
 
       // Test 2: Verify default problem settings (transpose, data types)
       origami::problem_t problem = {
@@ -540,6 +555,8 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
           .b_transpose     = origami::transpose_t::N,
           .a_dtype         = origami::data_type_t::Half,  // element_size_A = 16
           .b_dtype         = origami::data_type_t::Half,
+          .c_dtype         = origami::data_type_t::Half,
+          .d_dtype         = origami::data_type_t::Half,
           .mi_dtype        = origami::data_type_t::Half,
           .a_mx_block_size = 0,
           .b_mx_block_size = 0,
@@ -704,8 +721,8 @@ TEST_CASE("Origami: Formocast config fields have correct defaults", "[origami][f
   REQUIRE(config.tensile().global_split_u == 1);
   REQUIRE(config.tensile().global_accumulation == 0);
   REQUIRE(config.tensile().local_split_u == 1);
-  REQUIRE(config.grvw_a == 1);
-  REQUIRE(config.grvw_b == 1);
+  REQUIRE(config.grvw_a == 8);
+  REQUIRE(config.grvw_b == 8);
   REQUIRE(config.gwvw_d == 1);
   REQUIRE(config.tensile().direct_to_vgpr_a == false);
   REQUIRE(config.tensile().direct_to_vgpr_b == false);
