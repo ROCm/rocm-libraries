@@ -22,8 +22,8 @@ from Tensile.Components.Subtile.SubtileScaleEmit import (
 from rocisa.code import Module
 from rocisa.instruction import (
     SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32, SCmpLtU32, SCmpGeU32,
-    SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpLtI32, VCndMaskB32,
-    VMovB32, VSubI32,
+    SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
+    VCmpLtI32, VCndMaskB32, VMovB32, VSubI32,
 )
 from rocisa.container import vgpr, sgpr, DSModifiers, ContinuousRegister
 from rocisa.code import Label
@@ -358,6 +358,8 @@ class InstructionEmitter:
 
         self._tail_halfMaskVgpr = None
         self._tail_vNegOne = None
+        self._tail_vD8 = None
+        self._tail_boundaryMask = None
         if self.kernel["ProblemType"]["DataTypeA"].isBFloat16():
             self._tail_halfMaskVgpr = writer.vgprPool.checkOut(1, "tail_halfMask")
             self._tail_vNegOne = writer.vgprPool.checkOut(1, "tail_vNegOne")
@@ -367,6 +369,45 @@ class InstructionEmitter:
             module.add(VMovB32(
                 dst=vgpr(self._tail_vNegOne), src=-1,
                 comment="BF16 full-mask vgpr (constant-bus dodge)"))
+
+            # Precompute the 4 boundary masks from d = rem%8.
+            # The boundary-mask pattern (which vgprs are full/half/zero) depends
+            # only on rem%8: since laneK_0 is always a multiple of 8 and we mod
+            # out MatrixInstK=32, every "boundary" lane in every subIterK has
+            # effective_diff ≡ rem (mod 8). So all boundary lanes share the same
+            # 4-vgpr mask pattern, and we can build it once here.
+            laneSGPRCount = writer.states.laneSGPRCount
+            self._tail_vD8 = writer.vgprPool.checkOut(1, "tail_vD8")
+            module.add(VAndB32(
+                dst=vgpr(self._tail_vD8),
+                src0=sgpr(loopCounterName), src1=7,
+                comment="d = rem % 8 (boundary-mask pattern depends only on this)"))
+            self._tail_boundaryMask = [
+                writer.vgprPool.checkOut(1, f"tail_boundaryMask{i}")
+                for i in range(4)
+            ]
+            with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
+                maskSgpr = tmpSgprInfo.idx
+                for i in range(4):
+                    bm = self._tail_boundaryMask[i]
+                    module.add(VCmpLtI32(
+                        dst=sgpr(maskSgpr, laneSGPRCount),
+                        src0=vgpr(self._tail_vD8), src1=2*i + 2,
+                        comment=f"boundary[{i}]: d < {2*i+2} ? halfKeep : full"))
+                    module.add(VCndMaskB32(
+                        dst=vgpr(bm),
+                        src0=vgpr(self._tail_vNegOne),
+                        src1=vgpr(self._tail_halfMaskVgpr),
+                        src2=sgpr(maskSgpr, laneSGPRCount),
+                        comment=f"boundaryMask[{i}] = (d<{2*i+2}) ? halfKeep : full"))
+                    module.add(VCmpLtI32(
+                        dst=sgpr(maskSgpr, laneSGPRCount),
+                        src0=vgpr(self._tail_vD8), src1=2*i + 1,
+                        comment=f"boundary[{i}]: d < {2*i+1} ? 0 : prev"))
+                    module.add(VCndMaskB32(
+                        dst=vgpr(bm), src0=vgpr(bm), src1=0,
+                        src2=sgpr(maskSgpr, laneSGPRCount),
+                        comment=f"boundaryMask[{i}] = (d<{2*i+1}) ? 0 : prev"))
         return list(module.flatitems())
 
     def emit_mask_k(self, source):
@@ -422,35 +463,43 @@ class InstructionEmitter:
         with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
 
-            # Whole-vgpr compare for non-BF16 A/B and for MXSA/MXSB:
-            #   laneK_n >= rem  ⟺  diff <= n*MatrixInstK  ⟺  diff < n*MatrixInstK+1
-            needWholeMaskCmp = (not isBF16) or self.hasScale
-            if needWholeMaskCmp:
+            # Whole-vgpr compare for non-BF16 A/B (and consumed by MXSA/MXSB below
+            # for non-BF16+scale): laneK_n >= rem ⟺ diff <= n*MatrixInstK.
+            # BF16 doesn't need this here — the isBF16 block below ends with
+            # sZero (= diff <= kBaseConst) in maskSgpr, which MXSA/MXSB reuses.
+            if not isBF16:
                 module.add(VCmpLtI32(
                     dst=sgpr(maskSgpr, laneSGPRCount),
                     src0=vgpr(self._tail_vDiff), src1=kBaseConst + 1,
                     comment=f"mask: diff < {kBaseConst+1} (laneK_{subIterK} >= rem)"))
 
             if isBF16:
+                # 3-way classifier per (lane, subIterK):
+                #   sFull = effective_diff_n >= 8  → mask = -1
+                #   sZero = effective_diff_n <= 0  → mask = 0
+                #   else                           → mask = boundaryMask[i] (precomputed)
+                # Only 2 cmps per subIterK (shared across all i), vs 8 in the
+                # per-i version, because the boundary pattern is baked in.
+                module.add(VCmpGTI32(
+                    dst=sgpr(maskSgpr, laneSGPRCount),
+                    src0=vgpr(self._tail_vDiff), src1=kBaseConst + 7,
+                    comment=f"sFull: diff > {kBaseConst+7} (effective_diff_{subIterK} >= 8)"))
                 for i in range(vgprPerInUnroll):
-                    kOff = i * kStride + kBaseConst
-                    module.add(VCmpLtI32(
-                        dst=sgpr(maskSgpr, laneSGPRCount),
-                        src0=vgpr(self._tail_vDiff), src1=kOff + 2,
-                        comment=f"diff < {kOff+2} ? (vgpr {i} has < 2 valid K)"))
                     module.add(VCndMaskB32(
                         dst=vgpr(maskVgprs[i]),
-                        src0=vgpr(self._tail_vNegOne), src1=vgpr(self._tail_halfMaskVgpr),
+                        src0=vgpr(self._tail_boundaryMask[i]),
+                        src1=vgpr(self._tail_vNegOne),
                         src2=sgpr(maskSgpr, laneSGPRCount),
-                        comment=f"mask[{i}] = (diff<{kOff+2}) ? halfKeep : full"))
-                    module.add(VCmpLtI32(
-                        dst=sgpr(maskSgpr, laneSGPRCount),
-                        src0=vgpr(self._tail_vDiff), src1=kOff + 1,
-                        comment=f"diff < {kOff+1} ? (vgpr {i} has 0 valid K)"))
+                        comment=f"mask[{i}] = sFull ? full : boundary[{i}]"))
+                module.add(VCmpLeI32(
+                    dst=sgpr(maskSgpr, laneSGPRCount),
+                    src0=vgpr(self._tail_vDiff), src1=kBaseConst,
+                    comment=f"sZero: diff <= {kBaseConst} (effective_diff_{subIterK} <= 0)"))
+                for i in range(vgprPerInUnroll):
                     module.add(VCndMaskB32(
                         dst=vgpr(maskVgprs[i]), src0=vgpr(maskVgprs[i]), src1=0,
                         src2=sgpr(maskSgpr, laneSGPRCount),
-                        comment=f"mask[{i}] = (diff<{kOff+1}) ? 0 : prev"))
+                        comment=f"mask[{i}] = sZero ? 0 : prev"))
 
             def _mask_all_whole(tile_vgprs, label):
                 for v in tile_vgprs:
@@ -470,13 +519,10 @@ class InstructionEmitter:
                 mask_ab(list(self.vgprTilesA[tid]), "A")
             for tid in _unique_ids('B'):
                 mask_ab(list(self.vgprTilesB[tid]), "B")
-            # Re-issue the whole-vgpr compare for MXSA/MXSB; the BF16 partial path
-            # above overwrote maskSgpr.
-            if self.hasScale and isBF16:
-                module.add(VCmpLtI32(
-                    dst=sgpr(maskSgpr, laneSGPRCount),
-                    src0=vgpr(self._tail_vDiff), src1=kBaseConst + 1,
-                    comment=f"reload mask: diff < {kBaseConst+1} (for MXSA/MXSB)"))
+            # MXSA/MXSB use the whole-vgpr zero mask. For BF16 the isBF16 block
+            # above left sZero (= diff <= kBaseConst, semantically equal to
+            # diff < kBaseConst+1) in maskSgpr — exactly what we need. For non-BF16
+            # the needWholeMaskCmp at the top set the same predicate.
             if self.hasScale:
                 for tid in _unique_ids('SA'):
                     _mask_all_whole(list(self.vgprTilesSA[tid]), "MXSA")
@@ -504,6 +550,13 @@ class InstructionEmitter:
         if getattr(self, "_tail_vNegOne", None) is not None:
             self.writer.vgprPool.checkIn(self._tail_vNegOne)
             self._tail_vNegOne = None
+        if getattr(self, "_tail_vD8", None) is not None:
+            self.writer.vgprPool.checkIn(self._tail_vD8)
+            self._tail_vD8 = None
+        if getattr(self, "_tail_boundaryMask", None) is not None:
+            for bm in self._tail_boundaryMask:
+                self.writer.vgprPool.checkIn(bm)
+            self._tail_boundaryMask = None
         return []
 
     def populate(self, emitted, unroll_iter=0):
