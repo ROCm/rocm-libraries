@@ -30,7 +30,8 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                                            const std::string& split_k,
                                            const ckt::Inputs<SIGNATURE>& inputs,
                                            const ckt::Outputs<SIGNATURE>& outputs,
-                                           const ck_tile::stream_config& s_conf)
+                                           const ck_tile::stream_config& s_conf,
+                                           bool do_verification)
 {
     using DataType = DeduceDataType<SIGNATURE>;
 
@@ -40,7 +41,11 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
     int best_split_k = 1;
     bool all_instances_valid = true;
 
-    auto reference = compute_reference<SIGNATURE>(args, inputs);
+    auto reference = ckt::alloc_outputs(args);
+    if(do_verification)
+    {
+        reference = compute_reference<SIGNATURE>(args, inputs);
+    }
 
     const auto conv_param = args.to_ck_tile_conv_param();
 
@@ -104,22 +109,31 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
             auto&& [rtol, atol] =
                 get_rtol_atol<SIGNATURE>(num_accums, k_batch, max_accumulated_value);
 
-            const bool is_valid = validate_and_report<SIGNATURE, ConvBuffer::Weight>(
-                args, outputs, reference.get(), rtol, atol);
+            const bool is_valid = do_verification 
+                ? validate_and_report<SIGNATURE, ConvBuffer::Weight>(args, outputs, reference.get(), rtol, atol)
+                : true;
 
             best_avg_time = std::min(best_avg_time, avg_time);
             best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
             best_split_k  = best_avg_time < avg_time ? best_split_k : k_batch;
 
-            if(is_valid)
+            if (do_verification)
             {
-                std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms,"
-                          << " " << op_name << ", SplitK " << k_batch << std::endl;
+                if(is_valid)
+                {
+                    std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms,"
+                            << " " << op_name << ", SplitK " << k_batch << std::endl;
+                }
+                else
+                {
+                    std::cout << "[Error] " << op_name << ", SplitK " << k_batch << std::endl;
+                    all_instances_valid = false;
+                }
             }
-            else
+            else 
             {
-                std::cout << "[Error] " << op_name << ", SplitK " << k_batch << std::endl;
-                all_instances_valid = false;
+                std::cout << "[Not Validated] Perf: " << std::setw(10) << avg_time << " ms,"
+                            << " " << op_name << ", SplitK " << k_batch << std::endl;
             }
         }
     }

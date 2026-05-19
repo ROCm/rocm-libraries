@@ -30,7 +30,8 @@ std::tuple<bool, float, std::string>
 run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                    const ckt::Inputs<SIGNATURE>& inputs,
                                    const ckt::Outputs<SIGNATURE>& outputs,
-                                   const ck_tile::stream_config& s_conf)
+                                   const ck_tile::stream_config& s_conf,
+                                   bool do_verification)
 {
     using DataType = DeduceDataType<SIGNATURE>;
 
@@ -39,7 +40,11 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     std::string best_op_name;
     bool valid = true;
 
-    auto reference = compute_reference<SIGNATURE>(args, inputs);
+    auto reference = ckt::alloc_outputs(args);
+    if(do_verification)
+    {
+        reference = compute_reference<SIGNATURE>(args, inputs);
+    }
 
     // Register all generated forward kernels
     static bool kernels_registered = false;
@@ -83,10 +88,9 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
 
         best_avg_time = std::min(best_avg_time, avg_time);
         best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
-        std::cout << "Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name
-                  << std::endl;
+        std::cout << "Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name << std::endl;
 
-        if(!validate_and_report<SIGNATURE, ConvBuffer::Output>(
+        if(do_verification && !validate_and_report<SIGNATURE, ConvBuffer::Output>(
                args,
                outputs,
                reference.get(),

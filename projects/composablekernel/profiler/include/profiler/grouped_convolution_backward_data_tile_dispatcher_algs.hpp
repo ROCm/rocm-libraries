@@ -30,7 +30,8 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                                          const index_t instance_index,
                                          const ckt::Inputs<SIGNATURE>& inputs,
                                          const ckt::Outputs<SIGNATURE>& outputs,
-                                         const ck_tile::stream_config& s_conf)
+                                         const ck_tile::stream_config& s_conf,
+                                         bool do_verification)
 {
     using DataType = DeduceDataType<SIGNATURE>;
 
@@ -41,7 +42,11 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
     ck::index_t best_instance_index = -1;
     bool all_instances_valid = true;
 
-    auto reference = compute_reference<SIGNATURE>(args, inputs);
+    auto reference = ckt::alloc_outputs(args);
+    if(do_verification)
+    {
+        reference = compute_reference<SIGNATURE>(args, inputs);
+    }
 
     const auto conv_param = args.to_ck_tile_conv_param();
 
@@ -116,25 +121,35 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
             auto&& [rtol, atol] =
                 get_rtol_atol<SIGNATURE>(num_accums, k_batch, max_accumulated_value);
 
-            if(validate_and_report<SIGNATURE, ConvBuffer::Input>(
+            if (do_verification)
+            {
+                if(validate_and_report<SIGNATURE, ConvBuffer::Input>(
                    args, outputs, reference.get(), rtol, atol))
-            {
-                if(avg_time < best_avg_time)
                 {
-                    best_instance_index = num_kernel - 1;
+                    if(avg_time < best_avg_time)
+                    {
+                        best_instance_index = num_kernel - 1;
+                    }
+                    best_avg_time = std::min(best_avg_time, avg_time);
+                    best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
+                    best_split_k  = best_avg_time < avg_time ? best_split_k : k_batch;
+                    std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms," << " "
+                            << op_name << " (instance " << num_kernel - 1 << "), SplitK "
+                            << k_batch << std::endl;
                 }
-                best_avg_time = std::min(best_avg_time, avg_time);
-                best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
-                best_split_k  = best_avg_time < avg_time ? best_split_k : k_batch;
-                std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms," << " "
-                          << op_name << " (instance " << num_kernel - 1 << "), SplitK "
-                          << k_batch << std::endl;
+                else
+                {
+                    std::cout << "[Error] " << op_name << ", SplitK " << k_batch << std::endl;
+                    all_instances_valid = false;
+                }
             }
-            else
+            else 
             {
-                std::cout << "[Error] " << op_name << ", SplitK " << k_batch << std::endl;
-                all_instances_valid = false;
+                std::cout << "[Not Validated] Perf: " << std::setw(10) << avg_time << " ms," << " "
+                            << op_name << " (instance " << num_kernel - 1 << "), SplitK "
+                            << k_batch << std::endl;
             }
+            
         }
     }
 
