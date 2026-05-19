@@ -734,13 +734,11 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 #else
         auto scale_b_dram_window = make_tile_window(
             scale_b_window.get_bottom_tensor_view(),
-            make_tuple(number<NWarp * WG::kN>{},
-                       number<XdlPerScalePack>{}), // KPackIterPerWarp*XdlPerScalePack  ????
+            make_tuple(number<NWarp * WG::kN>{}, number<XdlPerScalePack>{}),
             scale_b_window.get_window_origin(),
             PipelinePolicy::template MakeMX_ScaleB_DramTileDistribution<Problem>());
-        const auto scale_b_dram_step_n =
-            amd_wave_read_first_lane(scale_b_dram_window.get_load_offset(
-                tuple<number<NWarp * WG::kN>, number<0>>{})); // NIterPerWarp * kN???
+        const auto scale_b_dram_step_n = amd_wave_read_first_lane(
+            scale_b_dram_window.get_load_offset(tuple<number<NWarp * WG::kN>, number<0>>{}));
         const auto scale_b_dram_step_k = amd_wave_read_first_lane(
             scale_b_dram_window.get_load_offset(tuple<number<0>, number<XdlPerScalePack>>{}));
 #endif
