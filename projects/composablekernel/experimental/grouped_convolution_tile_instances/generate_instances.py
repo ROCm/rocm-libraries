@@ -118,9 +118,9 @@ def get_k_mfma(dtype, m_per_xdl, n_per_xdl):
             return 4
     else:
         if m_per_xdl == 32:
-            return 16
+            return 8
         else:
-            return 32
+            return 16
 
 
 def check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector):
@@ -444,7 +444,7 @@ def parse_fwd_instances(instances, problem_name):
         warp_size = 64
         k_warp = int(block_size / (warp_size * m_warp * n_warp))
         dtype = get_dtype(problem_name)
-        k_per_xdl = min(max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl)), k_per_block)
+        k_per_xdl = max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl))
 
         if split_image:
             print(
@@ -656,7 +656,7 @@ def parse_bwd_weight_instances(instances, problem_name):
         k_warp = int(block_size / (warp_size * m_warp * n_warp))
         dtype = get_dtype(problem_name)
 
-        k_per_xdl = min(max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl)), k_per_block)
+        k_per_xdl = max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl))
 
         if not check_vectors(
             a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector
@@ -799,7 +799,7 @@ def parse_bwd_data_instances(instances, problem_name):
         k_warp = int(block_size / (warp_size * m_warp * n_warp))
         dtype = get_dtype(problem_name)
 
-        k_per_xdl = min(max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl)), k_per_block)
+        k_per_xdl = max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl))
 
         if check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector) == False:
             print(f"Skipping instance {instance_id} with irregular load since it's not supported yet.")
@@ -1173,3 +1173,4 @@ if __name__ == "__main__":
             process_depthwise_forward(configs_prefix, args.instances_dir)
             process_direction(bwd_weight_configs, "backward_weight", generate_instances_bwd_weight, configs_prefix, args.filter_pattern, args.instances_dir)
             process_direction(bwd_data_configs, "backward_data", generate_instances_bwd_data, configs_prefix, args.filter_pattern, args.instances_dir)
+
