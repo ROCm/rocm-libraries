@@ -31,35 +31,37 @@ constexpr size_t MAX_GRID_SIZE = static_cast<size_t>(1ULL << 32) / REF_BLOCK_SIZ
 // Build the kernel name for the GPU reference (always uses double accumulators).
 std::string RefKernelName(const std::string& direction,
                           const std::string& layout,
-                          miopenDataType_t data_type)
+                          miopenDataType_t in_type,
+                          miopenDataType_t out_type)
 {
     std::ostringstream name;
     name << "naive_conv_ab_nonpacked_" << direction << "_" << layout << "_";
 
-    // Input/output data type
-    switch(data_type)
+    // Input data type
+    switch(in_type)
     {
     case miopenFloat: name << "float_"; break;
     case miopenHalf: name << "half_"; break;
     case miopenBFloat16: name << "__hip_bfloat16_"; break;
     case miopenInt8: name << "int8_t_"; break;
-    default: MIOPEN_THROW("GpuConvReference: unsupported data type");
+    default: MIOPEN_THROW("GpuConvReference: unsupported input data type");
     }
 
     // Accumulator type: always double for reference (int32 for int8)
-    if(data_type == miopenInt8)
+    if(in_type == miopenInt8)
         name << "int32_t_";
     else
         name << "double_";
 
     // Output data type
-    switch(data_type)
+    switch(out_type)
     {
     case miopenFloat: name << "float"; break;
     case miopenHalf: name << "half"; break;
     case miopenBFloat16: name << "__hip_bfloat16"; break;
-    case miopenInt8: name << "int32_t"; break;
-    default: MIOPEN_THROW("GpuConvReference: unsupported data type");
+    case miopenInt8: name << "int8_t"; break;
+    case miopenInt32: name << "int32_t"; break;
+    default: MIOPEN_THROW("GpuConvReference: unsupported output data type");
     }
 
     // TF32 flag: always 0 for reference
@@ -154,13 +156,15 @@ size_t ComputeGridSizePerBatch3D(const std::string& direction,
 {
     if(direction == "fwd")
     {
+        // Per-batch grid: caller multiplies by batch chunk size
         if(is_default_layout)
-            return static_cast<size_t>(group) * n * k_per_group;
+            return static_cast<size_t>(group) * k_per_group;
         else
-            return static_cast<size_t>(group) * n * do_;
+            return static_cast<size_t>(group) * do_;
     }
     else if(direction == "bwd")
     {
+        // BWD grid includes n (no batch chunking)
         if(is_default_layout)
             return static_cast<size_t>(group) * n * c_per_group;
         else
@@ -168,10 +172,8 @@ size_t ComputeGridSizePerBatch3D(const std::string& direction,
     }
     else // wrw
     {
-        if(is_default_layout)
-            return static_cast<size_t>(group) * k_per_group;
-        else
-            return static_cast<size_t>(group) * k_per_group;
+        // WRW grid does not include n (no batch chunking)
+        return static_cast<size_t>(group) * k_per_group;
     }
 }
 
@@ -228,18 +230,19 @@ void GpuConvReference::RunFwd(const Handle& handle,
         int fx = wDesc.GetLengths()[3];
         int py = pads[0], px = pads[1];
         int sy = strides[0], sx = strides[1];
-        int dy = dilations[0], dx = dilations[1];
+        int dily = dilations[0], dilx = dilations[1];
 
-        size_t grid_size_per_batch =
-            ComputeGridSizePerBatch("fwd", is_default_layout, k, c, n, ho, hi, group, k_per_group,
-                                    c_per_group);
+        size_t grid_size_per_batch = ComputeGridSizePerBatch(
+            "fwd", is_default_layout, k, c, n, ho, hi, group, k_per_group, c_per_group);
 
         // Batch chunking
         int batch_chunk = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
-        if(batch_chunk < 1) batch_chunk = 1;
-        if(batch_chunk > n) batch_chunk = n;
+        if(batch_chunk < 1)
+            batch_chunk = 1;
+        if(batch_chunk > n)
+            batch_chunk = n;
 
-        std::string kernel_name = RefKernelName("fwd", layout_str, data_type);
+        std::string kernel_name = RefKernelName("fwd", layout_str, data_type, yDesc.GetType());
         std::string kernel_file = "naive_conv_fwd.cpp";
         std::string comp_opts   = RefCompileOptions(data_type);
 
@@ -256,10 +259,10 @@ void GpuConvReference::RunFwd(const Handle& handle,
 
         for(int batch_start = 0; batch_start < n; batch_start += batch_chunk)
         {
-            int cur_n          = std::min(batch_chunk, n - batch_start);
-            size_t grid_size   = grid_size_per_batch * cur_n;
-            size_t in_offset   = static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
-            size_t out_offset  = static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
+            int cur_n         = std::min(batch_chunk, n - batch_start);
+            size_t grid_size  = grid_size_per_batch * cur_n;
+            size_t in_offset  = static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
+            size_t out_offset = static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
             const void* in_ptr = static_cast<const char*>(x) + in_offset;
             void* out_ptr      = static_cast<char*>(y) + out_offset;
 
@@ -269,35 +272,58 @@ void GpuConvReference::RunFwd(const Handle& handle,
                              kernel_name,
                              {REF_BLOCK_SIZE, 1, 1},
                              {grid_size * REF_BLOCK_SIZE, 1, 1},
-                             comp_opts)(
-                in_ptr, w, 1.0, 0.0, out_ptr, in_strides, wei_strides, out_strides, hi, wi, cur_n,
-                k_per_group, c_per_group, ho, wo, sy, sx, dy, dx, py, px, fy, fx, group);
+                             comp_opts)(in_ptr,
+                                        w,
+                                        1.0,
+                                        0.0,
+                                        out_ptr,
+                                        in_strides,
+                                        wei_strides,
+                                        out_strides,
+                                        hi,
+                                        wi,
+                                        cur_n,
+                                        k_per_group,
+                                        c_per_group,
+                                        ho,
+                                        wo,
+                                        sy,
+                                        sx,
+                                        dily,
+                                        dilx,
+                                        py,
+                                        px,
+                                        fy,
+                                        fx,
+                                        group);
         }
     }
     else
     {
         // 3D
-        int di = xDesc.GetLengths()[2];
-        int hi = xDesc.GetLengths()[3];
-        int wi = xDesc.GetLengths()[4];
+        int di  = xDesc.GetLengths()[2];
+        int hi  = xDesc.GetLengths()[3];
+        int wi  = xDesc.GetLengths()[4];
         int do_ = yDesc.GetLengths()[2];
         int ho  = yDesc.GetLengths()[3];
         int wo  = yDesc.GetLengths()[4];
-        int fz = wDesc.GetLengths()[2];
-        int fy = wDesc.GetLengths()[3];
-        int fx = wDesc.GetLengths()[4];
+        int fz  = wDesc.GetLengths()[2];
+        int fy  = wDesc.GetLengths()[3];
+        int fx  = wDesc.GetLengths()[4];
         int pz = pads[0], py = pads[1], px = pads[2];
         int sz = strides[0], sy = strides[1], sx = strides[2];
-        int dz = dilations[0], dyz = dilations[1], dx = dilations[2];
+        int dilz = dilations[0], dily = dilations[1], dilx = dilations[2];
 
         size_t grid_size_per_batch = ComputeGridSizePerBatch3D(
             "fwd", is_default_layout, k, c, n, ho, hi, do_, di, group, k_per_group, c_per_group);
 
         int batch_chunk = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
-        if(batch_chunk < 1) batch_chunk = 1;
-        if(batch_chunk > n) batch_chunk = n;
+        if(batch_chunk < 1)
+            batch_chunk = 1;
+        if(batch_chunk > n)
+            batch_chunk = n;
 
-        std::string kernel_name = RefKernelName("fwd", layout_str, data_type);
+        std::string kernel_name = RefKernelName("fwd", layout_str, data_type, yDesc.GetType());
         std::string kernel_file = "naive_conv_fwd.cpp";
         std::string comp_opts   = RefCompileOptions(data_type);
 
@@ -314,10 +340,10 @@ void GpuConvReference::RunFwd(const Handle& handle,
 
         for(int batch_start = 0; batch_start < n; batch_start += batch_chunk)
         {
-            int cur_n          = std::min(batch_chunk, n - batch_start);
-            size_t grid_size   = grid_size_per_batch * cur_n;
-            size_t in_offset   = static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
-            size_t out_offset  = static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
+            int cur_n         = std::min(batch_chunk, n - batch_start);
+            size_t grid_size  = grid_size_per_batch * cur_n;
+            size_t in_offset  = static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
+            size_t out_offset = static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
             const void* in_ptr = static_cast<const char*>(x) + in_offset;
             void* out_ptr      = static_cast<char*>(y) + out_offset;
 
@@ -327,10 +353,36 @@ void GpuConvReference::RunFwd(const Handle& handle,
                              kernel_name,
                              {REF_BLOCK_SIZE, 1, 1},
                              {grid_size * REF_BLOCK_SIZE, 1, 1},
-                             comp_opts)(
-                in_ptr, w, 1.0, 0.0, out_ptr, in_strides, wei_strides, out_strides, di, hi, wi,
-                cur_n, k_per_group, c_per_group, do_, ho, wo, sz, sy, sx, dz, dyz, dx, pz, py, px,
-                fz, fy, fx, group);
+                             comp_opts)(in_ptr,
+                                        w,
+                                        1.0,
+                                        0.0,
+                                        out_ptr,
+                                        in_strides,
+                                        wei_strides,
+                                        out_strides,
+                                        di,
+                                        hi,
+                                        wi,
+                                        cur_n,
+                                        k_per_group,
+                                        c_per_group,
+                                        do_,
+                                        ho,
+                                        wo,
+                                        sz,
+                                        sy,
+                                        sx,
+                                        dilz,
+                                        dily,
+                                        dilx,
+                                        pz,
+                                        py,
+                                        px,
+                                        fz,
+                                        fy,
+                                        fx,
+                                        group);
         }
     }
 }
@@ -391,7 +443,7 @@ void GpuConvReference::RunBwd(const Handle& handle,
 
         size_t num_spatial_tiles = (thread_length + REF_BLOCK_SIZE - 1) / REF_BLOCK_SIZE;
 
-        std::string kernel_name = RefKernelName("bwd", layout_str, data_type);
+        std::string kernel_name = RefKernelName("bwd", layout_str, data_type, dxDesc.GetType());
         std::string kernel_file = "naive_conv_bwd.cpp";
         std::string comp_opts   = RefCompileOptions(data_type);
 
@@ -408,9 +460,30 @@ void GpuConvReference::RunBwd(const Handle& handle,
                          kernel_name,
                          {REF_BLOCK_SIZE, 1, 1},
                          {grid_size_per_batch * REF_BLOCK_SIZE, num_spatial_tiles, 1},
-                         comp_opts)(
-            dy, w, 1.0, 0.0, dx, out_strides, wei_strides, in_strides, hi, wi, n, k_per_group,
-            c_per_group, ho, wo, sy, sx, dily, dilx, py, px, fy, fx, group);
+                         comp_opts)(dy,
+                                    w,
+                                    1.0,
+                                    0.0,
+                                    dx,
+                                    out_strides,
+                                    wei_strides,
+                                    in_strides,
+                                    hi,
+                                    wi,
+                                    n,
+                                    k_per_group,
+                                    c_per_group,
+                                    ho,
+                                    wo,
+                                    sy,
+                                    sx,
+                                    dily,
+                                    dilx,
+                                    py,
+                                    px,
+                                    fy,
+                                    fx,
+                                    group);
     }
     else
     {
@@ -421,12 +494,12 @@ void GpuConvReference::RunBwd(const Handle& handle,
         int do_ = dyDesc.GetLengths()[2];
         int ho  = dyDesc.GetLengths()[3];
         int wo  = dyDesc.GetLengths()[4];
-        int fz = wDesc.GetLengths()[2];
-        int fy = wDesc.GetLengths()[3];
-        int fx = wDesc.GetLengths()[4];
+        int fz  = wDesc.GetLengths()[2];
+        int fy  = wDesc.GetLengths()[3];
+        int fx  = wDesc.GetLengths()[4];
         int pz = pads[0], py = pads[1], px = pads[2];
         int sz = strides[0], sy = strides[1], sx = strides[2];
-        int dz = dilations[0], dily = dilations[1], dilx = dilations[2];
+        int dilz = dilations[0], dily = dilations[1], dilx = dilations[2];
 
         size_t grid_size_per_batch = ComputeGridSizePerBatch3D(
             "bwd", is_default_layout, k, c, n, ho, hi, do_, di, group, k_per_group, c_per_group);
@@ -439,7 +512,7 @@ void GpuConvReference::RunBwd(const Handle& handle,
 
         size_t num_spatial_tiles = (thread_length + REF_BLOCK_SIZE - 1) / REF_BLOCK_SIZE;
 
-        std::string kernel_name = RefKernelName("bwd", layout_str, data_type);
+        std::string kernel_name = RefKernelName("bwd", layout_str, data_type, dxDesc.GetType());
         std::string kernel_file = "naive_conv_bwd.cpp";
         std::string comp_opts   = RefCompileOptions(data_type);
 
@@ -455,9 +528,36 @@ void GpuConvReference::RunBwd(const Handle& handle,
                          kernel_name,
                          {REF_BLOCK_SIZE, 1, 1},
                          {grid_size_per_batch * REF_BLOCK_SIZE, num_spatial_tiles, 1},
-                         comp_opts)(
-            dy, w, 1.0, 0.0, dx, out_strides, wei_strides, in_strides, di, hi, wi, n, k_per_group,
-            c_per_group, do_, ho, wo, sz, sy, sx, dz, dily, dilx, pz, py, px, fz, fy, fx, group);
+                         comp_opts)(dy,
+                                    w,
+                                    1.0,
+                                    0.0,
+                                    dx,
+                                    out_strides,
+                                    wei_strides,
+                                    in_strides,
+                                    di,
+                                    hi,
+                                    wi,
+                                    n,
+                                    k_per_group,
+                                    c_per_group,
+                                    do_,
+                                    ho,
+                                    wo,
+                                    sz,
+                                    sy,
+                                    sx,
+                                    dilz,
+                                    dily,
+                                    dilx,
+                                    pz,
+                                    py,
+                                    px,
+                                    fz,
+                                    fy,
+                                    fx,
+                                    group);
     }
 }
 
@@ -506,10 +606,9 @@ void GpuConvReference::RunWrw(const Handle& handle,
         int dily = dilations[0], dilx = dilations[1];
 
         // WRW reference: serial, no spatial tiling, no atomicAdd
-        size_t grid_size =
-            is_default_layout ? static_cast<size_t>(k) : static_cast<size_t>(k);
+        size_t grid_size = static_cast<size_t>(k);
 
-        std::string kernel_name = RefKernelName("wrw", layout_str, data_type);
+        std::string kernel_name = RefKernelName("wrw", layout_str, data_type, dwDesc.GetType());
         std::string kernel_file = "naive_conv_wrw.cpp";
         std::string comp_opts   = RefCompileOptions(data_type);
 
@@ -526,9 +625,30 @@ void GpuConvReference::RunWrw(const Handle& handle,
                          kernel_name,
                          {REF_BLOCK_SIZE, 1, 1},
                          {grid_size * REF_BLOCK_SIZE, 1, 1},
-                         comp_opts)(
-            x, dw, 1.0, 0.0, dy, in_strides, wei_strides, out_strides, hi, wi, n, k_per_group,
-            c_per_group, ho, wo, sy, sx, dily, dilx, py, px, fy, fx, group);
+                         comp_opts)(x,
+                                    dw,
+                                    1.0,
+                                    0.0,
+                                    dy,
+                                    in_strides,
+                                    wei_strides,
+                                    out_strides,
+                                    hi,
+                                    wi,
+                                    n,
+                                    k_per_group,
+                                    c_per_group,
+                                    ho,
+                                    wo,
+                                    sy,
+                                    sx,
+                                    dily,
+                                    dilx,
+                                    py,
+                                    px,
+                                    fy,
+                                    fx,
+                                    group);
     }
     else
     {
@@ -539,17 +659,16 @@ void GpuConvReference::RunWrw(const Handle& handle,
         int do_ = dyDesc.GetLengths()[2];
         int ho  = dyDesc.GetLengths()[3];
         int wo  = dyDesc.GetLengths()[4];
-        int fz = dwDesc.GetLengths()[2];
-        int fy = dwDesc.GetLengths()[3];
-        int fx = dwDesc.GetLengths()[4];
+        int fz  = dwDesc.GetLengths()[2];
+        int fy  = dwDesc.GetLengths()[3];
+        int fx  = dwDesc.GetLengths()[4];
         int pz = pads[0], py = pads[1], px = pads[2];
         int sz = strides[0], sy = strides[1], sx = strides[2];
-        int dz = dilations[0], dily = dilations[1], dilx = dilations[2];
+        int dilz = dilations[0], dily = dilations[1], dilx = dilations[2];
 
-        size_t grid_size = is_default_layout ? static_cast<size_t>(group) * k_per_group
-                                             : static_cast<size_t>(group) * k_per_group;
+        size_t grid_size = static_cast<size_t>(group) * k_per_group;
 
-        std::string kernel_name = RefKernelName("wrw", layout_str, data_type);
+        std::string kernel_name = RefKernelName("wrw", layout_str, data_type, dwDesc.GetType());
         std::string kernel_file = "naive_conv_wrw.cpp";
         std::string comp_opts   = RefCompileOptions(data_type);
 
@@ -566,9 +685,36 @@ void GpuConvReference::RunWrw(const Handle& handle,
                          kernel_name,
                          {REF_BLOCK_SIZE, 1, 1},
                          {grid_size * REF_BLOCK_SIZE, 1, 1},
-                         comp_opts)(
-            x, dw, 1.0, 0.0, dy, in_strides, wei_strides, out_strides, di, hi, wi, n, k_per_group,
-            c_per_group, do_, ho, wo, sz, sy, sx, dz, dily, dilx, pz, py, px, fz, fy, fx, group);
+                         comp_opts)(x,
+                                    dw,
+                                    1.0,
+                                    0.0,
+                                    dy,
+                                    in_strides,
+                                    wei_strides,
+                                    out_strides,
+                                    di,
+                                    hi,
+                                    wi,
+                                    n,
+                                    k_per_group,
+                                    c_per_group,
+                                    do_,
+                                    ho,
+                                    wo,
+                                    sz,
+                                    sy,
+                                    sx,
+                                    dilz,
+                                    dily,
+                                    dilx,
+                                    pz,
+                                    py,
+                                    px,
+                                    fz,
+                                    fy,
+                                    fx,
+                                    group);
     }
 }
 
