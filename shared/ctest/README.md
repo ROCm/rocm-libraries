@@ -82,11 +82,18 @@ flowchart TD
 test_categories:
   category_name:
     description: "Human-readable description"
-    test_patterns: ["*pattern1*", "*pattern2*"]
-    exclude: ["*pattern_to_exclude*"]
-    exclude_windows: ["*linux_only_tests*"]
-    exclude_linux: ["*windows_only_tests*"]
-    labels: ["quick", "label2"]
+    test_patterns:
+      - "*pattern1*"
+      - "*pattern2*"
+    exclude:
+      - "*pattern_to_exclude*"
+    exclude_windows:
+      - "*linux_only_tests*"
+    exclude_linux:
+      - "*windows_only_tests*"
+    labels:
+      - "quick"
+      - "label2"
 
 exclude_gpu:
   # Common pattern definitions using YAML anchors for reusability
@@ -128,19 +135,27 @@ execution_settings:
 
 **Environment (optional):** Under `execution_settings`, an `environment` map sets env vars for all category tests (e.g. `OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS`). Keys and values are strings; they are passed to CTest as `ENVIRONMENT "VAR1=val1;VAR2=val2"`.
 
-**Extra arguments (optional, per-category):** A category may set `extra_args` to a list (or single string) of additional command-line arguments that the parser appends to the test command after `--gtest_filter=...`. Useful for projects whose test binary has runtime flags beyond gtest filtering (e.g. rocFFT's `--smoketest` and `--test_prob`). Each entry is shell-quoted with `shlex.quote`, so values with spaces or shell metacharacters are preserved as a single argument by CTest.
+**Extra arguments (optional, per-category):** A category may set `extra_args` to a list (or single string) of additional command-line arguments that the parser appends to the test command after `--gtest_filter=...`. Useful for projects whose test binary accepts runtime flags beyond gtest filtering (for example, a flag to select a reduced subset of tests, or to scale a sampling/iteration parameter). Each entry is shell-quoted with `shlex.quote`, so values with spaces or shell metacharacters are preserved as a single argument by CTest.
 
 ```yaml
 test_categories:
   quick:
-    test_patterns: ["*"]
-    extra_args: ["--smoketest"]            # rocfft-test --gtest_filter=* --smoketest
-    labels: ["quick"]
+    test_patterns:
+      - "*"
+    extra_args:           # appended after --gtest_filter
+      - "--quick-subset"
+    labels:
+      - "quick"
   standard:
-    test_patterns: ["*"]
-    exclude: ["*multi_gpu*"]
-    extra_args: ["--test_prob", "0.02"]    # rocfft-test --gtest_filter=*-*multi_gpu* --test_prob 0.02
-    labels: ["standard"]
+    test_patterns:
+      - "*"
+    exclude:
+      - "*excluded_pattern*"
+    extra_args:           # multi-token args are passed verbatim
+      - "--sample-probability"
+      - "0.02"
+    labels:
+      - "standard"
 ```
 
 `extra_args` flow through identically to category tests and to GPU-exclusion test variants, in both the build-tree CTest definitions and the install-tree `CTestTestfile.cmake`.
@@ -154,8 +169,12 @@ test_categories:
   category_name:
     # Required fields (same as base)
     description: "Human-readable description"
-    test_patterns: ["*pattern1*", "*pattern2*"]
-    labels: ["label1", "label2"]
+    test_patterns:
+      - "*pattern1*"
+      - "*pattern2*"
+    labels:
+      - "label1"
+      - "label2"
 
     # Optional enhancement fields - add only if useful for your project
     notes: |
@@ -174,9 +193,12 @@ test_categories:
       - "other_category"  # Metadata for related categories (not enforced by parser; for documentation/tooling)
 
     # Standard fields (from base)
-    exclude: ["*always_exclude*"]
-    exclude_windows: ["*linux_only*"]
-    exclude_linux: ["*windows_only*"]
+    exclude:
+      - "*always_exclude*"
+    exclude_windows:
+      - "*linux_only*"
+    exclude_linux:
+      - "*windows_only*"
 
 # Optional: Top-level context for AI/LLM tools
 llm_context:
