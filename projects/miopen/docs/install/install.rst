@@ -2,31 +2,105 @@
   :description: Installing MIOpen from a package
   :keywords: MIOpen, ROCm, API, documentation, install, package
 
-********************************************************************
+************************************
 Install MIOpen
-********************************************************************
+************************************
 
-To install MIOpen from a package, choose either a pre-built package for your Linux
-distribution or choose a pre-compiled kernels package. For a list of MIOpen
-prerequisites, see :doc:`MIOpen prerequisites <./prerequisites>`. To build MIOpen from
-source, see :doc:`build MIOpen from source <./build-source>`.
+Install MIOpen from a pre-built package for your Linux distribution or from a
+pre-compiled kernels package.
 
-Installing using a pre-built package
-==============================================================
+Before you begin, verify that your system is supported. For more information,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-To install MIOpen on Ubuntu, use ``apt-get install miopen-hip``.
+For advanced workflows, source builds, or custom configurations, see
+:doc:`./build-source`.
 
-If you are using OpenCL, use ``apt-get install miopen-opencl``. (This is not recommended because
-OpenCL is deprecated.)
+.. _install-rocm:
 
-.. note::
+Install the ROCm Core SDK
+=========================
 
-   You can't install both backends on the same system simultaneously. To switch to a different
-   backend, completely uninstall the existing backend prior to installing
-   the new backend.
+MIOpen is included with the ROCm Core SDK on Linux and Windows. For the most
+complete installation on Linux, we recommend that developers use the
+``amdrocm-core-sdk`` meta package.
+
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on that page to view instructions appropriate for your system
+environment.
+
+.. _install-base:
+
+Install ROCm DNN libraries on Linux
+===================================
+
+Alternatively, if you want to install MIOpen as part of the ROCm
+DNN package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
+additional ROCm libraries and tools, install the ``amdrocm-dnn`` package.
+
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
+
+2. Install the ROCm DNN package that matches your desired ROCm version,
+   development package needs, and AMD GPU architecture. Package names use the
+   following format:
+
+   .. code-block:: shell-session
+
+      amdrocm-dnn<-dev/-devel><rocm_version><-llvm_target>
+
+   Where:
+
+   * ``<-dev/-devel>`` specifies whether to install library files and
+     headers. Omit this suffix to only install runtime packages.
+
+     * ``-dev`` is used on Debian-based distributions, including Ubuntu.
+
+     * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
+
+   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+     suffix to install the latest available version.
+
+   * ``<-llvm_target>`` (starting with ``gfx``) is used if you are installing
+     for a single AMD GPU architecture. Omit this suffix to install for all
+     architectures at the cost of disk space.
+
+   For example: ``amdrocm-dnn-dev7.13-gfx950``
+
+   Use the following command to install the latest DNN development package
+   release for supported GPU architectures:
+
+   .. tab-set::
+
+      .. tab-item:: Debian-based distros
+
+         .. code-block:: bash
+
+            sudo apt install amdrocm-dnn-dev
+
+      .. tab-item:: RHEL-based distros
+
+         .. code-block:: bash
+
+            sudo dnf install amdrocm-dnn-devel
+
+      .. tab-item:: SLES
+
+         .. code-block:: bash
+
+            sudo zypper install amdrocm-dnn-devel
+
+.. _install-nightly:
+
+Install a nightly build
+=======================
+
+The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
+nightly builds for the ROCm Core SDK and its components, including MIOpen.
+See `Nightly release status
+<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
 
 Installing using a kernels package
-==============================================================
+==================================
 
 MIOpen provides an optional pre-compiled kernels package to reduce startup latency. These
 precompiled kernels consist of a select set of popular input configurations. This collection of kernels
@@ -61,42 +135,3 @@ package. To run it, use the following command:
    ./utils/install_precompiled_kernels.sh
 
 The preceding script depends on the ``rocminfo`` package to query the GPU architecture.
-
-Installing dependencies
-==============================================================
-
-To install the MIOpen dependencies, use the ``install_deps.cmake`` command:
-
-.. note::
-
-   You can run ``install_deps.cmake`` from the ``rocm-libraries/projects/miopen`` directory.
-
-
-.. code:: shell
-
-   cmake -P install_deps.cmake
-
-By default, this installs the dependencies in ``/usr/local``, but you can specify another location using the ``--prefix``
-argument:
-
-.. code:: shell
-
-  cmake -P install_deps.cmake --prefix <miopen-dependency-path>
-
-The following example demonstrates how to use ``cmake`` with a specific installation directory:
-
-.. code:: shell
-
-   cmake -P install_deps.cmake --minimum --prefix /root/MIOpen/install_dir
-
-You can specify this directory during the configuration phase using ``CMAKE_PREFIX_PATH``.
-
-MIOpen's HIP backend uses :doc:`rocBLAS <rocblas:index>` by default. You can install the rocBLAS
-minimum release using ``apt-get install rocblas``. To disable rocBLAS, set the configuration flag
-``-DMIOPEN_USE_ROCBLAS=Off``. rocBLAS is **not** available with OpenCL.
-
-MIOpen's HIP backend can use :doc:`hipBLASLt <hipblaslt:index>`. To install the minimum release of hipBLASLt,
-use ``apt-get install hipblaslt``. In addition to installing hipBLASLt, you must also
-install :doc:`hipBLAS <hipblas:index>`. To install the hipBLAS minimum release, use ``apt-get install hipblas``.
-To disable hipBLASLt, set the configuration flag ``-DMIOPEN_USE_HIPBLASLT=Off``.
-hipBLASLt is **not** available with OpenCL.

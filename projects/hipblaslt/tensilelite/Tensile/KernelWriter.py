@@ -4414,22 +4414,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Allocate registers for VGPR tiles (PGR=2 delegates to SubtileBasedScheduler)
     pgr = kernel["PrefetchGlobalRead"]
-    if pgr != 2:
-      # PGR=2: A/B vgprTiles are allocated by LogicalScheduler in mainLoop
-      for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-        if tileInfo is not None:
-          tileInfo.allocVgprTileRegisters_legacy(self, kernel)
+    
 
     dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
     module.add(initVgprTilesToZero(self, kernel, dtileInfo))
-
-    if pgr != 2:
-      for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-        if tileInfo is not None and isinstance(getattr(tileInfo, 'vgprTiles', None), list):
-          for vtiles in tileInfo.vgprTiles:
-            regStr = "Vgpr" if vtiles.regList.pool == self.vgprPool else "Agpr"
-            module.addComment("%ss used for %s mma tile %u: %s"%(regStr, tileInfo.tc, tileInfo.vgprTiles.index(vtiles), str(vtiles)))
 
     for vtiles in dtileInfo.vgprTiles:
       regStr = "Vgpr" if vtiles.regList.pool == self.vgprPool else "Agpr"
@@ -4466,12 +4455,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(RegSet("s", "sgprSubtileNGuard", self.states.subtileN16ValidBlocksSgpr))
       self.states.nonPostLoopSgpr.append("SubtileMGuard")
       self.states.nonPostLoopSgpr.append("SubtileNGuard")
-
-    # Deallocate registers used for VGPR A/B/MXS tiles
-    if pgr != 2:
-      for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
-        if tileInfo is not None and isinstance(getattr(tileInfo, 'vgprTiles', None), list):
-          tileInfo.deallocVgprTileRegisters_legacy(self, kernel)
 
     # Start of post-loop code
     if 1:
@@ -4557,6 +4540,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if hasDeferredGSU0:
         module.appendModule(deferredGSU0)
       if hasDeferredActivation:
+        module.add(SBranch(labelName=kernelEndLabel.getLabelName(), comment="skip over activation functions"))
         module.appendModule(self.states.deferredActivationModules)
         self.states.deferredActivationModules = None
       module.add(kernelEndLabel)
@@ -4566,6 +4550,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     else:
       # If activation was deferred but no other deferred blocks exist, emit it before functionEnd
       if hasDeferredActivation:
+        module.add(SBranch(labelName="KernelEnd", comment="skip over activation functions"))
         module.appendModule(self.states.deferredActivationModules)
         self.states.deferredActivationModules = None
       module.add(self.functionEnd(kernel, addLabel=True))
@@ -5750,6 +5735,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Emit any deferred activation modules (set during globalWriteElements)
     if hasattr(self.states, 'deferredActivationModules') and self.states.deferredActivationModules is not None:
+      module.add(SBranch(labelName="KernelEnd", comment="skip over activation functions"))
       module.appendModule(self.states.deferredActivationModules)
       self.states.deferredActivationModules = None
 
