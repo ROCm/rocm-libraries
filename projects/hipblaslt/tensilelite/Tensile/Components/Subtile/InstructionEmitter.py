@@ -304,15 +304,26 @@ class InstructionEmitter:
     def emit_mask_k_init(self):
         """Compute (Serial % WavefrontSize) / dividerFortidInK into self._tail_kReg.
 
-        Also stages the BF16 half-mask constant 0x0000FFFF into self._tail_halfMaskVgpr
-        when the kernel datatype is BF16. The half-mask lives in a VGPR (not an SGPR)
-        because v_cndmask_b32 takes the user mask in src2 — adding another scalar
-        source in src1 would violate the GCN constant-bus restriction.
+        Also hoists the per-subIterK invariants into persistent vgprs so the
+        per-subIterK emit_mask_k only needs to issue cmp/cndmask with bumped
+        immediates (no laneK recomputation, no per-call diff sub):
+          * self._tail_workKVgpr — laneK_0 = kReg * numMIInUnroll
+          * self._tail_vDiff      — rem - laneK_0  (shared across all subIterK;
+            for subIterK=n the effective diff is diff - n*MatrixInstK, which we
+            fold into the cmp constants)
+          * self._tail_halfMaskVgpr — 0x0000FFFF (BF16 only, low-BF16-keep)
+          * self._tail_vNegOne    — 0xFFFFFFFF (BF16 only, full-mask vgpr;
+            cndmask const-bus dodge)
 
-        Reused by every emit_mask_k call in the tail body. The vgprs are leaked;
-        the tail's vgpr pool is released by deallocVgprTiles when the body ends.
+        The half-mask and full-mask live in vgprs because v_cndmask_b32 carries
+        the lane mask in src2 — adding another scalar source on src0/src1 would
+        violate the GCN constant-bus restriction.
+
+        Reused by every emit_mask_k call in the tail body. All vgprs are released
+        in emit_mask_k_done.
         """
         _, dividerFortidInK = self._mfma_K_constants()
+        numMIInUnroll, _ = self._mfma_K_constants()
         writer = self.writer
         module = Module()
 
@@ -330,29 +341,50 @@ class InstructionEmitter:
         writer.vgprPool.checkIn(tmpVgpr)
         writer.vgprPool.checkIn(dummy)
 
+        # laneK_0 and diff = rem - laneK_0 are shared across all subIterK.
+        self._tail_workKVgpr = writer.vgprPool.checkOut(1, "tail_workK")
+        self._tail_vDiff = writer.vgprPool.checkOut(1, "tail_vDiff")
+        loopCounterName = writer.loopCounterName(
+            self.kernel, writer.states.unrollIdx)
+        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+            module.add(vectorStaticMultiply(
+                vgpr(self._tail_workKVgpr), vgpr(self._tail_kReg),
+                numMIInUnroll, tmpSgprInfo,
+                comment=f"laneK_0 = tail_kReg * {numMIInUnroll}"))
+        module.add(VSubI32(
+            dst=vgpr(self._tail_vDiff),
+            src0=sgpr(loopCounterName), src1=vgpr(self._tail_workKVgpr),
+            comment="diff = rem - laneK_0 (shared across all subIterK)"))
+
         self._tail_halfMaskVgpr = None
+        self._tail_vNegOne = None
         if self.kernel["ProblemType"]["DataTypeA"].isBFloat16():
             self._tail_halfMaskVgpr = writer.vgprPool.checkOut(1, "tail_halfMask")
+            self._tail_vNegOne = writer.vgprPool.checkOut(1, "tail_vNegOne")
             module.add(VMovB32(
                 dst=vgpr(self._tail_halfMaskVgpr), src="0x0000FFFF",
                 comment="BF16 half-mask: keep K0 (low 16b), zero K1 (high 16b)"))
+            module.add(VMovB32(
+                dst=vgpr(self._tail_vNegOne), src=-1,
+                comment="BF16 full-mask vgpr (constant-bus dodge)"))
         return list(module.flatitems())
 
     def emit_mask_k(self, source):
         """Per-lane K-mask for one subIterK.
 
-        Computes laneK = _tail_kReg * numMIInUnroll + subIterK * MatrixInstK.
+        Uses the shared diff = rem - laneK_0 staged in emit_mask_k_init.
+        For subIterK=n the effective per-lane diff is `diff - n*MatrixInstK`,
+        which we fold into the cmp immediates (no per-call sub).
 
         A/B tiles get per-vgpr V_AND_B32 with a 3-state mask, so the boundary
-        can fall inside a vgpr without losing the valid element. The mask for
-        vgpr i (BF16 stride = 2 K positions per vgpr) is:
-            diff = rem - (laneK + 2*i)
-            mask = (diff <= 0) ? 0x00000000              # both K invalid
-                 : (diff == 1) ? 0x0000FFFF              # keep K0 only
-                              : 0xFFFFFFFF               # both K valid
-        Non-BF16 datatypes (and MXSA/MXSB scale vgprs) keep the legacy
-        whole-vgpr CNDMASK -> 0 path; the assertion below catches misuse
-        until the partial-mask table is generalized.
+        can fall inside a vgpr without losing the valid element. For BF16
+        (stride = 2 K positions per vgpr), vgpr `i` in subIterK `n` uses:
+            kOff = i*2 + n*MatrixInstK
+            mask = (diff < kOff+1) ? 0
+                 : (diff < kOff+2) ? 0x0000FFFF
+                                   : 0xFFFFFFFF
+        Non-BF16 (and MXSA/MXSB) keep the whole-vgpr CNDMASK -> 0 path,
+        which becomes "diff < n*MatrixInstK + 1 ? zero : keep".
         """
         assert self._tail_kReg is not None, \
             "emit_mask_k_init must run before emit_mask_k"
@@ -361,16 +393,13 @@ class InstructionEmitter:
         kernel = self.kernel
         subIterK = source.subIterK
         matrixInstK = kernel["MatrixInstK"]
+        kBaseConst = subIterK * matrixInstK
 
-        numMIInUnroll, _ = self._mfma_K_constants()
-
-        loopCounterName = writer.loopCounterName(kernel, writer.states.unrollIdx)
         laneSGPRCount = writer.states.laneSGPRCount
         isBF16 = kernel["ProblemType"]["DataTypeA"].isBFloat16()
         kStride = 2  # BF16: 2 elements packed per 32-bit vgpr (low=K0, high=K1)
 
         module = Module()
-        workKVgpr = writer.vgprPool.checkOut(1, f"mask_k_work_k{subIterK}")
 
         def _unique_ids(key):
             m = source.vgpr_tile_map.get(key, [{}])[0]
@@ -387,60 +416,36 @@ class InstructionEmitter:
                     vgprPerInUnroll = len(list(tilesDict[ids[0]]))
                     break
 
-        vDiff = writer.vgprPool.checkOut(1, f"mask_k_vdiff_k{subIterK}") if isBF16 else None
-        vNegOne = writer.vgprPool.checkOut(1, f"mask_k_vneg1_k{subIterK}") if isBF16 else None
         maskVgprs = [writer.vgprPool.checkOut(1, f"mask_k_msk{i}_k{subIterK}")
                      for i in range(vgprPerInUnroll)]
 
         with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
 
-            module.add(vectorStaticMultiply(
-                vgpr(workKVgpr), vgpr(self._tail_kReg),
-                numMIInUnroll, tmpSgprInfo,
-                comment=f"laneK = tail_kReg * {numMIInUnroll}"))
-            kBaseConst = subIterK * matrixInstK
-            if kBaseConst:
-                module.add(VAddU32(
-                    dst=vgpr(workKVgpr), src0=vgpr(workKVgpr),
-                    src1=kBaseConst,
-                    comment=f"laneK += subIterK({subIterK}) * MatrixInstK"))
-
-            # Whole-vgpr compare is only needed for non-BF16 A/B and for MXSA/MXSB.
-            # The BF16 partial-mask path computes its own per-vgpr mask below.
+            # Whole-vgpr compare for non-BF16 A/B and for MXSA/MXSB:
+            #   laneK_n >= rem  ⟺  diff <= n*MatrixInstK  ⟺  diff < n*MatrixInstK+1
             needWholeMaskCmp = (not isBF16) or self.hasScale
             if needWholeMaskCmp:
-                module.add(VCmpGEI32(
+                module.add(VCmpLtI32(
                     dst=sgpr(maskSgpr, laneSGPRCount),
-                    src0=vgpr(workKVgpr), src1=sgpr(loopCounterName),
-                    comment=f"mask: laneK >= rem (subIterK={subIterK})"))
+                    src0=vgpr(self._tail_vDiff), src1=kBaseConst + 1,
+                    comment=f"mask: diff < {kBaseConst+1} (laneK_{subIterK} >= rem)"))
 
             if isBF16:
-                # Stage 0xFFFFFFFF in a vgpr; v_cndmask_b32 takes the carry in src2,
-                # so src0/src1 must avoid a second scalar source (const-bus rule).
-                module.add(VMovB32(
-                    dst=vgpr(vNegOne), src=-1,
-                    comment="BF16 full-mask vgpr (constant-bus dodge)"))
-
-                # Compute diff = rem - laneK once; per-i mask is derived by comparing
-                # the shared diff against (2*i+1, 2*i+2) — no per-i diff recomputation.
-                module.add(VSubI32(
-                    dst=vgpr(vDiff), src0=sgpr(loopCounterName), src1=vgpr(workKVgpr),
-                    comment="diff = rem - laneK (shared across all i)"))
                 for i in range(vgprPerInUnroll):
-                    kOff = i * kStride
+                    kOff = i * kStride + kBaseConst
                     module.add(VCmpLtI32(
                         dst=sgpr(maskSgpr, laneSGPRCount),
-                        src0=vgpr(vDiff), src1=kOff + 2,
+                        src0=vgpr(self._tail_vDiff), src1=kOff + 2,
                         comment=f"diff < {kOff+2} ? (vgpr {i} has < 2 valid K)"))
                     module.add(VCndMaskB32(
                         dst=vgpr(maskVgprs[i]),
-                        src0=vgpr(vNegOne), src1=vgpr(self._tail_halfMaskVgpr),
+                        src0=vgpr(self._tail_vNegOne), src1=vgpr(self._tail_halfMaskVgpr),
                         src2=sgpr(maskSgpr, laneSGPRCount),
                         comment=f"mask[{i}] = (diff<{kOff+2}) ? halfKeep : full"))
                     module.add(VCmpLtI32(
                         dst=sgpr(maskSgpr, laneSGPRCount),
-                        src0=vgpr(vDiff), src1=kOff + 1,
+                        src0=vgpr(self._tail_vDiff), src1=kOff + 1,
                         comment=f"diff < {kOff+1} ? (vgpr {i} has 0 valid K)"))
                     module.add(VCndMaskB32(
                         dst=vgpr(maskVgprs[i]), src0=vgpr(maskVgprs[i]), src1=0,
@@ -465,26 +470,21 @@ class InstructionEmitter:
                 mask_ab(list(self.vgprTilesA[tid]), "A")
             for tid in _unique_ids('B'):
                 mask_ab(list(self.vgprTilesB[tid]), "B")
-            # Re-issue the laneK >= rem compare for MXSA/MXSB which use whole-vgpr mask;
-            # the BF16 partial path overwrote maskSgpr.
+            # Re-issue the whole-vgpr compare for MXSA/MXSB; the BF16 partial path
+            # above overwrote maskSgpr.
             if self.hasScale and isBF16:
-                module.add(VCmpGEI32(
+                module.add(VCmpLtI32(
                     dst=sgpr(maskSgpr, laneSGPRCount),
-                    src0=vgpr(workKVgpr), src1=sgpr(loopCounterName),
-                    comment=f"reload mask: laneK >= rem (for MXSA/MXSB)"))
+                    src0=vgpr(self._tail_vDiff), src1=kBaseConst + 1,
+                    comment=f"reload mask: diff < {kBaseConst+1} (for MXSA/MXSB)"))
             if self.hasScale:
                 for tid in _unique_ids('SA'):
                     _mask_all_whole(list(self.vgprTilesSA[tid]), "MXSA")
                 for tid in _unique_ids('SB'):
                     _mask_all_whole(list(self.vgprTilesSB[tid]), "MXSB")
 
-        writer.vgprPool.checkIn(workKVgpr)
         for m in maskVgprs:
             writer.vgprPool.checkIn(m)
-        if vDiff is not None:
-            writer.vgprPool.checkIn(vDiff)
-        if vNegOne is not None:
-            writer.vgprPool.checkIn(vNegOne)
         return list(module.flatitems())
 
     def emit_mask_k_done(self):
@@ -492,9 +492,18 @@ class InstructionEmitter:
         if self._tail_kReg is not None:
             self.writer.vgprPool.checkIn(self._tail_kReg)
             self._tail_kReg = None
+        if getattr(self, "_tail_workKVgpr", None) is not None:
+            self.writer.vgprPool.checkIn(self._tail_workKVgpr)
+            self._tail_workKVgpr = None
+        if getattr(self, "_tail_vDiff", None) is not None:
+            self.writer.vgprPool.checkIn(self._tail_vDiff)
+            self._tail_vDiff = None
         if getattr(self, "_tail_halfMaskVgpr", None) is not None:
             self.writer.vgprPool.checkIn(self._tail_halfMaskVgpr)
             self._tail_halfMaskVgpr = None
+        if getattr(self, "_tail_vNegOne", None) is not None:
+            self.writer.vgprPool.checkIn(self._tail_vNegOne)
+            self._tail_vNegOne = None
         return []
 
     def populate(self, emitted, unroll_iter=0):

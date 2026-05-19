@@ -2067,7 +2067,7 @@ class TestIntegration:
             sched.deallocVgprTiles(writer)
 
     def test_tailloop_k_mask_256x256_fp4(self):
-        """Tail loop must emit per-lane K-mask (v_cmp_ge_i32 + v_cndmask_b32) after wait_lr."""
+        """Tail loop must emit per-lane K-mask (v_cmp_lt_i32 + v_cndmask_b32) after wait_lr."""
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
 
@@ -2090,8 +2090,8 @@ class TestIntegration:
                 "expected mask-init arithmetic in tail preamble"
 
             # mask body: per-group compare + cndmask -> 0
-            assert "v_cmp_ge_i32" in asm, \
-                "tail loop missing per-lane K compare (v_cmp_ge_i32)"
+            assert "v_cmp_lt_i32" in asm, \
+                "tail loop missing per-lane K compare (v_cmp_lt_i32)"
             assert "v_cndmask_b32" in asm, \
                 "tail loop missing v_cndmask_b32 to zero A vgprs"
             assert ", 0," in asm, \
@@ -2099,7 +2099,7 @@ class TestIntegration:
 
             # ordering: compare must come after a wait_lr (lgkmcnt(0)) and
             # before the first v_mfma.
-            first_cmp   = asm.find("v_cmp_ge_i32")
+            first_cmp   = asm.find("v_cmp_lt_i32")
             first_mfma  = asm.find("v_mfma")
             last_wait_before_cmp = asm.rfind("lgkmcnt(0)", 0, first_cmp)
             assert first_cmp != -1 and first_mfma != -1
