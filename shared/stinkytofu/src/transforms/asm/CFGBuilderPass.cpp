@@ -45,22 +45,23 @@ class CFGBuilderPassImpl : public Pass {
         return &CFGBuilderPassImpl::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         // If the function has more than one BasicBlock, it already has a CFG
-        if (func.size() > 1) return;
+        if (func.size() > 1) return PreservedAnalyses::none();
 
         // If the function is empty or has no entry block, nothing to do
         BasicBlock* flatBB = func.getEntryBlock();
-        if (!flatBB || flatBB->empty()) return;
+        if (!flatBB || flatBB->empty()) return PreservedAnalyses::none();
 
         // Check if we need to split - look for label instructions
-        if (!needsSplitting(flatBB)) return;
+        if (!needsSplitting(flatBB)) return PreservedAnalyses::none();
 
         // Split the flat BasicBlock into multiple BasicBlocks at label boundaries
         splitAtLabels(func, flatBB);
 
         // Build CFG edges based on branches and fall-through
         buildCFGEdges(func);
+        return PreservedAnalyses::none();
     }
 
    private:
@@ -118,7 +119,8 @@ class CFGBuilderPassImpl : public Pass {
                 labelName = labelData ? labelData->label : "";
                 count = 0;
             } else {
-                labelName = labelName + "_" + std::to_string(++count);
+                labelName += "_";
+                labelName += std::to_string(++count);
             }
 
             // Create a new BasicBlock for this label

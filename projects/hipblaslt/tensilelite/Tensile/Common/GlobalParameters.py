@@ -137,6 +137,7 @@ globalParameters["CMakeBuildType"] = (
 )
 globalParameters["LogicFormat"] = "yaml"  # set library backend (yaml, or json)
 globalParameters["LibraryFormat"] = "yaml"  # set library backend (yaml, or msgpack)
+globalParameters["MXScaleFormat"] = 0  # MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout). Only the gfx950 subtile MX kernels need the pre-swizzle; gfx1250 reads canonical scales. The two gfx950 yamls that need it set MXScaleFormat: 1 explicitly.
 
 # True/False: CSV will/won't export WinnerGFlops, WinnerTimeUS, WinnerIdx, WinnerName.
 # TODO - if no side-effect, we can set default to True. This can make analyzing "LibraryLogic" (AddFromCSV) faster
@@ -177,9 +178,9 @@ globalParameters["DataInitTypeScaleB"] = 2
 globalParameters["DataInitTypeScaleC"] = 2
 globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3
-globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
+globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -308,16 +309,9 @@ globalParameters["DisableAsmComments"] = False  # Set to True to disable assembl
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
-# StinkyTofu optimization level
-# None: Disable StinkyTofu feature (set null in yaml file)
-# 0: No optimization
-# 1: Basic optimization
-# 2: Full optimization
-globalParameters["StinkyTofuOptLevel"] = 0
-
 # StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
 # 0: Silent (default)
-# 1: Pass names to stdout (continuous list in execution order)
+# 1: Pass names + AnalysisManager cache activity to stdout
 # 2: Initial IR + IR after each pass to per-PM files:
 #    kernel-OuterPM-{before,after}_passes.txt     (outer PM)
 #    <groupName>-{before,after}_passes.txt        (single-region adapter)
@@ -426,22 +420,13 @@ defaultBenchmarkCommonParameters = [
     {"DirectToVgprMXSA": [False]},
     {"DirectToVgprMXSB": [False]},
     {"DirectToVgprSparseMetadata": [False]},
-    # Restricted address remap features (default off unless explicitly enabled in the solution config):
-    {"BAddrInterleave": [False]},
-    {"KRingShift": [False]},
     {"DirectToLds": [0]},
+    {"UseSubtileImpl": [False]},
     {"UseSgprForGRO": [-1]},
     {"UseInstOffsetForGRO": [0]},
     {"AssertSummationElementMultiple": [1]},
     {"AssertFree0ElementMultiple": [1]},
     {"AssertFree1ElementMultiple": [1]},
-    # Address-interleave restriction (default disabled):
-    # When >0, the solution requires tiles1=(SizeJ/MT1) to have lowbit(tiles1)>1 (i.e. G>1),
-    {"AssertFree1DivByMT1LowbitGT1": [0]},
-    # KRingShift wrap restriction (default disabled):
-    # Encodes a runtime predicate that ensures (k + KRingShift) does not wrap in main loop
-    # (wrap is allowed only in tail loop where codegen applies the correction).
-    {"AssertKRingShiftTailWrapOnly": [0]},
     {"AssertAIGreaterThanEqual": [-1]},
     {"AssertAILessThanEqual": [-1]},
     {"StaggerU": [32]},  # recommend [0,32]
@@ -453,6 +438,7 @@ defaultBenchmarkCommonParameters = [
     {"GlobalSplitUCoalesced": [False]},
     {"GlobalSplitUWorkGroupMappingRoundRobin": [False]},
     {"Use64bShadowLimit": [True]},
+    {"Use64bShadowLimitMX": [False]}, # Disable Use64bShadowLimit for MXSA/B by default
     {"NumLoadsCoalescedA": [1]},
     {"NumLoadsCoalescedB": [1]},
     {"WorkGroup": [[16, 16, 1]]},
@@ -460,7 +446,7 @@ defaultBenchmarkCommonParameters = [
     {"WorkGroupMappingXCC": [1]},
     {"WorkGroupMappingXCCGroup": [-1]},
     {"ThreadTile": [[4, 4]]},
-    {"WavefrontSize": [64]},
+    {"WavefrontSize": [-1]},
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
     {"DepthU": [-1]},
@@ -512,6 +498,15 @@ defaultBenchmarkCommonParameters = [
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
+    {"TDMSplit": [False]},
+    {"MXScaleFormat": ["Auto"]},
+    {"MXLoadInst": ["Auto"]},
+    # SwInstructionPrefetch — True: reserve one scratch SGPR so StinkyTofu can insert software
+    # instruction prefetch when the ISA supports it (SwPrefetchInsertionPass).
+    # Purpose: CP prefetch covers only a bounded window; very large kernels can see early kernel
+    # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
+    # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
+    {"SwInstructionPrefetch": [True]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter

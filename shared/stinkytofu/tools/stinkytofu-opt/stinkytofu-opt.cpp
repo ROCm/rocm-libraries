@@ -31,10 +31,16 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Version.h"
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
+#include "stinkytofu/serialization/asm/RawAsmParser.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/PassOrderSnapshotJson.hpp"
 
@@ -59,7 +65,7 @@ class DeserializeStinkytofuIRPass : public StinkyInstPass {
         return &DeserializeStinkytofuIRPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
@@ -71,12 +77,14 @@ class DeserializeStinkytofuIRPass : public StinkyInstPass {
             StinkyIRConverter::populateFunctionFromString(irText, func, passCtx, arch);
         if (result != StinkyErrorCode::SUCCESS) {
             if (result == StinkyErrorCode::PASSCTX_EMPTY) {
-                std::cerr << "No PassContext available. Call convertToIRList first." << "\n";
+                std::cerr << "No PassContext available. Call convertToIRList first.\n";
             } else {
                 std::cerr << "Error: Failed to populate IRList from string. Error code: "
                           << static_cast<int>(result) << "\n";
             }
+            return PreservedAnalyses::none();
         }
+        return PreservedAnalyses::none();
     }
 
    private:
@@ -119,9 +127,15 @@ std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
         if (arg.substr(0, 2) == "--") {
             static constexpr char kSnapJson[] = "--pass-order-snapshot-json=";
             static constexpr char kSnapAfter[] = "--pass-order-snapshot-after-passes=";
-            if (arg.rfind(kSnapJson, 0) == 0 || arg.rfind(kSnapAfter, 0) == 0 ||
-                arg == "--print-output" || arg.rfind("--ds-read-order=", 0) == 0)
+            if (arg.starts_with(kSnapJson) || arg.starts_with(kSnapAfter) ||
+                arg == "--print-output" || arg == "--emit-asm" ||
+                arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
+                arg.starts_with("--ds-read-order=") || arg == "--from-label" || arg == "--to-label")
                 continue;
+            if (arg == "-o") {
+                ++i;  // skip the filename argument
+                continue;
+            }
             passNames.push_back(arg.substr(2));  // Remove "--" prefix
         }
     }
@@ -132,7 +146,7 @@ std::string extractPassOrderSnapshotJsonPath(int argc, char** argv) {
     static constexpr char kPrefix[] = "--pass-order-snapshot-json=";
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a.rfind(kPrefix, 0) == 0) return a.substr(std::strlen(kPrefix));
+        if (a.starts_with(kPrefix)) return a.substr(std::strlen(kPrefix));
     }
     return {};
 }
@@ -147,7 +161,7 @@ static void trimWhitespace(std::string& s) {
 }
 
 static std::vector<std::string> splitCommaPassNames(const char* prefix, const std::string& a) {
-    if (a.rfind(prefix, 0) != 0) return {};
+    if (!a.starts_with(prefix)) return {};
     std::string rest = a.substr(std::strlen(prefix));
     std::vector<std::string> out;
     size_t start = 0;
@@ -179,18 +193,48 @@ std::vector<std::string> extractPassOrderSnapshotAfterPasses(int argc, char** ar
 }  // namespace
 
 int main(int argc, char** argv) {
+    BackendRegistry::registerAllBackends();
+
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
-        std::cerr << "  --arch <arch>    Target architecture (gfx1250)\n";
+        std::cerr << "  --arch <arch>    Target architecture. Supported:";
+        for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
+        std::cerr << "\n";
         std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
                      "(stinkytofu-analysis)\n";
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
+        std::cerr << "Input formats:\n";
+        std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
+        std::cerr << "  <file>.s         Raw GPU assembly (auto-detected by extension)\n\n";
+        std::cerr << "Output flags:\n";
+        std::cerr << "  --print-output   Emit optimized IR (StinkyTofu text format)\n";
+        std::cerr << "  --emit-asm       Emit optimized GPU assembly (always on for .s input)\n";
+        std::cerr << "  -o <file>        Write output to file instead of stdout\n";
+        std::cerr
+            << "  --from-label <label>  Start of region to optimize (label name, inclusive)\n";
+        std::cerr << "  --to-label <label>    End of region to optimize (label name, inclusive)\n";
+        std::cerr << "                        Required for .s input when passes are specified.\n";
+        std::cerr
+            << "                        Labels can be any identifier added to the asm file.\n";
+        std::cerr << "  --preserve-symbolic-regs  Preserve and re-emit symbolic register names\n";
+        std::cerr << "                            (e.g. v[vgprSerialPersist-768]) instead of the\n";
+        std::cerr << "                            resolved numeric form (v255). Best used with\n";
+        std::cerr << "                            no passes, since passes operate on numeric\n";
+        std::cerr << "                            indices and can leave symbolic names stale.\n";
+        std::cerr << "  --preserve-comments       Preserve and re-emit trailing source comments\n";
+        std::cerr << "                            (// ... or ;) attached to each instruction,\n";
+        std::cerr << "                            label, or .set directive. Best used with no\n";
+        std::cerr << "                            passes; passes that rewrite or insert\n";
+        std::cerr << "                            instructions may leave comments stale.\n\n";
         std::cerr << "Example:\n";
-        std::cerr << "  " << argv[0] << " --arch gfx1250 input.txt --StinkyDAGSchedulerPass\n";
+        std::cerr << "  " << argv[0] << " --arch <arch> input.stir --StinkyDAGSchedulerPass\n";
+        std::cerr << "  " << argv[0]
+                  << " --arch <arch> input.s   --StinkyDAGSchedulerPass --emit-asm\n";
         return 1;
     }
 
@@ -200,17 +244,51 @@ int main(int argc, char** argv) {
         printAvailablePasses();
         return 0;
     }
+    if (firstArg == "--version") {
+        std::cout << "stinkytofu-opt " << STINKYTOFU_VERSION_MAJOR << "."
+                  << STINKYTOFU_VERSION_MINOR << "." << STINKYTOFU_VERSION_PATCH;
+        constexpr char tweak[] = STINKYTOFU_VERSION_TWEAK;
+        if (tweak[0] != '\0') std::cout << "-" << tweak;
+        std::cout << "\n";
+        return 0;
+    }
     if (firstArg == "--help") {
         std::cerr << "stinkytofu-opt - StinkyTofu IR optimizer\n\n";
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
-        std::cerr << "  --arch <arch>    Target architecture (gfx1250)\n";
+        std::cerr << "  --arch <arch>    Target architecture. Supported:";
+        for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
+        std::cerr << "\n";
         std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
                      "(stinkytofu-analysis)\n";
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
+        std::cerr << "Input formats:\n";
+        std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
+        std::cerr << "  <file>.s         Raw GPU assembly (auto-detected by extension)\n\n";
+        std::cerr << "Output flags:\n";
+        std::cerr << "  --print-output   Emit optimized IR (StinkyTofu text format)\n";
+        std::cerr << "  --emit-asm       Emit optimized GPU assembly (always on for .s input)\n";
+        std::cerr << "  -o <file>        Write output to file instead of stdout\n";
+        std::cerr
+            << "  --from-label <label>  Start of region to optimize (label name, inclusive)\n";
+        std::cerr << "  --to-label <label>    End of region to optimize (label name, inclusive)\n";
+        std::cerr << "                        Required for .s input when passes are specified.\n";
+        std::cerr
+            << "                        Labels can be any identifier added to the asm file.\n";
+        std::cerr << "  --preserve-symbolic-regs  Preserve and re-emit symbolic register names\n";
+        std::cerr << "                            (e.g. v[vgprSerialPersist-768]) instead of the\n";
+        std::cerr << "                            resolved numeric form (v255). Best used with\n";
+        std::cerr << "                            no passes, since passes operate on numeric\n";
+        std::cerr << "                            indices and can leave symbolic names stale.\n";
+        std::cerr << "  --preserve-comments       Preserve and re-emit trailing source comments\n";
+        std::cerr << "                            (// ... or ;) attached to each instruction,\n";
+        std::cerr << "                            label, or .set directive. Best used with no\n";
+        std::cerr << "                            passes; passes that rewrite or insert\n";
+        std::cerr << "                            instructions may leave comments stale.\n\n";
         printAvailablePasses();
         return 0;
     }
@@ -222,17 +300,26 @@ int main(int argc, char** argv) {
 
     if (firstArg == "--arch") {
         if (argc < 4) {
-            std::cerr << "Error: --arch requires an architecture argument\n";
-            std::cerr << "Supported architectures: gfx1250\n";
+            std::cerr << "Error: --arch requires an architecture argument. Supported:";
+            for (const auto& key : BackendRegistry::getRegisteredArchKeys())
+                std::cerr << " " << key;
+            std::cerr << "\n";
             return 1;
         }
 
         std::string archStr = argv[2];
-        if (archStr == "gfx1250") {
-            arch = {12, 5, 0};
-        } else {
+        if (!BackendRegistry::parseArchKey(archStr, arch)) {
+            std::cerr << "Error: Invalid architecture format '" << archStr
+                      << "'. Expected gfx<major><minor><stepping> (e.g. gfx1250)\n";
+            return 1;
+        }
+
+        if (!BackendRegistry::getArchPipeline(arch)) {
             std::cerr << "Error: Unsupported architecture '" << archStr << "'\n";
-            std::cerr << "Supported architectures: gfx1250\n";
+            std::cerr << "Supported architectures:";
+            for (const auto& key : BackendRegistry::getRegisteredArchKeys())
+                std::cerr << " " << key;
+            std::cerr << "\n";
             return 1;
         }
 
@@ -251,7 +338,7 @@ int main(int argc, char** argv) {
     // Parse --ds-read-order=ProgramOrder|Ascending|AscendingCache
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a.rfind("--ds-read-order=", 0) == 0) {
+        if (a.starts_with("--ds-read-order=")) {
             std::string val = a.substr(16);
             if (val == "ProgramOrder")
                 passFeatureConfig.dagFeatures.dsReadOrder =
@@ -269,53 +356,222 @@ int main(int argc, char** argv) {
     std::vector<std::string> requestedPasses = parsePassNames(argc, argv, passStartIdx);
 
     if (!requestedPasses.empty()) {
-        std::cout << "\n=== Adding Passes ===\n";
+        std::cerr << "\n=== Adding Passes ===\n";
         for (const auto& passName : requestedPasses) {
             if (createPassByName(passName))
-                std::cout << "Adding pass: " << passName << "\n";
+                std::cerr << "Adding pass: " << passName << "\n";
             else {
                 std::cerr << "Warning: Unknown pass '" << passName << "' - skipping\n";
                 std::cerr << "Use --list-passes to see available passes\n";
             }
         }
-        std::cout << "\n";
+        std::cerr << "\n";
     } else {
-        std::cout << "\n=== No optimization passes specified ===\n";
-        std::cout << "Only deserialization will be performed.\n";
-        std::cout << "Use --list-passes to see available passes.\n\n";
+        std::cerr << "\n=== No optimization passes specified ===\n";
+        std::cerr << "Only deserialization will be performed.\n";
+        std::cerr << "Use --list-passes to see available passes.\n\n";
     }
 
-    // Check for --print-output flag
+    // Check for --print-output, --emit-asm, -o, --from-label, --to-label,
+    // --preserve-symbolic-regs, --preserve-comments flags
     bool printOutput = false;
+    bool emitAsm = false;
+    bool preserveSymbolicRegs = false;
+    bool preserveComments = false;
+    std::string outputFile;
+    std::string fromLabel;
+    std::string toLabel;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--print-output") printOutput = true;
+        if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
+        if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
+        if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
+        if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
+            stinkytofu::PassManagerDebugConfig::addDebugOnly(argv[++i]);
+        }
+        if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
+        if (std::string(argv[i]) == "--from-label" && i + 1 < argc) fromLabel = argv[++i];
+        if (std::string(argv[i]) == "--to-label" && i + 1 < argc) toLabel = argv[++i];
     }
 
-    // Read and parse all functions from the input file
+    // Auto-detect assembly input by file extension (.s)
+    bool isAsmInput = filename.size() >= 2 && filename.substr(filename.size() - 2) == ".s";
+    if (isAsmInput) emitAsm = true;  // default output for asm input is asm
+
+    // For .s input with passes, --from-label and --to-label are required so passes
+    // run only on the intended region (loop body) rather than the entire kernel.
+    if (isAsmInput && !requestedPasses.empty() && (fromLabel.empty() || toLabel.empty())) {
+        std::cerr << "Error: --from-label and --to-label are required when running passes on "
+                     ".s input.\n";
+        std::cerr << "  Add labels to your assembly to mark the region to optimize, e.g.:\n";
+        std::cerr << "    my_region_start:\n";
+        std::cerr << "    <instructions>\n";
+        std::cerr << "    my_region_end:\n";
+        std::cerr << "  Then run: --from-label my_region_start --to-label my_region_end\n";
+        return 1;
+    }
+
+    // Read the input file
     std::ifstream inputFile(filename);
+    if (!inputFile) {
+        std::cerr << "Error: Cannot open input file '" << filename << "'\n";
+        return 1;
+    }
     std::stringstream fileBuffer;
     fileBuffer << inputFile.rdbuf();
     std::string fileContent = fileBuffer.str();
 
     GfxArchID archID = getGfxArchID(arch[0], arch[1], arch[2]);
 
-    auto parsed = stinkytofu::parseAllSourceStringsWithDiagnostics(fileContent);
-    if (parsed.hasErrors()) {
-        std::cerr << "Error: Failed to parse input file\n";
-        for (const auto& diag : parsed.diagnostics) std::cerr << "  " << diag.getMessage() << "\n";
-        return 1;
+    stinkytofu::MultiParseResult parsed;
+    std::shared_ptr<stinkytofu::SignatureBase> asmSignature;  // non-null for .s input with header
+
+    if (isAsmInput) {
+        // Parse raw GPU assembly via RawAsmParser → ParsedFunction
+        stinkytofu::RawAsmParserOptions parserOpts;
+        parserOpts.preserveSymbolicNames = preserveSymbolicRegs;
+        parserOpts.preserveComments = preserveComments;
+        auto asmResult = stinkytofu::parseRawAsmString(fileContent, archID, parserOpts);
+        if (asmResult.hasErrors()) {
+            std::cerr << "Error: Failed to parse assembly input file\n";
+            for (const auto& diag : asmResult.diagnostics)
+                std::cerr << "  " << diag.getMessage() << "\n";
+            return 1;
+        }
+        for (const auto& diag : asmResult.diagnostics)
+            std::cerr << "Warning: " << diag.getMessage() << "\n";
+        asmSignature = std::move(asmResult.signature);
+        if (asmResult.parsedFunction)
+            parsed.functions.push_back(std::move(asmResult.parsedFunction));
+    } else {
+        // Parse StinkyTofu IR text format
+        parsed = stinkytofu::parseAllSourceStringsWithDiagnostics(fileContent);
+        if (parsed.hasErrors()) {
+            std::cerr << "Error: Failed to parse input file\n";
+            for (const auto& diag : parsed.diagnostics)
+                std::cerr << "  " << diag.getMessage() << "\n";
+            return 1;
+        }
+        // Fall back to single-function parsing for flat format (no st.func)
+        if (parsed.functions.empty()) {
+            auto singleResult = stinkytofu::parseSourceStringWithDiagnostics(fileContent);
+            if (singleResult.parsedFunction)
+                parsed.functions.push_back(std::move(singleResult.parsedFunction));
+        }
     }
 
-    // Fall back to single-function parsing for flat format (no st.func)
-    if (parsed.functions.empty()) {
-        auto singleResult = stinkytofu::parseSourceStringWithDiagnostics(fileContent);
-        if (singleResult.parsedFunction)
-            parsed.functions.push_back(std::move(singleResult.parsedFunction));
+    // If --from-label / --to-label are given, split the flat ParsedFunction into three
+    // sections: pre (verbatim), sched (passes applied), post (verbatim).
+    // pre and post are wrapped in their own single-block ParsedFunctions so the normal
+    // emit path handles them without any passes.
+    stinkytofu::MultiParseResult preResult, postResult;
+    if (!fromLabel.empty() || !toLabel.empty()) {
+        if (fromLabel.empty() || toLabel.empty()) {
+            std::cerr << "Error: --from-label and --to-label must both be specified together\n";
+            return 1;
+        }
+        if (parsed.functions.size() != 1) {
+            std::cerr << "Error: --from-label/--to-label requires exactly one function\n";
+            return 1;
+        }
+        // Take ownership of the original instruction list and name before splitting.
+        // parsed.functions[0] will be replaced below, which would destroy the block
+        // and invalidate any reference into it.
+        std::string origFuncName = parsed.functions[0]->funcName;
+        auto originalInsts = std::move(parsed.functions[0]->blocks[0]->instructions);
+
+        // Find from-label and to-label positions
+        int fromIdx = -1, toIdx = -1;
+        for (int idx = 0; idx < (int)originalInsts.size(); ++idx) {
+            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == fromLabel)
+                fromIdx = idx;
+            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == toLabel)
+                toIdx = idx;
+        }
+        if (fromIdx < 0) {
+            std::cerr << "Error: --from-label '" << fromLabel << "' not found in assembly\n";
+            return 1;
+        }
+        if (toIdx < 0) {
+            std::cerr << "Error: --to-label '" << toLabel << "' not found in assembly\n";
+            return 1;
+        }
+        if (toIdx < fromIdx) {
+            std::cerr << "Error: --to-label appears before --from-label in the assembly\n";
+            return 1;
+        }
+
+        // Build pre: [0, fromIdx)
+        auto preFunc = std::make_unique<stinkytofu::ParsedFunction>();
+        preFunc->funcName = origFuncName + "_pre";
+        auto preBlock = std::make_unique<stinkytofu::ParsedBlock>();
+        preBlock->blockId = "entry";
+        for (int idx = 0; idx < fromIdx; ++idx)
+            preBlock->instructions.push_back(std::move(originalInsts[idx]));
+        preFunc->blocks.push_back(std::move(preBlock));
+        preResult.functions.push_back(std::move(preFunc));
+
+        // Build sched: [fromIdx, toIdx]  (inclusive of both labels)
+        auto schedFunc = std::make_unique<stinkytofu::ParsedFunction>();
+        schedFunc->funcName = origFuncName;
+        auto schedBlock = std::make_unique<stinkytofu::ParsedBlock>();
+        schedBlock->blockId = "entry";
+        for (int idx = fromIdx; idx <= toIdx; ++idx)
+            schedBlock->instructions.push_back(std::move(originalInsts[idx]));
+        schedFunc->blocks.push_back(std::move(schedBlock));
+        parsed.functions[0] = std::move(schedFunc);
+
+        // Build post: (toIdx, end)
+        auto postFunc = std::make_unique<stinkytofu::ParsedFunction>();
+        postFunc->funcName = origFuncName + "_post";
+        auto postBlock = std::make_unique<stinkytofu::ParsedBlock>();
+        postBlock->blockId = "entry";
+        for (int idx = toIdx + 1; idx < (int)originalInsts.size(); ++idx)
+            postBlock->instructions.push_back(std::move(originalInsts[idx]));
+        postFunc->blocks.push_back(std::move(postBlock));
+        postResult.functions.push_back(std::move(postFunc));
+    }
+
+    // Open output stream (-o <file> or stdout)
+    std::ofstream outputFileStream;
+    if (!outputFile.empty()) {
+        outputFileStream.open(outputFile);
+        if (!outputFileStream) {
+            std::cerr << "Error: Cannot open output file '" << outputFile << "'\n";
+            return 1;
+        }
+    }
+    std::ostream& out = outputFile.empty() ? std::cout : outputFileStream;
+
+    // Helper: emit a ParsedFunction verbatim (no passes) to the output stream.
+    auto emitVerbatim = [&](stinkytofu::MultiParseResult& mr) {
+        for (auto& pf : mr.functions) {
+            stinkytofu::Function func(pf->funcName);
+            stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*pf, func, archID);
+            if (emitAsm) {
+                stinkytofu::AsmEmitterOptions opts;
+                opts.emitComments = preserveComments;
+                opts.indent = 0;
+                opts.useSymbolicNames = preserveSymbolicRegs;
+                stinkytofu::StinkyAsmEmitter emitter(opts);
+                emitter.emit(out, func);
+            } else if (printOutput) {
+                func.dump(out);
+            }
+        }
+    };
+
+    // Emit header: use the parsed SignatureBase when available, otherwise verbatim pre-region.
+    if (asmSignature && emitAsm) {
+        out << asmSignature->toString();
+    } else {
+        emitVerbatim(preResult);
     }
 
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
         stinkytofu::PassManager passManager;
+        stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
         passManager.addInstrumentation(createDebugPrintInstrumentation());
         if (!passFeatureConfig.passOrderSnapshot.jsonPath.empty()) {
@@ -346,8 +602,19 @@ int main(int argc, char** argv) {
 
         passManager.run(func);
 
-        if (printOutput) func.dump(std::cout);
+        if (emitAsm) {
+            stinkytofu::AsmEmitterOptions opts;
+            opts.emitComments = preserveComments;
+            opts.indent = 0;
+            opts.useSymbolicNames = preserveSymbolicRegs;
+            stinkytofu::StinkyAsmEmitter emitter(opts);
+            emitter.emit(out, func);
+        } else if (printOutput) {
+            func.dump(out);
+        }
     }
+
+    emitVerbatim(postResult);
 
     return 0;
 }

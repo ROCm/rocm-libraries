@@ -133,15 +133,32 @@ cmake --install .
 
 ## Documentation
 
-For more comprehensive documentation on installation, samples and test contents, API reference and programmer's guide you can build the documentation locally using the following commands:
+For more comprehensive documentation on installation, samples and test contents, API reference and programmer's guide you can build the documentation locally.
+
+<details open>
+<summary>Standard</summary>
 
 ```bash
 cd docs
-
 pip3 install -r sphinx/requirements.txt
-
 python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 ```
+
+</details>
+
+<details>
+<summary>Ubuntu 24.04+</summary>
+
+Ubuntu 24.04 and later enforce [PEP 668](https://peps.python.org/pep-0668/), which prevents system-wide pip installs. Use a virtual environment instead:
+
+```bash
+cd docs
+python3 -m venv .venv
+.venv/bin/pip install -r sphinx/requirements.txt
+.venv/bin/python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+```
+
+</details>
 
 The HTML documentation can be viewed in your browser by opening the `docs/_build/html/index.html` result.
 

@@ -43,6 +43,8 @@ enum class hipblaslt_initialization
     integer_exact = 888, // A,C in [0,1,2], B ±[0,1,2]; alpha=2, beta 0 or -2; exact when K bounded
     // Near-FP16-max A, paired ±2 along K in B; FP32-math reference is 0 (rocBLAS-style accum probe)
     fp16_accumulator_probe = 889,
+    // Uniform random in [-6.0, 6.0] (full FP4 E2M1 range); ~4% zeros vs ~50% for hpl
+    uniform_low_precision  = 999,
 };
 
 typedef enum class _hipblaslt_activation_type
@@ -167,25 +169,21 @@ inline std::vector<size_t> preTileSizeForScaleB(hipblaslt_scaling_format s)
     }
 }
 
-// Compute scale buffer size accounting for padding by preSwizzleScalesGFX950.
+// Compute scale buffer size with padding for block-scaled MX formats.
 // dataRow, dataCol are the raw data matrix dimensions (A_row/A_col or B_row/B_col).
-// When pre-swizzle is active, the output may be larger than the unpadded size
-// because rows are padded to a multiple of 32 and cols to a multiple of 8.
+// Scale dimensions are padded to ensure kernels that process data in 32-element (M/N)
+// or 256-element (K) blocks always have valid scale entries:
+//   scaleRows = ceil(dataRow / blockSize) rounded up to multiple of 8
+//   scaleCols = dataCol rounded up to multiple of 32
+// When pre-swizzle is active, additional layout requirements may apply but are
+// already satisfied by the rounding above.
 inline size_t scaleBufferSize(int64_t dataRow, int64_t dataCol, hipblaslt_scaling_format s)
 {
     auto   bs        = blockSize(s);
-    size_t scaleRows = dataRow / bs;
-    size_t scaleCols = dataCol;
+    size_t scaleRows = ((dataRow + bs - 1) / bs + 7) / 8 * 8;
+    size_t scaleCols = ((dataCol + 31) / 32) * 32;
 
-    auto preSwizzle = preSwizzleSizeForScale(s);
-    if(preSwizzle.empty())
-        return scaleRows * scaleCols;
-
-    // preSwizzleScalesGFX950 is called with {scaleCols, scaleRows}.
-    // It pads numRows (=scaleCols) to multiple of 32, numCols (=scaleRows) to multiple of 8.
-    size_t paddedNumRows = ((scaleCols + 31) / 32) * 32;
-    size_t paddedNumCols = ((scaleRows + 7) / 8) * 8;
-    return paddedNumRows * paddedNumCols;
+    return scaleRows * scaleCols;
 }
 
 inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
@@ -254,6 +252,8 @@ constexpr auto hipblaslt_initialization2string(hipblaslt_initialization init)
         return "integer_exact";
     case hipblaslt_initialization::fp16_accumulator_probe:
         return "fp16_accumulator_probe";
+    case hipblaslt_initialization::uniform_low_precision:
+        return "uniform_low_precision";
     }
     return "invalid";
 }
@@ -277,6 +277,7 @@ inline hipblaslt_initialization string2hipblaslt_initialization(const std::strin
         value == "uniform_01" ? hipblaslt_initialization::uniform_01 :
         value == "integer_exact" ? hipblaslt_initialization::integer_exact :
         value == "fp16_accumulator_probe" ? hipblaslt_initialization::fp16_accumulator_probe :
+        value == "uniform_low_precision" ? hipblaslt_initialization::uniform_low_precision :
         static_cast<hipblaslt_initialization>(0);
 }
 // clang-format on

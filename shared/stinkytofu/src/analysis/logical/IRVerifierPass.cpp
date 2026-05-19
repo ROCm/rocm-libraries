@@ -31,11 +31,13 @@
 namespace stinkytofu {
 char LogicalIRVerifierPass::ID = 0;
 
-void LogicalIRVerifierPass::run(Function& func, PassContext&) {
+PreservedAnalyses LogicalIRVerifierPass::run(Function& func, PassContext&,
+                                             AnalysisManager& /*AM*/) {
     std::string error = validateLogicalIR(func, config_);
     if (!error.empty()) {
         STINKY_UNREACHABLE(error.c_str());
     }
+    return PreservedAnalyses::all();
 }
 
 std::string validateLogicalIR(Function& func, const LogicalIRVerifierConfig& config) {

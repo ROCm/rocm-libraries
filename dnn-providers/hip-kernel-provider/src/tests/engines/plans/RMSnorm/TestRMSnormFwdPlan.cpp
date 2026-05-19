@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <utility>
+
 #include <gtest/gtest.h>
 
 #include "engines/plans/RMSnorm/RMSnormFwdPlan.hpp"
@@ -24,25 +26,25 @@ using namespace hip_kernel_provider::rmsnorm;
 TEST(TestRMSnormFwdParams, ConstructsFromSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
 
-    EXPECT_NO_THROW(RMSnormFwdParams params(attr, graph.getTensorMap()));
+    EXPECT_NO_THROW(const RMSnormFwdParams params(attr, graph.getTensorMap()));
 }
 
 TEST(TestRMSnormFwdParams, HasCorrectTensorPointersForSingleNode)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
 
-    RMSnormFwdParams params(attr, graph.getTensorMap());
+    const RMSnormFwdParams params(attr, graph.getTensorMap());
 
     EXPECT_NE(params.x(), nullptr);
     EXPECT_NE(params.y(), nullptr);
@@ -54,13 +56,13 @@ TEST(TestRMSnormFwdParams, HasCorrectTensorPointersForSingleNode)
 TEST(TestRMSnormFwdParams, TensorPointersMatchExpectedUids)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
 
-    RMSnormFwdParams params(attr, graph.getTensorMap());
+    const RMSnormFwdParams params(attr, graph.getTensorMap());
 
     EXPECT_EQ(params.x()->uid(), attr.x_tensor_uid());
     EXPECT_EQ(params.y()->uid(), attr.y_tensor_uid());
@@ -70,14 +72,14 @@ TEST(TestRMSnormFwdParams, TensorPointersMatchExpectedUids)
 TEST(TestRMSnormFwdParams, IsMoveConstructible)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
 
     RMSnormFwdParams params(attr, graph.getTensorMap());
-    RMSnormFwdParams moved(std::move(params));
+    const RMSnormFwdParams moved(std::move(params));
 
     EXPECT_NE(moved.x(), nullptr);
     EXPECT_NE(moved.y(), nullptr);
@@ -94,21 +96,22 @@ TEST(TestRMSnormFwdParams, IsNotCopyConstructible)
 namespace
 {
 
-RMSnormFwdPlan createPlanFromGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
-                                   const std::vector<int64_t>& dims = {1, 3, 224, 224},
-                                   hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
-                                   = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+std::pair<flatbuffers::FlatBufferBuilder, RMSnormFwdPlan>
+    createPlanFromGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
+                        const std::vector<int64_t>& dims = {1, 3, 224, 224},
+                        hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
 {
     auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormGraph(strides, dims, inputDataType);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
 
     RMSnormFwdParams params(attr, graph.getTensorMap());
-    return RMSnormFwdPlan{std::move(params)};
+    return {std::move(builder), RMSnormFwdPlan{std::move(params)}};
 }
 
 hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
@@ -128,24 +131,24 @@ hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
 
 TEST(TestRMSnormFwdPlan, ExecuteWithoutCompileThrows)
 {
-    auto plan = createPlanFromGraph();
-    HipKernelHandle handle;
+    auto [fbb, plan] = createPlanFromGraph();
+    const HipKernelHandle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestRMSnormFwdPlan, GetWorkspaceSizeReturnsZero)
 {
-    auto plan = createPlanFromGraph();
-    HipKernelHandle handle;
+    auto [fbb, plan] = createPlanFromGraph();
+    const HipKernelHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
 TEST(TestRMSnormFwdPlan, IsMoveConstructible)
 {
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
 
-    RMSnormFwdPlan moved(std::move(plan));
-    HipKernelHandle handle;
+    const RMSnormFwdPlan moved(std::move(plan));
+    const HipKernelHandle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 
@@ -160,7 +163,7 @@ TEST(TestRMSnormFwdPlan, IsNotCopyConstructible)
 
 TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelName)
 {
-    MockKernelCompiler mockCompiler;
+    const MockKernelCompiler mockCompiler;
 
     auto mockKernel = std::make_unique<MockRunnableKernel>();
     EXPECT_CALL(*mockKernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
@@ -173,7 +176,7 @@ TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelName)
     EXPECT_CALL(mockCompiler, compile("RMSNormFwd.cpp", ::testing::_))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -181,7 +184,7 @@ TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelName)
 
 TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOption)
 {
-    MockKernelCompiler mockCompiler;
+    const MockKernelCompiler mockCompiler;
 
     auto mockKernel = std::make_unique<MockRunnableKernel>();
     EXPECT_CALL(*mockKernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
@@ -195,7 +198,7 @@ TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOption)
                 compile(::testing::_, ::testing::Contains(std::string("--offload-arch=gfx942"))))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps("gfx942");
 
     plan.compile(mockCompiler, deviceProps);
@@ -203,7 +206,7 @@ TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOption)
 
 TEST(TestRMSnormFwdPlan, CompileFp32SetsCorrectDefines)
 {
-    MockKernelCompiler mockCompiler;
+    const MockKernelCompiler mockCompiler;
 
     std::vector<std::string> capturedOptions;
     EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
@@ -218,7 +221,7 @@ TEST(TestRMSnormFwdPlan, CompileFp32SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -231,12 +234,15 @@ TEST(TestRMSnormFwdPlan, CompileFp32SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_IO_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }
 
 TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
 {
-    MockKernelCompiler mockCompiler;
+    const MockKernelCompiler mockCompiler;
 
     std::vector<std::string> capturedOptions;
     EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
@@ -251,9 +257,9 @@ TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph({150528, 50176, 224, 1},
-                                    {1, 3, 224, 224},
-                                    hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1},
+                                           {1, 3, 224, 224},
+                                           hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -266,12 +272,15 @@ TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_IO_TYPE=half"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=half"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=half"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }
 
 TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
 {
-    MockKernelCompiler mockCompiler;
+    const MockKernelCompiler mockCompiler;
 
     std::vector<std::string> capturedOptions;
     EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
@@ -286,9 +295,10 @@ TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph({150528, 50176, 224, 1},
-                                    {1, 3, 224, 224},
-                                    hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    auto [fbb, plan]
+        = createPlanFromGraph({150528, 50176, 224, 1},
+                              {1, 3, 224, 224},
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -301,18 +311,21 @@ TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_IO_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }
 
 TEST(TestRMSnormFwdPlan, CompileWithUnsupportedDimensionThrows)
 {
-    MockKernelCompiler mockCompiler;
+    const MockKernelCompiler mockCompiler;
 
     // 3D tensor is not supported
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
         {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();
@@ -327,13 +340,13 @@ TEST(TestRMSnormFwdPlan, CompileWithUnsupportedDimensionThrows)
 
 TEST(TestRMSnormFwdPlan, CompileWithUnsupportedWorkgroupsThrows)
 {
-    MockKernelCompiler mockCompiler;
+    const MockKernelCompiler mockCompiler;
 
     // Number of workgroups exeeds UINT32_MAX
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
         {4, 4, 2, 1}, {UINT32_MAX, 1, 2, 2}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_RMSNormAttributes();

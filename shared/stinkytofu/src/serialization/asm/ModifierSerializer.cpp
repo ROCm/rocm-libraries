@@ -159,6 +159,9 @@ bool serializeVisit(const MUBUFModifiers& mod, std::ostream& os) {
     os << " offen = " << (mod.offen ? "true" : "false") << ", offset12 = " << mod.offset12
        << ", glc = " << (mod.glc ? "true" : "false") << ", slc = " << (mod.slc ? "true" : "false")
        << ", nt = " << (mod.nt ? "true" : "false") << ", lds = " << (mod.lds ? "true" : "false");
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
     os << " }";
     return true;
 }
@@ -186,8 +189,17 @@ bool serializeVisit(const SDWAModifiers& mod, std::ostream& os) {
 // DPPModifiers
 bool serializeVisit(const DPPModifiers& mod, std::ostream& os) {
     os << ", mod.dpp = {";
-    os << " row_shr = " << mod.row_shr << ", row_bcast = " << mod.row_bcast
-       << ", bound_ctrl = " << mod.bound_ctrl;
+    if (mod.isDPP8) {
+        os << " isDPP8 = true, dpp8 = [" << (int)mod.dpp8[0];
+        for (int i = 1; i < 8; ++i) os << "," << (int)mod.dpp8[i];
+        os << "]";
+    } else {
+        os << " dppCtrl = " << static_cast<int>(mod.dppCtrl);
+        os << ", rowMask = " << (int)mod.rowMask;
+        os << ", bankMask = " << (int)mod.bankMask;
+    }
+    os << ", boundCtrl = " << (int)mod.boundCtrl;
+    os << ", fi = " << (int)mod.fi;
     os << " }";
     return true;
 }
@@ -320,14 +332,42 @@ bool serializeVisit(const SWaitAluData& mod, std::ostream& os) {
 // MFMAModifiers
 bool serializeVisit(const MFMAModifiers& mod, std::ostream& os) {
     os << ", mod.mfma = {";
-    os << " inputPermute = \"" << mod.inputPermute << "\", scaleStr = \"" << mod.scaleStr
-       << "\", negStr = \"" << mod.negStr << "\", reuseA = " << (mod.reuseA ? "true" : "false")
+    os << " reuseA = " << (mod.reuseA ? "true" : "false")
        << ", reuseB = " << (mod.reuseB ? "true" : "false");
-    os << ", neg_lo = " << (mod.neg_lo ? "true" : "false")
-       << ", neg_hi = " << (mod.neg_hi ? "true" : "false");
-    if (mod.isMXMFMA) {
-        os << ", isMXMFMA = true, mxInstType = " << mod.mxInstType
-           << ", mxScaleAType = " << mod.mxScaleAType << ", mxScaleBType = " << mod.mxScaleBType;
+    if (!mod.negBits.empty()) {
+        os << ", negLo = [" << (int)mod.negBits.negLo[0];
+        for (int i = 1; i < mod.negBits.numSrcs; ++i) os << "," << (int)mod.negBits.negLo[i];
+        os << "], negHi = [" << (int)mod.negBits.negHi[0];
+        for (int i = 1; i < mod.negBits.numSrcs; ++i) os << "," << (int)mod.negBits.negHi[i];
+        os << "], numNegSrcs = " << (int)mod.negBits.numSrcs;
+    }
+    os << " }";
+    return true;
+}
+
+// MatrixFmtModifiers
+bool serializeVisit(const MatrixFmtModifiers& mod, std::ostream& os) {
+    os << ", mod.matrix_fmt = {";
+    bool first = true;
+    auto sep = [&]() {
+        os << (first ? " " : ", ");
+        first = false;
+    };
+    if (mod.fmtA != MatrixFmt::NONE) {
+        sep();
+        os << "fmtA = \"" << matrixFmtToStr(mod.fmtA) << "\"";
+    }
+    if (mod.fmtB != MatrixFmt::NONE) {
+        sep();
+        os << "fmtB = \"" << matrixFmtToStr(mod.fmtB) << "\"";
+    }
+    if (mod.scaleFmtA != MatrixScaleFmt::NONE) {
+        sep();
+        os << "scaleFmtA = \"" << matrixScaleFmtToStr(mod.scaleFmtA) << "\"";
+    }
+    if (mod.scaleFmtB != MatrixScaleFmt::NONE) {
+        sep();
+        os << "scaleFmtB = \"" << matrixScaleFmtToStr(mod.scaleFmtB) << "\"";
     }
     os << " }";
     return true;
@@ -353,7 +393,7 @@ bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
                           SMEMModifiers, SDWAModifiers, DPPModifiers, VOP3Modifiers, VOP3PModifiers,
                           True16Modifiers, EXEC, VCC, SWaitCntData, SWaitTensorCntData,
                           SWaitStoreCntData, SDelayAluData, SWaitAluData, MFMAModifiers,
-                          MemTokenData>(mod, os);
+                          MatrixFmtModifiers, MemTokenData>(mod, os);
 }
 
 /*
@@ -377,10 +417,12 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
     } else if (attrKey == "mod.global") {
         inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0)));
     } else if (attrKey == "mod.mubuf") {
+        MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
         inst->addModifier(
             MUBUFModifiers(getBool(fields, "offen", false), getInt(fields, "offset12", 0),
                            getBool(fields, "glc", false), getBool(fields, "slc", false),
-                           getBool(fields, "nt", false), getBool(fields, "lds", false)));
+                           getBool(fields, "nt", false), getBool(fields, "lds", false), false,
+                           false, false, false, scope));
     } else if (attrKey == "mod.smem") {
         inst->addModifier(SMEMModifiers(getBool(fields, "glc", false), getBool(fields, "nv", false),
                                         getInt(fields, "offset", 0)));
@@ -405,20 +447,32 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
     } else if (attrKey == "mod.swaitstorecnt") {
         inst->addModifier(SWaitStoreCntData(static_cast<int8_t>(getInt(fields, "storecnt", -1))));
     } else if (attrKey == "mod.mfma") {
-        bool isMX = getBool(fields, "isMXMFMA", false);
-        if (isMX) {
-            inst->addModifier(MFMAModifiers(
-                getStr(fields, "inputPermute"), getStr(fields, "scaleStr"),
-                getStr(fields, "negStr"), getBool(fields, "reuseA", false),
-                getBool(fields, "reuseB", false), getInt(fields, "mxInstType", 0),
-                getInt(fields, "mxScaleAType", 0), getInt(fields, "mxScaleBType", 0)));
-        } else {
-            inst->addModifier(
-                MFMAModifiers(getStr(fields, "inputPermute"), getStr(fields, "scaleStr"),
-                              getStr(fields, "negStr"), getBool(fields, "reuseA", false),
-                              getBool(fields, "reuseB", false), getBool(fields, "neg_lo", false),
-                              getBool(fields, "neg_hi", false)));
+        MFMAModifiers mod;
+        mod.reuseA = getBool(fields, "reuseA", false);
+        mod.reuseB = getBool(fields, "reuseB", false);
+
+        // Neg bits
+        if (fields.contains("negLo")) {
+            auto loVec = getIntVector(fields, "negLo");
+            auto hiVec = getIntVector(fields, "negHi");
+            mod.negBits.numSrcs =
+                static_cast<uint8_t>(getInt(fields, "numNegSrcs", static_cast<int>(loVec.size())));
+            for (size_t i = 0; i < loVec.size() && i < 3; ++i)
+                mod.negBits.negLo[i] = static_cast<uint8_t>(loVec[i]);
+            for (size_t i = 0; i < hiVec.size() && i < 3; ++i)
+                mod.negBits.negHi[i] = static_cast<uint8_t>(hiVec[i]);
         }
+
+        inst->addModifier(mod);
+    } else if (attrKey == "mod.matrix_fmt") {
+        MatrixFmtModifiers mod;
+        if (fields.contains("fmtA")) mod.fmtA = parseMatrixFmt(getStr(fields, "fmtA"));
+        if (fields.contains("fmtB")) mod.fmtB = parseMatrixFmt(getStr(fields, "fmtB"));
+        if (fields.contains("scaleFmtA"))
+            mod.scaleFmtA = parseMatrixScaleFmt(getStr(fields, "scaleFmtA"));
+        if (fields.contains("scaleFmtB"))
+            mod.scaleFmtB = parseMatrixScaleFmt(getStr(fields, "scaleFmtB"));
+        inst->addModifier(mod);
     } else if (attrKey == "mod.delayalu") {
         auto toInstType = [](const std::string& s) {
             if (s == "VALU") return SDelayAluData::InstType::VALU;
@@ -426,8 +480,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             if (s == "TRANS") return SDelayAluData::InstType::TRANS;
             return SDelayAluData::InstType::NO_DEP;
         };
-        bool hasInstId1 = getBool(fields, "hasInstId1", false) || fields.count("instid1Type") ||
-                          fields.count("instSkip") || fields.count("instid1Distance");
+        bool hasInstId1 = getBool(fields, "hasInstId1", false) || fields.contains("instid1Type") ||
+                          fields.contains("instSkip") || fields.contains("instid1Distance");
         if (hasInstId1) {
             inst->addModifier(
                 SDelayAluData(toInstType(getStr(fields, "instid0Type", "NO_DEP")),
@@ -446,12 +500,29 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                                        getInt(fields, "hold_cnt", -1),
                                        getInt(fields, "vm_vsrc", -1), getInt(fields, "va_vcc", -1),
                                        getInt(fields, "sa_sdst", -1)));
+    } else if (attrKey == "mod.dpp") {
+        bool isDPP8 = getBool(fields, "isDPP8", false);
+        if (isDPP8) {
+            auto dpp8Vec = getIntVector(fields, "dpp8");
+            std::array<uint8_t, 8> dpp8Perm = {0, 0, 0, 0, 0, 0, 0, 0};
+            for (size_t i = 0; i < dpp8Vec.size() && i < 8; ++i)
+                dpp8Perm[i] = static_cast<uint8_t>(dpp8Vec[i]);
+            inst->addModifier(
+                DPPModifiers(dpp8Perm, static_cast<uint8_t>(getInt(fields, "fi", 0))));
+        } else {
+            DppCtrl ctrl = static_cast<DppCtrl>(getInt(fields, "dppCtrl", 0xFFFF));
+            inst->addModifier(DPPModifiers(ctrl,
+                                           static_cast<uint8_t>(getInt(fields, "rowMask", 0xF)),
+                                           static_cast<uint8_t>(getInt(fields, "bankMask", 0xF)),
+                                           static_cast<uint8_t>(getInt(fields, "boundCtrl", 0)),
+                                           static_cast<uint8_t>(getInt(fields, "fi", 0))));
+        }
     } else if (attrKey == "mod.memtoken") {
-        if (fields.count("tokens")) {
+        if (fields.contains("tokens")) {
             inst->addModifier(MemTokenData(getIntVector(fields, "tokens")));
         }
     }
-    // mod.sdwa, mod.dpp, mod.vop3p, mod.true16: no deserialize support yet
+    // mod.sdwa, mod.vop3p, mod.true16: no deserialize support yet
 }
 
 }  // namespace

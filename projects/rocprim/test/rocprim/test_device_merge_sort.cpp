@@ -26,6 +26,10 @@
 #include "../../common/utils_custom_type.hpp"
 #include "../../common/utils_device_ptr.hpp"
 
+// including Windows.h from test_utils_memory_check.hpp includes
+// macro definitions max and min which conflict with rocPRIM code.
+#define NOMINMAX
+
 // required test headers
 #include "indirect_iterator.hpp"
 #include "test_seed.hpp"
@@ -35,6 +39,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_memory_check.hpp"
 
 // required rocprim headers
 #include <rocprim/detail/various.hpp>
@@ -309,11 +314,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
     hipStream_t stream = 0; // default
 
+    rocprim::detail::target_arch arch;
+    HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
+
     // This test currently fails on gfx950 with key types of custom_type when BUILD_CODE_COVERAGE=ON.
     // Temporarily skip these cases while we investigate.
 #if defined(CODE_COVERAGE)
-    rocprim::detail::target_arch arch;
-    rocprim::detail::host_target_arch(stream, arch);
     if (common::is_custom_type<key_type>::value && arch == rocprim::detail::target_arch::gfx950)
     {
         std::cout << "Temporarily skipping custom_type test on gfx950." << std::endl;
@@ -334,9 +340,19 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
+        auto sizes = test_utils::get_sizes(seed_value);
+
         for(size_t size : test_utils::get_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            bool is_apu = test_utils::is_apu(arch);
+            if (is_apu && test_utils::get_total_system_memory(true) <= test_utils::minimum_memory_required_bytes
+                && size >= (1 << 20))
+            {
+                std::cout << "Insufficient APU sytstem memory. Skipping test for size = " << size << std::endl;
+                GTEST_SKIP();
+            }
 
             in_place = !in_place;
 
