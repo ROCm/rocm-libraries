@@ -2,7 +2,7 @@
 name: hipdnn-review
 description: Review a hipDNN pull request or local diff for correctness, API compatibility, provider behavior, resource management, code reuse, and testing coverage/quality. Uses local source/worktrees for cross-reference by default. Use when asked to review hipDNN code, review a PR, or assess whether a change is ready to merge.
 argument-hint: "[PR URL | branch:<name> | local] [base:<branch>] [focus:<area>] [diff-only]"
-allowed-tools: Bash, Read, Grep, Glob
+allowed-tools: Bash, Read, Grep, Glob, Task, WebFetch
 ---
 
 # hipDNN Review
@@ -22,6 +22,8 @@ If none of PR URL, `local`, or `branch:<name>` is supplied, ask which change set
 
 ## Setup
 
+If `diff-only` was passed, skip local worktree creation/update. Still capture a unique diff file and state in the final review that confidence is lower because local source cross-reference was intentionally skipped.
+
 1. Determine the repository root:
    ```bash
    git rev-parse --show-toplevel
@@ -37,11 +39,16 @@ If none of PR URL, `local`, or `branch:<name>` is supplied, ask which change set
      git diff --name-only <base>...
      git diff --stat <base>...
      ```
-3. Choose a unique diff output path without pasting the full diff into the response:
+   - Branch:
+     ```bash
+     git diff --name-only <base>...<branch>
+     git diff --stat <base>...<branch>
+     ```
+3. Choose a unique diff output path without pasting the full diff into the response. Prefer the workspace's artifact directory if repository instructions define one. For this repository family that is typically `WIP/worktrees/<repo>/<branch>/`; source checkouts belong under `worktrees/<repo>/<branch>/`, not under WIP. If no workspace artifact convention is available, use `mktemp`:
    ```bash
    DIFF_FILE=$(mktemp "${TMPDIR:-/tmp}/hipdnn-review.XXXXXX.diff")
    ```
-   Use a repository/WIP-scoped path instead if the workspace requires temporary artifacts outside `/tmp`.
+   Pass the chosen `DIFF_FILE` path to every reviewer.
 4. Fetch the diff:
    - PR:
      ```bash
@@ -56,6 +63,7 @@ If none of PR URL, `local`, or `branch:<name>` is supplied, ask which change set
      git diff <base>...<branch> > "$DIFF_FILE"
      ```
 5. Prefer a local source checkout for cross-reference. A review based only on the PR page or raw diff is incomplete unless `diff-only` was requested.
+   - Follow repository or workspace instructions for source worktree layout. If no local convention is documented, use an existing checkout instead of inventing a new directory layout.
    - For PR reviews, make the PR head and base source available locally before spawning reviewers. Use an existing local worktree/checkout if one already matches the PR head; otherwise fetch the PR/head branch and create or update a local worktree/checkout according to the repository's normal workspace conventions.
    - Fetch the selected base branch and update the base worktree when it can be fast-forwarded. If the base worktree is stale, dirty, detached unexpectedly, or cannot be fast-forwarded, report that limitation before reviewing.
    - For `branch:<name>` reviews, fetch the branch and base when possible, then compare the local branch source against the refreshed base.
@@ -108,6 +116,7 @@ hipDNN CI commonly runs sanitizer-enabled tests. Treat leaks and ownership ambig
 ### Compatibility Claims
 
 - For existing public-facing hipDNN API that corresponds to an equivalent cuDNN API, check whether the signature, parameter semantics, defaults, status behavior, ownership/lifetime rules, and documented constraints preserve seamless porting expectations.
+- When validating cuDNN compatibility, use authoritative NVIDIA documentation such as `https://docs.nvidia.com/deeplearning/cudnn/` via `WebFetch` when web access is available. If authoritative documentation is unavailable, do not infer cuDNN semantics from memory; flag the compatibility point for human verification instead.
 - Flag public API changes that silently diverge from the equivalent cuDNN API unless the divergence is explicit, documented, and intentional.
 - New hipDNN-only API does not need to match cuDNN by default. Review it for consistency with hipDNN design, and only apply cuDNN parity expectations when the API or documentation claims cuDNN compatibility.
 - If docs mention cuDNN migration, compatibility, or parity, ensure the wording is precise and does not promise unimplemented behavior.
@@ -127,6 +136,8 @@ hipDNN CI commonly runs sanitizer-enabled tests. Treat leaks and ownership ambig
 ## Testing Review
 
 Testing review is required for every hipDNN review, even when no test files changed. Do not equate "tests were added" with "the behavior is covered"; read the assertions and map them back to the changed code paths.
+
+For documentation-only, AI-skill-only, or comment-only changes with no product behavioral surface, the Testing Assessment may state that no product behavior is exercised. Do not invent behavioral test gaps for non-code changes; focus instead on validation appropriate to the artifact, such as formatting, metadata parsing, link/installability, or a dry-run invocation.
 
 ### Coverage Questions
 
@@ -158,20 +169,21 @@ In the final review, include a **Testing Assessment** section with:
 - Weak tests: tests with shallow assertions, excessive mocking, nondeterminism, or poor isolation.
 - Recommended tests: concrete test names or scenarios to add.
 
+## Severity
+
+- **Critical**: likely correctness failure, data corruption, leak/crash in normal use, ABI/API break, or a defect serious enough to block merge.
+- **Major**: real behavioral risk, missing essential validation, meaningful test gap, compatibility issue, or maintainability issue likely to cause defects.
+- **Minor**: localized quality issue, unclear docs, low-risk edge case, or non-blocking cleanup.
+- **Suggestion**: optional improvement, refactor, or broader follow-up.
+
 ## Default Multi-Agent Review
 
-Default to a multi-agent review when the runtime supports reviewer delegation and the necessary delegation tool is available to the skill. Tell the user which reviewers will run and proceed unless they opt out or ask for a single-pass review. If delegation is not available, or the active environment requires explicit permission before spawning agents, state that multi-agent review is the skill default and either ask for permission or use the direct single-pass fallback.
+Default to a multi-agent review using `Task` when reviewer delegation is available. Tell the user which reviewers will run and proceed unless they opt out or ask for a single-pass review. If delegation is unavailable in the active runtime, state that multi-agent review is the skill default and use the direct single-pass fallback.
 
-Use focused reviewers by changed-file bucket:
+Use the Scope Buckets above as the canonical taxonomy. Spawn focused reviewers for affected implementation buckets, plus the required cross-cutting reviewers:
 
-- **Frontend/API reviewer**: frontend, Python frontend, public headers, graph/node/attribute wrappers, public API compatibility, cuDNN-porting expectations for existing equivalent API.
-- **Backend reviewer**: backend descriptors, engines, plugin loading, status propagation, resource ownership, and backend C API behavior.
-- **Data/FlatBuffers reviewer**: data SDK, FlatBuffers SDK, schemas, generated wrappers, serialization compatibility, unpacking/ownership.
-- **Plugin SDK reviewer**: plugin interfaces, ABI/API contracts, behavior notes, plugin-facing ownership and error semantics.
-- **Provider reviewer**: provider registration, applicability, execution, workspace, streams, external library calls, unsupported-case behavior.
-- **Build/Infra reviewer**: CMake, presets, CI, packaging, install/export behavior, scripts, generated-file dependencies.
-- **Docs/Tools reviewer**: documentation, RFCs, codegen, developer tooling, user-facing claims.
-- **Testing reviewer**: coverage and test quality. Always run this reviewer, even when no test files changed.
+- **Bucket reviewers**: one reviewer per affected Scope Bucket when that bucket has meaningful changes.
+- **Testing reviewer**: coverage and test quality. Always run this reviewer, even when no test files changed; apply the docs-only carveout above when appropriate.
 - **Reuse reviewer**: duplication and existing helper opportunities. Run this for broad PRs, repeated patterns, generated boilerplate, or any change spanning multiple implementation buckets.
 
 Each reviewer should:
@@ -210,12 +222,5 @@ Lead with findings. If there are no findings, say so clearly and mention residua
 
 Briefly summarize the reviewed scope and overall readiness.
 ```
-
-Severity guidance:
-
-- **Critical**: likely correctness failure, data corruption, leak/crash in normal use, ABI/API break, or invalid merge blocker.
-- **Major**: real behavioral risk, missing essential validation, meaningful test gap, compatibility issue, or maintainability issue likely to cause defects.
-- **Minor**: localized quality issue, unclear docs, low-risk edge case, or non-blocking cleanup.
-- **Suggestion**: optional improvement, refactor, or broader follow-up.
 
 Keep comments specific and actionable. Avoid speculative findings unless the risk is concrete and supported by code references.
