@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -1305,17 +1305,6 @@ private:
 // RCCL-based grouped send/recv for non-uniform patterns
 struct CommRCCLGrouped : public MultiPlanItem
 {
-    struct Transfer
-    {
-        int                 peer_rank;
-        rocfft_location_t   local_location;
-        BufferPtr           buffer;
-        size_t              offset;
-        size_t              count;
-        bool                is_send; // true=send, false=recv
-        hipStream_wrapper_t stream; // each transfer has its own stream
-    };
-
     CommRCCLGrouped(rocfft_rccl_comm_t& _rccl,
                     rocfft_precision    _precision,
                     rocfft_array_type   _arrayType)
@@ -1350,6 +1339,11 @@ struct CommRCCLGrouped : public MultiPlanItem
         transfers.push_back(std::move(t));
     }
 
+    bool HasTransfers() const
+    {
+        return !transfers.empty();
+    }
+
     void ExecuteAsync(const rocfft_plan                     plan,
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
@@ -1380,18 +1374,22 @@ struct CommRCCLGrouped : public MultiPlanItem
         return false;
     }
 
-    bool HasTransfers() const
-    {
-        return !transfers.empty();
-    }
-
 private:
+    struct Transfer
+    {
+        int                 peer_rank;
+        rocfft_location_t   local_location;
+        BufferPtr           buffer;
+        size_t              offset;
+        size_t              count;
+        bool                is_send; // true=send, false=recv
+        hipStream_wrapper_t stream; // each transfer has its own stream
+    };
+
     rocfft_rccl_comm_t&     rccl;
     const rocfft_precision  precision;
     const rocfft_array_type arrayType;
-
-public:
-    std::vector<Transfer> transfers;
+    std::vector<Transfer>   transfers;
 };
 #endif // ROCFFT_RCCL_ENABLE
 

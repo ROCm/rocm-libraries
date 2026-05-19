@@ -2636,7 +2636,7 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
             outputItems.push_back(unpackIdx);
         }
 
-        if(!rcclGrouped->transfers.empty())
+        if(rcclGrouped->HasTransfers())
         {
             auto rcclIdx              = AddMultiPlanItem(std::move(rcclGrouped), packItems);
             multiPlan[rcclIdx]->group = itemGroup;
