@@ -164,6 +164,15 @@ class SignatureDefault(Signature):
         if kernel["ProblemType"]["Sparse"]:
             signature.addArg("MetaData", SVK.SIG_GLOBALBUFFER, "void" , "generic")
 
+        # Batch offset support for general batched mode (pointer array)
+        # Only for non-strided, non-grouped GEMM
+        if not kernel["ProblemType"]["StridedBatched"] and not kernel["ProblemType"]["GroupedGemm"]:
+            signature.addArg("batchOffsetD", SVK.SIG_VALUE, "u64")
+            signature.addArg("batchOffsetC", SVK.SIG_VALUE, "u64")
+            signature.addArg("batchOffsetA", SVK.SIG_VALUE, "u64")
+            signature.addArg("batchOffsetB", SVK.SIG_VALUE, "u64")
+            userArgumentsInfo.gemmArgumentSize += 32  # 4 offsets * 8 bytes each
+
         # StreamKForceDPOnly (SK3 DP-first, gfx1250) never touches the workspace
         # partials/fixup path, so AddressWS/AddressFlags are dead: they are dropped
         # from the SGPR define (KernelWriter.py) and here from the .kd metadata. The
