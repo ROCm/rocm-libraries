@@ -8,7 +8,7 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
-from conftest import build_conv_fprop_graph, execute_graph
+from .helpers import build_conv_fprop_graph, execute_graph
 
 # Dimensions used across tests
 N, C, H, W = 16, 16, 16, 16

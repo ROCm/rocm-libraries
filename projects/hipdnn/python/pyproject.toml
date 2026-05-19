@@ -41,5 +41,11 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["hipdnn_frontend"]
 
+[tool.pytest.ini_options]
+markers = [
+    "gpu: tests that require GPU hardware",
+    "integration: end-to-end integration tests",
+]
+
 [tool.cibuildwheel]
 skip = ["pp*", "cp36-*", "cp37-*"]

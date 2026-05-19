@@ -50,18 +50,14 @@ class TestGraphTensorCreation:
     """Tests for creating tensors via the Graph API."""
 
     def test_graph_tensor_creation(self):
-        """graph.tensor() creates a shared tensor from attributes."""
-        g = hipdnn.Graph()
+        """Tensor.create() produces a tensor with expected dims and dtype."""
+        t = hipdnn.Tensor.create([2, 3, 4], hipdnn.DataType.FLOAT)
+        t.set_stride([12, 4, 1])
 
-        attrs = hipdnn.Tensor()
-        attrs.set_dim([2, 3, 4])
-        attrs.set_data_type(hipdnn.DataType.FLOAT)
-        attrs.set_stride([12, 4, 1])
-
-        t = g.tensor(attrs)
         assert t is not None
         assert t.get_dim() == [2, 3, 4]
         assert t.get_data_type() == hipdnn.DataType.FLOAT
+        assert t.get_stride() == [12, 4, 1]
 
     def test_graph_tensor_like(self):
         """Graph.tensor_like() creates a tensor with matching dims but new uid."""

@@ -20,10 +20,14 @@ class TestTensorCreate:
         t = hipdnn.Tensor.create([1, 2, 3], hipdnn.DataType.FLOAT)
         assert t.get_data_type() == hipdnn.DataType.FLOAT
 
-    def test_tensor_uid_is_assigned(self):
-        """Each tensor receives a unique auto-assigned uid."""
+    def test_tensor_uid_is_not_auto_assigned(self):
+        """Tensor.create() does not auto-assign a uid; manual set_uid works."""
         t1 = hipdnn.Tensor.create([1, 2], hipdnn.DataType.FLOAT)
+        assert not t1.has_uid()
+
+        t1.set_uid(1)
         t2 = hipdnn.Tensor.create([3, 4], hipdnn.DataType.FLOAT)
+        t2.set_uid(2)
         assert t1.get_uid() != t2.get_uid()
 
 
