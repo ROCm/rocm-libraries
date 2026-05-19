@@ -686,14 +686,8 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
     for(size_t r = 0; r < devices.size(); ++r)
     {
         rocfft_scoped_device dev(devices[r]);
-        send_ptrs[r] = ptr_offset(sendBuffers[r].get(in_buffer, out_buffer, local_comm_rank),
-                                  sendOffsets[r],
-                                  precision,
-                                  arrayType);
-        recv_ptrs[r] = ptr_offset(recvBuffers[r].get(in_buffer, out_buffer, local_comm_rank),
-                                  recvOffsets[r],
-                                  precision,
-                                  arrayType);
+        send_ptrs[r] = sendBuffers[r].get(in_buffer, out_buffer, local_comm_rank);
+        recv_ptrs[r] = recvBuffers[r].get(in_buffer, out_buffer, local_comm_rank);
     }
 
     // RCCL collectives must be called from ALL devices simultaneously;
@@ -748,8 +742,8 @@ void CommRCCLAllToAll::Print(rocfft_ostream& os, const int indent) const
     for(size_t r = 0; r < devices.size(); ++r)
     {
         os << indentStr << "  rank " << r << ": device=" << devices[r]
-           << " sendBuf=" << PrintBufferPtrOffset(sendBuffers[r], sendOffsets[r])
-           << " recvBuf=" << PrintBufferPtrOffset(recvBuffers[r], recvOffsets[r]) << "\n";
+           << " sendBuf=" << PrintBufferPtrOffset(sendBuffers[r], 0)
+           << " recvBuf=" << PrintBufferPtrOffset(recvBuffers[r], 0) << "\n";
     }
     os << std::endl;
 }

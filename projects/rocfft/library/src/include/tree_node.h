@@ -1222,29 +1222,32 @@ private:
 // RCCL-based all-to-all communication for multi-GPU transpose.
 struct CommRCCLAllToAll : public MultiPlanItem
 {
-    // sendBuffers / recvBuffers / sendOffsets / recvOffsets must all be
-    // indexed by RCCL rank.  rocfft_rccl_comm_t assigns ranks in sorted
-    // device-id order (this holds even for non-contiguous device sets
-    // such as {1, 3, 6}), so building the vectors in the same order as
-    // _rccl.get_devices(), or equivalently in ascending device-id order,
-    // satisfies the contract.
+    // sendBuffers and recvBuffers must both be indexed by RCCL rank.
+    // rocfft_rccl_comm_t assigns ranks in sorted device-id order (this
+    // holds even for non-contiguous device sets such as {1, 3, 6}), so
+    // building the vectors in the same order as _rccl.get_devices(),
+    // or equivalently in ascending device-id order, satisfies the contract.
     CommRCCLAllToAll(rocfft_rccl_comm_t&           _rccl,
                      rocfft_precision              _precision,
                      rocfft_array_type             _arrayType,
                      size_t                        _count_per_rank,
                      const std::vector<BufferPtr>& _sendBuffers,
-                     const std::vector<BufferPtr>& _recvBuffers,
-                     const std::vector<size_t>&    _sendOffsets,
-                     const std::vector<size_t>&    _recvOffsets)
+                     const std::vector<BufferPtr>& _recvBuffers)
         : rccl(_rccl)
         , precision(_precision)
         , arrayType(_arrayType)
         , count_per_rank(_count_per_rank)
         , sendBuffers(_sendBuffers)
         , recvBuffers(_recvBuffers)
-        , sendOffsets(_sendOffsets)
-        , recvOffsets(_recvOffsets)
     {
+        // validate caller-supplied buffer counts against the communicator
+        const auto nranks = static_cast<size_t>(rccl.num_ranks());
+        if(sendBuffers.size() != nranks || recvBuffers.size() != nranks)
+            throw std::invalid_argument(
+                "CommRCCLAllToAll: sendBuffers/recvBuffers size ("
+                + std::to_string(sendBuffers.size()) + "/" + std::to_string(recvBuffers.size())
+                + ") must match rccl.num_ranks() (" + std::to_string(nranks) + ")");
+
         // allocate one stream per participating device, in RCCL rank order
         for(int dev : rccl.get_devices())
         {
@@ -1288,12 +1291,10 @@ private:
     const rocfft_array_type arrayType;
     const size_t            count_per_rank; // elements per rank (uniform)
 
-    // per-device send/recv buffers and offsets.  all four are indexed
-    // by RCCL rank to match the ordering returned by rccl.get_devices().
+    // per-device send/recv buffers, indexed by RCCL rank to match the
+    // ordering returned by rccl.get_devices().
     const std::vector<BufferPtr> sendBuffers;
     const std::vector<BufferPtr> recvBuffers;
-    const std::vector<size_t>    sendOffsets;
-    const std::vector<size_t>    recvOffsets;
 
     // one stream per device, also indexed by RCCL rank
     std::vector<hipStream_wrapper_t> streams;

@@ -2504,17 +2504,9 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
             sendBuffers.push_back(bufs.first);
             recvBuffers.push_back(bufs.second);
         }
-        const std::vector<size_t> sendOffsets(ndevices, 0);
-        const std::vector<size_t> recvOffsets(ndevices, 0);
 
-        auto rcclAllToAll         = std::make_unique<CommRCCLAllToAll>(rccl,
-                                                               precision,
-                                                               desc.inArrayType,
-                                                               uniform_count,
-                                                               sendBuffers,
-                                                               recvBuffers,
-                                                               sendOffsets,
-                                                               recvOffsets);
+        auto rcclAllToAll = std::make_unique<CommRCCLAllToAll>(
+            rccl, precision, desc.inArrayType, uniform_count, sendBuffers, recvBuffers);
         rcclAllToAll->group       = itemGroup;
         rcclAllToAll->description = "RCCL ncclAllToAll";
 
