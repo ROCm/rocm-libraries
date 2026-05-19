@@ -315,6 +315,20 @@ else()
         add_custom_target(benchmark_gemm_universal_${scheduler}_scheduler)
     endforeach()
 
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap larger than any combo's
+    # feasible set (which would make sampling a no-op for most combos).
+    if(NOT "${GEMM_UNIVERSAL_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GEMM_UNIVERSAL_DATATYPE _gu_n_dt)
+        list(LENGTH GEMM_UNIVERSAL_LAYOUT _gu_n_lay)
+        math(EXPR _gu_n_combos "${_gu_n_dt} * ${_gu_n_lay}")
+        if(_gu_n_combos GREATER 0)
+            math(EXPR GEMM_UNIVERSAL_MAX_INSTANCES
+                "${GEMM_UNIVERSAL_MAX_INSTANCES} / ${_gu_n_combos}")
+            message(STATUS "  gemm_universal: per-combo budget = ${GEMM_UNIVERSAL_MAX_INSTANCES} (${_gu_n_combos} combos)")
+        endif()
+    endif()
+
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS GEMM_UNIVERSAL_DATATYPE)
         foreach(l IN LISTS GEMM_UNIVERSAL_LAYOUT)
