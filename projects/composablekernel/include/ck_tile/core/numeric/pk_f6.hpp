@@ -508,6 +508,8 @@ CK_TILE_DEVICE uint32x3_t _to_fp6_pk16(T src, float scale = 1.0f)
 }
 
 // Overload for scalar and small vectors (size 1 or 16)
+// TODO: commented out due to vector_traits template argument mismatch
+#if 0
 template <typename T,
           bool stochastic_rounding            = false,
           typename std::enable_if<vector_traits<T>::vector_size == 1 ||
@@ -533,6 +535,7 @@ CK_TILE_DEVICE pk_fp6_raw_t _to_pk_fp6(T src, float scale = 1.0f)
 
     return cvt.pf6[0];
 }
+#endif
 
 // Device conversion functions for BF6 E3M2 with pkscale and Opsel
 template <typename T, int Opsel>
@@ -588,6 +591,8 @@ CK_TILE_DEVICE uint32x3_t _to_bf6_pk16(T src, float scale = 1.0f)
 }
 
 // Overload for scalar and small vectors (size 1 or 16)
+// TODO
+#if 0
 template <typename T,
           bool stochastic_rounding            = false,
           typename std::enable_if<vector_traits<T>::vector_size == 1 ||
@@ -613,6 +618,7 @@ CK_TILE_DEVICE pk_bf6_raw_t _to_pk_bf6(T src, float scale = 1.0f)
 
     return cvt.pbf6[0];
 }
+#endif
 #endif
 } // namespace impl
 #endif
