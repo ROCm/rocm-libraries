@@ -296,6 +296,17 @@ C precisions axpby all: &axpby_all_precisions
   - *float16_float32_axpby_precision
   - *bfloat16_float32_axpby_precision
 
+# Precisions supported by hipsparseGather (uniform precision only: X == Y).
+# Includes int8, fp16, bf16, fp32, fp64, complex32, and complex64.
+C precisions gather: &gather_precisions
+  - *int8_precision
+  - *half_precision
+  - *bfloat16_precision
+  - *single_precision
+  - *double_precision
+  - *single_precision_complex
+  - *double_precision_complex
+
 SpMV mixed precisions: &spmv_mixed_precisions
   - *int8_int8_int32_int32_axyt_precision
   - *int8_int8_float32_float32_axyt_precision

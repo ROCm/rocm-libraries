@@ -3,6 +3,9 @@ name: TheRock CI Windows
 on:
   workflow_call:
     inputs:
+      therock_ref:
+        type: string
+        required: true
       cmake_options:
         type: string
       projects_to_test:
@@ -49,7 +52,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 4e469b56368b633fad7e77b559db6607da0028eb # 2026-05-13 commit
+          ref: ${{ inputs.therock_ref }}
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
