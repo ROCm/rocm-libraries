@@ -29,5 +29,6 @@ target_sources(stinkytofu PRIVATE
     RemoveDelayAluPass.cpp
     InsertDelayAluPass.cpp
     LoopRegionRemarkPass.cpp
+    RemoveWaitAluPass.cpp
     EstimateAsmCyclesPass.cpp
 )
