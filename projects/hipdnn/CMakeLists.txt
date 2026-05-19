@@ -155,7 +155,7 @@ if(DEFINED HIP_DNN_SKIP_TESTS)
 endif()
 option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
 
-option(HIPDNN_BUILD_PYTHON_BINDINGS "Build Python bindings (requires Python and nanobind)" ON)
+option(HIPDNN_BUILD_PYTHON_BINDINGS "Build Python bindings (requires Python and nanobind)" OFF)
 
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
