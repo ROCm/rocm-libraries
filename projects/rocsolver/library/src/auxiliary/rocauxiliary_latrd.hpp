@@ -2125,7 +2125,12 @@ void rocsolver_latrd_forsytrd_getMemorySize(const rocblas_int n,
     // worst case.
     w4 = sizeof(T) * k * batch_count;
     rocblas_int gr = (n - 1) / 4 + 1;
-    n3 = sizeof(T) * (n + k) * gr * batch_count;
+    // Size norms to cover both the multi-kernel path ((n+k)*gr per batch) and the cooperative
+    // kernel tmp buffer (LATRD_COOP_TARGET_GRID_X * n per batch).
+    constexpr rocblas_int LATRD_COOP_TARGET_GRID_X = 256;
+    n3 = sizeof(T)
+         * std::max((size_t)(n + k) * gr, (size_t)LATRD_COOP_TARGET_GRID_X * n)
+         * batch_count;
 
     *size_norms = std::max({n1, n2, n3});
     *size_work = std::max({w1, w2, w3, w4});
@@ -2308,6 +2313,10 @@ auto rocsolver_latrd_forsytrd_getWorkItems(rocblas_handle handle,
     std::size_t size_W = k * ldw;
     std::size_t buffer = 3 * n * n;
     size_work = std::max(size_work, size_A + size_W + buffer);
+
+    // Global workspace for z1[k], z2[k] per batch in the naive kernel path (v and w point into pA and pW)
+    size_t size_vwzz = sizeof(T) * 2 * k * batch_count;
+    size_work = std::max(size_work, size_vwzz);
     auto work_items = create_work_item({"latrd_scalars", size_scalars})
         + create_work_item({"latrd_workArr", size_workArr})
         + create_work_item({"latrd_work", size_work}) + create_work_item({"latrd_norms", size_norms});
@@ -2724,7 +2733,8 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
                                                                      const rocblas_int shiftW,
                                                                      const rocblas_int ldw,
                                                                      const rocblas_stride strideW,
-                                                                     T* work)
+                                                                     T* work,
+                                                                     T* tmp)
 {
     constexpr bool is_complex_t = rocblas_is_complex<T>;
     auto grid = cooperative_groups::this_grid();
@@ -2738,35 +2748,26 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
     S* E = load_ptr_batch<S>(EE, batch_id, 0, strideE);
     T* tau = load_ptr_batch<T>(tauA, batch_id, 0, strideP);
     T* W = load_ptr_batch<T>(WW, batch_id, 0, strideW);
-    T* pw = nullptr;
-    T* pv = nullptr;
     T* Atmp = nullptr;
-    T* pSAtmp = nullptr;
     T* Wtmp = nullptr;
-    T* pSWtmp = nullptr;
 
-    // Shared variables
+    // Shared memory: tau_j[1] | pSmem[MAX_THDS] | pSv[n] | pSw[nb].  z1/z2 live in global work.
+    // pSv holds the Householder column (Parts B/C/E). pSw holds row-j scalars (Part A, j<=nb-1)
+    // and z2 (Part D, j<=nb-1). Part E reads w directly from global to avoid sizing pSw at n.
+    // n is bounded by sharedMemPerBlock via use_fused_kernel gate.
     extern __shared__ double lmem[];
     T* tau_j = reinterpret_cast<T*>(lmem);
-    /* T* As = reinterpret_cast<T*>(tau_j + 1); */
-    T* pSA = A;
-    /* T* Ws = reinterpret_cast<T*>(pSA + n * n); */
-    T* pSW = W;
-    /* T* v = reinterpret_cast<T*>(pSW + n * nb); */
-    T* v = reinterpret_cast<T*>(lmem + 1);
-    T* pSv = v;
-    T* w = reinterpret_cast<T*>(v + n);
-    T* pSw = w;
-    T* pSz1 = reinterpret_cast<T*>(w + n);
-    T* pSz2 = reinterpret_cast<T*>(pSz1 + nb);
-    T* pSmem = reinterpret_cast<T*>(pSz2 + nb);
+    T* pSmem = tau_j + 1;
+    T* pSv   = pSmem + MAX_THDS; // [n]
+    T* pSw   = pSv   + n;        // [nb]
 
-    // Workspace
-    // work is aligned at 64 bytes
+    // Global workspace per batch: z1[nb], z2[nb].  v and w point into pA and pW.
+    rocblas_int work_stride = 2 * nb;
+    T* z1 = work + (rocblas_stride)batch_id * work_stride;
+    T* z2 = z1 + nb;
+
     T* pA = A;
     T* pW = W;
-    T* pz1 = work;
-    T* pz2 = work + n;
 
     T tauj;
     T alpha;
@@ -2778,15 +2779,9 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
     T temp{};
     for(rocblas_int j = 0; j < nb; ++j)
     {
-        nj = n - j - 1;
-        /* pv = A + j * lda; */
-        /* pw = W + j * ldw; */
-
-        // Zero W
-        for(I ii = tid; ii < n; ii += MAX_THDS)
-        {
-            w[ii] = T(0);
-        }
+        nj   = n - j - 1;
+        T* v = pA + (j + 1) + j * ldSA; // Householder vector lives in column j of A
+        T* w = pW + j * ldSW;            // w column lives in column j of W
 
         // Part A:
         //
@@ -2796,15 +2791,25 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
         //
         if(j > 0)
         {
-            // Step 1: A(j:n-1, j) = -A(j:n-1, 0:j-1) * W(j, 0:1-j)^H + A(j:n-1, j)
+            // Step 1: A(j:n-1, j) = -A(j:n-1, 0:j-1) * W(j, 0:j-1)^H + A(j:n-1, j)
             // Step 2: A(j:n-1, j) = -W(j:n-1, 0:j-1) * A(j, 0:j-1)^H + A(j:n-1, j)
-            for(I ii = tid; ii < nj + 1; ii += MAX_THDS)
+            //
+            // Stage row j of W and A (the scalar broadcast values) into LDS to avoid
+            // j strided global reads (stride = ldSW / ldSA ≈ n) per outer ii iteration.
+            if(tid < j)
+            {
+                pSv[tid] = conj(pW[j + (I)tid * ldSW]);
+                pSw[tid] = conj(pA[j + (I)tid * ldSA]);
+            }
+            __syncthreads();
+
+            for(I ii = bid * MAX_THDS + tid; ii < nj + 1; ii += gridDim.x * MAX_THDS)
             {
                 temp = T(0);
                 for(I jj = 0; jj < j; jj++)
                 {
-                    temp += pA[j + ii + jj * ldSA] * pW[j + jj * ldSW];
-                    temp += pW[j + ii + jj * ldSW] * pA[j + jj * ldSA];
+                    temp += pA[j + ii + jj * ldSA] * pSv[jj];
+                    temp += pW[j + ii + jj * ldSW] * pSw[jj];
                 }
                 pA[ii + j + j * ldSA] -= temp;
             }
@@ -2819,44 +2824,36 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
         // and copy off-diagonal element to E[j]
         //
         // Note: both v and tau_j are required for the next steps.
+
         if(bid == 0)
         {
-            // Load A(j+1:n-1,j) into v
+            // Load A(j+1:n-1, j) into pSv. pSv[0] = alpha.
             for(I ii = tid; ii < nj; ii += MAX_THDS)
-            {
-                v[ii] = pA[ii + (j + 1) + j * ldSA];
-            }
+                pSv[ii] = pA[(j + 1 + ii) + j * ldSA];
             __syncthreads();
 
-            // LARFG
+            // Norm of pSv[1:nj-1] (sub-diagonal part; excludes alpha at pSv[0]).
             temp = T(0);
             for(I ii = tid; ii < nj - 1; ii += MAX_THDS)
-            {
-                temp += v[ii + 1] * conj(v[ii + 1]);
-            }
+                temp += pSv[ii + 1] * conj(pSv[ii + 1]);
             reduce_block_sum(temp, pSmem);
 
             if(tid == 0)
             {
-                // set tau, beta, and put scaling factor into pSmem[0]
-                run_set_taubeta<T>(tau_j, &temp, v, E + j);
-
-                tau[j] = tau_j[0];
+                run_set_taubeta<T>(tau_j, &temp, pSv, E + j); // pSv[0] <- 1, temp <- scal
+                tau[j]   = tau_j[0];
                 pSmem[0] = temp;
             }
             __syncthreads();
 
-            // Scale v
+            // Scale pSv[1:nj-1] and write the Householder vector back to A.
+            // v points into pA so this simultaneously updates v.
             T scal = pSmem[0];
-            for(I ii = tid; ii < nj - 1; ii += MAX_THDS)
-            {
-                v[ii + 1] *= scal;
-            }
-
-            // Copy v back to A(j+1:n-1,j)
             for(I ii = tid; ii < nj; ii += MAX_THDS)
             {
-                pA[(ii + j + 1) + j * ldSA] = v[ii];
+                if(ii > 0)
+                    pSv[ii] *= scal;
+                pA[(j + 1 + ii) + j * ldSA] = pSv[ii];
             }
         }
         grid.sync();
@@ -2865,63 +2862,119 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
         // Compute w = tau_j*A*v - 1/2*tau_j^2*(v'*A*v)*v
         //
 
-        // Part C:
+        // Part C: v/w/z1/z2 are in global memory — all blocks participate.
         //
-        // SYMV
-        //
-        // Step 4: w_0 = A(j+1:n-1, j+1:n-1) * v(0:n-1-j)
-        //
-        Atmp = pA + (j + 1) + (j + 1) * ldSA;
+
+        // Load A(j+1:n-1, j) into pSv.  z1/z2 were zeroed by bid>0 blocks during Part B.
         for(I ii = tid; ii < nj; ii += MAX_THDS)
-        {
-            temp = T(0);
-            for(I jj = 0; jj < nj; jj++)
-            {
-                temp += Atmp[ii + jj * ldSA] * v[jj];
-            }
-            w[ii + j + 1] = temp;
-        }
+            pSv[ii] = pA[(j + 1 + ii) + j * ldSA];
+        __syncthreads();
 
-        // Step 5: z1(0:j-1) = W(j+1:n-1, 0:j-1)^H * v(0:n-1-j)
+        // Step 4: w(j+1:n-1) = A(j+1:n-1, j+1:n-1) * v(0:n-1-j)
         //
-        Wtmp = pW + (j + 1);
-        for(I jj = tid; jj < j; jj += MAX_THDS)
+        // 2-phase GEMV: split jj (columns) across all blocks so all gridDim.x blocks
+        // participate, rather than only the first ceil(nj/MAX_THDS) blocks.
+        // Phase 1 — block bid handles jj in [jj_start, jj_end); all threads cover all rows ii.
+        // Phase 2 — bid==0 reduces the gridDim.x partial slices into w.
+        Atmp = pA + (j + 1) + (j + 1) * ldSA;
         {
-            temp = T(0);
-            for(I ii = 0; ii < nj; ++ii)
+            I jj_chunk = (nj + gridDim.x - 1) / gridDim.x;
+            I jj_start = (I)bid * jj_chunk;
+            I jj_end   = min(jj_start + jj_chunk, nj);
+            T* tmp_bid
+                = tmp + (rocblas_stride)batch_id * n * gridDim.x + (rocblas_stride)bid * n;
+            for(I ii = tid; ii < nj; ii += MAX_THDS)
             {
-                temp += conj(Wtmp[ii + jj * ldSW]) * v[ii];
+                T acc = T(0);
+                for(I jj = jj_start; jj < jj_end; jj++)
+                    acc += Atmp[ii + jj * ldSA] * pSv[jj];
+                tmp_bid[ii] = acc;
             }
-            /* reduce_block_sum(temp, pSmem); */
-            /* pSW[jj + j * ldSW] = pSmem[0]; */
-            pSz1[jj] = temp;
-        }
-
-        // Step 7: z2(0:j-1) = A(j+1:n-1, 0:j-1)^H * v(0:n - 1 -j);
-        //
-        Atmp = pA + (j + 1);
-        for(I jj = tid; jj < j; jj += MAX_THDS)
-        {
-            temp = T(0);
-            for(I ii = 0; ii < nj; ++ii)
-            {
-                temp += conj(Atmp[ii + jj * ldSA]) * v[ii];
-            }
-            /* reduce_block_sum(temp, pSmem); */
-            /* pSW[jj + j * ldSW] = pSmem[0]; */
-            pSz2[jj] = temp;
         }
         grid.sync();
 
-        // Part D:
+        {
+            T* tmp_base = tmp + (rocblas_stride)batch_id * n * gridDim.x;
+            for(I ii = bid * MAX_THDS + tid; ii < nj; ii += gridDim.x * MAX_THDS)
+            {
+                T acc = T(0);
+                for(I b = 0; b < gridDim.x; b++)
+                    acc += tmp_base[(rocblas_stride)b * n + ii];
+                w[j + 1 + ii] = acc;
+            }
+        }
+        grid.sync();
+
+        // Steps 5 & 7: z1(0:j-1) = W(j+1:n-1, 0:j-1)^H * v(0:nj-1)
+        //              z2(0:j-1) = A(j+1:n-1, 0:j-1)^H * v(0:nj-1)
+        // Block bid handles columns jj = bid, bid+gridDim.x, ...
+        // When gridDim.x == 1: Steps 5 & 7 are fused — thread tid owns column jj=tid and
+        //   accumulates both dot products in one pass, no reduction needed.
+        // When gridDim.x > 1: Steps 5 & 7 run separately; all threads in a block reduce
+        //   over rows for each assigned column via an intra-block reduction.
+        // No atomics — deterministic.
+        Wtmp = pW + (j + 1);
+        Atmp = pA + (j + 1);
+        if(gridDim.x == 1)
+        {
+            for(I jj = tid; jj < j; jj += MAX_THDS)
+            {
+                T s1 = T(0), s2 = T(0);
+                for(I ii = 0; ii < nj; ++ii)
+                {
+                    T vi = pSv[ii];
+                    s1 += Wtmp[ii + jj * ldSW] * vi;
+                    s2 += Atmp[ii + jj * ldSA] * vi;
+                }
+                z1[jj] = s1;
+                z2[jj] = s2;
+            }
+        }
+        else
+        {
+            for(I jj = bid; jj < j; jj += gridDim.x)
+            {
+                T s1 = T(0);
+                for(I ii = tid; ii < nj; ii += MAX_THDS)
+                    s1 += Wtmp[ii + jj * ldSW] * pSv[ii];
+                reduce_block_sum(s1, pSmem);
+                if(tid == 0)
+                    z1[jj] = s1;
+                __syncthreads();
+            }
+            for(I jj = bid; jj < j; jj += gridDim.x)
+            {
+                T s2 = T(0);
+                for(I ii = tid; ii < nj; ii += MAX_THDS)
+                    s2 += Atmp[ii + jj * ldSA] * pSv[ii];
+                reduce_block_sum(s2, pSmem);
+                if(tid == 0)
+                    z2[jj] = s2;
+                __syncthreads();
+            }
+        }
+        grid.sync();
+
+        // Part D: v/w/z1/z2 are in global memory — all blocks participate.
         //
         // Step 6: w(j+1:n-1) = -A(j+1:n-1, 0:j-1) * z1(0:j-1) + w(j+1:n-1)
         // Step 8: w(j+1:n-1) = -W(j+1:n-1, 0:j-1) * z2(0:j-1) + w(j+1:n-1)
         //
         // Note: Steps 6 and 8 can be fused.
+
+        // Load z1 and z2 into shared mem.
+        T* pSz1 = pSv;
+        T* pSz2 = pSw;
+        for(I ii = tid; ii < j; ii += MAX_THDS)
+        {
+            pSz1[ii] = z1[ii];
+            pSz2[ii] = z2[ii];
+        }
+        __syncthreads();
+
         Atmp = pA + (j + 1);
         Wtmp = pW + (j + 1);
-        for(I ii = tid; ii < nj; ii += MAX_THDS)
+        for(I ii = bid * MAX_THDS + tid; ii < nj; ii += gridDim.x * MAX_THDS)
         {
             temp = T(0);
             for(I jj = 0; jj < j; ++jj)
@@ -2939,34 +2992,26 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_naive(const I n,
         //
         // alpha = -0.5 * tauj^2 * <v, w>
         //
-        // Dot product <v, w>
         if(bid == 0)
         {
-            temp = 0;
+            // Load v into pSv; accumulate dot product reading w directly from global.
+            // pSw is sized nb (not n) so w is not staged here.
+            temp = T(0);
             for(I ii = tid; ii < nj; ii += MAX_THDS)
             {
-                temp += v[ii] * conj(w[ii + j + 1]);
+                pSv[ii] = v[ii];
+                temp += pSv[ii] * conj(w[ii + j + 1]);
             }
             reduce_block_sum(temp, pSmem);
 
             if(tid == 0)
-            {
-                // alpha = - 1/2 * tauj^2 * <v, w>
-                pSmem[0] = -0.5 * tau_j[0] * tau_j[0] * temp;
-            }
+                pSmem[0] = -0.5 * tau_j[0] * tau_j[0] * temp; // alpha
             __syncthreads();
 
-            // AXPY
+            // AXPY: pSv holds v; re-read w from global.
+            T alpha = pSmem[0];
             for(I ii = tid; ii < nj; ii += MAX_THDS)
-            {
-                w[ii + j + 1] = pSmem[0] * v[ii] + tau_j[0] * w[ii + j + 1];
-            }
-            __syncthreads();
-
-            for(I ii = tid; ii < n; ii += MAX_THDS)
-            {
-                pSW[ii + j * ldSW] = w[ii];
-            }
+                pW[(j + 1 + ii) + j * ldSW] = alpha * pSv[ii] + tau_j[0] * w[ii + j + 1];
         }
         grid.sync();
 
@@ -3007,6 +3052,7 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
     T* work = (T*)dwptr->work("latrd_work");
     T* norms = (T*)dwptr->work("latrd_norms");
     T** workArr = (T**)dwptr->work("latrd_workArr");
+    dwptr->set_workspace();
 
     if(dwptr->size("latrd_scalars") > 0)
         init_scalars(handle, (T*)scalars);
@@ -3056,8 +3102,11 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
         bool use_small_kernel = !select_coop_launch && (n < small_switch_size)
             && (lmemsize_small <= props->sharedMemPerBlock);
 
-        const size_t lmemsize_fused = ((256 / props->warpSize) + 1 + 5 * n + 5 * k) * sizeof(T);
-        /* std::cout << "lmemsize = " << std::to_string(lmemsize_fused / 1024.0) << "KB" << std::endl; */
+        // Shared memory: tau_j[1] | pSmem[256] | pSv[n] | pSw[k]. z1/z2 live in global work.
+        // pSw is sized k (not n) since Part E reads w directly from global.
+        // lmemsize_fused grows with n; use_fused_kernel is false when it exceeds sharedMemPerBlock.
+        constexpr rocblas_int NAIVE_THDS = 256;
+        const size_t lmemsize_fused      = (1 + NAIVE_THDS + n + k) * sizeof(T);
         bool use_fused_kernel = select_coop_launch
             && !rocblas_is_complex<T> && (lmemsize_fused <= props->sharedMemPerBlock);
 
@@ -3109,11 +3158,38 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             void* kernelArgs[] = {(void*)&n,      (void*)&k,       (void*)&A,    (void*)&shiftA_,
                                   (void*)&lda,    (void*)&strideA, (void*)&E_j_, (void*)&strideE,
                                   (void*)&tau_j_, (void*)&strideP, (void*)&W,    (void*)&shiftW,
-                                  (void*)&ldw,    (void*)&strideW, (void*)&work};
+                                  (void*)&ldw,    (void*)&strideW, (void*)&work, (void*)&norms};
+
+            // Compute grid width: enough blocks to cover n rows, capped by cooperative-launch limit.
+            // hipLaunchCooperativeKernel requires gridDim.x * gridDim.z <= max resident blocks.
+            int max_blocks_per_sm = 0;
+            HIP_TRACE(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+                &max_blocks_per_sm,
+                (void*)(latrd_lower_kernel_naive<NAIVE_THDS, T, rocblas_int, S, U>),
+                NAIVE_THDS, lmemsize_fused));
+            rocblas_int max_total_blocks = max_blocks_per_sm * props->multiProcessorCount;
+            rocblas_int max_grid_x = std::max(1, max_total_blocks / batch_count);
+            // LATRD_COOP_GRID_X allows GPU-specific tuning of Step 4 block count.
+            // norms buffer is sized for up to LATRD_COOP_TARGET_GRID_X blocks (see getMemorySize).
+            // Default (0) falls back to enough blocks to cover n rows or k columns.
+            static const rocblas_int env_grid_x = []() {
+                const char* v = std::getenv("LATRD_COOP_GRID_X");
+                return v ? std::atoi(v) : 0;
+            }();
+            rocblas_int want_grid_x = env_grid_x > 0
+                ? env_grid_x
+                : std::max((n + NAIVE_THDS - 1) / NAIVE_THDS, k);
+            rocblas_int grid_x = std::min(want_grid_x, max_grid_x);
+
+            if(print_debug_messages_latrd_forsytrd)
+                std::fprintf(stderr,
+                             "[latrd_naive] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d\n",
+                             n, max_blocks_per_sm, max_total_blocks, grid_x);
 
             HIP_TRACE(hipLaunchCooperativeKernel(
-                (void*)(latrd_lower_kernel_naive<256, T, rocblas_int, S, U>),
-                dim3(1, 1, batch_count), dim3(256), kernelArgs, lmemsize_fused, stream));
+                (void*)(latrd_lower_kernel_naive<NAIVE_THDS, T, rocblas_int, S, U>),
+                dim3(grid_x, 1, batch_count), dim3(NAIVE_THDS), kernelArgs, lmemsize_fused, stream));
+
             HIP_TRACE(hipDeviceSynchronize());
         }
         else
