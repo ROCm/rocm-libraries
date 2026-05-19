@@ -123,9 +123,10 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
       )
     endforeach()
   else()
-      add_relative_test(${TEST_NAME} ${TEST_TARGET})
+      add_relative_test(${TEST_NAME} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
       set_tests_properties(${TEST_NAME}
           PROPERTIES
+              RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
               LABELS "hip"
       )
   endif()
