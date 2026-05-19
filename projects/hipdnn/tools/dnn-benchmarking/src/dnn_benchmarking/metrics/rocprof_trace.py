@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ._artifact_paths import flatten_hostname_dir
 from ._diagnostic import warn_once
 from ._tool_resolver import resolve_rocm_tool
 
@@ -31,6 +32,9 @@ def _build_argv(
     inner_argv: List[str],
     rocprofv3_binary: str,
 ) -> List[str]:
+    # `-o results` strips rocprofv3's default `<pid>_` filename prefix;
+    # ``flatten_hostname_dir`` then strips the `<hostname>/` segment
+    # after the subprocess returns.
     return [
         rocprofv3_binary,
         "--kernel-trace",
@@ -39,6 +43,8 @@ def _build_argv(
         fmt,
         "-d",
         str(out_dir),
+        "-o",
+        "results",
         "--",
         *inner_argv,
     ]
@@ -141,6 +147,11 @@ def run(
             }
         }
 
+    # Hoist results.<ext> out of <out_dir>/<hostname>/ to <out_dir>/.
+    # Done on both success and error paths so anything rocprofv3
+    # produced before exiting is reachable at a stable path.
+    flatten_hostname_dir(out_dir)
+
     result: Dict[str, Any] = {"format": fmt}
     if proc.returncode != 0:
         tail = "\n".join(proc.stderr.strip().splitlines()[-40:])
@@ -188,6 +199,7 @@ def run(
         except (OSError, subprocess.SubprocessError) as e:
             result["fallback_error"] = f"pftrace fallback invocation failed: {e}"
             return {"trace": result}
+        flatten_hostname_dir(out_dir)
         if fb_proc.returncode == 0:
             pftrace_path = _find_artifact(out_dir, ".pftrace")
             if pftrace_path is not None:

@@ -31,9 +31,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ._artifact_paths import flatten_hostname_dir
 from ._diagnostic import warn_once
-from .arch import detect_arch
 from ._tool_resolver import resolve_rocm_tool
+from .arch import detect_arch
 
 PMC_SETS: Dict[str, Dict[str, List[str]]] = {
     "gfx942": {
@@ -103,12 +104,18 @@ def _build_argv(
     inner_argv: List[str],
     rocprofv3_binary: str,
 ) -> List[str]:
+    # `-o results` drops the `<pid>_` prefix from rocprofv3's default
+    # `<hostname>/<pid>_results.<ext>` filename. The hostname segment is
+    # still added by rocprofv3 itself and is hoisted out post-run by
+    # ``profiling_orchestrator.flatten_hostname_dir``.
     return [
         rocprofv3_binary,
         "--pmc",
         *counters,
         "-d",
         str(out_dir),
+        "-o",
+        "results",
         "--",
         *inner_argv,
     ]
@@ -247,8 +254,10 @@ def run(
             }
         }
 
-    # rocprofv3 nests its own <hostname>/<pid>_results.db under -d. Pass
-    # out_dir directly so we don't double the hostname segment.
+    # rocprofv3 nests its output under <out_dir>/<hostname>/. We hoist
+    # those files up to <out_dir>/ post-run so the artifact path the
+    # user sees in the JSON / console doesn't carry the hostname
+    # segment for single-host runs.
     out_dir.mkdir(parents=True, exist_ok=True)
     argv = _build_argv(counters, out_dir, inner_argv, rocprofv3_binary)
 
@@ -263,6 +272,11 @@ def run(
                 "skipped": f"rocprofv3 invocation failed: {e}",
             }
         }
+
+    # Hoist results.db out of <out_dir>/<hostname>/ to <out_dir>/.
+    # Safe to run on the error path too — anything rocprofv3 wrote
+    # before exiting non-zero ends up alongside the success-path files.
+    flatten_hostname_dir(out_dir)
 
     result: Dict[str, Any] = {
         "set": pmc_set,

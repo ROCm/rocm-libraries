@@ -45,6 +45,10 @@ class TestArgvBuild:
         assert "--output-format" in argv
         # Format follows --output-format
         assert argv[argv.index("--output-format") + 1] == "pftrace"
+        # `-o results` strips the `<pid>_` prefix from rocprofv3's
+        # default filename so the artifact path stays predictable.
+        assert "-o" in argv
+        assert argv[argv.index("-o") + 1] == "results"
 
 
 class TestPftracePath:

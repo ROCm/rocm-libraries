@@ -63,14 +63,6 @@ class TestProfilingFields:
         assert isinstance(cfg.profiling_output_dir, Path)
         assert cfg.profiling_output_dir == Path("/tmp/out")
 
-    def test_default_roofline_data_type_is_fp32(self):
-        cfg = MetricsConfig()
-        assert cfg.roofline_data_type == "FP32"
-
-    def test_invalid_roofline_data_type_raises(self):
-        with pytest.raises(ValueError, match="Invalid roofline_data_type"):
-            MetricsConfig(roofline_data_type="FP4")  # type: ignore[arg-type]
-
     def test_pmc_all_without_multipass_flag_raises(self):
         with pytest.raises(
             ValueError, match="--pmc all requires --pmc-allow-multipass"

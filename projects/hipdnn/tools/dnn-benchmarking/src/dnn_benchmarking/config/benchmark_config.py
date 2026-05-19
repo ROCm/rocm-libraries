@@ -150,13 +150,14 @@ class MetricsConfig:
             and instructions. Kernel-space events are dropped silently
             when ``/proc/sys/kernel/perf_event_paranoid > 1``.
         roofline: Re-run under ``rocprof-compute profile --roof-only``
-            to generate a roofline PDF. Path-only recording — the plot
-            itself is the user-facing artifact.
-        roofline_data_type: ``FP32`` | ``FP16`` | ``BF16`` | ``FP64`` |
-            ``INT8`` — passed through to ``rocprof-compute
-            --roofline-data-type``. Stack-style (multiple types in one
-            PDF) is not exposed; users who want it can re-run
-            rocprof-compute against the recorded db_path.
+            to generate a roofline PDF at rocprof-compute's default
+            datatype (FP32). Path-only recording — the plot itself is
+            the user-facing artifact. Non-default datatypes (FP16, BF16,
+            etc.) are rendered post-hoc by the user via
+            ``rocprof-compute analyze --path <db_path>/..
+            --roofline-data-type FP16``; we don't expose a profile-time
+            knob because rocprof-compute's ``profile`` mode doesn't
+            accept one.
         pmc_allow_multipass: Required for ``--pmc all``. Without it,
             ``all`` is rejected at config-build time because the rocprofv3
             multi-pass replay budget is easy to exceed and the resulting
@@ -172,7 +173,6 @@ class MetricsConfig:
     pmc_set: Optional[Literal["basic", "memory", "flops", "all"]] = None
     perf: bool = False
     roofline: bool = False
-    roofline_data_type: Literal["FP32", "FP16", "BF16", "FP64", "INT8"] = "FP32"
     pmc_allow_multipass: bool = False
     profiling_output_dir: Optional[Path] = None
 
@@ -199,12 +199,6 @@ class MetricsConfig:
             raise ValueError(
                 f"Invalid pmc_set: '{self.pmc_set}'. "
                 "Valid options: basic, memory, flops, all"
-            )
-        valid_data_types = {"FP32", "FP16", "BF16", "FP64", "INT8"}
-        if self.roofline_data_type not in valid_data_types:
-            raise ValueError(
-                f"Invalid roofline_data_type: '{self.roofline_data_type}'. "
-                f"Valid options: {sorted(valid_data_types)}"
             )
         # The 'all' PMC set unions every counter group; rocprofv3 falls
         # back to multi-pass replay, which has been observed to hang for

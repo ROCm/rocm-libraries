@@ -527,6 +527,13 @@ def _run_single_provider_engine(
                     extra = run_profiling_passes(
                         graph_path=graph_path,
                         engine_id=engine_id,
+                        # `provider` is the human-readable engine name
+                        # set by run_graph_all_providers (see
+                        # ``_resolve_engine_name``) — use it for the
+                        # per-engine output subdirectory so the
+                        # artifact path doesn't carry the 19-digit
+                        # engine ID hash.
+                        engine_name=provider,
                         seed=config.seed,
                         warmup_iters=config.warmup_iters,
                         benchmark_iters=config.benchmark_iters,

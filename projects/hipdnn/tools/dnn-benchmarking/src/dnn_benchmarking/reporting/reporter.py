@@ -800,12 +800,20 @@ class Reporter:
 
         roofline = extra.get("roofline")
         if isinstance(roofline, dict):
-            dt = roofline.get("data_type", "?")
-            pdf = roofline.get("pdf_path")
-            if pdf:
-                self._print(f"  Roofline ({dt}):       {pdf}")
-            elif "skipped" in roofline:
-                self._print(f"  Roofline ({dt}):       skipped — {roofline['skipped']}")
+            # rocprof-compute profile mode emits CSVs (no PDF); the PDF
+            # comes from a separate `rocprof-compute analyze` pass that
+            # the user runs against `workload_path`.
+            workload = roofline.get("workload_path")
+            csv = roofline.get("roofline_csv")
+            if csv:
+                self._print(f"  Roofline CSV:         {csv}")
+            if workload:
+                self._print(
+                    f"  Roofline analyze:     rocprof-compute analyze "
+                    f"--path {workload}"
+                )
+            if "skipped" in roofline:
+                self._print(f"  Roofline:             skipped — {roofline['skipped']}")
         self._print("")
 
     def _print_pe_correctness(

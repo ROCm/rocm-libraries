@@ -1008,17 +1008,13 @@ class TestProfilingFlagParsing:
         assert parser.parse_args(["--graph", "g.json"]).roofline is False
         assert parser.parse_args(["--graph", "g.json", "--roofline"]).roofline is True
 
-    def test_roofline_data_type_default_fp32_accepts_named_types(self):
-        parser = create_parser()
-        assert parser.parse_args(["--graph", "g.json"]).roofline_data_type == "FP32"
-        for dt in ("FP32", "FP16", "BF16", "FP64", "INT8"):
-            args = parser.parse_args(["--graph", "g.json", "--roofline-data-type", dt])
-            assert args.roofline_data_type == dt
-
-    def test_roofline_data_type_rejects_unknown(self):
+    def test_roofline_data_type_flag_does_not_exist(self):
+        """``--roofline-data-type`` was removed because it's only valid on
+        ``rocprof-compute analyze``, not ``profile``. Anyone trying to
+        pass it should get an argparse error, not a silent acceptance."""
         parser = create_parser()
         with pytest.raises(SystemExit):
-            parser.parse_args(["--graph", "g.json", "--roofline-data-type", "INT4"])
+            parser.parse_args(["--graph", "g.json", "--roofline-data-type", "FP16"])
 
     def test_profiling_output_dir_default_none_accepts_path(self, tmp_path):
         parser = create_parser()
@@ -1063,7 +1059,6 @@ class TestProfilingFlagPropagation:
                 "--emit-trace": "pftrace",
                 "--perf": True,
                 "--roofline": True,
-                "--roofline-data-type": "FP16",
                 "--profiling-output-dir": str(tmp_path / "out"),
             }
         )
@@ -1092,7 +1087,6 @@ class TestProfilingFlagPropagation:
         assert m.emit_trace == "pftrace"
         assert m.perf is True
         assert m.roofline is True
-        assert m.roofline_data_type == "FP16"
         assert m.profiling_output_dir == Path(str(tmp_path / "out"))
 
     def test_pmc_all_without_multipass_rejected_at_cli_layer(self):

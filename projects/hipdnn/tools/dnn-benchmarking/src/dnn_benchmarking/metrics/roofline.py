@@ -3,12 +3,23 @@
 
 """rocprof-compute roofline collection.
 
-Wraps the workload in ``rocprof-compute profile --roof-only --
-roofline-data-type <dt> --`` to produce a roofline plot. The PDF is
-the user-facing artifact; ``extra_metrics["roofline"]`` records
-file paths only (no parsing of the underlying SQLite). Stack-style
-multi-type plots are deferred — users can re-run rocprof-compute
-against the recorded ``db_path`` if they want one.
+Wraps the workload in ``rocprof-compute profile --roof-only --`` to
+produce a roofline plot. The PDF is the user-facing artifact;
+``extra_metrics["roofline"]`` records file paths only (no parsing of
+the underlying SQLite).
+
+Datatype selection is intentionally absent here: in current
+rocprof-compute (and upstream rocm-systems develop) the
+``--roofline-data-type`` flag exists only under
+``rocprof-compute analyze``, not ``profile``. The profile run captures
+the HBM/compute ceilings using rocprof-compute's default datatype
+(FP32). Users who need FP16/BF16/etc. plots run::
+
+    rocprof-compute analyze --path <recorded db_path>/.. \\
+        --roofline-data-type FP16
+
+against the workload directory we record in
+``extra_metrics["roofline"]["db_path"]``.
 """
 
 import subprocess
@@ -20,7 +31,6 @@ from ._tool_resolver import resolve_rocm_tool
 
 
 def _build_argv(
-    data_type: str,
     workload_dir: Path,
     inner_argv: List[str],
     rocprof_compute_binary: str,
@@ -29,8 +39,6 @@ def _build_argv(
         rocprof_compute_binary,
         "profile",
         "--roof-only",
-        "--roofline-data-type",
-        data_type,
         "-n",
         workload_dir.name,
         "-p",
@@ -40,46 +48,45 @@ def _build_argv(
     ]
 
 
-def _find(search_dir: Path, suffix: str) -> Optional[Path]:
-    candidates = sorted(search_dir.rglob(f"*{suffix}"))
+def _find_named(search_dir: Path, name: str) -> Optional[Path]:
+    """Return the first match for an exact filename anywhere under
+    ``search_dir``, or ``None`` if absent."""
+    candidates = sorted(search_dir.rglob(name))
     return candidates[0] if candidates else None
 
 
 def run(
     inner_argv: List[str],
     out_dir: Path,
-    data_type: str,
 ) -> Dict[str, Any]:
-    """Run rocprof-compute --roof-only and record the artefact paths."""
+    """Run rocprof-compute --roof-only and record the artefact paths.
+
+    ``profile --roof-only`` emits CSV ceiling data (``roofline.csv``
+    plus per-IP ``results_pmc_perf_<n>.csv``) and a sysinfo dump — no
+    PDF and no SQLite. The PDF/HTML is rendered later by a separate
+    ``rocprof-compute analyze --path <workload_dir> [--roofline-data-type
+    DTYPE]`` run, which the user is expected to run themselves against
+    the ``workload_path`` we record.
+    """
     binary = resolve_rocm_tool("rocprof-compute")
     if binary is None:
         warn_once(
             "roofline",
             "rocprof-compute binary not found; skipping roofline",
         )
-        return {
-            "roofline": {
-                "data_type": data_type,
-                "skipped": "rocprof-compute binary not found",
-            }
-        }
+        return {"roofline": {"skipped": "rocprof-compute binary not found"}}
 
     out_dir.mkdir(parents=True, exist_ok=True)
     workload_dir = out_dir / "workload"
-    argv = _build_argv(data_type, workload_dir, inner_argv, binary)
+    argv = _build_argv(workload_dir, inner_argv, binary)
 
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, check=False)
     except (OSError, subprocess.SubprocessError) as e:
         warn_once("roofline", f"rocprof-compute invocation failed: {e}")
-        return {
-            "roofline": {
-                "data_type": data_type,
-                "skipped": f"rocprof-compute invocation failed: {e}",
-            }
-        }
+        return {"roofline": {"skipped": f"rocprof-compute invocation failed: {e}"}}
 
-    result: Dict[str, Any] = {"data_type": data_type}
+    result: Dict[str, Any] = {}
     if proc.returncode != 0:
         tail = "\n".join(proc.stderr.strip().splitlines()[-40:])
         warn_once(
@@ -91,14 +98,20 @@ def run(
         result["error_tail"] = tail
         return {"roofline": result}
 
-    pdf = _find(out_dir, ".pdf")
-    db = _find(out_dir, ".db")
-    if pdf is None and db is None:
-        warn_once("roofline", "no PDF or db produced by rocprof-compute")
-        result["warnings"] = ["no PDF or db produced"]
+    # roofline.csv carries the empirical HBM/compute ceilings — the
+    # single most useful artifact and what users point `analyze` at.
+    roofline_csv = _find_named(out_dir, "roofline.csv")
+    sysinfo_csv = _find_named(out_dir, "sysinfo.csv")
+    if roofline_csv is None and sysinfo_csv is None:
+        warn_once("roofline", "no roofline.csv or sysinfo.csv produced")
+        result["warnings"] = ["no roofline.csv or sysinfo.csv produced"]
         return {"roofline": result}
-    if pdf is not None:
-        result["pdf_path"] = str(pdf)
-    if db is not None:
-        result["db_path"] = str(db)
+    if roofline_csv is not None:
+        result["roofline_csv"] = str(roofline_csv)
+        # The workload directory is what `rocprof-compute analyze
+        # --path ...` expects. Record it explicitly so the user
+        # doesn't have to derive it.
+        result["workload_path"] = str(roofline_csv.parent)
+    if sysinfo_csv is not None:
+        result["sysinfo_csv"] = str(sysinfo_csv)
     return {"roofline": result}

@@ -162,7 +162,6 @@ def run_suite_cli(
             pmc_set=getattr(args, "pmc", None),
             perf=getattr(args, "perf", False),
             roofline=getattr(args, "roofline", False),
-            roofline_data_type=getattr(args, "roofline_data_type", "FP32"),
             pmc_allow_multipass=getattr(args, "pmc_allow_multipass", False),
             profiling_output_dir=getattr(args, "profiling_output_dir", None),
         )

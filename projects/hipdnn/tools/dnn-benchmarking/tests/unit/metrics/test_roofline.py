@@ -3,7 +3,6 @@
 
 """Tests for the rocprof-compute roofline wrapper."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,9 +17,12 @@ def _reset():
 
 
 class TestArgvBuild:
-    def test_passes_data_type_and_inner_argv(self, tmp_path):
+    def test_no_data_type_flag_in_profile_argv(self, tmp_path):
+        """rocprof-compute's ``profile`` subcommand does not accept
+        ``--roofline-data-type`` — that flag lives only under
+        ``analyze``. Passing it to ``profile`` errors. Regression
+        guard: ensure we never re-introduce it on the profile side."""
         argv = roofline_mod._build_argv(
-            data_type="FP32",
             workload_dir=tmp_path / "workload",
             inner_argv=["python", "-m", "dnn_benchmarking"],
             rocprof_compute_binary="/opt/rocm/bin/rocprof-compute",
@@ -31,15 +33,19 @@ class TestArgvBuild:
         assert argv[0] == "/opt/rocm/bin/rocprof-compute"
         assert "profile" in argv
         assert "--roof-only" in argv
-        # Data type follows --roofline-data-type
-        assert argv[argv.index("--roofline-data-type") + 1] == "FP32"
+        assert "--roofline-data-type" not in argv
         # Inner argv follows '--'
         sep = argv.index("--")
         assert argv[sep + 1 :] == ["python", "-m", "dnn_benchmarking"]
 
 
 class TestRunHappyPath:
-    def test_records_pdf_and_db_paths(self, tmp_path, monkeypatch):
+    def test_records_csv_and_workload_paths(self, tmp_path, monkeypatch):
+        """``profile --roof-only`` emits CSVs (roofline.csv +
+        sysinfo.csv + per-IP results CSVs), no PDF and no SQLite. We
+        record roofline.csv as the primary artifact and the workload
+        directory so the user can point ``rocprof-compute analyze
+        --path <dir>`` at it to render PDFs."""
         monkeypatch.setattr(
             roofline_mod,
             "resolve_rocm_tool",
@@ -47,28 +53,34 @@ class TestRunHappyPath:
         )
 
         def fake_run(argv, **kwargs):
-            wl_dir = tmp_path / "workload"
-            wl_dir.mkdir(parents=True, exist_ok=True)
-            (wl_dir / "roofline.pdf").write_bytes(b"%PDF-1.4")
-            (wl_dir / "workload.db").write_bytes(b"sqlite-bytes")
+            # rocprof-compute nests its output one level deeper than
+            # workload_dir (under <wl_dir>/<gpu>/). The _find_named
+            # walker is recursive so the test mirrors that depth.
+            inner = tmp_path / "workload" / "gfx90a"
+            inner.mkdir(parents=True, exist_ok=True)
+            (inner / "roofline.csv").write_text("Empirical_HBM,123\n")
+            (inner / "sysinfo.csv").write_text("gpu,gfx90a\n")
+            (inner / "results_pmc_perf_0.csv").write_text("k,v\n")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch.object(roofline_mod.subprocess, "run", side_effect=fake_run):
-            extra = roofline_mod.run(
-                inner_argv=["python"], out_dir=tmp_path, data_type="FP32"
-            )
+            extra = roofline_mod.run(inner_argv=["python"], out_dir=tmp_path)
         rl = extra["roofline"]
-        assert rl["data_type"] == "FP32"
-        assert rl["pdf_path"].endswith("roofline.pdf")
-        assert rl["db_path"].endswith("workload.db")
+        assert rl["roofline_csv"].endswith("roofline.csv")
+        assert rl["sysinfo_csv"].endswith("sysinfo.csv")
+        # workload_path is the parent dir of roofline.csv — what
+        # `rocprof-compute analyze --path` expects.
+        assert rl["workload_path"].endswith("workload/gfx90a")
+        # No data_type, no pdf_path, no db_path under the new contract.
+        assert "data_type" not in rl
+        assert "pdf_path" not in rl
+        assert "db_path" not in rl
 
 
 class TestFailureModes:
     def test_missing_binary_returns_skipped(self, monkeypatch, tmp_path):
         monkeypatch.setattr(roofline_mod, "resolve_rocm_tool", lambda name: None)
-        extra = roofline_mod.run(
-            inner_argv=["python"], out_dir=tmp_path, data_type="FP32"
-        )
+        extra = roofline_mod.run(inner_argv=["python"], out_dir=tmp_path)
         assert extra["roofline"]["skipped"] == "rocprof-compute binary not found"
 
     def test_nonzero_exit_records_error_tail(self, monkeypatch, tmp_path):
@@ -81,19 +93,17 @@ class TestFailureModes:
             returncode=1, stdout="", stderr="rocprof-compute: workload failed\n"
         )
         with patch.object(roofline_mod.subprocess, "run", return_value=proc):
-            extra = roofline_mod.run(
-                inner_argv=["python"], out_dir=tmp_path, data_type="FP32"
-            )
+            extra = roofline_mod.run(inner_argv=["python"], out_dir=tmp_path)
         assert extra["roofline"]["returncode"] == 1
         assert "failed" in extra["roofline"]["error_tail"]
 
     def test_success_with_missing_artifacts_records_warning(
         self, monkeypatch, tmp_path
     ):
-        """rocprof-compute exited 0 but produced no PDF and no DB — the
-        run is technically successful but there's nothing to point the
-        user at. We must record the gap rather than silently emit an
-        empty `roofline` slice."""
+        """rocprof-compute exited 0 but produced neither the ceilings
+        CSV nor sysinfo — the run is technically successful but there's
+        nothing to point the user at. We must record the gap rather
+        than silently emit an empty `roofline` slice."""
         monkeypatch.setattr(
             roofline_mod,
             "resolve_rocm_tool",
@@ -101,11 +111,9 @@ class TestFailureModes:
         )
         proc = MagicMock(returncode=0, stdout="", stderr="")
         with patch.object(roofline_mod.subprocess, "run", return_value=proc):
-            extra = roofline_mod.run(
-                inner_argv=["python"], out_dir=tmp_path, data_type="FP32"
-            )
+            extra = roofline_mod.run(inner_argv=["python"], out_dir=tmp_path)
         rl = extra["roofline"]
-        assert rl["data_type"] == "FP32"
-        assert rl["warnings"] == ["no PDF or db produced"]
-        assert "pdf_path" not in rl
-        assert "db_path" not in rl
+        assert rl["warnings"] == ["no roofline.csv or sysinfo.csv produced"]
+        assert "roofline_csv" not in rl
+        assert "sysinfo_csv" not in rl
+        assert "workload_path" not in rl

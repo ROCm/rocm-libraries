@@ -89,9 +89,16 @@ def build_inner_argv(
     return argv
 
 
-def _subdir(out_dir: Path, graph_path: Path, engine_id: int, source: str) -> Path:
-    name = f"{graph_path.stem}_{engine_id}_{source}"
-    sub = out_dir / name
+def _subdir(out_dir: Path, graph_path: Path, engine_name: str, source: str) -> Path:
+    """Per-source output directory:
+    ``<out_dir>/<graph_stem>/<engine_name>/<source>/``.
+
+    Three semantic levels under the user-controlled root: graph, then
+    engine, then profiling source. Replaces the legacy flat scheme
+    ``<graph>_<engine_id>_<source>/`` whose engine_id segment was a
+    19-digit hash that no one could read or type.
+    """
+    sub = out_dir / graph_path.stem / engine_name / source
     sub.mkdir(parents=True, exist_ok=True)
     return sub
 
@@ -99,6 +106,7 @@ def _subdir(out_dir: Path, graph_path: Path, engine_id: int, source: str) -> Pat
 def run_profiling_passes(
     graph_path: Path,
     engine_id: int,
+    engine_name: str,
     seed: Optional[int],
     warmup_iters: int,
     benchmark_iters: int,
@@ -114,6 +122,10 @@ def run_profiling_passes(
     Args:
         graph_path: Graph file passed to the inner process.
         engine_id: Single engine ID for the inner process.
+        engine_name: Human-readable engine name (e.g.
+            ``"MIOPEN_ENGINE"``) used as the per-engine output
+            subdirectory; resolved by the caller via
+            ``suite_runner._resolve_engine_name``.
         seed: Reproducibility seed for fill_inputs_random; passed
             through to the inner process so PMC counts are over the
             same input distribution as the timed pass.
@@ -150,7 +162,7 @@ def run_profiling_passes(
                     out_dir=_subdir(
                         out_dir,
                         graph_path,
-                        engine_id,
+                        engine_name,
                         f"pmc_{metrics_config.pmc_set}",
                     ),
                     pmc_set=metrics_config.pmc_set,
@@ -168,7 +180,7 @@ def run_profiling_passes(
                     out_dir=_subdir(
                         out_dir,
                         graph_path,
-                        engine_id,
+                        engine_name,
                         f"trace_{metrics_config.emit_trace}",
                     ),
                     fmt=metrics_config.emit_trace,
@@ -183,7 +195,7 @@ def run_profiling_passes(
             aggregated.update(
                 _perf_mod.run(
                     inner_argv=inner_argv,
-                    out_dir=_subdir(out_dir, graph_path, engine_id, "perf"),
+                    out_dir=_subdir(out_dir, graph_path, engine_name, "perf"),
                 )
             )
         except Exception as e:
@@ -195,8 +207,7 @@ def run_profiling_passes(
             aggregated.update(
                 _roofline_mod.run(
                     inner_argv=inner_argv,
-                    out_dir=_subdir(out_dir, graph_path, engine_id, "roofline"),
-                    data_type=metrics_config.roofline_data_type,
+                    out_dir=_subdir(out_dir, graph_path, engine_name, "roofline"),
                 )
             )
         except Exception as e:

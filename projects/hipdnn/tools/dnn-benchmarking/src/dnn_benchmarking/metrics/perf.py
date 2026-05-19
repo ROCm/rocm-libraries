@@ -21,7 +21,6 @@ nothing about ``--perf`` is fatal.
 """
 
 import shutil
-import socket
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -123,9 +122,11 @@ def run(
     if kernel_ok:
         events.extend(PERF_EVENTS_KERNEL)
 
-    host_dir = out_dir / socket.gethostname()
-    host_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = host_dir / "perf.csv"
+    # No hostname subdir: perf is a single CSV, the orchestrator's
+    # per-(graph, engine, source) subdir already disambiguates runs,
+    # and the user-facing path stays short.
+    out_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = out_dir / "perf.csv"
     argv = _build_argv(events, csv_path, inner_argv)
 
     try:

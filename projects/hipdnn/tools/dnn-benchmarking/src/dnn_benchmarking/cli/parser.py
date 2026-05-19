@@ -308,17 +308,12 @@ Tarball Input:
             "extra_metrics['roofline']. Adds ~3 extra workload runs."
         ),
     )
-    metrics_group.add_argument(
-        "--roofline-data-type",
-        type=str,
-        choices=["FP32", "FP16", "BF16", "FP64", "INT8"],
-        default="FP32",
-        metavar="DTYPE",
-        help=(
-            "Data type for the roofline plot (default: FP32). Passed "
-            "through to rocprof-compute --roofline-data-type."
-        ),
-    )
+    # --roofline-data-type intentionally absent: rocprof-compute only
+    # accepts it under `analyze`, not `profile`. The profile run captures
+    # ceilings at the tool's default datatype (FP32); rendering FP16/
+    # BF16/etc. PDFs is a post-processing step the user runs themselves
+    # against extra_metrics["roofline"]["db_path"]:
+    #   rocprof-compute analyze --path <db_path>/.. --roofline-data-type FP16
     metrics_group.add_argument(
         "--profiling-output-dir",
         type=Path,

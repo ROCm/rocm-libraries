@@ -102,9 +102,20 @@ class TestPerfRendering:
 
 
 class TestRooflineRendering:
-    def test_pdf_path_renders(self):
-        extra = {"roofline": {"data_type": "FP16", "pdf_path": "/tmp/roofline.pdf"}}
+    def test_csv_and_analyze_hint_render(self):
+        """``profile --roof-only`` produces CSVs; we surface roofline.csv
+        and an analyze-command hint that the user can copy-paste to
+        render PDFs in any datatype."""
+        extra = {
+            "roofline": {
+                "roofline_csv": "/tmp/r/workload/gfx90a/roofline.csv",
+                "sysinfo_csv": "/tmp/r/workload/gfx90a/sysinfo.csv",
+                "workload_path": "/tmp/r/workload/gfx90a",
+            }
+        }
         out = io.StringIO()
         Reporter(output=out)._print_profiling_block(_make_pe(extra))
-        assert "Roofline (FP16)" in out.getvalue()
-        assert "/tmp/roofline.pdf" in out.getvalue()
+        rendered = out.getvalue()
+        assert "Roofline CSV:" in rendered
+        assert "/tmp/r/workload/gfx90a/roofline.csv" in rendered
+        assert "rocprof-compute analyze --path /tmp/r/workload/gfx90a" in rendered

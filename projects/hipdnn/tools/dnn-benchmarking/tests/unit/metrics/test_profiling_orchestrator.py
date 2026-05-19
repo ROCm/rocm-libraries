@@ -93,6 +93,7 @@ class TestResolveOutputDir:
             orch.run_profiling_passes(
                 graph_path=Path("graphs/g.json"),
                 engine_id=1,
+                engine_name="ENGINE_A",
                 seed=None,
                 warmup_iters=1,
                 benchmark_iters=1,
@@ -107,6 +108,7 @@ class TestResolveOutputDir:
             orch.run_profiling_passes(
                 graph_path=Path("graphs/g.json"),
                 engine_id=2,
+                engine_name="ENGINE_B",
                 seed=None,
                 warmup_iters=1,
                 benchmark_iters=1,
@@ -116,12 +118,9 @@ class TestResolveOutputDir:
             assert cfg.profiling_output_dir == first_root
 
         assert len(captured_pmc_dirs) == 2
-        # Both per-source subdirs land under the same root.
-        assert captured_pmc_dirs[0].parent == first_root
-        assert captured_pmc_dirs[1].parent == first_root
-        # Per-engine subdir names differ.
-        assert captured_pmc_dirs[0].name == "g_1_pmc_basic"
-        assert captured_pmc_dirs[1].name == "g_2_pmc_basic"
+        # Per-source subdirs land under <root>/<graph>/<engine>/<source>.
+        assert captured_pmc_dirs[0] == first_root / "g" / "ENGINE_A" / "pmc_basic"
+        assert captured_pmc_dirs[1] == first_root / "g" / "ENGINE_B" / "pmc_basic"
 
 
 class TestDispatch:
@@ -130,6 +129,7 @@ class TestDispatch:
         result = orch.run_profiling_passes(
             graph_path=tmp_path / "g.json",
             engine_id=1,
+            engine_name="ENGINE_X",
             seed=None,
             warmup_iters=1,
             benchmark_iters=1,
@@ -155,6 +155,7 @@ class TestDispatch:
             result = orch.run_profiling_passes(
                 graph_path=tmp_path / "g.json",
                 engine_id=1,
+                engine_name="ENGINE_X",
                 seed=None,
                 warmup_iters=1,
                 benchmark_iters=1,
@@ -171,6 +172,7 @@ class TestDispatch:
             result = orch.run_profiling_passes(
                 graph_path=tmp_path / "g.json",
                 engine_id=1,
+                engine_name="ENGINE_X",
                 seed=None,
                 warmup_iters=1,
                 benchmark_iters=1,
@@ -198,6 +200,7 @@ class TestDispatch:
             orch.run_profiling_passes(
                 graph_path=Path("graphs/sample_conv.json"),
                 engine_id=42,
+                engine_name="MIOPEN_ENGINE",
                 seed=None,
                 warmup_iters=1,
                 benchmark_iters=1,
@@ -205,5 +208,14 @@ class TestDispatch:
                 plugin_path=None,
                 out_dir=tmp_path,
             )
-        assert captured["pmc_dir"].name == "sample_conv_42_pmc_basic"
-        assert captured["trace_dir"].name == "sample_conv_42_trace_pftrace"
+        # New layout: <root>/<graph>/<engine_name>/<source>/. Engine name
+        # (human-readable) replaces engine_id (19-digit hash) so artifact
+        # paths are typeable.
+        assert (
+            captured["pmc_dir"]
+            == tmp_path / "sample_conv" / "MIOPEN_ENGINE" / "pmc_basic"
+        )
+        assert (
+            captured["trace_dir"]
+            == tmp_path / "sample_conv" / "MIOPEN_ENGINE" / "trace_pftrace"
+        )

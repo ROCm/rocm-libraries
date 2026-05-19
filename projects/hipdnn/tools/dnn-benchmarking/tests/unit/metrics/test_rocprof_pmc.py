@@ -60,6 +60,11 @@ class TestArgvBuild:
         # workloads).
         assert argv[0] == "/opt/rocm/bin/rocprofv3"
         assert "--pmc" in argv
+        # `-o results` strips the `<pid>_` prefix from rocprofv3's
+        # default `<hostname>/<pid>_results.<ext>` filename so the
+        # artifact path is stable and copy-pasteable.
+        assert "-o" in argv
+        assert argv[argv.index("-o") + 1] == "results"
         # Counter names follow --pmc and precede '--' separator
         sep = argv.index("--")
         assert "GRBM_GUI_ACTIVE" in argv[:sep]
