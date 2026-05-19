@@ -20,7 +20,7 @@ import json
 import logging
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from codegen_common import (
@@ -95,6 +95,20 @@ class GroupedConvLayout(Enum):
     NDHWGK = "NDHWGK"  # Output: N D H W G K
 
 
+class StreamKReductionStrategy(Enum):
+    """Strategies for stream-K reduction"""
+    TREE = "TREE"
+    LINEAR = "LINEAR"
+
+@dataclass
+class StreamKConfig:
+    """Configuration for stream-K"""
+
+    streamk_enabled: bool = False
+    strategy: StreamKReductionStrategy = StreamKReductionStrategy.TREE
+    streamk_persistent: bool = False
+    
+
 @dataclass
 class GroupedConvTraitConfig(TraitConfigBase):
     """Kernel trait configuration for grouped convolution (extends TraitConfigBase).
@@ -118,6 +132,7 @@ class GroupedConvTraitConfig(TraitConfigBase):
     explicit_gemm: bool = False
     two_stage: bool = False
     specialization: str = "default"  # default, filter1x1_pad0, filter1x1_stride1_pad0, filter3x3
+    streamk_config: StreamKConfig = field(default_factory=StreamKConfig)
 
 
 # Backward compatibility alias
@@ -279,6 +294,16 @@ class GroupedConvKernelConfig:
         if hasattr(tr, "specialization") and tr.specialization != "default":
             name += f"_{tr.specialization}"
 
+        if tr.explicit_gemm:
+            name += "_explicit_gemm"
+
+        # Stream-K suffix
+        sk = tr.streamk_config
+        if sk.streamk_enabled:
+            name += f"_streamk_{sk.strategy.value.lower()}"
+            if sk.streamk_persistent:
+                name += "_persistent"
+
         # Padding suffix (only if not all enabled)
         if not (tr.pad_m and tr.pad_n and tr.pad_k):
             name += f"_pad{int(tr.pad_m)}{int(tr.pad_n)}{int(tr.pad_k)}"
@@ -292,6 +317,11 @@ class GroupedConvKernelConfig:
 
         # Check trait validity (pipeline+epilogue+scheduler combination)
         if not self.trait.is_valid():
+            return False
+
+        # Stream-K is only supported for backward_weight
+        tr = self.trait
+        if tr.streamk_config.streamk_enabled and self.variant != GroupedConvVariant.BACKWARD_WEIGHT:
             return False
 
         # Backward operations have stricter pipeline requirements:
@@ -479,6 +509,10 @@ class CKTileGroupedConvKernelGenerator:
         if config.trait.two_stage:
             elementwise_include = '\n#include "ck_tile/ops/elementwise.hpp"'
 
+        streamk_include = ""
+        if config.trait.streamk_config.streamk_enabled:
+            streamk_include = '\n#include "ck_tile/ops/gemm/kernel/streamk_gemm/streamk_gemm_tile_partitioner.hpp"'
+
         return f"""// SPDX-License-Identifier: MIT
 // Auto-generated CK Tile Grouped Convolution kernel: {kernel_name}
 // Variant: {self.variant.value}
@@ -493,7 +527,7 @@ class CKTileGroupedConvKernelGenerator:
 #include "ck_tile/ops/grouped_convolution.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/grouped_convolution/kernel/{kernel_header}"
-#include "ck_tile/ops/grouped_convolution/pipeline/grouped_conv_universal_pipeline_ag_bg_cr_policy.hpp"{elementwise_include}
+#include "ck_tile/ops/grouped_convolution/pipeline/grouped_conv_universal_pipeline_ag_bg_cr_policy.hpp"{elementwise_include}{streamk_include}
 
 using namespace ck_tile;
 """
@@ -565,6 +599,9 @@ struct {kernel_name}_Config {{
     ) -> str:
         """Generate kernel instantiation code with launch function"""
         tr = config.trait
+
+        if self.variant == GroupedConvVariant.BACKWARD_WEIGHT and tr.streamk_config.streamk_enabled:
+            return self._kernel_instance_streamk(config, kernel_name)
 
         if self.variant == GroupedConvVariant.BACKWARD_WEIGHT and tr.two_stage:
             return self._kernel_instance_two_stage(config, kernel_name)
@@ -1238,6 +1275,184 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
 """
 
 
+    def _kernel_instance_streamk(
+        self, config: GroupedConvKernelConfig, kernel_name: str
+    ) -> str:
+        """Generate stream-K bwd_weight kernel: StreamKTilePartitioner, workspace-based reduction.
+        """
+        tr = config.trait
+        sk = tr.streamk_config
+        ns_name = "ns_" + kernel_name.replace("-", "_")
+        direction_prefix = "BWD_WEIGHT"
+        launcher_alias = "SelectedConvBwdWeightLauncher"
+
+        strategy_cpp = f"StreamKReductionStrategy::{sk.strategy.value.capitalize()}"
+        persistent_cpp = "true" if sk.streamk_persistent else "false"
+
+        return f"""
+namespace {ns_name} {{
+
+using Config = {kernel_name}_Config;
+constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = "{kernel_name}";
+using SelectedConv{direction_prefix.title()}_Kernel = Config;
+
+struct {kernel_name}_Launcher {{
+    using KernelConfig  = Config;
+    using InDataType    = typename Config::InDataType;
+    using WeiDataType   = typename Config::WeiDataType;
+    using OutDataType   = typename Config::OutDataType;
+    using AccDataType   = typename Config::AccDataType;
+    using InLayout      = typename Config::InLayout;
+    using WeiLayout     = typename Config::WeiLayout;
+    using OutLayout     = typename Config::OutLayout;
+
+    static constexpr index_t NDimSpatial = Config::NDimSpatial;
+
+    using GemmShape = TileGemmShape<
+        sequence<Config::M_Tile, Config::N_Tile, Config::K_Tile>,
+        sequence<Config::M_Warp, Config::N_Warp, Config::K_Warp>,
+        sequence<Config::M_Warp_Tile, Config::N_Warp_Tile, Config::K_Warp_Tile>>;
+
+    static constexpr auto ConvSpec = {self._get_conv_specialization(config.trait)};
+    using GroupedConvTraitsType = GroupedConvTraits<
+        NDimSpatial, 
+        ConvSpec, 
+        InLayout, 
+        WeiLayout, 
+        tuple<>, 
+        OutLayout,
+        Config::VectorSizeA, 
+        Config::VectorSizeB, 
+        Config::VectorSizeC,
+        Config::NumGroupsToMerge, 
+        Config::EnableSplitImage, 
+        Config::ExplicitGemm>;
+
+    using TilePartitioner = StreamKTilePartitioner<GemmShape, {strategy_cpp}, {persistent_cpp}>;
+
+    using GemmUniversalTraits = TileGemmUniversalTraits<
+        GroupedConvTraitsType::FixedGemmParams::kPadM,
+        GroupedConvTraitsType::FixedGemmParams::kPadN,
+        GroupedConvTraitsType::FixedGemmParams::kPadK,
+        Config::DoubleSmemBuffer,
+        typename GroupedConvTraitsType::AsLayoutBwdWeight,
+        typename GroupedConvTraitsType::BsLayoutBwdWeight,
+        typename GroupedConvTraitsType::CLayoutBwdWeight,
+        GroupedConvTraitsType::FixedGemmParams::TransposeC,
+        GroupedConvTraitsType::FixedGemmParams::UseStructuredSparsity,
+        GroupedConvTraitsType::FixedGemmParams::Persistent,
+        Config::NumWaveGroups>;
+
+    using UniversalGemmProblem = UniversalGemmPipelineProblem<
+            OutDataType, 
+            InDataType, 
+            AccDataType, 
+            GemmShape, 
+            GemmUniversalTraits,
+            scheduler,
+            element_wise::PassThrough, 
+            element_wise::PassThrough,
+            OutDataType, 
+            InDataType,
+            GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
+            GroupedConvTraitsType::VectorSizeA, 
+            GroupedConvTraitsType::VectorSizeB>;
+        
+    constexpr int BlockedXDLN_PerWarp = 1
+            
+    using ConvEpilogue = CShuffleEpilogue<
+            CShuffleEpilogueProblem<OutDataType, 
+            InDataType, 
+            tuple<>, 
+            AccDataType, 
+            WeiDataType,
+            typename GroupedConvTraitsType::ImplicitGemmDsLayout,
+            typename GroupedConvTraitsType::FixedGemmParams::ELayout,
+            element_wise::PassThrough,
+            TilePartitioner::MPerBlock, 
+            TilePartitioner::NPerBlock,
+            Config::M_Warp, 
+            Config::N_Warp, 
+            Config::M_Warp_Tile,
+            Config::N_Warp_Tile, 
+            Config::K_Warp_Tile,
+            GroupedConvTraitsType::FixedGemmParams::TransposeC,
+            Config::NumWaveGroups,
+            GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
+            Config::VectorSizeC, 
+            BlockedXDLN_PerWarp,
+            Config::DoubleSmemBuffer>>;
+
+    using GemmPipeline = {self._get_pipeline_template_args(tr.pipeline, "UniversalGemmProblem")};
+
+    using Kernel = GroupedConvolutionBackwardWeightKernel<
+        GroupedConvTraitsType, TilePartitioner, GemmPipeline, ConvEpilogue>;
+            
+    static float launch(const GroupedConvBwdWeightHostArgs& args, const stream_config& s) {{
+        float ave_time{{0}};
+
+        constexpr auto scheduler = Config::Scheduler;        
+
+        auto kargs = Kernel::MakeKernelArgs(args);
+
+        if (!Kernel::IsSupportedArgument(kargs)) {{
+            throw std::runtime_error("Arguments not supported for stream-K bwd_weight kernel");
+        }}
+
+        // Stream-K workspace allocation
+        auto ws_size = Kernel::GetWorkSpaceSize(kargs);
+        DeviceMem workspace_dev(ws_size);
+        Kernel::SetWorkSpacePointer(kargs, workspace_dev.GetDeviceBuffer());
+
+        const dim3 grids = Kernel::GridSize(kargs);
+        const dim3 blocks = Kernel::BlockSize();
+
+        auto preprocess = [&]() {{
+            // Stream-K: zero workspace flags before each kernel launch
+            if(ws_size > 0) {{
+                hip_check_error(
+                    hipMemsetAsync(workspace_dev.GetDeviceBuffer(), 0, ws_size, s.stream_id_));
+            }}
+        }};
+
+        ave_time = launch_kernel_time_mask(
+            s, preprocess,
+            make_kernel<Config::kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+
+        return ave_time;
+    }}
+
+    static bool is_supported(const ck_tile::conv::ConvParam& conv_param, int k_batch) {{
+        GroupedConvBwdWeightHostArgs args(conv_param, nullptr, nullptr, {{}}, nullptr, k_batch);
+
+        constexpr auto scheduler = Config::Scheduler;
+
+        auto kargs = Kernel::MakeKernelArgs(args);
+        return Kernel::IsSupportedArgument(kargs);
+    }}
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+    static std::string get_instance_string() {{
+        constexpr auto scheduler = Config::Scheduler;
+
+        return Kernel{{}}.GetInstanceString();
+    }}
+#endif
+}};
+
+using {launcher_alias} = {kernel_name}_Launcher;
+
+}} // namespace {ns_name}
+
+using {kernel_name}_Launcher = {ns_name}::{kernel_name}_Launcher;
+
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+using {launcher_alias} = {ns_name}::{launcher_alias};
+constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{direction_prefix}_KERNEL_NAME;
+#endif
+"""
+
+
 # ============================================================================
 # Dispatcher Wrapper Generator
 # ============================================================================
@@ -1433,6 +1648,11 @@ def load_configs_from_json(
             explicit_gemm=inst.get("explicit_gemm", False),
             two_stage=inst.get("two_stage", False),
             specialization=inst.get("specialization", "default"),
+            streamk_config=StreamKConfig(
+                streamk_enabled=inst.get("streamk_enabled", False),
+                strategy=StreamKReductionStrategy(inst.get("streamk_reduction_strategy", "TREE")),
+                streamk_persistent=inst.get("streamk_persistent", False)
+            ) if inst.get("streamk_enabled", False) else StreamKConfig()
         )
 
         # compv2/basic_v2 (GemmPipelineAGmemBGmemCRegV2) is not compatible with
@@ -2138,9 +2358,7 @@ def main():
     parser.add_argument("--vector-b", type=int, default=8, help="Vector size B")
     parser.add_argument("--vector-c", type=int, default=8, help="Vector size C")
     parser.add_argument("--num-wave-groups", type=int, default=1, help="Wave groups")
-    parser.add_argument(
-        "--num-groups-to-merge", type=int, default=1, help="Groups to merge"
-    )
+    parser.add_argument("--num-groups-to-merge", type=int, default=1, help="Groups to merge")
     parser.add_argument(
         "--double-smem-buffer",
         type=str,
@@ -2156,6 +2374,28 @@ def main():
         "--two-stage",
         action="store_true",
         help="Enable two-stage bwd_weight (fp32 workspace + elementwise convert)",
+    )
+    parser.add_argument(
+        "--explicit-gemm",
+        action="store_true",
+        help="Enable explicit GEMM",
+    )
+    parser.add_argument(
+        "--streamk-enabled",
+        action="store_true",
+        help="Use StreamK for grouped convolution kernels",
+    )
+    parser.add_argument(
+        "--streamk-reduction-strategy",
+        type=str,
+        choices=["TREE", "LINEAR"],
+        default=None,
+        help="Reduction strategy for Stream-K",
+    )
+    parser.add_argument(
+        "--streamk-persistent",
+        action="store_true",
+        help="Use persistent threads for Stream-K",
     )
 
     args = parser.parse_args()
@@ -2221,6 +2461,12 @@ def main():
             num_groups_to_merge=args.num_groups_to_merge,
             split_image=args.split_image,
             two_stage=args.two_stage,
+            explicit_gemm=args.explicit_gemm,
+            streamk_config=StreamKConfig(
+                streamk_enabled=args.streamk_enabled,
+                strategy=StreamKReductionStrategy(args.streamk_reduction_strategy or "TREE"),
+                streamk_persistent=args.streamk_persistent,
+            ) if args.streamk_enabled else StreamKConfig()
         )
         config = GroupedConvKernelConfig(
             tile=tile,
