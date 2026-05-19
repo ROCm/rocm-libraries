@@ -47,9 +47,8 @@ void safeDestroyHandle(const HeuristicPlugin* plugin, hipdnnHeuristicHandle_t ha
     }
     catch(const std::exception& e)
     {
-        HIPDNN_BACKEND_LOG_WARN("Failed to destroy handle for heuristic plugin '{}': {}",
-                                plugin->name(),
-                                e.what());
+        HIPDNN_BACKEND_LOG_WARN(
+            "Failed to destroy handle for heuristic plugin '{}': {}", plugin->name(), e.what());
     }
     catch(...)
     {

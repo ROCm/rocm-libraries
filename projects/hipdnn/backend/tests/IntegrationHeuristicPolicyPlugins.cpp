@@ -46,13 +46,12 @@ namespace
 // makeScopedPolicyDescriptor in IntegrationHeuristicPlugin.cpp.
 inline auto makeScopedHipdnnHandle(hipdnnHandle_t handle)
 {
-    return hipdnn_data_sdk::utilities::ScopedResource<hipdnnHandle_t>(handle,
-                                                                      [](hipdnnHandle_t h) {
-                                                                          if(h != nullptr)
-                                                                          {
-                                                                              hipdnnDestroy(h);
-                                                                          }
-                                                                      });
+    return hipdnn_data_sdk::utilities::ScopedResource<hipdnnHandle_t>(handle, [](hipdnnHandle_t h) {
+        if(h != nullptr)
+        {
+            hipdnnDestroy(h);
+        }
+    });
 }
 
 inline auto makeScopedPolicyDescriptor(const HeuristicPlugin& plugin,
@@ -279,9 +278,8 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PolicyDescriptorCreationSucceeds)
     ASSERT_NE(plugin, nullptr);
 
     // Create policy descriptor
-    auto descriptor = makeScopedPolicyDescriptor(*plugin,
-                                                 plugin->createPolicyDescriptor(pluginHandle,
-                                                                                policyId));
+    auto descriptor = makeScopedPolicyDescriptor(
+        *plugin, plugin->createPolicyDescriptor(pluginHandle, policyId));
     EXPECT_NE(descriptor.get(), nullptr);
 }
 

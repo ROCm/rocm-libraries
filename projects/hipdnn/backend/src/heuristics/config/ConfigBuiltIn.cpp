@@ -66,8 +66,8 @@ constexpr const char* POLICY_NAME = "SelectionHeuristic::Config";
 hipdnnCallback_t g_loggingCallback = nullptr; // NOLINT(readability-identifier-naming)
 hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO; // NOLINT(readability-identifier-naming)
 
-#define CONFIG_BUILTIN_LOG(severity, ...)                                                          \
-    HIPDNN_BUILTIN_HEURISTIC_LOG(                                                                  \
+#define CONFIG_BUILTIN_LOG(severity, ...) \
+    HIPDNN_BUILTIN_HEURISTIC_LOG(         \
         g_loggingCallback, g_logLevel, severity, "[BuiltInConfig] ", __VA_ARGS__)
 
 int64_t policyId()

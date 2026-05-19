@@ -158,7 +158,8 @@ TEST_F(TestSelectionHeuristic, MoveAssignment)
     // in getSortedEngineIds still has the candidate set after the assignment.
     const std::vector<int64_t> inputIds = {10, 20, 30};
     const std::vector<int64_t> sortedIds = {30, 20, 10};
-    EXPECT_CALL(*_mockPlugin, setEngineIds(mockDescriptor2, ::testing::_, inputIds.size())).Times(1);
+    EXPECT_CALL(*_mockPlugin, setEngineIds(mockDescriptor2, ::testing::_, inputIds.size()))
+        .Times(1);
     EXPECT_CALL(*_mockPlugin, getSortedEngineIds(mockDescriptor2))
         .WillOnce(::testing::Return(sortedIds));
 

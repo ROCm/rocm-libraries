@@ -64,8 +64,8 @@ constexpr const char* POLICY_NAME = "SelectionHeuristic::StaticOrdering";
 hipdnnCallback_t g_loggingCallback = nullptr; // NOLINT(readability-identifier-naming)
 hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO; // NOLINT(readability-identifier-naming)
 
-#define STATIC_ORDERING_LOG(severity, ...)                                                       \
-    HIPDNN_BUILTIN_HEURISTIC_LOG(                                                                \
+#define STATIC_ORDERING_LOG(severity, ...) \
+    HIPDNN_BUILTIN_HEURISTIC_LOG(          \
         g_loggingCallback, g_logLevel, severity, "[BuiltInStaticOrdering] ", __VA_ARGS__)
 
 int64_t policyId()

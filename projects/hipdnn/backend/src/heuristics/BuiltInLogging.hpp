@@ -25,14 +25,14 @@ constexpr size_t BUILT_IN_LOG_BUFFER_SIZE = 1024;
 //   #define MY_LOG(severity, ...) \
 //       HIPDNN_BUILTIN_HEURISTIC_LOG(                                            \
 //           g_loggingCallback, g_logLevel, severity, "[MyBuiltIn] ", __VA_ARGS__)
-#define HIPDNN_BUILTIN_HEURISTIC_LOG(callback, threshold, severity, prefix, ...)               \
-    do                                                                                         \
-    {                                                                                          \
-        if((callback) != nullptr && (severity) >= (threshold))                                 \
-        {                                                                                      \
-            std::array<char, ::hipdnn_backend::heuristics::detail::BUILT_IN_LOG_BUFFER_SIZE>   \
-                _buf{};                                                                        \
-            std::snprintf(_buf.data(), _buf.size(), prefix __VA_ARGS__);                       \
-            (callback)((severity), _buf.data());                                               \
-        }                                                                                      \
+#define HIPDNN_BUILTIN_HEURISTIC_LOG(callback, threshold, severity, prefix, ...)             \
+    do                                                                                       \
+    {                                                                                        \
+        if((callback) != nullptr && (severity) >= (threshold))                               \
+        {                                                                                    \
+            std::array<char, ::hipdnn_backend::heuristics::detail::BUILT_IN_LOG_BUFFER_SIZE> \
+                _buf{};                                                                      \
+            std::snprintf(_buf.data(), _buf.size(), prefix __VA_ARGS__);                     \
+            (callback)((severity), _buf.data());                                             \
+        }                                                                                    \
     } while(0)

@@ -151,11 +151,10 @@ void EngineHeuristicDescriptor::syncPolicySlots(const std::vector<int64_t>& orde
         }
         catch(const std::exception& e)
         {
-            HIPDNN_BACKEND_LOG_WARN(
-                "Failed to construct SelectionHeuristic for policy ID {}: {}. "
-                "Slot will be skipped during finalize().",
-                policyId,
-                e.what());
+            HIPDNN_BACKEND_LOG_WARN("Failed to construct SelectionHeuristic for policy ID {}: {}. "
+                                    "Slot will be skipped during finalize().",
+                                    policyId,
+                                    e.what());
         }
         catch(...)
         {
