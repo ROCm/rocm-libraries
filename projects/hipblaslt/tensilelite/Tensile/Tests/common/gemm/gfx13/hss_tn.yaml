@@ -56,7 +56,7 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 1, 1, 2, 2]
         - GlobalReadVectorWidthA: [1,8]
         - GlobalReadVectorWidthB: [1,8]
-        - LocalReadVectorWidth: [8]
+        - LocalReadVectorWidth: [8,16]
         - VectorWidthA: [1,8]
         - VectorWidthB: [1,8]
         # - StoreVectorWidth: [1]

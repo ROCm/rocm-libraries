@@ -839,7 +839,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 strideK *= 2
         
         elif writer.states.asmCaps["HasWMMA_V4"]:
-            strideK = max(8, inputPerThread) if umlds else (mt + LdsPad) * max(8, inputPerThread)
+            strideK = max(8, inputPerThread) if umlds else (mt + LdsPad) * max(8, min(inputPerThread, kernel["MIInputPerThread%s"%tc]))
 
         # special case for new F8 MFMA, need to exclude wmma_v3
         elif kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32 and (not writer.states.asmCaps["HasWMMA_V3"]):

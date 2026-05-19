@@ -624,30 +624,37 @@ class LocalReadMFMA(LocalRead):
         MIInputPerThUnroll = kernel["MIInputPerThread%s"%tc] // numTilePerInst
         numVectorsPerTile = kernel["MIWaveTile"][tile01] // vectorWidth
         numReadsPerVector = int((vectorWidth * tP["bpeDS"]) / (tileBlockWidth * bpr))
-        # overloading numReadsPerUnroll for DirectToLds x2/x4 case when blockWidth of instruction < LocalReadVectorWidth
-        # fp64 TLU=1 reading 0.5element/lane/read..
-        # for TLU=0 case, blockWidth and LRVW should match
-        numReadsPerUnroll = ceil(tP["bpeDS"] * MIInputPerThUnroll / (unrollBlockWidth * bpr))
-        numVgpr  = int(ceil(blockWidth))
-        tmpvgprFP32 = []
 
         if tc == 'A':
-            lrvwTile = writer.states.lrvwTileA
+            lrvwTile   = writer.states.lrvwTileA
+            lrvwUnroll = writer.states.lrvwUnrollA
             abmatrixinfo = writer.states.a
         elif tc == "MXSA":
-            lrvwTile = writer.states.lrvwTileMXSA
+            lrvwTile   = writer.states.lrvwTileMXSA
+            lrvwUnroll = writer.states.lrvwUnrollMXSA
             abmatrixinfo = writer.states.mxsa
         elif tc == 'B':
-            lrvwTile = writer.states.lrvwTileB
+            lrvwTile   = writer.states.lrvwTileB
+            lrvwUnroll = writer.states.lrvwUnrollB
             abmatrixinfo = writer.states.b
         elif tc == "MXSB":
-            lrvwTile = writer.states.lrvwTileMXSB
+            lrvwTile   = writer.states.lrvwTileMXSB
+            lrvwUnroll = writer.states.lrvwUnrollMXSB
             abmatrixinfo = writer.states.mxsb
         elif tc == "Metadata":
-            lrvwTile = writer.states.lrvwTileMetadata
+            lrvwTile   = writer.states.lrvwTileMetadata
+            lrvwUnroll = writer.states.lrvwUnrollMetadata
             abmatrixinfo = writer.states.m
         else:
             raise Exception(f"unsupport tc %s{tc}")
+
+        if kernel["UnrollMajorLDS%s"%tc] and writer.states.asmCaps.get("HasWMMA_V4", False):
+            effectiveMIInput = max(MIInputPerThUnroll, lrvwUnroll // numTilePerInst)
+        else:
+            effectiveMIInput = MIInputPerThUnroll
+        numReadsPerUnroll = ceil(tP["bpeDS"] * effectiveMIInput / (unrollBlockWidth * bpr))
+        numVgpr  = int(ceil(blockWidth))
+        tmpvgprFP32 = []
 
         numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
         perpStride = abmatrixinfo.gNLCPerpStride
@@ -1515,9 +1522,12 @@ class LocalReadMFMA(LocalRead):
                                 elif writer.states.asmCaps["HasWMMA_V4"]:
                                     vw = max(8, kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"])
                                     if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
-                                        incOffset = rIdx * numElementPerRead * UnrollStride
-                                        if kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"] == 4 and rIdx & 1:
-                                            incOffset -= 4
+                                        if lrvwUnroll > kernel["MIInputPerThread%s"%tc]:
+                                            incOffset = rIdx * numElementPerRead
+                                        else:
+                                            incOffset = rIdx * numElementPerRead * UnrollStride
+                                            if kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"] == 4 and rIdx & 1:
+                                                incOffset -= 4
                                     else:
                                         incOffset = (rIdx + (rIdx // vw) * vw) * numElementPerRead * UnrollStride
 

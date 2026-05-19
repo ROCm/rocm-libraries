@@ -2512,6 +2512,22 @@ class Solution(collections.abc.Mapping):
           if wlrA < wlrB:
             state["LocalReadVectorWidthB"] = wlrA * state["MIInputPerThread"]
 
+        # WMMA_V4 override: tile-major WLR is not supported,
+        # so we use per-tensor UnrollMajorLDS to re-evaluate LRVW.
+        if isaInfoMap[isa].asmCaps.get("HasWMMA_V4", False):
+          for tc, autoLRVW, maxLRVW in [("A", autoLRVWA, maxLRVWA), ("B", autoLRVWB, maxLRVWB)]:
+            mipt = state["MIInputPerThread%s" % tc]
+            if state["LocalReadVectorWidth%s" % tc] > mipt and not state["UnrollMajorLDS%s" % tc]:
+              if autoLRVW:
+                state["LocalReadVectorWidth%s" % tc] = min(mipt, maxLRVW)
+              else:
+                reject(state, printRejectionReason, "WMMA_V4: LocalReadVectorWidth%s > MIInputPerThread%s requires UnrollMajorLDS%s" % (tc, tc, tc))
+          # Asymmetric wider local reads not supported
+          wlrA = max(state["LocalReadVectorWidthA"] // state["MIInputPerThreadA"], 1)
+          wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"], 1)
+          if wlrA != wlrB:
+            reject(state, printRejectionReason, "WMMA_V4 does not support asymmetric wider local reads (wlrA=%u, wlrB=%u)" % (wlrA, wlrB))
+
         if state["ProblemType"]["Sparse"] == 1:
           state["LocalReadVectorWidthMetadata"] = state["LocalReadVectorWidthA"]
         elif state["ProblemType"]["Sparse"] == 2:

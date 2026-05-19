@@ -7550,7 +7550,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       factorSubIterA = kernel["numSubTiles"]
 
       if kernel["UnrollMajorLDSA"] or kernel["enableLDSTrA"]:
-        self.states.numReadsPerUnrollA = ceil(tensorParametersA["bpe"] * kernel["MIInputPerThreadA"] / int(tensorParametersA["localReadInstruction"].blockWidth * 4))
+        effectiveInputA = max(kernel["MIInputPerThreadA"], self.states.lrvwUnrollA) if self.states.asmCaps.get("HasWMMA_V4", False) else kernel["MIInputPerThreadA"]
+        self.states.numReadsPerUnrollA = ceil(tensorParametersA["bpe"] * effectiveInputA / int(tensorParametersA["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollA = kernel["MIInputPerThreadA"]
         if kernel["ForceUnrollSubIter"]:
@@ -7584,7 +7585,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       factorSubIterB = kernel["numSubTiles"]
 
       if kernel["UnrollMajorLDSB"] or kernel["enableLDSTrB"]:
-        self.states.numReadsPerUnrollB = ceil(tensorParametersB["bpe"] * kernel["MIInputPerThreadB"] / int(tensorParametersB["localReadInstruction"].blockWidth * 4))
+        effectiveInputB = max(kernel["MIInputPerThreadB"], self.states.lrvwUnrollB) if self.states.asmCaps.get("HasWMMA_V4", False) else kernel["MIInputPerThreadB"]
+        self.states.numReadsPerUnrollB = ceil(tensorParametersB["bpe"] * effectiveInputB / int(tensorParametersB["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollB = kernel["MIInputPerThreadB"]
         if kernel["ForceUnrollSubIter"]:

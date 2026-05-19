@@ -10946,14 +10946,34 @@ class KernelWriterAssembly(KernelWriter):
       # In 1 block MI, it remap localReadAddr in order to let each thread wider local read continuous k
       # this decrease performance since it require more loop to handle continuous k in each thread.
       # reCalculating localread address because we disable wider local read in tail loop
-      if not kernel["UseDotInstruction"] and ((self.states.numReadsIterCoalescedA > 1 or self.states.numReadsIterCoalescedB > 1)):
+      hasWiderLocalRead = self.states.numReadsIterCoalescedA > 1 or self.states.numReadsIterCoalescedB > 1
+      if not kernel["UseDotInstruction"] and hasWiderLocalRead:
         loopComponent = Component.PersistentLoop.find(self)
         imod.add(loopComponent.recalcLocalReadAddressesAB(self, kernel))
+
+        if self.states.asmCaps["HasWMMA_V4"]:
+          if not kernel["DirectToVgprA"] and self.states.numReadsIterCoalescedA > 1:
+            if kernel["InnerUnroll"] < self.states.numReadsIterCoalescedA:
+              self.states.numReadsPerIterA //= self.states.numReadsIterCoalescedA
+          if not kernel["DirectToVgprB"] and self.states.numReadsIterCoalescedB > 1:
+            if kernel["InnerUnroll"] < self.states.numReadsIterCoalescedB:
+              self.states.numReadsPerIterB //= self.states.numReadsIterCoalescedB
 
         self.states.numReadsIterCoalescedA = 1
         self.states.numReadsIterCoalescedB = 1
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
           self.states.numReadsIterCoalescedMetadata = 1
+
+        if self.states.asmCaps["HasWMMA_V4"]:
+          self.states.numIterPerCoalescedReadA = 1
+          self.states.numIterPerCoalescedReadB = 1
+          if kernel["UnrollMajorLDSA"]:
+            divider = 2 if (kernel["ProblemType"]["Sparse"] == 1) and (kernel["MIInputPerThreadA"] * kernel["ProblemType"]["DataType"].numBytes() <= 16) else 1
+            self.states.lrvwUnrollA = kernel["MIInputPerThreadA"] // divider
+          if kernel["UnrollMajorLDSB"]:
+            divider = 2 if (kernel["ProblemType"]["Sparse"] == 2) and (kernel["MIInputPerThreadB"] * kernel["ProblemType"]["DataType"].numBytes() <= 16) else 1
+            self.states.lrvwUnrollB = kernel["MIInputPerThreadB"] // divider
+
         tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
         imod.add(self.lraTileAssignment(kernel, tPA, tPB))
         imod.add(self.lraFinalOffset(kernel, tPA))
@@ -11924,6 +11944,10 @@ class KernelWriterAssembly(KernelWriter):
           elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             if tc in ("MXSA", "MXSB"):
               offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
+            elif self.states.asmCaps["HasWMMA_V4"] and tc == "A":
+              offsetInc = matrixInstK * self.states.numReadsIterCoalescedA
+            elif self.states.asmCaps["HasWMMA_V4"] and tc == "B":
+              offsetInc = matrixInstK * self.states.numReadsIterCoalescedB
             else:
               offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedA, self.states.numReadsIterCoalescedB)
             if kernel["ProblemType"]["Sparse"]:
@@ -11934,7 +11958,10 @@ class KernelWriterAssembly(KernelWriter):
           else:
             if tc == "A":
               sparseA = kernel["ProblemType"]["Sparse"] == 1
-              lrvw = kernel["LocalReadVectorWidth%s"%tc] // (2 if sparseA else 1)
+              if self.states.asmCaps["HasWMMA_V4"]:
+                lrvw = min(kernel["LocalReadVectorWidth%s"%tc] // (2 if sparseA else 1), kernel["MIInputPerThread%s"%tc])
+              else:
+                lrvw = kernel["LocalReadVectorWidth%s"%tc] // (2 if sparseA else 1)
               wlr = lrvw//kernel["MIInputPerThreadA"]
               wlr = max(wlr, 1)
               if kernel["ProblemType"]["Sparse"] and lrvw < kernel["MIInputPerThreadA"]:
@@ -11970,7 +11997,10 @@ class KernelWriterAssembly(KernelWriter):
                 offsetInc //= 8
             elif tc == "B":
               sparseB = kernel["ProblemType"]["Sparse"] == 2
-              lrvw = kernel["LocalReadVectorWidth%s"%tc] // (2 if sparseB else 1)
+              if self.states.asmCaps["HasWMMA_V4"]:
+                lrvw = min(kernel["LocalReadVectorWidth%s"%tc] // (2 if sparseB else 1), kernel["MIInputPerThread%s"%tc])
+              else:
+                lrvw = kernel["LocalReadVectorWidth%s"%tc] // (2 if sparseB else 1)
               wlr = lrvw//kernel["MIInputPerThreadB"]
               wlr = max(wlr, 1)
               if kernel["ProblemType"]["Sparse"] and lrvw < kernel["MIInputPerThreadB"]:
