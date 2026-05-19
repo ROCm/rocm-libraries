@@ -13,12 +13,12 @@ Review hipDNN changes with a code-review stance: findings first, ordered by seve
 
 - **PR URL**: GitHub PR URL to review.
 - `local`: Review the current worktree diff instead of a PR.
-- `branch:<name>`: Review a local branch or use it as the PR worktree name when needed.
+- `branch:<name>`: Review a local branch instead of a PR.
 - `base:<branch>`: Base branch for comparison. Default: the PR base branch, then `origin/develop`, then `develop`.
 - `focus:<area>`: Optional review emphasis such as `testing`, `backend`, `frontend`, `provider`, `build`, or `reuse`.
 - `diff-only`: Opt out of local checkout/worktree setup and review only the PR/diff plus already-available files. Use only when the user wants to avoid local clone/worktree cost.
 
-If neither a PR URL nor `local` is supplied, ask which change set to review.
+If none of PR URL, `local`, or `branch:<name>` is supplied, ask which change set to review.
 
 ## Setup
 
@@ -37,20 +37,31 @@ If neither a PR URL nor `local` is supplied, ask which change set to review.
      git diff --name-only <base>...
      git diff --stat <base>...
      ```
-3. Fetch the diff without pasting the full diff into the response:
+3. Choose a unique diff output path without pasting the full diff into the response:
+   ```bash
+   DIFF_FILE=$(mktemp "${TMPDIR:-/tmp}/hipdnn-review.XXXXXX.diff")
+   ```
+   Use a repository/WIP-scoped path instead if the workspace requires temporary artifacts outside `/tmp`.
+4. Fetch the diff:
    - PR:
      ```bash
-     gh pr diff <PR_URL> > /tmp/hipdnn-review.diff
+     gh pr diff <PR_URL> > "$DIFF_FILE"
      ```
    - Local:
      ```bash
-     git diff <base>... > /tmp/hipdnn-review.diff
+     git diff <base>... > "$DIFF_FILE"
      ```
-4. Prefer a local source checkout for cross-reference. A review based only on the PR page or raw diff is incomplete unless `diff-only` was requested.
+   - Branch:
+     ```bash
+     git diff <base>...<branch> > "$DIFF_FILE"
+     ```
+5. Prefer a local source checkout for cross-reference. A review based only on the PR page or raw diff is incomplete unless `diff-only` was requested.
    - For PR reviews, make the PR head and base source available locally before spawning reviewers. Use an existing local worktree/checkout if one already matches the PR head; otherwise fetch the PR/head branch and create or update a local worktree/checkout according to the repository's normal workspace conventions.
-   - For local reviews, use the current worktree and the selected base branch for cross-reference.
+   - Fetch the selected base branch and update the base worktree when it can be fast-forwarded. If the base worktree is stale, dirty, detached unexpectedly, or cannot be fast-forwarded, report that limitation before reviewing.
+   - For `branch:<name>` reviews, fetch the branch and base when possible, then compare the local branch source against the refreshed base.
+   - For `local` reviews, use the current worktree and the selected base branch for cross-reference.
    - If local source setup is unavailable or skipped, state that the review is `diff-only` and lower confidence accordingly.
-5. Read only the files needed to validate the changed behavior and nearby patterns. Prefer `rg` for call sites, similar implementations, tests, and ownership patterns; fall back to `grep` if `rg` is unavailable.
+6. Read only the files needed to validate the changed behavior and nearby patterns. Prefer `rg` for call sites, similar implementations, tests, and ownership patterns; fall back to `grep` if `rg` is unavailable.
 
 Do not modify files during review.
 
@@ -149,7 +160,7 @@ In the final review, include a **Testing Assessment** section with:
 
 ## Default Multi-Agent Review
 
-Default to a multi-agent review when the runtime supports reviewer delegation. Tell the user which reviewers will run and proceed unless they opt out or ask for a single-pass review. If the active environment requires explicit permission before spawning agents, state that multi-agent review is the skill default and ask for permission before spawning.
+Default to a multi-agent review when the runtime supports reviewer delegation and the necessary delegation tool is available to the skill. Tell the user which reviewers will run and proceed unless they opt out or ask for a single-pass review. If delegation is not available, or the active environment requires explicit permission before spawning agents, state that multi-agent review is the skill default and either ask for permission or use the direct single-pass fallback.
 
 Use focused reviewers by changed-file bucket:
 
