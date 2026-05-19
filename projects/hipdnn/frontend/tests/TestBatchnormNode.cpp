@@ -8,6 +8,9 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
+
+// NOTE: Frontend allows broadcastable shapes for scale/bias.
+// Backend providers (e.g. MIOpen) may still reject unsupported shapes.
 TEST(TestBatchnormNode, PreValidateAcceptsBroadcastableScaleBias)
 {
     BatchnormAttributes batchnormAttributes;
@@ -66,7 +69,65 @@ TEST(TestBatchnormNode, PreValidateRejectsMismatchedScaleBiasShapes)
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
+TEST(TestBatchnormNode, PreValidateAcceptsRank2BroadcastableScaleBias)
+{
+    BatchnormAttributes batchnormAttributes;
 
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    // {1, C} broadcastable shape
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 64});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    epsilonTensor->set_dim({1}).set_value(1e-5);
+    batchnormAttributes.set_epsilon(epsilonTensor);
+
+    const GraphAttributes graphAttributes;
+    const BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBatchnormNode, PreValidateAcceptsDifferentBroadcastRanks)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    // Example broadcastable shapes
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({64});  // rank-1
+    batchnormAttributes.set_scale(scaleTensor);
+
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({64});   // still must match scale
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    epsilonTensor->set_dim({1}).set_value(1e-5);
+    batchnormAttributes.set_epsilon(epsilonTensor);
+
+    const GraphAttributes graphAttributes;
+    const BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
 
 TEST(TestBatchnormNode, PreValidateNode)
 {
@@ -402,36 +463,6 @@ TEST(TestBatchnormNode, PreValidateRejectsMismatchedInputOutputShapes)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(error.get_message().find("dimension mismatch") != std::string::npos);
-}
-
-TEST(TestBatchnormNode, PreValidateRejectsMismatchedChannelDimensions)
-{
-    BatchnormAttributes batchnormAttributes;
-
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
-    batchnormAttributes.set_x(xTensor);
-
-    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
-
-    auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 128, 1, 1}); // Mismatched channel dimension
-    batchnormAttributes.set_scale(scaleTensor);
-
-    auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({1, 128, 1, 1});
-    batchnormAttributes.set_bias(biasTensor);
-
-    auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1}).set_value(1e-5);
-    batchnormAttributes.set_epsilon(epsilonTensor);
-
-    const GraphAttributes graphAttributes;
-    const BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
-
-    auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("channel dimension") != std::string::npos);
 }
 
 TEST(TestBatchnormNode, PreValidateRejectsInvalidMeanTensorShape)
