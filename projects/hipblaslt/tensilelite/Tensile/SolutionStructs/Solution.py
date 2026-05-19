@@ -4218,9 +4218,14 @@ class Solution(collections.abc.Mapping):
 
     # Sparse problem
     if state["ProblemType"]["Sparse"]:
-      if (state["DirectToLdsA"] or state["DirectToLdsB"] or state["DirectToLdsMetadata"]) and state["ExpandPointerSwap"]:
-        reject(state, printRejectionReason, "Sparse + DirectToLds + ExpandPointerSwap=1 currently unsupported")
-        return False
+      if state["DirectToLdsA"] or state["DirectToLdsB"] or state["DirectToLdsMetadata"]:
+        if state["ExpandPointerSwap"]:
+          reject(state, printRejectionReason, "Sparse + DirectToLds + ExpandPointerSwap=1 currently unsupported")
+          return False
+        if state["PrefetchGlobalRead"] == 1:
+          reject(state, printRejectionReason, "Sparse + DirectToLds + PrefetchGlobalRead=1 currently unsupported")
+          return False
+      
       # if state["PrefetchGlobalRead"] and not state["ExpandPointerSwap"]:
       #   reject(state, printRejectionReason, "Sparse A kernel only support PGR with EPS=1.")
       #   return
