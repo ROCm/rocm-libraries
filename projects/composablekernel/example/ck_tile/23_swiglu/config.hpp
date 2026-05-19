@@ -35,7 +35,7 @@ struct SwiGLUConfigBase
     static constexpr auto Scheduler                 = ck_tile::GemmPipelineScheduler::Intrawave;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
     static constexpr ck_tile::index_t NumWaveGroups = 1;
-    static constexpr bool Preshuffle                = false;
+    static constexpr bool c                = false;
     static constexpr bool TiledMMAPermuteN          = false;
 };
 

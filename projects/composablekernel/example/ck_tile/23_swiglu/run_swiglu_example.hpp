@@ -43,7 +43,7 @@ bool verify_outputs(const ck_tile::HostTensor<CDataType>& c_m_n_dev_result,
 
     std::cout << "Relative error threshold: " << rtol_atol.at(ck_tile::number<0>{})
               << " Absolute error threshold: " << rtol_atol.at(ck_tile::number<1>{}) << std::endl;
-    std::cout << "The " << variant << " verification result is:" << (pass ? "correct" : "fail")
+    std::cout << "The " << variant << " verification result is: " << (pass ? "correct" : "fail")
               << std::endl;
     return pass;
 }
@@ -218,9 +218,9 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
 
     if(init_method == 0)
     {
-        ck_tile::FillUniformDistribution<ADataTypeBuf>{-2.f, 2.f}(a_m_k);
-        ck_tile::FillUniformDistribution<BDataTypeBuf>{-2.f, 2.f}(b0_k_n);
-        ck_tile::FillUniformDistribution<BDataTypeBuf>{-2.f, 2.f}(b1_k_n);
+        ck_tile::FillUniformDistribution<ADataTypeBuf>{-0.2f, 0.2f}(a_m_k);
+        ck_tile::FillUniformDistribution<BDataTypeBuf>{-0.2f, 0.2f}(b0_k_n);
+        ck_tile::FillUniformDistribution<BDataTypeBuf>{-0.2f, 0.2f}(b1_k_n);
     }
     else if(init_method == 1)
     {
@@ -417,8 +417,6 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
                                             const CLayout c_layout = CLayout{})
 {
     using Invoker = UniversalInvoker;
-    // using AccDataType = typename SwiGLUTypeConfig<ADataType, BDataType,
-    // CDataType > ::AccDataType;
 
     // Normal path - delegate to shared implementation
     return run_gemm_example_with_layouts<GemmConfig, Invoker, ADataType, BDataType, CDataType>(
@@ -430,9 +428,7 @@ template <typename GemmConfig,
           typename APrecType,
           typename BPrecType = APrecType,
           typename CPrecType = APrecType>
-int run_gemm_example_prec_type_universal(std::string a_layout,
-                                         std::string b_layout,
-                                         ck_tile::ArgParser& arg_parser)
+int run_with_prec(std::string a_layout, std::string b_layout, ck_tile::ArgParser& arg_parser)
 {
     auto a_layout_variant = string_to_layout(a_layout);
     auto b_layout_variant = string_to_layout(b_layout);
@@ -450,45 +446,41 @@ int run_gemm_example_prec_type_universal(std::string a_layout,
 }
 
 template <template <class> typename Pipeline>
-auto run_swiglu_example_pipeline(ck_tile::ArgParser& arg_parser) -> int
+auto run_with_pipeline(ck_tile::ArgParser& arg_parser) -> int
 {
     std::string data_type = arg_parser.get_str("prec");
     std::string a_layout  = arg_parser.get_str("a_layout");
     std::string b_layout  = arg_parser.get_str("b_layout");
 
     if(data_type == "fp16")
-        return run_gemm_example_prec_type_universal<Pipeline<ck_tile::fp16_t>, ck_tile::fp16_t>(
+        return run_with_prec<Pipeline<ck_tile::fp16_t>, ck_tile::fp16_t>(
             a_layout, b_layout, arg_parser);
 
-    // if(data_type == "bf16")
-    //     return run_gemm_example_prec_type_universal<Pipeline<ck_tile::bf16_t>, ck_tile::bf16_t>(
-    //         a_layout, b_layout, arg_parser);
+    if(data_type == "bf16")
+        return run_with_prec<Pipeline<ck_tile::bf16_t>, ck_tile::bf16_t>(
+            a_layout, b_layout, arg_parser);
 
-    // if(data_type == "fp8")
-    //     return run_gemm_example_prec_type_universal<Pipeline<ck_tile::fp8_t>, ck_tile::fp8_t>(
-    //         a_layout, b_layout, arg_parser);
+    if(data_type == "fp8")
+        return run_with_prec<Pipeline<ck_tile::fp8_t>, ck_tile::fp8_t>(
+            a_layout, b_layout, arg_parser);
 
-    // if(data_type == "pk_int4")
-    //     return run_gemm_example_prec_type_universal<Pipeline<ck_tile::pk_int4_t>,
-    //                                                 ck_tile::pk_int4_t>(
-    //         a_layout, b_layout, arg_parser);
-    // if(data_type == "tf32")
-    //     return run_gemm_example_prec_type_universal<Pipeline<ck_tile::tf32_t>, ck_tile::tf32_t>(
-    //         a_layout, b_layout, arg_parser);
+    if(data_type == "bf8")
+        return run_with_prec<Pipeline<ck_tile::bf8_t>, ck_tile::bf8_t>(
+            a_layout, b_layout, arg_parser);
 
     throw std::runtime_error(std::format("Invalid datatype! \n\t{}", data_type));
 }
 
-inline auto run_swiglu_example(ck_tile::ArgParser& arg_parser) -> int
+inline auto run(ck_tile::ArgParser& arg_parser) -> int
 {
     std::string pipeline = arg_parser.get_str("pipeline");
 
     if(pipeline == "v3")
-        return run_swiglu_example_pipeline<SwiGLUConfigComputeV3>(arg_parser);
+        return run_with_pipeline<SwiGLUConfigComputeV3>(arg_parser);
     if(pipeline == "v4")
-        return run_swiglu_example_pipeline<SwiGLUConfigComputeV4>(arg_parser);
-    // if(pipeline == "v6")
-    //     return run_swiglu_example_pipeline<SwiGLUConfigComputeV6>(arg_parser);
+        return run_with_pipeline<SwiGLUConfigComputeV4>(arg_parser);
+    if(pipeline == "v6")
+        return run_with_pipeline<SwiGLUConfigComputeV6>(arg_parser);
 
     throw std::runtime_error(std::format("Invalid pipeline! \n\t{}", pipeline));
 }

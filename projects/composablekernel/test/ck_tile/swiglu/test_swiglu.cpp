@@ -143,52 +143,52 @@ using Test_Intra_V6 = decltype(TestParams{
 
 using KernelTypes = ::testing::Types<
     /* V3 */
-    Test_Intra_V3<dtypes<F16, F16, F32>, layouts<R, R, R>>
-    // Test_Intra_V3<dtypes<F16, F16, F32>, layouts<R, C, R>>,
-    // Test_Intra_V3<dtypes<F16, F16, F32>, layouts<C, R, R>>,
-    // Test_Intra_V3<dtypes<F16, F16, F32>, layouts<C, C, R>>,
+    Test_Intra_V3<dtypes<F16, F16, F32>, layouts<R, R, R>>,
+    Test_Intra_V3<dtypes<F16, F16, F32>, layouts<R, C, R>>,
+    Test_Intra_V3<dtypes<F16, F16, F32>, layouts<C, R, R>>,
+    Test_Intra_V3<dtypes<F16, F16, F32>, layouts<C, C, R>>,
 
-    // Test_Intra_V3<dtypes<F8, F16, F32>, layouts<R, R, R>>,
-    // Test_Intra_V3<dtypes<F8, F16, F32>, layouts<R, C, R>>,
-    // Test_Intra_V3<dtypes<F8, F16, F32>, layouts<C, R, R>>,
-    // Test_Intra_V3<dtypes<F8, F16, F32>, layouts<C, C, R>>,
+    Test_Intra_V3<dtypes<F8, F16, F32>, layouts<R, R, R>>,
+    Test_Intra_V3<dtypes<F8, F16, F32>, layouts<R, C, R>>,
+    Test_Intra_V3<dtypes<F8, F16, F32>, layouts<C, R, R>>,
+    Test_Intra_V3<dtypes<F8, F16, F32>, layouts<C, C, R>>,
 
-    // Test_Intra_V3<dtypes<BF16, F16, F32>, layouts<R, R, R>>,
-    // Test_Intra_V3<dtypes<BF16, F16, F32>, layouts<R, C, R>>,
-    // Test_Intra_V3<dtypes<BF16, F16, F32>, layouts<C, R, R>>,
-    // Test_Intra_V3<dtypes<BF16, F16, F32>, layouts<C, C, R>>,
+    Test_Intra_V3<dtypes<BF16, F16, F32>, layouts<R, R, R>>,
+    Test_Intra_V3<dtypes<BF16, F16, F32>, layouts<R, C, R>>,
+    Test_Intra_V3<dtypes<BF16, F16, F32>, layouts<C, R, R>>,
+    Test_Intra_V3<dtypes<BF16, F16, F32>, layouts<C, C, R>>,
 
-    // /* V4 */
-    // Test_Intra_V4<dtypes<F16, F16, F32>, layouts<R, R, R>>,
-    // Test_Intra_V4<dtypes<F16, F16, F32>, layouts<R, C, R>>,
-    // Test_Intra_V4<dtypes<F16, F16, F32>, layouts<C, R, R>>,
-    // Test_Intra_V4<dtypes<F16, F16, F32>, layouts<C, C, R>>,
+    /* V4 */
+    Test_Intra_V4<dtypes<F16, F16, F32>, layouts<R, R, R>>,
+    Test_Intra_V4<dtypes<F16, F16, F32>, layouts<R, C, R>>,
+    Test_Intra_V4<dtypes<F16, F16, F32>, layouts<C, R, R>>,
+    Test_Intra_V4<dtypes<F16, F16, F32>, layouts<C, C, R>>,
 
-    // Test_Intra_V4<dtypes<BF16, F16, F32>, layouts<R, R, R>>,
-    // Test_Intra_V4<dtypes<BF16, F16, F32>, layouts<R, C, R>>,
-    // Test_Intra_V4<dtypes<BF16, F16, F32>, layouts<C, R, R>>,
-    // Test_Intra_V4<dtypes<BF16, F16, F32>, layouts<C, C, R>>,
+    Test_Intra_V4<dtypes<BF16, F16, F32>, layouts<R, R, R>>,
+    Test_Intra_V4<dtypes<BF16, F16, F32>, layouts<R, C, R>>,
+    Test_Intra_V4<dtypes<BF16, F16, F32>, layouts<C, R, R>>,
+    Test_Intra_V4<dtypes<BF16, F16, F32>, layouts<C, C, R>>,
 
-    // Test_Intra_V4<dtypes<F8, F16, F32>, layouts<R, R, R>>,
-    // Test_Intra_V4<dtypes<F8, F16, F32>, layouts<R, C, R>>,
-    // Test_Intra_V4<dtypes<F8, F16, F32>, layouts<C, R, R>>,
-    // Test_Intra_V4<dtypes<F8, F16, F32>, layouts<C, C, R>>,
+    Test_Intra_V4<dtypes<F8, F16, F32>, layouts<R, R, R>>,
+    Test_Intra_V4<dtypes<F8, F16, F32>, layouts<R, C, R>>,
+    Test_Intra_V4<dtypes<F8, F16, F32>, layouts<C, R, R>>,
+    Test_Intra_V4<dtypes<F8, F16, F32>, layouts<C, C, R>>,
 
-    // /* V6 */
-    // Test_Intra_V6<dtypes<F16, F16, F32>, layouts<R, R, R>>
-    // Test_Intra_V6<dtypes<F16, F16, F32>, layouts<R, C, R>>,
-    // Test_Intra_V6<dtypes<F16, F16, F32>, layouts<C, R, R>>,
-    // Test_Intra_V6<dtypes<F16, F16, F32>, layouts<C, C, R>>,
+    /* V6 */
+    Test_Intra_V6<dtypes<F16, F16, F32>, layouts<R, R, R>>,
+    Test_Intra_V6<dtypes<F16, F16, F32>, layouts<R, C, R>>,
+    Test_Intra_V6<dtypes<F16, F16, F32>, layouts<C, R, R>>,
+    Test_Intra_V6<dtypes<F16, F16, F32>, layouts<C, C, R>>,
 
-    // Test_Intra_V6<dtypes<BF16, F16, F32>, layouts<R, R, R>>,
-    // Test_Intra_V6<dtypes<BF16, F16, F32>, layouts<R, C, R>>,
-    // Test_Intra_V6<dtypes<BF16, F16, F32>, layouts<C, R, R>>,
-    // Test_Intra_V6<dtypes<BF16, F16, F32>, layouts<C, C, R>>,
+    Test_Intra_V6<dtypes<BF16, F16, F32>, layouts<R, R, R>>,
+    Test_Intra_V6<dtypes<BF16, F16, F32>, layouts<R, C, R>>,
+    Test_Intra_V6<dtypes<BF16, F16, F32>, layouts<C, R, R>>,
+    Test_Intra_V6<dtypes<BF16, F16, F32>, layouts<C, C, R>>,
 
-    // Test_Intra_V6<dtypes<F8, F16, F32>, layouts<R, R, R>>,
-    // Test_Intra_V6<dtypes<F8, F16, F32>, layouts<R, C, R>>,
-    // Test_Intra_V6<dtypes<F8, F16, F32>, layouts<C, R, R>>,
-    // Test_Intra_V6<dtypes<F8, F16, F32>, layouts<C, C, R>>
+    Test_Intra_V6<dtypes<F8, F16, F32>, layouts<R, R, R>>,
+    Test_Intra_V6<dtypes<F8, F16, F32>, layouts<R, C, R>>,
+    Test_Intra_V6<dtypes<F8, F16, F32>, layouts<C, R, R>>,
+    Test_Intra_V6<dtypes<F8, F16, F32>, layouts<C, C, R>>
     >;
 } // namespace ck_tile
 
