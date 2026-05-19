@@ -1917,6 +1917,42 @@ Tests:
   unit_check: 1
   gpu_arch_exclude: '11\d\d|12[^5]\d'
 
+- name: matmul_bias_stride_f16_128
+  category: pre_checkin
+  function:
+    matmul: *bias_stride_support_f16_128
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  bias_vector: [0, 1]
+  activation_type: [relu, none]
+  batch_count: [1, 5]
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
+
+- name: matmul_bias_stride_bf16_129
+  category: pre_checkin
+  function:
+    matmul: *bias_stride_support_bf16_129
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  bias_vector: [0, 1]
+  activation_type: [relu, none]
+  batch_count: [1, 5]
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
+
+- name: matmul_bias_stride_f32_129
+  category: pre_checkin
+  function:
+    matmul: *bias_stride_support_f32_129
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  bias_vector: [0, 1]
+  activation_type: [relu, none]
+  batch_count: [1, 5]
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
+
 - name: matmul_dgelu_bias
   category: pre_checkin
   function:
