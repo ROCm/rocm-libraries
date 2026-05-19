@@ -28,6 +28,7 @@
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGen.hpp>
+#include "DataInitializationHelpers.hpp"
 #endif
 #include "TensorDataManipulation.hpp"
 #include "Utility.hpp"
@@ -202,6 +203,8 @@ namespace TensileLite
                 return "TrigIndAbsSin";
             case InitMode::TrigIndAbsCos:
                 return "TrigIndAbsCos";
+            case InitMode::UniformLowPrecision:
+                return "UniformLowPrecision";
 
             case InitMode::Count:
                 break;
@@ -273,6 +276,8 @@ namespace TensileLite
                 mode = InitMode::TrigIndAbsSin;
             else if(strValue == ToString(InitMode::TrigIndAbsCos))
                 mode = InitMode::TrigIndAbsCos;
+            else if(strValue == ToString(InitMode::UniformLowPrecision))
+                mode = InitMode::UniformLowPrecision;
             else if(std::all_of(strValue.begin(), strValue.end(), isdigit))
             {
                 int value = atoi(strValue.c_str());
@@ -765,14 +770,25 @@ namespace TensileLite
                                   size_t                  totalElements,
                                   hipMemcpyKind           kind)
         {
+            // First, fill entire buffer with NaN/Inf sentinels from "bad" buffer
             HIP_CHECK_EXC(
                 hipMemcpy(dst,
-                          src,
+                          bad,
                           multiplyElementSize(totalElements,
                                               DataTypeInfo::Get(descriptor.dataType()).elementSize),
                           kind));
+            // Then, copy valid data to middle section, overwriting sentinel padding
             ptrdiff_t dPadding = totalElements - descriptor.totalAllocatedElements();
             dPadding           = multiplyElementSize(dPadding, descriptor.elementBytes());
+
+            // Ensure dPadding/2 is properly aligned for the element type
+            // Round dPadding to multiple of (2 * ceil(elementBytes)) to ensure:
+            // 1. dPadding is even (so dPadding/2 is a whole number)
+            // 2. dPadding/2 is aligned to element boundaries
+            float elementBytes = descriptor.elementBytes();
+            size_t alignmentBytes = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, elementBytes)));
+            dPadding = (dPadding / alignmentBytes) * alignmentBytes;
+
             void* dstOffset    = (void*)((uint8_t*)dst + dPadding / 2);
             TensileLite::hip::CopyTensorVoid(dstOffset, src, descriptor, kind);
             return dstOffset;
@@ -889,6 +905,17 @@ namespace TensileLite
             return paddedM_N * paddedK * b;
         }
 
+        size_t getSwizzledMXTensorNumAllocatedElements(const TensorDescriptor& desc,
+                                                       size_t                  dimk,
+                                                       bool                    unrollMajor)
+        {
+            const auto k    = unrollMajor ? desc.sizes()[0] : desc.sizes()[1];
+            const auto m_n  = unrollMajor ? desc.sizes()[1] : desc.sizes()[0];
+            const auto b    = desc.sizes()[2];
+            const auto padk = (k + dimk - 1) / dimk * dimk;
+            return padk * m_n * b;
+        }
+
         double DataInitialization::GetRepresentativeBetaValue(po::variables_map const& args)
         {
             auto argValue = args["init-beta"].as<int>();
@@ -915,6 +942,17 @@ namespace TensileLite
             , m_mxScaleFormat(args["mx-scale-format"].as<int>())
 
         {
+            if(m_mxScaleFormat > 0)
+            {
+                hipDeviceProp_t prop;
+                int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
+                hipGetDeviceProperties(&prop, deviceIdx);
+                // gfx950 subtile kernels expect the preswizzled layout produced by
+                // generateMXInput. All other architectures use the K-swizzle path.
+                m_isMXPreswizzleArch
+                    = (std::string(prop.gcnArchName).find("gfx950") != std::string::npos);
+            }
+
             m_rotatingBuffer
                 = args["rotating-buffer-size"].as<int32_t>() * 1024 * 1024; // Change to bytes
             m_rotatingMode   = args["rotating-buffer-mode"].as<int32_t>();
@@ -993,6 +1031,20 @@ namespace TensileLite
                                 problem.tensors()[i], MiM_N, MiK, PackK);
                             numAllocatedBytes = multiplyElementSize(
                                 numAllocatedElements, rocisa::GetElementSize(dataType));
+                        }
+                        if (i == ContractionProblemGemm::TENSOR::MXSA && problem.mxBlockA() != 0)
+                        {
+                            bool unrollMajor = (problem.freeIndicesA()[0].i != 0);
+                            size_t MX = problem.mxBlockA();
+                            size_t dimk = 128 / MX;
+                            numAllocatedElements = getSwizzledMXTensorNumAllocatedElements(problem.tensors()[i], dimk, unrollMajor);
+                        }
+                        else if (i == ContractionProblemGemm::TENSOR::MXSB && problem.mxBlockB() != 0)
+                        {
+                            bool unrollMajor = (problem.freeIndicesB()[0].i != 0);
+                            size_t MX = problem.mxBlockB();
+                            size_t dimk = 128 / MX;
+                            numAllocatedElements = getSwizzledMXTensorNumAllocatedElements(problem.tensors()[i], dimk, unrollMajor);
                         }
 
                         pristine.maxElements = std::max(pristine.maxElements, numAllocatedElements);
@@ -1756,9 +1808,9 @@ namespace TensileLite
             // bytes the kernel sees are identical to the bytes the reference reads. We
             // gate on m_mxScaleFormat > 0 because that is the user-visible signal that
             // they opted into the subtile / pre-swizzle layout.
-            bool useMXGenerator = isMXFP4Problem(problem) && m_mxScaleFormat > 0;
+            bool useMXGenerator = isMXProblem(problem) && m_mxScaleFormat > 0;
             if(useMXGenerator)
-                initializeMXDataForFP4(problem);
+                initializeMXData(problem);
 
             auto& tensors = problem.tensors();
             for(size_t i = 0; i < m_vdata.size(); i++)
@@ -1832,26 +1884,8 @@ namespace TensileLite
         }
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-        namespace
-        {
-            /** Maps Tensile MX scale element type to hipDataType for generateMXInput (mxDataGen). */
-            hipDataType hipMxScaleTypeForDataGenerator(rocisa::DataType mxType)
-            {
-                switch(mxType)
-                {
-                case rocisa::DataType::Float8:
-                    return HIP_R_8F_E4M3;
-                case rocisa::DataType::E5M3:
-                    return static_cast<hipDataType>(HIP_R_8F_E5M3_EXT);
-                case rocisa::DataType::E8:
-                case rocisa::DataType::None:
-                    return HIP_R_8F_UE8M0;
-                default:
-                    throw std::runtime_error(
-                        "initializeMXData: unsupported MX scale element type for generateMXInput");
-                }
-            }
-        } // namespace
+
+        using namespace detail;
 
         static std::string_view initModeToMXMethod(InitMode mode)
         {
@@ -1872,13 +1906,14 @@ namespace TensileLite
             }
         }
 
-        void DataInitialization::initializeMXDataForFP4(ContractionProblemGemm const& problem)
+        void DataInitialization::initializeMXData(ContractionProblemGemm const& problem)
         {
             // Initializes A, B, MXSA, MXSB so the default-init loop in initializeCPUInputs
-            // can safely skip them. For MX-FP4 sides we drive mxDataGenerator (so the values
-            // are coordinated with their E8 scales); for any non-FP4 side (e.g. MX-B6 or non-MX
-            // mixed-mode) we fall back to the same initArray path the default loop would have
-            // taken, to avoid leaving the malloc'd buffers uninitialized.
+            // can safely skip them. For MX-FP4 / MX-FP8 / MX-BFloat8 sides we drive
+            // mxDataGenerator (so the values are coordinated with their E8 scales); for any
+            // non-FP4/FP8 side (e.g. MX-B6 or non-MX mixed-mode) we fall back to the same
+            // initArray path the default loop would have taken, to avoid leaving the
+            // malloc'd buffers uninitialized
             auto const& tensors = problem.tensors();
 
             auto initTensorFromDefault = [&](int i) {
@@ -1894,6 +1929,10 @@ namespace TensileLite
                     }
                 }
             };
+
+            // Reset preswizzle flags; they will be set below if gpuInput.valid is populated.
+            m_mxPreswizzledA = false;
+            m_mxPreswizzledB = false;
 
             // Compute preSwizzle parameters from the solution's matrix instruction to rearrange
             // the scale tensor into the GPU kernel's expected memory layout
@@ -1940,7 +1979,7 @@ namespace TensileLite
                 }
             }
 
-            if(isMXFP4Tensor(problem.a(), problem.mxBlockA()))
+            if(isMXTensor(problem.a(), problem.mxBlockA()))
             {
                 auto const& tensorA = problem.a();
                 auto        rows    = tensorA.sizes()[0];
@@ -1949,16 +1988,20 @@ namespace TensileLite
                 size_t      batchCount = tensorA.sizes().size() > 2 ? tensorA.sizes()[2] : 1;
 
                 auto& pristineA
-                    = m_vdata[ContractionProblemGemm::TENSOR::A].pristine[rocisa::DataType::Float4];
+                    = m_vdata[ContractionProblemGemm::TENSOR::A].pristine[tensorA.dataType()];
                 auto& pristineE8A
                     = m_vdata[ContractionProblemGemm::TENSOR::MXSA].pristine[problem.mxsa().dataType()];
 
-                // FP4: 2 elements packed per byte, batch stride in bytes = strides[2] / 2
+                // FP4: 2 elements packed per byte (packing=2); FP8: 1 element per byte
+                // (packing=1). Compute byte stride generically via DataTypeInfo so we
+                // never hard-code /2 again the next time a new dtype shows up
                 size_t dataBatchStrideBytes = 0;
                 size_t scaleBatchStrideBytes = 0;
                 if(batchCount > 1)
                 {
-                    dataBatchStrideBytes  = tensorA.strides()[2] / 2;
+                    auto const  dataInfo         = DataTypeInfo::Get(tensorA.dataType());
+                    dataBatchStrideBytes
+                        = multiplyElementSize(tensorA.strides()[2], static_cast<float>(dataInfo.elementSize));
                     auto const& mxsaTensor = problem.mxsa();
                     scaleBatchStrideBytes = mxsaTensor.strides()[mxsaTensor.sizes().size() - 1];
                 }
@@ -1970,13 +2013,15 @@ namespace TensileLite
                             0x00,
                             problem.mxsa().totalAllocatedElements());
 
+                // cpuInput.valid always holds canonical (non-preswizzled) scale so the CPU
+                // reference reads it with correct linear strides.
                 for(size_t b = 0; b < batchCount; b++)
                 {
                     auto* dataPtr  = static_cast<uint8_t*>(pristineA.cpuInput.valid.get())
                                      + b * dataBatchStrideBytes;
                     auto* scalePtr = static_cast<uint8_t*>(pristineE8A.cpuInput.valid.get())
                                      + b * scaleBatchStrideBytes;
-                    generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                    generateMXInput(hipMxDataTypeForDataGenerator(tensorA.dataType()),
                                     hipMxScaleTypeForDataGenerator(problem.mxTypeA()),
                                     dataPtr,
                                     scalePtr,
@@ -1984,8 +2029,8 @@ namespace TensileLite
                                     cols,
                                     stride,
                                     problem.transA(),
-                                    preSwizzleA,
-                                    preTileA,
+                                    {},
+                                    {},
                                     problem.mxBlockA(),
                                     1,
                                     true,
@@ -1993,10 +2038,48 @@ namespace TensileLite
                                     -1.0f,
                                     1.0f);
                 }
+
+                // For preswizzle-arch (gfx950): when the preswizzle condition fires,
+                // generate the preswizzled scale and upload it directly to gpuInput.valid.
+                // copySwizzledToGPUBuffer will use gpuInput.valid as-is instead of
+                // applying the gfx1250 K-swizzle.
+                if(m_isMXPreswizzleArch && !preSwizzleA.empty() && pristineE8A.gpuInput.valid)
+                {
+                    size_t gpuScaleBytes = problem.mxsa().totalAllocatedElements()
+                                          * DataTypeInfo::Get(problem.mxsa().dataType()).elementSize;
+                    std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, 0);
+                    for(size_t b = 0; b < batchCount; b++)
+                    {
+                        auto* dataPtr  = static_cast<uint8_t*>(pristineA.cpuInput.valid.get())
+                                         + b * dataBatchStrideBytes;
+                        auto* scalePtr = gpuScaleBuf.data() + b * scaleBatchStrideBytes;
+                        generateMXInput(hipMxDataTypeForDataGenerator(tensorA.dataType()),
+                                        hipMxScaleTypeForDataGenerator(problem.mxTypeA()),
+                                        dataPtr,
+                                        scalePtr,
+                                        rows,
+                                        cols,
+                                        stride,
+                                        problem.transA(),
+                                        preSwizzleA,
+                                        preTileA,
+                                        problem.mxBlockA(),
+                                        1,
+                                        true,
+                                        initModeToMXMethod(initA),
+                                        -1.0f,
+                                        1.0f);
+                    }
+                    HIP_CHECK_EXC(hipMemcpy(pristineE8A.gpuInput.valid.get(),
+                                            gpuScaleBuf.data(),
+                                            gpuScaleBytes,
+                                            hipMemcpyHostToDevice));
+                    m_mxPreswizzledA = true;
+                }
             }
             else
             {
-                // A is not FP4 (or mxBlockA == 0). The default-init loop will skip A and
+                // A is not FP4/FP8 (or mxBlockA == 0). The default-init loop will skip A and
                 // MXSA because useMXGenerator is true, so seed them here with the same
                 // initArray path the default loop would have used.
                 initTensorFromDefault(ContractionProblemGemm::TENSOR::A);
@@ -2004,7 +2087,7 @@ namespace TensileLite
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSA);
             }
 
-            if(isMXFP4Tensor(problem.b(), problem.mxBlockB()))
+            if(isMXTensor(problem.b(), problem.mxBlockB()))
             {
                 auto const& tensorB = problem.b();
                 auto        rows    = tensorB.sizes()[0];
@@ -2013,16 +2096,19 @@ namespace TensileLite
                 size_t      batchCount = tensorB.sizes().size() > 2 ? tensorB.sizes()[2] : 1;
 
                 auto& pristineB
-                    = m_vdata[ContractionProblemGemm::TENSOR::B].pristine[rocisa::DataType::Float4];
+                    = m_vdata[ContractionProblemGemm::TENSOR::B].pristine[tensorB.dataType()];
                 auto& pristineE8B
                     = m_vdata[ContractionProblemGemm::TENSOR::MXSB].pristine[problem.mxsb().dataType()];
 
-                // FP4: 2 elements packed per byte, batch stride in bytes = strides[2] / 2
+                // FP4: 2 elements packed per byte (packing=2); FP8: 1 element per byte
+                // (packing=1). Generic byte-stride via DataTypeInfo (see A side above).
                 size_t dataBatchStrideBytes = 0;
                 size_t scaleBatchStrideBytes = 0;
                 if(batchCount > 1)
                 {
-                    dataBatchStrideBytes  = tensorB.strides()[2] / 2;
+                    auto const  dataInfo         = DataTypeInfo::Get(tensorB.dataType());
+                    dataBatchStrideBytes
+                        = multiplyElementSize(tensorB.strides()[2], static_cast<float>(dataInfo.elementSize));
                     auto const& mxsbTensor = problem.mxsb();
                     scaleBatchStrideBytes = mxsbTensor.strides()[mxsbTensor.sizes().size() - 1];
                 }
@@ -2034,13 +2120,14 @@ namespace TensileLite
                             0x00,
                             problem.mxsb().totalAllocatedElements());
 
+                // cpuInput.valid holds canonical scale for the CPU reference.
                 for(size_t b = 0; b < batchCount; b++)
                 {
                     auto* dataPtr  = static_cast<uint8_t*>(pristineB.cpuInput.valid.get())
                                      + b * dataBatchStrideBytes;
                     auto* scalePtr = static_cast<uint8_t*>(pristineE8B.cpuInput.valid.get())
                                      + b * scaleBatchStrideBytes;
-                    generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                    generateMXInput(hipMxDataTypeForDataGenerator(tensorB.dataType()),
                                     hipMxScaleTypeForDataGenerator(problem.mxTypeB()),
                                     dataPtr,
                                     scalePtr,
@@ -2048,8 +2135,8 @@ namespace TensileLite
                                     cols,
                                     stride,
                                     problem.transB(),
-                                    preSwizzleB,
-                                    preTileB,
+                                    {},
+                                    {},
                                     problem.mxBlockB(),
                                     1,
                                     false,
@@ -2057,10 +2144,45 @@ namespace TensileLite
                                     -1.0f,
                                     1.0f);
                 }
+
+                // For preswizzle-arch (gfx950): upload preswizzled scale directly to gpuInput.valid.
+                if(m_isMXPreswizzleArch && !preSwizzleB.empty() && pristineE8B.gpuInput.valid)
+                {
+                    size_t gpuScaleBytes = problem.mxsb().totalAllocatedElements()
+                                          * DataTypeInfo::Get(problem.mxsb().dataType()).elementSize;
+                    std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, 0);
+                    for(size_t b = 0; b < batchCount; b++)
+                    {
+                        auto* dataPtr  = static_cast<uint8_t*>(pristineB.cpuInput.valid.get())
+                                         + b * dataBatchStrideBytes;
+                        auto* scalePtr = gpuScaleBuf.data() + b * scaleBatchStrideBytes;
+                        generateMXInput(hipMxDataTypeForDataGenerator(tensorB.dataType()),
+                                        hipMxScaleTypeForDataGenerator(problem.mxTypeB()),
+                                        dataPtr,
+                                        scalePtr,
+                                        rows,
+                                        cols,
+                                        stride,
+                                        problem.transB(),
+                                        preSwizzleB,
+                                        preTileB,
+                                        problem.mxBlockB(),
+                                        1,
+                                        false,
+                                        initModeToMXMethod(initB),
+                                        -1.0f,
+                                        1.0f);
+                    }
+                    HIP_CHECK_EXC(hipMemcpy(pristineE8B.gpuInput.valid.get(),
+                                            gpuScaleBuf.data(),
+                                            gpuScaleBytes,
+                                            hipMemcpyHostToDevice));
+                    m_mxPreswizzledB = true;
+                }
             }
             else
             {
-                // B is not FP4 (or mxBlockB == 0). Same fallback rationale as the A side.
+                // B is not FP4/FP8 (or mxBlockB == 0). Same fallback rationale as the A side.
                 initTensorFromDefault(ContractionProblemGemm::TENSOR::B);
                 if(problem.mxBlockB() > 0)
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSB);
@@ -2070,7 +2192,7 @@ namespace TensileLite
         void DataInitialization::initializeMXData(ContractionProblemGemm const& /*problem*/)
         {
             // The MX data generator is disabled at build time. Reaching this
-            // path means a problem requiring MX FP4 initialization was issued
+            // path means a problem requiring MX FP4 or MX FP8 initialization was issued
             // against a build that doesn't include mxDataGenerator support.
             throw std::runtime_error(
                 "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time");
@@ -2349,27 +2471,55 @@ namespace TensileLite
                 if(it != m_vdata[i].pristine.end())
                 {
                     auto& p = it->second;
-                    if(kind == hipMemcpyHostToHost)
-                        ptr = copyInputBuffers(desc,
-                                               p.cpuInput.current.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
-                    else if(kind == hipMemcpyHostToDevice)
-                        ptr = copyInputBuffers(desc,
-                                               p.gpuInput.current.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
-                    else if(kind == hipMemcpyDeviceToDevice)
-                        ptr = copyInputBuffers(desc,
-                                               p.gpuInput.current.get(),
-                                               p.gpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
+                    // For output tensors with NaN bounds checking, initialize buffer with NaN sentinels
+                    if(m_curBoundsCheck == BoundsCheckMode::NaN)
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.cpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.cpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.cpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.gpuInput.valid.get(),
+                                                      p.gpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                    }
+                    else
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyInputBuffers(desc,
+                                                   p.cpuInput.current.get(),
+                                                   p.cpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyInputBuffers(desc,
+                                                   p.gpuInput.current.get(),
+                                                   p.cpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyInputBuffers(desc,
+                                                   p.gpuInput.current.get(),
+                                                   p.gpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                    }
                     if(ptr == nullptr)
                     {
-                        std::runtime_error("output ptr is null when copy input");
+                        throw std::runtime_error("output ptr is null when copy input");
                     }
                     ptrs[i]        = ptr;
                     batchPtrs[i]   = p.getInputByKind(kind).batch.get();
@@ -2393,8 +2543,11 @@ namespace TensileLite
                 bool needSwizzle
                     = (problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
                       || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B);
+                bool needMXSwizzle
+                    = (problem.mxBlockA() && (i == ContractionProblemGemm::TENSOR::MXSA))
+                      || (problem.mxBlockB() && (i == ContractionProblemGemm::TENSOR::MXSB));
                 //Copy swizzle tensor would be in copySwizzledToGPUBuffer
-                if(needSwizzle)
+                if(needSwizzle || needMXSwizzle)
                     continue;
                 void* ptr  = nullptr;
                 auto& desc = problem.tensors()[i];
@@ -2429,6 +2582,22 @@ namespace TensileLite
                 bool needSwizzle
                     = (problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
                       || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B);
+
+                bool needMXSwizzle = false;
+                bool unrollMajor = false;
+                size_t MX = 0;
+                if (i == ContractionProblemGemm::TENSOR::MXSA && problem.mxBlockA())
+                {
+                    needMXSwizzle = true;
+                    unrollMajor = (problem.freeIndicesA()[0].i != 0);
+                    MX = problem.mxBlockA();
+                }
+                else if (i == ContractionProblemGemm::TENSOR::MXSB && problem.mxBlockB())
+                {
+                    needMXSwizzle = true;
+                    unrollMajor = (problem.freeIndicesB()[0].i != 0);
+                    MX = problem.mxBlockB();
+                }
 
                 void* ptr{};
 
@@ -2485,6 +2654,106 @@ namespace TensileLite
                                                permuted.getDesc().flattenSize(),
                                                hipMemcpyHostToDevice);
                         g_swizzleCache.emplace(swizzleKey, std::move(permuted));
+                    }
+                }
+                else if (needMXSwizzle)
+                {
+                    bool isMXSA = (i == ContractionProblemGemm::TENSOR::MXSA);
+                    bool isMXSB = (i == ContractionProblemGemm::TENSOR::MXSB);
+                    bool preswizzledAlready = (isMXSA && m_mxPreswizzledA)
+                                             || (isMXSB && m_mxPreswizzledB);
+
+                    // The picked solution dictates the in-device MX scale layout via
+                    // problemType.mxScaleFormat (mirrors the MXScaleFormat solution
+                    // parameter): 0=NoSwizzle, 1=HostPreSwizzle, 2=InMemorySwizzle.
+                    // Sentinel -1 means "no solution selected yet" (e.g. the first
+                    // prepareGPUInputs call per problem, before solution iteration);
+                    // in that case the path below uses the arch-driven default
+                    // (gfx950 host preswizzle, otherwise K-swizzle).
+                    int kernelMxScaleFormat = -1;
+                    if (m_currentSolution != nullptr)
+                        kernelMxScaleFormat = m_currentSolution->problemType.mxScaleFormat;
+
+                    if (kernelMxScaleFormat == 0)
+                    {
+                        // NoSwizzle: kernel reads scales in canonical row/column
+                        // layout (buffer_load_* path). Upload cpuInput.valid as-is,
+                        // no K-swizzle, no padding permute.
+                        ptr = copyInputBuffers(desc,
+                                               p.gpuInput.valid.get(),
+                                               p.cpuInput.valid.get(),
+                                               p.maxElements,
+                                               hipMemcpyHostToDevice);
+                    }
+                    else if (m_isMXPreswizzleArch && preswizzledAlready)
+                    {
+                        // gfx950 subtile: preswizzle was applied by initializeMXDataForFP4 and
+                        // gpuInput.valid was already populated — use it as-is.
+                        ptr = p.gpuInput.valid.get();
+                    }
+                    else if (m_isMXPreswizzleArch)
+                    {
+                        // gfx950: preswizzle didn't fire (scale dims not divisible by tileK,
+                        // e.g. small K). Kernel expects canonical layout — copy cpuInput.valid
+                        // directly without K-swizzle.
+                        ptr = copyInputBuffers(desc,
+                                               p.gpuInput.valid.get(),
+                                               p.cpuInput.valid.get(),
+                                               p.maxElements,
+                                               hipMemcpyHostToDevice);
+                    }
+                    else
+                    {
+                        // gfx1250 and other arches: apply K-dimension swizzle.
+                        // gfx950 is excluded by the branches above.
+                        using Tensor = Tensor::Manipulation::Tensor;
+
+                        if (unrollMajor)
+                        {
+                            auto unrolledSize = desc.sizes()[0];
+                            auto tiledSize    = desc.sizes()[1];
+                            size_t dimk       = 128 / MX;
+                            auto tmpTensor    = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
+                            ::Tensor::Manipulation::Shape paddedShape{tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
+
+                            memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
+                            //Temporary hack
+                            uint64_t padVal{};
+                            auto     paddedTensor = ::Tensor::Manipulation::pad(
+                                tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
+                            paddedTensor.reshape({paddedShape[0],
+                                                  paddedShape[1] / dimk,
+                                                  dimk});
+                            Tensor permuted = permute(paddedTensor, {1,0,2});
+                            ptr             = copyInputBuffers(desc,
+                                                   p.gpuInput.valid.get(),
+                                                   permuted.as<void>(),
+                                                   permuted.getDesc().flattenSize(),
+                                                   hipMemcpyHostToDevice);
+                        }
+                        else
+                        {
+                            auto unrolledSize = desc.sizes()[1];
+                            auto tiledSize    = desc.sizes()[0];
+                            size_t dimk       = 128 / MX;
+                            auto tmpTensor    = Tensor({unrolledSize, tiledSize}, desc.elementBytes());
+                            ::Tensor::Manipulation::Shape paddedShape{(unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
+
+                            memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
+                            //Temporary hack
+                            uint64_t padVal{};
+                            auto     paddedTensor = ::Tensor::Manipulation::pad(
+                                tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
+                            paddedTensor.reshape({paddedShape[0] / dimk,
+                                                  dimk,
+                                                  paddedShape[1]});
+                            Tensor permuted = permute(paddedTensor, {0,2,1});
+                            ptr             = copyInputBuffers(desc,
+                                                   p.gpuInput.valid.get(),
+                                                   permuted.as<void>(),
+                                                   permuted.getDesc().flattenSize(),
+                                                   hipMemcpyHostToDevice);
+                        }
                     }
                 }
                 else

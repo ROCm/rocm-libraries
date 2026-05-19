@@ -27,6 +27,9 @@
 #error "we should enable fmha_fwd_splitkv() api in order to cooperate with fmha_fwd_appendkv()"
 #endif
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
 enum class fwd_result
 {
     success,
@@ -1136,7 +1139,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
             traits.has_logits_soft_cap = 0.f < logits_soft_cap;
             traits.mask_type           = mask.type;
             traits.bias_type           = bias.type;
-            traits.has_sink            = mask.sink > 0 ? true : false;
+            traits.has_sink            = (mask.sink > 0 || init_sink_value != 0) ? true : false;
             traits.has_lse             = lse;
 
             if constexpr(std::is_same_v<fmha_fwd_traits, std::decay_t<decltype(traits)>>)
@@ -2484,3 +2487,4 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
     return pass ? fwd_result::success : fwd_result::failure;
 }
+#pragma clang diagnostic pop

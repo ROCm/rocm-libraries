@@ -27,6 +27,32 @@ namespace ck_tile::builder::profiling {
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ndhwgc_fp32.inc"
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ndhwgc_bf16.inc"
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ndhwgc_fp16.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_fp32.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_fp16.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_bf16.inc"
+
+template <auto SIGNATURE>
+void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
+                        const ckt::Outputs<SIGNATURE>& outputs,
+                        const ckt::Outputs<SIGNATURE>& reference)
+{
+    using DataType =
+        std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
+                           float,
+                           std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP16,
+                                              ck_tile::half_t,
+                                              ck_tile::bfloat16_t>>;
+    const auto conv_param = args.to_ck_tile_conv_param();
+
+    const std::size_t output_bytes_num = conv_param.template GetOutputByte<DataType>();
+    std::vector<DataType> out(output_bytes_num / sizeof(DataType));
+    std::vector<DataType> ref(output_bytes_num / sizeof(DataType));
+    HIP_CHECK_ERROR(
+        hipMemcpy(&ref.data()[0], reference.output, output_bytes_num, hipMemcpyDeviceToHost));
+    HIP_CHECK_ERROR(
+        hipMemcpy(&out.data()[0], outputs.output, output_bytes_num, hipMemcpyDeviceToHost));
+    ck_tile::check_err(out, ref, "Error: Incorrect results!");
+}
 
 /// @brief `run_grouped_conv_forward_tile_algs()` run all grouped conv fwd instances.
 ///
@@ -38,7 +64,8 @@ std::tuple<bool, float, std::string>
 run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                    const ckt::Inputs<SIGNATURE>& inputs,
                                    const ckt::Outputs<SIGNATURE>& outputs,
-                                   const ck_tile::stream_config& s_conf)
+                                   const ck_tile::stream_config& s_conf,
+                                   bool do_verification = true)
 {
     using DataType = DeduceDataType<SIGNATURE>;
 
@@ -50,8 +77,21 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     float avg_time;
     bool valid = true;
 
-    auto reference = compute_reference<SIGNATURE>(args, inputs);
+    using DataType =
+        std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
+                           float,
+                           std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP16,
+                                              ck_tile::half_t,
+                                              ck_tile::bfloat16_t>>;
 
+    auto reference = ckt::alloc_outputs(args);
+    if(do_verification)
+    {
+        using ReferenceInstance =
+            typename ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
+        auto ref_conv                    = ReferenceInstance{};
+        [[maybe_unused]] auto ref_result = ckt::run(ref_conv, args, inputs, reference.get());
+    }
     auto run_alg = [&](auto&& run_alg_func) {
         std::tie(is_supported, avg_time, op_name) = run_alg_func(args, inputs, outputs, s_conf);
         if(is_supported)
@@ -68,14 +108,30 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
             std::cout << "Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name
                       << std::endl;
 
-            if(!validate_and_report<SIGNATURE, ConvBuffer::Output>(
-                   args,
-                   outputs,
-                   reference.get(),
-                   ck::profiler::get_rtol<DataType>(),
-                   ck::profiler::get_atol<DataType>()))
+            if(do_verification)
             {
-                valid = false;
+                ckt::ValidationReport report;
+                ckt::Outputs<SIGNATURE>::reflect(args,
+                                                 [&](std::string_view name,
+                                                     const auto& desc,
+                                                     void* ckt::Outputs<SIGNATURE>::*ptr) {
+                                                     report.check(
+                                                         name,
+                                                         desc,
+                                                         outputs.*ptr,
+                                                         reference.get().*ptr,
+                                                         ck::profiler::get_rtol<DataType>(),
+                                                         ck::profiler::get_atol<DataType>());
+                                                 });
+
+                for(const auto& error : report.get_errors())
+                {
+                    valid = false;
+                    std::cout << "Number of incorrect values: " << error.wrong_elements
+                              << " Is all zero:" << error.is_all_zero()
+                              << " max err: " << error.max_error << std::endl;
+                    run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
+                }
             }
         }
         else
@@ -107,6 +163,18 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP32_FWD)
     {
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ndhwgc_fp32_calls.inc"
+    }
+    else if constexpr(SIGNATURE == SIGNATURE_NGCHW_FP16_FWD)
+    {
+#include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_fp16_calls.inc"
+    }
+    else if constexpr(SIGNATURE == SIGNATURE_NGCHW_BF16_FWD)
+    {
+#include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_bf16_calls.inc"
+    }
+    else if constexpr(SIGNATURE == SIGNATURE_NGCHW_FP32_FWD)
+    {
+#include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_fp32_calls.inc"
     }
     else
     {

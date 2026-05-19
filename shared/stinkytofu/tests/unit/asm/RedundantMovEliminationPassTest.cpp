@@ -225,8 +225,6 @@ TEST_F(RedundantMovEliminationPassTest, NoDuplicates) {
     auto* func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
-    std::string before = getFunctionIR(*func);
-
     PassContext passCtx;
     passCtx.setGemmTileConfig(gemmConfig);
 

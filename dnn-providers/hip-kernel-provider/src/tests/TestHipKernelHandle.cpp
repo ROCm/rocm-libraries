@@ -8,7 +8,7 @@
 
 TEST(TestHipKernelHandle, ConstructsAndDestructsSuccessfully)
 {
-    HipKernelHandle handle;
+    const HipKernelHandle handle;
 }
 
 TEST(TestHipKernelHandle, SetAndGetStream)

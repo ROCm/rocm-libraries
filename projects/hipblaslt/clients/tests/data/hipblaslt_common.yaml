@@ -8,6 +8,8 @@ Datatypes:
         f16_r: 2
         f32_r: 0
         f64_r: 1
+        f32_c: 4 
+        f64_c: 5
         i8_r: 3
         i32_r: 10
         bf16_r: 14
@@ -48,6 +50,7 @@ Datatypes:
         uniform_01: 777
         integer_exact: 888
         fp16_accumulator_probe: 889
+        uniform_low_precision: 999
   - hipblaslt_activation_type:
       bases: [ c_int ]
       attr:
@@ -85,6 +88,12 @@ Real precisions: &real_precisions
     { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r}
   - &single_precision
     { a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r , scale_type: f32_r}
+
+Complex precisions: &complex_precisions
+  - &complex_float_precision
+    {a_type: f32_c, b_type: f32_c, c_type: f32_c, d_type: f32_c, compute_type: c_f32_r, scale_type: f32_c}
+  - &complex_double_precision
+    {a_type: f64_c, b_type: f64_c, c_type: f64_c, d_type: f64_c, compute_type: c_f64_r, scale_type: f64_c}
 
 # F8 NANOO
 Real precisions 1 bytes (fnuz): &real_precisions_1b_fnuz
@@ -563,8 +572,10 @@ Arguments:
   - name: c_char*64
   - category: c_char*64
   - known_bug_platforms: c_char*64
-  - alpha: c_float
-  - beta: c_float
+  - alpha: c_double
+  - alphai: c_double
+  - beta: c_double
+  - betai: c_double
   - stride_a: c_int64*32
   - stride_b: c_int64*32
   - stride_c: c_int64*32
@@ -688,7 +699,9 @@ Defaults:
   N: 128
   K: 128
   alpha: 1.0
+  alphai: 0.0
   beta: 0.0
+  betai: 0.0
   transA: '*'
   transB: '*'
   batch_count: 1
