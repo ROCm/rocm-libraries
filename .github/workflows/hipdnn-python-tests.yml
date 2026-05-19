@@ -1,0 +1,72 @@
+name: hipdnn-python-tests
+
+on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+    paths:
+      - 'projects/hipdnn/**'
+      - '.github/workflows/hipdnn-python-tests.yml'
+  pull_request:
+    paths:
+      - 'projects/hipdnn/**'
+      - '.github/workflows/hipdnn-python-tests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    runs-on: azure-linux-scale-rocm
+    steps:
+      - name: Checkout rocm-libraries
+        uses: actions/checkout@v6
+
+      - name: Checkout TheRock
+        uses: actions/checkout@v6
+        with:
+          repository: ROCm/TheRock
+          path: TheRock
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            python3-venv \
+            python3-dev
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install boto3 cmake numpy pytest
+          pip install -r TheRock/requirements.txt
+
+      - name: Install ROCm
+        run: |
+          sudo .venv/bin/python3 TheRock/build_tools/install_rocm_from_artifacts.py \
+            --latest-release \
+            --amdgpu-family gfx94X-dcgpu \
+            --output-dir /opt/rocm \
+            --base-only
+
+      - name: Build hipDNN with Python bindings and miopen-provider
+        run: |
+          . .venv/bin/activate
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          cmake -B build -GNinja \
+            -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;miopen-provider" \
+            -DROCM_PATH=/opt/rocm \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DHIP_PLATFORM=amd
+          ninja -C build hipdnn_frontend_python libmiopen_plugin.so
+
+      - name: Run Python binding tests
+        run: |
+          . .venv/bin/activate
+          PYTHONPATH=projects/hipdnn/python:build/lib \
+          LD_LIBRARY_PATH=build/lib:/opt/rocm/lib \
+          HIPDNN_PLUGIN_PATH=build/lib/hipdnn_plugins/engines \
+          pytest projects/hipdnn/python/hipdnn_frontend/test/ -v
