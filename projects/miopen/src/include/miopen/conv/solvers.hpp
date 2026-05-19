@@ -351,16 +351,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwd11x11 final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwdGen final : ConvSolver
-{
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclDirectFwdGen>(); }
-
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&) const override;
-};
-
 struct PerformanceImplicitGemm : PerfConfigBase<PerformanceImplicitGemm>
 {
     int BPerBlock; // 2^n[8..16]
