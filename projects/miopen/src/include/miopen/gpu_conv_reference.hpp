@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <miopen/config.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/convolution.hpp>
@@ -17,7 +18,7 @@ namespace miopen {
 ///
 /// This replaces the previous approach of toggling AlwaysEnableConvDirectNaive
 /// to dual-purpose the naive conv solver as both a solver and a GPU reference.
-struct GpuConvReference
+struct MIOPEN_INTERNALS_EXPORT GpuConvReference
 {
     static void RunFwd(const Handle& handle,
                        const TensorDescriptor& xDesc,
