@@ -23,6 +23,7 @@
 #ifdef ROCFFT_RCCL_ENABLE
 
 #include "rccl_wrapper.h"
+#include "../../shared/rocfft_hip.h"
 #include "logging.h"
 #include <map>
 #include <mutex>
@@ -72,24 +73,16 @@ static NcclTypeInfo get_nccl_type_info(size_t base_type_size, bool is_complex)
 // implementation details shared by all copies of a handle via shared_ptr
 struct rocfft_rccl_comm_t::Impl
 {
-    // each comm is for one rank, and each rank has exactly one
-    // device.  comms is indexed by rank.
-    std::vector<ncclComm_t> comms;
+    // one communicator per device, keyed by device_id.
+    std::map<int, ncclComm_t> device_to_comm;
 
     // unique id used to bootstrap this communicator group.
     // stored so it can be broadcast via MPI for multi-node in the future.
     ncclUniqueId uniqueId{};
 
-    // device_id -> NCCL rank mapping
-    std::map<int, int> device_to_rank;
-    int                nranks = 0;
-
-    // runs exactly once — when the last shared_ptr<Impl> referring to
-    // this object is released.  copies of rocfft_rccl_comm_t only bump
-    // the refcount and never duplicate these ncclComm_t handles.
     ~Impl()
     {
-        for(auto comm : comms)
+        for(auto& [dev, comm] : device_to_comm)
         {
             if(comm)
             {
@@ -142,59 +135,25 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
             return {};
         }
         new_comm.pimpl->uniqueId = id;
-        new_comm.pimpl->nranks   = ndevices;
-
-        // save and restore the caller's active device
-        int original_device = 0;
-        if(hipGetDevice(&original_device) != hipSuccess)
-            throw std::runtime_error("hipGetDevice failed during RCCL communicator init");
-
-        // comms is indexed by rank (not device_id); device_to_rank
-        // maps device_id -> rank for lookup in get_comm().
-        new_comm.pimpl->comms.resize(ndevices, nullptr);
 
         // init one communicator per device using ncclCommInitRank,
         // batched inside a group call for single-process efficiency.
-        // use try/catch to guarantee ncclGroupEnd is called even if
-        // hipSetDevice throws between ncclGroupStart and ncclGroupEnd.
         // ranks are assigned in sorted device-id order (std::set).
-        ncclGroupStart();
-        try
         {
-            int rank = 0;
+            rocfft_rccl_group_t group;
+            int                 rank = 0;
             for(int dev : devices)
             {
-                if(hipSetDevice(dev) != hipSuccess)
-                    throw std::runtime_error("hipSetDevice failed for device "
-                                             + std::to_string(dev));
-                new_comm.pimpl->device_to_rank[dev] = rank;
-                result = ncclCommInitRank(&new_comm.pimpl->comms[rank], ndevices, id, rank);
+                rocfft_scoped_device set_dev(dev);
+                ncclComm_t           comm = nullptr;
+                result                    = ncclCommInitRank(&comm, ndevices, id, rank);
                 if(result != ncclSuccess)
-                {
-                    ncclGroupEnd();
-                    if(hipSetDevice(original_device) != hipSuccess)
-                        throw std::runtime_error("hipSetDevice failed restoring device "
-                                                 + std::to_string(original_device));
                     return {};
-                }
+                new_comm.pimpl->device_to_comm[dev] = comm;
                 ++rank;
             }
         }
-        catch(...)
-        {
-            ncclGroupEnd();
-            throw;
-        }
-        result = ncclGroupEnd();
 
-        if(hipSetDevice(original_device) != hipSuccess)
-            throw std::runtime_error("hipSetDevice failed restoring device "
-                                     + std::to_string(original_device));
-
-        if(result != ncclSuccess)
-        {
-            return {};
-        }
         comm_cache[devices] = std::move(new_comm);
     }
 
@@ -209,26 +168,26 @@ void rocfft_rccl_comm_t::reset_all()
 
 void* rocfft_rccl_comm_t::get_comm(int device_id) const
 {
-    // look up the NCCL rank for this device and index into
-    // comms by rank (not device_id) so this stays correct
-    // even if device ids are non-contiguous or reordered.
-    auto it = pimpl->device_to_rank.find(device_id);
-    if(it == pimpl->device_to_rank.end())
+    auto it = pimpl->device_to_comm.find(device_id);
+    if(it == pimpl->device_to_comm.end())
         return nullptr;
-    return &pimpl->comms[it->second];
+    return it->second;
 }
 
 int rocfft_rccl_comm_t::num_ranks() const
 {
-    return pimpl->nranks;
+    return static_cast<int>(pimpl->device_to_comm.size());
 }
 
 int rocfft_rccl_comm_t::get_rank(int device_id) const
 {
-    auto it = pimpl->device_to_rank.find(device_id);
-    if(it == pimpl->device_to_rank.end())
+    auto it = pimpl->device_to_comm.find(device_id);
+    if(it == pimpl->device_to_comm.end())
         return -1;
-    return it->second;
+    int rank = -1;
+    if(ncclCommUserRank(it->second, &rank) != ncclSuccess)
+        return -1;
+    return rank;
 }
 
 // RAII group wrapper
@@ -250,14 +209,13 @@ bool rocfft_rccl_comm_t::alltoall(const void* sendbuf,
                                   size_t      base_type_size,
                                   bool        is_complex)
 {
-    ncclComm_t* comm_ptr = static_cast<ncclComm_t*>(get_comm(device_id));
-    if(!comm_ptr)
+    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
+    if(!comm)
         return false;
 
     auto [dtype, multiplier] = get_nccl_type_info(base_type_size, is_complex);
 
-    ncclResult_t result
-        = ncclAllToAll(sendbuf, recvbuf, count * multiplier, dtype, *comm_ptr, stream);
+    ncclResult_t result = ncclAllToAll(sendbuf, recvbuf, count * multiplier, dtype, comm, stream);
 
     if(result != ncclSuccess)
     {
@@ -276,14 +234,13 @@ bool rocfft_rccl_comm_t::send(const void* sendbuf,
                               size_t      base_type_size,
                               bool        is_complex)
 {
-    ncclComm_t* comm_ptr = static_cast<ncclComm_t*>(get_comm(device_id));
-    if(!comm_ptr)
+    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
+    if(!comm)
         return false;
 
     auto [dtype, multiplier] = get_nccl_type_info(base_type_size, is_complex);
 
-    ncclResult_t result
-        = ncclSend(sendbuf, count * multiplier, dtype, peer_rank, *comm_ptr, stream);
+    ncclResult_t result = ncclSend(sendbuf, count * multiplier, dtype, peer_rank, comm, stream);
 
     if(result != ncclSuccess)
     {
@@ -302,14 +259,13 @@ bool rocfft_rccl_comm_t::recv(void*       recvbuf,
                               size_t      base_type_size,
                               bool        is_complex)
 {
-    ncclComm_t* comm_ptr = static_cast<ncclComm_t*>(get_comm(device_id));
-    if(!comm_ptr)
+    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
+    if(!comm)
         return false;
 
     auto [dtype, multiplier] = get_nccl_type_info(base_type_size, is_complex);
 
-    ncclResult_t result
-        = ncclRecv(recvbuf, count * multiplier, dtype, peer_rank, *comm_ptr, stream);
+    ncclResult_t result = ncclRecv(recvbuf, count * multiplier, dtype, peer_rank, comm, stream);
 
     if(result != ncclSuccess)
     {
