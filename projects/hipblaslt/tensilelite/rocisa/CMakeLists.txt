@@ -82,7 +82,8 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/composite.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/cycle.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/remove.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/insert_delay_alu.cpp")
+                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/insert_delay_alu.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/macro_inline.cpp")
 
     nanobind_add_module(_rocisa NOMINSIZE NB_SUPPRESS_WARNINGS
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/main.cpp"
