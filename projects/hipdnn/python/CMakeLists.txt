@@ -12,10 +12,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
-if(NOT COMMAND hipdnn_add_dependency)
-    include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Dependencies.cmake")
-endif()
-
 hipdnn_add_dependency(tsl-robin-map VERSION ${HIPDNN_TSL_ROBIN_MAP_VERSION})
 hipdnn_add_dependency(nanobind VERSION ${HIPDNN_NANOBIND_VERSION})
 
@@ -24,15 +20,6 @@ set(HIPDNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../frontend/include
 )
 
 find_package(hip REQUIRED)
-
-# When built as a subdirectory of hipDNN, these targets already exist.
-# When built standalone, find them from the staged/install prefix.
-if(NOT TARGET hipdnn_frontend)
-    find_package(hipdnn_frontend CONFIG REQUIRED)
-endif()
-if(NOT TARGET hipdnn_backend)
-    find_package(hipdnn_backend CONFIG REQUIRED)
-endif()
 
 nanobind_add_module(
     hipdnn_frontend_python
