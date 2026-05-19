@@ -1057,40 +1057,40 @@ def process_depthwise_forward(configs_prefix: str, instances_path: str) -> None:
 
         print(f"  -> {cpp_dir}  ({len(instances)} .cpp files)")
 
+fwd_configs = [
+        "nhwgc_fp32",
+        "nhwgc_fp16",
+        "nhwgc_bf16",
+        "ndhwgc_fp32",
+        "ndhwgc_fp16",
+        "ndhwgc_bf16",
+    ]
+
+bwd_weight_configs = [
+    "nhwgc_fp32",
+    "nhwgc_fp16",
+    "nhwgc_bf16",
+    "ndhwgc_fp32",
+    "ndhwgc_fp16",
+    "ndhwgc_bf16",
+    "nhwgc_fp32_streamk",
+    "nhwgc_fp16_streamk",
+    "nhwgc_bf16_streamk",
+    "ndhwgc_fp32_streamk",
+    "ndhwgc_fp16_streamk",
+    "ndhwgc_bf16_streamk",
+]
+
+bwd_data_configs = [
+    "nhwgc_fp32",
+    "nhwgc_fp16",
+    "nhwgc_bf16",
+    "ndhwgc_fp32",
+    "ndhwgc_fp16",
+    "ndhwgc_bf16",
+]
+
 if __name__ == "__main__":
-    fwd_configs = [
-        "nhwgc_fp32",
-        "nhwgc_fp16",
-        "nhwgc_bf16",
-        "ndhwgc_fp32",
-        "ndhwgc_fp16",
-        "ndhwgc_bf16",
-    ]
-
-    bwd_weight_configs = [
-        "nhwgc_fp32",
-        "nhwgc_fp16",
-        "nhwgc_bf16",
-        "ndhwgc_fp32",
-        "ndhwgc_fp16",
-        "ndhwgc_bf16",
-        "nhwgc_fp32_streamk",
-        "nhwgc_fp16_streamk",
-        "nhwgc_bf16_streamk",
-        "ndhwgc_fp32_streamk",
-        "ndhwgc_fp16_streamk",
-        "ndhwgc_bf16_streamk",
-    ]
-
-    bwd_data_configs = [
-        "nhwgc_fp32",
-        "nhwgc_fp16",
-        "nhwgc_bf16",
-        "ndhwgc_fp32",
-        "ndhwgc_fp16",
-        "ndhwgc_bf16",
-    ]
-
     parser = argparse.ArgumentParser(
         description="Generate grouped conv CK Tile instances."
     )
