@@ -12,6 +12,9 @@
 
 #include "ck/library/utility/convolution_parameter.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
 namespace ck {
 namespace test {
 
@@ -244,3 +247,4 @@ inline bool load_and_populate_test_cases(const std::vector<std::string>& csv_pat
 
 } // namespace test
 } // namespace ck
+#pragma clang diagnostic pop

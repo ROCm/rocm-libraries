@@ -27,6 +27,7 @@
 
 #include "gtest_common.hpp"
 #include "compare_helper.hpp"
+#include "gtest_desc_guard.hpp"
 #include "../dropout_util.hpp"
 #include "get_handle.hpp"
 
@@ -1758,6 +1759,11 @@ protected:
         miopen::DropoutDescriptor dropoutDesc{};
 
         size_t statesSizeInBytes = 0;
+        void* dropout_state_buf  = nullptr;
+
+        // See DestroyInternalRnnDropoutDesc — frees the descriptor allocated
+        // by RNNDescriptor's default constructor that the upcoming Set* will leak.
+        DestroyInternalRnnDropoutDesc(&rnnDesc);
 
         if(useDropout != 0)
         {
@@ -1765,7 +1771,6 @@ protected:
             unsigned long long dropout_seed = 0ULL;
             miopenDropoutGetStatesSize(&handle, &statesSizeInBytes);
 
-            void* dropout_state_buf;
             (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 
             miopenSetDropoutDescriptor(&dropoutDesc,
@@ -1879,6 +1884,17 @@ protected:
                    "iterations like this will also be skipped"
                 << std::endl;
             inference_dropout_issue_notified = true;
+        }
+
+        // Free the DropoutDescriptor that miopenSetRNNDescriptor just allocated.
+        // In the dropout path, the internal pointer aliases the user-owned stack
+        // `dropoutDesc` — freeing it would double-free.
+        if(useDropout == 0)
+            DestroyInternalRnnDropoutDesc(&rnnDesc);
+
+        if(useDropout != 0)
+        {
+            (void)hipFree(dropout_state_buf);
         }
     }
 

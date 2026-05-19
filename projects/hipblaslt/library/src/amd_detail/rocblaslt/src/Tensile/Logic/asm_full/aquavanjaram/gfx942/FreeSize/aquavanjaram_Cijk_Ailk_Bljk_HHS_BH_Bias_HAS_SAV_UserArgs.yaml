@@ -1,7 +1,7 @@
 - {MinimumRequiredVersion: 5.0.0}
 - aquavanjaram
 - gfx942
-- [Device 0050, Device 0051]
+- [Device 0049, Device 0050]
 - Activation: true
   ActivationComputeDataType: 0
   ActivationNoGuard: false

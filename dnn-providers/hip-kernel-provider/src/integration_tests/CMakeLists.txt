@@ -21,6 +21,8 @@ add_executable(
     Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
     Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
     Batchnorm/IntegrationGpuBatchnormFwdTrainingActiv.cpp
+    Batchnorm/IntegrationGpuBatchnormBackward.cpp
+    Batchnorm/IntegrationGpuBatchnormBackwardActivation.cpp
     RMSnorm/IntegrationGpuRMSnormForward.cpp
     Layernorm/IntegrationGpuLayernormForward.cpp
 )
@@ -53,9 +55,16 @@ if(ENABLE_ASM_SDPA_ENGINE)
                 "Skipping SDPA integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
     else()
         target_sources(hip_kernel_provider_integration_tests PRIVATE
+            asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
             asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
         )
+        # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
+        target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+            ${CMAKE_CURRENT_BINARY_DIR}/../engines/asm_sdpa_engine/generated
+        )
+        # Ensure codegen runs before compiling the integration tests
+        add_dependencies(hip_kernel_provider_integration_tests asm_kernel_codegen)
         target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE
             AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../engines/asm_sdpa_engine/asm/asm_kernels"
         )

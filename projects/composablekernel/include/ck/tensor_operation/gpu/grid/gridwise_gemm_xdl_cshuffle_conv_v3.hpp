@@ -16,6 +16,7 @@
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck {
@@ -183,7 +184,11 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
           lcm_AK1_BK1 <= 4) ||
          (is_same<ComputeTypeA, int8_t>::value && lcm_AK1_BK1 <= 8) ||
          ((is_same<ComputeTypeA, f8_t>::value || is_same<ComputeTypeA, bf8_t>::value) &&
+#if defined(__gfx125__)
+          lcm_AK1_BK1 < 128))
+#else
           lcm_AK1_BK1 < 32))
+#endif
             ? true
             : false;
     static constexpr auto is_scale_mfma = false;
@@ -536,6 +541,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                  NXdlPerWave,
                  KPack,
                  DirectLoad,
+                 false, // TransposeC
+                 false, // UseDataCachePrefetch
                  ALdsScalarLoadToVgpr,
                  BLdsScalarLoadToVgpr>())>;
 

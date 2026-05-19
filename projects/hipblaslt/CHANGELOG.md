@@ -2,16 +2,38 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.4.0
+
+### Added
+
+* Complex datatype support for gfx942 and gfx950.
+
 ## hipBLASLt 1.3.0
 
 ### Added
 
 * General Batched GEMM support.
+* `HIPBLASLT_CHECK_NUMERICS` environment variable: opt-in post-GEMM NaN
+  scanner for `hipblasLtMatmul` output (D matrix). Accepts numeric
+  (`1`, `2`) or word values (`info`, `warn`, `none`/`off`). Output goes
+  to the standard hipBLASLt log sink (or `stderr` if no log sink is
+  configured). Per-call cost is one scanner kernel launch only -- no
+  `hipStreamSynchronize`, no per-call alloc/free. A persistent 4-byte
+  device flag is allocated once in the handle constructor and drained
+  once at handle destruction with a single `hipDeviceSynchronize`;
+  a teardown log line reports the first matmul call_id at which NaN
+  was observed (or that none was, with a sampling caveat when the
+  scanner only ran on a subset of calls). Companion env vars allow
+  sampling (`HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY`) and a bisect window
+  (`HIPBLASLT_CHECK_NUMERICS_SCAN_FROM` / `_SCAN_UNTIL`). A C API
+  `hipblasLtCheckNumericsDrain(handle, &first_nan_call_id)` lets
+  frameworks drive a drain on demand.
 
 ### Changed
 
 * Replaced `install.sh` with an invoke-based task runner (`tasks.py`) to support cross-platform builds including Windows (ROCm 7.0+).
 * gtest and msgpack-cxx are now fetched automatically via CMake FetchContent if not found on the system.
+* Greatly improved MXFP4 GEMM performance when using HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT
 
 ## hipBLASLt 1.2.2 for ROCm 7.2.1
 

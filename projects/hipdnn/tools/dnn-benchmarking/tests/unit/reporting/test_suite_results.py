@@ -39,6 +39,7 @@ class TestBenchmarkStatsToDict:
             "max_ms": 1.5,
             "p95_ms": 1.4,
             "p99_ms": 1.49,
+            "total_ms": 0.0,
         }
 
 
