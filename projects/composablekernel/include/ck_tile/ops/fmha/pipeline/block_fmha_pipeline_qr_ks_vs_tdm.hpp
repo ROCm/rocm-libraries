@@ -228,13 +228,16 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
 
         // ---------------------------------------------------------------------
-        // TDM configs for Q / K (Step B2)
+        // TDM configs for Q / K / V
         // pad_enable + pad_amount + pad_interval are compile-time, sourced from
-        // the policy. workgroup_mask defaults to 0 (no cluster multicast in B2).
-        // V uses async_load_tile path (h hybrid revert), no TDM config needed.
+        // the policy. workgroup_mask defaults to 0 (no cluster multicast).
+        // V uses load_tile_tdm (single-box plain layout) — same TDM machinery
+        // as Q / K, with V dram dist switched to trivial tile-major and the
+        // V LDS read view kept plain row-major (matches the write view).
         // ---------------------------------------------------------------------
         TDMConfig tdm_config_q;
         TDMConfig tdm_config_k;
+        TDMConfig tdm_config_v;
         {
             constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
             tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
@@ -245,6 +248,11 @@ struct BlockFmhaPipelineQRKSVSTdm
             tdm_config_k.pad_enable              = LdsPaddingConfigK[I0];
             tdm_config_k.pad_config.pad_amount   = LdsPaddingConfigK[I1];
             tdm_config_k.pad_config.pad_interval = LdsPaddingConfigK[number<2>{}];
+
+            constexpr auto LdsPaddingConfigV     = Policy::template GetLdsPaddingConfigV<Problem>();
+            tdm_config_v.pad_enable              = LdsPaddingConfigV[I0];
+            tdm_config_v.pad_config.pad_amount   = LdsPaddingConfigV[I1];
+            tdm_config_v.pad_config.pad_interval = LdsPaddingConfigV[number<2>{}];
         }
 
         // Q tile in LDS
@@ -338,11 +346,18 @@ struct BlockFmhaPipelineQRKSVSTdm
                                          Policy::template GetSmemSizeK<Problem>() +
                                          Policy::template GetSmemSizeS<Problem>()),
             Policy::template MakeVLdsBlockDescriptor<Problem>());
+        // V LDS read view uses the same plain row-major desc as the write
+        // view (Xor=false). This matches the TDM box-major writer (single
+        // plain box per V tile) and lets the existing MakeVRegTileDistribution
+        // outer-dist + QuadInputEncoding suffix (TransposedDstrEncode) drive
+        // ds_load_tr_b128 with per-lane VOFFSETs that satisfy the WMMA B
+        // operand expected pattern. Verified end-to-end on ABC + multi-stride
+        // GQA + d-sweep (d ≤ 128).
         auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType*>(static_cast<char*>(smem_ptr) +
                                          Policy::template GetSmemSizeK<Problem>() +
                                          Policy::template GetSmemSizeS<Problem>()),
-            Policy::template MakeVLdsBlockDescriptor<Problem, true>());
+            Policy::template MakeVLdsBlockDescriptor<Problem>());
         auto v_lds_write_window =
             make_tile_window(v_lds_write_view,
                              Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(),
@@ -373,10 +388,9 @@ struct BlockFmhaPipelineQRKSVSTdm
         do
         {
             block_sync_lds();
-            // (h hybrid) V uses async_load_tile (B1 verified path); K uses TDM above.
-            // sync counters are independent: s_wait_tensorcnt for K (TDM),
-            // block_sync_lds_direct_load<0> for V (async).
-            async_load_tile(v_lds_write_window, v_dram_window); // prefetch load v tile
+            // V uses load_tile_tdm (single-box plain LDS write). Both K and V
+            // are on the tensorcnt counter (s_wait_tensorcnt_barrier for sync).
+            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window); // prefetch load v tile
 
             // move V tile windows
             move_tile_window(v_dram_window, {kN0, 0});
@@ -578,10 +592,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
-            // (h hybrid) wait for V async load to complete (V uses async path,
-            // not TDM, in this hybrid). K TDM is on the independent tensorcnt
-            // counter and is already drained earlier in this iteration.
-            block_sync_lds_direct_load<0>();
+            // V is on the tensorcnt counter (load_tile_tdm). Wait for V TDM
+            // write to fully commit before ds_load_tr reads.
+            s_wait_tensorcnt_barrier<0>();
 
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -760,13 +773,16 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
 
         // ---------------------------------------------------------------------
-        // TDM configs for Q / K (Step B2)
+        // TDM configs for Q / K / V
         // pad_enable + pad_amount + pad_interval are compile-time, sourced from
-        // the policy. workgroup_mask defaults to 0 (no cluster multicast in B2).
-        // V uses async_load_tile path (h hybrid revert), no TDM config needed.
+        // the policy. workgroup_mask defaults to 0 (no cluster multicast).
+        // V uses load_tile_tdm (single-box plain layout) — same TDM machinery
+        // as Q / K, with V dram dist switched to trivial tile-major and the
+        // V LDS read view kept plain row-major (matches the write view).
         // ---------------------------------------------------------------------
         TDMConfig tdm_config_q;
         TDMConfig tdm_config_k;
+        TDMConfig tdm_config_v;
         {
             constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
             tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
@@ -777,6 +793,11 @@ struct BlockFmhaPipelineQRKSVSTdm
             tdm_config_k.pad_enable              = LdsPaddingConfigK[I0];
             tdm_config_k.pad_config.pad_amount   = LdsPaddingConfigK[I1];
             tdm_config_k.pad_config.pad_interval = LdsPaddingConfigK[number<2>{}];
+
+            constexpr auto LdsPaddingConfigV     = Policy::template GetLdsPaddingConfigV<Problem>();
+            tdm_config_v.pad_enable              = LdsPaddingConfigV[I0];
+            tdm_config_v.pad_config.pad_amount   = LdsPaddingConfigV[I1];
+            tdm_config_v.pad_config.pad_interval = LdsPaddingConfigV[number<2>{}];
         }
 
         // Q tile in LDS

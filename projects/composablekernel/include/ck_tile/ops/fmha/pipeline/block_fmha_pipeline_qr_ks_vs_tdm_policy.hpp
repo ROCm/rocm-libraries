@@ -498,42 +498,37 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         return k_block_dstr;
     }
 
-    // Step B2 (h hybrid): V goes back to async_load + ds_load_tr (B1 path).
-    // V dram dist reverted to B1 5D (mirrors
-    // block_fmha_pipeline_qr_ks_vs_async_trload_policy.hpp:615-641).
-    // The B2 (λ-2) trivial tile-major attempt produced element-permutation
-    // garbage because TDM box-major write writes plain row-major LDS but
-    // ds_load_tr_b128 expects a thread-permuted layout (5D dist is the
-    // reverse-engineered match). TDM box-major + thread-permuted layout are
-    // physically incompatible under simple dist changes — see (h) decision
-    // doc swe-status-lambda-pivot.md.
+    // V dram dist for the TDM writer path. Trivial tile-major mirrors the
+    // K dist (MakeKDramTileDistribution above): warp-split V's seq dim
+    // (kKPerBlock=kN0) into warpNum chunks; each thread loads the full V
+    // hdim vector (kNPerBlock=kN1). IsWarpLevelParallelOnly=true matches K.
+    //
+    // The baseline B1 5D async-style scatter dist is incompatible with TDM
+    // box-major writes — the dist projection scatters thread bytes to LDS
+    // positions that ds_load_tr_b128 reads as garbage. The trivial tile-major
+    // form produces a plain row-major LDS layout that the read view + standard
+    // MakeVRegTileDistribution can consume correctly.
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto MakeVDramTileDistribution()
     {
         constexpr index_t kBlockSize = Problem::kBlockSize;
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kN0;
+        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1; // V hdim,    128
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kN0; // V seq dim, 64
+        constexpr index_t warpNum    = kBlockSize / get_warp_size();
 
-        constexpr index_t MaxVectorSize = 16 / sizeof(typename Problem::VDataType);
-
-        constexpr index_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
-        static_assert(0 < ElemPerThread);
-        constexpr index_t kMaxVecLoad = min(ElemPerThread, MaxVectorSize);
-
-        constexpr index_t NPerThread     = kMaxVecLoad;
-        constexpr index_t NThreads       = kNPerBlock / NPerThread;
-        constexpr index_t KThreadPerWarp = get_warp_size() / NThreads;
-        constexpr index_t NumWarps       = kBlockSize / get_warp_size();
-        constexpr index_t KPerThread     = kKPerBlock / (KThreadPerWarp * NumWarps);
+        static_assert(kKPerBlock % warpNum == 0,
+                      "V kN0 (seq) must be divisible by warpNum for trivial tile-major V dist");
 
         return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<1>,
-                                       tuple<sequence<KPerThread, NumWarps, KThreadPerWarp>,
-                                             sequence<NThreads, NPerThread>>,
-                                       tuple<sequence<1>, sequence<1, 2>>,
-                                       tuple<sequence<1>, sequence<2, 0>>,
-                                       sequence<1, 2>,
-                                       sequence<0, 1>>{});
+            tile_distribution_encoding<
+                sequence<>,                                    // R: empty
+                tuple<sequence<warpNum, kKPerBlock / warpNum>, // X[0]: V seq dim, warp split (8, 8)
+                      sequence<kNPerBlock>>, // X[1]: V hdim, single full vector per thread (128)
+                tuple<sequence<1>>,          // PsToRH: warp dim mapping
+                tuple<sequence<0>>,          // PsToRH_lid
+                sequence<1, 2>,              // YsToD outer
+                sequence<1, 0>>{},           // YsToD inner
+            bool_constant<true>{});          // IsWarpLevelParallelOnly
     }
 
     template <typename Problem>
@@ -781,11 +776,14 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigV()
     {
-        // Step B2 (λ-2) disambig: V padding temporarily DISABLED.
-        // Same rationale as GetLdsPaddingConfigK above (H4' verified swizzle/
-        // padding is not the root cause of B2 garbage; disabling here narrows
-        // the variable set during step-5 verify so only V dram dist + dual
-        // view changes are in flight). Re-enable after (λ-1)+(λ-2) ABC pass.
+        // V LDS padding currently DISABLED. Re-enabling the writer-side config
+        // alone misaligns the reader (V LDS read view is plain row-major and
+        // not padding-aware). A full re-enable requires a padding-aware
+        // MakeVLdsBlockDescriptor mirroring gemm pipeline's
+        // MakeBLdsBlockDescriptorForTrLoad
+        // (gemm_universal_pipeline_ag_bg_cr_policy.hpp:1297-1410). Padding is
+        // a bank-conflict-avoidance perf optimization, not a correctness
+        // requirement; deferred to a follow-up perf pass.
         return make_tuple(number<false>{}, number<0>{}, number<0>{});
     }
 };
