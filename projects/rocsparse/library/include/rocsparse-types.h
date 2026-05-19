@@ -288,7 +288,7 @@ typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
 /*! \ingroup types_module
  * \brief \p rocsparse_fsai_descr is a structure holding the rocSPARSE FSAI
  * (Factorized Sparse Approximate Inverse) descriptor data. It must be initialized using
- * the rocsparse_create_fsai_descr() routine. It should be destroyed at the
+ * the rocsparse_fsai_descr_create() routine. It should be destroyed at the
  * end using rocsparse_destroy_fsai_descr().
  */
 typedef struct _rocsparse_fsai_descr* rocsparse_fsai_descr;
