@@ -17,7 +17,7 @@ TEST(TestHipProgram, CompilesAndGetsKernel)
 {
     SKIP_IF_NO_DEVICES();
 
-    HipProgram program("vector_add.cpp", {"-O3"});
+    const HipProgram program("vector_add.cpp", {"-O3"});
     hipFunction_t kernel = program.getKernel("vector_add");
     EXPECT_NE(nullptr, kernel);
 }
@@ -44,7 +44,7 @@ TEST(TestHipKernel, LaunchesVectorAdd)
     ASSERT_EQ(hipSuccess, hipMemcpy(devB, hostB.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
     // Launch kernel
-    HipProgram program("vector_add.cpp", {"-O3"});
+    const HipProgram program("vector_add.cpp", {"-O3"});
     HipKernel kernel(program, "vector_add");
     kernel.setBlockSize(256);
     kernel.setGridSize(1);

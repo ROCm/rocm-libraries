@@ -429,15 +429,60 @@ class Reporter:
         self._print(f"Running benchmark on {total} file(s)...")
 
     def print_suite_header(
-        self, total_graphs: int, tarball_source: Optional[str] = None
+        self,
+        total_graphs: int,
+        tarball_source: Optional[str] = None,
+        extra_profiling_runs: int = 0,
     ) -> None:
-        """Print suite execution header."""
+        """Print suite execution header.
+
+        Includes a one-line machine summary (CPU + GPU + ROCm) collected
+        by ``metrics.machine_info`` so console output matches the JSON
+        metadata. Failures are silent — ``machine_info`` already routes
+        them through ``warn_once``.
+
+        When ``extra_profiling_runs > 0`` the user gets an upfront notice
+        of the cost of opt-in profiling so they can size their suite
+        accordingly.
+        """
         self._print_line("=")
         self._print(f"hipDNN Benchmark Suite: {total_graphs} graph(s)")
         self._print_line("=")
         if tarball_source is not None:
             self._print(f"Source:  {tarball_source} (extracted)")
+        self._print_machine_summary()
+        if extra_profiling_runs > 0:
+            self._print(
+                f"Profiling: {extra_profiling_runs} extra workload run(s) "
+                "per (graph, engine)"
+            )
         self._print("")
+
+    def _print_machine_summary(self) -> None:
+        """Print a compact machine identity line if any field is known."""
+        try:
+            from ..metrics.machine_info import collect_machine_info
+            from .suite_results import collect_environment_info
+        except ImportError:
+            return
+        try:
+            env = collect_environment_info()
+        except Exception:
+            return
+        cpu = env.get("cpu_model") or "unknown CPU"
+        gpu = env.get("gpu_model") or "unknown GPU"
+        rocm = env.get("rocm_version") or "unknown ROCm"
+        cu = env.get("gpu_compute_units")
+        hbm = env.get("gpu_hbm_gb")
+        gpu_extras = []
+        if cu is not None:
+            gpu_extras.append(f"{cu} CUs")
+        if hbm is not None:
+            gpu_extras.append(f"{hbm:g} GB HBM")
+        gpu_label = gpu + (f" ({', '.join(gpu_extras)})" if gpu_extras else "")
+        self._print(f"Host:    {cpu}")
+        self._print(f"GPU:     {gpu_label}")
+        self._print(f"ROCm:    {rocm}")
 
     def print_suite_graph_start(self, index: int, total: int, graph_name: str) -> None:
         """Print per-graph progress line at start (no trailing newline).
@@ -484,6 +529,42 @@ class Reporter:
         self._print(f"  Failed:       {metadata.fail_combinations}")
         self._print(f"  Skipped:      {metadata.skip_combinations}")
         self._print(f"  Errors:       {metadata.error_combinations}")
+
+        # Suite-end footprint — process RSS and VRAM allocated at the
+        # moment the metadata was built. These are flat across the suite
+        # (steady-state library + buffer footprint), which is exactly
+        # why they belong here and not on every per-engine result.
+        footprint_present = any(
+            v is not None
+            for v in (
+                metadata.host_rss_mb,
+                metadata.host_ram_available_mb,
+                metadata.vram_used_mb,
+            )
+        )
+        if footprint_present:
+            self._print("")
+            self._print("Suite Footprint:")
+            if metadata.host_rss_mb is not None:
+                avail = metadata.host_ram_available_mb
+                avail_str = (
+                    f"  (host avail {self._fmt_mib(avail)})"
+                    if avail is not None
+                    else ""
+                )
+                self._print(
+                    f"  Host RSS:     {self._fmt_mib(metadata.host_rss_mb)}{avail_str}"
+                )
+            if metadata.vram_used_mb is not None:
+                if metadata.vram_total_mb:
+                    self._print(
+                        f"  VRAM used:    {self._fmt_mib(metadata.vram_used_mb)}"
+                        f" / {self._fmt_mib(metadata.vram_total_mb)}"
+                    )
+                else:
+                    self._print(
+                        f"  VRAM used:    {self._fmt_mib(metadata.vram_used_mb)}"
+                    )
 
     def print_suite_footer(self) -> None:
         """Print suite footer."""
@@ -536,6 +617,7 @@ class Reporter:
 
             if pe.status == "success":
                 self._print_pe_stats(pe)
+                self._print_pe_metrics(pe)
                 if pe.correctness is not None:
                     self._print_pe_correctness(pe.correctness, suite_config)
             elif pe.status == "skipped":
@@ -561,6 +643,137 @@ class Reporter:
         elif pe.e2e_stats is not None:
             self._print("Kernel Timing: Not available")
             self._print("")
+
+    @staticmethod
+    def _fmt_mib(mib: float) -> str:
+        """Render a MiB quantity as MiB or GiB depending on magnitude."""
+        if mib >= 1024:
+            return f"{mib / 1024:.2f} GiB"
+        return f"{mib:.1f} MiB"
+
+    def _print_pe_metrics(self, pe: ProviderEngineResult) -> None:
+        """Render the always-on metrics block in verbose mode.
+
+        Suppresses the entire section when no metric fields are
+        populated (e.g. when the user passed ``--metrics-tier off``)
+        so the output stays compact.
+        """
+        any_present = any(
+            v is not None
+            for v in (
+                pe.workspace_bytes,
+                pe.analytical_flops,
+                pe.analytical_io_bytes,
+                pe.derived_tflops_per_s,
+                pe.derived_gbytes_per_s,
+                pe.cpu_user_time_per_iter_us,
+                pe.cpu_kernel_time_per_iter_us,
+                pe.vram_used_mb,
+            )
+        )
+        if not any_present:
+            return
+
+        # Pull the unrounded kernel mean used to derive throughput/BW so
+        # the printed numbers are reproducible from a single source of
+        # truth — without it, the user can't multiply the rounded mean
+        # back through the FLOPs total to recover the printed TFLOPs.
+        kernel_mean_ms = (
+            pe.gpu_kernel_stats.mean_ms if pe.gpu_kernel_stats is not None else None
+        )
+        derivation_suffix = (
+            f"  (kernel mean {kernel_mean_ms:.4f} ms)"
+            if kernel_mean_ms is not None
+            else ""
+        )
+
+        self._print("Derived Metrics:")
+        if pe.workspace_bytes is not None:
+            self._print(
+                f"  Workspace:            {self._fmt_mib(pe.workspace_bytes / 1024 / 1024)}"
+            )
+        if pe.analytical_flops is not None:
+            partial = " (partial)" if pe.analytical_flops_partial else ""
+            self._print(f"  Analytical FLOPs:     {pe.analytical_flops:,}{partial}")
+        if pe.derived_tflops_per_s is not None:
+            self._print(
+                f"  Throughput:           {pe.derived_tflops_per_s:.3f} TFLOP/s"
+                f"{derivation_suffix}"
+            )
+        if pe.analytical_io_bytes is not None:
+            self._print(
+                f"  Analytical I/O:       {self._fmt_mib(pe.analytical_io_bytes / 1024 / 1024)}"
+            )
+        if pe.derived_gbytes_per_s is not None:
+            self._print(
+                f"  Bandwidth:            {pe.derived_gbytes_per_s:.2f} GB/s"
+                f"{derivation_suffix}"
+            )
+        if (
+            pe.cpu_user_time_per_iter_us is not None
+            or pe.cpu_kernel_time_per_iter_us is not None
+        ):
+            user = (
+                pe.cpu_user_time_per_iter_us
+                if pe.cpu_user_time_per_iter_us is not None
+                else 0.0
+            )
+            kern = (
+                pe.cpu_kernel_time_per_iter_us
+                if pe.cpu_kernel_time_per_iter_us is not None
+                else 0.0
+            )
+            self._print(f"  CPU per iter (u/k):   {user:.1f} µs / {kern:.1f} µs")
+        if pe.vram_used_mb is not None:
+            self._print(f"  VRAM used:            {self._fmt_mib(pe.vram_used_mb)}")
+        self._print("")
+        self._print_profiling_block(pe)
+
+    def _print_profiling_block(self, pe: ProviderEngineResult) -> None:
+        """Render the opt-in profiling artefacts when extra_metrics is set.
+
+        Each line is conditional: a user who runs only --emit-trace
+        sees one line, only --perf sees a different one. Full nested
+        data is always in the JSON.
+        """
+        extra = pe.extra_metrics
+        if not extra:
+            return
+        any_present = any(isinstance(extra.get(k), dict) for k in ("trace", "perf"))
+        if not any_present:
+            return
+        self._print("Profiling:")
+
+        trace = extra.get("trace")
+        if isinstance(trace, dict):
+            path = trace.get("path") or trace.get("db_path")
+            fmt = trace.get("format", "?")
+            if path:
+                self._print(f"  Trace ({fmt}):         {path}")
+            elif "skipped" in trace:
+                self._print(f"  Trace ({fmt}):         skipped — {trace['skipped']}")
+
+        perf = extra.get("perf")
+        if isinstance(perf, dict):
+            if "skipped" in perf:
+                self._print(f"  CPU (perf):           skipped — {perf['skipped']}")
+            else:
+                bits = []
+                ipc = perf.get("ipc_user")
+                if isinstance(ipc, (int, float)):
+                    bits.append(f"IPC={ipc:.2f}")
+                cu = perf.get("cycles_user")
+                if isinstance(cu, (int, float)):
+                    bits.append(f"cycles_u={cu:,.0f}")
+                iu = perf.get("instructions_user")
+                if isinstance(iu, (int, float)):
+                    bits.append(f"instr_u={iu:,.0f}")
+                tc = perf.get("task_clock_ms")
+                if isinstance(tc, (int, float)):
+                    bits.append(f"task_clock={tc:.1f}ms")
+                if bits:
+                    self._print(f"  CPU (perf):           {'  '.join(bits)}")
+        self._print("")
 
     def _print_pe_correctness(
         self, correctness: CorrectnessResult, suite_config: SuiteConfig
