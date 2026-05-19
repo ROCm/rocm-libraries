@@ -254,9 +254,24 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         # fetch_test_configurations.py). Bundling the binary here makes it
         # arrive via miopenprovider_lib so the ctest entry registered above
         # can find it as `../hipdnn_integration_tests` from miopen_plugin/.
-        install(PROGRAMS $<TARGET_FILE:hipdnn_integration_tests>
-                DESTINATION ${CMAKE_INSTALL_BINDIR}
-        )
+        #
+        # Use install(IMPORTED_RUNTIME_ARTIFACTS) for the imported-target case
+        # (TheRock per-subproject build, where hipdnn_integration_tests comes
+        # in via find_package and TARGET_FILE → IMPORTED_LOCATION). The earlier
+        # install(PROGRAMS $<TARGET_FILE:imported>) form was silently a no-op
+        # in CI: the Linux miopenprovider_lib artifact was 222K with the
+        # binary apparently never copied, leaving the cross-provider ctest
+        # entry registered but unable to find ../hipdnn_integration_tests.
+        # For the superbuild case (target is non-imported, owned by the
+        # hipdnn_integration_tests subproject), skip — its own install rule
+        # already places the binary in bin/ and IMPORTED_RUNTIME_ARTIFACTS
+        # only handles imported targets.
+        get_target_property(_hit_imported hipdnn_integration_tests IMPORTED)
+        if(_hit_imported)
+            install(IMPORTED_RUNTIME_ARTIFACTS hipdnn_integration_tests
+                    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            )
+        endif()
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
     endif()
