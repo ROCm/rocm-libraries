@@ -2,8 +2,8 @@
 # SPDX-License-Identifier:  MIT
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "hipdnn-frontend"
@@ -38,11 +38,8 @@ dev = [
     "numpy",
 ]
 
-[tool.hatch.build]
-packages = ["hipdnn_frontend"]
-
-[tool.hatch.build.hooks.custom]
-path = "_hatch_build.py"
+[tool.setuptools.packages.find]
+include = ["hipdnn_frontend*"]
 
 [tool.cibuildwheel]
 skip = ["pp*", "cp36-*", "cp37-*"]

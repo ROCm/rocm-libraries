@@ -5,15 +5,19 @@ from __future__ import annotations
 
 import glob
 import os
+import shutil
 from pathlib import Path
 
-from hatchling.builders.hooks.plugin.interface import BuildHookInterface
+from setuptools import setup
+from setuptools.command.build_py import build_py
 
 
-class CustomBuildHook(BuildHookInterface):
-    """Copy a pre-built nanobind extension into the wheel."""
+class BuildPyWithExtension(build_py):
+    """Copy pre-built nanobind extension into the package before building."""
 
-    def initialize(self, version: str, build_data: dict) -> None:
+    def run(self):
+        super().run()
+
         ext_dir = os.environ.get("HIPDNN_EXT_DIR", "")
         if not ext_dir:
             return
@@ -25,6 +29,11 @@ class CustomBuildHook(BuildHookInterface):
                 f"No hipdnn_frontend_python extension found in {ext_path}"
             )
 
+        pkg_dir = Path(self.build_lib) / "hipdnn_frontend"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
         for ext in extensions:
-            name = Path(ext).name
-            build_data["force_include"][ext] = f"hipdnn_frontend/{name}"
+            shutil.copy2(ext, pkg_dir / Path(ext).name)
+
+
+setup(cmdclass={"build_py": BuildPyWithExtension})

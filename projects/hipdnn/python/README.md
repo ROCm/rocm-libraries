@@ -61,7 +61,7 @@ pip install --upgrade pip
 
 ### 2. Building and Installing the Python Bindings
 
-The Python bindings use hatchling to handle the build process automatically through pip:
+The Python bindings use setuptools to handle the build process automatically through pip:
 
 ```bash
 # Navigate to the hipdnn python directory
