@@ -222,9 +222,14 @@ def generate_set_directives(sgprs):
     return "\n".join(f".set sgpr{name}, {idx}" for name, idx in sgprs.items())
 
 
-def init_rocisa():
+def init_rocisa(target=None):
     """Initialize rocIsa singleton for the detected GPU target.
-
+    Args:
+        target: Optional gfx string (e.g. 'gfx950'). When None (default), we
+                use GFX_TARGET as detected from the host via
+                rocm_agent_enumerator. Passing an explicit target is required
+                only by tests whose assertions are tied to a specific ISA's
+                opcode mnemonics (mfma vs wmma).
     Always calls ri.init() because other module imports (e.g. KernelWriter)
     may have already initialized the singleton with a different target.
     """
@@ -232,9 +237,10 @@ def init_rocisa():
     from rocisa import rocIsa
     from Tensile.Common.Architectures import gfxToIsa
     ri = rocIsa.getInstance()
-    if not GFX_TARGET:
-        raise ValueError(f"Invalid GPU target: '{GFX_TARGET}'")
-    isa = gfxToIsa(GFX_TARGET)
+    gfx_target = target if target is not None else GFX_TARGET
+    if not gfx_target:
+        raise ValueError(f"Invalid GPU target: '{gfx_target}'")
+    isa = gfxToIsa(gfx_target)
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
     ri.init(isa, asmpath)
     ri.setKernel(isa, WAVESIZE)
