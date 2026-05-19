@@ -26,20 +26,6 @@ from ..common.exceptions import GraphLoadError
 from ..config.benchmark_config import MetricsConfig, SuiteConfig
 from ..execution.suite_runner import _run_single_provider_engine
 from ..graph.loader import GraphLoader
-from ..reporting.reporter import Reporter
-
-
-def _quiet_reporter() -> Reporter:
-    """Reporter that swallows every print so the inner run is silent."""
-
-    class _Sink:
-        def write(self, *_args, **_kwargs):
-            return 0
-
-        def flush(self):
-            return None
-
-    return Reporter(output=_Sink())  # type: ignore[arg-type]
 
 
 def run_internal_profiling(args: argparse.Namespace) -> int:
@@ -53,8 +39,6 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-
-    reporter = _quiet_reporter()
 
     try:
         import hipdnn_frontend as hipdnn
@@ -128,5 +112,4 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
     # Quiet success — the profiler captures everything it needs from
     # the run itself. Avoid emitting anything on stdout so trace-format
     # consumers don't accidentally treat our text as part of their data.
-    _ = reporter  # kept for symmetry; orchestrator may want logging later
     return 0
