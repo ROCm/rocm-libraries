@@ -49,7 +49,7 @@ jobs:
           # Load the map and look up the rtd_slug by rtd_alias
           project_slug=$(jq -r --arg alias "$project_alias" \
             '.projects[] | select(.rtd_alias == $alias) | .rtd_slug' \
-            .github/project-map.json)
+            .github/docs-config.json)
 
           echo "project_slug=$project_slug" >> $GITHUB_OUTPUT
 

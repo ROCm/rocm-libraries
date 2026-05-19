@@ -745,7 +745,7 @@ class TestEngineFlagModeRejection:
         assert result == 1
 
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    @patch("dnn_benchmarking.cli.pytorch_runner.run_pytorch_benchmark")
+    @patch("dnn_benchmarking.cli.pytorch_runner_cli.run_pytorch_benchmark")
     def test_single_engine_with_pytorch_backend_accepted(
         self, mock_run_pytorch: MagicMock, mock_gpu: MagicMock
     ) -> None:

@@ -237,7 +237,8 @@ struct TypedModifier : public Modifier {
     }
 
    protected:
-    explicit TypedModifier() : Modifier(Derived::Type) {}
+    explicit TypedModifier()  // NOLINT(bugprone-crtp-constructor-accessibility)
+        : Modifier(Derived::Type) {}
 };
 
 struct DSModifiers : public TypedModifier<DSModifiers> {
@@ -735,17 +736,7 @@ struct SWaitAluData : public TypedModifier<SWaitAluData> {
         uint16_t va_sdst : 3;   // Bits 11-9
         uint16_t va_vdst : 4;   // Bits 15-12
 
-        HwValue& operator=(HwValue const& other) {
-            sa_sdst = other.sa_sdst;
-            va_vcc = other.va_vcc;
-            vm_vsrc = other.vm_vsrc;
-            reserved = other.reserved;
-            hold_cnt = other.hold_cnt;
-            va_ssrc = other.va_ssrc;
-            va_sdst = other.va_sdst;
-            va_vdst = other.va_vdst;
-            return *this;
-        }
+        HwValue& operator=(HwValue const& other) = default;
     };
 
     // Field enumeration

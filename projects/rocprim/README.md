@@ -145,14 +145,11 @@ ctest -R <regex>
 
 ### Using multiple GPUs concurrently for testing
 
-This feature requires using CMake 3.16+ for building and testing.
+This feature requires CMake 3.18+ to be used for building and testing. *(Prior versions of CMake don't
+support the RESOURCE_SPEC_FILE argument for CTest and versions prior to 3.16 don't support the RESOURCE_GROUPS
+property on tests. Both are needed to run tests concurrently on multiple GPUs.)*
 
-```note
-Prior versions of CMake can't assign IDs to tests when running in parallel. Assigning tests to distinct
-devices could only be done at the cost of extreme complexity.
-```
-
-Unit tests can make use of the
+Unit tests of rocPrim can make use of the
 [CTest resource allocation](https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation)
 feature, which you can use to distribute tests across multiple GPUs in an intelligent manner. This
 feature can accelerate testing when multiple GPUs of the same family are in a system. It can also test
@@ -167,26 +164,31 @@ arguments. Make sure that the `cmake` and `ctest` versions you invoke are suffic
 
 #### Auto resource specification generation
 
-You can independently call the utility script located in the repository using the following code:
+An executable named `generate_resource_spec` will be built when you run `cmake -DBUILD_TEST=ON`.
+It can be used to generate the resource spec file, which describes the GPU resources available on your system:
 
 ```shell
 # Go to rocPRIM build directory
 cd rocPRIM; cd build
 
-# Invoke directly or use CMake script mode via cmake -P
-../cmake/GenerateResourceSpec.cmake
+# Invoke the executable with a name for the output json file
+./generate_resource_spec resources.json
 
-# Assuming you have 2 compatible GPUs in the system
-ctest --resource-spec-file ./resources.json --parallel 2
+# Run tests in parallel with specified number of jobs
+ctest --resource-spec-file ./resources.json --parallel <number-of-jobs>
 ```
+
+It will launch up to the specified number of jobs to run tests in parallel, while honoring the available
+GPU resources defined by the resource spec file and their allocation defined by the `RESOURCE_GROUPS`
+property on the tests.
 
 #### Manual
 
 Assuming you have two GPUs from the gfx900 family and they are the first devices enumerated by the
-system, you can use `-D AMDGPU_TEST_TARGETS=gfx900` during configuration to specify that only
-one family will be tested. Leaving this var empty (default) results in targeting the default device in the
-system. To let CMake know there are two GPUs that should be targeted, you have to provide a `JSON`
-file to CTest via the `--resource-spec-file <path_to_file>` flag. For example:
+system, you can use `-D AMDGPU_TEST_TARGETS=gfx900` during configuration to specify that you want only
+one family to be tested. If you leave this var empty (default), all GPUs in the system
+are targeted. To specify that there are two GPUs that should be targeted, you must feed a JSON file,
+similar to the generated `resources.json` file, for example:
 
 ```json
 {
@@ -209,8 +211,12 @@ file to CTest via the `--resource-spec-file <path_to_file>` flag. For example:
 }
 ```
 
-Invoking CTest as `ctest --resource-spec-file <path_to_file> --parallel 2` allows two tests to run
-concurrently, distributed between the two GPUs.
+to CTest using the `--resource-spec-file` flag:
+
+```shell
+# Run tests on specified GPU family
+ctest --resource-spec-file <path-to-your-resources.json> --parallel <number-of-jobs>
+```
 
 ### Using custom seeds for the tests
 
