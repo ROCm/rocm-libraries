@@ -26,9 +26,9 @@ To build hipFFT and hipFFTW from source, follow these steps:
 
 #. Install the library build dependencies:
 
-   On AMD platforms, install :doc:`hipFFT <rocfft:index>`. To build from source,
-   hipFFT must be installed with the development headers.
-   These headers can be added by installing the ``rocfft-dev`` or ``rocfft-devel`` package. If hipFFT was built from
+   On AMD platforms, install :doc:`rocFFT <rocfft:index>`. To build hipFFT and hipFFTW from source,
+   rocFFT must be installed with the development headers.
+   These headers can be added by installing the ``rocfft-dev`` or ``rocfft-devel`` package. If rocFFT was built from
    source, then these headers are already included.
 
 #. Install the client build dependencies for the clients:
