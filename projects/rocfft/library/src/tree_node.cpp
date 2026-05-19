@@ -669,64 +669,55 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                                     size_t                                multiPlanIdx,
                                     const std::map<int, device_callback_t>&)
 {
+    const auto devices = rccl.get_devices();
+
     if(LOG_PLAN_ENABLED())
     {
         log_plan("CommRCCLAllToAll: count_per_rank=" + std::to_string(count_per_rank)
-                 + ", ndevices=" + std::to_string(locations.size()) + ", "
-                 + precision_name(precision) + " " + PrintArrayType(arrayType) + "\n");
+                 + ", ndevices=" + std::to_string(devices.size()) + ", " + precision_name(precision)
+                 + " " + PrintArrayType(arrayType) + "\n");
     }
 
-    // collect send and recv pointers per device.  sendBuffers[i] and
-    // recvBuffers[i] are distinct allocations, mirroring the MPI path.
-    std::vector<void*> send_ptrs(locations.size(), nullptr);
-    std::vector<void*> recv_ptrs(locations.size(), nullptr);
-    for(size_t i = 0; i < locations.size(); ++i)
+    // collect send and recv pointers per device, indexed by RCCL rank.
+    // sendBuffers[r] and recvBuffers[r] are distinct allocations on
+    // device devices[r], mirroring the MPI path.
+    std::vector<void*> send_ptrs(devices.size(), nullptr);
+    std::vector<void*> recv_ptrs(devices.size(), nullptr);
+    for(size_t r = 0; r < devices.size(); ++r)
     {
-        const auto& loc = locations[i];
-        if(loc.comm_rank == local_comm_rank)
-        {
-            rocfft_scoped_device dev(loc.device);
-            send_ptrs[i] = ptr_offset(sendBuffers[i].get(in_buffer, out_buffer, local_comm_rank),
-                                      sendOffsets[i],
-                                      precision,
-                                      arrayType);
-            recv_ptrs[i] = ptr_offset(recvBuffers[i].get(in_buffer, out_buffer, local_comm_rank),
-                                      recvOffsets[i],
-                                      precision,
-                                      arrayType);
-        }
+        rocfft_scoped_device dev(devices[r]);
+        send_ptrs[r] = ptr_offset(sendBuffers[r].get(in_buffer, out_buffer, local_comm_rank),
+                                  sendOffsets[r],
+                                  precision,
+                                  arrayType);
+        recv_ptrs[r] = ptr_offset(recvBuffers[r].get(in_buffer, out_buffer, local_comm_rank),
+                                  recvOffsets[r],
+                                  precision,
+                                  arrayType);
     }
 
     // RCCL collectives must be called from ALL devices simultaneously;
     // use ncclGroupStart/End to batch all calls together.
     //
     // Buffer layout (disjoint send/recv):
-    //   sendBuffers[d]:  slot[dst_rank] at offset dst_rank * count_per_rank
+    //   sendBuffers[r]:  slot[dst_rank] at offset dst_rank * count_per_rank
     //                    (populated by the pack step antecedents)
-    //   recvBuffers[d]:  slot[src_rank] at offset src_rank * count_per_rank
+    //   recvBuffers[r]:  slot[src_rank] at offset src_rank * count_per_rank
     //                    (populated by the collective; read by unpack step)
     {
         rocfft_rccl_group_t group; // ncclGroupStart called in constructor
 
-        size_t stream_idx = 0;
-        for(size_t i = 0; i < locations.size(); ++i)
+        for(size_t r = 0; r < devices.size(); ++r)
         {
-            const auto& loc = locations[i];
+            rocfft_scoped_device dev(devices[r]);
 
-            if(loc.comm_rank == local_comm_rank && send_ptrs[i] != nullptr)
-            {
-                rocfft_scoped_device dev(loc.device);
-
-                rccl.alltoall(send_ptrs[i],
-                              recv_ptrs[i],
-                              count_per_rank,
-                              loc.device,
-                              streams[stream_idx],
-                              precision,
-                              arrayType);
-
-                ++stream_idx;
-            }
+            rccl.alltoall(send_ptrs[r],
+                          recv_ptrs[r],
+                          count_per_rank,
+                          devices[r],
+                          streams[r],
+                          precision,
+                          arrayType);
         }
         // ncclGroupEnd called in destructor - this will actually launch the collective
     }
@@ -734,35 +725,31 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
 
 void CommRCCLAllToAll::Wait()
 {
-    // synchronize all streams, setting the correct device context
-    // for each (streams are in the same order as local locations)
-    size_t stream_idx = 0;
-    for(const auto& loc : locations)
+    // synchronize each stream on its corresponding device, in RCCL rank order
+    const auto devices = rccl.get_devices();
+    for(size_t r = 0; r < devices.size(); ++r)
     {
-        if(loc.comm_rank == local_comm_rank)
-        {
-            rocfft_scoped_device dev(loc.device);
-            if(streams[stream_idx] && hipStreamSynchronize(streams[stream_idx]) != hipSuccess)
-                throw std::runtime_error("hipStreamSynchronize failed for RCCL AllToAll on device "
-                                         + std::to_string(loc.device));
-            ++stream_idx;
-        }
+        rocfft_scoped_device dev(devices[r]);
+        if(streams[r] && hipStreamSynchronize(streams[r]) != hipSuccess)
+            throw std::runtime_error("hipStreamSynchronize failed for RCCL AllToAll on device "
+                                     + std::to_string(devices[r]));
     }
 }
 
 void CommRCCLAllToAll::Print(rocfft_ostream& os, const int indent) const
 {
     const std::string indentStr("    ", indent);
+    const auto        devices = rccl.get_devices();
 
     os << indentStr << "CommRCCLAllToAll " << precision_name(precision) << " "
        << PrintArrayType(arrayType) << ":\n";
     os << indentStr << "  count_per_rank: " << count_per_rank << "\n";
-    os << indentStr << "  num_ranks: " << locations.size() << "\n";
-    for(size_t i = 0; i < locations.size(); ++i)
+    os << indentStr << "  num_ranks: " << devices.size() << "\n";
+    for(size_t r = 0; r < devices.size(); ++r)
     {
-        os << indentStr << "  rank " << i << ": device=" << locations[i].device
-           << " sendBuf=" << PrintBufferPtrOffset(sendBuffers[i], sendOffsets[i])
-           << " recvBuf=" << PrintBufferPtrOffset(recvBuffers[i], recvOffsets[i]) << "\n";
+        os << indentStr << "  rank " << r << ": device=" << devices[r]
+           << " sendBuf=" << PrintBufferPtrOffset(sendBuffers[r], sendOffsets[r])
+           << " recvBuf=" << PrintBufferPtrOffset(recvBuffers[r], recvOffsets[r]) << "\n";
     }
     os << std::endl;
 }

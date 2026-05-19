@@ -194,6 +194,17 @@ int rocfft_rccl_comm_t::get_rank(int device_id) const
     return rank;
 }
 
+std::vector<int> rocfft_rccl_comm_t::get_devices() const
+{
+    // ranks are assigned in sorted device-id order in create(), so
+    // std::map's natural ordering already gives us devices in rank order.
+    std::vector<int> devices;
+    devices.reserve(pimpl->device_to_comm.size());
+    for(const auto& [dev, comm] : pimpl->device_to_comm)
+        devices.push_back(dev);
+    return devices;
+}
+
 // RAII group wrapper
 rocfft_rccl_group_t::rocfft_rccl_group_t()
 {
@@ -221,9 +232,8 @@ void rocfft_rccl_comm_t::alltoall(const void*       sendbuf,
     if(result != ncclSuccess)
     {
         log_trace(__func__, "ncclAllToAll failed", result);
-        throw rocfft_rccl_exception_t("ncclAllToAll failed on device "
-                                      + std::to_string(device_id) + ": "
-                                      + ncclGetErrorString(result));
+        throw rocfft_rccl_exception_t("ncclAllToAll failed on device " + std::to_string(device_id)
+                                      + ": " + ncclGetErrorString(result));
     }
 }
 

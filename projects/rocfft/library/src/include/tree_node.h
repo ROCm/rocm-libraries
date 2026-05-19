@@ -1222,35 +1222,35 @@ private:
 // RCCL-based all-to-all communication for multi-GPU transpose.
 struct CommRCCLAllToAll : public MultiPlanItem
 {
-    CommRCCLAllToAll(rocfft_rccl_comm_t&                   _rccl,
-                     int                                   local_comm_rank,
-                     rocfft_precision                      _precision,
-                     rocfft_array_type                     _arrayType,
-                     size_t                                _count_per_rank,
-                     const std::vector<rocfft_location_t>& _locations,
-                     const std::vector<BufferPtr>&         _sendBuffers,
-                     const std::vector<BufferPtr>&         _recvBuffers,
-                     const std::vector<size_t>&            _sendOffsets,
-                     const std::vector<size_t>&            _recvOffsets)
+    // sendBuffers / recvBuffers / sendOffsets / recvOffsets must all be
+    // indexed by RCCL rank.  rocfft_rccl_comm_t assigns ranks in sorted
+    // device-id order (this holds even for non-contiguous device sets
+    // such as {1, 3, 6}), so building the vectors in the same order as
+    // _rccl.get_devices(), or equivalently in ascending device-id order,
+    // satisfies the contract.
+    CommRCCLAllToAll(rocfft_rccl_comm_t&           _rccl,
+                     rocfft_precision              _precision,
+                     rocfft_array_type             _arrayType,
+                     size_t                        _count_per_rank,
+                     const std::vector<BufferPtr>& _sendBuffers,
+                     const std::vector<BufferPtr>& _recvBuffers,
+                     const std::vector<size_t>&    _sendOffsets,
+                     const std::vector<size_t>&    _recvOffsets)
         : rccl(_rccl)
         , precision(_precision)
         , arrayType(_arrayType)
         , count_per_rank(_count_per_rank)
-        , locations(_locations)
         , sendBuffers(_sendBuffers)
         , recvBuffers(_recvBuffers)
         , sendOffsets(_sendOffsets)
         , recvOffsets(_recvOffsets)
     {
-        // allocate stream for each participating device
-        for(const auto& loc : locations)
+        // allocate one stream per participating device, in RCCL rank order
+        for(int dev : rccl.get_devices())
         {
-            if(loc.comm_rank == local_comm_rank)
-            {
-                rocfft_scoped_device dev(loc.device);
-                streams.emplace_back();
-                streams.back().alloc();
-            }
+            rocfft_scoped_device scoped(dev);
+            streams.emplace_back();
+            streams.back().alloc();
         }
     }
 
@@ -1274,14 +1274,11 @@ struct CommRCCLAllToAll : public MultiPlanItem
         return false;
     }
 
+    // single-process RCCL: all participating devices belong to the local
+    // process, so the collective runs on local_comm_rank only.
     bool ExecutesOnRank(int comm_rank) const override
     {
-        for(const auto& loc : locations)
-        {
-            if(loc.comm_rank == comm_rank)
-                return true;
-        }
-        return false;
+        return comm_rank == local_comm_rank;
     }
 
 private:
@@ -1291,14 +1288,14 @@ private:
     const rocfft_array_type arrayType;
     const size_t            count_per_rank; // elements per rank (uniform)
 
-    // all participating devices and their per-device send/recv buffers
-    const std::vector<rocfft_location_t> locations;
-    const std::vector<BufferPtr>         sendBuffers;
-    const std::vector<BufferPtr>         recvBuffers;
-    const std::vector<size_t>            sendOffsets;
-    const std::vector<size_t>            recvOffsets;
+    // per-device send/recv buffers and offsets.  all four are indexed
+    // by RCCL rank to match the ordering returned by rccl.get_devices().
+    const std::vector<BufferPtr> sendBuffers;
+    const std::vector<BufferPtr> recvBuffers;
+    const std::vector<size_t>    sendOffsets;
+    const std::vector<size_t>    recvOffsets;
 
-    // streams for async execution
+    // one stream per device, also indexed by RCCL rank
     std::vector<hipStream_wrapper_t> streams;
 };
 

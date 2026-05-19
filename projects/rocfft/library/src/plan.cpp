@@ -2486,27 +2486,31 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         }
 
         // build the CommRCCLAllToAll item with distinct send and recv
-        // buffer lists
-        std::vector<rocfft_location_t> locations;
-        std::vector<BufferPtr>         sendBuffers;
-        std::vector<BufferPtr>         recvBuffers;
-        std::vector<size_t>            sendOffsets;
-        std::vector<size_t>            recvOffsets;
+        // buffer lists, indexed by RCCL rank.  RCCL ranks are assigned
+        // in sorted device-id order, so we first collect per-device
+        // buffers in a map and then flatten them to vectors.
+        std::map<int /*device*/, std::pair<BufferPtr, BufferPtr>> deviceBufs;
         for(size_t d = 0; d < ndevices; ++d)
         {
-            locations.push_back(inField.bricks[d].location);
-            sendBuffers.push_back(BufferPtr::temp(a2aSendBufs[d].data()));
-            recvBuffers.push_back(BufferPtr::temp(a2aRecvBufs[d].data()));
-            sendOffsets.push_back(0);
-            recvOffsets.push_back(0);
+            deviceBufs[inField.bricks[d].location.device]
+                = {BufferPtr::temp(a2aSendBufs[d].data()), BufferPtr::temp(a2aRecvBufs[d].data())};
         }
+        std::vector<BufferPtr> sendBuffers;
+        std::vector<BufferPtr> recvBuffers;
+        sendBuffers.reserve(ndevices);
+        recvBuffers.reserve(ndevices);
+        for(const auto& [dev, bufs] : deviceBufs)
+        {
+            sendBuffers.push_back(bufs.first);
+            recvBuffers.push_back(bufs.second);
+        }
+        const std::vector<size_t> sendOffsets(ndevices, 0);
+        const std::vector<size_t> recvOffsets(ndevices, 0);
 
         auto rcclAllToAll         = std::make_unique<CommRCCLAllToAll>(rccl,
-                                                               local_comm_rank,
                                                                precision,
                                                                desc.inArrayType,
                                                                uniform_count,
-                                                               locations,
                                                                sendBuffers,
                                                                recvBuffers,
                                                                sendOffsets,

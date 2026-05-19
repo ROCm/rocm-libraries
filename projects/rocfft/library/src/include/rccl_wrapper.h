@@ -82,8 +82,13 @@ public:
     // total number of ranks in this communicator
     int num_ranks() const;
 
-    // NCCL rank assigned to the given device, or -1 if not found
+    // NCCL rank assigned to the given device
     int get_rank(int device_id) const;
+
+    // device IDs in RCCL rank order (rank 0 first, ..., rank num_ranks()-1 last).
+    // useful for callers that need to iterate over the communicator's devices
+    // in a well-defined order matching the NCCL rank numbering.
+    std::vector<int> get_devices() const;
 
     // all-to-all with uniform counts.  count is in elements of the
     // logical rocFFT type described by (precision, array_type); the
