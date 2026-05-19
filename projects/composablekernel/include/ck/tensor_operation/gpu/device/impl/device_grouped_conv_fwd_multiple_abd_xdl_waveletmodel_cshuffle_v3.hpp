@@ -1773,25 +1773,6 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         return str.str();
     }
 
-#ifdef CK_EXPERIMENTAL_BUILDER
-    std::string GetInstanceString() const override
-    {
-        static_assert(ck_tile::reflect::HasInstanceTraits<DeviceOp>,
-                      "Specialization of instance_traits not found. Please check that a "
-                      "specialization exists in file "
-                      "ck_tile/builder/reflect/"
-                      "instance_traits_device_grouped_conv_fwd_multiple_abd_xdl_cshuffle_v3.hpp "
-                      "for the given template parameters.");
-        return ck_tile::reflect::instance_string<DeviceOp>();
-    }
-
-    std::unique_ptr<ck_tile::reflect::Description> describe() const override
-    {
-        return std::make_unique<ck_tile::reflect::conv::ConvDescription>(
-            ck_tile::reflect::describe<DeviceOp>());
-    }
-#endif
-
     size_t GetWorkSpaceSize(const BaseArgument* p_arg) const override
     {
         auto arg = dynamic_cast<const Argument*>(p_arg);

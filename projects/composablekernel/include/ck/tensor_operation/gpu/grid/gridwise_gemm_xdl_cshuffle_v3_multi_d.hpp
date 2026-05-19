@@ -969,7 +969,6 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             KPerBlock / (MfmaInst::GetKPerXdlops() / MfmaInst::GetK1PerXdlops());
         if constexpr(KPerThread % KPack != 0)
         {
-            static_assert(0);
             return false;
         }
 
