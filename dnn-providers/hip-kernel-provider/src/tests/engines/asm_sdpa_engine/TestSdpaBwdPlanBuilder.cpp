@@ -6,6 +6,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "GraphTest.hpp"
 #include "HipKernelHandle.hpp"
@@ -62,6 +63,8 @@ auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {

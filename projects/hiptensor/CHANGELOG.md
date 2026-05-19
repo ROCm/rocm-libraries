@@ -2,6 +2,12 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
+## Since last release ROCm 7.13
+
+### Added
+
+* Added support for new GPU target gfx1250.
+
 ## Since last release ROCm 7.12
 
 ### Added
@@ -11,13 +17,13 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
   * gfx11: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153.
   * gfx12: gfx1200, gfx1201.
 * Added unary element-wise operators to contraction, including the new `BilinearUnary` class, dedicated instances, samples, and tests.
-* Added Dockerfiles (prebuilt and full build) and documentation to streamline hipTensor build environment setup. 
+* Added Dockerfiles (prebuilt and full build) and documentation to streamline hipTensor build environment setup.
 * Added the `CREATE_TEST_APP_LOCAL_DEPLOY` CMake option to stage required ROCm DLLs on Windows, and updated the Windows build documentation accordingly.
 
 ### Changed
 * Replaced numeric UID-based actor-critic kernel lookup with platform-stable string-based kernel name comparison to enable cross-platform compatibility.
 * Adopted FNV-1a string hashing in place of `std::hash` to ensure plan cache files are portable across platforms.
-* Switched to ROCm-provided CMake install functions (`rocm_export_targets`) for consistency with other ROCm libraries. 
+* Switched to ROCm-provided CMake install functions (`rocm_export_targets`) for consistency with other ROCm libraries.
 * Adapted hipTensor to CK namespace changes for `host_tensor` functions.
 * Cleaned up `rtest` script formatting and removed invalid run commands from `rtest.xml`.
 
