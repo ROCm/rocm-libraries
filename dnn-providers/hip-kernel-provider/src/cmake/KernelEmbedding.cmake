@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# - This module is responsible for inling the kernels into a single source file,
+# - This module is responsible for inlining the kernels into a single source file,
 # from which kernels are retrieved when running any of them from HipProgram.
 # It defines a global property that contains a list of all kernel source files
 # from any of the available engines.
