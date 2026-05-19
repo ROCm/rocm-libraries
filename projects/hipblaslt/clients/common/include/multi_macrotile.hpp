@@ -29,7 +29,8 @@ std::vector<int64_t> computeOrigamiOptimizedSplitsWithHandle(
     hipDataType c_type, hipDataType d_type,
     hipblasComputeType_t compute_type,
     bool brute_force = false,
-    bool xcd_aware = false);
+    bool xcd_aware = false,
+    bool greedy = false);
 
 // ── Sub-problem descriptor ──────────────────────────────────────────────────
 
@@ -225,26 +226,71 @@ inline std::vector<GemmSubProblem> splitGemmProblem(
     // 18/20 = N-split (20 = brute-force)
     // 21 = 3-way M-split, 22 = 3-way N-split
     // 23 = XCD-aware M-split, 24 = XCD-aware N-split
-    bool is_m_split = (split_strategy == 17 || split_strategy == 19 || split_strategy == 21 || split_strategy == 23);
+    // 25 = Greedy biggest-MT M-split (single deterministic candidate)
+    // 26 = Greedy biggest-MT N-split (single deterministic candidate)
+    // 27 = Greedy auto: try both axes, pick the one with the smaller leftover
+    bool is_m_split = (split_strategy == 17 || split_strategy == 19
+                       || split_strategy == 21 || split_strategy == 23
+                       || split_strategy == 25);
     bool brute_force = (split_strategy == 19 || split_strategy == 20);
     bool three_way = (split_strategy == 21 || split_strategy == 22);
     bool xcd_aware = (split_strategy == 23 || split_strategy == 24);
+    bool greedy    = (split_strategy == 25 || split_strategy == 26 || split_strategy == 27);
+    bool greedy_auto = (split_strategy == 27);
 
     if (three_way && num_splits <= 0) num_splits = 3;
     else if (num_splits <= 0) num_splits = 2;
+    if (greedy) num_splits = 2; // greedy is always 2-way: big-MT piece + leftover
     num_splits = std::min(num_splits, 16);
 
     std::vector<int64_t> split_sizes;
     if (handle)
     {
-        int64_t dim   = is_m_split ? M : N;
-        int64_t other = is_m_split ? N : M;
-        int     mt    = is_m_split ? macrotile_m : macrotile_n;
+        if (greedy_auto)
+        {
+            // Try both axes; prefer the one with the smaller leftover (less
+            // work assigned to the slow tail kernel).  If only one axis
+            // produces a useful split, take it.  Tie-break: prefer M-split
+            // (it tends to produce better-balanced kernels for transB=N
+            // layouts based on the existing benchmark data).
+            std::vector<int64_t> m_split = computeOrigamiOptimizedSplitsWithHandle(
+                handle, M, num_splits, macrotile_m, N, K, /*is_m_split=*/true,
+                transA, transB, a_type, b_type, c_type, d_type, compute_type,
+                /*brute_force=*/false, /*xcd_aware=*/false, /*greedy=*/true);
+            std::vector<int64_t> n_split = computeOrigamiOptimizedSplitsWithHandle(
+                handle, N, num_splits, macrotile_n, M, K, /*is_m_split=*/false,
+                transA, transB, a_type, b_type, c_type, d_type, compute_type,
+                /*brute_force=*/false, /*xcd_aware=*/false, /*greedy=*/true);
 
-        split_sizes = computeOrigamiOptimizedSplitsWithHandle(
-            handle, dim, num_splits, mt, other, K, is_m_split,
-            transA, transB, a_type, b_type, c_type, d_type, compute_type,
-            brute_force, xcd_aware);
+            int64_t m_leftover = m_split.size() == 2 ? m_split[1] : INT64_MAX;
+            int64_t n_leftover = n_split.size() == 2 ? n_split[1] : INT64_MAX;
+
+            if (m_leftover == INT64_MAX && n_leftover == INT64_MAX)
+            {
+                split_sizes.clear();
+            }
+            else if (m_leftover <= n_leftover)
+            {
+                split_sizes = m_split;
+                is_m_split  = true;
+            }
+            else
+            {
+                split_sizes = n_split;
+                is_m_split  = false;
+            }
+        }
+        else
+        {
+            int64_t dim   = is_m_split ? M : N;
+            int64_t other = is_m_split ? N : M;
+            int     mt    = is_m_split ? macrotile_m : macrotile_n;
+
+            split_sizes = computeOrigamiOptimizedSplitsWithHandle(
+                handle, dim, num_splits, mt, other, K, is_m_split,
+                transA, transB, a_type, b_type, c_type, d_type, compute_type,
+                brute_force, xcd_aware, greedy);
+        }
     }
 
     if (split_sizes.empty())

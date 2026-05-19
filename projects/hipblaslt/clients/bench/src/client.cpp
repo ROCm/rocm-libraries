@@ -628,7 +628,10 @@ try
         "  17=Origami M-split (default), 18=Origami N-split\n"
         "  19=Brute-force M-split, 20=Brute-force N-split\n"
         "  21=3-way M-split, 22=3-way N-split\n"
-        "  23=XCD-aware M-split, 24=XCD-aware N-split")
+        "  23=XCD-aware M-split, 24=XCD-aware N-split\n"
+        "  25=Greedy biggest-MT M-split (granularity-1 + leftover)\n"
+        "  26=Greedy biggest-MT N-split (granularity-1 + leftover)\n"
+        "  27=Greedy biggest-MT auto-axis (picks M or N by smaller leftover)")
 
         ("num_splits",
         value<int32_t>(&arg.num_splits)->default_value(2),

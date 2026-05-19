@@ -4097,14 +4097,23 @@ void testing_matmul_with_bias(const Arguments& arg,
                         {
                             hipblaslt_cout << "\n=== L2 Cache Persistence Hints ===" << std::endl;
 
-                            // All M-split strategies (3, 17, 19, 21, 23): B is shared
-                            // All N-split strategies (4, 18, 20, 22, 24): A is shared
+                            // All M-split strategies (3, 17, 19, 21, 23, 25): B is shared
+                            // All N-split strategies (4, 18, 20, 22, 24, 26): A is shared
+                            // Strategy 27 (greedy auto): infer from sub[0]'s dims vs the
+                            // full problem — if m_size shrank → M-split; if n_size shrank → N-split.
                             bool correctness_is_m_split = (arg.split_strategy == 3
                                 || arg.split_strategy == 17 || arg.split_strategy == 19
-                                || arg.split_strategy == 21 || arg.split_strategy == 23);
+                                || arg.split_strategy == 21 || arg.split_strategy == 23
+                                || arg.split_strategy == 25);
                             bool correctness_is_n_split = (arg.split_strategy == 4
                                 || arg.split_strategy == 18 || arg.split_strategy == 20
-                                || arg.split_strategy == 22 || arg.split_strategy == 24);
+                                || arg.split_strategy == 22 || arg.split_strategy == 24
+                                || arg.split_strategy == 26);
+                            if (arg.split_strategy == 27 && subProblems.size() >= 2)
+                            {
+                                if (subProblems[0].m_size != M[0]) correctness_is_m_split = true;
+                                else if (subProblems[0].n_size != N[0]) correctness_is_n_split = true;
+                            }
 
                             void* shared_matrix_ptr = nullptr;
                             size_t shared_matrix_bytes = 0;
@@ -4520,10 +4529,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                 "MacroTile-Align", "Power-of-2", "CU-Balanced", "Performance", "Adaptive-Power-of-2",
                 "Unknown", "Unknown", "Unknown", "Unknown",
                 "Cache-Optimized-M", "Cache-Optimized-N",
-                "Origami-Optimized-M", "Origami-Optimized-N"
+                "Origami-Optimized-M", "Origami-Optimized-N",
+                "BruteForce-M", "BruteForce-N",
+                "3-way-M", "3-way-N",
+                "XCD-aware-M", "XCD-aware-N",
+                "Greedy-BiggestMT-M", "Greedy-BiggestMT-N", "Greedy-BiggestMT-Auto"
             };
 
-            const char* strategy_name = (actual_strategy <= 18) ? strategy_names[actual_strategy] : "Unknown";
+            const char* strategy_name = (actual_strategy >= 0 && actual_strategy <= 27)
+                                        ? strategy_names[actual_strategy] : "Unknown";
 
             hipblaslt_cout << "Multi-MacroTile: Using "
                           << strategy_name
@@ -4596,7 +4610,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_cout << "  Baseline origami_latency: " << std::fixed << std::setprecision(0) << bl_origami << " cycles" << std::endl;
 
                     // === MT-AWARE HEURISTIC CHECK ===
-                    bool is_m_split_actual = (actual_strategy == 17 || actual_strategy == 19 || actual_strategy == 21 || actual_strategy == 23);
+                    bool is_m_split_actual = (actual_strategy == 17 || actual_strategy == 19
+                                              || actual_strategy == 21 || actual_strategy == 23
+                                              || actual_strategy == 25);
+                    // Greedy-auto (27): infer axis from sub[0] dims
+                    if (actual_strategy == 27 && subProblems.size() >= 2)
+                        is_m_split_actual = (subProblems[0].m_size != M[0]);
                     if (!shouldEnableMultiMT_MTAware(bl_mt_m, bl_mt_n, transB, M[0], N[0], is_m_split_actual))
                     {
                         hipblaslt_cout << "  Heuristic: DISABLED (MT=" << bl_mt_m << "x" << bl_mt_n
@@ -4771,7 +4790,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                     if(arg.multi_mt_aware_wgm)
                     {
                         bool is_m_split = (arg.split_strategy == 17 || arg.split_strategy == 19
-                                           || arg.split_strategy == 21 || arg.split_strategy == 23);
+                                           || arg.split_strategy == 21 || arg.split_strategy == 23
+                                           || arg.split_strategy == 25);
+                        // Greedy-auto: infer axis from sub[0] dims
+                        if (arg.split_strategy == 27 && subProblems.size() >= 2)
+                            is_m_split = (subProblems[0].m_size != M[0]);
                         auto r = selectMultiMTAwareWgmTriple(
                             (int)sp,
                             sub.m_size, sub.n_size, sub.k_size,
@@ -4927,7 +4950,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             // computeOrigamiOptimizedSplitsWithHandle (dimension-aware heuristic +
             // Origami compute_total_latency scoring).  No sub-problem kernels are
             // executed before the timed loop.
-            if((actual_strategy >= 17 && actual_strategy <= 24) && subProblems.size() > 1)
+            if((actual_strategy >= 17 && actual_strategy <= 27) && subProblems.size() > 1)
             {
                 auto& candidates = getOrigamiCandidates();
                 if(!candidates.empty())
@@ -5008,7 +5031,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.l2_cache_hints && subProblems.size() > 1)
             {
                 bool timing_is_m_split = (actual_strategy == 17 || actual_strategy == 19
-                                       || actual_strategy == 21 || actual_strategy == 23);
+                                       || actual_strategy == 21 || actual_strategy == 23
+                                       || actual_strategy == 25);
+                // Greedy-auto: infer axis from sub[0] dims
+                if (actual_strategy == 27 && subProblems.size() >= 2)
+                    timing_is_m_split = (subProblems[0].m_size != M[0]);
                 void*  shared_ptr   = nullptr;
                 size_t shared_bytes = 0;
                 const char* shared_name = nullptr;

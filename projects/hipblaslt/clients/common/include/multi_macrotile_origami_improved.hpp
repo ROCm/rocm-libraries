@@ -556,6 +556,258 @@ inline std::vector<OrigamiCandidate> generate3WayCandidates(
     return unique;
 }
 
+// ── Greedy split strategy (S25/S26/S27) ─────────────────────────────────────
+//
+// Idea: pick the BIGGEST MacroTile available in the kernel set (e.g., MT256
+// on gfx950) and peel off the largest contiguous piece of the split axis
+// that is an exact multiple of that MacroTile.  That sub-problem then has
+// "granularity 1" along the split axis (zero tile padding waste, perfect
+// XCD alignment when the count is also divisible by NUM_XCDS).  The
+// leftover (`total_size mod biggest_MT`) becomes the second sub-problem
+// and is solved with whatever the default Origami / heuristic kernel is —
+// we don't try to optimize the small piece further.
+//
+// This is a single-candidate, deterministic, O(1) strategy: no empirical
+// search, no analytical scoring across many candidates, no extra GPU
+// trials.  It just queries the heuristic ONCE on a known-good aligned
+// probe to discover the "biggest" MT, then computes a single split.
+//
+// Returns {biggest_mt_m, biggest_mt_n} discovered from the heuristic's
+// solution name.  Falls back to (256, 256) (MI350X dominant) on any
+// failure.
+inline std::pair<size_t, size_t> queryBiggestMacroTile(
+    hipblasLtHandle_t handle, int64_t K,
+    hipblasOperation_t transA, hipblasOperation_t transB,
+    hipDataType a_type, hipDataType b_type,
+    hipDataType c_type, hipDataType d_type,
+    hipblasComputeType_t compute_type)
+{
+    // 8192 is large enough to land on the biggest available MT for all
+    // dtypes / layouts on gfx950, and is itself a multiple of 256 / 128 / 64
+    // so the heuristic isn't biased toward an off-multiple kernel.
+    int64_t probe_M = 8192;
+    int64_t probe_N = 8192;
+
+    int64_t A_rows = (transA == HIPBLAS_OP_N) ? probe_M : K;
+    int64_t A_cols = (transA == HIPBLAS_OP_N) ? K : probe_M;
+    int64_t B_rows = (transB == HIPBLAS_OP_N) ? K : probe_N;
+    int64_t B_cols = (transB == HIPBLAS_OP_N) ? probe_N : K;
+
+    hipblasLtMatrixLayout_t matA, matB, matC, matD;
+    hipblasLtMatrixLayoutCreate(&matA, a_type, A_rows, A_cols, A_rows);
+    hipblasLtMatrixLayoutCreate(&matB, b_type, B_rows, B_cols, B_rows);
+    hipblasLtMatrixLayoutCreate(&matC, c_type, probe_M, probe_N, probe_M);
+    hipblasLtMatrixLayoutCreate(&matD, d_type, probe_M, probe_N, probe_M);
+
+    hipblasLtMatmulDesc_t desc;
+    hipblasLtMatmulDescCreate(&desc, compute_type, HIP_R_32F);
+    hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t));
+    hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t));
+
+    hipblasLtMatmulPreference_t pref;
+    hipblasLtMatmulPreferenceCreate(&pref);
+
+    hipblasLtMatmulHeuristicResult_t heur;
+    int ret = 0;
+    hipblasLtMatmulAlgoGetHeuristic(handle, desc, matA, matB, matC, matD,
+                                    pref, 1, &heur, &ret);
+
+    size_t mt_m = 256, mt_n = 256;
+    if (ret > 0)
+    {
+        try {
+            std::string sol = hipblaslt_ext::getSolutionNameFromAlgo(handle, heur.algo);
+            size_t mt_k;
+            parseMacroTileFromName(sol, mt_m, mt_n, mt_k);
+        } catch (...) {}
+    }
+
+    hipblasLtMatmulPreferenceDestroy(pref);
+    hipblasLtMatmulDescDestroy(desc);
+    hipblasLtMatrixLayoutDestroy(matD);
+    hipblasLtMatrixLayoutDestroy(matC);
+    hipblasLtMatrixLayoutDestroy(matB);
+    hipblasLtMatrixLayoutDestroy(matA);
+
+    return {mt_m, mt_n};
+}
+
+// Probe the heuristic for a candidate sub-problem and return the
+// MacroTile component along the axis being checked.  Returns 0 on
+// failure.  This is used by the greedy split search to verify that a
+// candidate size actually maps to the biggest MT in the kernel set.
+inline size_t probeSubProblemMtAlongAxis(
+    hipblasLtHandle_t handle,
+    int64_t M_sub, int64_t N_sub, int64_t K,
+    bool check_m_axis,
+    hipblasOperation_t transA, hipblasOperation_t transB,
+    hipDataType a_type, hipDataType b_type,
+    hipDataType c_type, hipDataType d_type,
+    hipblasComputeType_t compute_type)
+{
+    int64_t A_rows = (transA == HIPBLAS_OP_N) ? M_sub : K;
+    int64_t A_cols = (transA == HIPBLAS_OP_N) ? K : M_sub;
+    int64_t B_rows = (transB == HIPBLAS_OP_N) ? K : N_sub;
+    int64_t B_cols = (transB == HIPBLAS_OP_N) ? N_sub : K;
+
+    hipblasLtMatrixLayout_t matA, matB, matC, matD;
+    hipblasLtMatrixLayoutCreate(&matA, a_type, A_rows, A_cols, A_rows);
+    hipblasLtMatrixLayoutCreate(&matB, b_type, B_rows, B_cols, B_rows);
+    hipblasLtMatrixLayoutCreate(&matC, c_type, M_sub, N_sub, M_sub);
+    hipblasLtMatrixLayoutCreate(&matD, d_type, M_sub, N_sub, M_sub);
+
+    hipblasLtMatmulDesc_t desc;
+    hipblasLtMatmulDescCreate(&desc, compute_type, HIP_R_32F);
+    hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t));
+    hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t));
+
+    hipblasLtMatmulPreference_t pref;
+    hipblasLtMatmulPreferenceCreate(&pref);
+
+    hipblasLtMatmulHeuristicResult_t heur;
+    int ret = 0;
+    hipblasLtMatmulAlgoGetHeuristic(handle, desc, matA, matB, matC, matD,
+                                    pref, 1, &heur, &ret);
+
+    size_t mt = 0;
+    if (ret > 0)
+    {
+        try {
+            std::string sol = hipblaslt_ext::getSolutionNameFromAlgo(handle, heur.algo);
+            size_t mt_m, mt_n, mt_k;
+            if (parseMacroTileFromName(sol, mt_m, mt_n, mt_k))
+                mt = check_m_axis ? mt_m : mt_n;
+        } catch (...) {}
+    }
+
+    hipblasLtMatmulPreferenceDestroy(pref);
+    hipblasLtMatmulDescDestroy(desc);
+    hipblasLtMatrixLayoutDestroy(matD);
+    hipblasLtMatrixLayoutDestroy(matC);
+    hipblasLtMatrixLayoutDestroy(matB);
+    hipblasLtMatrixLayoutDestroy(matA);
+
+    return mt;
+}
+
+// Greedy split builder.
+//
+// Goal: pick the largest contiguous piece `s_big` of the split-axis such that
+//   (a) s_big is an exact multiple of `biggest_mt` (granularity 1), AND
+//   (b) the heuristic actually picks `biggest_mt` for the (s_big, other_dim, K)
+//       sub-problem (so we get the wide kernel we asked for).
+// The leftover piece (`total_size - s_big`) becomes sub[1] and is solved
+// with whatever default kernel the heuristic picks.
+//
+// If total_size is already perfectly aligned AND the heuristic picks the
+// biggest MT for the full problem, no split is beneficial → returns {}.
+//
+// Probe budget: at most ~6 heuristic queries (cheap relative to the
+// micro-benchmark in S17/S18 which dispatches many GPU trials).
+inline std::vector<int64_t> computeGreedySplitWithHandle(
+    hipblasLtHandle_t handle,
+    int64_t total_size,
+    bool is_m_split,
+    int64_t other_dim,
+    int64_t K,
+    hipblasOperation_t transA, hipblasOperation_t transB,
+    hipDataType a_type, hipDataType b_type,
+    hipDataType c_type, hipDataType d_type,
+    hipblasComputeType_t compute_type)
+{
+    auto big = queryBiggestMacroTile(handle, K,
+                                     transA, transB,
+                                     a_type, b_type, c_type, d_type,
+                                     compute_type);
+    size_t biggest_mt = is_m_split ? big.first : big.second;
+    if (biggest_mt == 0) return {};
+    int64_t mt = (int64_t)biggest_mt;
+
+    // Probe the original problem first.  If the heuristic already picks the
+    // biggest MT along the split axis, splitting buys us nothing along that
+    // axis (the existing kernel is already what greedy would target).
+    int64_t M_full = is_m_split ? total_size : other_dim;
+    int64_t N_full = is_m_split ? other_dim : total_size;
+    size_t orig_mt = probeSubProblemMtAlongAxis(
+        handle, M_full, N_full, K, is_m_split,
+        transA, transB, a_type, b_type, c_type, d_type, compute_type);
+    if (orig_mt == biggest_mt)
+        return {};
+
+    // Build candidate "big piece" sizes, descending, all multiples of biggest_mt.
+    // Goal: pick the largest s_big such that the heuristic responds with
+    // biggest_mt for (s_big, other_dim, K).
+    std::vector<int64_t> candidates;
+
+    // First candidate: largest multiple of mt that is strictly less than total_size.
+    int64_t max_aligned = ((total_size - 1) / mt) * mt;
+    if (max_aligned > 0 && max_aligned < total_size)
+        candidates.push_back(max_aligned);
+
+    // Power-of-2 candidates (commonly trigger the biggest-MT kernels in the
+    // tuned set on gfx950): 32k, 16k, 8k, 4k, 2k.
+    for (int64_t p : {(int64_t)32768, (int64_t)16384, (int64_t)8192,
+                      (int64_t)4096,  (int64_t)2048})
+    {
+        if (p < total_size && p % mt == 0)
+            candidates.push_back(p);
+    }
+
+    // Dedup and sort descending.
+    std::sort(candidates.begin(), candidates.end(), std::greater<int64_t>());
+    candidates.erase(std::unique(candidates.begin(), candidates.end()),
+                     candidates.end());
+
+    // Minimum sane leftover.  Too-small leftovers (e.g., 256) hurt because
+    // the small sub-problem's kernel runs serially and has high overhead per
+    // output element.  Empirically (see 9216² regression with leftover=256
+    // dropping perf 41%), the leftover needs to be at least ~1024 elements
+    // along the split axis to amortize launch + per-kernel overhead.
+    const int64_t MIN_LEFTOVER = std::max((int64_t)1024, (int64_t)biggest_mt * 4);
+
+    for (int64_t s_big : candidates)
+    {
+        if (s_big <= 0 || s_big >= total_size) continue;
+        int64_t s_left = total_size - s_big;
+        if (s_left < MIN_LEFTOVER) continue;
+
+        int64_t M_sub = is_m_split ? s_big : other_dim;
+        int64_t N_sub = is_m_split ? other_dim : s_big;
+        size_t got_mt = probeSubProblemMtAlongAxis(
+            handle, M_sub, N_sub, K, is_m_split,
+            transA, transB, a_type, b_type, c_type, d_type, compute_type);
+
+        if (got_mt == biggest_mt)
+        {
+            hipblaslt_cout << "Greedy probe hit: " << (is_m_split ? "M" : "N")
+                          << "_sub=" << s_big << " gives MT" << got_mt
+                          << " (target=" << biggest_mt << "), leftover="
+                          << s_left << std::endl;
+            return {s_big, s_left};
+        }
+    }
+
+    // No candidate produced biggest_mt — fall back to "best-effort": use the
+    // largest aligned candidate even if the heuristic still picks a smaller
+    // MT for it.  This still gets exact granularity along the axis and tends
+    // to outperform the unsplit problem when the imbalance was severe.
+    if (!candidates.empty())
+    {
+        int64_t s_big  = candidates.front();
+        int64_t s_left = total_size - s_big;
+        if (s_left >= MIN_LEFTOVER)
+        {
+            hipblaslt_cout << "Greedy probe miss; using best-effort "
+                          << (is_m_split ? "M" : "N") << "_sub=" << s_big
+                          << " (heuristic still picks MT<" << biggest_mt
+                          << "), leftover=" << s_left << std::endl;
+            return {s_big, s_left};
+        }
+    }
+
+    return {};
+}
+
 // Generate XCD-aware candidates.
 // Targets sub-problem A-tile fitting in L2 per XCD (4 MB on MI355X).
 inline std::vector<OrigamiCandidate> generateXCDAwareCandidates(
@@ -618,7 +870,8 @@ inline std::vector<OrigamiCandidate> generateXCDAwareCandidates(
 }
 
 // Entry point called by splitGemmProblem.
-// Strategies: 17/18=Origami, 19/20=brute-force, 21/22=3-way, 23/24=XCD-aware
+// Strategies: 17/18=Origami, 19/20=brute-force, 21/22=3-way, 23/24=XCD-aware,
+//             25/26=greedy biggest-MT M/N split, 27=greedy auto axis pick
 inline std::vector<int64_t> computeOrigamiOptimizedSplitsWithHandle(
     hipblasLtHandle_t handle,
     int64_t total_size,
@@ -632,10 +885,50 @@ inline std::vector<int64_t> computeOrigamiOptimizedSplitsWithHandle(
     hipDataType c_type, hipDataType d_type,
     hipblasComputeType_t compute_type,
     bool brute_force,
-    bool xcd_aware)
+    bool xcd_aware,
+    bool greedy)
 {
     int64_t M = is_m_split ? total_size : other_dim;
     int64_t N = is_m_split ? other_dim : total_size;
+
+    // ── Greedy strategy (S25/S26): single deterministic split ──────────────
+    // Discovers the biggest available MacroTile via a heuristic probe, then
+    // peels off floor(total/biggest_MT) * biggest_MT for sub[0] (granularity 1)
+    // and leaves the leftover as sub[1] (default Origami solution). No
+    // candidate enumeration, no scoring, no benchmark loop is needed.
+    if (greedy)
+    {
+        auto split = computeGreedySplitWithHandle(
+            handle, total_size, is_m_split, other_dim, K,
+            transA, transB, a_type, b_type, c_type, d_type, compute_type);
+
+        // Push as a single OrigamiCandidate so the timing path's
+        // "Using Origami-analytical best split" diagnostic still has
+        // something meaningful to print.
+        std::vector<OrigamiCandidate> single;
+        if (!split.empty())
+        {
+            // Discover (mt_m, mt_n) again so we can report it in the label.
+            auto big = queryBiggestMacroTile(
+                handle, K, transA, transB,
+                a_type, b_type, c_type, d_type, compute_type);
+            size_t biggest_mt = is_m_split ? big.first : big.second;
+            std::string label = std::string("greedy-MT") + std::to_string(biggest_mt)
+                                + "[" + std::to_string(split[0]) + ","
+                                + std::to_string(split[1]) + "]";
+            single.push_back({split, label, 0.0});
+        }
+        getOrigamiCandidates() = single;
+
+        if (!split.empty())
+        {
+            hipblaslt_cout << "Greedy split: biggest-MT piece="
+                          << split[0] << ", leftover=" << split[1]
+                          << " (granularity-1 on " << (is_m_split ? "M" : "N")
+                          << "-axis sub[0])" << std::endl;
+        }
+        return split;
+    }
 
     if (!isMacroTilePreserved(handle, M, N, K, num_splits, is_m_split,
                                transA, transB, a_type, b_type, c_type, d_type, compute_type))
