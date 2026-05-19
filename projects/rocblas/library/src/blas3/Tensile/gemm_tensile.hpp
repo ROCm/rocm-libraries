@@ -179,11 +179,12 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
         auto       D_base = D_ptr + offset_d;
 
         // Calculate safe k_chunk_size to keep offsets within signed 32-bit
-        int64_t max_stride = std::max(int64_t(ld_a), int64_t(ld_b));
+        int64_t max_stride        = std::max(int64_t(ld_a), int64_t(ld_b));
         int64_t bytes_per_element = sizeof(Ti);
-        int64_t safe_k = (max_stride > 0 && max_stride * bytes_per_element > 0)
-                             ? std::max(int64_t(1), int64_t(2147483647) / (max_stride * bytes_per_element))
-                             : int64_t(k);
+        int64_t safe_k
+            = (max_stride > 0 && max_stride * bytes_per_element > 0)
+                  ? std::max(int64_t(1), int64_t(2147483647) / (max_stride * bytes_per_element))
+                  : int64_t(k);
         // Only chunk if needed (when k would overflow)
         // Ensure k_chunk >= 1 to avoid infinite loop when k=0
         int64_t k_chunk = (safe_k >= k) ? std::max(int64_t(k), int64_t(1)) : safe_k;
@@ -197,16 +198,15 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
 
             // Adjust A: advance k_base columns (transA=N) or k_base rows (transA=T)
             auto a_k_offset = (trans_a == rocblas_operation_none)
-                                  ? int64_t(k_base) * ld_a   // column-major: col offset
-                                  : k_base;                    // transposed: row offset
+                                  ? int64_t(k_base) * ld_a // column-major: col offset
+                                  : k_base; // transposed: row offset
             // Adjust B: advance k_base rows (transB=N) or k_base columns (transB=T)
             auto b_k_offset = (trans_b == rocblas_operation_none)
-                                  ? k_base                     // column-major: row offset
-                                  : int64_t(k_base) * ld_b;   // transposed: col offset
+                                  ? k_base // column-major: row offset
+                                  : int64_t(k_base) * ld_b; // transposed: col offset
 
             // First chunk uses original beta; subsequent use beta=1 to accumulate
             const Tc* chunk_beta = (k_base == 0) ? beta : &one_val;
-
 
             RocblasContractionProblem<Ti, To, Tc> problem{handle,
                                                           trans_a,
