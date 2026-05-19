@@ -616,11 +616,11 @@ struct {kernel_name}_Config {{
         # Create valid C++ namespace name
         ns_name = "ns_" + kernel_name.replace("-", "_")
 
-        # basic_v1 / basic_async_v1 inherit BaseGemmPipelineAGmemBGmemCRegV1
+        # compv1 / basic_v1 / basic_async_v1 inherit BaseGemmPipelineAGmemBGmemCRegV1
         # whose TailHandler takes (run_func, has_hot_loop) and invokes
         # run_func(bool_constant<...>) -- 1 lambda arg. Other pipelines pass
         # (run_func, has_hot_loop, tail_number) and invoke 2-arg run_func.
-        if tr.pipeline in ("basic_v1", "basic_async_v1"):
+        if tr.pipeline in ("compv1", "basic_v1", "basic_async_v1"):
             tail_handler_call = "BaseGemmPipeline::TailHandler(Run, has_hot_loop);"
             run_lambda_signature = "[&](const auto has_hot_loop_)"
         else:
@@ -697,7 +697,8 @@ struct {kernel_name}_Launcher {{
     using GemmPipelineProblem = GemmPipelineProblem<
         {a_dtype}, {b_dtype}, AccDataType, GemmShape,
         typename GroupedConvTraitsType::template {gemm_traits}<Config::NumWaveGroups>,
-        element_wise::PassThrough, element_wise::PassThrough, {c_dtype},
+        {a_dtype}, {b_dtype},
+        element_wise::PassThrough, element_wise::PassThrough,
         GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
         GroupedConvTraitsType::VectorSizeA, GroupedConvTraitsType::VectorSizeB>;
     
@@ -720,7 +721,8 @@ struct {kernel_name}_Launcher {{
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             {a_dtype}, {b_dtype}, AccDataType, GemmShape, GemmUniversalTraits,
             scheduler,
-            element_wise::PassThrough, element_wise::PassThrough, {c_dtype},
+            element_wise::PassThrough, element_wise::PassThrough,
+            {a_dtype}, {b_dtype},
             GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
             GroupedConvTraitsType::VectorSizeA, GroupedConvTraitsType::VectorSizeB>;
         
@@ -866,7 +868,8 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             {a_dtype}, {b_dtype}, AccDataType, GemmShape, GemmUniversalTraits,
             scheduler,
-            element_wise::PassThrough, element_wise::PassThrough, {c_dtype},
+            element_wise::PassThrough, element_wise::PassThrough,
+            {a_dtype}, {b_dtype},
             GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
             GroupedConvTraitsType::VectorSizeA, GroupedConvTraitsType::VectorSizeB>;
 
@@ -910,7 +913,8 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             {a_dtype}, {b_dtype}, AccDataType, GemmShape, GemmUniversalTraits,
             scheduler,
-            element_wise::PassThrough, element_wise::PassThrough, {c_dtype},
+            element_wise::PassThrough, element_wise::PassThrough,
+            {a_dtype}, {b_dtype},
             GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
             GroupedConvTraitsType::VectorSizeA, GroupedConvTraitsType::VectorSizeB>;
 
@@ -1044,7 +1048,8 @@ struct {kernel_name}_Launcher {{
     using GemmPipelineProblem = GemmPipelineProblem<
         OutDataType, InDataType, AccDataType, GemmShape,
         typename GroupedConvTraitsType::template GroupedConvImplicitGemmTraitsBwdWeight<Config::NumWaveGroups>,
-        element_wise::PassThrough, element_wise::PassThrough, WeiDataType,
+        OutDataType, InDataType,
+        element_wise::PassThrough, element_wise::PassThrough,
         GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
         GroupedConvTraitsType::VectorSizeA, GroupedConvTraitsType::VectorSizeB>;
 
@@ -1058,7 +1063,8 @@ struct {kernel_name}_Launcher {{
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             OutDataType, InDataType, AccDataType, GemmShape, GemmUniversalTraits,
             scheduler,
-            element_wise::PassThrough, element_wise::PassThrough, WeiDataType,
+            element_wise::PassThrough, element_wise::PassThrough,
+            OutDataType, InDataType,
             GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
             GroupedConvTraitsType::VectorSizeA, GroupedConvTraitsType::VectorSizeB>;
 
@@ -1155,7 +1161,8 @@ struct {kernel_name}_Launcher {{
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             OutDataType, InDataType, AccDataType, GemmShape, GemmUniversalTraits,
             scheduler,
-            element_wise::PassThrough, element_wise::PassThrough, WeiDataType,
+            element_wise::PassThrough, element_wise::PassThrough,
+            OutDataType, InDataType,
             GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
             GroupedConvTraitsType::VectorSizeA, GroupedConvTraitsType::VectorSizeB>;
 
@@ -1189,7 +1196,8 @@ struct {kernel_name}_Launcher {{
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             OutDataType, InDataType, AccDataType, GemmShape, GemmUniversalTraits,
             scheduler,
-            element_wise::PassThrough, element_wise::PassThrough, WeiDataType,
+            element_wise::PassThrough, element_wise::PassThrough,
+            OutDataType, InDataType,
             GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
             GroupedConvTraitsType::VectorSizeA, GroupedConvTraitsType::VectorSizeB>;
 
