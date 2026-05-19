@@ -19,8 +19,6 @@ set(HIPDNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../frontend/include
     CACHE PATH "Path to hipDNN frontend includes"
 )
 
-find_package(hip REQUIRED)
-
 nanobind_add_module(
     hipdnn_frontend_python
     src/module.cpp
