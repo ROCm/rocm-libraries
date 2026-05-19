@@ -676,9 +676,6 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                  + precision_name(precision) + " " + PrintArrayType(arrayType) + "\n");
     }
 
-    const size_t base_size  = real_type_size(precision);
-    const bool   is_complex = array_type_is_complex(arrayType);
-
     // collect send and recv pointers per device.  sendBuffers[i] and
     // recvBuffers[i] are distinct allocations, mirroring the MPI path.
     std::vector<void*> send_ptrs(locations.size(), nullptr);
@@ -725,8 +722,8 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                                              count_per_rank,
                                              loc.device,
                                              streams[stream_idx],
-                                             base_size,
-                                             is_complex);
+                                             precision,
+                                             arrayType);
 
                 if(!success)
                 {
@@ -801,9 +798,6 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
     if(transfers.empty())
         return;
 
-    const size_t base_size  = real_type_size(precision);
-    const bool   is_complex = array_type_is_complex(arrayType);
-
     // group all operations - ncclGroupStart called in constructor
     rocfft_rccl_group_t group;
 
@@ -826,8 +820,8 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                                     t.peer_rank,
                                     t.local_location.device,
                                     t.stream,
-                                    base_size,
-                                    is_complex);
+                                    precision,
+                                    arrayType);
             }
             else
             {
@@ -836,8 +830,8 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                                     t.peer_rank,
                                     t.local_location.device,
                                     t.stream,
-                                    base_size,
-                                    is_complex);
+                                    precision,
+                                    arrayType);
             }
 
             if(!success)

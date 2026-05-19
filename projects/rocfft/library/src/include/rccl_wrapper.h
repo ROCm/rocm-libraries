@@ -33,6 +33,7 @@
 #include <vector>
 
 #include <rccl/rccl.h>
+#include <rocfft/rocfft.h>
 
 // value-semantic handle to an RCCL communicator set for single-process
 // multi-GPU transfers.
@@ -74,35 +75,35 @@ public:
     // NCCL rank assigned to the given device, or -1 if not found
     int get_rank(int device_id) const;
 
-    // all-to-all with uniform counts.
-    // base_type_size is the size of one real component (2/4/8).
-    bool alltoall(const void* sendbuf,
-                  void*       recvbuf,
-                  size_t      count,
-                  int         device_id,
-                  hipStream_t stream,
-                  size_t      base_type_size,
-                  bool        is_complex);
+    // all-to-all with uniform counts.  count is in elements of the
+    // logical rocFFT type described by (precision, array_type); the
+    // wrapper internally maps this to the matching ncclDataType_t and
+    // adjusts the element count for complex/planar layouts.
+    bool alltoall(const void*       sendbuf,
+                  void*             recvbuf,
+                  size_t            count,
+                  int               device_id,
+                  hipStream_t       stream,
+                  rocfft_precision  precision,
+                  rocfft_array_type array_type);
 
-    // point-to-point send.
-    // base_type_size is the size of one real component (2/4/8).
-    bool send(const void* sendbuf,
-              size_t      count,
-              int         peer_rank,
-              int         device_id,
-              hipStream_t stream,
-              size_t      base_type_size,
-              bool        is_complex);
+    // point-to-point send
+    bool send(const void*       sendbuf,
+              size_t            count,
+              int               peer_rank,
+              int               device_id,
+              hipStream_t       stream,
+              rocfft_precision  precision,
+              rocfft_array_type array_type);
 
-    // point-to-point receive.
-    // base_type_size is the size of one real component (2/4/8).
-    bool recv(void*       recvbuf,
-              size_t      count,
-              int         peer_rank,
-              int         device_id,
-              hipStream_t stream,
-              size_t      base_type_size,
-              bool        is_complex);
+    // point-to-point receive
+    bool recv(void*             recvbuf,
+              size_t            count,
+              int               peer_rank,
+              int               device_id,
+              hipStream_t       stream,
+              rocfft_precision  precision,
+              rocfft_array_type array_type);
 
 private:
     struct Impl;

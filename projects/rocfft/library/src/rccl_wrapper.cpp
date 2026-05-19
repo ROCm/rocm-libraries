@@ -23,6 +23,8 @@
 #ifdef ROCFFT_RCCL_ENABLE
 
 #include "rccl_wrapper.h"
+#include "../../shared/array_predicate.h"
+#include "../../shared/precision_type.h"
 #include "../../shared/rocfft_hip.h"
 #include "logging.h"
 #include <map>
@@ -41,14 +43,15 @@ struct NcclTypeInfo
     size_t         count_multiplier; // 1 for real, 2 for complex
 };
 
-// map (base_type_size, is_complex) to the NCCL datatype and a count
-// multiplier.  base_type_size is the size of one real component
-// (2 for half, 4 for float, 8 for double).  complex data is
-// transferred as 2x the real component type.
-static NcclTypeInfo get_nccl_type_info(size_t base_type_size, bool is_complex)
+// map a rocFFT (precision, array_type) pair to the NCCL datatype and
+// the count multiplier needed to express one logical rocFFT element
+// in NCCL terms.  rocFFT half/float/double map to ncclFloat16/32/64;
+// complex layouts double the element count since NCCL has no native
+// complex datatype.
+static NcclTypeInfo get_nccl_type_info(rocfft_precision precision, rocfft_array_type array_type)
 {
     ncclDataType_t dtype;
-    switch(base_type_size)
+    switch(real_type_size(precision))
     {
     case 2:
         dtype = ncclFloat16;
@@ -64,10 +67,9 @@ static NcclTypeInfo get_nccl_type_info(size_t base_type_size, bool is_complex)
         // any other size indicates a bug in the caller.  there is
         // no safe fallback since the count_multiplier assumes a
         // floating-point element width.
-        throw std::runtime_error("unexpected base_type_size " + std::to_string(base_type_size)
-                                 + " in RCCL datatype mapping (expected 2, 4, or 8)");
+        throw std::runtime_error("unsupported rocfft_precision in RCCL datatype mapping");
     }
-    return {dtype, is_complex ? size_t{2} : size_t{1}};
+    return {dtype, array_type_is_complex(array_type) ? size_t{2} : size_t{1}};
 }
 
 // implementation details shared by all copies of a handle via shared_ptr
@@ -128,13 +130,11 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
         // generate unique id for this communicator group.
         // for single-node this stays local; for multi-node the root
         // rank would broadcast this via MPI_Bcast.
-        ncclUniqueId id;
-        ncclResult_t result = ncclGetUniqueId(&id);
+        ncclResult_t result = ncclGetUniqueId(&new_comm.pimpl->uniqueId);
         if(result != ncclSuccess)
         {
             return {};
         }
-        new_comm.pimpl->uniqueId = id;
 
         // init one communicator per device using ncclCommInitRank,
         // batched inside a group call for single-process efficiency.
@@ -146,7 +146,7 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
             {
                 rocfft_scoped_device set_dev(dev);
                 ncclComm_t           comm = nullptr;
-                result                    = ncclCommInitRank(&comm, ndevices, id, rank);
+                result = ncclCommInitRank(&comm, ndevices, new_comm.pimpl->uniqueId, rank);
                 if(result != ncclSuccess)
                     return {};
                 new_comm.pimpl->device_to_comm[dev] = comm;
@@ -170,7 +170,9 @@ void* rocfft_rccl_comm_t::get_comm(int device_id) const
 {
     auto it = pimpl->device_to_comm.find(device_id);
     if(it == pimpl->device_to_comm.end())
-        return nullptr;
+        throw std::invalid_argument("rocfft_rccl_comm_t::get_comm: device_id "
+                                    + std::to_string(device_id)
+                                    + " is not part of this communicator");
     return it->second;
 }
 
@@ -183,10 +185,12 @@ int rocfft_rccl_comm_t::get_rank(int device_id) const
 {
     auto it = pimpl->device_to_comm.find(device_id);
     if(it == pimpl->device_to_comm.end())
-        return -1;
+        throw std::invalid_argument("rocfft_rccl_comm_t::get_rank: device_id "
+                                    + std::to_string(device_id)
+                                    + " is not part of this communicator");
     int rank = -1;
     if(ncclCommUserRank(it->second, &rank) != ncclSuccess)
-        return -1;
+        throw std::runtime_error("rocfft_rccl_comm_t::get_rank: ncclCommUserRank failed");
     return rank;
 }
 
@@ -201,19 +205,19 @@ rocfft_rccl_group_t::~rocfft_rccl_group_t()
     ncclGroupEnd();
 }
 
-bool rocfft_rccl_comm_t::alltoall(const void* sendbuf,
-                                  void*       recvbuf,
-                                  size_t      count,
-                                  int         device_id,
-                                  hipStream_t stream,
-                                  size_t      base_type_size,
-                                  bool        is_complex)
+bool rocfft_rccl_comm_t::alltoall(const void*       sendbuf,
+                                  void*             recvbuf,
+                                  size_t            count,
+                                  int               device_id,
+                                  hipStream_t       stream,
+                                  rocfft_precision  precision,
+                                  rocfft_array_type array_type)
 {
     ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
     if(!comm)
         return false;
 
-    auto [dtype, multiplier] = get_nccl_type_info(base_type_size, is_complex);
+    auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
 
     ncclResult_t result = ncclAllToAll(sendbuf, recvbuf, count * multiplier, dtype, comm, stream);
 
@@ -226,19 +230,19 @@ bool rocfft_rccl_comm_t::alltoall(const void* sendbuf,
     return true;
 }
 
-bool rocfft_rccl_comm_t::send(const void* sendbuf,
-                              size_t      count,
-                              int         peer_rank,
-                              int         device_id,
-                              hipStream_t stream,
-                              size_t      base_type_size,
-                              bool        is_complex)
+bool rocfft_rccl_comm_t::send(const void*       sendbuf,
+                              size_t            count,
+                              int               peer_rank,
+                              int               device_id,
+                              hipStream_t       stream,
+                              rocfft_precision  precision,
+                              rocfft_array_type array_type)
 {
     ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
     if(!comm)
         return false;
 
-    auto [dtype, multiplier] = get_nccl_type_info(base_type_size, is_complex);
+    auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
 
     ncclResult_t result = ncclSend(sendbuf, count * multiplier, dtype, peer_rank, comm, stream);
 
@@ -251,19 +255,19 @@ bool rocfft_rccl_comm_t::send(const void* sendbuf,
     return true;
 }
 
-bool rocfft_rccl_comm_t::recv(void*       recvbuf,
-                              size_t      count,
-                              int         peer_rank,
-                              int         device_id,
-                              hipStream_t stream,
-                              size_t      base_type_size,
-                              bool        is_complex)
+bool rocfft_rccl_comm_t::recv(void*             recvbuf,
+                              size_t            count,
+                              int               peer_rank,
+                              int               device_id,
+                              hipStream_t       stream,
+                              rocfft_precision  precision,
+                              rocfft_array_type array_type)
 {
     ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
     if(!comm)
         return false;
 
-    auto [dtype, multiplier] = get_nccl_type_info(base_type_size, is_complex);
+    auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
 
     ncclResult_t result = ncclRecv(recvbuf, count * multiplier, dtype, peer_rank, comm, stream);
 
