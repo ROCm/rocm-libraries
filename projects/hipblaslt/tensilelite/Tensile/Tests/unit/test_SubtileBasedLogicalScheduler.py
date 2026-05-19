@@ -51,6 +51,7 @@ def makeTileInfo(tc, kernel):
 def _mock_dtype(num_bytes=2):
     mock = MagicMock()
     mock.numBytes.return_value = num_bytes
+    mock.numRegisters.return_value = num_bytes / 4
     return mock
 
 
@@ -83,6 +84,9 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "MatrixInstM": 16,
         "MatrixInstN": 16,
         "MatrixInstK": matrixInstK,
+        "MatrixInstB": 1,
+        "MIInputPerThreadA": matrixInstK // 4,
+        "MIInputPerThreadB": matrixInstK // 4,
         "MIWaveGroup": list(miWaveGroup),
         "WavefrontSize": 64,
         "SourceSwap": sourceSwap,
@@ -214,6 +218,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     from rocisa import rocIsa
     from rocisa.register import RegisterPool
     from rocisa.enum import RegisterType
+    from Tensile.Common.RegisterPool import allocTmpGpr
 
     ri = rocIsa.getInstance()
     if not ri.isInit():
@@ -233,7 +238,18 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     writer.sgprPool = RegisterPool(0, RegisterType.Sgpr, False)
     writer.states = SimpleNamespace(
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
+        unrollIdx=0,
+        laneSGPRCount=2,
     )
+    writer.allocTmpSgpr = lambda num, alignment=None, tag=None: allocTmpGpr(
+        writer.sgprPool, num, writer.states.regCaps["MaxSgpr"], alignment, tag, None)
+    writer.loopCounterName = lambda kernel, loopIdx: "LoopCounterL"
+    _label_counters = {}
+    def _getNameInc(base):
+        n = _label_counters.get(base, 0)
+        _label_counters[base] = n + 1
+        return f"{base}_{n}"
+    writer.labels = SimpleNamespace(getNameInc=_getNameInc)
     dTileInfo = makeTileInfo('D', kernel)
     dTileInfo.allocVgprTileRegisters_legacy(writer, kernel)
     writer.states.d = SimpleNamespace(tileInfo=dTileInfo)
@@ -2044,6 +2060,48 @@ class TestIntegration:
                 assert "NGLL" in asm
                 assert "NLL" in asm
 
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_tailloop_k_mask_256x256_fp4(self):
+        """Tail loop must emit per-lane K-mask (v_cmp_ge_i32 + v_cndmask_b32) after wait_lr."""
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+            asm = str(sched.emitTailLoop(writer, kernel))
+
+            # mask init (preamble): kReg = (Serial % WS) / dividerFortidInK
+            assert "v_and_b32" in asm or "v_lshrrev_b32" in asm, \
+                "expected mask-init arithmetic in tail preamble"
+
+            # mask body: per-group compare + cndmask -> 0
+            assert "v_cmp_ge_i32" in asm, \
+                "tail loop missing per-lane K compare (v_cmp_ge_i32)"
+            assert "v_cndmask_b32" in asm, \
+                "tail loop missing v_cndmask_b32 to zero A vgprs"
+            assert ", 0," in asm, \
+                "v_cndmask_b32 should zero (src1=0) the masked lanes"
+
+            # ordering: compare must come after a wait_lr (lgkmcnt(0)) and
+            # before the first v_mfma.
+            first_cmp   = asm.find("v_cmp_ge_i32")
+            first_mfma  = asm.find("v_mfma")
+            last_wait_before_cmp = asm.rfind("lgkmcnt(0)", 0, first_cmp)
+            assert first_cmp != -1 and first_mfma != -1
+            assert last_wait_before_cmp != -1, "expected lgkmcnt(0) before mask"
+            assert first_cmp < first_mfma, "mask must precede first MFMA"
         finally:
             sched.deallocVgprTiles(writer)
 

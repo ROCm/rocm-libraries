@@ -396,6 +396,40 @@ class SyncOp(BaseOp):
 
 
 @dataclass
+class MaskKInitOp(BaseOp):
+    """Compute the per-lane K-index vgpr once at tail-loop entry.
+
+    The emitter checks out a vgpr holding (Serial%WavefrontSize) /
+    (MatrixInstN*MatrixInstB) and reuses it for every MaskKOp in the body.
+    """
+    def __post_init__(self):
+        self.kind = 'mask_k_init'
+
+
+@dataclass
+class MaskKOp(BaseOp):
+    """Zero A (and MXSA if scaled) vgprs whose K-index >= remaining tail K,
+    for one subIterK group. Emits VCmpGEI32 against the tail loop counter
+    sgpr followed by VCndMaskB32 over the tile's vgprs.
+    """
+    subIterK: int = 0
+    vgpr_tile_map: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.kind = 'mask_k'
+
+    def __str__(self):
+        return f"mask_k(k={self.subIterK})"
+
+
+@dataclass
+class MaskKDoneOp(BaseOp):
+    """Release the vgpr allocated by MaskKInitOp. Emits no instructions."""
+    def __post_init__(self):
+        self.kind = 'mask_k_done'
+
+
+@dataclass
 class LRIncOp(BaseOp):
     """LDS buffer swap for local reads on a specific tensor."""
     tensor: str = ""
@@ -417,6 +451,37 @@ class GRIncOp(BaseOp):
 
     def __str__(self):
         return f"gr_inc({self.tensor})"
+
+
+@dataclass
+class TailSrdAdvanceOp(BaseOp):
+    """SRD-only advance (no LW swap) at tail entry, runtime-conditional on
+    K >= 2*DepthU. Emitted only on the NGLL path, where PRELOOP's MT1 GR
+    loaded data without an accompanying SRD advance, so the tail GR would
+    otherwise read one DU short of the partial-K data.
+    """
+    tensor: str = ""
+
+    def __post_init__(self):
+        self.kind = 'tail_srd_advance'
+
+    def __str__(self):
+        return f"tail_srd_advance({self.tensor})"
+
+
+@dataclass
+class TailLRIncOp(BaseOp):
+    """LR LDS buffer swap at tail entry, runtime-conditional on K < 2*DepthU.
+    Emitted only on the NLL-only path, where PRELOOP swapped LW but not LR,
+    leaving the LR pointer one buffer behind the tail GR's write target.
+    """
+    tensor: str = ""
+
+    def __post_init__(self):
+        self.kind = 'tail_lr_inc'
+
+    def __str__(self):
+        return f"tail_lr_inc({self.tensor})"
 
 
 @dataclass
@@ -2036,9 +2101,19 @@ class LogicalScheduler:
                      for pi in range(cfg.numPartitions)]
         
         preamble = []
-        # Some GRs/LRs Inc examples for all tensors.
-        preamble.extend(self._make_depops_all_tensors(GRIncOp))
-        preamble.extend(self._make_depops_all_tensors(LRIncOp))
+        # No unconditional GR_INC: mainloop's last iter (PGR=0) or PRELOOP
+        # (PGR=2) already handled the SRD advance + LW swap that the tail body
+        # would otherwise need. For PGR>=2 two opposite entry paths arrive
+        # here and need opposite fixups, dispatched at runtime on K vs 2*DU:
+        #   - NLL-only (K < 2*DU): PRELOOP swapped LW but not LR → TailLRIncOp
+        #     aligns LR with LW. No SRD advance needed.
+        #   - NGLL ran (K >= 2*DU): NGLL swapped LR (aligned with LW), but
+        #     PRELOOP's MT1 GR loaded data without advancing SRD afterwards
+        #     → TailSrdAdvanceOp bumps SRD by one DU. No LR swap needed.
+        # Each op emits its own runtime branch so only one body executes.
+        if cfg.pgr >= 2:
+            preamble.extend(self._make_depops_all_tensors(TailLRIncOp))
+            preamble.extend(self._make_depops_all_tensors(TailSrdAdvanceOp))
 
         # GRs entire MT at once for all tensors.
         all_tiles = {
@@ -2049,6 +2124,8 @@ class LogicalScheduler:
         # waitcount 0 + sync
         preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
         preamble.append(SyncOp())
+        # Per-lane K-index vgpr for the tail mask; reused by every MaskKOp.
+        preamble.append(MaskKInitOp())
 
         # Loop over partitions to re-use vgpr tile maps.
         all_partitions = []
@@ -2072,6 +2149,8 @@ class LogicalScheduler:
                     lr.vgpr_tile_map = copy.deepcopy(tile_maps[pi].get(tensor, []))
                     ops.append(lr)
                 ops.append(WaitLROp())
+                ops.append(MaskKOp(subIterK=k,
+                                   vgpr_tile_map=copy.deepcopy(tile_maps[pi])))
                 mfma_tileA = MFMATileRange(k, k + 1, *cur['A'])
                 mfma_tileB = MFMATileRange(k, k + 1, *cur['B'])
                 mfma = MFMAPlacement(subIterK=k, tileA=mfma_tileA, tileB=mfma_tileB)
@@ -2079,6 +2158,9 @@ class LogicalScheduler:
                 ops.append(mfma)
                 groups.append(self._to_emitted(ops))
             all_partitions.append(groups)
+
+        # Release the tail mask kReg vgpr (allocated by MaskKInitOp).
+        all_partitions[-1].append(self._to_emitted([MaskKDoneOp()]))
 
         self._tailloop_emitted = all_partitions
         return self._tailloop_emitted

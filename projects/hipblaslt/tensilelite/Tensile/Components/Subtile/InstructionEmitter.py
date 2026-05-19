@@ -20,9 +20,15 @@ from Tensile.Components.Subtile.SubtileScaleEmit import (
     globalReadDoScaleSubtile, globalReadScalePtrUpdates,
 )
 from rocisa.code import Module
-from rocisa.instruction import SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32, SCBranchSCC1
-from rocisa.container import vgpr, sgpr, DSModifiers
+from rocisa.instruction import (
+    SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32, SCmpLtU32, SCmpGeU32,
+    SCBranchSCC1, VAddU32, VCmpGEI32, VCndMaskB32,
+)
+from rocisa.container import vgpr, sgpr, DSModifiers, ContinuousRegister
 from rocisa.code import Label
+from rocisa.functions import (
+    vectorStaticRemainder, vectorStaticDivide, vectorStaticMultiply,
+)
 
 
 class SWaitCntEx(SWaitCnt):
@@ -77,16 +83,25 @@ class InstructionEmitter:
 
         # Dispatch table — unroll_iter is passed for mfma/lr
         self._dispatch = {
-            'mfma':     lambda em, ui: self.emit_mfma(em.source, ui),
-            'lr':       lambda em, ui: self.emit_lr(em.source, ui),
-            'gr':       lambda em, ui: self.emit_gr(em.source),
-            'wait_gr':  lambda em, ui: self.emit_wait_gr(em.source),
-            'wait_lr':  lambda em, ui: self.emit_wait_lr(),
-            'sync':     lambda em, ui: self.emit_sync(),
-            'lr_inc':   lambda em, ui: self.emit_lr_inc(em.source),
-            'gr_inc':   lambda em, ui: self.emit_gr_inc(em.source),
-            'skip':     lambda em, ui: self.emit_skip(em.source),
+            'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
+            'lr':           lambda em, ui: self.emit_lr(em.source, ui),
+            'gr':           lambda em, ui: self.emit_gr(em.source),
+            'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
+            'wait_lr':      lambda em, ui: self.emit_wait_lr(),
+            'sync':         lambda em, ui: self.emit_sync(),
+            'lr_inc':           lambda em, ui: self.emit_lr_inc(em.source),
+            'gr_inc':           lambda em, ui: self.emit_gr_inc(em.source),
+            'tail_srd_advance': lambda em, ui: self.emit_tail_srd_advance(em.source),
+            'tail_lr_inc':      lambda em, ui: self.emit_tail_lr_inc(em.source),
+            'skip':             lambda em, ui: self.emit_skip(em.source),
+            'mask_k_init':  lambda em, ui: self.emit_mask_k_init(),
+            'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
+            'mask_k_done':  lambda em, ui: self.emit_mask_k_done(),
         }
+
+        # Per-lane K-index vgpr for the tail-loop K mask. Set by emit_mask_k_init,
+        # consumed by emit_mask_k for every subIterK in the tail body.
+        self._tail_kReg = None
 
     def emit_mfma(self, placement, unroll_iter=0):
         """Emit MFMA instructions from MFMAPlacement."""
@@ -222,6 +237,44 @@ class InstructionEmitter:
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
+    def emit_tail_srd_advance(self, source):
+        """SRD-only advance for tail entry, gated by `K >= 2*DepthU`.
+
+        Runs only on the NGLL path where PRELOOP's MT1 GR loaded without an
+        accompanying SRD advance. NLL-only path (K < 2*DU) skips the body.
+        """
+        tensor = source.tensor
+        tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
+        two_du = 2 * self.kernel["DepthU"]
+        skipLabel = Label(self.writer.labels.getNameInc(f"TailSkipSrdAdv_{tc}"), "")
+        module = Module()
+        module.add(SCmpLtU32(src0=sgpr("SizesSum+0"), src1=two_du,
+                             comment=f"K < 2*DepthU? skip tail SRD advance for {tc}"))
+        module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
+                                comment="NLL-only path: SRD already in place"))
+        module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
+        module.add(skipLabel)
+        return list(module.flatitems())
+
+    def emit_tail_lr_inc(self, source):
+        """LR LDS buffer swap for tail entry, gated by `K < 2*DepthU`.
+
+        Runs only on the NLL-only path where PRELOOP swapped LW but not LR.
+        NGLL path (K >= 2*DU) skips the body — NGLL already swapped LR.
+        """
+        tensor = source.tensor
+        tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
+        two_du = 2 * self.kernel["DepthU"]
+        skipLabel = Label(self.writer.labels.getNameInc(f"TailSkipLrInc_{tc}"), "")
+        module = Module()
+        module.add(SCmpGeU32(src0=sgpr("SizesSum+0"), src1=two_du,
+                             comment=f"K >= 2*DepthU? skip tail LR swap for {tc}"))
+        module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
+                                comment="NGLL path: LR already aligned with LW"))
+        module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
+        module.add(skipLabel)
+        return list(module.flatitems())
+
     def emit_skip(self, source):
         """Emit skip guard: compare LoopCounterL and branch."""
         skipLabel = Label(f"SkipTo{source.target}", "")
@@ -232,6 +285,118 @@ class InstructionEmitter:
             SCBranchSCC1(labelName=skipLabel.getLabelName(),
                          comment=f"skip to {source.target}"),
         ]
+
+    def _mfma_K_constants(self):
+        """Constants used by both mask emitters.
+
+        Returns (numMIInUnroll, dividerFortidInK). Assumes K % numMIInUnroll == 0
+        so the tail boundary always lands between full per-lane K chunks — no
+        intra-MFMA-operand group split or intra-vgpr partial masking needed.
+        """
+        kernel = self.kernel
+        matrixInstT      = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+        numTileInInstA   = kernel["MatrixInstM"] // matrixInstT
+        numMIInUnroll    = kernel["MIInputPerThreadA"] // numTileInInstA
+        dividerFortidInK = kernel["MatrixInstN"] * kernel["MatrixInstB"]
+        return numMIInUnroll, dividerFortidInK
+
+    def emit_mask_k_init(self):
+        """Compute (Serial % WavefrontSize) / dividerFortidInK into self._tail_kReg.
+
+        Reused by every emit_mask_k call in the tail body. The vgpr is leaked;
+        the tail's vgpr pool is released by deallocVgprTiles when the body ends.
+        """
+        _, dividerFortidInK = self._mfma_K_constants()
+        writer = self.writer
+        module = Module()
+
+        self._tail_kReg = writer.vgprPool.checkOut(1, "tail_kReg")
+        tmpVgpr = writer.vgprPool.checkOut(2, "tail_kReg_tmp")
+        tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
+        dummy = writer.vgprPool.checkOut(1, "tail_kReg_dummy")
+        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+            module.add(vectorStaticRemainder(
+                dummy, self._tail_kReg, "Serial",
+                self.kernel["WavefrontSize"], tmpVgprRes, tmpSgprInfo))
+            module.add(vectorStaticDivide(
+                self._tail_kReg, self._tail_kReg,
+                dividerFortidInK, tmpVgprRes))
+        writer.vgprPool.checkIn(tmpVgpr)
+        writer.vgprPool.checkIn(dummy)
+        return list(module.flatitems())
+
+    def emit_mask_k(self, source):
+        """Per-lane K-mask for one subIterK. Assumes K % numMIInUnroll == 0.
+
+          laneK = _tail_kReg * numMIInUnroll + subIterK * MatrixInstK
+          mask  = (laneK >= s[LoopCounterL])
+        Then VCndMaskB32 -> 0 over every vgpr in each A/B tile (and the
+        MXSA/MXSB tiles when scaled).
+        """
+        assert self._tail_kReg is not None, \
+            "emit_mask_k_init must run before emit_mask_k"
+
+        writer = self.writer
+        kernel = self.kernel
+        subIterK = source.subIterK
+        matrixInstK = kernel["MatrixInstK"]
+
+        numMIInUnroll, _ = self._mfma_K_constants()
+
+        loopCounterName = writer.loopCounterName(kernel, writer.states.unrollIdx)
+        laneSGPRCount = writer.states.laneSGPRCount
+
+        module = Module()
+        workKVgpr = writer.vgprPool.checkOut(1, f"mask_k_work_k{subIterK}")
+        with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
+            maskSgpr = tmpSgprInfo.idx
+
+            module.add(vectorStaticMultiply(
+                vgpr(workKVgpr), vgpr(self._tail_kReg),
+                numMIInUnroll, tmpSgprInfo,
+                comment=f"laneK = tail_kReg * {numMIInUnroll}"))
+            kBaseConst = subIterK * matrixInstK
+            if kBaseConst:
+                module.add(VAddU32(
+                    dst=vgpr(workKVgpr), src0=vgpr(workKVgpr),
+                    src1=kBaseConst,
+                    comment=f"laneK += subIterK({subIterK}) * MatrixInstK"))
+
+            module.add(VCmpGEI32(
+                dst=sgpr(maskSgpr, laneSGPRCount),
+                src0=vgpr(workKVgpr), src1=sgpr(loopCounterName),
+                comment=f"mask: laneK >= rem (subIterK={subIterK})"))
+
+            def _unique_ids(key):
+                m = source.vgpr_tile_map.get(key, [{}])[0]
+                return sorted(set(m.values()))
+
+            def _mask_all(tile_vgprs, label):
+                for v in tile_vgprs:
+                    module.add(VCndMaskB32(
+                        dst=vgpr(v), src0=vgpr(v), src1=0,
+                        src2=sgpr(maskSgpr, laneSGPRCount),
+                        comment=f"zero {label} if laneK >= rem"))
+
+            for tid in _unique_ids('A'):
+                _mask_all(list(self.vgprTilesA[tid]), "A")
+            for tid in _unique_ids('B'):
+                _mask_all(list(self.vgprTilesB[tid]), "B")
+            if self.hasScale:
+                for tid in _unique_ids('SA'):
+                    _mask_all(list(self.vgprTilesSA[tid]), "MXSA")
+                for tid in _unique_ids('SB'):
+                    _mask_all(list(self.vgprTilesSB[tid]), "MXSB")
+
+        writer.vgprPool.checkIn(workKVgpr)
+        return list(module.flatitems())
+
+    def emit_mask_k_done(self):
+        """Release the tail-loop kReg vgpr allocated by emit_mask_k_init."""
+        if self._tail_kReg is not None:
+            self.writer.vgprPool.checkIn(self._tail_kReg)
+            self._tail_kReg = None
+        return []
 
     def populate(self, emitted, unroll_iter=0):
         """Walk emitted partitions and fill em.instructions."""
