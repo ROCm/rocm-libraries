@@ -12,7 +12,7 @@ The `CTest resource allocation feature <https://cmake.org/cmake/help/latest/manu
 
    CMake 3.18 or later is required.
 
-When rocThrust is built with :doc:`cmake -DBUILD_TEST=ON <../install/rocThrust-install-with-cmake>`, the ``generate_resource_spec`` binary file is created. 
+When rocThrust is built with :doc:`cmake -DBUILD_TEST=ON <../install/source-build>`, the ``generate_resource_spec`` binary file is created. 
 
 
 Use ``generate_resource_spec`` to create a resource specification file. The resource specification file is a JSON file that describes the GPU resources available on your system. For example:
@@ -28,4 +28,4 @@ To run tests in parallel, pass the resource specification file and the maximum n
     ctest --resource-spec-file PATH_TO_RESOURCE_SPECIFICATION_FILE --parallel MAXIMUM_NUMBER_OF_PARALLEL_TESTS
 
 
-To restrict tests to a single family of GPUs, use the ``AMDGPU_TEST_TARGETS`` option when :doc:`building rocThrust <../install/rocThrust-install-with-cmake>`.
+To restrict tests to a single family of GPUs, use the ``AMDGPU_TEST_TARGETS`` option when :doc:`building rocThrust <../install/source-build>`.
