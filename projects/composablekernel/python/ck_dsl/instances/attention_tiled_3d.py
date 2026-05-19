@@ -32,6 +32,7 @@ from ..core.ir import (
     BF16,
     F16,
     F32,
+    FP8E4M3,
     I32,
     I64,
     IRBuilder,
@@ -97,6 +98,15 @@ class UnifiedAttention3DTiledSpec:
     # VGPR allocation in exchange for higher occupancy. ``None`` keeps
     # the LLVM heuristic.
     waves_per_eu: Optional[int] = None
+    # FP8 K/V cache (mirrors UnifiedAttention2DTiledSpec.kv_storage_dtype).
+    # See that spec's docstring for the semantics.
+    kv_storage_dtype: Optional[str] = None
+
+    def __post_init__(self):
+        if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
+            raise ValueError(
+                f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
+            )
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -134,6 +144,7 @@ class UnifiedAttention3DTiledSpec:
             f"h{self.num_query_heads}kv{self.num_kv_heads}",
             f"seg{self.num_segments}",
             self.dtype,
+            f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
             "sinks" if self.use_sinks else "",
             f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",
@@ -152,19 +163,40 @@ def supports_tiled_3d(
     use_qq_bias: bool,
     use_fp8: bool,
     q_dtype,
+    kv_storage_dtype: Optional[str] = None,
 ) -> Tuple[bool, str]:
     if dtype not in ("fp16", "bf16"):
         return False, f"tiled 3D kernel currently supports fp16/bf16 (got {dtype!r})"
-    if head_size not in (128, 256):
+    if head_size not in (64, 128, 256):
         return (
             False,
-            f"tiled 3D kernel only supports head_size in {{128,256}} (got {head_size})",
+            f"tiled 3D kernel only supports head_size in {{64,128,256}} (got {head_size})",
         )
-    if block_size not in (16, 64):
+    if head_size % 32 != 0:
         return (
             False,
-            f"tiled 3D kernel only supports block_size in {{16,64}} (got {block_size})",
+            f"tiled 3D kernel requires head_size divisible by 32 (got {head_size})",
         )
+    if block_size not in (16, 32, 64):
+        return (
+            False,
+            f"tiled 3D kernel only supports block_size in {{16,32,64}} (got {block_size})",
+        )
+    # FP8 K/V cache: enabled via ``kv_storage_dtype="fp8e4m3"``. The
+    # ``use_fp8`` flag mirrors the upstream API; both must be set
+    # consistently.
+    if kv_storage_dtype is not None and kv_storage_dtype != "fp8e4m3":
+        return (
+            False,
+            f"tiled 3D kernel: unsupported kv_storage_dtype {kv_storage_dtype!r}",
+        )
+    if use_fp8 and kv_storage_dtype is None:
+        return (
+            False,
+            "tiled 3D kernel: use_fp8=True requires kv_storage_dtype='fp8e4m3'",
+        )
+    if q_dtype is not None and q_dtype not in ("fp16", "bf16"):
+        return False, f"tiled 3D kernel: unsupported q_dtype {q_dtype!r}"
     if num_queries_per_kv > 16 or num_queries_per_kv < 1:
         return (
             False,
@@ -172,9 +204,8 @@ def supports_tiled_3d(
         )
     if 16 % num_queries_per_kv != 0:
         return False, "tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16"
-    if use_fp8 or q_dtype is not None:
-        return False, "tiled 3D kernel does not implement FP8 path yet"
-    # ALiBi and QQ-bias are now supported by the tiled 3D kernel.
+    # ALiBi and QQ-bias are now supported by the tiled 3D kernel; FP8 K/V
+    # cache is gated above via kv_storage_dtype.
     return True, "supported"
 
 
@@ -204,6 +235,10 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    # FP8 K/V cache: see ``UnifiedAttention2DTiledSpec.kv_storage_dtype``.
+    KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
+    KV_BYTES = 1 if KV_FP8 else 2
+    kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
     QK_K_STEP = 32
     PV_K_STEP = 32 if T % 32 == 0 else 16
@@ -239,11 +274,15 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
         "query_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
     )
     key = b.param(
-        "key_cache_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "key_cache_ptr",
+        PtrType(kv_io_dtype, "global"),
+        noalias=True,
+        readonly=True,
+        align=16,
     )
     value = b.param(
         "value_cache_ptr",
-        PtrType(dtype, "global"),
+        PtrType(kv_io_dtype, "global"),
         noalias=True,
         readonly=True,
         align=16,
@@ -261,8 +300,8 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
         "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4
     )
     scale_p = b.param("scale", F32)
-    _k_scale = b.param("k_scale", F32)
-    _v_scale = b.param("v_scale", F32)
+    k_scale_p = b.param("k_scale", F32)
+    v_scale_p = b.param("v_scale", F32)
     softcap_p = b.param("softcap", F32)
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
@@ -479,9 +518,13 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
     assert (T * HD) % KV_HALVES_PER_CALL == 0
     kv_calls_per_tile = (T * HD) // KV_HALVES_PER_CALL
     bytes_per_call = KV_HALVES_PER_CALL * 2
-    kv_stride_blk_b = BS * NUM_KV * HD * 2
-    kv_stride_tok_b = NUM_KV * HD * 2
-    kv_stride_h_b = HD * 2
+    # Byte strides for paged KV cache. KV_BYTES is 2 for bf16/fp16, 1 for
+    # fp8e4m3. The FP8 sync loader path below dequantises and stores to
+    # LDS in the working dtype, so ``bytes_per_buf`` stays at the working
+    # dtype slab size.
+    kv_stride_blk_b = BS * NUM_KV * HD * KV_BYTES
+    kv_stride_tok_b = NUM_KV * HD * KV_BYTES
+    kv_stride_h_b = HD * KV_BYTES
     bytes_per_buf = T * HD * 2
 
     lane_half_base = b.mul(tid, b.const_i32(8))
@@ -498,7 +541,7 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
     paged_kv_desc = TensorDescriptor.naive(
         "paged_kv_bytes",
         lengths=[1 << 24, T, NUM_KV, HD],
-        strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, 2],
+        strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
         coord_names=("physical_block", "token", "kv_head", "dim"),
     ).transform(
         indirect("tile_idx", into="physical_block", table=block_tables, base=seq_base),
@@ -535,7 +578,62 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
             v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(value_rsrc, v_dst, voff, zero_soff, 4)
 
-    _issue_k_load(tile_start, b.const_i32(0))
+    # FP8 K/V cache: sync dequant loader. See attention_tiled_2d.py for the
+    # rationale. The FP8 path stores the working dtype (bf16/fp16) into LDS,
+    # so the rest of the kernel reads K/V_lds unchanged.
+    fp8_elems_per_chunk = 8
+    fp8_total_chunks = (T * HD) // fp8_elems_per_chunk
+    if KV_FP8:
+        assert fp8_total_chunks % THREADS == 0, (
+            f"fp8 loader: total chunks {fp8_total_chunks} must be divisible by "
+            f"THREADS={THREADS} (T={T}, HD={HD})"
+        )
+    fp8_chunks_per_thread = fp8_total_chunks // THREADS
+
+    def _issue_fp8_dequant_loads(
+        kv_tile_idx: Value, buf_idx: Value, lds_token: str
+    ) -> None:
+        scale = k_scale_p if lds_token == "K" else v_scale_p
+        lds = K_lds if lds_token == "K" else V_lds
+        src = key if lds_token == "K" else value
+        for call in range(fp8_chunks_per_thread):
+            chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
+            row = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
+            col = b.mul(
+                b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
+                b.const_i32(fp8_elems_per_chunk),
+            )
+            linear_half_first = b.add(b.mul(row, b.const_i32(HD)), col)
+            voff, _ = paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear_half_first,
+                kv_head=kv_head_idx,
+            )
+            fp8_vec = b.global_load_vN(
+                src, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
+            )
+            dequanted = []
+            for i in range(fp8_elems_per_chunk):
+                fp8_v = b.vec_extract(fp8_vec, i)
+                f32_v = b.fmul(b.cvt_fp8_to_f32(fp8_v), scale)
+                dequanted.append(b.cast_f32_to(f32_v, dtype))
+            packed = b.vec_pack(dequanted, dtype)
+            b.smem_store_vN(lds, [buf_idx, row, col], packed, fp8_elems_per_chunk)
+
+    def _issue_k(tile_idx: Value, buf_idx: Value) -> None:
+        if KV_FP8:
+            _issue_fp8_dequant_loads(tile_idx, buf_idx, "K")
+        else:
+            _issue_k_load(tile_idx, buf_idx)
+
+    def _issue_v(tile_idx: Value, buf_idx: Value) -> None:
+        if KV_FP8:
+            _issue_fp8_dequant_loads(tile_idx, buf_idx, "V")
+        else:
+            _issue_v_load(tile_idx, buf_idx)
+
+    _issue_k(tile_start, b.const_i32(0))
 
     cur_buf_init = b.const_i32(0)
     iter_args.append(("cur_buf", cur_buf_init))
@@ -573,8 +671,8 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
                 acc_v = _mfma_16x16x32(b, dtype, A_kits[k], B_v, acc_v)
             S_n.append(acc_v)
 
-        _issue_v_load(kv_tile_iv, cur_buf)
-        _issue_k_load(safe_next_tile, nxt_buf)
+        _issue_v(kv_tile_iv, cur_buf)
+        _issue_k(safe_next_tile, nxt_buf)
 
         # See attention_tiled_2d.py for the rationale on applying ALiBi /
         # QQ-bias before the select-with-(-inf) (equivalent to Triton's
@@ -669,8 +767,13 @@ def build_unified_attention_3d_tiled(spec: UnifiedAttention3DTiledSpec) -> Kerne
         new_l_vals = [
             b.fadd(b.fmul(l_vals[r], alpha_regs[r]), l_local[r]) for r in range(4)
         ]
-        b.s_waitcnt(vmcnt=kv_calls_per_tile, lgkmcnt=kv_calls_per_tile)
-        b.sync()
+        if KV_FP8:
+            # FP8 sync loader has no in-flight async work.
+            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+            b.sync()
+        else:
+            b.s_waitcnt(vmcnt=kv_calls_per_tile, lgkmcnt=kv_calls_per_tile)
+            b.sync()
 
         new_acc = []
         for n in range(PV_N_TILES):

@@ -713,9 +713,13 @@ class TestHelpers(unittest.TestCase):
         )
         ok_fp16, _ = supports_tiled_2d(**base)
         self.assertTrue(ok_fp16)
-        # head_size=256, dtype=bf16, alibi, qq_bias all supported.
+        # head_size in {64, 128, 256}, block_size in {16, 32, 64}, dtype=bf16,
+        # alibi, qq_bias all supported.
         for accept in [
             dict(head_size=256),
+            dict(head_size=64),
+            dict(block_size=32),
+            dict(block_size=64),
             dict(dtype="bf16"),
             dict(use_alibi=True),
             dict(use_qq_bias=True),
@@ -724,9 +728,10 @@ class TestHelpers(unittest.TestCase):
             kwargs.update(accept)
             ok, reason = supports_tiled_2d(**kwargs)
             self.assertTrue(ok, msg=f"expected accept for {accept}, got: {reason}")
-        # FP8 and unsupported block_size still gated.
+        # FP8, unsupported head_size, and unsupported block_size still gated.
         for override in [
-            dict(block_size=32),
+            dict(head_size=72),
+            dict(block_size=24),
             dict(use_fp8=True),
         ]:
             kwargs = dict(base)

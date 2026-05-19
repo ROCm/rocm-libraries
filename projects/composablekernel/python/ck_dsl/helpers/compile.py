@@ -40,12 +40,16 @@ Typical use:
 
 from __future__ import annotations
 
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
-from typing import Dict
+from pathlib import Path
+from typing import Dict, List, Optional
 
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
+from ..core.lower_hip import lower_kernel_to_hip
 from ..core.lower_llvm import lower_kernel_to_llvm
 from ..core.passes import PassStats, optimize_kernel
 from ..runtime.comgr import build_hsaco_from_llvm_ir
@@ -115,5 +119,88 @@ def compile_kernel(
         hsaco=hsaco,
         timings=timings,
         pass_stats=pass_stats,
+        isa=isa,
+    )
+
+
+def compile_kernel_via_hipcc(
+    kernel: KernelDef,
+    *,
+    arch: str = "gfx950",
+    extra_flags: Optional[List[str]] = None,
+    timeout_s: int = 240,
+) -> KernelArtifact:
+    """Lower ``kernel`` to HIP C++, compile through ``hipcc --genco``, and
+    return a :class:`KernelArtifact` whose ``hsaco`` is the hipcc output.
+
+    Use this **only** when the LLVM-direct pipeline (``compile_kernel``)
+    is leaving performance on the table for a specific workload. The HIP
+    path goes through the full clang frontend + AMDGPU backend, which
+    sometimes generates better-scheduled code for long-running attention
+    kernels (we measured a ~5% win on prefill_b4_q1000 with the kernel
+    in ``instances/attention_tiled_2d.py``). The trade-offs:
+
+      - Compile is ~5× slower (~450ms vs ~90ms via libamd_comgr) due
+        to the heavier clang frontend.
+      - Requires ``hipcc`` in ``$PATH`` (build-time only, since the HSACO
+        bytes are cacheable and identical to the LLVM-direct path's
+        runtime ABI).
+      - The HIP debug backend has narrower op coverage than the LLVM
+        backend; verify the kernel actually lowers via ``lower_kernel_to_hip``
+        before relying on this path.
+
+    Returns the same ``KernelArtifact`` shape as :func:`compile_kernel`;
+    ``ir_text`` is the textual MLIR-style IR, ``llvm_text`` is empty
+    (this path doesn't go through the LLVM-direct lowering), ``hsaco``
+    is the hipcc output, and ``timings`` records the lower + hipcc steps.
+    """
+    timings: Dict[str, float] = {}
+    t0 = time.perf_counter()
+    ir_text = print_ir(kernel)
+    t1 = time.perf_counter()
+    hip_src = lower_kernel_to_hip(kernel)
+    t2 = time.perf_counter()
+    flags = ["-O3"]
+    if extra_flags:
+        flags.extend(extra_flags)
+    with tempfile.TemporaryDirectory() as td:
+        stem = kernel.name.replace(".", "_")[:80] or "kernel"
+        src_path = Path(td) / f"{stem}.hip"
+        hsaco_path = Path(td) / f"{stem}.hsaco"
+        src_path.write_text(hip_src, encoding="utf-8")
+        proc = subprocess.run(
+            [
+                "hipcc",
+                f"--offload-arch={arch}",
+                "--genco",
+                *flags,
+                str(src_path),
+                "-o",
+                str(hsaco_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"hipcc failed for kernel '{kernel.name}' (arch={arch}):\n"
+                f"--- stdout ---\n{proc.stdout[-2000:]}\n"
+                f"--- stderr ---\n{proc.stderr[-2000:]}"
+            )
+        hsaco = hsaco_path.read_bytes()
+    t3 = time.perf_counter()
+    timings["ir_build"] = (t1 - t0) * 1000.0
+    timings["ir_lower_hip"] = (t2 - t1) * 1000.0
+    timings["hipcc"] = (t3 - t2) * 1000.0
+    timings["total"] = (t3 - t0) * 1000.0
+    isa = f"amdgcn-amd-amdhsa--{arch}"
+    return KernelArtifact(
+        kernel=kernel,
+        ir_text=ir_text,
+        llvm_text="",  # HIP path doesn't produce LLVM IR text directly
+        hsaco=hsaco,
+        timings=timings,
+        pass_stats=PassStats(),
         isa=isa,
     )
