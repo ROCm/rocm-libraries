@@ -50,6 +50,8 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1, 1, 2, 4, 2, 2]
+          - [32, 32,  64, 1, 1, 2, 2, 2, 2]
+          - [32, 32,  64, 1, 1, 4, 4, 2, 2]
         - ForceDisableShadowInit: [True, False]
         - UseSgprForGRO: [0, 1]
         - DepthU: [256]

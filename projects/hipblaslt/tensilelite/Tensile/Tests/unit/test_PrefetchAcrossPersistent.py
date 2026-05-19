@@ -170,6 +170,24 @@ def _tensor_parameters(with_mx=False):
     return tpa, tpb
 
 
+def _module_items(module):
+    return [module.getItem(i) for i in range(module.itemsSize())]
+
+
+def _module_index(items, name):
+    return next(i for i, item in enumerate(items) if isinstance(item, Module) and item.name == name)
+
+
+def _instruction_index(items, instruction_type, dst, src):
+    return next(
+        i
+        for i, item in enumerate(items)
+        if isinstance(item, instruction_type)
+        and str(item.dst) == dst
+        and [str(item_src) for item_src in item.srcs] == [src]
+    )
+
+
 def test_classic_pap_primes_mx_first_pgr_group_before_marking_primed():
     writer = _ClassicPapWriter(version=(9, 5, 0))
     kernel = _classic_kernel(ProblemType={"MXBlockA": 32, "MXBlockB": 32, "Sparse": 0})
@@ -227,18 +245,21 @@ def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount
         )
         tpa, tpb = _tensor_parameters()
 
-        asm = str(kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(writer, kernel, tpa, tpb))
+        module = kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(writer, kernel, tpa, tpb)
+        items = _module_items(module)
 
-        assert "checkpoint LoopCounter for PAP restore" in asm
-        assert "checkpoint OrigLoopCounter for PAP restore" in asm
-        assert "unit: calculate loop num iter" in asm
-        assert "unit: setup PAP loads" in asm
-        assert "restore LoopCounter after PAP" in asm
-        assert "restore OrigLoopCounter after PAP" in asm
+        loop_checkpoint = _instruction_index(items, kwa_module.VMovB32, "v70", "s[sgprLoopCounterL]")
+        orig_loop_checkpoint = _instruction_index(items, kwa_module.VMovB32, "v71", "s[sgprOrigLoopCounter]")
+        calculate_loop_num_iter = _module_index(items, "calculateLoopNumIter")
+        setup_pap_loads = _module_index(items, "setupPrefetchAcrossPersistentLoads")
+        loop_restore = _instruction_index(items, kwa_module.VReadfirstlaneB32, "s[sgprLoopCounterL]", "v70")
+        orig_loop_restore = _instruction_index(items, kwa_module.VReadfirstlaneB32, "s[sgprOrigLoopCounter]", "v71")
 
-        assert asm.index("checkpoint LoopCounter for PAP restore") < asm.index("unit: calculate loop num iter")
-        assert asm.index("unit: calculate loop num iter") < asm.index("unit: setup PAP loads")
-        assert asm.index("unit: setup PAP loads") < asm.index("restore LoopCounter after PAP")
+        assert loop_checkpoint < calculate_loop_num_iter
+        assert orig_loop_checkpoint < calculate_loop_num_iter
+        assert calculate_loop_num_iter < setup_pap_loads
+        assert setup_pap_loads < loop_restore
+        assert loop_restore < orig_loop_restore
         assert writer.vgprPool.checked_in == [70]
     finally:
         kwa_module.Component.StreamK.find = original_find
