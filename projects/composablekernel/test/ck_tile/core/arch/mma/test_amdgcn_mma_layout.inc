@@ -167,6 +167,7 @@ struct MmaLayoutTestKernel
             BVecType b_frag{};
             CVecType c_frag{};
             uint32_t sparse_idx{};
+            bool computed_sparse_idx = false;
             // The actual scale is computed as pow(2, scale - 127), so:
             // 125 -> 2^-2 and 129 -> 2^2.
             int scale_A = 125;
@@ -208,6 +209,7 @@ struct MmaLayoutTestKernel
                     {
                         sparse_idx = 0x88888888 | (k_rem_sparse << (vec_value_item_idx * 2));
                     }
+                    computed_sparse_idx = true;
                 }
             }
 
@@ -226,9 +228,11 @@ struct MmaLayoutTestKernel
 
             if constexpr(MmaOpTraits<MmaOp>::IsSparse)
             {
-                // Sparse_idx is calculated (overwriting default 0 value) in *exactly* one lane
-                // (assert), but must be broadcast to all (warp-level "or" reduction intrinsic).
-                int num_sparse_idx_calced = __popcll(__ballot(sparse_idx != 0));
+                // Sparse_idx is calculated in *exactly* one lane (assert), but must be
+                // broadcast to all (warp-level "or" reduction intrinsic). Note: we use a
+                // separate flag because sparse_idx==0 is a valid encoding (WMMA 1-bit: 0
+                // means "select element 0").
+                int num_sparse_idx_calced = __popcll(__ballot(computed_sparse_idx));
                 if(num_sparse_idx_calced != 1)
                 {
                     if(threadIdx.x == 0)
