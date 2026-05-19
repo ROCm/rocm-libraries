@@ -50,6 +50,9 @@ namespace rocsparse
                                                   double               boost_tol,
                                                   T                    boost_val)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % BBDIM == 0, "BLOCKSIZE must be a multiple of BBDIM.");
         static constexpr uint32_t DIMX = BBDIM;
         static constexpr uint32_t DIMY = BLOCKSIZE / BBDIM;
 

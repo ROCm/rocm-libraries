@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -219,6 +219,10 @@ namespace rocsparse
                                                         const I* __restrict__ csr_row_ptr_begin,
                                                         rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         J left = left_init;
 
         const uint32_t wid      = rocsparse::read_first_lane(threadIdx.x / WFSIZE);
@@ -274,6 +278,10 @@ namespace rocsparse
                                                     const J* __restrict__ starting_block_ids,
                                                     rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         static constexpr uint32_t NNZ_PER_BLOCK = NNZ_PER_THREAD * BLOCKSIZE;
 
         if(USE_STARTING_BLOCK_IDS)
