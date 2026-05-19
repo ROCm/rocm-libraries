@@ -1,7 +1,7 @@
 ---
 name: hipdnn-review
-description: Review a hipDNN pull request or local diff for correctness, API compatibility, provider behavior, resource management, code reuse, and testing coverage/quality. Use when asked to review hipDNN code, review a PR, or assess whether a change is ready to merge.
-argument-hint: "[PR URL | branch:<name> | local] [base:<branch>] [focus:<area>]"
+description: Review a hipDNN pull request or local diff for correctness, API compatibility, provider behavior, resource management, code reuse, and testing coverage/quality. Uses local source/worktrees for cross-reference by default. Use when asked to review hipDNN code, review a PR, or assess whether a change is ready to merge.
+argument-hint: "[PR URL | branch:<name> | local] [base:<branch>] [focus:<area>] [diff-only]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -16,6 +16,7 @@ Review hipDNN changes with a code-review stance: findings first, ordered by seve
 - `branch:<name>`: Review a local branch or use it as the PR worktree name when needed.
 - `base:<branch>`: Base branch for comparison. Default: the PR base branch, then `origin/develop`, then `develop`.
 - `focus:<area>`: Optional review emphasis such as `testing`, `backend`, `frontend`, `provider`, `build`, or `reuse`.
+- `diff-only`: Opt out of local checkout/worktree setup and review only the PR/diff plus already-available files. Use only when the user wants to avoid local clone/worktree cost.
 
 If neither a PR URL nor `local` is supplied, ask which change set to review.
 
@@ -45,7 +46,11 @@ If neither a PR URL nor `local` is supplied, ask which change set to review.
      ```bash
      git diff <base>... > /tmp/hipdnn-review.diff
      ```
-4. Read only the files needed to validate the changed behavior and nearby patterns. Prefer `rg` for call sites, similar implementations, tests, and ownership patterns; fall back to `grep` if `rg` is unavailable.
+4. Prefer a local source checkout for cross-reference. A review based only on the PR page or raw diff is incomplete unless `diff-only` was requested.
+   - For PR reviews, make the PR head and base source available locally before spawning reviewers. Use an existing local worktree/checkout if one already matches the PR head; otherwise fetch the PR/head branch and create or update a local worktree/checkout according to the repository's normal workspace conventions.
+   - For local reviews, use the current worktree and the selected base branch for cross-reference.
+   - If local source setup is unavailable or skipped, state that the review is `diff-only` and lower confidence accordingly.
+5. Read only the files needed to validate the changed behavior and nearby patterns. Prefer `rg` for call sites, similar implementations, tests, and ownership patterns; fall back to `grep` if `rg` is unavailable.
 
 Do not modify files during review.
 
@@ -161,6 +166,7 @@ Use focused reviewers by changed-file bucket:
 Each reviewer should:
 
 - Review only its assigned bucket, but read enough adjacent code to validate behavior.
+- Use the local PR/head source and local base source for cross-reference. Do not rely only on the diff unless the review is explicitly running in `diff-only` mode.
 - Compare against existing base-branch patterns and tests.
 - Return findings with severity, file/line references, and concrete rationale.
 - Include "No findings" when nothing actionable is found.
