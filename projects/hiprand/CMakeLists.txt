@@ -32,6 +32,9 @@ set(MIN_ROCRAND_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocRAND
 # Set download branch for dependency rocPRIM
 set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.13" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 
 if(DEFINED ENV{ROCM_PATH})
   set (ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "The path to the ROCm installation.")
