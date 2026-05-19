@@ -428,12 +428,12 @@ class KernelWriterAssembly(KernelWriter):
       elif tChar == "B":
         localReadWidth = (self.states.lrvwUnrollB * tP["bpeDS"]) / bpr
       elif tChar == "MXSA":
-        if self.states.asmCaps["HasWMMA_V3"]:
+        if self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle":
           localReadWidth = (self.states.lrvwUnrollMXSA * kernel["VectorWidthA"] * tP["bpeDS"]) / bpr
         else:
           localReadWidth = (self.states.lrvwUnrollMXSA * tP["bpeDS"]) / bpr
       elif tChar == "MXSB":
-        if self.states.asmCaps["HasWMMA_V3"]:
+        if self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle":
           localReadWidth = (self.states.lrvwUnrollMXSB * kernel["VectorWidthB"] * tP["bpeDS"]) / bpr
         else:
           localReadWidth = (self.states.lrvwUnrollMXSB * tP["bpeDS"]) / bpr

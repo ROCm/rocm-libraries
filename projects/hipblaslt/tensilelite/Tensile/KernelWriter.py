@@ -6118,22 +6118,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.lrvwTileB = 1
 
     if kernel["ProblemType"]["MXBlockA"]:
-      if not self.states.asmCaps["HasWMMA_V3"]:
-        if not kernel["UnrollMajorLDSMXSA"] and not forceLrvwTile1A:
-          self.states.lrvwTileMXSA = kernel["VectorWidthA"]
-        else:
-          self.states.lrvwTileMXSA = 1
-      else:
+      if ((self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle")
+          or (not kernel["UnrollMajorLDSMXSA"] and not forceLrvwTile1A)):
         self.states.lrvwTileMXSA = kernel["VectorWidthA"]
+      else:
+        self.states.lrvwTileMXSA = 1
 
     if kernel["ProblemType"]["MXBlockB"]:
-      if not self.states.asmCaps["HasWMMA_V3"]:
-        if not kernel["UnrollMajorLDSMXSB"] and not forceLrvwTile1B:
-          self.states.lrvwTileMXSB = kernel["VectorWidthB"]
-        else:
-          self.states.lrvwTileMXSB = 1
-      else:
+      if ((self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle")
+          or (not kernel["UnrollMajorLDSMXSB"] and not forceLrvwTile1B)):
         self.states.lrvwTileMXSB = kernel["VectorWidthB"]
+      else:
+        self.states.lrvwTileMXSB = 1
 
     # DirectToVgpr + pack (v_perm)
     self.states.packDTVA = kernel["DirectToVgprA"] and self.states.lrvwTileA > 1 and kernel["MIInputPerThread"] > 1

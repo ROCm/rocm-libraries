@@ -641,7 +641,8 @@ class LocalReadMFMA(LocalRead):
         isgfx950 = kernel["ISA"][:2] == (9, 5)
         isgfx950mx = isgfx950 and ("MXS" in tc)
 
-        if "MXS" in tc and writer.states.asmCaps["HasWMMA_V3"]:
+        if ("MXS" in tc and writer.states.asmCaps["HasWMMA_V3"]
+            and kernel["MXScaleFormat"] == "InMemorySwizzle"):
             return self.localReadMX(writer, kernel, bufferIdx, iui, epsi, tP)
 
         MacDataType      = f"MacDataType{tc}" if(tc=="A" or tc=="B") else "DataType"
