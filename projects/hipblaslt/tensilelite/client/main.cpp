@@ -389,9 +389,14 @@ namespace TensileLite
                     "N (>0) = load N extra copies (total = N+1 modules including the original). "
                     "-1 = auto: extras = max(inputArr.size()-1, cache-overflow term). "
                     "First term aligns with DataInit's rotating buffer cycle; "
-                    "second term targets ~128KB of L1 I-cache (Linux: 128KB / min "
-                    "kernel_start->label_GW_End across all --code-object; non-Linux: raw "
-                    "--icache-rotate-size).")
+                    "second term targets overflowing L1 I-cache: "
+                    "Linux uses --icache-rotate-size*2*1024 / min(kernel_start->label_GW_End "
+                    "across all --code-object); non-Linux uses --icache-rotate-size directly.")
+                ("icache-rotate-size",        po::value<int>()->default_value(64),
+                    "Cache budget (in KB) for the cache-overflow term of --icache-rotate-copies=-1. "
+                    "Linux: effective bytes = N * 2 * 1024 (default 64 -> 128KB, ~2x typical L1 "
+                    "I-cache); larger -> more copies loaded for the same per-kernel hot-path size. "
+                    "Non-Linux: used directly as the extras count (no ELF parsing).")
                 ("use-e",                     po::value<bool>()->default_value(false), "Use E.")
                 ("use-gradient",              po::value<bool>()->default_value(false), "Use gradient.")
                 ("use-user-args",             po::value<bool>()->default_value(false), "Use user argument structure as kernel input.")
@@ -638,6 +643,8 @@ namespace TensileLite
             DUMP_OPT("use-user-args", bool);
             DUMP_OPT("rotating-buffer-size", int32_t);
             DUMP_OPT("rotating-buffer-mode", int32_t);
+            DUMP_OPT("icache-rotate-copies", int);
+            DUMP_OPT("icache-rotate-size", int);
             DUMP_OPT("output-amaxD", bool);
             DUMP_OPT("timing-instrumentation", bool);
 #undef DUMP_OPT
@@ -1281,15 +1288,19 @@ int main(int argc, const char* argv[])
                             if(sz > 0 && (K == 0 || sz < K))
                                 K = sz;
                         }
-                        constexpr std::uintmax_t kCacheBudgetBytes
-                            = std::uintmax_t{64} * 2 * 1024; // 128 KB
+                        // kCacheBudgetBytes = icache-rotate-size * 2 * 1024.
+                        // Default icache-rotate-size=64 -> 128 KB
+                        // Loosely targets ~2x typical L1 I-cache.
+                        std::uintmax_t kCacheBudgetBytes
+                            = std::uintmax_t(args["icache-rotate-size"].as<int>())
+                                * 2 * 1024;
 
                         if(K == 0)
                         {
                             std::cerr << "[icache-rotate] warning: no label_GW_End "
                                       << "found in any --code-object; cache-based "
                                       << "term contributes 0" << std::endl;
-                            K = 1; // sentinel to avoid "/0" in the diagnostic print
+                            K = std::uintmax_t(args["icache-rotate-size"].as<int>()) - 1; // sentinel to avoid "/0" in the diagnostic print
                         }
 
                         int extrasFromCache
