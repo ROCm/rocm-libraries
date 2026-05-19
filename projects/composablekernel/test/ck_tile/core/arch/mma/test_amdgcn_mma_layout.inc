@@ -197,17 +197,17 @@ struct MmaLayoutTestKernel
                 {
                     a_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem_pack);
 
-                    // Calc an appropriate sparse idx value for a single 1 in position k. We use a
-                    // baseline index of 0x88888888. This sends each compressed index i to
-                    // uncompressed index i * 2. If k is odd, we should send it to i * 2 + 1
-                    // instead. We update only the absolutely necessary pair of bits for this
-                    // (idx[v*2:v*2+1]), where v is meant to be the idx of the *value items* in the
-                    // lane. Note that this simple calculation works for any 4:2 sparse intrinsic
-                    // with up to 16 packed k elements per lane.
-
                     // Calc vector item idx as if the datatype were not packed (value item).
                     uint32_t vec_value_item_idx = v * MmaOp::APackedSize + k_rem_pack;
-                    sparse_idx = 0x88888888 | (k_rem_sparse << (vec_value_item_idx * 2));
+
+                    if constexpr(std::is_same_v<typename MmaOp::OpType, WmmaOp>)
+                    {
+                        sparse_idx = (k_rem_sparse << vec_value_item_idx);
+                    }
+                    else
+                    {
+                        sparse_idx = 0x88888888 | (k_rem_sparse << (vec_value_item_idx * 2));
+                    }
                 }
             }
 
