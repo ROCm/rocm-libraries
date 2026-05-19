@@ -59,8 +59,6 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-=======
->>>>>>> 02a88531051 (Cleaned up test files.)
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [1]
         - MatrixInstruction:
