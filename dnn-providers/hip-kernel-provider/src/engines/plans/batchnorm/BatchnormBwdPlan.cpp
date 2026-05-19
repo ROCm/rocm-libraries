@@ -53,8 +53,8 @@ struct ProblemDims
     bool isGfx120X = false;
 };
 
-ProblemDims extractProblemDims(const BatchnormBwdParams& params,
-                               const hipDeviceProp_t& deviceProperties)
+static ProblemDims extractProblemDims(const BatchnormBwdParams& params,
+                                      const hipDeviceProp_t& deviceProperties)
 {
     ProblemDims dims{};
 
@@ -282,8 +282,8 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     _invInNhw = 1.0f / static_cast<float>(dims.inNhw);
 
     size_t xlocalsize = config.xlocalsize;
-    size_t ylocalsize = config.ylocalsize;
-    size_t zlocalsize = config.zlocalsize;
+    const size_t ylocalsize = config.ylocalsize;
+    const size_t zlocalsize = config.zlocalsize;
     size_t xgridsize = 1;
     size_t ygridsize = 1;
     size_t zgridsize = 1;
