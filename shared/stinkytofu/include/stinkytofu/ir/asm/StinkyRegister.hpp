@@ -49,7 +49,7 @@ enum class RegType {
 ///
 /// For new code, prefer tryParseRegType() which returns std::optional.
 inline RegType stringToRegType(const std::string& str) {
-#define REGISTER_TYPE(ENUM, STR, DESC) \
+#define REGISTER_TYPE(ENUM, STR, DESC) /* NOLINT(bugprone-macro-parentheses) */ \
     if (str == STR) return RegType::ENUM;
 #include "stinkytofu/ir/asm/RegisterType.def"
     // Don't assert on invalid input - return UNKNOWN for error handling

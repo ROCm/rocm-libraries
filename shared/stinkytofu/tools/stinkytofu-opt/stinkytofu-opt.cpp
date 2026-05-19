@@ -127,11 +127,10 @@ std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
         if (arg.substr(0, 2) == "--") {
             static constexpr char kSnapJson[] = "--pass-order-snapshot-json=";
             static constexpr char kSnapAfter[] = "--pass-order-snapshot-after-passes=";
-            if (arg.rfind(kSnapJson, 0) == 0 || arg.rfind(kSnapAfter, 0) == 0 ||
+            if (arg.starts_with(kSnapJson) || arg.starts_with(kSnapAfter) ||
                 arg == "--print-output" || arg == "--emit-asm" ||
                 arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
-                arg.rfind("--ds-read-order=", 0) == 0 || arg == "--from-label" ||
-                arg == "--to-label")
+                arg.starts_with("--ds-read-order=") || arg == "--from-label" || arg == "--to-label")
                 continue;
             if (arg == "-o") {
                 ++i;  // skip the filename argument
@@ -147,7 +146,7 @@ std::string extractPassOrderSnapshotJsonPath(int argc, char** argv) {
     static constexpr char kPrefix[] = "--pass-order-snapshot-json=";
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a.rfind(kPrefix, 0) == 0) return a.substr(std::strlen(kPrefix));
+        if (a.starts_with(kPrefix)) return a.substr(std::strlen(kPrefix));
     }
     return {};
 }
@@ -162,7 +161,7 @@ static void trimWhitespace(std::string& s) {
 }
 
 static std::vector<std::string> splitCommaPassNames(const char* prefix, const std::string& a) {
-    if (a.rfind(prefix, 0) != 0) return {};
+    if (!a.starts_with(prefix)) return {};
     std::string rest = a.substr(std::strlen(prefix));
     std::vector<std::string> out;
     size_t start = 0;
@@ -339,7 +338,7 @@ int main(int argc, char** argv) {
     // Parse --ds-read-order=ProgramOrder|Ascending|AscendingCache
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a.rfind("--ds-read-order=", 0) == 0) {
+        if (a.starts_with("--ds-read-order=")) {
             std::string val = a.substr(16);
             if (val == "ProgramOrder")
                 passFeatureConfig.dagFeatures.dsReadOrder =

@@ -65,12 +65,16 @@ protected:
 
     void runGraphTest([[maybe_unused]] float tolerance, const TensorLayout& layout)
     {
+        // Known failures under MIOPEN_FIND_ENFORCE=4 (exhaustive tuning) on degenerate spatial
+        // dims (e.g. [2,3,1,1], [32,3,1,14]): exhaustive search selects a kernel with numerical
+        // accuracy issues on 1-element spatial dimensions. Not an ASAN error. Root cause is in
+        // MIOpen kernel selection for degenerate shapes.
         namespace fe = hipdnn_frontend;
 
         const auto& [bnTestCase, activTestCase] = this->GetParam();
         auto dims = bnTestCase.dims;
 
-        std::vector<int64_t> channelDims = getDerivedShape(dims);
+        const std::vector<int64_t> channelDims = getDerivedShape(dims);
 
         graph::Graph graphObj;
         graphObj.set_name("BatchnormBackwardActivationTest");
@@ -115,7 +119,7 @@ protected:
             = std::make_shared<graph::TensorAttributes>(std::move(invVarAttr));
 
         // BN_Y = batchnorm_inference(X, mean, inv_variance, scale, bias)
-        graph::BatchnormInferenceAttributes bnInfAttrs;
+        const graph::BatchnormInferenceAttributes bnInfAttrs;
 
         auto bnY = graphObj.batchnorm_inference(xTensorAttr,
                                                 meanTensorAttr,
