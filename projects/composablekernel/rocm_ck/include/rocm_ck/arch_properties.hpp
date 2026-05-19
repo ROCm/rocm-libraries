@@ -60,7 +60,7 @@ constexpr TargetProperties properties(GpuTarget target)
     case GpuTarget::gfx1150: return {.wavefront_size = 32, .arch_family = ArchFamily::RDNA};
     case GpuTarget::gfx1151: return {.wavefront_size = 32, .arch_family = ArchFamily::RDNA};
     case GpuTarget::_count:
-    default: throw "invalid GpuTarget in properties";
+    default: throw "unsupported GpuTarget — add a case to properties() for new targets";
     }
 }
 
@@ -114,14 +114,14 @@ struct TargetSet
     static constexpr int bitIndex(GpuTarget target)
     {
         if(target >= GpuTarget::_count)
-            throw "invalid GpuTarget in bitIndex";
+            throw "GpuTarget out of range — value must be a valid enum member, not _count";
         return static_cast<int>(target);
     }
 
     static constexpr GpuTarget targetAt(int index)
     {
         if(index < 0 || index >= kNumTargets)
-            throw "invalid bit index in targetAt";
+            throw "TargetSet index out of range [0, kNumTargets)";
         return static_cast<GpuTarget>(index);
     }
 
@@ -270,10 +270,7 @@ struct TargetSet
     {
         if(!is_single_target())
             throw "single_target() requires exactly one target in the set";
-        for(int i = 0; i < kNumTargets; ++i)
-            if(bits & (uint64_t{1} << i))
-                return targetAt(i);
-        throw "unreachable";
+        return targetAt(std::countr_zero(bits));
     }
 
     // ---- Iteration --------------------------------------------------------

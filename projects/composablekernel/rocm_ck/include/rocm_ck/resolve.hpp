@@ -87,7 +87,8 @@ struct ResolvedSignature
         for(int i = 0; i < num_tensors; ++i)
             if(tensors[i].name == name)
                 return tensors[i];
-        throw "tensor not found in resolved signature";
+        throw "tensor() — name not found in resolved signature; "
+              "check that it appears in an op slot or Tensor entry";
     }
 
     /// Find a resolved tensor's slot index by name. Compile-time error if not found.
@@ -96,7 +97,8 @@ struct ResolvedSignature
         for(int i = 0; i < num_tensors; ++i)
             if(tensors[i].name == name)
                 return i;
-        throw "tensor not found in resolved signature";
+        throw "tensorIndex() — name not found in resolved signature; "
+              "check that it appears in an op slot or Tensor entry";
     }
 
     /// Find a resolved scalar by name. Compile-time error if not found.
@@ -105,7 +107,8 @@ struct ResolvedSignature
         for(int i = 0; i < num_scalars; ++i)
             if(scalars[i].name == name)
                 return scalars[i];
-        throw "scalar not found in resolved signature";
+        throw "scalar() — name not found; "
+              "add a Scalar entry with this name to the Signature";
     }
 
     /// Find a resolved scalar's slot index by name. Compile-time error if not found.
@@ -114,7 +117,8 @@ struct ResolvedSignature
         for(int i = 0; i < num_scalars; ++i)
             if(scalars[i].name == name)
                 return i;
-        throw "scalar not found in resolved signature";
+        throw "scalarIndex() — name not found; "
+              "add a Scalar entry with this name to the Signature";
     }
 
     /// Find a tensor slot index by name. Returns -1 if not found.
@@ -188,7 +192,8 @@ consteval std::string_view collectTensorSlotsFromOp(const Op& op,
                 }
             }
             if(!found_scalar)
-                throw "ScaleOp.scale references undeclared Scalar";
+                throw "ScaleOp.scale references undeclared Scalar — "
+                      "add a matching Scalar entry to the Signature";
             return typed_op.out;
         }
         else if constexpr(BinaryOpLike<T>)
@@ -296,7 +301,7 @@ consteval ResolvedSignature resolve(const Signature& sig)
         if(idx >= 0)
             return idx;
         if(num >= kMaxTensors)
-            throw "too many unique tensors (max kMaxTensors)";
+            throw "too many unique tensors in Signature (max 16)";
         infos[num].name = name;
         return num++;
     };
@@ -313,7 +318,8 @@ consteval ResolvedSignature resolve(const Signature& sig)
                 changed         = true;
             }
             else if(infos[idx].rank != rank)
-                throw "conflicting rank for tensor: two operators imply different ranks";
+                throw "conflicting rank for tensor — two operators imply different ranks; "
+                      "check that shared tensor names are intentional";
         }
         if(layout != Layout::Auto)
         {
@@ -323,7 +329,8 @@ consteval ResolvedSignature resolve(const Signature& sig)
                 changed           = true;
             }
             else if(infos[idx].layout != layout)
-                throw "conflicting layout for tensor: two operators imply different layouts";
+                throw "conflicting layout for tensor — two operators imply different layouts; "
+                      "check that shared tensor names are intentional";
         }
         return changed;
     };
@@ -408,8 +415,9 @@ consteval ResolvedSignature resolve(const Signature& sig)
             break;
     }
     if(changed)
-        throw "rank/layout propagation did not converge — "
-              "operator graph is too complex";
+        throw "could not infer rank/layout for all tensors — "
+              "set rank and layout explicitly on Tensor entries, "
+              "or reduce chained operations";
 
     // ================================================================
     // Phase 3: Merge explicit Tensor entries (override propagation)
