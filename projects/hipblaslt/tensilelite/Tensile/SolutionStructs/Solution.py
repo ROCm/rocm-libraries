@@ -743,9 +743,9 @@ class Solution(collections.abc.Mapping):
           for field in ("LSC", "LSP", "NumLoadsCoalesced", "NumLoadsPerpendicular", "NumTotalPackedLoads"):
             state["%s%s" % (field, tc)] = 0
 
-      if state["PrefetchGlobalRead"] not in [0, 2]:
+      if state["PrefetchGlobalRead"] not in [0, 1, 2]:
         reject(state, printRejectionReason,
-               "UseSubtileImpl=1 requires PrefetchGlobalRead 0 or 2, got %d" % state["PrefetchGlobalRead"])
+               "UseSubtileImpl=1 requires PrefetchGlobalRead 0, 1 or 2, got %d" % state["PrefetchGlobalRead"])
       if not (state["MatrixInstM"] == 16 and state["MatrixInstN"] == 16):
         reject(state, printRejectionReason, "UseSubtileImpl=1 requires MatrixInst 16x16")
       if state["ScheduleIterAlg"] == 1 or state["ScheduleIterAlg"] == 2:
@@ -2104,6 +2104,7 @@ class Solution(collections.abc.Mapping):
     tdmInst: int = state["TDMInst"]
     state["enableTDMA"] = bool(tdmInst & 0x01)
     state["enableTDMB"] = bool(tdmInst & 0x02)
+    state["enableTDMMetadata"] = bool(state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"] and tdmInst > 0)
 
     if tdmInst not in (0, 3):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
@@ -2394,6 +2395,9 @@ class Solution(collections.abc.Mapping):
       state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
 
       def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> int:
+        # SubtileImpl does not need LDS padding.
+        if state["UseSubtileImpl"]:
+          return 0, 0, 0, 0, 0
         isMX = state["ProblemType"].get("MXBlockA", 0) != 0 or state["ProblemType"].get("MXBlockB", 0) != 0
         numBytesA = state["ProblemType"]["MacDataTypeA"].numBytes()
         numBytesB = state["ProblemType"]["MacDataTypeB"].numBytes()
@@ -2416,9 +2420,6 @@ class Solution(collections.abc.Mapping):
         if (not isaInfoMap[isa].asmCaps['HasWMMA']) and (readRegsA > 6 or readRegsB > 6):
           reject(state, "LocalReadVectorWidth results in attemping to read LDS larger than b192, reject")
           return ldsPadA, ldsPadB, ldsPadM, 0, 0
-        # SubtileImpl does not need LDS padding.
-        if state["UseSubtileImpl"]:
-          return 0, 0, 0, 0, 0
         if state["EnableMatrixInstruction"]:
           # for readRegs = 1 or 4, we need to double pad for MI16x16xNx1 to avoid bank conflict.
           if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
@@ -4120,7 +4121,7 @@ class Solution(collections.abc.Mapping):
         state["StoreSwapAddr"] = offsetBlk > 0 and (state["1LDSBuffer"] != 1) and \
           (offsetBlk + int(2**(math.ceil(math.log(offsetBlk, 2)))) > state["MaxLDS"])
 
-      if offsetBlk > 0 and not state["StoreSwapAddr"] and numLdsBlk == 2:
+      if offsetBlk > 0 and not state["StoreSwapAddr"] and not state["UseSubtileImpl"] and numLdsBlk == 2:
         # Rounds offsetBlk to a power of two to enable inlining {s,v}_xor constants for swapping offsets
         # skip ceiling to nearest power of two for numLdsBlk>=3
         offsetBlk = roundupOffsetBlk

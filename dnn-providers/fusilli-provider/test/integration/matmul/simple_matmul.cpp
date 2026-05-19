@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk::utilities;
@@ -96,6 +97,21 @@ TEST(MatmulIntegrationTest, SimpleMatmul) {
 
   result = graph->build_operation_graph(handle);
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+
+  std::vector<int64_t> rankedEngineIds;
+  result = graph->get_ranked_engine_ids(rankedEngineIds);
+  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+  ASSERT_FALSE(rankedEngineIds.empty());
+
+  std::vector<BehaviorNote> behaviorNotes;
+  result =
+      graph->get_behavior_notes_for_engine(rankedEngineIds[0], behaviorNotes);
+  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+  ASSERT_EQ(behaviorNotes.size(), 3u);
+  EXPECT_EQ(behaviorNotes[0], BehaviorNote::RUNTIME_COMPILATION);
+  EXPECT_EQ(behaviorNotes[1], BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY);
+  EXPECT_EQ(behaviorNotes[2],
+            BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 
   result = graph->create_execution_plans();
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;

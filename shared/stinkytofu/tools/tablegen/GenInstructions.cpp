@@ -1537,8 +1537,6 @@ static bool emitArchIsaFile(const std::string& arch,
         int uop = 0;
         auto it = unifiedOpcodeMap.find(inst.mnemonic);
         if (it != unifiedOpcodeMap.end()) uop = it->second;
-        int encodingBits = inst.encodingBits;
-        if (encodingBits <= 0) encodingBits = 32;
         std::string flagStr = flagsToMakeFlagSetContent(inst.finalFlags);
         out << "  { " << std::setw(3) << i << ", " << std::setw(5) << uop << ", " << std::setw(3)
             << inst.cycle << ", " << std::setw(4) << inst.latency << ", " << "0x" << std::hex
