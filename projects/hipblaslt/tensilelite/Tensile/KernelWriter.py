@@ -4540,6 +4540,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if hasDeferredGSU0:
         module.appendModule(deferredGSU0)
       if hasDeferredActivation:
+        module.add(SBranch(labelName=kernelEndLabel.getLabelName(), comment="skip over activation functions"))
         module.appendModule(self.states.deferredActivationModules)
         self.states.deferredActivationModules = None
       module.add(kernelEndLabel)
@@ -4549,6 +4550,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     else:
       # If activation was deferred but no other deferred blocks exist, emit it before functionEnd
       if hasDeferredActivation:
+        module.add(SBranch(labelName="KernelEnd", comment="skip over activation functions"))
         module.appendModule(self.states.deferredActivationModules)
         self.states.deferredActivationModules = None
       module.add(self.functionEnd(kernel, addLabel=True))
@@ -5733,6 +5735,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Emit any deferred activation modules (set during globalWriteElements)
     if hasattr(self.states, 'deferredActivationModules') and self.states.deferredActivationModules is not None:
+      module.add(SBranch(labelName="KernelEnd", comment="skip over activation functions"))
       module.appendModule(self.states.deferredActivationModules)
       self.states.deferredActivationModules = None
 
