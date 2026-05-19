@@ -22,7 +22,8 @@ from Tensile.Components.Subtile.SubtileScaleEmit import (
 from rocisa.code import Module
 from rocisa.instruction import (
     SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32, SCmpLtU32, SCmpGeU32,
-    SCBranchSCC1, VAddU32, VCmpGEI32, VCndMaskB32,
+    SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpLtI32, VCndMaskB32,
+    VMovB32, VSubI32,
 )
 from rocisa.container import vgpr, sgpr, DSModifiers, ContinuousRegister
 from rocisa.code import Label
@@ -303,7 +304,12 @@ class InstructionEmitter:
     def emit_mask_k_init(self):
         """Compute (Serial % WavefrontSize) / dividerFortidInK into self._tail_kReg.
 
-        Reused by every emit_mask_k call in the tail body. The vgpr is leaked;
+        Also stages the BF16 half-mask constant 0x0000FFFF into self._tail_halfMaskVgpr
+        when the kernel datatype is BF16. The half-mask lives in a VGPR (not an SGPR)
+        because v_cndmask_b32 takes the user mask in src2 — adding another scalar
+        source in src1 would violate the GCN constant-bus restriction.
+
+        Reused by every emit_mask_k call in the tail body. The vgprs are leaked;
         the tail's vgpr pool is released by deallocVgprTiles when the body ends.
         """
         _, dividerFortidInK = self._mfma_K_constants()
@@ -323,15 +329,30 @@ class InstructionEmitter:
                 dividerFortidInK, tmpVgprRes))
         writer.vgprPool.checkIn(tmpVgpr)
         writer.vgprPool.checkIn(dummy)
+
+        self._tail_halfMaskVgpr = None
+        if self.kernel["ProblemType"]["DataTypeA"].isBFloat16():
+            self._tail_halfMaskVgpr = writer.vgprPool.checkOut(1, "tail_halfMask")
+            module.add(VMovB32(
+                dst=vgpr(self._tail_halfMaskVgpr), src="0x0000FFFF",
+                comment="BF16 half-mask: keep K0 (low 16b), zero K1 (high 16b)"))
         return list(module.flatitems())
 
     def emit_mask_k(self, source):
-        """Per-lane K-mask for one subIterK. Assumes K % numMIInUnroll == 0.
+        """Per-lane K-mask for one subIterK.
 
-          laneK = _tail_kReg * numMIInUnroll + subIterK * MatrixInstK
-          mask  = (laneK >= s[LoopCounterL])
-        Then VCndMaskB32 -> 0 over every vgpr in each A/B tile (and the
-        MXSA/MXSB tiles when scaled).
+        Computes laneK = _tail_kReg * numMIInUnroll + subIterK * MatrixInstK.
+
+        A/B tiles get per-vgpr V_AND_B32 with a 3-state mask, so the boundary
+        can fall inside a vgpr without losing the valid element. The mask for
+        vgpr i (BF16 stride = 2 K positions per vgpr) is:
+            diff = rem - (laneK + 2*i)
+            mask = (diff <= 0) ? 0x00000000              # both K invalid
+                 : (diff == 1) ? 0x0000FFFF              # keep K0 only
+                              : 0xFFFFFFFF               # both K valid
+        Non-BF16 datatypes (and MXSA/MXSB scale vgprs) keep the legacy
+        whole-vgpr CNDMASK -> 0 path; the assertion below catches misuse
+        until the partial-mask table is generalized.
         """
         assert self._tail_kReg is not None, \
             "emit_mask_k_init must run before emit_mask_k"
@@ -345,9 +366,14 @@ class InstructionEmitter:
 
         loopCounterName = writer.loopCounterName(kernel, writer.states.unrollIdx)
         laneSGPRCount = writer.states.laneSGPRCount
+        isBF16 = kernel["ProblemType"]["DataTypeA"].isBFloat16()
+        kStride = 2  # BF16: 2 elements packed per 32-bit vgpr (low=K0, high=K1)
 
         module = Module()
         workKVgpr = writer.vgprPool.checkOut(1, f"mask_k_work_k{subIterK}")
+        vMask = writer.vgprPool.checkOut(1, f"mask_k_vmask_k{subIterK}") if isBF16 else None
+        vDiff = writer.vgprPool.checkOut(1, f"mask_k_vdiff_k{subIterK}") if isBF16 else None
+        vNegOne = writer.vgprPool.checkOut(1, f"mask_k_vneg1_k{subIterK}") if isBF16 else None
         with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
 
@@ -362,40 +388,106 @@ class InstructionEmitter:
                     src1=kBaseConst,
                     comment=f"laneK += subIterK({subIterK}) * MatrixInstK"))
 
-            module.add(VCmpGEI32(
-                dst=sgpr(maskSgpr, laneSGPRCount),
-                src0=vgpr(workKVgpr), src1=sgpr(loopCounterName),
-                comment=f"mask: laneK >= rem (subIterK={subIterK})"))
+            # Whole-vgpr compare is only needed for non-BF16 A/B and for MXSA/MXSB.
+            # The BF16 partial-mask path computes its own per-vgpr mask below.
+            needWholeMaskCmp = (not isBF16) or self.hasScale
+            if needWholeMaskCmp:
+                module.add(VCmpGEI32(
+                    dst=sgpr(maskSgpr, laneSGPRCount),
+                    src0=vgpr(workKVgpr), src1=sgpr(loopCounterName),
+                    comment=f"mask: laneK >= rem (subIterK={subIterK})"))
+
+            if isBF16:
+                # Stage 0xFFFFFFFF in a vgpr; v_cndmask_b32 takes the carry in src2,
+                # so src0/src1 must avoid a second scalar source (const-bus rule).
+                module.add(VMovB32(
+                    dst=vgpr(vNegOne), src=-1,
+                    comment="BF16 full-mask vgpr (constant-bus dodge)"))
 
             def _unique_ids(key):
                 m = source.vgpr_tile_map.get(key, [{}])[0]
                 return sorted(set(m.values()))
 
-            def _mask_all(tile_vgprs, label):
+            def _mask_all_whole(tile_vgprs, label):
                 for v in tile_vgprs:
                     module.add(VCndMaskB32(
                         dst=vgpr(v), src0=vgpr(v), src1=0,
                         src2=sgpr(maskSgpr, laneSGPRCount),
                         comment=f"zero {label} if laneK >= rem"))
 
+            def _mask_all_partial(tile_vgprs, label):
+                for i, v in enumerate(tile_vgprs):
+                    kOff = i * kStride
+                    # vDiff = rem - (laneK + kOff)
+                    if kOff:
+                        module.add(VAddU32(
+                            dst=vgpr(vDiff), src0=vgpr(workKVgpr), src1=kOff,
+                            comment=f"vgprK0 = laneK + {kOff}"))
+                        module.add(VSubI32(
+                            dst=vgpr(vDiff), src0=sgpr(loopCounterName), src1=vgpr(vDiff),
+                            comment=f"diff = rem - vgprK0 ({label}[{i}])"))
+                    else:
+                        module.add(VSubI32(
+                            dst=vgpr(vDiff), src0=sgpr(loopCounterName), src1=vgpr(workKVgpr),
+                            comment=f"diff = rem - laneK ({label}[{i}])"))
+                    # mask = (diff < 2) ? sHalf : 0xFFFFFFFF
+                    module.add(VCmpLtI32(
+                        dst=sgpr(maskSgpr, laneSGPRCount),
+                        src0=vgpr(vDiff), src1=2,
+                        comment="diff < 2 ?"))
+                    module.add(VCndMaskB32(
+                        dst=vgpr(vMask),
+                        src0=vgpr(vNegOne), src1=vgpr(self._tail_halfMaskVgpr),
+                        src2=sgpr(maskSgpr, laneSGPRCount),
+                        comment="mask = (diff<2) ? halfKeep : full"))
+                    # if diff < 1: mask = 0
+                    module.add(VCmpLtI32(
+                        dst=sgpr(maskSgpr, laneSGPRCount),
+                        src0=vgpr(vDiff), src1=1,
+                        comment="diff < 1 ?"))
+                    module.add(VCndMaskB32(
+                        dst=vgpr(vMask), src0=vgpr(vMask), src1=0,
+                        src2=sgpr(maskSgpr, laneSGPRCount),
+                        comment="mask = (diff<1) ? 0 : prev"))
+                    module.add(VAndB32(
+                        dst=vgpr(v), src0=vgpr(v), src1=vgpr(vMask),
+                        comment=f"mask {label}[{i}] (K=[{kOff},{kOff+kStride-1}])"))
+
+            mask_ab = _mask_all_partial if isBF16 else _mask_all_whole
             for tid in _unique_ids('A'):
-                _mask_all(list(self.vgprTilesA[tid]), "A")
+                mask_ab(list(self.vgprTilesA[tid]), "A")
             for tid in _unique_ids('B'):
-                _mask_all(list(self.vgprTilesB[tid]), "B")
+                mask_ab(list(self.vgprTilesB[tid]), "B")
+            # Re-issue the laneK >= rem compare for MXSA/MXSB which use whole-vgpr mask;
+            # the BF16 partial path overwrote maskSgpr.
+            if self.hasScale and isBF16:
+                module.add(VCmpGEI32(
+                    dst=sgpr(maskSgpr, laneSGPRCount),
+                    src0=vgpr(workKVgpr), src1=sgpr(loopCounterName),
+                    comment=f"reload mask: laneK >= rem (for MXSA/MXSB)"))
             if self.hasScale:
                 for tid in _unique_ids('SA'):
-                    _mask_all(list(self.vgprTilesSA[tid]), "MXSA")
+                    _mask_all_whole(list(self.vgprTilesSA[tid]), "MXSA")
                 for tid in _unique_ids('SB'):
-                    _mask_all(list(self.vgprTilesSB[tid]), "MXSB")
+                    _mask_all_whole(list(self.vgprTilesSB[tid]), "MXSB")
 
         writer.vgprPool.checkIn(workKVgpr)
+        if vMask is not None:
+            writer.vgprPool.checkIn(vMask)
+        if vDiff is not None:
+            writer.vgprPool.checkIn(vDiff)
+        if vNegOne is not None:
+            writer.vgprPool.checkIn(vNegOne)
         return list(module.flatitems())
 
     def emit_mask_k_done(self):
-        """Release the tail-loop kReg vgpr allocated by emit_mask_k_init."""
+        """Release the tail-loop vgprs allocated by emit_mask_k_init."""
         if self._tail_kReg is not None:
             self.writer.vgprPool.checkIn(self._tail_kReg)
             self._tail_kReg = None
+        if getattr(self, "_tail_halfMaskVgpr", None) is not None:
+            self.writer.vgprPool.checkIn(self._tail_halfMaskVgpr)
+            self._tail_halfMaskVgpr = None
         return []
 
     def populate(self, emitted, unroll_iter=0):
