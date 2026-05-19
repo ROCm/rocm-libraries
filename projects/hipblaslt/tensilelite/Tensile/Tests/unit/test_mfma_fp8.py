@@ -32,7 +32,8 @@ import numpy as np
 import math
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     WAVESIZE, NUM_WAVES, NUM_THREADS,
     AB_B8,
@@ -379,7 +380,7 @@ def compare_mfma_output(actual_bytes, expected_pairs, debug=False):
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestMfmaFP8:
     """GPU tests for FP8 GR->LDS->LR->MFMA roundtrip."""
 
@@ -430,8 +431,8 @@ if __name__ == "__main__":
                         help="Config index to test (default: all)")
     args = parser.parse_args()
 
-    if not HAS_HIP:
-        print("HIP not available — cannot run GPU test")
+    if not HAS_GFX950:
+        print(f"GPU tests require gfx950, found {GFX_TARGET} — cannot run GPU test")
         sys.exit(1)
 
     config_list  = CONFIGS if args.config is None else [CONFIGS[args.config]]
