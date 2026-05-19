@@ -3103,7 +3103,7 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                 abort();
             }
 
-            rocblas_int shiftA_ = shiftA + idx2D(j, j, lda);
+            rocblas_stride shiftA_ = shiftA + idx2D(j, j, lda);
             T* tau_j_ = tau + j;
             S* E_j_ = E + j;
             void* kernelArgs[] = {(void*)&n,      (void*)&k,       (void*)&A,    (void*)&shiftA_,
