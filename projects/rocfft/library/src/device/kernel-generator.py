@@ -102,7 +102,8 @@ def get_kernel_key(kernel):
 
 def merge_kernel_list(kernels, all_precisions):
     """Merge precision and architecture lists with kernel list. 
-    Check for duplicated kernel and invalid precision/arch entries."""
+    Check for duplicated kernel and invalid precision/arch entries.
+    Ensures that the batch ranges of the kernels are non-overlapping."""
 
     r, d = list(), dict()
 
@@ -195,14 +196,19 @@ def merge_kernel_list(kernels, all_precisions):
                 min_batch = 1
                 max_batch = sys.maxsize
 
+                # check if the key is already in the dictionary
                 if key not in d:
+                    # if the key is not in the dictionary, add it to the dictionary
                     d[key] = list()
+                    # if the batch is not empty, add the batch to the list
                     if not is_empty_batch(kernel_cpy):
                         d[key].append(
                             get_batch_range(kernel_cpy, min_batch, max_batch))
 
                     r.append(kernel_cpy)
                 else:
+                    # Check if the entry for the given key in the dictionary is empty,
+                    # and also the batch is empty. If both are true, then the kernel is a duplicate
                     if not d[key] and is_empty_batch(kernel_cpy):
                         print(dup_err_msg + str(kernel))
                         sys.exit(1)

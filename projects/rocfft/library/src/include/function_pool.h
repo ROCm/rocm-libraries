@@ -231,11 +231,11 @@ class function_pool
     PPFPKeyMap::const_iterator
         find_pp_key_in_map(const PPFPKeyMap& fmap, const PPFMKey& key, const size_t& batch) const
     {
-        // NOTE: The key to the kernels obtained from equal_range(key) are guaranteed to have
-        // non-overlapping batch ranges. So we can simply check if the input batch is within
-        // the range of the kernel. If the input batch is not within range but there is a kernel
-        // that matches the key and has no specified batch_low and batch_high, then we return
-        // the key to that kernel.
+        // NOTE: The kernels obtainable from equal_range(key) are guaranteed to have non-overlapping
+        // batch ranges. This is enforced by the kernel-generator.py script. So we can simply check
+        // if the input batch is within the range of the kernel. If the input batch is not within range
+        //  but there is a kernel that matches the key and has no specified batch_low and batch_high,
+        // then we return the key to that kernel.
         auto range = fmap.equal_range(key);
         auto best  = fmap.end();
         for(auto it = range.first; it != range.second; ++it)
@@ -299,7 +299,7 @@ class function_pool
 
     // retrieve a key with the correct kernel configs from a generic key
     const PPFMKey&
-        get_actual_pp_key(const PPFMKey& key, PPFPKeyMap& pool, const size_t& batch) const
+        get_actual_pp_key(const PPFMKey& key, const PPFPKeyMap& pool, const size_t& batch) const
     {
         // First attempt an exact match with the given architecture in gcn_arch_name if possible
         auto it = find_pp_key_in_map(pool, key, batch);
