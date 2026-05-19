@@ -4,9 +4,7 @@
 """Stage-tagged type aliases for the LogicalScheduler pipeline.
 
 These aliases name each intermediate representation produced by the scheduler
-passes. They are pure documentation aids enforced by static type checkers
-(pyright); at runtime all four schedule aliases resolve to the same Python
-container types, so they impose zero overhead.
+passes.
 
 Stage progression
 -----------------
