@@ -253,7 +253,10 @@ class InstructionEmitter:
                              comment=f"K < 2*DepthU? skip tail SRD advance for {tc}"))
         module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
                                 comment="NLL-only path: SRD already in place"))
-        module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
+        if tensor in ('SA', 'SB'):
+            module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
+        else:
+            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
         module.add(skipLabel)
         return list(module.flatitems())
 
@@ -356,19 +359,21 @@ class InstructionEmitter:
             src0=sgpr(loopCounterName), src1=vgpr(self._tail_workKVgpr),
             comment="diff = rem - laneK_0 (shared across all subIterK)"))
 
+        # _tail_vNegOne is needed by both BF16 (3-state mask src0) and non-BF16
+        # (cndmask src0 to build a 0-or-(-1) lane mask). v_cndmask_b32 already
+        # spends its const-bus on src2 (sgpr predicate); src0 must be a vgpr.
         self._tail_halfMaskVgpr = None
-        self._tail_vNegOne = None
+        self._tail_vNegOne = writer.vgprPool.checkOut(1, "tail_vNegOne")
+        module.add(VMovB32(
+            dst=vgpr(self._tail_vNegOne), src=-1,
+            comment="full-mask vgpr (constant-bus dodge)"))
         self._tail_vD8 = None
         self._tail_boundaryMask = None
         if self.kernel["ProblemType"]["DataTypeA"].isBFloat16():
             self._tail_halfMaskVgpr = writer.vgprPool.checkOut(1, "tail_halfMask")
-            self._tail_vNegOne = writer.vgprPool.checkOut(1, "tail_vNegOne")
             module.add(VMovB32(
                 dst=vgpr(self._tail_halfMaskVgpr), src="0x0000FFFF",
                 comment="BF16 half-mask: keep K0 (low 16b), zero K1 (high 16b)"))
-            module.add(VMovB32(
-                dst=vgpr(self._tail_vNegOne), src=-1,
-                comment="BF16 full-mask vgpr (constant-bus dodge)"))
 
             # Precompute the 4 boundary masks from d = rem%8.
             # The boundary-mask pattern (which vgprs are full/half/zero) depends
@@ -417,15 +422,19 @@ class InstructionEmitter:
         For subIterK=n the effective per-lane diff is `diff - n*MatrixInstK`,
         which we fold into the cmp immediates (no per-call sub).
 
-        A/B tiles get per-vgpr V_AND_B32 with a 3-state mask, so the boundary
-        can fall inside a vgpr without losing the valid element. For BF16
-        (stride = 2 K positions per vgpr), vgpr `i` in subIterK `n` uses:
+        A/B tiles get per-vgpr V_AND_B32 with a mask vgpr. For BF16
+        (stride = 2 K positions per vgpr), vgpr `i` in subIterK `n` uses a
+        3-state mask:
             kOff = i*2 + n*MatrixInstK
             mask = (diff < kOff+1) ? 0
                  : (diff < kOff+2) ? 0x0000FFFF
                                    : 0xFFFFFFFF
-        Non-BF16 (and MXSA/MXSB) keep the whole-vgpr CNDMASK -> 0 path,
-        which becomes "diff < n*MatrixInstK + 1 ? zero : keep".
+        Non-BF16 (e.g. FP4) uses a single 2-state mask shared across all i:
+            mask = (diff < n*MatrixInstK + 1) ? 0 : 0xFFFFFFFF
+        This assumes rem aligns to the per-lane K stride per vgpr (true for
+        rem=32 with FP4 MIK=128, 8 K/vgpr × 4 vgprs). A boundary inside a
+        non-BF16 vgpr would need per-byte/nibble handling.
+        MXSA/MXSB keep the whole-vgpr CNDMASK -> 0 path.
         """
         assert self._tail_kReg is not None, \
             "emit_mask_k_init must run before emit_mask_k"
@@ -446,32 +455,59 @@ class InstructionEmitter:
             m = source.vgpr_tile_map.get(key, [{}])[0]
             return sorted(set(m.values()))
 
-        # For BF16: all A/B tiles in this subIterK have the same vgprs-per-lane count
-        # and the same K layout across vgprs, so the i-th vgpr of every tile gets the
-        # same mask. Compute one mask per i and reuse across all tiles.
+        # All A/B tiles in this subIterK have the same vgprs-per-lane count
+        # and the same K layout across vgprs, so the i-th vgpr of every tile
+        # gets the same mask. Compute the masks once and reuse across all tiles.
         vgprPerInUnroll = 0
-        if isBF16:
-            for ids, tilesDict in ((_unique_ids('A'), self.vgprTilesA),
-                                   (_unique_ids('B'), self.vgprTilesB)):
-                if ids:
-                    vgprPerInUnroll = len(list(tilesDict[ids[0]]))
-                    break
+        for ids, tilesDict in ((_unique_ids('A'), self.vgprTilesA),
+                               (_unique_ids('B'), self.vgprTilesB)):
+            if ids:
+                vgprPerInUnroll = len(list(tilesDict[ids[0]]))
+                break
 
-        maskVgprs = [writer.vgprPool.checkOut(1, f"mask_k_msk{i}_k{subIterK}")
-                     for i in range(vgprPerInUnroll)]
+        # BF16 allocates one mask per i (boundary may land inside any vgpr).
+        # Non-BF16 builds a single 2-state mask and replicates the index across
+        # all i, since the boundary aligns to a vgpr edge.
+        if isBF16:
+            maskVgprs = [writer.vgprPool.checkOut(1, f"mask_k_msk{i}_k{subIterK}")
+                         for i in range(vgprPerInUnroll)]
+        else:
+            sharedMask = writer.vgprPool.checkOut(1, f"mask_k_msk_k{subIterK}")
+            maskVgprs = [sharedMask] * vgprPerInUnroll
 
         with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
 
-            # Whole-vgpr compare for non-BF16 A/B (and consumed by MXSA/MXSB below
-            # for non-BF16+scale): laneK_n >= rem ⟺ diff <= n*MatrixInstK.
+            # Compare for non-BF16: laneK_n >= rem ⟺ diff <= n*MatrixInstK ⟺
+            # diff < kBaseConst+1. Predicate is reused by MXSA/MXSB below (whole
+            # -vgpr cndmask) and by the v_and mask vgpr we build next.
             # BF16 doesn't need this here — the isBF16 block below ends with
             # sZero (= diff <= kBaseConst) in maskSgpr, which MXSA/MXSB reuses.
             if not isBF16:
-                module.add(VCmpLtI32(
-                    dst=sgpr(maskSgpr, laneSGPRCount),
-                    src0=vgpr(self._tail_vDiff), src1=kBaseConst + 1,
-                    comment=f"mask: diff < {kBaseConst+1} (laneK_{subIterK} >= rem)"))
+                literal = kBaseConst + 1
+                if -16 <= literal <= 64:
+                    module.add(VCmpLtI32(
+                        dst=sgpr(maskSgpr, laneSGPRCount),
+                        src0=vgpr(self._tail_vDiff), src1=literal,
+                        comment=f"mask: diff < {literal} (laneK_{subIterK} >= rem)"))
+                else:
+                    # VOPC inline-constant range is -16..64; stage larger
+                    # literals via a scratch sgpr (e.g. FP4 MI_K=128, subIterK>=1).
+                    with writer.allocTmpSgpr(1) as litSgprInfo:
+                        litSgpr = litSgprInfo.idx
+                        module.add(SMovB32(
+                            dst=sgpr(litSgpr), src=hex(literal),
+                            comment=f"stage literal {literal} (non-inline)"))
+                        module.add(VCmpLtI32(
+                            dst=sgpr(maskSgpr, laneSGPRCount),
+                            src0=vgpr(self._tail_vDiff), src1=sgpr(litSgpr),
+                            comment=f"mask: diff < {literal} (laneK_{subIterK} >= rem)"))
+                # Build the 2-state mask vgpr: predicate ? 0 : -1.
+                module.add(VCndMaskB32(
+                    dst=vgpr(sharedMask),
+                    src0=vgpr(self._tail_vNegOne), src1=0,
+                    src2=sgpr(maskSgpr, laneSGPRCount),
+                    comment=f"mask = (diff < {literal}) ? 0 : -1"))
 
             if isBF16:
                 # 3-way classifier per (lane, subIterK):
@@ -514,22 +550,22 @@ class InstructionEmitter:
                         dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
                         comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
 
-            mask_ab = _mask_all_partial if isBF16 else _mask_all_whole
             for tid in _unique_ids('A'):
-                mask_ab(list(self.vgprTilesA[tid]), "A")
+                _mask_all_partial(list(self.vgprTilesA[tid]), "A")
             for tid in _unique_ids('B'):
-                mask_ab(list(self.vgprTilesB[tid]), "B")
+                _mask_all_partial(list(self.vgprTilesB[tid]), "B")
             # MXSA/MXSB use the whole-vgpr zero mask. For BF16 the isBF16 block
             # above left sZero (= diff <= kBaseConst, semantically equal to
             # diff < kBaseConst+1) in maskSgpr — exactly what we need. For non-BF16
             # the needWholeMaskCmp at the top set the same predicate.
-            if self.hasScale:
-                for tid in _unique_ids('SA'):
-                    _mask_all_whole(list(self.vgprTilesSA[tid]), "MXSA")
-                for tid in _unique_ids('SB'):
-                    _mask_all_whole(list(self.vgprTilesSB[tid]), "MXSB")
+            # TEMP: scale mask disabled while debugging FP4 tail correctness.
+            # if self.hasScale:
+            #     for tid in _unique_ids('SA'):
+            #         _mask_all_whole(list(self.vgprTilesSA[tid]), "MXSA")
+            #     for tid in _unique_ids('SB'):
+            #         _mask_all_whole(list(self.vgprTilesSB[tid]), "MXSB")
 
-        for m in maskVgprs:
+        for m in set(maskVgprs):
             writer.vgprPool.checkIn(m)
         return list(module.flatitems())
 
