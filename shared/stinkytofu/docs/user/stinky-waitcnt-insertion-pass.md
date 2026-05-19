@@ -143,6 +143,31 @@ This pass uses `MemTokenData` in three ways:
 2. **LDS write-after-read (WAR)** (in `computeRequiredWaits`): if an LDS writer (`tensor_load_to_lds` / `ds_write`) has tokens that overlap with prior pending DS reads, synthesize WAR dependencies and emit an `s_wait_dscnt` that drains them. `collectLdsWarDependencies` applies a per-pair same-pipeline filter (via `isOnSameDSPipeline`), so a `ds_write` writer skips candidate readers it already shares a hardware pipeline (and therefore FIFO ordering) with.
 3. **Tensor barrier matching** (in `reinsertTensorWaitsHeuristic`): if the oldest pending tensor load's tokens overlap with a barrier's tokens, emit a `s_wait_tensorcnt`.
 
+### Conservative Fallback for Missing `MemTokenData`
+
+`StinkyBuildImplicitDependencyPass` does not always attach `MemTokenData`. When `passCtx.getPassFeatureConfig().barrierConfig.unrollMovableBarrier == false` the upstream pass skips all LDS-token annotation, so the three sites above receive instructions with no tokens at all. To stay correctness-safe in that mode (and in any other situation where a single op fails to be annotated), the pass applies a hybrid conservative policy whenever a required token is missing.
+
+| Site | Anchor missing tokens (writer / barrier) | Candidate missing tokens (reader / pending op / pending tensor load) |
+|------|------------------------------------------|----------------------------------------------------------------------|
+| DS barrier conflict | Barrier without `MemTokenData` triggers `s_wait_dscnt 0` whenever pending DS ops exist; queue cleared. | An untagged pending DS op (`hasUntaggedDSOp()`) triggers `s_wait_dscnt 0` on the next barrier, regardless of whether the barrier itself is tagged. |
+| WAR-on-LDS | Writer without `MemTokenData` triggers `s_wait_dscnt 0` if any non-same-pipeline DS read/atomic is pending (current block or any predecessor exit state). Same-pipeline filter still applies. | A reader/atomic without `MemTokenData` is widened into the WAR dep set; the normal `min(count - 1)` algorithm then picks the wait value. |
+| Tensor barrier matching | Barrier without `MemTokenData` emits `s_wait_tensorcnt 0` and clears the cross-block `tensorLoads` deque. | A tensor load in the deque without `MemTokenData` is treated as the youngest conflicting entry; all loads up to and including it are drained. |
+
+The "anchor missing" branch always reduces to a wait-0 on the appropriate counter, subject to the standard `CounterWaitState::needsNewWait` redundancy elision (so back-to-back drains do not double-emit). The "candidate missing" branch never inflates the value beyond what the normal `min(count - 1)` path would compute for an overlapping op at the same position. Every conservative branch logs a `PASS_DEBUG` line so investigations into perf regressions in `unrollMovableBarrier=false` mode can identify which sites fired.
+
+```mermaid
+flowchart TD
+    Inst[Anchor instruction] --> Q1{Anchor has MemTokenData?}
+    Q1 -->|No| Drain["Full drain on counter<br/>s_wait_*cnt 0"]
+    Q1 -->|Yes| Q2{Any candidate lacks MemTokenData<br/>or token overlap?}
+    Q2 -->|No| NoWait[No conservative wait]
+    Q2 -->|Yes| Widen["Add candidate to dep set<br/>normal min count-1"]
+    Drain --> Elide[Redundancy elision via CounterWaitState]
+    Widen --> Elide
+```
+
+`isLdsWriterAnchor` (formerly `isLdsWriterWithTokens`) now identifies LDS writers structurally so the WAR scan runs unconditionally; the actual choice of conservative vs. per-token path lives in `collectLdsWarDependencies`, which returns an `LdsWarResult { deps, forceDsDrain }`. `PendingMemOpTracker::hasUntaggedDSOp()` is the helper used by the barrier path to detect candidate-side missing tokens.
+
 ## Core Algorithm: computeRequiredWaits
 
 This method walks a single basic block in program order and determines which instructions need a preceding wait. It returns a list of `(anchorInstruction, WaitCountSpec)` pairs.
@@ -152,36 +177,51 @@ This method walks a single basic block in program order and determines which ins
 ```
 For each non-PHI instruction in the block:
 
-  1. If it is a barrier with MemTokenData token conflict:
+  1. If it is a barrier and pendingDSOps is non-empty:
+       Drain when any of the following holds:
+         a. Barrier tokens overlap with activeDSTokens (tagged-barrier path)
+         b. Barrier lacks MemTokenData (anchor-missing-tokens fallback)
+         c. Any pending DS op lacks MemTokenData (candidate-missing-tokens fallback)
      -> Emit DS wait-0 (all pending DS ops must complete)
      -> Clear DS state and continue to next instruction
 
   2. Collect its memory-op dependencies via collectSources
      (flatten through PHIs, filter to DS/buffer ops only)
 
-  3. If it is an LDS writer with MemTokenData (tensor_load_to_lds / ds_write):
-     -> collectLdsWarDependencies scans pending DS reads/atomics
-        (current block + each CFG predecessor's exit state) and adds
-        token-overlapping ones to memOpDependencies
-     -> Per-pair filter inside the helper: candidates on the same hardware
-        pipeline as the writer (isOnSameDSPipeline) are skipped because the
-        hardware FIFO-retires them on the shared counter. In practice this
-        means a ds_write writer adds no synthetic WAR deps against prior
-        ds_read / ds_atomic on dlcnt.
+  3. If it is an LDS writer anchor (tensor_load_to_lds / ds_write):
+     -> collectLdsWarDependencies returns { deps, forceDsDrain }:
+          Writer has MemTokenData: scan pending DS reads/atomics in current
+          block + each CFG predecessor's exit state; add token-overlapping
+          ones (and any reader missing MemTokenData) to memOpDependencies.
+          Per-pair filter inside the helper: candidates on the same hardware
+          pipeline as the writer (isOnSameDSPipeline) are skipped because the
+          hardware FIFO-retires them on the shared counter. In practice this
+          means a ds_write writer adds no synthetic WAR deps against prior
+          ds_read / ds_atomic on dlcnt.
 
-  4. If memOpDependencies is not empty, for each counter (DS, buffer):
+          Writer lacks MemTokenData: forceDsDrain == true if any non-same-
+          pipeline candidate exists in the current block or any predecessor;
+          deps is left empty. The caller emits s_wait_dscnt 0 instead of
+          running the per-pair min(count - 1) computation.
+
+  4. If forceDsDrain (only set by the conservative branch):
+     -> Emit DS wait-0 (subject to redundancy elision)
+     -> Clear DS state; the buffer counter still runs via memOpDependencies
+
+  5. If memOpDependencies is not empty, for each counter (DS, buffer):
      a. Compute the required wait value (current block + predecessors)
+        Skip the DS branch when forceDsDrain already emitted the drain.
      b. Check if a new wait is actually needed (redundancy elision)
      c. If needed, record the (anchor, waitSpec) pair
 
-  5. Tail recording: only AFTER any wait has been emitted, record inst as a
+  6. Tail recording: only AFTER any wait has been emitted, record inst as a
      DS or buffer op (if applicable) so it appears as in-flight for subsequent
      iterations. This matches hardware semantics: the wait executes before the
      consumer issues, so its queue snapshot must exclude the consumer itself.
 
 After the loop:
-  6. Trim exit state queues based on last emitted waits
-  7. Store the trimmed state into blockExitMemState for successor blocks
+  7. Trim exit state queues based on last emitted waits
+  8. Store the trimmed state into blockExitMemState for successor blocks
 ```
 
 ### Barrier token conflict handling
@@ -200,20 +240,24 @@ Barrier @tokens=[2, 3]:
 
 ### LDS write-after-read (WAR) handling
 
-`tensor_load_to_lds` and `ds_write` are LDS *writers*. If a prior `ds_read` is still draining on the DS counter, the writer cannot be safely issued because it would clobber memory that the read is still consuming. The pure SSA-style def-use chain captures **read-after-write** (a `ds_read` lists its LDS writer as a source) but never captures **write-after-read** -- a writer never lists prior readers as sources. The pass therefore synthesizes WAR dependencies inside `computeRequiredWaits` whenever it sees an LDS writer with `MemTokenData`:
+`tensor_load_to_lds` and `ds_write` are LDS *writers*. If a prior `ds_read` is still draining on the DS counter, the writer cannot be safely issued because it would clobber memory that the read is still consuming. The pure SSA-style def-use chain captures **read-after-write** (a `ds_read` lists its LDS writer as a source) but never captures **write-after-read** -- a writer never lists prior readers as sources. The pass therefore runs `collectLdsWarDependencies` inside `computeRequiredWaits` for every LDS writer anchor (no longer gated on `MemTokenData`):
 
 ```
-For each LDS writer with MemTokenData (tensor_load_to_lds / ds_write):
+For each LDS writer anchor (tensor_load_to_lds / ds_write):
 
   Scan pending DS reads/atomics in two scopes (mirrors computeWaitValueForCounter):
     1. Current block: localState.pendingDSOps
     2. Each CFG predecessor's refined exit state in blockExitMemState
 
-  For each scanned op:
-    if op is a DS read (or DS atomic) with MemTokenData
-       and hasTokenOverlap(op.tokens, writer.tokens)
-       and NOT isOnSameDSPipeline(writer, op)
-      -> add op to memOpDependencies
+  If the writer has MemTokenData:
+    For each scanned op:
+      if op is a DS read (or DS atomic) and NOT isOnSameDSPipeline(writer, op):
+        if op has no MemTokenData               -> add to memOpDependencies (widen)
+        elif hasTokenOverlap(op.tokens, writer.tokens) -> add to memOpDependencies
+
+  If the writer has NO MemTokenData (conservative fallback):
+    if any scanned op is a DS read / DS atomic NOT on the same pipeline:
+      forceDsDrain = true                       (caller emits s_wait_dscnt 0)
 ```
 
 #### Same-pipeline filter (isOnSameDSPipeline)
@@ -406,21 +450,28 @@ The pass removes all `IF_WaitTensorCnt` instructions from blocks labeled `label_
 
 ### Phase 2: Reinsert tensor waits based on barrier token matching
 
-Walking all processed blocks in RPO, the pass maintains a **cross-block** deque of tensor load instructions (those carrying `MemTokenData`). At each barrier, it checks the oldest pending tensor load's tokens for overlap with the barrier's tokens:
+Walking all processed blocks in RPO, the pass maintains a **cross-block** deque of *every* tensor load instruction (with or without `MemTokenData`). At each barrier, it walks the deque from the youngest end looking for the youngest conflicting load:
 
 ```
 tensorLoads: [T0, T1, T2]   (oldest first, accumulated across blocks)
 
 Barrier @tokens=[5, 6]:
-  Check T0's tokens against barrier tokens:
-    T0 @tokens=[5] -> overlap with [5, 6] -> match!
+  Walk from youngest: T2, T1, T0
+    T2 @tokens=[7]   -> no overlap
+    T1 @tokens=[5]   -> overlap with [5, 6] -> match (lastDependentIndex = 1)
 
-  Pop T0, emit s_wait_tensorcnt with remaining count:
-    tensorLoads after pop: [T1, T2]
-    -> Emit s_wait_tensorcnt 2 before barrier
+  Pop loads up to and including T1, emit s_wait_tensorcnt with remaining count:
+    tensorLoads after pop: [T2]
+    -> Emit s_wait_tensorcnt 1 before barrier
 ```
 
-The wait count equals the number of tensor loads still pending *after* removing the matched one. This ensures the oldest load completes before the barrier while allowing newer loads to remain in flight.
+The wait count equals the number of tensor loads still pending *after* removing the matched range. This ensures the youngest conflicting load completes before the barrier while allowing newer non-conflicting loads to remain in flight.
+
+**Conservative fallback** (hybrid policy):
+
+- A tensor load without `MemTokenData` is still pushed into the deque -- it cannot be proven disjoint from any future barrier and must stay visible.
+- A barrier without `MemTokenData` is treated as conflicting with everything in the deque: emit `s_wait_tensorcnt 0` and clear the deque.
+- A tagged barrier walking the deque treats any untagged entry as the youngest conflicting load (sets `lastDependentIndex` to that index and breaks), draining all entries up to and including it.
 
 Note: tensor waits collected per block are emitted at the end of each block's scan via `emitWaitInstructions`, while the `tensorLoads` deque persists across blocks.
 
@@ -493,9 +544,13 @@ anonymous namespace {
     isDSMemoryOp(...)              // DS read or write predicate
     isBufferMemoryOp(...)          // Global load or store predicate
     hasTokenOverlap(A, B)          // Template: any shared token between containers
+    isLdsWriterAnchor(...)         // tensor_load_to_lds / ds_write (token-agnostic)
+    isOnSameDSPipeline(a, b)       // Same hardware FIFO (DS dlcnt) pair?
 
     // --- Data structures ---
     struct PendingMemOpTracker     // In-flight memory op queues + token tracking
+                                   //   .hasUntaggedDSOp() helper for conservative path
+    struct LdsWarResult            // { deps, forceDsDrain } from WAR analysis
     struct WaitCountSpec           // Wait counter immediate triplet
 
     // --- Pass class ---
