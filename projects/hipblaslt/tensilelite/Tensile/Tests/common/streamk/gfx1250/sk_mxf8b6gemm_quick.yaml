@@ -1,0 +1,327 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  KernelTime: True
+  NewClient: 2
+  BoundsCheck: False
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeD: 3
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: False
+  MinKForGSU: 1
+  Architecture: gfx1250
+  CpuThreads: 1
+  # KeepBuildTmp: True
+  PrintLevel: 2
+  ISA: [[12, 5, 0]]
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
+
+BenchmarkProblems:
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: B6
+      DataType: B6  # can be F8 or B6
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [1]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  1, 1,  1, 2]
+        - DepthU: [256]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [True, False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [0]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [1, 0]
+        - DirectToVgprSparseMetadata: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # - Exact: [127, 127, 1, 1024]
+          - Exact: [128, 128, 1, 1024]
+          # - Exact: [129, 129, 1, 1024]
+          # - Exact: [127, 127, 1, 1056]
+          - Exact: [128, 128, 1, 1056]
+          # - Exact: [129, 129, 1, 1056]
+
+  #######################################
+  # NN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: B6
+      DataType: B6  # can be F8 or B6
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [1]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  1, 1,  1, 2]
+        - DepthU: [256]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [True, False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [0]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [1, 0]
+        - DirectToVgprSparseMetadata: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # - Exact: [127, 127, 1, 1024]
+          - Exact: [128, 128, 1, 1024]
+          # - Exact: [129, 129, 1, 1024]
+          # - Exact: [127, 127, 1, 1056]
+          - Exact: [128, 128, 1, 1056]
+          # - Exact: [129, 129, 1, 1056]
+
+  #######################################
+  # NT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: B6
+      DataType: B6  # can be F8 or B6
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [1]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  1, 1,  1, 2]
+        - DepthU: [256]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [True, False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [0]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [1, 0]
+        - DirectToVgprSparseMetadata: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # - Exact: [127, 127, 1, 1024]
+          - Exact: [128, 128, 1, 1024]
+          # - Exact: [129, 129, 1, 1024]
+          # - Exact: [127, 127, 1, 1056]
+          - Exact: [128, 128, 1, 1056]
+          # - Exact: [129, 129, 1, 1056]
+
+  #######################################
+  # TT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: B6
+      DataType: B6  # can be F8 or B6
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [1]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  1, 1,  1, 2]
+        - DepthU: [256]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [True, False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [0]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [1, 0]
+        - DirectToVgprSparseMetadata: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # - Exact: [127, 127, 1, 1024]
+          - Exact: [128, 128, 1, 1024]
+          # - Exact: [129, 129, 1, 1024]
+          # - Exact: [127, 127, 1, 1056]
+          - Exact: [128, 128, 1, 1056]
+          # - Exact: [129, 129, 1, 1056]

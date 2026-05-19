@@ -590,6 +590,17 @@ namespace TensileLite
             int  mxBlockB                   = 0;
             rocisa::DataType mxTypeA        = rocisa::DataType::E8;
             rocisa::DataType mxTypeB        = rocisa::DataType::E8;
+
+            // In-device MX scale layout expected by the kernel. Mirrors the
+            // MXScaleFormat solution parameter (see Tensile/Common/ValidParameters.py).
+            // Encoded as a small int so it round-trips through msgpack and YAML
+            // logic files without an explicit enum schema:
+            //   0 = NoSwizzle       (default; canonical row/column layout)
+            //   1 = HostPreSwizzle  (gfx950 subtile host-preswizzled layout)
+            //   2 = InMemorySwizzle (gfx1250 TDM-populated swizzled layout)
+            // The host (DataInitialization) consults this to decide whether to
+            // apply the K-dimension swizzle on the MX scale tensor before upload.
+            int mxScaleFormat = 0;
         };
 
         struct LinearModel

@@ -6,6 +6,7 @@
 #include "HipdnnAttentionImplementation.h"
 #include "HipdnnBackendAttributeName.h"
 #include "HipdnnBackendAttributeType.h"
+#include "HipdnnBackendBehaviorNote.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
@@ -80,6 +81,10 @@ inline const char* hipdnnGetDataTypeString(hipdnnDataType_t type)
         return "HIPDNN_DATA_FP8_E4M3";
     case HIPDNN_DATA_FP8_E5M2:
         return "HIPDNN_DATA_FP8_E5M2";
+    case HIPDNN_DATA_FP8_E4M3_FNUZ:
+        return "HIPDNN_DATA_FP8_E4M3_FNUZ";
+    case HIPDNN_DATA_FP8_E5M2_FNUZ:
+        return "HIPDNN_DATA_FP8_E5M2_FNUZ";
     case HIPDNN_DATA_FP8_E8M0:
         return "HIPDNN_DATA_FP8_E8M0";
     case HIPDNN_DATA_FP4_E2M1:
@@ -175,6 +180,27 @@ inline const char* hipdnnGetAttributeTypeString(hipdnnBackendAttributeType_t typ
     }
 }
 
+inline const char* hipdnnGetBehaviorNoteString(hipdnnBackendBehaviorNote_t note)
+{
+    switch(note)
+    {
+    case HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION:
+        return "HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION";
+    case HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM:
+        return "HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM";
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE:
+        return "HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE";
+    case HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY:
+        return "HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY";
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return "HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION";
+    case HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT:
+        return "HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT";
+    default:
+        return "HIPDNN_BEHAVIOR_NOTE_UNKNOWN";
+    }
+}
+
 inline const char* hipdnnGetBackendDescriptorTypeName(hipdnnBackendDescriptorType_t type)
 {
     switch(type)
@@ -243,6 +269,8 @@ inline const char* hipdnnGetBackendDescriptorTypeName(hipdnnBackendDescriptorTyp
         return "HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR";
     case HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR:
         return "HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR";
+    case HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT:
+        return "HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT";
     default:
         return "UNKNOWN_TYPE";
     }
@@ -836,6 +864,24 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
     case HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC:
         return "HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC";
 
+    // RMSNorm backward operation attributes
+    case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_X_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_X_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_SCALE_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_SCALE_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DSCALE_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DSCALE_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DBIAS_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DBIAS_EXT";
+    case HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT:
+        return "HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT";
+
     // Operation extension attributes
     case HIPDNN_ATTR_OPERATION_NAME_EXT:
         return "HIPDNN_ATTR_OPERATION_NAME_EXT";
@@ -891,6 +937,8 @@ inline const char* hipdnnGetOperationTypeString(hipdnnOperationType_ext_t type)
         return "HIPDNN_OPERATION_TYPE_REDUCTION_EXT";
     case HIPDNN_OPERATION_TYPE_RMSNORM_EXT:
         return "HIPDNN_OPERATION_TYPE_RMSNORM_EXT";
+    case HIPDNN_OPERATION_TYPE_RMSNORM_BACKWARD_EXT:
+        return "HIPDNN_OPERATION_TYPE_RMSNORM_BACKWARD_EXT";
     case HIPDNN_OPERATION_TYPE_SDPA_BACKWARD_EXT:
         return "HIPDNN_OPERATION_TYPE_SDPA_BACKWARD_EXT";
     case HIPDNN_OPERATION_TYPE_SDPA_FORWARD_EXT:

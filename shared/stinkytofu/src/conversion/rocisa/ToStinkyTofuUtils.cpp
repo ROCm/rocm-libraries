@@ -778,7 +778,7 @@ std::shared_ptr<stinkytofu::SignatureBase> toStinkySignature(const rocisa::Signa
     auto stinkySig = std::make_shared<stinkytofu::SignatureBase>(
         rocisaSig.name, isaVersion, cm.kernArgsVersion, cm.codeObjectVersion, kd.groupSegSize,
         kd.sgprWorkGroup, kd.vgprWorkItem, cm.flatWgSize, wavefrontSize, kd.originalTotalVgprs,
-        kd.totalAgprs, kd.totalSgprs, kd.enablePreloadKernArgs);
+        kd.totalAgprs, kd.totalSgprs, kd.numSgprPreload);
 
     // Convert arguments
     for (const auto& arg : cm.argList) {
@@ -822,7 +822,7 @@ void traverseModule(const rocisa::Module& module,
 }  // anonymous namespace
 
 namespace stinkytofu {
-std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
+static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const rocisa::Module& module, std::array<int, 3> arch, const std::string& moduleName,
     const StinkyAsmModule::ModuleOptions& moduleOptions) {
     // Get GfxArchID from architecture array
@@ -999,6 +999,7 @@ std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     // Check whether a rocisa Instruction is a global/buffer/flat load or tensor load.
     // Excludes SMemLoadInstruction (s_load) which also inherits from GlobalReadInstruction.
     auto isPrefetchLoadInst = [](const rocisa::Instruction* inst) -> bool {
+        // NOLINTNEXTLINE(misc-redundant-expression)
         return dynamic_cast<const rocisa::MUBUFReadInstruction*>(inst) ||
                dynamic_cast<const rocisa::GLOBALLoadInstruction*>(inst) ||
                dynamic_cast<const rocisa::FLATReadInstruction*>(inst) ||
@@ -1088,7 +1089,7 @@ std::array<int, 3> convertArch(nb::object arch_obj) {
 /// Python code to convert rocisa to StinkyTofu IR.
 ///
 /// \param m The nanobind module to add bindings to
-void init_stinkytofu(nb::module_ m) {
+void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
         "isSupportedByStinkyTofu",
@@ -1120,10 +1121,28 @@ void init_stinkytofu(nb::module_ m) {
             return module_->getName();
         }
 
+        void setOutputName(const std::string& name) {
+            module_->setOutputName(name);
+        }
+
+        std::string getOutputName() const {
+            return module_->getOutputName();
+        }
+
+        void setOutputDir(const std::string& dir) {
+            module_->setOutputDir(dir);
+        }
+
+        std::string getOutputDir() const {
+            return module_->getOutputDir();
+        }
+
         // Override emitAssembly to include signature
         std::string emitAssembly() const {
             std::string result;
             if (signature_) {
+                int64_t totalBytes = module_->getTotalInstructionBytes();
+                if (totalBytes >= 0) signature_->setTotalInstructionBytes(totalBytes);
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
@@ -1141,6 +1160,13 @@ void init_stinkytofu(nb::module_ m) {
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
         .def("getName", &StinkyAsmModuleWithSignature::getName)
+        .def("setOutputName", &StinkyAsmModuleWithSignature::setOutputName,
+             "Set full kernel name for output files (e.g. cost file); should match .o basename")
+        .def("getOutputName", &StinkyAsmModuleWithSignature::getOutputName)
+        .def("setOutputDir", &StinkyAsmModuleWithSignature::setOutputDir,
+             "Set output dir for cost file: comparison_output/<yaml_name>; file at "
+             "<dir>/<kernel_name>/aggregated_instruction_cost.txt")
+        .def("getOutputDir", &StinkyAsmModuleWithSignature::getOutputDir)
         .def("getModule", &StinkyAsmModuleWithSignature::getModule);
 
     // Bind toStinkyTofuModule with signature support
@@ -1152,7 +1178,9 @@ void init_stinkytofu(nb::module_ m) {
             std::array<int, 3> archArray = convertArch(arch_obj);
 
             // Override with options dict if provided
-            StinkyAsmModule::ModuleOptions moduleOptions;
+            StinkyAsmModule::ModuleOptions moduleOptions{};
+            // Sentinel: <0 means use legacy default scratch SGPR in SwPrefetchInsertionPass (102).
+            moduleOptions.SwPrefetchScratchSgpr = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 
@@ -1174,7 +1202,8 @@ void init_stinkytofu(nb::module_ m) {
 #undef DEBUG_SET_MODULE_OPTION
             }
 
-            // Convert module to StinkyAsmModule
+            // Convert module to StinkyAsmModule (StinkyAsmModule ctor sets
+            // EnableSwPrefetchInsertion from Sgpr != -1)
             auto stinkyModule =
                 stinkytofu::toStinkyTofuModule(module, archArray, moduleName, moduleOptions);
 
