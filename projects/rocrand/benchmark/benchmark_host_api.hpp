@@ -22,12 +22,14 @@
 
 #include "benchmark_utils.hpp"
 
-#include "rng/threefry.hpp"
+#ifdef __HIP__
+    #include "rng/threefry.hpp"
 
-#include "rng/distribution/log_normal.hpp"
-#include "rng/distribution/normal.hpp"
-#include "rng/distribution/poisson.hpp"
-#include "rng/distribution/uniform.hpp"
+    #include "rng/distribution/log_normal.hpp"
+    #include "rng/distribution/normal.hpp"
+    #include "rng/distribution/poisson.hpp"
+    #include "rng/distribution/uniform.hpp"
+#endif
 
 #include <optional>
 #include <type_traits>
@@ -68,6 +70,7 @@ constexpr const char* ordering_name(ordering_t order)
     return "unknown";
 }
 
+#ifdef __HIP__
 template<typename>
 struct config_provider_of
 {
@@ -129,13 +132,16 @@ struct distribution_input<rocrand_impl::host::threefry_generator_template<
 
 template<typename Generator>
 using distribution_input_t = typename distribution_input<Generator>::type;
+#endif
 
 template<typename T, distribution Distribution, typename Generator = void>
 struct host_api_benchmark : public primbench::benchmark_interface
 {
+#ifdef __HIP__
     using Config = config_provider_of_t<Generator>;
 
     static constexpr bool is_autotuning = !std::is_void_v<Generator>;
+#endif
 
     host_api_benchmark(rng_type_t            engine,
                        ordering_t            ordering,
@@ -165,6 +171,7 @@ struct host_api_benchmark : public primbench::benchmark_interface
             json.add("poisson_lambda", *m_poisson_lambda);
         }
 
+#ifdef __HIP__
         if constexpr(is_autotuning)
         {
             json.add("cfg",
@@ -172,23 +179,27 @@ struct host_api_benchmark : public primbench::benchmark_interface
                          .add("threads", Config::static_config.threads)
                          .add("blocks", Config::static_config.blocks));
         }
+#endif
 
         return json;
     }
 
     void run(primbench::state& state) override
     {
+#ifdef __HIP__
         if constexpr(is_autotuning)
         {
             run_tuning(state);
         }
         else
+#endif
         {
             run_benchmark(state);
         }
     }
 
 private:
+#ifdef __HIP__
     template<typename GeneratorT>
     auto make_distribution()
     {
@@ -263,6 +274,7 @@ private:
 
         PRIMBENCH_CHECK(gpu_free(data));
     }
+#endif
 
     void run_benchmark(primbench::state& state)
     {
