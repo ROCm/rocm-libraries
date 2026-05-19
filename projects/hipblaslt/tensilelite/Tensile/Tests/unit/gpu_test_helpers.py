@@ -25,11 +25,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-try:
-    from hip import hip, hiprtc  # type: ignore
-    HAS_HIP = True
-except ImportError:
-    HAS_HIP = False
+from hip import hip, hiprtc  # type: ignore
 
 from unittest.mock import MagicMock
 from types import SimpleNamespace
@@ -40,10 +36,45 @@ from rocisa.container import vgpr, sgpr
 from rocisa.instruction import SLoadB32, SLoadB64, SLoadB128, SWaitCnt, VLShiftLeftB32, VMovB32
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
-from Tensile.Components.SubtileBasedKernel import TileInfo
+from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+
+# ---- GPU target detection ----
+def _detect_gfx_target():
+    """Detect the GPU architecture from the current device.
+
+    Detection order:
+    1. TENSILE_GPU_TARGET env var (explicit override)
+    2. rocm_agent_enumerator (GPU hardware detection)
+
+    Returns None if no GPU can be detected.
+    """
+    override = os.environ.get("TENSILE_GPU_TARGET")
+    if override:
+        return override
+
+    rocmpath = os.environ.get("ROCM_PATH", "/opt/rocm")
+    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
+    if os.path.exists(enumerator):
+        try:
+            output = subprocess.check_output(
+                [enumerator, "-t", "GPU"], stderr=subprocess.DEVNULL
+            )
+            archs = [
+                line.strip()
+                for line in output.decode().splitlines()
+                if line.strip() and "gfx000" not in line
+            ]
+            if archs:
+                return archs[0]
+        except subprocess.CalledProcessError:
+            pass
+
+    return None
+
 
 # ---- Constants ----
-GFX_TARGET = "gfx950"
+GFX_TARGET = _detect_gfx_target()
+HAS_GFX950 = GFX_TARGET == "gfx950"
 WAVESIZE   = 64
 NUM_WAVES  = 4
 NUM_THREADS = WAVESIZE * NUM_WAVES  # 256
@@ -161,8 +192,8 @@ def create_writer(cfg, mi_wave_group=None):
     # Build kernel and TileInfo
     kernel = _create_kernel(cfg, mi_wave_group=mi_wave_group)
 
-    tileInfoA = TileInfo('A', kernel)
-    tileInfoB = TileInfo('B', kernel)
+    tileInfoA = TileInfo(AB_B16, 'A', writer, kernel)
+    tileInfoB = TileInfo(AB_B16, 'B', writer, kernel)
 
     writer.agprPool = RegisterPool(0, RegisterType.Accvgpr,
                                     defaultPreventOverflow=False, printRP=False)
@@ -171,12 +202,13 @@ def create_writer(cfg, mi_wave_group=None):
         a=SimpleNamespace(tileInfo=tileInfoA),
         b=SimpleNamespace(tileInfo=tileInfoB),
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
+        archCaps={"LDSBankCount": 64, "LDSBankWidth": 4},
     )
     # LDS layout: A subtiles followed by B subtiles, aligned to readSize
     readSize = 2 * tileInfoA.subtileSize
     numASubtiles = tileInfoA.globalSubtileGrid[0] * tileInfoA.globalSubtileGrid[1]
     writer.ldsStartOffsetA = 0
-    writer.ldsStartOffsetB = ((numASubtiles * tileInfoA.subtileSize + readSize-1) // readSize) * readSize
+    writer.ldsStartOffsetB = int(((numASubtiles * tileInfoA.subtileSize + readSize-1) // readSize) * readSize)
 
     return writer, kernel, tileInfoA, tileInfoB
 
@@ -191,14 +223,21 @@ def generate_set_directives(sgprs):
 
 
 def init_rocisa():
-    """Initialize rocIsa singleton if needed."""
+    """Initialize rocIsa singleton for the detected GPU target.
+
+    Always calls ri.init() because other module imports (e.g. KernelWriter)
+    may have already initialized the singleton with a different target.
+    """
+    import shutil
     from rocisa import rocIsa
+    from Tensile.Common.Architectures import gfxToIsa
     ri = rocIsa.getInstance()
-    if not ri.isInit():
-        import shutil
-        asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
-        ri.init((9, 5, 0), asmpath)
-    ri.setKernel((9, 5, 0), WAVESIZE)
+    if not GFX_TARGET:
+        raise ValueError(f"Invalid GPU target: '{GFX_TARGET}'")
+    isa = gfxToIsa(GFX_TARGET)
+    asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+    ri.init(isa, asmpath)
+    ri.setKernel(isa, WAVESIZE)
 
 
 # ---- Kernel assembly generator ----
@@ -268,6 +307,7 @@ def generate_kernel_asm(inner_asm, writer, args, lds_size=0, num_threads=None):
     """
     if num_threads is None:
         num_threads = NUM_THREADS
+    lds_size = int(lds_size)
     set_directives = generate_set_directives(writer.sgprs)
     args_metadata, kernarg_size = _generate_args_metadata(args)
 

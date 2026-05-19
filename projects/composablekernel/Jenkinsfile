@@ -24,6 +24,24 @@
 // Benefits: PR builds 5h → 30min (typical), nightly builds unchanged
 // See: script/dependency-parser/README.md for details
 //
+
+@NonCPS
+String getGitHubCommitHash(def build)
+{
+    def scmAction = build?.actions.find { action ->
+        action instanceof jenkins.scm.api.SCMRevisionAction
+    }
+    if (scmAction?.revision instanceof org.jenkinsci.plugins.github_branch_source.PullRequestSCMRevision)
+    {
+        return scmAction.revision.pullHash
+    }
+    else if (scmAction?.revision instanceof jenkins.plugins.git.AbstractGitSCMSource$SCMRevisionImpl)
+    {
+        return scmAction.revision.hash
+    }
+    return null
+}
+
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
 }
@@ -36,6 +54,30 @@ def show_node_info() {
         cat /sys/module/amdgpu/version
         ls /opt/ -la
     """
+}
+
+def setGithubStatus(String context, String state, String description) {
+    def sha = env.GIT_COMMIT
+    def targetUrl = env.RUN_DISPLAY_URL ?: env.BUILD_URL
+    def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
+    withCredentials([usernamePassword(credentialsId: 'github-app-miopen', usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
+        def code = '0'
+        try {
+            retry(3) {
+                code = sh(returnStdout: true, script: """
+                    curl -s -w "%{http_code}" -o /dev/null -X POST '${statusUrl}' \\
+                        -H "Authorization: token \$GITHUB_TOKEN" \\
+                        -H 'Content-Type: application/json' \\
+                        -d '{"state":"${state}","context":"${context}","description":"${description}","target_url":"${targetUrl}"}'
+                """).trim()
+                if (!code.startsWith('2')) {
+                    error("GitHub status POST returned ${code}")
+                }
+            }
+        } catch (Exception e) {
+            echo "WARNING: GitHub status POST failed after retries (context=${context}, state=${state}, code=${code})"
+        }
+    }
 }
 
 def cloneUpdateRefRepo() {
@@ -78,7 +120,14 @@ def checkoutComposableKernel()
     //update ref repo
     cloneUpdateRefRepo()
     // checkout project
-    checkout scm
+    def scmVars = checkout scm
+    // getGitHubCommitHash reads SCMRevisionAction recorded before any local merge,
+    // giving the true PR branch tip (pullHash) or branch HEAD (hash).
+    // Falls back to ORIG_HEAD (pre-merge HEAD set by git merge) when SCMRevisionAction
+    // is unavailable, then to HEAD for branch builds where no merge occurred.
+    env.GIT_COMMIT = getGitHubCommitHash(currentBuild.rawBuild) ?: sh(returnStdout: true, script: '''
+        git rev-parse ORIG_HEAD 2>/dev/null || git rev-parse HEAD
+    ''').trim()
 }
 
 def generateAndArchiveBuildTraceVisualization(String buildTraceFileName) {
@@ -672,6 +721,9 @@ def cmake_build(Map conf=[:]){
         if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
             setup_args = " -D CK_EXPERIMENTAL_BUILDER=ON "  + setup_args
         }
+        if (params.RUN_ROCM_CK_TESTS) {
+            setup_args = " -D CK_ENABLE_ROCM_CK=ON " + setup_args
+        }
         setup_cmd = conf.get(
             "setup_cmd",
             """${cmake_envs} cmake -G Ninja ${setup_args} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_FLAGS=" -O3 " .. """
@@ -720,6 +772,26 @@ def cmake_build(Map conf=[:]){
         try {
             //build CK
             sh cmd
+            if (runAllUnitTests){
+                // Archive artifacts if they were generated
+                if (fileExists("ck_build_trace_${arch_name}.json")) {
+                    archiveArtifacts "ck_build_trace_${arch_name}.json"
+                }
+                if (fileExists("clang_build_analysis_${arch_name}.log")) {
+                    archiveArtifacts "clang_build_analysis_${arch_name}.log"
+                }
+                // Process ninja build trace after full build
+                sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
+                archiveArtifacts "ck_build_trace_${arch_name}.json"
+                sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
+
+                if (params.NINJA_FTIME_TRACE) {
+                    echo "running ClangBuildAnalyzer"
+                    sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --all . clang_build.log"
+                    sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --analyze clang_build.log > clang_build_analysis_${arch_name}.log"
+                    archiveArtifacts "clang_build_analysis_${arch_name}.log"
+                }
+            }
         } catch (Exception buildError) {
             echo "Build failed: ${buildError.getMessage()}"
             throw buildError
@@ -744,49 +816,35 @@ def cmake_build(Map conf=[:]){
             }
         }
 
-        //run tests except when NO_CK_BUILD is set
+        //run tests except when NO_CK_BUILD is set and except on gfx1250
         if(!setup_args.contains("NO_CK_BUILD")){
-            if (params.NINJA_BUILD_TRACE || params.BUILD_INSTANCES_ONLY){
-                // do not run unit tests when building instances only
-                if(!params.BUILD_INSTANCES_ONLY){
-                    if (!runAllUnitTests){
-                        // Smart Build: Run smart_build_and_test.sh
-                        sh """
-                            export WORKSPACE_ROOT=${env.WORKSPACE}
-                            export PARALLEL=32
-                            export NINJA_JOBS=${nt}
-                            export ARCH_NAME=${arch_name}
-                            export PROCESS_NINJA_TRACE=true
-                            export NINJA_FTIME_TRACE=${params.NINJA_FTIME_TRACE ? 'true' : 'false'}
-                            bash ../script/dependency-parser/smart_build_and_test.sh
-                        """
-
-                        // Archive artifacts if they were generated
-                        if (fileExists("ck_build_trace_${arch_name}.json")) {
-                            archiveArtifacts "ck_build_trace_${arch_name}.json"
-                        }
-                        if (fileExists("clang_build_analysis_${arch_name}.log")) {
-                            archiveArtifacts "clang_build_analysis_${arch_name}.log"
-                        }
-                    }
-                    else{
+            // run unit tests unless building library for all targets
+            // Note: This else block is when NINJA_BUILD_TRACE=false and BUILD_INSTANCES_ONLY=false
+            // So no ninja trace processing needed here
+            if (!params.BUILD_INSTANCES_ONLY){
+                if (!runAllUnitTests && !setup_args.contains("gfx1250") ){
+                    // Smart Build: Run smart_build_and_test.sh
+                    sh """
+                        export WORKSPACE_ROOT=${env.WORKSPACE}
+                        export PARALLEL=32
+                        export NINJA_JOBS=${nt}
+                        export ARCH_NAME=${arch_name}
+                        export PROCESS_NINJA_TRACE=false
+                        export NINJA_FTIME_TRACE=false
+                        bash ../script/dependency-parser/smart_build_and_test.sh
+                    """
+                }
+                else{ //run all tests
+                    if(!setup_args.contains("gfx1250")){
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
                         sh "ninja -j${nt} check"
-
-                        // Process ninja build trace after full build
-                        sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
-                        archiveArtifacts "ck_build_trace_${arch_name}.json"
-                        sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
-
-                        if (params.NINJA_FTIME_TRACE) {
-                            echo "running ClangBuildAnalyzer"
-                            sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --all . clang_build.log"
-                            sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --analyze clang_build.log > clang_build_analysis_${arch_name}.log"
-                            archiveArtifacts "clang_build_analysis_${arch_name}.log"
-                        }
                     }
-                    if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
-                        sh 'ninja check-builder'
+                    else{ //do not run tests on gfx1250, just build everything
+                        echo "Building for gfx1250"
+                        sh "ninja -j${nt}"
+                    }
+                    if (params.RUN_ROCM_CK_TESTS) {
+                        sh 'ninja check-rocm-ck'
                     }
                     if(params.BUILD_PACKAGES){
                         echo "Build ckProfiler packages"
@@ -795,44 +853,8 @@ def cmake_build(Map conf=[:]){
                         stash includes: "composablekernel-ckprofiler**.deb", name: "profiler_package_${arch_name}"
                     }
                 }
-                if(params.BUILD_INSTANCES_ONLY){
-                    // build deb packages
-                    echo "Build library package"
-                    sh 'ninja -j64 package'
-                    sh 'mv composablekernel-dev_*.deb composablekernel-dev_all_targets_1.2.0_amd64.deb'
-                    stash includes: "composablekernel-dev**.deb", name: "lib_package"
-                }
-            }
-            else{
-                // run unit tests unless building library for all targets
-                // Note: This else block is when NINJA_BUILD_TRACE=false and BUILD_INSTANCES_ONLY=false
-                // So no ninja trace processing needed here
-                if (!params.BUILD_INSTANCES_ONLY){
-                    if (!runAllUnitTests){
-                        // Smart Build: Run smart_build_and_test.sh
-                        sh """
-                            export WORKSPACE_ROOT=${env.WORKSPACE}
-                            export PARALLEL=32
-                            export NINJA_JOBS=${nt}
-                            export ARCH_NAME=${arch_name}
-                            export PROCESS_NINJA_TRACE=false
-                            export NINJA_FTIME_TRACE=false
-                            bash ../script/dependency-parser/smart_build_and_test.sh
-                        """
-                    }
-                    else{
-                        echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
-                        sh "ninja -j${nt} check"
-                    }
-                    if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
-                        sh 'ninja check-builder'
-                    }
-                    if(params.BUILD_PACKAGES){
-                        echo "Build ckProfiler packages"
-                        sh 'ninja -j64 package'
-                        sh "mv composablekernel-ckprofiler_*.deb composablekernel-ckprofiler_1.2.0_amd64_${arch_name}.deb"
-                        stash includes: "composablekernel-ckprofiler**.deb", name: "profiler_package_${arch_name}"
-                    }
+                if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
+                    sh 'ninja check-builder'
                 }
             }
         }
@@ -860,13 +882,19 @@ def buildHipClangJob(Map conf=[:]){
         def retimage
         (retimage, image) = getDockerImage(conf)
 
-        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
+        setGithubStatus("${env.STAGE_NAME}", 'pending', "Starting ${env.STAGE_NAME}")
+        try {
             withDockerContainer(image: image, args: dockerOpts) {
                 timeout(time: 20, unit: 'HOURS')
                 {
                     cmake_build(conf)
                 }
             }
+            setGithubStatus("${env.STAGE_NAME}", 'success', "Stage ${env.STAGE_NAME} passed")
+        }
+        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+                setGithubStatus("${env.STAGE_NAME}", 'failure', "Stage ${env.STAGE_NAME} failed")
+                throw e
         }
         return retimage
 }
@@ -890,7 +918,8 @@ def Build_CK(Map conf=[:]){
         def image
         def retimage
 
-        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
+        setGithubStatus("${env.STAGE_NAME}", 'pending', "Starting ${env.STAGE_NAME}")
+        try {
             try {
                 (retimage, image) = getDockerImage(conf)
                 withDockerContainer(image: image, args: dockerOpts) {
@@ -907,6 +936,7 @@ def Build_CK(Map conf=[:]){
             }
             catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
                 echo "The job was cancelled or aborted"
+                setGithubStatus("${env.STAGE_NAME}", 'failure', "Stage ${env.STAGE_NAME} failed")
                 throw e
             }
             withDockerContainer(image: image, args: dockerOpts) {
@@ -967,6 +997,11 @@ def Build_CK(Map conf=[:]){
                     }
                 }
             }
+            setGithubStatus("${env.STAGE_NAME}", 'success', "Stage ${env.STAGE_NAME} passed")
+        }
+        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+                setGithubStatus("${env.STAGE_NAME}", 'failure', "Stage ${env.STAGE_NAME} failed")
+                throw e
         }
         return retimage
 }
@@ -987,7 +1022,8 @@ def process_results(Map conf=[:]){
     //use older image that has user jenkins
     def image = "${env.CK_DOCKERHUB}:ck_ub22.04_rocm6.3"
 
-    gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
+    setGithubStatus("${env.STAGE_NAME}", 'pending', 'Processing results...')
+    try {
         try
         {
             echo "Pulling image: ${image}"
@@ -1000,6 +1036,10 @@ def process_results(Map conf=[:]){
         {
             error "Unable to locate image: ${image}"
         }
+    }
+    catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+                setGithubStatus("${env.STAGE_NAME}", 'failure', "Stage ${env.STAGE_NAME} failed")
+                throw e
     }
 
     withDockerContainer(image: image, args: '--cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v=/var/jenkins/:/var/jenkins') {
@@ -1108,10 +1148,10 @@ def process_results(Map conf=[:]){
                     // process the logs
                     sh "./process_perf_data.sh"
                 }
+                setGithubStatus("${env.STAGE_NAME}", 'success', "Stage ${env.STAGE_NAME} passed")
             }
-            catch(e){
-                echo "Throwing error exception while processing performance test results"
-                echo 'Exception occurred: ' + e.toString()
+            catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+                setGithubStatus("${env.STAGE_NAME}", 'failure', "Stage ${env.STAGE_NAME} failed")
                 throw e
             }
             finally{
@@ -1126,7 +1166,8 @@ def run_downstream_tests(Map conf=[:]){
     checkoutComposableKernel()
     def dockerOpts = get_docker_options() + ' --group-add irc '
 
-    gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
+    setGithubStatus("${env.STAGE_NAME}", 'pending', "Starting ${env.STAGE_NAME}")
+    try {
         try
         {
             echo "Pulling image: ${conf.image}"
@@ -1140,6 +1181,10 @@ def run_downstream_tests(Map conf=[:]){
             error "Unable to locate image: ${conf.image}"
         }
     }
+    catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+                setGithubStatus("${env.STAGE_NAME}", 'failure', "Stage ${env.STAGE_NAME} failed")
+                throw e
+    }
 
     withDockerContainer(image: conf.image, args: dockerOpts) {
         timeout(time: conf.get("timeoutHours", 2), unit: 'HOURS'){
@@ -1149,10 +1194,12 @@ def run_downstream_tests(Map conf=[:]){
                 for (cmd in conf.execute_cmds) {
                     sh "${cmd}"
                 }
+                setGithubStatus("${env.STAGE_NAME}", 'success', "Stage ${env.STAGE_NAME} passed")
             }
             catch(e){
                 echo "Throwing error exception while running ${env.STAGE_NAME}"
                 echo 'Exception occurred: ' + e.toString()
+                setGithubStatus("${env.STAGE_NAME}", 'error', "Stage ${env.STAGE_NAME} failed")
                 throw e
             }
             finally{
@@ -1321,8 +1368,8 @@ pipeline {
             description: "Build CK and run tests on gfx101 (default: OFF)")
         booleanParam(
             name: "BUILD_GFX103",
-            defaultValue: true,
-            description: "Build CK and run tests on gfx103 (default: ON)")
+            defaultValue: false,
+            description: "Build CK and run tests on gfx103 (default: OFF)")
         booleanParam(
             name: "BUILD_GFX11",
             defaultValue: true,
@@ -1331,6 +1378,10 @@ pipeline {
             name: "BUILD_GFX12",
             defaultValue: true,
             description: "Build CK and run tests on gfx12 (default: ON)")
+        booleanParam(
+            name: "BUILD_GFX1250",
+            defaultValue: true,
+            description: "Build CK for gfx1250 (default: ON)")
         booleanParam(
             name: "NINJA_BUILD_TRACE",
             defaultValue: true,
@@ -1351,6 +1402,10 @@ pipeline {
             name: "RUN_BUILDER_TESTS",
             defaultValue: false,
             description: "Run CK_BUILDER tests (default: OFF)")
+        booleanParam(
+            name: "RUN_ROCM_CK_TESTS",
+            defaultValue: true,
+            description: "Run rocm_ck tests (default: ON)")
         booleanParam(
             name: "RUN_ALL_UNIT_TESTS",
             defaultValue: false,
@@ -1407,9 +1462,9 @@ pipeline {
         dbsshport = "${dbsshport}"
         dbsshuser = "${dbsshuser}"
         dbsshpassword = "${dbsshpassword}"
-        ck_git_creds = "${ck_git_creds}"
         gerrit_cred="${gerrit_cred}"
         DOCKER_BUILDKIT = "1"
+        BUILD_GFX103 = "${env.BRANCH_NAME == 'develop' ? true : false}"
     }
     stages{
         stage("Determine CI Execution") {
@@ -1747,6 +1802,7 @@ pipeline {
                     environment{
                         setup_args = "NO_CK_BUILD"
                         execute_args = """ cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+                                            -D BUILD_CK_TILE_ENGINE="ON" \
                                             -D CMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
                                             -D CMAKE_BUILD_TYPE=Release \
                                             -D GPU_TARGETS="gfx942" \
@@ -1789,6 +1845,7 @@ pipeline {
                     environment{
                         setup_args = "NO_CK_BUILD"
                         execute_args = """ cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+                                            -D BUILD_CK_TILE_ENGINE="ON" \
                                             -D CMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
                                             -D CMAKE_BUILD_TYPE=Release \
                                             -D GPU_TARGETS="gfx942" \
@@ -1823,6 +1880,7 @@ pipeline {
                     environment{
                         setup_args = "NO_CK_BUILD"
                         execute_args = """ cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+                                            -D BUILD_CK_TILE_ENGINE="ON" \
                                             -D CMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
                                             -D CMAKE_BUILD_TYPE=Release \
                                             -D GPU_TARGETS="gfx950" \
@@ -1852,6 +1910,7 @@ pipeline {
                     environment{
                         setup_args = "NO_CK_BUILD"
                         execute_args = """ cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+                                            -D BUILD_CK_TILE_ENGINE="ON" \
                                             -D CMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
                                             -D CMAKE_BUILD_TYPE=Release \
                                             -D GPU_TARGETS="gfx1201" \
@@ -1908,6 +1967,7 @@ pipeline {
                         cleanWs()
                     }
                 }
+                /*
                 stage("Build CK and run Tests on gfx908")
                 {
                     when {
@@ -1924,6 +1984,7 @@ pipeline {
                         cleanWs()
                     }
                 }
+                */
                 stage("Build CK and run Tests on gfx90a")
                 {
                     when {
@@ -1959,6 +2020,7 @@ pipeline {
                         cleanWs()
                     }
                 }
+                /*
                 stage("Build CK and run Tests on gfx1010")
                 {
                     when {
@@ -1975,6 +2037,7 @@ pipeline {
                         cleanWs()
                     }
                 }
+                */
                 stage("Build CK and run Tests on gfx1030")
                 {
                     when {
@@ -2023,6 +2086,21 @@ pipeline {
                         cleanWs()
                     }
                 }
+                stage("Build CK for gfx1250")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.BUILD_GFX1250.toBoolean() && !params.RUN_FULL_QA.toBoolean() && !params.BUILD_INSTANCES_ONLY.toBoolean() }
+                    }
+                    agent{ label rocmnode("gfx90a") }
+                    environment{
+                        setup_args = """ -DCMAKE_INSTALL_PREFIX=../install -DGPU_TARGETS="gfx1250" -DDISABLE_DL_KERNELS="ON" """
+                    }
+                    steps{
+                        Build_CK_and_Reboot(setup_args: setup_args, docker_name: "${env.CK_DOCKERHUB_PRIVATE}:npi-mi450-latest", config_targets: "install", no_reboot:true, build_type: 'Release', prefixpath: '/usr/local')
+                        cleanWs()
+                    }
+                }
             }
             post {
                 always {
@@ -2040,8 +2118,9 @@ pipeline {
                 }
                 success {
                     script {
-                        // Report the parent stage build ck and run tests status
-                        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
+                        node(rocmnode("nogpu")) {
+                            // Report the parent stage build ck and run tests status
+                            setGithubStatus("${env.STAGE_NAME}", 'success', "Stage ${env.STAGE_NAME} passed")
                             echo "Reporting success status for build ck and run tests"
                         }
                     }
@@ -2067,12 +2146,9 @@ pipeline {
             post {
                 success {
                     script {
-                        // Report the skipped parent's stage status
-                        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "Process Performance Test Results", account: 'ROCm', repo: 'rocm-libraries') {
-                            echo "Process Performance Test Results stage skipped."
-                        }
-                        // Report the skipped stage's status
-                        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "Process results", account: 'ROCm', repo: 'rocm-libraries') {
+                        node(rocmnode("nogpu")) {
+                            // Report the skipped parent's stage status
+                            setGithubStatus("${env.STAGE_NAME}", 'success', "Stage ${env.STAGE_NAME} passed")
                             echo "Process Performance Test Results stage skipped."
                         }
                     }
@@ -2082,22 +2158,25 @@ pipeline {
     }
     post {
         success {
-            githubNotify context: 'Math CI Summary',
-                         status: 'SUCCESS',
-                         description: 'All checks have passed'
+            script {
+                node(rocmnode("nogpu")) {
+                    setGithubStatus('Math CI Summary', 'success', "Math CI passed")
+                }
+            }
         }
         failure {
-            githubNotify context: 'Math CI Summary',
-                         status: 'FAILURE',
-                         description: 'Some checks have failed'
-            node(rocmnode("nogpu")) {
-                script {
-                    checkoutComposableKernel()
-                }
-                withCredentials([string(credentialsId: 'ck_ci_errors_webhook_url', variable: 'WEBHOOK_URL')]) {
-                    sh 'bash projects/composablekernel/script/infra_helper/send_failure_notifications.sh'
+            script {
+                node(rocmnode("nogpu")) {
+                    setGithubStatus('Math CI Summary', 'failure', "Math CI failed")
+                    script {
+                        checkoutComposableKernel()
+                    }
+                    withCredentials([string(credentialsId: 'ck_ci_errors_webhook_url', variable: 'WEBHOOK_URL')]) {
+                        sh 'bash projects/composablekernel/script/infra_helper/send_failure_notifications.sh'
+                    }
                 }
             }
         }
     }
 }
+

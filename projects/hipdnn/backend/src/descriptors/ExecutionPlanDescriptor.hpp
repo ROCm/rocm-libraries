@@ -25,7 +25,6 @@ private:
     std::shared_ptr<const EngineConfigDescriptor> _engineConfig;
     std::shared_ptr<const plugin::EngineExecutionContextWrapper> _executionContext;
     std::shared_ptr<plugin::EnginePluginResourceManager> _pluginResourceManager;
-    std::vector<uint8_t> _serializedEngineConfig;
     std::vector<int64_t> _tensorUids;
     int64_t _workspaceSize = INVALID_WORKSPACE_SIZE;
     int64_t _engineId = INVALID_ENGINE_ID;
