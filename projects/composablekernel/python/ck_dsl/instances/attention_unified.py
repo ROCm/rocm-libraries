@@ -10,7 +10,9 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from ..core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
@@ -70,6 +72,17 @@ class UnifiedAttentionProblem:
     # because they already fit at 1 wave per workgroup. ``None`` keeps
     # the LLVM backend's heuristic choice.
     waves_per_eu: Optional[int] = None
+    # Compile backend for the tiled 2D path:
+    #   - ``None`` (default): auto-pick. Uses the LLVM-direct
+    #     pipeline (``compile_kernel``) except for large prefill
+    #     (``max_seqlen_q > 512 or num_seqs * max_seqlen_q > 1024``),
+    #     where ``hipcc --genco`` is measurably faster (≈5% on
+    #     ``b4_q1000_kv1000``) thanks to clang's heavier scheduling.
+    #   - ``"llvm"``: always use the LLVM-direct path (~90ms compile).
+    #   - ``"hipcc"``: always lower to HIP C++ and compile via hipcc
+    #     (~450ms compile but ~5% faster on long-running kernels).
+    # See ``probe_hip_lowering.py`` for the per-shape comparison.
+    compile_backend: Optional[str] = None
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -146,15 +159,29 @@ def supports_native_unified_attention(
     This is deliberately strict. It prevents a partially implemented backend
     from being selected in `auto` mode and gives test code a single place to
     check coverage.
+
+    Scalar 2D backend coverage (this returns True for these):
+    - head_size in {64, 128, 256} (the scalar kernel loops over head_size with
+      ``b.unroll(p.head_size)``, so any HD that divides cleanly through the
+      online-softmax accumulator works)
+    - block_size in {16, 32, 64} (used only as the modulus in PagedKvDescriptor
+      address arithmetic)
+    - dtype in {fp16, bf16}
+    - has_sinks: yes
+    - sliding_window: yes
+    - softcap: yes
     """
-    if problem.head_size not in (128, 256):
+    if problem.head_size not in (64, 128, 256):
         return False, f"unsupported head_size {problem.head_size}"
-    if problem.block_size not in (16, 64):
+    if problem.block_size not in (16, 32, 64):
         return False, f"unsupported block_size {problem.block_size}"
     if problem.dtype not in ("fp16", "bf16"):
         return False, f"unsupported dtype {problem.dtype}"
+    # FP8 K/V cache: scalar 2D backend does not implement the FP8 dequant
+    # path yet; only the tiled 2D and tiled 3D backends do (see
+    # ``supports_native_unified_attention_tiled`` and ``_3d_tiled``).
     if problem.use_fp8 or problem.q_dtype is not None:
-        return False, "FP8 unified attention is not enabled in CK DSL yet"
+        return False, "FP8 unified attention is not enabled in the scalar 2D path yet"
     if problem.use_alibi:
         return False, "ALiBi slopes are not enabled in CK DSL attention yet"
     if problem.use_qq_bias:
@@ -176,6 +203,8 @@ def supports_native_unified_attention_tiled(
         use_fp8=problem.use_fp8,
         q_dtype=problem.q_dtype,
         num_warps=_select_2d_num_warps(problem),
+        kv_storage_dtype=_kv_storage_dtype(problem),
+        tile_size=_select_2d_tile_size(problem),
     )
 
 
@@ -192,6 +221,7 @@ def supports_native_unified_attention_3d_tiled(
         use_qq_bias=problem.use_qq_bias,
         use_fp8=problem.use_fp8,
         q_dtype=problem.q_dtype,
+        kv_storage_dtype=_kv_storage_dtype(problem),
     )
 
 
@@ -218,47 +248,259 @@ def _cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     )
 
 
+def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
+    """Choose ``tile_size`` (T) for the tiled 2D kernel.
+
+    ``T`` is the number of KV tokens consumed per outer-loop iter (per
+    kernel iteration). Larger ``T`` amortises the outer-loop overhead
+    (block-table lookup, async-DMA issue, softmax/PV scheduling) but
+    only pays off if there is enough KV per CTA to keep the multi-block
+    descriptor's wave-uniform path filled.
+
+    **Universal ``T = 2 * BS``** post the Q-in-registers + single-buffer-V
+    refactor: the LDS savings (8 KiB Q + 8 KiB V) make the multi-block
+    path fit comfortably for every workload class on MI355X. For decode,
+    the higher per-iter amortization beats the smaller-tile choice by
+    ~24% (measured ``/workspace/probe_prefill_sweep.py``: decode_b1
+    drops 34 µs → 26 µs).
+
+    The kernel's own gate (``supports_tiled_2d``) re-validates the
+    choice against the per-wave-tokens / LDS-budget constraints.
+
+    Per-shape champion overrides (``attention_champion_routes.json``)
+    take precedence: round-based optimization may record a different
+    ``tile_size`` for a specific shape.
+    """
+    override = _champion_override(problem, "tile_size")
+    if override is not None:
+        return int(override)
+    return 2 * problem.block_size
+
+
+_CHAMPION_ROUTES_PATH = (
+    Path(__file__).parent / "attention_champion_routes.json" if False else None
+)
+_CHAMPION_ROUTES_CACHE: Optional[Dict[str, Dict[str, int]]] = None
+
+
+def _shape_signature(problem: UnifiedAttentionProblem) -> str:
+    """Stable signature string mapping a problem to a champion-routes entry.
+
+    Format mirrors the bench harness `_shape_id` function so the bench
+    JSONs and runtime overrides can share keys verbatim.
+    """
+    sw = "_sw" if problem.sliding_window > 0 else ""
+    fp8 = "_fp8kv" if problem.use_fp8 else "_bf16kv"
+    return (
+        f"n{problem.num_seqs}q{problem.max_seqlen_q}k{problem.max_seqlen_k}"
+        f"_d{problem.head_size}b{problem.block_size}"
+        f"_h{problem.num_query_heads}kv{problem.num_kv_heads}"
+        f"{fp8}{sw}"
+    )
+
+
+def _load_champion_routes() -> Dict[str, Dict[str, int]]:
+    """Lazy-load the per-shape champion routing table.
+
+    Returns a dict mapping shape_signature -> {num_warps, block_m_per_warp,
+    tile_size, waves_per_eu}. Missing keys fall back to the heuristic
+    selectors. The file lives next to this module so any in-tree edit is
+    picked up at import without setup changes.
+    """
+    global _CHAMPION_ROUTES_CACHE
+    if _CHAMPION_ROUTES_CACHE is not None:
+        return _CHAMPION_ROUTES_CACHE
+    path = Path(__file__).parent / "attention_champion_routes.json"
+    if not path.exists():
+        _CHAMPION_ROUTES_CACHE = {}
+        return _CHAMPION_ROUTES_CACHE
+    try:
+        doc = json.loads(path.read_text())
+        _CHAMPION_ROUTES_CACHE = doc.get("routes", {}) if isinstance(doc, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        _CHAMPION_ROUTES_CACHE = {}
+    return _CHAMPION_ROUTES_CACHE
+
+
+def _champion_override(problem: UnifiedAttentionProblem, key: str):
+    """Return the per-shape champion override for a knob, or None."""
+    routes = _load_champion_routes()
+    entry = routes.get(_shape_signature(problem))
+    if not entry:
+        return None
+    return entry.get(key)
+
+
 def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     """Choose ``num_warps`` for the tiled 2D kernel.
 
-    The kernel supports `num_warps in {1, 2, 4}`. Multi-warp is correct
-    (each warp owns 16 rows of BLOCK_M and runs its own MFMA / softmax /
-    PV pipeline; there is no cross-warp reduction). However, empirical
-    benchmarking on MI355X shows that wider CTAs do not actually speed
-    up the inner KV loop for the workloads we care about, because each
-    wave's MFMA throughput is the limit and adding waves only shrinks
-    the grid. So we default to ``num_warps=1`` and keep the multi-warp
-    machinery in place for future split-N experiments.
+    The kernel supports ``num_warps in {1, 2, 4, 8}`` (each warp owns 16
+    rows of ``BLOCK_M``; no cross-warp reduction). The kernel also has a
+    hard ceiling ``T * HD >= num_warps * 64 * 8`` — at ``THREADS *
+    halves_per_call`` per call we need that many halves available in the
+    per-tile KV slab, otherwise the async DMA underfills.
 
-    Multi-warp lays out OK at correctness but not speed; if you change
-    this, run `python/ck_dsl/examples/attention/parity_unified_attention.py`
-    with `--paths 2d` and verify the 2D-vs-2D table still wins or at
-    least doesn't regress.
+    Tuning thresholds (calibrated against the trace shapes documented in
+    ``/workspace/trace_bench_report.md`` on MI355X / gfx950; the
+    ``warps``-sweep harness is at ``/workspace/probe_prefill_sweep.py``
+    and the prefill-time harness is at
+    ``/workspace/probe_prefill_time.py``):
+
+    **Post Q-in-registers + single-buffer-V refactor** (measured at
+    ``/workspace/probe_prefill_sweep.py`` on MI355X):
+
+      ``q <= 64``    (decode + tiny prefill) -> 1   (small grid; tiny
+                                                     per-CTA work)
+      ``q <= 128``                           -> 2
+      ``q in (128, 256]``                    -> 4   (medium prefill;
+                                                     BLOCK_M=64 wins
+                                                     against q=256's
+                                                     CTA count)
+      ``q > 256``                            -> 2   (NW=2 dominates large
+                                                     prefill after the
+                                                     LDS savings — was
+                                                     NW=4 in the pre-
+                                                     refactor heuristic)
+
+    The result is further clamped against:
+
+      - the architectural ceiling above (``T * HD >= num_warps * 512``);
+      - the per-wave-tokens constraint (``WAVE*8/HD <= BS``);
+      - an LDS-budget check (``<= 96 KiB`` so we keep >= 1 CTA/CU on
+        MI355X comfortably).
     """
-    return 1
+    override = _champion_override(problem, "num_warps")
+    if override is not None:
+        return int(override)
+
+    if problem.max_seqlen_q <= 64:
+        target = 1
+    elif problem.max_seqlen_q <= 128:
+        target = 2
+    elif problem.max_seqlen_q <= 256:
+        target = 4
+    else:
+        # Long prefill (q > 256): the prior choice of NW=2 was conservative
+        # against LDS/VGPR pressure. Round-1 cluster-A sweep
+        # (``/workspace/rounds/round_01_bf16_q1000_v1/cluster_a_sweep.md``)
+        # showed ``nw=4 mw=16 T=2*BS`` beats ``nw=2`` on 14 of 17 long-prefill
+        # bf16 targets by 1.04-1.87× (no regressions). Resource analysis
+        # (``resources.json``): nw=4 keeps WGs/CU at 4 (vs default 5), VGPR
+        # at 121-126 (no spills), LDS at 36 KB (fits 4 WG/CU comfortably);
+        # BLOCK_M=64 (BLOCK_Q=8) cuts the q-block CTA count in half vs
+        # BLOCK_M=32 (BLOCK_Q=4), reducing per-CTA dispatch overhead.
+        target = 4
+
+    HD = problem.head_size
+    BS = problem.block_size
+    T = _select_2d_tile_size(problem)
+    WORK_BYTES = 2
+    # Step down until all constraints are satisfied.
+    while target > 1:
+        THREADS = 64 * target
+        BLOCK_M = 16 * target
+        # Architectural ceiling: T * HD halves must satisfy at least one
+        # async-DMA call's worth of lane-contiguous payload.
+        if (T * HD) < THREADS * 8:
+            target //= 2
+            continue
+        # Per-wave tokens must fit within one block (wave-uniform
+        # block_table lookup constraint, enforced by supports_tiled_2d).
+        per_wave_tokens = (64 * 8) // HD
+        if per_wave_tokens > BS:
+            target //= 2
+            continue
+        lds_bytes = (
+            BLOCK_M * HD * WORK_BYTES
+            + 2 * T * HD * WORK_BYTES
+            + 2 * T * HD * WORK_BYTES
+            + BLOCK_M * T * WORK_BYTES
+            + BLOCK_M * HD * 4
+        )
+        if lds_bytes <= 96 * 1024:
+            break
+        target //= 2
+    return max(1, target)
 
 
-def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
+def _kv_storage_dtype(problem: UnifiedAttentionProblem) -> Optional[str]:
+    """Return ``"fp8e4m3"`` for the FP8 K/V cache path, else ``None``.
+
+    The upstream API uses ``use_fp8=True`` to flip into the FP8 K/V cache
+    code path (with bf16/fp16 query, bf16/fp16 output, per-tensor
+    ``k_scale``/``v_scale``). The kernel takes ``kv_storage_dtype`` so the
+    same plumbing can later add bf8e5m2 or other low-precision K/V.
+    """
+    return "fp8e4m3" if problem.use_fp8 else None
+
+
+def _tiled_cache_key_from_spec(
+    problem: UnifiedAttentionProblem, spec: "UnifiedAttention2DTiledSpec"
+) -> Tuple:
+    """Compute the tiled-2D cache key from a pre-built spec.
+
+    Use this when the caller already has the spec (avoids rebuilding it
+    twice per launch). See ``_tiled_cache_key`` for the legacy single-arg
+    form that builds the spec internally.
+    """
     return (
         "tiled",
         problem.num_seqs,
         problem.num_query_heads,
         problem.num_kv_heads,
-        problem.head_size,
-        problem.block_size,
-        problem.dtype,
-        problem.sliding_window,
-        bool(problem.use_sinks),
-        bool(problem.softcap > 0),
-        bool(problem.use_alibi),
-        bool(problem.use_qq_bias),
-        _select_2d_num_warps(problem),
+        spec.head_size,
+        spec.block_size,
+        spec.dtype,
+        spec.sliding_window,
+        bool(spec.use_sinks),
+        bool(spec.has_softcap),
+        bool(spec.use_alibi),
+        bool(spec.use_qq_bias),
+        spec.num_warps,
+        spec.kv_storage_dtype,
+        spec.tile_size_eff,
+        spec.waves_per_eu,
+        spec.block_m_per_warp,
+        _select_2d_compile_backend(problem),
     )
+
+
+def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
+    """Compute the tiled-2D cache key (legacy single-arg form).
+
+    Prefer ``_tiled_cache_key_from_spec`` when the spec is already in hand
+    to avoid the second ``_tiled_spec_from_problem`` call.
+    """
+    return _tiled_cache_key_from_spec(problem, _tiled_spec_from_problem(problem))
+
+
+def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
+    """Choose ``waves_per_eu`` for the tiled 2D kernel.
+
+    Triton's ``select_2d_config`` uses ``waves_per_eu=2`` for every config
+    (verified at ``/workspace/aiter/aiter/ops/triton/attention/unified_attention.py``).
+    We match that: it gives the LLVM backend more VGPR headroom per wave
+    (less risk of spill to scratch / LDS) while still meeting the
+    occupancy targets (the double-buffered K/V kernel runs at 2-3 WGs/CU
+    on MI355X depending on shape; pushing for wpe=3 was a marginal
+    +5% on isolated workloads but no consistent gain over the full
+    workload spectrum once we A/B'd it against Triton's choice).
+
+    If the problem itself pinned ``waves_per_eu`` (via the public
+    ``UnifiedAttentionProblem.waves_per_eu`` field), respect that.
+    """
+    if problem.waves_per_eu is not None:
+        return problem.waves_per_eu
+    return 2
 
 
 def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ) -> UnifiedAttention2DTiledSpec:
+    # Per-shape champion overrides take precedence over heuristic selectors;
+    # they're loaded from attention_champion_routes.json and tracked by the
+    # round-based optimization loop at /workspace/rounds/.
+    mw_override = _champion_override(problem, "block_m_per_warp")
     return UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -272,7 +514,10 @@ def _tiled_spec_from_problem(
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
         num_warps=_select_2d_num_warps(problem),
-        waves_per_eu=problem.waves_per_eu,
+        waves_per_eu=_select_2d_waves_per_eu(problem),
+        kv_storage_dtype=_kv_storage_dtype(problem),
+        tile_size=_select_2d_tile_size(problem),
+        block_m_per_warp=int(mw_override) if mw_override is not None else 16,
     )
 
 
@@ -299,6 +544,7 @@ def _tiled_3d_spec_from_problem(
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
         waves_per_eu=problem.waves_per_eu,
+        kv_storage_dtype=_kv_storage_dtype(problem),
     )
 
 
@@ -317,21 +563,23 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         bool(problem.use_alibi),
         bool(problem.use_qq_bias),
         _num_segments(problem),
+        _kv_storage_dtype(problem),
     )
 
 
-def _3d_signature(dtype: str):
+def _3d_signature(dtype: str, *, kv_dtype: Optional[str] = None):
     from ..helpers.spec import SignatureBuilder
 
     io_dtype = "f16" if dtype == "fp16" else "bf16"
+    kv_io = kv_dtype if kv_dtype else io_dtype
     return (
         SignatureBuilder()
         .ptr("segm_output_ptr", "f32")
         .ptr("segm_max_ptr", "f32")
         .ptr("segm_expsum_ptr", "f32")
         .ptr("query_ptr", io_dtype)
-        .ptr("key_cache_ptr", io_dtype)
-        .ptr("value_cache_ptr", io_dtype)
+        .ptr("key_cache_ptr", kv_io)
+        .ptr("value_cache_ptr", kv_io)
         .ptr("sink_ptr", io_dtype)
         .ptr("block_tables_ptr", "i32")
         .ptr("seq_lens_ptr", "i32")
@@ -365,17 +613,25 @@ def _reduce_signature(dtype: str):
 
 
 def _attn_signature(
-    dtype: str, *, include_bt_stride: bool, include_qq_bias_stride: bool = False
+    dtype: str,
+    *,
+    include_bt_stride: bool,
+    include_qq_bias_stride: bool = False,
+    kv_dtype: Optional[str] = None,
 ):
     from ..helpers.spec import SignatureBuilder
 
     io_dtype = "f16" if dtype == "fp16" else "bf16"
+    # K/V cache dtype defaults to the working dtype (bf16/fp16). The FP8
+    # K/V path passes ``kv_dtype="fp8e4m3"`` so the signature uses 1-byte
+    # pointers for K/V cache instead of 2-byte.
+    kv_io = kv_dtype if kv_dtype else io_dtype
     sb = (
         SignatureBuilder()
         .ptr("output_ptr", io_dtype)
         .ptr("query_ptr", io_dtype)
-        .ptr("key_cache_ptr", io_dtype)
-        .ptr("value_cache_ptr", io_dtype)
+        .ptr("key_cache_ptr", kv_io)
+        .ptr("value_cache_ptr", kv_io)
         .ptr("sink_ptr", io_dtype)
         .ptr("block_tables_ptr", "i32")
         .ptr("seq_lens_ptr", "i32")
@@ -415,6 +671,9 @@ def _attn_values(
     qq_bias=None,
     qq_bias_stride_0: int = 0,
     include_qq_bias_stride: bool = False,
+    k_scale: float = 1.0,
+    v_scale: float = 1.0,
+    out_scale: float = 1.0,
 ):
     vals = {
         "output_ptr": out,
@@ -428,9 +687,9 @@ def _attn_values(
         "qq_bias_ptr": qq_bias if qq_bias is not None else 0,
         "query_start_len_ptr": cu_seqlens_q,
         "scale": float(softmax_scale),
-        "k_scale": 1.0,
-        "v_scale": 1.0,
-        "out_scale": 1.0,
+        "k_scale": float(k_scale),
+        "v_scale": float(v_scale),
+        "out_scale": float(out_scale),
         "softcap": float(softcap),
         "num_seqs": int(problem.num_seqs),
     }
@@ -461,6 +720,8 @@ def _run_3d_tiled(
     qq_bias=None,
     qq_bias_stride_0: int = 0,
     stream: int = 0,
+    k_scale: float = 1.0,
+    v_scale: float = 1.0,
 ):
     """Launch the tiled 3D segment + reduce kernels.
 
@@ -510,8 +771,8 @@ def _run_3d_tiled(
         "qq_bias_ptr": qq_bias if qq_bias is not None else 0,
         "query_start_len_ptr": cu_seqlens_q,
         "scale": float(softmax_scale),
-        "k_scale": 1.0,
-        "v_scale": 1.0,
+        "k_scale": float(k_scale),
+        "v_scale": float(v_scale),
         "softcap": float(softcap),
         "num_seqs": int(problem.num_seqs),
         "block_table_stride": int(bt_stride),
@@ -646,7 +907,7 @@ def _get_3d_pipeline(
     seg_launcher = KernelLauncher(
         hsaco=seg_hsaco,
         kernel_name=seg_kname,
-        signature=_3d_signature(problem.dtype),
+        signature=_3d_signature(problem.dtype, kv_dtype=_kv_storage_dtype(problem)),
         cache_key=("3d_seg",) + cache_key,
     )
     red_launcher = KernelLauncher(
@@ -661,6 +922,38 @@ def _get_3d_pipeline(
     return pipeline, pool
 
 
+def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
+    """Pick the compile backend (LLVM-direct vs hipcc) for the 2D tiled kernel.
+
+    The HIP path (``hipcc --genco``) is measurably faster than the
+    LLVM-direct path on large-batch bf16/fp16 prefill (≈5% on
+    ``b4_q1000_kv1000``) because clang's frontend + AMDGPU backend
+    pipeline does heavier instruction scheduling for the long
+    unrolled loop body. Smaller workloads (decode, small prefill)
+    are 5-29% slower via hipcc, so the auto-selector only switches
+    when the workload is large enough to amortize hipcc's ~450ms
+    compile cost AND benefit from its scheduling.
+
+    The FP8 K/V path uses sync-dequant loaders with intrinsics that
+    the HIP debug backend may not fully cover; the auto-selector
+    pins FP8 to ``llvm`` until ``hipcc`` is validated for that
+    code path.
+
+    See ``/workspace/probe_hip_lowering.py`` for the per-shape sweep.
+    """
+    if problem.compile_backend in ("llvm", "hipcc"):
+        return problem.compile_backend
+    # Auto: HIP for large-batch bf16/fp16 prefill workloads where
+    # hipcc's heavier scheduler measurably wins. FP8 stays on LLVM
+    # until the HIP path is exercised on the dequant-loader kernels.
+    if problem.use_fp8:
+        return "llvm"
+    total_work = problem.num_seqs * max(problem.max_seqlen_q, 1)
+    if problem.max_seqlen_q > 512 and total_work > 1024:
+        return "hipcc"
+    return "llvm"
+
+
 def _get_2d_launcher(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
@@ -669,16 +962,24 @@ def _get_2d_launcher(
         return _2D_LAUNCHERS[cache_key]
     if cache_key not in _ATTN_TILED_CACHE:
         spec = _tiled_spec_from_problem(problem)
-        artifact = compile_kernel(
-            build_unified_attention_2d_tiled(spec), capture_ir_text=False
-        )
+        kernel = build_unified_attention_2d_tiled(spec)
+        backend = _select_2d_compile_backend(problem)
+        if backend == "hipcc":
+            from ..helpers.compile import compile_kernel_via_hipcc
+
+            artifact = compile_kernel_via_hipcc(kernel)
+        else:
+            artifact = compile_kernel(kernel, capture_ir_text=False)
         _ATTN_TILED_CACHE[cache_key] = (artifact.hsaco, artifact.kernel_name)
     hsaco, kname = _ATTN_TILED_CACHE[cache_key]
     launcher = KernelLauncher(
         hsaco=hsaco,
         kernel_name=kname,
         signature=_attn_signature(
-            problem.dtype, include_bt_stride=True, include_qq_bias_stride=True
+            problem.dtype,
+            include_bt_stride=True,
+            include_qq_bias_stride=True,
+            kv_dtype=_kv_storage_dtype(problem),
         ),
         cache_key=("2d",) + cache_key,
     )
@@ -729,6 +1030,9 @@ def run_unified_attention_torch(
     attempts: int = 1,
     backend: str = "auto",
     stream: int = 0,
+    k_scale: float = 1.0,
+    v_scale: float = 1.0,
+    out_scale: float = 1.0,
 ):
     """Launch a CK DSL attention kernel on torch tensors.
 
@@ -782,6 +1086,8 @@ def run_unified_attention_torch(
                 qq_bias=qq_bias,
                 qq_bias_stride_0=qq_bias_stride_0,
                 stream=int(stream),
+                k_scale=k_scale,
+                v_scale=v_scale,
             )
         if backend == "3d":
             raise NotImplementedError(reason_3d)
@@ -789,7 +1095,12 @@ def run_unified_attention_torch(
     if backend in ("tiled", "auto"):
         ok_t, reason_t = supports_native_unified_attention_tiled(problem)
         if ok_t:
-            key = _tiled_cache_key(problem)
+            # Build the spec ONCE and reuse for the cache key + grid math.
+            # Two spec builds per launch was a measurable per-call overhead
+            # on the bf16 decode path (round-1 baseline noted ~4µs/call
+            # regression on q=1 shapes); this folds them into one.
+            spec_for_launch = _tiled_spec_from_problem(problem)
+            key = _tiled_cache_key_from_spec(problem, spec_for_launch)
             launcher = _get_2d_launcher(problem, key)
             vals = _attn_values(
                 problem=problem,
@@ -809,21 +1120,26 @@ def run_unified_attention_torch(
                 qq_bias=qq_bias,
                 qq_bias_stride_0=qq_bias_stride_0,
                 include_qq_bias_stride=True,
+                k_scale=k_scale,
+                v_scale=v_scale,
+                out_scale=out_scale,
             )
             # The dispatcher must compute the grid using the same BLOCK_Q
-            # the kernel uses (which depends on `num_warps`); a mismatch
+            # the kernel uses (which depends on `block_m`); a mismatch
             # would launch the wrong number of CTAs and the kernel's
             # q_block_local_idx -> qb_start_pos math would touch the
             # wrong query positions.
-            num_warps = _select_2d_num_warps(problem)
-            block_m = 16 * num_warps
+            # Derive directly from the spec the kernel was built from so
+            # any monkey-patched override (e.g. round-1 sweep probes) is
+            # honored consistently.
+            block_m = spec_for_launch.block_m
             block_q = (
                 block_m // problem.num_queries_per_kv
                 if problem.num_queries_per_kv <= block_m
                 else 1
             )
             total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
-            threads_per_block = 64 * num_warps
+            threads_per_block = 64 * spec_for_launch.num_warps
             return launcher(
                 vals,
                 config=LaunchConfig(

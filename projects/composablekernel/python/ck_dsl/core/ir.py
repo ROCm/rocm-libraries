@@ -824,19 +824,41 @@ class IRBuilder:
         *,
         align: Optional[int] = None,
     ) -> Value:
-        """Vectorised global load of N consecutive 16-bit values.
+        """Vectorised global load of N consecutive values.
 
-        Supports `f16` and `bf16` (N in {2,4,8}).
+        Supports `f16` / `bf16` (N in {2,4,8}) and `fp8e4m3` / `bf8e5m2`
+        (N in {2,4,8,16}) on this LLVM target. The fp8 case lowers to a
+        single ``load <N x i8>`` from ``addrspace(1)``; AMDGPU's backend
+        coalesces these into a single 1/2/4/16-byte VMEM load when the
+        address is naturally aligned.
+
+        The per-element size is folded into the default alignment so the
+        common case (8 fp8 → 8-byte load) does not need an explicit
+        ``align=`` kwarg.
         """
-        if dtype.name not in ("f16", "bf16"):
-            raise ValueError(f"global_load_vN supports f16/bf16, got {dtype.name}")
-        if n not in (2, 4, 8):
-            raise ValueError(f"unsupported vector width for global_load_vN: {n}")
+        if dtype.name in ("f16", "bf16"):
+            elem_bytes = 2
+            if n not in (2, 4, 8):
+                raise ValueError(f"unsupported vector width for global_load_vN: {n}")
+        elif dtype.name in ("fp8e4m3", "bf8e5m2"):
+            elem_bytes = 1
+            if n not in (2, 4, 8, 16):
+                raise ValueError(
+                    f"unsupported vector width for fp8 global_load_vN: {n}"
+                )
+        else:
+            raise ValueError(
+                f"global_load_vN supports f16/bf16/fp8e4m3/bf8e5m2, got {dtype.name}"
+            )
         return self._op(
             "memref.global_load_vN",
             [ptr, idx],
             [VectorType(dtype, n)],
-            attrs={"elem_type": dtype.name, "vec": n, "align": int(align or (n * 2))},
+            attrs={
+                "elem_type": dtype.name,
+                "vec": n,
+                "align": int(align or (n * elem_bytes)),
+            },
             result_name_hint=f"gv{n}",
         ).result
 
@@ -949,17 +971,28 @@ class IRBuilder:
         return self.smem_load_vN(smem, *indices, dtype=F16, n=n)
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
-        """LDS load of ``<N x dtype>``. Supports 16-bit (f16 / bf16) and
-        32-bit (f32 / i32) element types; AMDGPU lowers 16-bit vector
-        loads to ``ds_read_b{16, 32, 64, 128}`` and 32-bit vector loads
-        to ``ds_read_b{32, 64, 128}``.
+        """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
+        i8), 16-bit (f16 / bf16) and 32-bit (f32 / i32) element types;
+        AMDGPU lowers vector LDS loads to ``ds_read_b{8, 16, 32, 64, 128}``
+        based on total payload size. The 8-bit variants must use ``n in {1,
+        2, 4, 8, 16}`` so the resulting payload still maps to a single
+        ``ds_read_b*`` instruction (n=16 → ds_read_b128).
         """
-        if dtype.name not in ("f16", "bf16", "f32", "i32"):
+        if dtype.name not in ("f16", "bf16", "f32", "i32", "fp8e4m3", "bf8e5m2", "i8"):
             raise ValueError(
-                f"smem_load_vN supports f16 / bf16 / f32 / i32, got {dtype.name}"
+                "smem_load_vN supports f16 / bf16 / f32 / i32 / fp8e4m3 / "
+                f"bf8e5m2 / i8, got {dtype.name}"
             )
-        if n not in (1, 2, 4, 8):
-            raise ValueError(f"unsupported vector width for smem_load_vN: {n}")
+        allowed_n = (
+            (1, 2, 4, 8, 16)
+            if dtype.name in ("fp8e4m3", "bf8e5m2", "i8")
+            else (1, 2, 4, 8)
+        )
+        if n not in allowed_n:
+            raise ValueError(
+                f"unsupported vector width {n} for smem_load_vN of {dtype.name} "
+                f"(allowed: {allowed_n})"
+            )
         if not indices:
             raise ValueError("smem_load_vN needs at least one index")
         return self._op(
