@@ -759,6 +759,13 @@ validParameters = { # we need to make sure this matches develop
     # Used as a co-tenant load kernel for contended-perf benchmarking.
     # Termination is via process death. Requires StreamK = 1, 2, or 3.
     "DebugPersistentKernelLoopForever": [False, True],
+    # Persistent-kernel debug: when True, the kernel enters a tight branch-to-self
+    # spin at the top of the persistent loop, never executing the GEMM body.
+    # Used as a low-utilization co-tenant (CU occupied, ~no compute) for
+    # contended-perf benchmarking. Termination is via process death.
+    # Requires StreamK = 1, 2, or 3. Mutually exclusive with
+    # DebugPersistentKernelLoopForever.
+    "DebugPersistentKernelBusyLoop": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
     # -1 : Set GlobalReadVectorWidth =  VectorWidth

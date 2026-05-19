@@ -85,6 +85,13 @@ class PersistentLoopOn(PersistentLoop):
         persistentLabel = Label(label="PersistentLoopStart", comment="")
         module.add(persistentLabel)
 
+        if kernel.get("DebugPersistentKernelBusyLoop", False):
+            # Branch to self at the top of the persistent loop: the GEMM body
+            # never executes, so the kernel just holds the CU spinning. Used as
+            # a low-utilization co-tenant for contended-perf benchmarking.
+            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
+
         # TODO remove?
         # kStr += inst("s_add_u32", sgpr("PersistentLoopIter"), sgpr("PersistentLoopIter"), hex(1), "Inc PersistentLoop Iter")     # Back-up: not needed now
         #kStr += str(Code.WaitCnt(self.version, 0,0,"wait for outstanding stores"))

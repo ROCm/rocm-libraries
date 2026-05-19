@@ -1211,6 +1211,15 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason,
                "DebugPersistentKernelLoopForever requires StreamK in {1,2,3} (got %d)"
                % state["StreamK"])
+      if state["DebugPersistentKernelBusyLoop"] and state["StreamK"] not in (1, 2, 3):
+        # Mode 4 exits via KernelEnd in graWorkGroup before reaching the
+        # persistent-loop label, so the branch-to-self would be unreachable.
+        reject(state, printRejectionReason,
+               "DebugPersistentKernelBusyLoop requires StreamK in {1,2,3} (got %d)"
+               % state["StreamK"])
+      if state["DebugPersistentKernelBusyLoop"] and state["DebugPersistentKernelLoopForever"]:
+        reject(state, printRejectionReason,
+               "DebugPersistentKernelBusyLoop and DebugPersistentKernelLoopForever are mutually exclusive")
       if not state["Valid"]:
         print2("in assignDerivedParameters, state['Valid'] = False")
         return
@@ -1221,6 +1230,7 @@ class Solution(collections.abc.Mapping):
       state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
       state["DebugPersistentKernelLoopForever"] = False
+      state["DebugPersistentKernelBusyLoop"] = False
 
     computeBytes = state["ProblemType"]["ComputeDataType"].numBytes()
     state["_WorkspaceSizePerElemC"] = computeBytes
