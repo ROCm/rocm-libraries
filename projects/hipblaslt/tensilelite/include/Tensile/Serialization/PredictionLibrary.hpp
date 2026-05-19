@@ -109,23 +109,35 @@ namespace TensileLite
                                 .hand_optimized_main_loop
                                 = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
                                                                                        : false,
-                                .occupancy
-                                = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
-                                .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
                                 .cache_hints_a             = solution->sizeMapping.nonTemporalA,
                                 .cache_hints_b             = solution->sizeMapping.nonTemporalB,
                                 .cache_hints_d             = solution->sizeMapping.NonTemporalD,
-                                .prefetch_global_read      = solution->sizeMapping.PrefetchGlobalRead,
                                 .direct_to_lds_a           = solution->sizeMapping.DirectToLdsA,
                                 .direct_to_lds_b           = solution->sizeMapping.DirectToLdsB,
-                                .local_split_u             = solution->sizeMapping.LocalSplitU,
+                                .grvw_a                    = solution->sizeMapping.grvwA,
+                                .grvw_b                    = solution->sizeMapping.grvwB,
                                 .lds_bytes                 = solution->sizeMapping.LdsNumBytes,
-                                .one_lds_buffer            = (solution->sizeMapping.OneLDSBuffer == 1),
                                 .lds_tr_inst               = solution->sizeMapping.LDSTrInst,
+                                .local_split_u             = solution->sizeMapping.LocalSplitU,
+                                .occupancy
+                                = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
+                                .one_lds_buffer            = (solution->sizeMapping.OneLDSBuffer == 1),
+                                .prefetch_global_read      = solution->sizeMapping.PrefetchGlobalRead,
+                                .wave                      = {static_cast<std::size_t>(solution->sizeMapping.waveGroup[0]),
+                                                              static_cast<std::size_t>(solution->sizeMapping.waveGroup[1])},
+                                .workgroup                 = {solution->sizeMapping.workGroupSize.x,
+                                                              solution->sizeMapping.workGroupSize.y,
+                                                              solution->sizeMapping.workGroupSize.z},
+                                .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .index                     = local_index,
+                                .gwvw_d                    = solution->sizeMapping.gwvwD,
+                                .vector_width_a            = solution->sizeMapping.VectorWidthA,
+                                .vector_width_b            = solution->sizeMapping.VectorWidthB,
                             };
+                            origami_config.tensile().wave_group_m = solution->sizeMapping.waveGroup[0];
+                            origami_config.tensile().wave_group_n = solution->sizeMapping.waveGroup[1];
 
                             lib.origami_config_list.emplace_back(origami_config);
                         }

@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
+#include <string>
 
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
@@ -12,6 +14,42 @@
 #include "origami/types.hpp"
 
 namespace origami {
+
+namespace {
+// Calibration helper: allow env-var overrides of tunable heuristic knobs so
+// that coefficient sweeps can run without a rebuild.  Only non-zero / finite
+// values are accepted; anything else leaves the compiled default in place.
+//
+// The env vars are read ONCE at process start (lazy-init via the local
+// static below) and cached, so lookup() -- which fires for every candidate
+// solution during heuristic ranking -- pays no per-call getenv/stod cost.
+struct env_overrides_t {
+};
+
+std::optional<double> read_env_double(const char* name) {
+  if (const char* raw = std::getenv(name)) {
+    try {
+      double val = std::stod(raw);
+      if (std::isfinite(val)) { return val; }
+    } catch (...) {
+      // fall through -- leave unset
+    }
+  }
+  return std::nullopt;
+}
+
+const env_overrides_t& env_overrides() {
+  static const env_overrides_t cache = []() {
+    env_overrides_t e;
+    return e;
+  }();
+  return cache;
+}
+
+inline void apply_env_overrides(heuristic_params_t& /*p*/) {
+  (void)env_overrides();
+}
+}  // namespace
 
 // ============================================================================
 // heuristic_params_t Implementation
@@ -22,13 +60,6 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   weight_mem_l2        = other.weight_mem_l2;
   weight_mem_mall      = other.weight_mem_mall;
   weight_mem_dram      = other.weight_mem_dram;
-  weight_compute       = other.weight_compute;
-  weight_memory        = other.weight_memory;
-  weight_wg_setup      = other.weight_wg_setup;
-  weight_prologue      = other.weight_prologue;
-  weight_epilogue      = other.weight_epilogue;
-  weight_loop_overhead = other.weight_loop_overhead;
-  weight_tile_total    = other.weight_tile_total;
 
   // Empirical constants
   main_memory_load_latency            = other.main_memory_load_latency;
@@ -59,25 +90,19 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   postgsu_kernel_launch_overhead      = other.postgsu_kernel_launch_overhead;
   postgsu_threads_per_wg              = other.postgsu_threads_per_wg;
   postgsu_wavefront_size              = other.postgsu_wavefront_size;
-  prologue_setup_fraction              = other.prologue_setup_fraction;
   lsu_reduction_overhead              = other.lsu_reduction_overhead;
   ntd_ksplit_penalty                  = other.ntd_ksplit_penalty;
   d_pollution_penalty                 = other.d_pollution_penalty;
   d_writealloc_factor                 = other.d_writealloc_factor;
   mall_capacity_bytes                 = other.mall_capacity_bytes;
   mall_overflow_fade_slope            = other.mall_overflow_fade_slope;
-  occ_timestep_benefit                = other.occ_timestep_benefit;
   one_lds_buffer_overhead             = other.one_lds_buffer_overhead;
   pack_transpose_overhead             = other.pack_transpose_overhead;
   tail_loop_overhead                  = other.tail_loop_overhead;
   tile_fixed_overhead                 = other.tile_fixed_overhead;
   du_waste_overhead                   = other.du_waste_overhead;
-  spatial_waste_weight                = other.spatial_waste_weight;
   mi_pipeline_hazard_penalty          = other.mi_pipeline_hazard_penalty;
-  vgpr_pressure_penalty               = other.vgpr_pressure_penalty;
-  acc_vgpr_budget_per_simd            = other.acc_vgpr_budget_per_simd;
-  acc_waves_target                    = other.acc_waves_target;
-  tile_penalty_alpha                  = other.tile_penalty_alpha;
+  epilogue_store_issue_cycles          = other.epilogue_store_issue_cycles;
 
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
@@ -140,81 +165,19 @@ size_t heuristic_key_t::specificity() const {
 // heuristics_database_t Implementation
 // ============================================================================
 
-heuristics_database_t::heuristics_database_t() { initialize_defaults(); }
+heuristics_database_t::heuristics_database_t() {
+  initialize_defaults();
+  // Apply env-var overrides to default_params_.  These only take effect when
+  // lookup() falls through to the defaults, which is the common path -- the
+  // hand-optimized specialisations in initialize_defaults() only tweak
+  // main_loop_efficiency and do not touch the primality / prologue-cap /
+  // GRVW knobs we override here.
+  apply_env_overrides(default_params_);
+}
 
 heuristics_database_t& heuristics_database_t::get_instance() {
   static heuristics_database_t instance;
   return instance;
-}
-
-/**
- * @brief Apply TF32 emulation heuristics based on runtime arithmetic intensity.
- *
- * These heuristics cannot be precomputed since they depend on problem size.
- */
-static void apply_tf32_heuristics(heuristic_params_t& params,
-                                  const problem_t& problem,
-                                  const hardware_t& hardware,
-                                  const config_t& config) {
-  // Check if this is TF32 emulation on gfx950
-  const bool is_gfx950   = (hardware.arch == hardware_t::architecture_t::gfx950);
-  const bool is_tf32_emu = (problem.mi_dtype == data_type_t::XFloat32) && is_gfx950;
-
-  if (!is_tf32_emu) return;
-
-  const size_t M = problem.size.m;
-  const size_t N = problem.size.n;
-  const size_t K = problem.size.k;
-
-  const size_t MT_M = config.mt.m;
-  const size_t MT_N = config.mt.n;
-  const size_t MT_K = config.mt.k;
-
-  const bool a_trans = (problem.a_transpose == transpose_t::T);
-  const bool b_trans = (problem.b_transpose == transpose_t::T);
-
-  const auto a_bytes = data_type_to_bytes(problem.a_dtype);
-
-  // Compute arithmetic intensity for this specific problem
-  double arith     = emulated_tf32_arithmetic_intensity(M, N, K, static_cast<double>(a_bytes));
-  double threshold = heuristic_defaults_t::TF32_ARITH_INTENSITY_THRESHOLD;
-
-  // Skip TF32 tile discount when splitting is active (similar guard to CMS
-  // kernels where main_loop_efficiency is bypassed when splitting_factor > 4).
-  const auto [reduction, num_wgs, active_cus, num_timesteps, splitting_factor] =
-      compute_launch_parameters(problem, hardware, config, config.grid_selection, hardware.N_CU);
-  if (splitting_factor > 1) return;
-
-  // Custom kernel optimizations based on transpose mode and tile config
-  // NT: N-transpose configuration
-  if ((!a_trans && b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
-    if (arith < threshold) {
-      params.weight_tile_total *= 0.85;
-    } else {
-      params.weight_tile_total *= 0.7;
-    }
-  }
-
-  // NN: No-transpose configuration
-  if ((!a_trans && !b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
-    if (arith < threshold) {
-      params.weight_tile_total *= 0.9;
-    } else {
-      params.weight_tile_total *= 0.7;
-    }
-  }
-
-  // TN: Transpose-A configuration
-  if ((a_trans && !b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
-    if (arith < threshold) {
-      params.weight_tile_total *= 0.9;
-    } else {
-      params.weight_tile_total *= 0.7;
-    }
-  }
-
-  // Bias for large K-dimension (depth upscaling)
-  if ((K >= (M * 16) && K >= (N * 16)) && (MT_K >= 128)) { params.weight_tile_total *= 0.5; }
 }
 
 heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
@@ -261,8 +224,11 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
   // Apply matches in order of increasing specificity
   for (const auto& [spec, params] : matches) { result.merge_with(*params); }
 
-  // Apply TF32 emulation heuristics (runtime-dependent on arithmetic intensity)
-  apply_tf32_heuristics(result, problem, hardware, config);
+  // Env-var overrides apply LAST so they are not clobbered by hand-optimized
+  // or per-MT entries (whose merge_with overwrites every field, even those
+  // they did not specialise).  The cached env_overrides() above makes this a
+  // branch-only hot path -- no getenv/stod per call.
+  apply_env_overrides(result);
 
   return result;
 }
@@ -303,21 +269,7 @@ bool heuristics_database_t::has_hand_optimized_entry(hardware_t::architecture_t 
 
 void heuristics_database_t::initialize_defaults() {
   // ========================================================================
-  // HEURISTIC 1: Problematic tile configuration (MT64x32x32)
-  // ========================================================================
-  {
-    auto key    = make_tile_key(64, 32, 32, transpose_t::N, transpose_t::N);
-    key.a_dtype = data_type_t::BFloat16;
-    key.b_dtype = data_type_t::BFloat16;
-
-    heuristic_params_t params;
-    params.weight_tile_total = 10.0;
-
-    add_entry(key, params);
-  }
-
-  // ========================================================================
-  // HEURISTIC 2: CMS Kernel Efficiencies (gfx950, BF16)
+  // HEURISTIC 1: CMS Kernel Efficiencies (gfx950, BF16)
   // ========================================================================
   {
     // BF16 NT configurations

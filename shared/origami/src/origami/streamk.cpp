@@ -338,6 +338,40 @@ size_t grid_k_split_aware(const problem_t& problem,
 
   const size_t tile_size = config.mt.m * config.mt.n * config.workspace_size_per_elem_c;
 
+  // Returns true if the candidate sk_grid produces per-CTA k-iter stripes whose
+  // contiguous-dim footprint does not align to a full cache line on either operand.
+  // Each WG processes ~ceil(iters_total / candidate_grid) k-iters, decomposed into
+  // (iters_per_cta / iters_per_tile) full tiles plus a (iters_per_cta % iters_per_tile)
+  // fragment. Full-tile chunks always cover the entire K of their tile, so their
+  // boundaries are tile-aligned and sk_grid-independent. Only the fragment can land
+  // at a sk_grid-dependent K offset and straddle a cache line. Along the contig dim
+  // of each operand (K when a_transpose=T or b_transpose=N, otherwise M for A or N
+  // for B), the fragment byte stripe is bpe * (fragment_iters * MT_K) for K-contig
+  // or bpe * MT_M / MT_N otherwise. If that stripe is not a multiple of a full
+  // cache line, adjacent CTA boundaries land mid-cacheline, wasting bandwidth on
+  // the straddled lines. K-contig operands are the only ones whose stripe varies
+  // with sk_grid; non-K-contig stripes are sk_grid-independent and act as a
+  // problem-level gate.
+  auto causes_partial_cachelines = [&](size_t candidate_grid) -> bool {
+    constexpr size_t CACHE_LINE_BYTES = 128;
+    if (candidate_grid == 0 || iters_per_tile == 0) return false;
+    const size_t iters_total    = num_iters_total(tiles, iters_per_tile);
+    const size_t iters_per_cta  = num_iters_per_cta(iters_total, candidate_grid);
+    const size_t fragment_iters = iters_per_cta % iters_per_tile;
+    const size_t bpe_a          = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
+    const size_t bpe_b          = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
+    const size_t a_contig_bytes = (problem.a_transpose == transpose_t::T)
+                                      ? fragment_iters * config.mt.k * bpe_a
+                                      : config.mt.m * bpe_a;
+    const size_t b_contig_bytes = (problem.b_transpose == transpose_t::N)
+                                      ? fragment_iters * config.mt.k * bpe_b
+                                      : config.mt.n * bpe_b;
+    auto straddles = [](size_t bytes) {
+      return bytes > 0 && (bytes % CACHE_LINE_BYTES) != 0;
+    };
+    return straddles(a_contig_bytes) || straddles(b_contig_bytes);
+  };
+
   // More tiles than CUs
   // Distribute tiles evenly across maximum number of CUs
   // Split remaining tiles as evenly as possible for better caching
@@ -355,6 +389,11 @@ size_t grid_k_split_aware(const problem_t& problem,
       // Check if higher occupancy would cause excessive workspace requirements (set current limit
       // to 128MB)
       if ((tiles % frac_grid != 0) && (tile_size * frac_grid > 128ull * 1024ull * 1024ull))
+        continue;
+
+      // Skip grids whose per-CTA k-iter fragment straddles a cache line on
+      // either operand's contiguous dimension.
+      if (causes_partial_cachelines(frac_grid))
         continue;
 
       if (frac_grid <= virt_cu_count) {

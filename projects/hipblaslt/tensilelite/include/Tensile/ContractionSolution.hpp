@@ -149,6 +149,7 @@ namespace TensileLite
         size_t workspaceSizePerElemBias = 0;
 
         bool activationFused = true;
+        bool SourceSwap      = false;
 
         std::string customKernelName;
 
