@@ -90,7 +90,7 @@ if $cached; then
 fi
 
 ! $quiet && printf -- "Checking if copyright statements are up-to-date... "
-mapfile -d $'\0' changed_files < <(git diff-index "${diff_opts[@]}" "$diff_hash" ${diff_filter} | LANG=C.UTF-8 sort -z)
+mapfile -d $'\0' changed_files < <(git diff-index "${diff_opts[@]}" "$diff_hash" -- ${diff_filter} | LANG=C.UTF-8 sort -z)
 
 if ! (( ${#changed_files[@]} )); then
     ! $quiet && printf -- "\033[32mDone!\033[0m\n"
