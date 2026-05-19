@@ -28,11 +28,11 @@
 #include <mutex>
 #include <stdexcept>
 
-// process-wide cached communicator.  default-constructed empty; populated
-// on first successful call to rocfft_rccl_comm_t::create() and reset at
-// rocfft_cleanup() via assignment from a default-constructed handle.
-rocfft_rccl_comm_t rocfft_rccl_comm_t::comm_world;
-static std::mutex  comm_world_mutex;
+// process-wide cache of communicators keyed by device set.
+// different plans may use different GPU subsets, so each distinct
+// set gets its own RCCL communicator.
+static std::map<std::set<int>, rocfft_rccl_comm_t> comm_cache;
+static std::mutex                                  comm_cache_mutex;
 
 struct NcclTypeInfo
 {
@@ -115,14 +115,17 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
         return {};
     }
 
-    // create communicator scoped to the requested devices.
-    // the communicator is cached in comm_world for reuse by
-    // subsequent plans with the same device set.
+    // look up or create a communicator for this exact device set.
     // guard with a mutex so concurrent plan creation from
-    // multiple threads does not race on comm_world.
-    std::lock_guard<std::mutex> lock(comm_world_mutex);
+    // multiple threads does not race on the cache.
+    std::lock_guard<std::mutex> lock(comm_cache_mutex);
 
-    if(!comm_world)
+    auto it = comm_cache.find(devices);
+    if(it != comm_cache.end())
+    {
+        return it->second;
+    }
+
     {
         const int ndevices = static_cast<int>(devices.size());
 
@@ -192,10 +195,16 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
         {
             return {};
         }
-        comm_world = std::move(new_comm);
+        comm_cache[devices] = std::move(new_comm);
     }
 
-    return comm_world;
+    return comm_cache[devices];
+}
+
+void rocfft_rccl_comm_t::reset_all()
+{
+    std::lock_guard<std::mutex> lock(comm_cache_mutex);
+    comm_cache.clear();
 }
 
 void* rocfft_rccl_comm_t::get_comm(int device_id) const

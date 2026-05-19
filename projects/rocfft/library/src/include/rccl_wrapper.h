@@ -26,6 +26,7 @@
 // the macro undefined the file expands to nothing.
 #ifdef ROCFFT_RCCL_ENABLE
 
+#include <cstddef>
 #include <hip/hip_runtime.h>
 #include <memory>
 #include <set>
@@ -57,12 +58,12 @@ public:
 
     // return a populated handle for the specified devices, or an empty
     // handle if RCCL is disabled, fewer than two devices were given, or
-    // initialization failed.
+    // initialization failed.  Communicators are cached per device-set
+    // so different plans can use different GPU subsets concurrently.
     static rocfft_rccl_comm_t create(const std::set<int>& devices);
 
-    // process-wide cached communicator.  created on demand by create()
-    // and reset at rocfft_cleanup().
-    static rocfft_rccl_comm_t comm_world;
+    // release all cached communicators (called at rocfft_cleanup()).
+    static void reset_all();
 
     // get the RCCL communicator for a specific device
     void* get_comm(int device_id) const;

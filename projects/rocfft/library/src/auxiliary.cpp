@@ -171,7 +171,7 @@ try
     RTCCache::single.reset();
 
 #ifdef ROCFFT_RCCL_ENABLE
-    rocfft_rccl_comm_t::comm_world = {};
+    rocfft_rccl_comm_t::reset_all();
 #endif
 
     TuningBenchmarker::GetSingleton().Clean();
