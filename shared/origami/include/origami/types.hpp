@@ -227,6 +227,29 @@ enum class transpose_t {
 };
 
 /**
+ * @brief A compact 2-D dimension pair (M, N).
+ *
+ * Provides convenient accessors for common GEMM tiling parameters
+ * and helpers like mn() for area.
+ */
+ struct dim2_t {
+  /// M dimension (rows).
+  std::size_t m;
+
+  /// N dimension (columns).
+  std::size_t n;
+
+  constexpr bool operator==(const dim2_t& o) const noexcept {
+    return m == o.m && n == o.n;
+  }
+
+  constexpr bool operator!=(const dim2_t& o) const noexcept { return !(*this == o); }
+
+  /// @return Product m*n.
+  constexpr std::size_t mn() const noexcept { return m * n; }
+};
+
+/**
  * @brief A compact 3-D dimension triple (M, N, K).
  *
  * Provides convenient accessors for common GEMM tiling parameters
@@ -476,18 +499,14 @@ using backend_params_t = std::variant<std::monostate, tensile_params_t>;
  * work-group mapping (WGM), and cache-control hints.
  */
 struct config_t {
-  /// Macro tile and matrix-instruction shape.
+  /// Macro tile shape.
   dim3_t mt{0, 0, 0};
+
+  /// Matrix-instruction shape.
   dim3_t mi{0, 0, 0};
 
   /// Main loop optimization flag (indicates use of any optimized kernel variant)
   bool hand_optimized_main_loop = false;
-
-  /// Occupancy (number of wavefronts resident per CU).
-  int occupancy = -1;
-
-  /// Reorder workgroup id for L2 reuse.
-  int workgroup_mapping = 0;
 
   /// Whether operand A is accessed with cache-flags.
   int cache_hints_a = 0;
@@ -498,51 +517,53 @@ struct config_t {
   /// Whether output D is written with non-temporal (streaming) cache flags (NonTemporalD).
   int cache_hints_d = 0;
 
-  /// PrefetchGlobalRead depth (number of global-read prefetch stages in the pipeline).
-  int prefetch_global_read = 2;
-
   /// DirectToLds flags — bypass VGPR and write global loads directly to LDS.
   bool direct_to_lds_a = false;
   bool direct_to_lds_b = false;
 
-  /// LocalSplitU factor (intra-workgroup K-split across threads).
-  int local_split_u = 1;
+  /// Global read vector width (Bytes per load) for matrix A
+  std::size_t grvw_a = 8;
+
+  /// Global read vector width (Bytes per load) for matrix B
+  std::size_t grvw_b = 8;
 
   /// LDS footprint of this kernel in bytes (from TensileLite LdsNumBytes).
   /// Used to compute per-CU occupancy: floor(hardware.lds_capacity / lds_bytes).
   std::size_t lds_bytes = 0;
 
+  /// LDS Transpose Instruction: uses hardware ds_load_b64_tr_b16 to transpose
+  /// 16-bit data during LDS read, eliminating explicit VALU pack/shuffle.
+  bool lds_tr_inst = false;
+
+  /// LocalSplitU factor (intra-workgroup K-split across threads).
+  int local_split_u = 0;
+
+  /// Occupancy (number of wavefronts resident per CU).
+  int occupancy = -1;
+
   /// Single LDS buffer mode (1LDSBuffer=1): uses one LDS staging slab instead
   /// of two, saving LDS at the cost of a read-sync-write barrier per iteration.
   bool one_lds_buffer = false;
 
-  /// LDS Transpose Instruction: uses hardware ds_load_b64_tr_b16 to transpose
-  /// 16-bit data during LDS read, eliminating explicit VALU pack/shuffle.
-  bool lds_tr_inst = false;
+  /// PrefetchGlobalRead depth
+  int prefetch_global_read = 2;
+
+  /// Wave-group dimensions [wave_group_m, wave_group_n]
+  /// per workgroup along the M/N directions of the output tile.
+  dim2_t wave{2, 2};
+
+  /// Tensile workgroup shape.
+  dim3_t workgroup{0, 0, 0};
+
+  /// Reorder workgroup id for L2 reuse.
+  int workgroup_mapping = 0;
 
   /// Workspace size parameters.
   std::size_t workspace_size            = 0;
   std::size_t workspace_size_per_elem_c = 0;
 
-  /// Reduction strategy.
-  reduction_t reduction_strategy = reduction_t::none;
-
-  /// Prediction mode for latency estimation.
-  prediction_modes_t prediction_mode = prediction_modes_t::estimation;
-
-  /// Target backend for kernel execution.
-  target_t target = target_t::tensilelite;
-  /// Grid selection algorithm.
-  grid_selection_t grid_selection = grid_selection_t::k_split_aware;
-
   /// Index of config, not used by Origami but can be used by the user
   std::size_t index = 0;
-
-  /// Global read vector width for matrix A (elements per load)
-  std::size_t grvw_a = 1;
-
-  /// Global read vector width for matrix B (elements per load)
-  std::size_t grvw_b = 1;
 
   /// Global write vector width for matrix D (elements per store)
   std::size_t gwvw_d = 1;
@@ -552,6 +573,18 @@ struct config_t {
 
   /// LDS load vector width for matrix B (elements per LDS read)
   int vector_width_b = 1;
+
+  /// Reduction strategy.
+  reduction_t reduction_strategy = reduction_t::none;
+
+  /// Prediction mode for latency estimation.
+  prediction_modes_t prediction_mode = prediction_modes_t::estimation;
+
+  /// Target backend for kernel execution.
+  target_t target = target_t::tensilelite;
+
+  /// Grid selection algorithm.
+  grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
   /// Backend-specific parameters (type should match target).
   /// Use tensile() accessor to get/set Tensile-specific params.
@@ -579,8 +612,9 @@ struct config_t {
            direct_to_lds_a == o.direct_to_lds_a && direct_to_lds_b == o.direct_to_lds_b &&
            local_split_u == o.local_split_u && lds_bytes == o.lds_bytes &&
            one_lds_buffer == o.one_lds_buffer &&
-           lds_tr_inst == o.lds_tr_inst &&
-           workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
+          lds_tr_inst == o.lds_tr_inst && wave == o.wave && workgroup == o.workgroup &&
+          workgroup_mapping == o.workgroup_mapping &&
+          reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
            vector_width_b == o.vector_width_b && backend == o.backend;
@@ -604,6 +638,11 @@ struct config_t {
                                           lds_bytes,
                                           one_lds_buffer,
                                           lds_tr_inst,
+                                          wave.m,
+                                          wave.n,
+                                          workgroup.m,
+                                          workgroup.n,
+                                          workgroup.k,
                                           workgroup_mapping,
                                           static_cast<std::uint32_t>(reduction_strategy),
                                           static_cast<std::uint32_t>(prediction_mode),

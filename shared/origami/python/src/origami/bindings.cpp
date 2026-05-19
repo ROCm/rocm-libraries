@@ -145,6 +145,7 @@ NB_MODULE(origami, m) {
       .def_rw("hand_optimized_main_loop", &origami::config_t::hand_optimized_main_loop)
       .def_rw("occupancy", &origami::config_t::occupancy)
       .def_rw("workgroup_mapping", &origami::config_t::workgroup_mapping)
+      .def_rw("workgroup", &origami::config_t::workgroup)
       .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)
       .def_rw("cache_hints_b", &origami::config_t::cache_hints_b)
       .def_rw("cache_hints_d", &origami::config_t::cache_hints_d)

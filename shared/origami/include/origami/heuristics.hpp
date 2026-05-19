@@ -45,13 +45,6 @@ struct heuristic_defaults_t {
   static constexpr double WEIGHT_MEM_L2        = 1.0;
   static constexpr double WEIGHT_MEM_MALL      = 1.0;
   static constexpr double WEIGHT_MEM_DRAM      = 1.0;
-  static constexpr double WEIGHT_COMPUTE       = 1.0;
-  static constexpr double WEIGHT_MEMORY        = 1.0;
-  static constexpr double WEIGHT_WG_SETUP      = 1.0;
-  static constexpr double WEIGHT_PROLOGUE      = 1.0;
-  static constexpr double WEIGHT_EPILOGUE      = 1.0;
-  static constexpr double WEIGHT_LOOP_OVERHEAD = 100.0;
-  static constexpr double WEIGHT_TILE_TOTAL    = 1.0;
 
   // Empirical Constants
   static constexpr double MAIN_MEMORY_LOAD_LATENCY         = 200.0;
@@ -95,12 +88,7 @@ struct heuristic_defaults_t {
   // Main Loop Efficiency
   static constexpr double MAIN_LOOP_EFFICIENCY = 1.0;
 
-  // TF32 Emulation Constants
-  static constexpr double TF32_ARITH_INTENSITY_THRESHOLD = 1000.0;
-
   // --- PGR (PrefetchGlobalRead) ---
-  // Prologue = (setup + pgr) * L_mem.  Setup captures WG init overhead.
-  static constexpr double PROLOGUE_SETUP_FRACTION  = 0.0;
   // Main loop: two overlapping streams —
   //   memory  stream = L_mem * (num_iter - pgr)
   //   compute stream = L_compute * num_iter
@@ -178,12 +166,6 @@ struct heuristic_defaults_t {
   // L2.
   static constexpr double MALL_OVERFLOW_FADE_SLOPE = 2.0;
 
-  // --- LDS Occupancy ---
-  // Per additional workgroup that can co-reside on a CU (beyond the first),
-  // effective timestep count is multiplied by this factor.
-  // < 1.0 means higher occupancy hides more inter-WG latency.
-  static constexpr double OCC_TIMESTEP_BENEFIT = 0.95;
-
   // --- 1LDSBuffer ---
   // Per-iteration overhead (cycles) when using a single LDS buffer instead
   // of double-buffering.  Represents the read-sync-write barrier stall.
@@ -213,27 +195,6 @@ struct heuristic_defaults_t {
   // Penalty = DU_WASTE_OVERHEAD * (MT_K / tail_k).
   static constexpr double DU_WASTE_OVERHEAD = 500.0;
 
-  // --- VGPR Pressure / ACC Occupancy ---
-  // Larger MFMA tiles (especially MI32x32) allocate the full output
-  // accumulator tile as persistent ACC VGPRs for the entire K-loop.
-  // On gfx950 each SIMD has 512 ACC VGPRs; output tiles whose per-thread
-  // ACC footprint (MT_M * MT_N / wave_threads) exceeds this budget lose
-  // wave-level latency hiding because at most 1 wave can fit per SIMD.
-  // Physically this shows up as (a) unmasked mem-load latency in the
-  // main loop and (b) ACC spill/restore overhead in the epilogue.  The
-  // penalty is smooth, bounded, and fires only when the per-thread ACC
-  // footprint approaches or exceeds the budget (relative to a target
-  // of 2 waves/SIMD for good latency hiding).
-  // Multiplier on L_tile_total:
-  //   (1 + VGPR_PRESSURE_PENALTY * max(0, 2 - acc_waves_per_simd)).
-  // With budget 512 and strength 0.2, a MT192x256 MI32 tile
-  // (acc_per_thread=768, acc_waves=0.67) incurs ~27% penalty, while
-  // a MT160x192 MI16 tile (acc_per_thread=480, acc_waves=1.07) only
-  // ~19% and MT80x256 (acc_per_thread=320, acc_waves=1.6) only ~8%.
-  static constexpr double VGPR_PRESSURE_PENALTY = 0.2;
-  static constexpr double ACC_VGPR_BUDGET_PER_SIMD = 512.0;
-  static constexpr double ACC_WAVES_TARGET = 2.0;
-
   // --- MFMA Pipeline Hazard (DepthU too shallow for back-to-back MI reuse) ---
   // When MT_K <= MI_K each main-loop iteration contains exactly one (or fewer)
   // MI K-fold, so there is no opportunity to issue back-to-back MFMAs within
@@ -248,31 +209,10 @@ struct heuristic_defaults_t {
   // reuse opportunity kicks in).
   static constexpr double MI_PIPELINE_HAZARD_PENALTY = 0.15;
 
-  // --- Spatial Waste ---
-  // Additive per-tile penalty (cycles per wasted output element) when the
-  // tile grid over-allocates in M or N.  Covers predicated-load overhead,
-  // MFMA waste, cache pollution from shifted-pointer reads, and imperfect
-  // overlap of wasted work.  Scales naturally with tile area so large tiles
-  // get a big penalty and small tiles almost none.
-  static constexpr double SPATIAL_WASTE_WEIGHT = 1.0;
-
-  // --- Effective Tile Under-Utilization Penalty Strength ---
-  // Softens the 1/utilization multiplier on L_tile_total.  The raw 1/util
-  // formula assumes every wasted launched element costs as much as a useful
-  // one, but HW pipelines and buffers hide a large fraction of the waste
-  // (predicated loads, MFMA bubbles, and edge-masked stores overlap with
-  // the surrounding useful work).  Empirically, on M=160 N-heavy problems,
-  // MT192x160 / MT160x96 / MT64x160 kernels (util 0.66-0.83) are over-
-  // predicted by +15-30% with alpha=1.0; dropping to alpha=0.5 roughly
-  // halves the over-charge while leaving perfect-fit (util=1.0) kernels
-  // untouched and still penalizing extreme dilution (util<<1) meaningfully.
-  //
-  //   effective_tile_penalty = 1 + alpha * (1/util - 1)
-  //     util=1.00  -> 1.00   (no change)
-  //     util=0.83  -> 1.10   (was 1.20 at alpha=1.0)
-  //     util=0.66  -> 1.25   (was 1.50)
-  //     util=0.50  -> 1.50   (was 2.00)
-  static constexpr double TILE_PENALTY_ALPHA = 0.5;
+  // Per-store-instruction issue cost (cycles) for the epilogue store path.
+  // Independent of SourceSwap; represents fixed v_buffer_store / s_swap
+  // sequencing overhead per emitted vector store instruction.
+  static constexpr double EPILOGUE_STORE_ISSUE_CYCLES = 1.0;
 };
 
 /**
@@ -286,13 +226,6 @@ struct heuristic_params_t {
   double weight_mem_l2        = heuristic_defaults_t::WEIGHT_MEM_L2;
   double weight_mem_mall      = heuristic_defaults_t::WEIGHT_MEM_MALL;
   double weight_mem_dram      = heuristic_defaults_t::WEIGHT_MEM_DRAM;
-  double weight_compute       = heuristic_defaults_t::WEIGHT_COMPUTE;
-  double weight_memory        = heuristic_defaults_t::WEIGHT_MEMORY;
-  double weight_wg_setup      = heuristic_defaults_t::WEIGHT_WG_SETUP;
-  double weight_prologue      = heuristic_defaults_t::WEIGHT_PROLOGUE;
-  double weight_epilogue      = heuristic_defaults_t::WEIGHT_EPILOGUE;
-  double weight_loop_overhead = heuristic_defaults_t::WEIGHT_LOOP_OVERHEAD;
-  double weight_tile_total    = heuristic_defaults_t::WEIGHT_TILE_TOTAL;
 
   // === Empirical Constants ===
   double main_memory_load_latency         = heuristic_defaults_t::MAIN_MEMORY_LOAD_LATENCY;
@@ -330,25 +263,19 @@ struct heuristic_params_t {
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
 
   // === PGR / LSU / DTL / NTD parameters ===
-  double prologue_setup_fraction  = heuristic_defaults_t::PROLOGUE_SETUP_FRACTION;
   double lsu_reduction_overhead = heuristic_defaults_t::LSU_REDUCTION_OVERHEAD;
   double ntd_ksplit_penalty     = heuristic_defaults_t::NTD_KSPLIT_PENALTY;
   double d_pollution_penalty    = heuristic_defaults_t::D_POLLUTION_PENALTY;
   double d_writealloc_factor    = heuristic_defaults_t::D_WRITEALLOC_FACTOR;
   size_t mall_capacity_bytes    = heuristic_defaults_t::MALL_CAPACITY_BYTES;
   double mall_overflow_fade_slope = heuristic_defaults_t::MALL_OVERFLOW_FADE_SLOPE;
-  double occ_timestep_benefit    = heuristic_defaults_t::OCC_TIMESTEP_BENEFIT;
   double one_lds_buffer_overhead   = heuristic_defaults_t::ONE_LDS_BUFFER_OVERHEAD;
   double pack_transpose_overhead   = heuristic_defaults_t::PACK_TRANSPOSE_OVERHEAD;
   double tail_loop_overhead        = heuristic_defaults_t::TAIL_LOOP_OVERHEAD;
   double tile_fixed_overhead     = heuristic_defaults_t::TILE_FIXED_OVERHEAD;
   double du_waste_overhead       = heuristic_defaults_t::DU_WASTE_OVERHEAD;
-  double spatial_waste_weight    = heuristic_defaults_t::SPATIAL_WASTE_WEIGHT;
   double mi_pipeline_hazard_penalty = heuristic_defaults_t::MI_PIPELINE_HAZARD_PENALTY;
-  double vgpr_pressure_penalty       = heuristic_defaults_t::VGPR_PRESSURE_PENALTY;
-  double acc_vgpr_budget_per_simd    = heuristic_defaults_t::ACC_VGPR_BUDGET_PER_SIMD;
-  double acc_waves_target            = heuristic_defaults_t::ACC_WAVES_TARGET;
-  double tile_penalty_alpha          = heuristic_defaults_t::TILE_PENALTY_ALPHA;
+  double epilogue_store_issue_cycles = heuristic_defaults_t::EPILOGUE_STORE_ISSUE_CYCLES;
 
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).

@@ -117,7 +117,7 @@ namespace TensileLite
                 iot::mapRequired(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
 
                 iot::mapOptional(io, "activationFused", s.activationFused);
-
+                iot::mapOptional(io, "SourceSwap", s.SourceSwap);
                 iot::mapOptional(io, "CustomKernelName", s.customKernelName);
 
                 iot::mapRequired(io, "workGroupMappingXCC", s.workGroupMappingXCC);

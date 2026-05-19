@@ -1237,13 +1237,6 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   REQUIRE(defaults.weight_mem_l2 == 1.0);
   REQUIRE(defaults.weight_mem_mall == 1.0);
   REQUIRE(defaults.weight_mem_dram == 1.0);
-  REQUIRE(defaults.weight_compute == 1.0);
-  REQUIRE(defaults.weight_memory == 1.0);
-  REQUIRE(defaults.weight_wg_setup == 1.0);
-  REQUIRE(defaults.weight_prologue == 1.5);
-  REQUIRE(defaults.weight_epilogue == 2.0);
-  REQUIRE(defaults.weight_loop_overhead == 500.0);
-  REQUIRE(defaults.weight_tile_total == 1.0);
 
   // Check default empirical constants
   // REQUIRE(defaults.l2_min_hit_rate_default == 0.5);
@@ -1282,8 +1275,8 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   origami::heuristic_params_t override;
 
   // Set some non-default values in override
-  override.weight_compute           = 2.0;
-  override.weight_memory            = 3.0;
+  override.weight_mem_l2            = 2.0;
+  override.weight_mem_mall          = 3.0;
   override.main_memory_load_latency = 300.0;
   override.main_loop_efficiency     = 0.8;
 
@@ -1291,15 +1284,13 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   base.merge_with(override);
 
   // Check that overridden values changed
-  REQUIRE(base.weight_compute == 2.0);
-  REQUIRE(base.weight_memory == 3.0);
+  REQUIRE(base.weight_mem_l2 == 2.0);
+  REQUIRE(base.weight_mem_mall == 3.0);
   REQUIRE(base.main_memory_load_latency == 300.0);
   REQUIRE(base.main_loop_efficiency == 0.8);
 
   // Check that non-overridden values remain default
-  REQUIRE(base.weight_mem_l2 == origami::heuristic_defaults_t::WEIGHT_MEM_L2);
-  REQUIRE(base.weight_prologue == origami::heuristic_defaults_t::WEIGHT_PROLOGUE);
-  REQUIRE(base.weight_epilogue == origami::heuristic_defaults_t::WEIGHT_EPILOGUE);
+  REQUIRE(base.weight_mem_dram == origami::heuristic_defaults_t::WEIGHT_MEM_DRAM);
 }
 
 TEST_CASE("Heuristics: Key matching - exact match", "[heuristics]") {
@@ -1437,66 +1428,6 @@ TEST_CASE("Heuristics: Optimized kernel efficiency lookup", "[heuristics]") {
   REQUIRE(params.main_loop_efficiency == Approx(1.0 / 1.15).epsilon(1e-6));
 }
 
-TEST_CASE("Heuristics: Problematic tile configuration (64x32x32)", "[heuristics]") {
-  auto& db = origami::heuristics_database_t::get_instance();
-
-  auto hardware = make_hardware(950);
-  auto problem  = make_problem(1024, 1024, 1024);
-  auto config   = make_config(64, 32, 32, 16, 16, 16);
-
-  problem.a_dtype     = origami::data_type_t::BFloat16;
-  problem.b_dtype     = origami::data_type_t::BFloat16;
-  problem.mi_dtype    = origami::data_type_t::BFloat16;
-  problem.a_transpose = origami::transpose_t::N;
-  problem.b_transpose = origami::transpose_t::N;
-
-  auto params = db.lookup(problem, hardware, config);
-
-  // Should have 10x penalty for this problematic configuration
-  REQUIRE(params.weight_tile_total == 10.0);
-}
-
-TEST_CASE("Heuristics: TF32 emulation - memory bound", "[heuristics]") {
-  auto& db = origami::heuristics_database_t::get_instance();
-
-  auto hardware = make_hardware(950);
-  // Small problem: arith intensity = (3*2*512*512*512) / ((512*512 + 512*512 + 512*512) * 4) = 256
-  // < 1000
-  auto problem = make_problem(512, 512, 512);
-  auto config  = make_config(256, 256, 32, 16, 16, 16);
-
-  problem.a_dtype     = origami::data_type_t::Float;
-  problem.b_dtype     = origami::data_type_t::Float;
-  problem.mi_dtype    = origami::data_type_t::XFloat32;
-  problem.a_transpose = origami::transpose_t::N;
-  problem.b_transpose = origami::transpose_t::T;
-
-  auto params = db.lookup(problem, hardware, config);
-
-  // Should have optimization for memory-bound TF32 (arith < 1000)
-  REQUIRE(params.weight_tile_total == 0.6);
-}
-
-TEST_CASE("Heuristics: TF32 emulation - compute bound", "[heuristics]") {
-  auto& db = origami::heuristics_database_t::get_instance();
-
-  auto hardware = make_hardware(950);
-  // Large problem: arith intensity = (3*2*2048*2048*2048) / ((3 * 2048*2048) * 4) = 2048 > 1000
-  auto problem = make_problem(2048, 2048, 2048);
-  auto config  = make_config(256, 256, 32, 16, 16, 16);
-
-  problem.a_dtype     = origami::data_type_t::Float;
-  problem.b_dtype     = origami::data_type_t::Float;
-  problem.mi_dtype    = origami::data_type_t::XFloat32;
-  problem.a_transpose = origami::transpose_t::N;
-  problem.b_transpose = origami::transpose_t::T;
-
-  auto params = db.lookup(problem, hardware, config);
-
-  // Should have stronger optimization for compute-bound TF32 (arith >= 1000)
-  REQUIRE(params.weight_tile_total == 0.4);
-}
-
 TEST_CASE("Heuristics: Helper functions - make_kernel_variant_key", "[heuristics]") {
   auto key = origami::make_hand_optimized_kernel_key(origami::hardware_t::architecture_t::gfx950,
                                                      origami::data_type_t::BFloat16,
@@ -1578,7 +1509,7 @@ TEST_CASE("Heuristics: Database add_entry and lookup", "[heuristics]") {
   key.mt_m     = 777;                         // Unique tile size
 
   origami::heuristic_params_t params;
-  params.weight_wg_setup = 7.77;  // Unique value
+  params.tile_fixed_overhead = 7.77;  // Unique value
 
   db.add_entry(key, params);
 
@@ -1591,7 +1522,7 @@ TEST_CASE("Heuristics: Database add_entry and lookup", "[heuristics]") {
   auto result = db.lookup(problem, hardware, config);
 
   // Should find our custom entry
-  REQUIRE(result.weight_wg_setup == 7.77);
+  REQUIRE(result.tile_fixed_overhead == 7.77);
 }
 
 TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]") {
@@ -1603,7 +1534,7 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   general_key.mi_dtype = origami::data_type_t::Float;  // Specific dtype to avoid conflicts
 
   origami::heuristic_params_t general_params;
-  general_params.weight_epilogue = 3.33;  // Use a weight that's less likely to conflict
+  general_params.tile_fixed_overhead = 3.33;  // Use a value that's less likely to conflict
 
   db.add_entry(general_key, general_params);
 
@@ -1614,7 +1545,7 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   specific_key.mt_m     = 555;  // Unique value
 
   origami::heuristic_params_t specific_params;
-  specific_params.weight_epilogue = 5.55;  // More specific value
+  specific_params.tile_fixed_overhead = 5.55;  // More specific value
 
   db.add_entry(specific_key, specific_params);
 
@@ -1627,7 +1558,7 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   auto result = db.lookup(problem, hardware, config);
 
   // Should use more specific rule
-  REQUIRE(result.weight_epilogue == 5.55);
+  REQUIRE(result.tile_fixed_overhead == 5.55);
 }
 
 TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
