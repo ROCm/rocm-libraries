@@ -920,6 +920,27 @@ struct SWaitAluData : public TypedModifier<SWaitAluData> {
         return validFields & (1 << field);
     }
 
+    // Clear a single field (sets it back to "unused" / no-wait).
+    void clearField(Field field) {
+        validFields &= ~(1 << field);
+        switch (field) {
+                // clang-format off
+            case VA_VDST:  fieldsValue.va_vdst  = 0; break;
+            case VA_SDST:  fieldsValue.va_sdst  = 0; break;
+            case VA_SSRC:  fieldsValue.va_ssrc  = 0; break;
+            case HOLD_CNT: fieldsValue.hold_cnt = 0; break;
+            case VM_VSRC:  fieldsValue.vm_vsrc  = 0; break;
+            case VA_VCC:   fieldsValue.va_vcc   = 0; break;
+            case SA_SDST:  fieldsValue.sa_sdst  = 0; break;
+            default: break;  // clang-format on
+        }
+    }
+
+    // True when no field is currently valid (instruction is a no-op).
+    bool empty() const {
+        return validFields == 0;
+    }
+
    private:
     HwValue fieldsValue;
     uint8_t validFields;  // Bitmask indicating which fields are valid (not -1)
