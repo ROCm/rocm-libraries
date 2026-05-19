@@ -59,6 +59,7 @@ jobs:
           cmake -B build -GNinja \
             -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;miopen-provider" \
             -DHIPDNN_BUILD_PYTHON_BINDINGS=ON \
+            -DENABLE_CLANG_FORMAT=OFF \
             -DROCM_PATH=/opt/rocm \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DHIP_PLATFORM=amd
