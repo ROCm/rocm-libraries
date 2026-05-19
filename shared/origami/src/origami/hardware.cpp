@@ -271,6 +271,7 @@ bool hardware_t::has_native_TF32() const {
       return true;
     case architecture_t::gfx90a:
     case architecture_t::gfx950:
+    case architecture_t::gfx1200:
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1150:
