@@ -117,7 +117,7 @@ hipDNN CI commonly runs sanitizer-enabled tests. Treat leaks and ownership ambig
 ### Compatibility Claims
 
 - For existing public-facing hipDNN API that corresponds to an equivalent cuDNN API, check whether the signature, parameter semantics, defaults, status behavior, ownership/lifetime rules, and documented constraints preserve seamless porting expectations.
-- When validating cuDNN compatibility, use an exact authoritative NVIDIA API reference page under `https://docs.nvidia.com/deeplearning/cudnn/` via `WebFetch` when web access is available. If the exact API page cannot be located or fetched, do not infer cuDNN semantics from memory; flag the compatibility point for human verification instead.
+- When validating cuDNN compatibility, prefer source-level comparison against the equivalent cuDNN frontend/API implementation, such as the public cuDNN frontend repository, when web access or a local checkout is available. Use NVIDIA's published cuDNN API documentation as a supporting reference for released behavior. If neither an authoritative source page nor source implementation can be located, do not infer cuDNN semantics from memory; flag the compatibility point for human verification instead.
 - Flag public API changes that silently diverge from the equivalent cuDNN API unless the divergence is explicit, documented, and intentional.
 - New hipDNN-only API does not need to match cuDNN by default. Review it for consistency with hipDNN design, and only apply cuDNN parity expectations when the API or documentation claims cuDNN compatibility.
 - If docs mention cuDNN migration, compatibility, or parity, ensure the wording is precise and does not promise unimplemented behavior.
