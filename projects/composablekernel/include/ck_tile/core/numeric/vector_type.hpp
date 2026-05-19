@@ -12,7 +12,6 @@
 #include "ck_tile/core/numeric/bfloat16.hpp"
 #include "ck_tile/core/numeric/pk_int4.hpp"
 #include "ck_tile/core/numeric/pk_fp4.hpp"
-#include "ck_tile/core/numeric/pk_f6.hpp"
 #include "ck_tile/core/numeric/e8m0.hpp"
 
 namespace ck_tile {
@@ -99,86 +98,6 @@ struct impl::ext_vector<int8_t, 12>
     static constexpr index_t N = 12;
     using value_type           = int32x3_tt;
     using type                 = int32x3_tt;
-};
-
-template <int N, f6_kind kind>
-struct f6x16xN_tt // Underlying type for ext_vector_t<fp6x16, N> and ext_vector_t<bf6x16, N> impls
-{
-    int32_t data[N * 3];
-
-    // Proxy reference structure is necessary for setting values by subscript.
-    struct reference
-    {
-        f6x16xN_tt& vec;
-        index_t i;
-
-        CK_TILE_HOST_DEVICE reference& operator=(const pk_f6_legacy_t<16, kind>& val)
-        {
-            vec.data[i * 3]     = val[0];
-            vec.data[i * 3 + 1] = val[1];
-            vec.data[i * 3 + 2] = val[2];
-            return *this;
-        }
-
-        CK_TILE_HOST_DEVICE operator pk_f6_legacy_t<16, kind>() const
-        {
-            pk_f6_legacy_t<16, kind> result;
-            result.data_[0] = vec.data[i * 3];
-            result.data_[1] = vec.data[i * 3 + 1];
-            result.data_[2] = vec.data[i * 3 + 2];
-            return result;
-        }
-    };
-
-    CK_TILE_HOST_DEVICE reference operator[](index_t i) { return reference{*this, i}; }
-
-    CK_TILE_HOST_DEVICE pk_f6_legacy_t<16, kind> operator[](index_t i) const
-    {
-        pk_f6_legacy_t<16, kind> result;
-        result.data_[0] = data[i * 3];
-        result.data_[1] = data[i * 3 + 1];
-        result.data_[2] = data[i * 3 + 2];
-        return result;
-    }
-};
-
-template <int N, f6_kind kind>
-struct vector_traits<f6x16xN_tt<N, kind>>
-{
-    using scalar_type                    = pk_f6_legacy_t<16, kind>;
-    static constexpr index_t vector_size = N;
-};
-
-template <>
-struct impl::ext_vector<pk_fp6x16_t, 1>
-{
-    static constexpr index_t N = 1;
-    using value_type           = f6x16xN_tt<1, f6_kind::fp6>;
-    using type                 = f6x16xN_tt<1, f6_kind::fp6>;
-};
-
-template <>
-struct impl::ext_vector<pk_fp6x16_t, 2>
-{
-    static constexpr index_t N = 2;
-    using value_type           = f6x16xN_tt<2, f6_kind::fp6>;
-    using type                 = f6x16xN_tt<2, f6_kind::fp6>;
-};
-
-template <>
-struct impl::ext_vector<pk_bf6x16_t, 1>
-{
-    static constexpr index_t N = 1;
-    using value_type           = f6x16xN_tt<1, f6_kind::bf6>;
-    using type                 = f6x16xN_tt<1, f6_kind::bf6>;
-};
-
-template <>
-struct impl::ext_vector<pk_bf6x16_t, 2>
-{
-    static constexpr index_t N = 2;
-    using value_type           = f6x16xN_tt<2, f6_kind::bf6>;
-    using type                 = f6x16xN_tt<2, f6_kind::bf6>;
 };
 
 // u32
