@@ -1808,7 +1808,7 @@ namespace TensileLite
             // bytes the kernel sees are identical to the bytes the reference reads. We
             // gate on m_mxScaleFormat > 0 because that is the user-visible signal that
             // they opted into the subtile / pre-swizzle layout.
-            bool useMXGenerator = isMXProblem(problem) && m_mxScaleFormat > 0;
+            bool useMXGenerator = isMXProblemExceptF6(problem) && m_mxScaleFormat > 0;
             if(useMXGenerator)
                 initializeMXData(problem);
 

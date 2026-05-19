@@ -59,17 +59,13 @@ namespace TensileLite
             if(mxBlock == 0)
                 return false;
             auto dt = tensor.dataType();
-            if(dt == rocisa::DataType::Float6 or
-                    dt == rocisa::DataType::BFloat6)
-            {
-                 throw std::runtime_error("Float6 and BFloat6 currently are not supported");
-            }
+
             return dt == rocisa::DataType::Float4
                 || dt == rocisa::DataType::Float8
                 || dt == rocisa::DataType::BFloat8;
         }
 
-        inline bool isMXProblem(const ContractionProblemGemm& problem)
+        inline bool isMXProblemExceptF6(const ContractionProblemGemm& problem)
         {
             return isMXTensor(problem.a(), problem.mxBlockA())
                 || isMXTensor(problem.b(), problem.mxBlockB());
@@ -910,7 +906,7 @@ namespace TensileLite
                    && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty())
                 {
-                    bool isMX = isMXProblem(*m_currentGemmProblem);
+                    bool isMX = isMXProblemExceptF6(*m_currentGemmProblem);
                     if(isMX)
                     {
                         initializeMXData(*m_currentGemmProblem);

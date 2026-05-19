@@ -141,7 +141,7 @@ namespace TensileLite
             if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
                 // Must mirror DataInitialization::preSolution's gate.
-                if(!isMXProblem(*gemm))
+                if(!isMXProblemExceptF6(*gemm))
                     return;
                 ScopedTimer timer("cpu_reference_gemm_per_solution");
                 SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
