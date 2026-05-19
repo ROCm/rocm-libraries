@@ -3,7 +3,9 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
-## MIOpen 3.6.0 for ROCm 7.13.0
+## MIOpen 3.5.2 for ROCm 7.14.0
+
+## MIOpen 3.5.1 for ROCm 7.13.0
 ### Added
 * Added `MIOPEN_LOG_BUFFER_SIZE` option: when set to non-zero, dumps recent MIOpen logs to file on error.
 * [Conv] Added `ConvDepthwiseFwd3D` solver for optimizing specific 3D depthwise convolutions.

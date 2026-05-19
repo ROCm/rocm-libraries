@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -79,9 +79,9 @@ extern "C" {
 *  Currently, \p rocsparse_dense_to_sparse only supports the algorithm \ref rocsparse_dense_to_sparse_alg_default.
 *  See the full example below.
 *
-*  \p rocsparse_dense_to_sparse supports \ref rocsparse_datatype_f16_r, \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
-*  \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c for values arrays in the sparse matrix (stored in
-*  CSR, CSC, or COO format) and the dense matrix. For the row/column offset and row/column index arrays of the sparse matrix,
+*  \p rocsparse_dense_to_sparse supports \ref rocsparse_datatype_f16_r, \ref rocsparse_datatype_bf16_r, \ref rocsparse_datatype_f32_r,
+*  \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c for values arrays in the sparse matrix
+*  (stored in CSR, CSC, or COO format) and the dense matrix. For the row/column offset and row/column index arrays of the sparse matrix,
 *  \p rocsparse_dense_to_sparse supports the precisions \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64.
 *
 *  \par Uniform Precisions:
