@@ -81,39 +81,152 @@ def setGithubStatus(String context, String state, String description) {
     }
 }
 
+// Retry helper with exponential backoff
+def retryWithExponentialBackoff(String operation, Closure action, int maxRetries = 5) {
+    def attempt = 0
+    def baseDelay = 5 // seconds
+    def lastError = null
+
+    while (attempt < maxRetries) {
+        attempt++
+        try {
+            echo "[RETRY] ${operation}: Attempt ${attempt}/${maxRetries}"
+
+            // Log diagnostic info before each attempt
+            sh """
+                echo "[DIAG] Current time: \$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")"
+                echo "[DIAG] Node: \${NODE_NAME}"
+                echo "[DIAG] Network interfaces:"
+                ip addr show || ifconfig
+                echo "[DIAG] DNS resolution test for github.com:"
+                nslookup github.com || echo "nslookup failed"
+                echo "[DIAG] Ping test for github.com:"
+                ping -c 3 github.com || echo "ping failed"
+                echo "[DIAG] Testing HTTPS connectivity to github.com:"
+                curl -v -I https://github.com 2>&1 || echo "curl test failed"
+                echo "[DIAG] Testing docker daemon:"
+                docker info || echo "docker info failed"
+            """
+
+            def result = action()
+            echo "[RETRY] ${operation}: SUCCESS on attempt ${attempt}"
+            return result
+        } catch (Exception e) {
+            lastError = e
+            echo "[RETRY] ${operation}: FAILED on attempt ${attempt}: ${e.getMessage()}"
+            echo "[RETRY] Stack trace: ${e.getStackTrace().join('\n')}"
+
+            if (attempt < maxRetries) {
+                // Calculate exponential backoff: 5, 10, 20, 40, 80 seconds
+                def delay = baseDelay * Math.pow(2, attempt - 1)
+                echo "[RETRY] ${operation}: Waiting ${delay} seconds before retry ${attempt + 1}..."
+
+                // Log additional diagnostics during wait
+                sh """
+                    echo "[DIAG] Error details before retry:"
+                    echo "  Error message: ${e.getMessage()}"
+                    echo "  Error class: ${e.getClass().getName()}"
+                    echo "[DIAG] System resource check:"
+                    df -h
+                    free -h
+                    netstat -an | grep -E '(ESTABLISHED|LISTEN|TIME_WAIT)' | wc -l
+                """
+
+                sleep(time: delay, unit: 'SECONDS')
+            } else {
+                echo "[RETRY] ${operation}: EXHAUSTED all ${maxRetries} retries"
+                throw new Exception("[RETRY] ${operation} failed after ${maxRetries} attempts. Last error: ${e.getMessage()}", e)
+            }
+        }
+    }
+
+    throw lastError
+}
+
 def cloneUpdateRefRepo() {
     def refRepoPath = "/var/jenkins/ref-repo/rocm-libraries"
     def lockLabel = "git ref repo lock - ${env.NODE_NAME}"
+
+    echo "[GIT] Checking if ref repo exists at ${refRepoPath}"
+    sh """
+        echo "[GIT-DIAG] Timestamp: \$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")"
+        echo "[GIT-DIAG] Node: \${NODE_NAME}"
+        echo "[GIT-DIAG] Checking ref repo path..."
+        ls -la ${refRepoPath} || echo "Path does not exist"
+    """
+
     def folderExists = sh(
         script: "test -d ${refRepoPath}/refs",
         returnStatus: true
     ) == 0
 
     if (!folderExists) {
-        echo "rocm-libraries repo does not exist at ${refRepoPath}, creating mirror clone..."
-        echo "locking on label: ${lockLabel}"
+        echo "[GIT] rocm-libraries repo does not exist at ${refRepoPath}, creating mirror clone..."
+        echo "[GIT] locking on label: ${lockLabel}"
         lock(lockLabel) {
-            def cloneCommand = """
-                set -ex
-                rm -rf ${refRepoPath} && mkdir -p ${refRepoPath}
-                git clone --mirror https://github.com/ROCm/rocm-libraries.git ${refRepoPath}
-            """
-            sh(script: cloneCommand, label: "clone ref repo")
+            retryWithExponentialBackoff("Git mirror clone") {
+                sh """
+                    echo "[GIT] Starting mirror clone..."
+                    echo "[GIT] Target: ${refRepoPath}"
+                    echo "[GIT] Source: https://github.com/ROCm/rocm-libraries.git"
+                    echo "[GIT] Git version: \$(git --version)"
+                    echo "[GIT] Git config:"
+                    git config --list
+
+                    set -ex
+                    rm -rf ${refRepoPath} && mkdir -p ${refRepoPath}
+
+                    echo "[GIT] Executing: git clone --mirror https://github.com/ROCm/rocm-libraries.git ${refRepoPath}"
+                    GIT_TRACE=1 GIT_CURL_VERBOSE=1 git clone --mirror https://github.com/ROCm/rocm-libraries.git ${refRepoPath}
+
+                    echo "[GIT] Clone completed successfully"
+                    ls -la ${refRepoPath}
+                """
+            }
         }
-        echo "Completed git clone, lock released"
+        echo "[GIT] Completed git clone, lock released"
     }
-    echo "rocm-libraries repo exists at ${refRepoPath}, performing git remote update..."
-    echo "locking on label: ${lockLabel}"
+
+    echo "[GIT] rocm-libraries repo exists at ${refRepoPath}, performing git remote update..."
+    echo "[GIT] locking on label: ${lockLabel}"
     lock(lockLabel) {
-        def fetchCommand = """
-            set -ex
-            cd ${refRepoPath}
-            git remote prune origin
-            git remote update
-        """
-        sh(script: fetchCommand, label: "update ref repo")
+        retryWithExponentialBackoff("Git remote prune") {
+            sh """
+                echo "[GIT] Starting git remote prune..."
+                echo "[GIT] Repository: ${refRepoPath}"
+                echo "[GIT] Timestamp: \$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")"
+
+                set -ex
+                cd ${refRepoPath}
+
+                echo "[GIT] Current git remotes:"
+                git remote -v
+
+                echo "[GIT] Executing: git remote prune origin"
+                GIT_TRACE=1 git remote prune origin
+
+                echo "[GIT] Remote prune completed successfully"
+            """
+        }
+
+        retryWithExponentialBackoff("Git remote update") {
+            sh """
+                echo "[GIT] Starting git remote update..."
+                echo "[GIT] Repository: ${refRepoPath}"
+                echo "[GIT] Timestamp: \$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")"
+
+                set -ex
+                cd ${refRepoPath}
+
+                echo "[GIT] Executing: git remote update"
+                GIT_TRACE=1 GIT_CURL_VERBOSE=1 git remote update
+
+                echo "[GIT] Remote update completed successfully"
+                echo "[GIT] Final ref count: \$(find refs -type f | wc -l)"
+            """
+        }
     }
-    echo "Completed git ref repo fetch, lock released"
+    echo "[GIT] Completed git ref repo fetch, lock released"
 }
 
 def checkoutComposableKernel()
