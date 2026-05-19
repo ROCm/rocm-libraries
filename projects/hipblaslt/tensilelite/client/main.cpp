@@ -375,7 +375,7 @@ namespace TensileLite
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
                 ("factor-dim-args",           po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[]"), "factor dimensions args.")
                 ("icache-flush-args",         po::value<std::vector<bool>>()->default_value(std::vector<bool>(1, false), "[]"), "ICache flush args.")
-                ("icache-rotate-copies",      po::value<int>()->default_value(0), "Number of EXTRA hipModule_t copies of each --code-object file to load and rotate per launch (I-cache cold-miss test). 0 = disabled, no extra copies (default). N (>0) = load N extra copies (total = N+1 modules including the original).")
+                ("icache-rotate-copies",      po::value<int>()->default_value(0), "Number of EXTRA hipModule_t copies of each --code-object file to load and rotate per launch (I-cache cold-miss test). 0 = disabled, no extra copies (default). N (>0) = load N extra copies (total = N+1 modules including the original). -1 = auto: align with DataInit's rotating buffer cycle (load inputArr.size()-1 extras after the first problem's rotating buffer is prepared).")
                 ("use-e",                     po::value<bool>()->default_value(false), "Use E.")
                 ("use-gradient",              po::value<bool>()->default_value(false), "Use gradient.")
                 ("use-user-args",             po::value<bool>()->default_value(false), "Use user argument structure as kernel input.")
@@ -1115,6 +1115,40 @@ int main(int argc, const char* argv[])
                         maxRotatingBufferNum, problem, inputs, stream);
                     static_cast<void>(hipDeviceSynchronize());
                 }
+
+                // I-cache rotation auto-load: when --icache-rotate-copies=-1,
+                // align the code rotation cycle with DataInit's actual data
+                // buffer rotation cycle (inputArr.size() = 1 original + extras).
+                // Use adapter.numRotationModules()==1 as the "not yet loaded"
+                // guard so the load only fires on the first problem; subsequent
+                // problems reuse the same N.
+                {
+                    int icacheArg = args["icache-rotate-copies"].as<int>();
+                    if(icacheArg == -1 && adapter.numRotationModules() == 1)
+                    {
+                        int extras = static_cast<int>(inputArr.size()) - 1;
+                        if(extras > 0)
+                        {
+                            ScopedTimer timer("icache_rotate_extra_copies_loading");
+                            auto const& filenames
+                                = args["code-object"].as<std::vector<std::string>>();
+                            for(auto const& filename : filenames)
+                                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(
+                                    filename, extras));
+                            std::cout << "[icache-rotate] auto extras = inputArr.size()-1 = "
+                                      << extras << " (total = " << inputArr.size()
+                                      << " modules, aligned with DataInit's rotating buffer)"
+                                      << std::endl;
+                        }
+                        else
+                        {
+                            std::cout << "[icache-rotate] auto: inputArr.size()=" << inputArr.size()
+                                      << ", no extra copies loaded (rotation disabled)"
+                                      << std::endl;
+                        }
+                    }
+                }
+
                 // The first per-solution iteration must re-upload inputs so that
                 // the upload happens after preSolution() and can read the picked
                 // solution's problemType.mxScaleFormat to pick the correct host
