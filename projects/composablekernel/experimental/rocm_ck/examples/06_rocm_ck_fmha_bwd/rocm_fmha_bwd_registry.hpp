@@ -144,24 +144,24 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::GROUP},
          .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
-        {"fmha_bwd_dqdkdv_fp16_d128_group_cmask", makeSpec(FmhaBwdDQDKDVConfig{
-            .signature = {.dtype = DataType::FP16,
-                       .hdim_q = 128, .hdim_v = 128,
-                       .mode = FmhaMode::GROUP},
-            .algorithm = {.has_mask = true,
-                       .pad_hdim_q = 8, .pad_hdim_v = 8}})},
-        {"fmha_bwd_dqdkdv_fp16_d128_group_det", makeSpec(FmhaBwdDQDKDVConfig{
-            .signature = {.dtype = DataType::FP16,
-                       .hdim_q = 128, .hdim_v = 128,
-                       .mode = FmhaMode::GROUP},
-            .algorithm = {.is_deterministic = true,
-                       .pad_hdim_q = 8, .pad_hdim_v = 8}})},
-        {"fmha_bwd_dqdkdv_fp16_d128_group_dropout", makeSpec(FmhaBwdDQDKDVConfig{
-            .signature = {.dtype = DataType::FP16,
-                       .hdim_q = 128, .hdim_v = 128,
-                       .mode = FmhaMode::GROUP},
-            .algorithm = {.has_dropout = true,
-                       .pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d128_group_cmask", makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                    .hdim_q = 128, .hdim_v = 128,
+                    .mode = FmhaMode::GROUP},
+        .algorithm = {.has_mask = true,
+                    .pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d128_group_det", makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                    .hdim_q = 128, .hdim_v = 128,
+                    .mode = FmhaMode::GROUP},
+        .algorithm = {.is_deterministic = true,
+                    .pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d128_group_dropout", makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                    .hdim_q = 128, .hdim_v = 128,
+                    .mode = FmhaMode::GROUP},
+        .algorithm = {.has_dropout = true,
+                    .pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_fp16_d128_batch_ebias", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,

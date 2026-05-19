@@ -460,7 +460,9 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.stride_bias       = static_cast<index_t>(t_bias.strides[0]);
         kargs.nhead_stride_bias = static_cast<index_t>(t_bias.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
+        {
             kargs.batch_stride_bias = static_cast<index_t>(t_bias.strides[2]);
+        }
     }
     else if constexpr(K.bias_type == FmhaBiasType::ALIBI)
     {
@@ -476,7 +478,9 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.stride_dbias       = static_cast<index_t>(t_dbias.strides[0]);
         kargs.nhead_stride_dbias = static_cast<index_t>(t_dbias.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
+        {
             kargs.batch_stride_dbias = static_cast<index_t>(t_dbias.strides[2]);
+        }
     }
 
     if constexpr(K.has_mask)
@@ -490,10 +494,10 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     if constexpr(K.has_dropout)
     {
         const TensorArg& t_randval = args.tensors[S::RANDVAL];
-        const float p_undrop  = args.scalars[S::P_UNDROP].f32;
-        const float rp_undrop = args.scalars[S::RP_UNDROP].f32;
-        kargs.rp_undrop       = rp_undrop;
-        kargs.scale_rp_undrop = rp_undrop * raw_scale;
+        const float p_undrop       = args.scalars[S::P_UNDROP].f32;
+        const float rp_undrop      = args.scalars[S::RP_UNDROP].f32;
+        kargs.rp_undrop            = rp_undrop;
+        kargs.scale_rp_undrop      = rp_undrop * raw_scale;
         // Clamp before the uint8_t cast: out-of-range float-to-int
         // conversion is UB. Host setup may pass p_undrop > 1.0 for
         // dropout-disabled "no-drop" launches.
@@ -509,7 +513,9 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.stride_randval       = static_cast<index_t>(t_randval.strides[0]);
         kargs.nhead_stride_randval = static_cast<index_t>(t_randval.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
+        {
             kargs.batch_stride_randval = static_cast<index_t>(t_randval.strides[2]);
+        }
     }
 
     if constexpr(K.is_deterministic)

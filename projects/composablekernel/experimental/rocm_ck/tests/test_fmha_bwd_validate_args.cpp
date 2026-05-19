@@ -166,12 +166,12 @@ TEST(FmhaBwdValidateArgs, PassesWhenRandvalPresentForDropout)
 
     static int dummy = 1;
 
-    Args args                          = makeValidArgs();
-    args.scalars[S::DROP_SEED].u64     = 1;
-    args.scalars[S::DROP_OFFSET].u64   = 0;
-    args.scalars[S::P_UNDROP].f32      = 1.0f;
-    args.scalars[S::RP_UNDROP].f32     = 1.0f;
-    args.tensors[S::RANDVAL]           = {&dummy, makeShape(1), makeStrides(1)};
+    Args args                        = makeValidArgs();
+    args.scalars[S::DROP_SEED].u64   = 1;
+    args.scalars[S::DROP_OFFSET].u64 = 0;
+    args.scalars[S::P_UNDROP].f32    = 1.0f;
+    args.scalars[S::RP_UNDROP].f32   = 1.0f;
+    args.tensors[S::RANDVAL]         = {&dummy, makeShape(1), makeStrides(1)};
 
     validateArgs(args, dropout_spec);
 }
