@@ -15,10 +15,6 @@ find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 hipdnn_add_dependency(tsl-robin-map VERSION ${HIPDNN_TSL_ROBIN_MAP_VERSION})
 hipdnn_add_dependency(nanobind VERSION ${HIPDNN_NANOBIND_VERSION})
 
-set(HIPDNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../frontend/include"
-    CACHE PATH "Path to hipDNN frontend includes"
-)
-
 nanobind_add_module(
     hipdnn_frontend_python
     src/module.cpp
@@ -30,19 +26,11 @@ nanobind_add_module(
     src/memory_bindings.cpp
 )
 
-target_include_directories(
-    hipdnn_frontend_python
-    PRIVATE
-        ${HIPDNN_FRONTEND_INCLUDE_DIR}
-        ${HIP_INCLUDE_DIRS}
-)
-
 target_link_libraries(
     hipdnn_frontend_python
     PRIVATE
         hipdnn_frontend
         hipdnn_backend
-        hip::host
 )
 
 set_target_properties(
