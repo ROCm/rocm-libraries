@@ -25,10 +25,12 @@
  *******************************************************************************/
 
 #include "hipblaslt_data.hpp"
+#include "hipblaslt_init.hpp"
 #include "hipblaslt_parse_data.hpp"
 #include "hipblaslt_test.hpp"
 #include "test_cleanup.hpp"
 #include "utility.hpp"
+#include <cstring>
 #include <string>
 
 using namespace testing;
@@ -201,6 +203,21 @@ static std::string hipblaslt_capture_args(int argc, char** argv)
     return cmdLine.str();
 }
 
+// Remove host_side_fill_kernel flag so gtest does not reject it
+static void hipblaslt_gtest_check_host_side_fill_kernel_flags(int& argc, char** argv)
+{
+    char** dst = argv + 1;
+    for(int i = 1; i < argc; ++i)
+    {
+        if(!strcmp(argv[i], "--host_side_fill_kernel"))
+            set_host_side_fill_kernel_state(true);
+        else
+            *dst++ = argv[i];
+    }
+    *dst = nullptr;
+    argc = static_cast<int>(dst - argv);
+}
+
 static void hipblaslt_print_args(const std::string& args)
 {
     hipblaslt_cout << args << std::endl;
@@ -227,6 +244,11 @@ static void hipblaslt_set_test_device()
 int main(int argc, char** argv)
 {
     std::string args = hipblaslt_capture_args(argc, argv);
+
+    hipblaslt_gtest_check_host_side_fill_kernel_flags(argc, argv);
+    if(host_side_fill_kernel())
+        hipblaslt_cout << "info: --host_side_fill_kernel enabled (device matrix init via host + hipMemcpy)\n"
+                       << std::endl;
 
     // Set signal handler
     hipblaslt_test_sigaction();
