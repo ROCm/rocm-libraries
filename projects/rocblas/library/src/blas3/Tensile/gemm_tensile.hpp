@@ -169,6 +169,7 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
 #endif
 
         // ALMIOPEN-1609 FIX: chunk k dimension when stride*k could overflow 32-bit
+        // Note: k==0 is a valid BLAS operation (D = beta*C), must not skip it.
         // Tensile kernels use 32-bit offset = column * stride, which overflows
         // when stride (=lda or ldb) is large and k is large.
         // Safe k_chunk: k_chunk * max(lda,ldb) * sizeof(element) < 2^31
@@ -184,12 +185,13 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
                              ? std::max(int64_t(1), int64_t(2147483647) / (max_stride * bytes_per_element))
                              : int64_t(k);
         // Only chunk if needed (when k would overflow)
-        int64_t k_chunk = (safe_k >= k) ? int64_t(k) : safe_k;
+        // Ensure k_chunk >= 1 to avoid infinite loop when k=0
+        int64_t k_chunk = (safe_k >= k) ? std::max(int64_t(k), int64_t(1)) : safe_k;
 
         Tc beta_val = *beta;
         Tc one_val  = static_cast<Tc>(1);
 
-        for(int64_t k_base = 0; k_base < k; k_base += k_chunk)
+        for(int64_t k_base = 0; k_base < std::max(int64_t(k), int64_t(1)); k_base += k_chunk)
         {
             int32_t kblock = int32_t(std::min(int64_t(k) - k_base, k_chunk));
 
@@ -204,6 +206,8 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
 
             // First chunk uses original beta; subsequent use beta=1 to accumulate
             const Tc* chunk_beta = (k_base == 0) ? beta : &one_val;
+
+                    m, n, k, batches, (long)k_base, (long)(k_base + kblock), kblock, (long)k_chunk);
 
             RocblasContractionProblem<Ti, To, Tc> problem{handle,
                                                           trans_a,
