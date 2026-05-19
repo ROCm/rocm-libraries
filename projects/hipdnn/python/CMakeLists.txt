@@ -39,9 +39,6 @@ set_target_properties(
         INSTALL_RPATH_USE_LINK_PATH TRUE
 )
 
-# Stage the extension where the wheel build hook can find it.
-install(TARGETS hipdnn_frontend_python DESTINATION lib/hipdnn/python)
-
 install(CODE "
     set(_wheel_dir \"\${CMAKE_INSTALL_PREFIX}/share/hipdnn/wheels\")
     file(MAKE_DIRECTORY \"\${_wheel_dir}\")
@@ -51,7 +48,7 @@ install(CODE "
         COMMAND \"${Python_EXECUTABLE}\"
             \"${CMAKE_CURRENT_SOURCE_DIR}/build_python_wheel.py\"
             --source-dir \"${CMAKE_CURRENT_SOURCE_DIR}\"
-            --ext-dir \"\${CMAKE_INSTALL_PREFIX}/lib/hipdnn/python\"
+            --ext-dir \"${CMAKE_CURRENT_BINARY_DIR}\"
             --wheel-dir \"\${_wheel_dir}\"
         RESULT_VARIABLE _result
     )

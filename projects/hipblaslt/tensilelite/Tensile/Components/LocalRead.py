@@ -607,8 +607,29 @@ class LocalReadMFMA(LocalRead):
         if "MXS" in tc:
             subTc = tc[3]
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-            tileStride = mxUnit
-            UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] * mxUnit
+            # MX scale LDS strides, gated by MXScaleFormat:
+            #   - Swizzled (HostPreSwizzle/InMemorySwizzle):
+            #       tileStride   = mxUnit
+            #       UnrollStride = MT * mxUnit  (M-blocks interleaved on K)
+            #   - NoSwizzle (canonical): LDS layout follows UnrollMajorLDS<tc>,
+            #     which is mirrored from UnrollMajorLDS<A/B> = not TLU<A/B>:
+            #       UMLDS=1 (K-major LDS):  addr(m,k) = k + m*(_DepthU_MXS + LdsPad)
+            #         tileStride   = _DepthU_MXS + LdsPad
+            #         UnrollStride = mxUnit
+            #       UMLDS=0 (M-major LDS):  addr(m,k) = m + k*(MT + LdsPad)
+            #         tileStride   = 1
+            #         UnrollStride = MT + LdsPad
+            mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+            isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+            if isMxSwizzled:
+                tileStride = mxUnit
+                UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] * mxUnit
+            elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
+                tileStride = kernel["_DepthU%s" % tc] + LdsPad
+                UnrollStride = mxUnit
+            else:
+                tileStride = 1
+                UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad
 
         enableLDSTr = tP["enableLDSTr"]
         matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
@@ -1432,7 +1453,12 @@ class LocalReadMFMA(LocalRead):
                             # The WMMA V3 LDS layout uses a *2 factor on the unroll stride.
                             def calcGfx1250LdsOffset():
                                 if "MXS" in tc:
-                                    incOffset = 0
+                                    # rIdx walks the K-scales packed into one MFMA-K sub-iter.
+                                    # Step is UnrollStride, which equals mxUnit for K-major LDS
+                                    # (UMLDS=1) and MT+LdsPad for M-major LDS (UMLDS=0). For
+                                    # UMLDS=1, numReadsPerUnroll is typically 1 so this loop
+                                    # degenerates to the pre-existing incOffset=0 behavior.
+                                    incOffset = rIdx * numElementPerRead * UnrollStride
                                 elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                     incOffset = rIdx * numElementPerRead * UnrollStride * 2
                                     incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride

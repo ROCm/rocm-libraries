@@ -56,6 +56,17 @@ protected:
         // Initialize HIP
         ASSERT_EQ(hipInit(0), hipSuccess);
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
+
+        // Check for any engine specific test skips
+        if(auto* info = ::testing::UnitTest::GetInstance()->current_test_info(); info != nullptr)
+        {
+            const std::string testName = std::string(info->test_suite_name()) + "." + info->name();
+            if(auto skipReason = TestConfig::get().findSkipForTest(testName))
+            {
+                GTEST_SKIP() << "[arch " << TestConfig::get().getCurrentArch() << "] "
+                             << *skipReason;
+            }
+        }
     }
 
     void setTestCaseNote(std::string note)

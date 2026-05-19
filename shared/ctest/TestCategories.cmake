@@ -72,3 +72,67 @@ function(apply_test_category_labels target_name yaml_file working_dir)
     # Include and execute the generated CMake code
     include("${CATEGORY_CMAKE}")
 endfunction()
+
+# Function to apply category labels to discovered Catch2 tests using tag-based filtering
+# Optional 4th parameter: install_test_file - path to write install-time test definitions
+function(apply_catch2_test_category_labels target_name yaml_file working_dir)
+    if(NOT Python3_FOUND)
+        message(WARNING "Python3 not found, cannot parse Catch2 test categories YAML")
+        return()
+    endif()
+
+    # Validate inputs
+    set(_validation_failed FALSE)
+    if("${target_name}" STREQUAL "")
+        message(WARNING "target_name is empty, cannot generate Catch2 test categories")
+        set(_validation_failed TRUE)
+    endif()
+    if(NOT EXISTS "${yaml_file}")
+        message(WARNING "Catch2 test categories YAML file not found: ${yaml_file}")
+        set(_validation_failed TRUE)
+    endif()
+    if(NOT IS_DIRECTORY "${working_dir}")
+        message(WARNING "Working directory does not exist: ${working_dir}")
+        set(_validation_failed TRUE)
+    endif()
+    if(_validation_failed)
+        return()
+    endif()
+
+    set(PARSE_SCRIPT "${ROCM_LIBRARIES_ROOT}/shared/ctest/parse_catch2_categories.py")
+    if(NOT EXISTS "${PARSE_SCRIPT}")
+        message(WARNING "Catch2 test category parser script not found: ${PARSE_SCRIPT}")
+        return()
+    endif()
+
+    set(install_test_file "${ARGV3}")
+    if(install_test_file)
+        set(python_args ${yaml_file} ${target_name} ${working_dir} ${install_test_file})
+    else()
+        set(python_args ${yaml_file} ${target_name} ${working_dir})
+    endif()
+
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} ${PARSE_SCRIPT} ${python_args}
+        OUTPUT_VARIABLE CMAKE_CATEGORY_CODE
+        ERROR_VARIABLE PARSE_ERROR
+        RESULT_VARIABLE PARSE_RESULT
+    )
+
+    if(NOT PARSE_RESULT EQUAL 0)
+        message(WARNING "Failed to parse Catch2 test categories YAML: ${PARSE_ERROR}")
+        return()
+    endif()
+
+    set(CATEGORY_CMAKE "${CMAKE_CURRENT_BINARY_DIR}/catch2_test_categories.cmake")
+    file(WRITE "${CATEGORY_CMAKE}" "${CMAKE_CATEGORY_CODE}")
+
+    message(STATUS "Generated Catch2 test category configuration: ${CATEGORY_CMAKE}")
+
+    if(NOT EXISTS "${CATEGORY_CMAKE}")
+        message(WARNING "Generated Catch2 test categories file not found: ${CATEGORY_CMAKE}")
+        return()
+    endif()
+
+    include("${CATEGORY_CMAKE}")
+endfunction()
