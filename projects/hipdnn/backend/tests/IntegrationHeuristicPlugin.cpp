@@ -210,9 +210,8 @@ TEST_F(IntegrationHeuristicPlugin, CompleteWorkflowWithDevicePropertiesAndFinali
     const auto policyInfos = rm->getHeuristicPolicyInfos();
     ASSERT_FALSE(policyInfos.empty());
 
-    // Target the test plugin by known policy ID. policyInfos[0] is derived
-    // from an unordered_map iteration and lands on different plugins across
-    // platforms; built-ins reject the synthetic graph payload below.
+    // Target the test plugin by known policy ID; built-ins reject the
+    // synthetic graph payload below.
     const auto goodPolicyId = hipdnn_data_sdk::utilities::policyNameToId("TestGoodHeuristicPolicy");
     const HeuristicPlugin* plugin = rm->getPluginForPolicyId(goodPolicyId);
     ASSERT_NE(plugin, nullptr);
@@ -385,9 +384,8 @@ TEST_F(IntegrationHeuristicPlugin, FinalizeWithEmptyEngineIdsSucceeds)
     const auto policyInfos = rm->getHeuristicPolicyInfos();
     ASSERT_FALSE(policyInfos.empty());
 
-    // Target the test plugin by known policy ID. policyInfos[0] is derived
-    // from an unordered_map iteration and lands on different plugins across
-    // platforms; built-ins reject finalize() without a real graph payload.
+    // Target the test plugin by known policy ID; built-ins reject finalize()
+    // without a real graph payload.
     const auto goodPolicyId = hipdnn_data_sdk::utilities::policyNameToId("TestGoodHeuristicPolicy");
     const HeuristicPlugin* plugin = rm->getPluginForPolicyId(goodPolicyId);
     ASSERT_NE(plugin, nullptr);

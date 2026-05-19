@@ -13,6 +13,19 @@
 namespace hipdnn_backend::plugin
 {
 
+namespace
+{
+
+// std::string_view{nullptr} is UB. Plugin code is untrusted: an out-param
+// const char** may be left null on a "successful" status return. Funnel every
+// plugin-supplied C string through this helper before constructing a view.
+std::string_view safeStringView(const char* str) noexcept
+{
+    return (str != nullptr) ? std::string_view{str} : std::string_view{};
+}
+
+} // anonymous namespace
+
 HeuristicPlugin::HeuristicPlugin(SharedLibrary&& lib)
     : _lib(std::move(lib))
     , _sourceLabel(_lib.libraryPath().string())
@@ -200,21 +213,21 @@ std::string_view HeuristicPlugin::apiVersion() const
 {
     const char* version = nullptr;
     invokeHeuristicFunction("get API version", _funcs.getApiVersion, &version);
-    return version;
+    return safeStringView(version);
 }
 
 std::string_view HeuristicPlugin::name() const
 {
     const char* name = nullptr;
     invokeHeuristicFunction("get plugin name", _funcs.getName, &name);
-    return (name != nullptr) ? name : "";
+    return safeStringView(name);
 }
 
 std::string_view HeuristicPlugin::version() const
 {
     const char* version = nullptr;
     invokeHeuristicFunction("get plugin version", _funcs.getVersion, &version);
-    return version;
+    return safeStringView(version);
 }
 
 hipdnnPluginType_t HeuristicPlugin::type() const
@@ -279,7 +292,7 @@ std::string_view HeuristicPlugin::getPolicyName(int64_t policyId) const
 {
     const char* name = nullptr;
     invokeHeuristicFunction("get policy name", _funcs.getPolicyName, policyId, &name);
-    return (name != nullptr) ? name : "";
+    return safeStringView(name);
 }
 
 hipdnnPluginStatus_t HeuristicPlugin::setLoggingCallback(hipdnnCallback_t callback) const
@@ -379,7 +392,7 @@ std::string_view HeuristicPlugin::getLastErrorString() const noexcept
 {
     const char* error = nullptr;
     _funcs.getLastErrorString(&error);
-    return (error != nullptr) ? error : "";
+    return safeStringView(error);
 }
 
 } // namespace hipdnn_backend::plugin

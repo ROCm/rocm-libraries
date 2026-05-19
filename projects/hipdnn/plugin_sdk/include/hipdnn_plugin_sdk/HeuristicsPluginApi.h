@@ -334,15 +334,25 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
  * The output IDs must be a permutation or subset of the input IDs from SetEngineIds.
  * The host validates this constraint.
  *
- * This function supports two usage patterns:
- * 1. Query count: Pass engine_ids = nullptr to get the count in num_engines
- * 2. Retrieve IDs: Pass non-null engine_ids and capacity in *num_engines,
- *    receive actual count in *num_engines
+ * Callers MUST use the two-call pattern:
+ *   1. Query count: Pass engine_ids = NULL; on return *num_engines holds the
+ *      total number of IDs the policy will produce.
+ *   2. Retrieve IDs: Allocate an array of that exact size, set *num_engines to
+ *      that capacity, and call again with engine_ids pointing at the array.
+ *      On return *num_engines holds the number of IDs actually written.
+ *
+ * If the caller supplies a non-NULL engine_ids with a capacity smaller than the
+ * policy's full result, the implementation silently truncates: it writes
+ * min(*num_engines, total) IDs and sets *num_engines to that truncated count.
+ * The return value is still HIPDNN_PLUGIN_STATUS_SUCCESS, so the caller cannot
+ * distinguish "buffer was exactly right" from "buffer was too small" without
+ * having queried the count first. Always query first.
  *
  * @param[in] desc The policy descriptor.
- * @param[out] engine_ids Array to receive the sorted engine IDs, or nullptr to query count.
- * @param[in,out] num_engines Input: capacity of engine_ids array (ignored if engine_ids is null).
- *                            Output: number of IDs available/written.
+ * @param[out] engine_ids Array to receive the sorted engine IDs, or NULL to query count.
+ * @param[in,out] num_engines Input: capacity of engine_ids array (ignored if engine_ids is NULL).
+ *                            Output: number of IDs available (count query) or written
+ *                            (retrieve, possibly truncated to the input capacity).
  *
  * @return HIPDNN_PLUGIN_STATUS_SUCCESS on success,
  *         HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED if descriptor not finalized,

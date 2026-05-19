@@ -517,7 +517,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     LOG_API_ENTRY("unloadingMode={}", unloadingMode);
 
     return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        // Apply to both plugin resource managers so the public ABI behaves
+        // uniformly regardless of plugin kind.
         hipdnn_backend::plugin::EnginePluginResourceManager::setPluginUnloadingMode(unloadingMode);
+        hipdnn_backend::plugin::HeuristicPluginResourceManager::setPluginUnloadingMode(
+            unloadingMode);
         LOG_API_SUCCESS(apiName, "set_plugin_unloading_mode={}", unloadingMode);
         return HIPDNN_STATUS_SUCCESS;
     });

@@ -467,6 +467,55 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, DuplicatePolicyIdPluginsReject
     EXPECT_TRUE(foundPluginA) << "Survivor should be pluginA (the first offered), not pluginB";
 }
 
+// ========== loadPluginFromFile Return-Value Regression ==========
+
+// Expose loadPluginFromFile() so we can directly observe its bool return.
+// The bug it guards against: success was set to true at the top of the
+// tryCatch lambda, so a throwing validateBeforeAdding() (e.g. bad API
+// version) left success == true and the caller's failedCount silently
+// stayed at zero.
+class LoadPluginFromFileProbe : public HeuristicPluginManager
+{
+public:
+    using HeuristicPluginManager::loadPluginFromFile;
+};
+
+TEST_F(TestHeuristicPluginManagerValidationPaths, LoadPluginFromFileReturnsFalseOnValidationFailure)
+{
+    const auto badPlugin
+        = _testPluginPath / hipdnn_data_sdk::utilities::getLibraryName(BAD_API_VERSION_PLUGIN);
+    ASSERT_TRUE(std::filesystem::exists(badPlugin))
+        << "Test precondition: bad-API-version plugin missing at " << badPlugin;
+
+    LoadPluginFromFileProbe probe;
+    const size_t pluginCountBefore = probe.getPlugins().size();
+
+    EXPECT_FALSE(probe.loadPluginFromFile(badPlugin))
+        << "loadPluginFromFile must report failure when validateBeforeAdding throws";
+    EXPECT_EQ(probe.getPlugins().size(), pluginCountBefore)
+        << "Rejected plugin must not be appended to _plugins";
+}
+
+TEST_F(TestHeuristicPluginManagerValidationPaths, LoadPluginFromFileReturnsTrueOnSuccess)
+{
+    const auto goodPlugin = getHeuristicPluginPath("test_good_heuristic_plugin");
+    ASSERT_TRUE(std::filesystem::exists(goodPlugin))
+        << "Test precondition: good plugin missing at " << goodPlugin;
+
+    LoadPluginFromFileProbe probe;
+    const size_t pluginCountBefore = probe.getPlugins().size();
+
+    EXPECT_TRUE(probe.loadPluginFromFile(goodPlugin));
+    EXPECT_EQ(probe.getPlugins().size(), pluginCountBefore + 1u);
+
+    // A second load of the same file is an idempotent no-op (already in
+    // _loadedPluginFiles); it must also return true so failedCount is
+    // not inflated by retries.
+    EXPECT_TRUE(probe.loadPluginFromFile(goodPlugin))
+        << "Idempotent reload of an already-loaded plugin must not count as failure";
+    EXPECT_EQ(probe.getPlugins().size(), pluginCountBefore + 1u);
+}
+
 // ========== Edge Case: Empty Plugin Directory ==========
 
 TEST_F(TestHeuristicPluginManagerValidationPaths, EmptyDirectorySkipsValidation)

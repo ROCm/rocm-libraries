@@ -299,6 +299,7 @@ private:
         }
     }
 
+protected:
     bool loadPluginFromFile(const std::filesystem::path& filePath)
     {
         HIPDNN_BACKEND_LOG_INFO("Attempting to load plugin from [{}]", filePath.string());
@@ -306,13 +307,15 @@ private:
         bool success = false;
         hipdnn_backend::tryCatch(
             [&]() {
-                success = true;
                 SharedLibrary lib(filePath);
                 const auto libraryPath = lib.libraryPath();
 
-                // Shared library ensures an injective, weakly canonical mapping to a path
+                // Shared library ensures an injective, weakly canonical mapping to a path.
+                // Treat an already-loaded library as a successful no-op so the caller's
+                // failedCount reflects real load failures only.
                 if(_loadedPluginFiles.find(libraryPath) != _loadedPluginFiles.end())
                 {
+                    success = true;
                     return;
                 }
 
@@ -352,12 +355,15 @@ private:
                                         static_cast<int>(type));
 
                 actionAfterAdding(*_plugins.back());
+
+                success = true;
             },
             fmt::format("❌ Error loading plugin from [{}]: ", filePath.string()));
 
         return success;
     }
 
+private:
     std::vector<std::shared_ptr<Plugin>> _plugins;
     std::set<std::filesystem::path> _loadedPluginFiles;
     std::set<std::filesystem::path> _defaultPluginPaths;

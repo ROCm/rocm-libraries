@@ -22,6 +22,7 @@
 #include "ConfigBuiltIn.hpp"
 
 #include "EngineOverrideConfig.hpp"
+#include "heuristics/BuiltInLogging.hpp"
 #include "logging/Logging.hpp"
 
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
@@ -50,21 +51,24 @@ constexpr const char* PLUGIN_NAME = "BuiltInConfigHeuristic";
 constexpr const char* PLUGIN_VERSION = "1.0.0";
 constexpr const char* POLICY_NAME = "SelectionHeuristic::Config";
 
-hipdnnCallback_t g_loggingCallback = nullptr;
-hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO;
+// File-scope logging callback / level, set via the C-ABI-shaped
+// SetLoggingCallback / SetLogLevel below. The backend supplies its own
+// callback when registering the built-in (see PluginManagerBase::registerPlugin)
+// so log lines from this module flow through the backend logger.
+//
+// Identity contract: the built-in is statically linked into the backend, so
+// these globals live in the same process image as the caller. The last writer
+// wins — if multiple HeuristicPluginManager instances register the built-in
+// they overwrite each other's callback. This is intentional: registerPlugin()
+// hands in a callback that forwards to the backend logger, which is itself a
+// process-wide sink, so the identity of the "current" callback does not matter
+// as long as one is installed. Do not assume per-instance scoping here.
+hipdnnCallback_t g_loggingCallback = nullptr; // NOLINT(readability-identifier-naming)
+hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO; // NOLINT(readability-identifier-naming)
 
-constexpr size_t LOG_BUFFER_SIZE = 1024;
-
-#define CONFIG_BUILTIN_LOG(severity, ...)                                            \
-    do                                                                               \
-    {                                                                                \
-        if(g_loggingCallback != nullptr && (severity) >= g_logLevel)                 \
-        {                                                                            \
-            std::array<char, LOG_BUFFER_SIZE> _buf{};                                \
-            std::snprintf(_buf.data(), _buf.size(), "[BuiltInConfig] " __VA_ARGS__); \
-            g_loggingCallback(severity, _buf.data());                                \
-        }                                                                            \
-    } while(0)
+#define CONFIG_BUILTIN_LOG(severity, ...)                                                          \
+    HIPDNN_BUILTIN_HEURISTIC_LOG(                                                                  \
+        g_loggingCallback, g_logLevel, severity, "[BuiltInConfig] ", __VA_ARGS__)
 
 int64_t policyId()
 {

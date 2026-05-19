@@ -137,7 +137,34 @@ void EngineHeuristicDescriptor::syncPolicySlots(const std::vector<int64_t>& orde
             continue;
         }
 
-        _policySlots.push_back(std::make_unique<heuristics::SelectionHeuristic>(heurRm, policyId));
+        // SelectionHeuristic's constructor calls into the plugin to create the
+        // policy descriptor, which can throw. Treat a failed slot the same way
+        // we treat a not-loaded policy: log and insert a null placeholder so
+        // the policy loop in finalize() simply skips it via its existing
+        // nullptr branch instead of aborting the whole descriptor.
+        // HipdnnException derives from std::exception, so one catch covers both.
+        try
+        {
+            _policySlots.push_back(
+                std::make_unique<heuristics::SelectionHeuristic>(heurRm, policyId));
+            continue;
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Failed to construct SelectionHeuristic for policy ID {}: {}. "
+                "Slot will be skipped during finalize().",
+                policyId,
+                e.what());
+        }
+        catch(...)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Failed to construct SelectionHeuristic for policy ID {} (unknown exception). "
+                "Slot will be skipped during finalize().",
+                policyId);
+        }
+        _policySlots.push_back(nullptr);
     }
 }
 
@@ -168,6 +195,15 @@ void EngineHeuristicDescriptor::finalize()
     if(candidates.empty())
     {
         _engineIds.clear();
+        HipdnnBackendDescriptorImpl<EngineHeuristicDescriptor>::finalize();
+        return;
+    }
+
+    // findFirst is a fast applicability probe (Graph::is_supported_ext) — the
+    // caller only needs to know whether *any* engine can run the graph.
+    if(_findFirst)
+    {
+        _engineIds = std::move(candidates);
         HipdnnBackendDescriptorImpl<EngineHeuristicDescriptor>::finalize();
         return;
     }
@@ -237,8 +273,13 @@ void EngineHeuristicDescriptor::finalize()
         }
     }
 
-    // Call SetDeviceProperties on each distinct handle
-    // Convert to vector and sort by handle pointer for deterministic iteration
+    // Call SetDeviceProperties on each distinct handle.
+    // Sort by handle pointer so the call order is stable *within this process
+    // run* — std::unordered_map iteration order is otherwise unspecified, which
+    // would scramble the order of any per-handle log lines emitted below and
+    // make the fail-soft disable order non-reproducible from one finalize() to
+    // the next on the same descriptor. Pointers vary across runs (ASLR), so
+    // this is reproducible-per-run, not reproducible-across-runs.
     std::vector<std::pair<hipdnnHeuristicHandle_t, const plugin::HeuristicPlugin*>> sortedHandles(
         distinctHandles.begin(), distinctHandles.end());
     std::sort(sortedHandles.begin(), sortedHandles.end(), [](const auto& a, const auto& b) {
@@ -701,8 +742,8 @@ void EngineHeuristicDescriptor::getPolicyOrder(hipdnnBackendAttributeType_t attr
                   "EngineHeuristicDescriptor failed to get policy order: Null pointer.");
 
     // The dispatcher requires isFinalized() before reaching here, so
-    // _orderedPolicyIds reflects the resolved order (descriptor > handle > env
-    // > default) actually used during finalize().
+    // _orderedPolicyIds reflects the resolved order (env > descriptor > default)
+    // actually used during finalize(). See resolveHeuristicPolicyOrder().
     if(requestedElementCount == 0)
     {
         *elementCount = static_cast<int64_t>(_orderedPolicyIds.size());

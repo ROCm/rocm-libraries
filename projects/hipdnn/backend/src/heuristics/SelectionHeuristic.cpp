@@ -7,6 +7,7 @@
 #include <unordered_set>
 
 #include "HipdnnException.hpp"
+#include "logging/Logging.hpp"
 #include "plugin/HeuristicPlugin.hpp"
 #include "plugin/HeuristicPluginResourceManager.hpp"
 
@@ -47,10 +48,21 @@ SelectionHeuristic::~SelectionHeuristic()
                 plugin->destroyPolicyDescriptor(_descriptor);
             }
         }
-        catch(const HipdnnException&) // NOLINT(bugprone-empty-catch)
+        // Destructors must not propagate. HipdnnException derives from
+        // std::exception, so one catch covers both; plugin code is untrusted
+        // and may also throw non-std types — fall through to catch(...).
+        catch(const std::exception& e)
         {
-            // Log but don't throw from destructor
-            // The plugin's logging callback should have already reported this
+            HIPDNN_BACKEND_LOG_WARN(
+                "Exception while destroying heuristic policy descriptor for policy ID {}: {}",
+                _policyId,
+                e.what());
+        }
+        catch(...)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Unknown exception while destroying heuristic policy descriptor for policy ID {}",
+                _policyId);
         }
         _descriptor = nullptr;
     }
@@ -60,9 +72,11 @@ SelectionHeuristic::SelectionHeuristic(SelectionHeuristic&& other) noexcept
     : _resourceManager(std::move(other._resourceManager))
     , _policyId(other._policyId)
     , _descriptor(other._descriptor)
+    , _inputEngineIds(std::move(other._inputEngineIds))
 {
     other._policyId = 0;
     other._descriptor = nullptr;
+    other._inputEngineIds.clear();
 }
 
 SelectionHeuristic& SelectionHeuristic::operator=(SelectionHeuristic&& other) noexcept
@@ -80,9 +94,22 @@ SelectionHeuristic& SelectionHeuristic::operator=(SelectionHeuristic&& other) no
                     plugin->destroyPolicyDescriptor(_descriptor);
                 }
             }
-            catch(...) // NOLINT(bugprone-empty-catch)
+            // noexcept move-assign must not propagate. HipdnnException
+            // derives from std::exception, so one catch covers both; plugin
+            // code is untrusted and may also throw non-std types.
+            catch(const std::exception& e)
             {
-                // Ignore exceptions in move assignment cleanup
+                HIPDNN_BACKEND_LOG_WARN(
+                    "Exception while destroying heuristic policy descriptor for policy ID {} "
+                    "during move-assignment: {}",
+                    _policyId,
+                    e.what());
+            }
+            catch(...)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Unknown exception while destroying heuristic policy "
+                                        "descriptor for policy ID {} during move-assignment",
+                                        _policyId);
             }
         }
 
@@ -90,8 +117,10 @@ SelectionHeuristic& SelectionHeuristic::operator=(SelectionHeuristic&& other) no
         _resourceManager = std::move(other._resourceManager);
         _policyId = other._policyId;
         _descriptor = other._descriptor;
+        _inputEngineIds = std::move(other._inputEngineIds);
         other._policyId = 0;
         other._descriptor = nullptr;
+        other._inputEngineIds.clear();
     }
     return *this;
 }

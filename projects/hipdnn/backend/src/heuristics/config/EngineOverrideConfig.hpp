@@ -4,6 +4,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -173,13 +174,12 @@ public:
     static std::optional<EngineOverrideConfig> loadFromEnv()
     {
         static constexpr const char* ENV_VAR = "HIPDNN_HEUR_CONFIG_PATH";
-        std::string path = hipdnn_data_sdk::utilities::getEnv(ENV_VAR, "");
-        const auto first = path.find_first_not_of(" \t\r\n");
-        if(first == std::string::npos)
+        const std::string path
+            = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv(ENV_VAR, ""));
+        if(path.empty())
         {
             return std::nullopt;
         }
-        path = path.substr(first, path.find_last_not_of(" \t\r\n") - first + 1);
         return load(path);
     }
 
