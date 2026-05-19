@@ -69,7 +69,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 option(ROCSOLVER_EMBED_FMT "Hide libfmt symbols" ON)
 
-set(USE_FMT_LIB "auto" CACHE STRING "Use the fmt library instead of std::format (auto, ON, or OFF)")
+set(USE_FMT_LIB "ON" CACHE STRING "Use the fmt library instead of std::format (auto, ON, or OFF)")
 
 if(USE_FMT_LIB STREQUAL "auto")
     # Verify the std::format facilities used by the std backend actually compile
