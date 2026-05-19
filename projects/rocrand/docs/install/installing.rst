@@ -98,4 +98,3 @@ The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
 nightly builds for the ROCm Core SDK and its components, including rocRAND.
 See `Nightly release status
 <https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
-
