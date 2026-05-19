@@ -123,15 +123,29 @@ function(add_external_integration_test_target)
         endif()
 
         # Install-tree paths are relative to the directory ctest runs from,
-        # which is ${CMAKE_INSTALL_BINDIR}/${INSTALL_SUBDIR}/. Compute filenames
-        # at configure time (file(WRITE) does not evaluate generator expressions).
-        set(_install_bin
-            "../hipdnn_integration_tests${CMAKE_EXECUTABLE_SUFFIX}"
+        # which is ${CMAKE_INSTALL_BINDIR}/${INSTALL_SUBDIR}/. Compute via
+        # file(RELATIVE_PATH) against the real install locations so the result
+        # tracks the platform layout — the plugin lives under bin/ on Windows
+        # but lib/ on Linux (HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR encodes
+        # that split). Use a synthetic absolute root because file(RELATIVE_PATH)
+        # requires absolute inputs and the real prefix may differ between
+        # configure-time and the deploy target.
+        set(_synthetic_root "/__hipdnn_install_root__")
+        set(_install_cwd_abs
+            "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}"
         )
-        set(_install_plugin
-            "../${HIPDNN_PLUGIN_ENGINE_SUBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${ARG_PLUGIN_TARGET}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        set(_bin_abs
+            "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests${CMAKE_EXECUTABLE_SUFFIX}"
         )
-        set(_install_config "../${_config_install_basename}")
+        set(_plugin_abs
+            "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${ARG_PLUGIN_TARGET}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        )
+        set(_config_abs
+            "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/${_config_install_basename}"
+        )
+        file(RELATIVE_PATH _install_bin "${_install_cwd_abs}" "${_bin_abs}")
+        file(RELATIVE_PATH _install_plugin "${_install_cwd_abs}" "${_plugin_abs}")
+        file(RELATIVE_PATH _install_config "${_install_cwd_abs}" "${_config_abs}")
 
         set(_install_cmd "add_test([=[${ARG_TARGET_NAME}]=] \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
         if(ARG_TEST_CONFIG)
