@@ -265,3 +265,9 @@ install(FILES
     ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h
     DESTINATION include/stinkytofu
 )
+# Install tablegen-generated files needed by the Python module when built
+# standalone against an installed stinkytofu (LLVM-style split).
+install(FILES
+    ${TABLEGEN_OUTPUT_DIR}/PythonBindings_generated.inc
+    DESTINATION include/stinkytofu/bindings/python
+)
