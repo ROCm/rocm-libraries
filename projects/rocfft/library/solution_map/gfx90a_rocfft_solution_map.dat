@@ -1174,6 +1174,9 @@
 {"Problem":{"arch":"gfx90a","token":"100_104_216_sp_op_real_bwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_216_sp_ip_complex","child_option":1},{"child_token":"sbcc_104_sp_ip_complex","child_option":1},{"child_token":"51_sp_ip_complex","child_option":3} ]}
                ]},
+{"Problem":{"arch":"gfx90a","token":"100_104_216_sp_op_real_fwd"},
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"100_sp_ip_complex","child_option":6},{"child_token":"sbcc_216_sp_ip_complex","child_option":0},{"child_token":"sbcc_104_sp_ip_complex","child_option":0} ]}
+               ]},               
 {"Problem":{"arch":"gfx90a","token":"104_104_208_dp_op_real_bwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_208_dp_ip_complex","child_option":1},{"child_token":"sbcc_104_dp_ip_complex","child_option":1},{"child_token":"53_dp_ip_complex","child_option":1} ]}
                ]},
