@@ -294,14 +294,14 @@ using ColRowRow_F16F16F32F16 = TestGemmPersistentAsyncInput<Col, Row, Row, F16, 
 using ColColRow_F16F16F32F16 = TestGemmPersistentAsyncInput<Col, Col, Row, F16, F16, F32, F16>;
 
 // Test case for Row-Row-Row layout
-// TEST_F(RowRowRow_F16F16F32F16, BasicTest) { this->Run(); }
+TEST_F(RowRowRow_F16F16F32F16, BasicTest) { this->Run(); }
 
 // Test case for Row-Col-Row layout
 TEST_F(RowColRow_F16F16F32F16, BasicTest) { this->Run(); }
 TEST_F(RowColRow_F8F8F32F8, BasicTest) { this->Run(); }
 
 // Test case for Col-Row-Row layout
-// TEST_F(ColRowRow_F16F16F32F16, BasicTest) { this->Run(); }
+TEST_F(ColRowRow_F16F16F32F16, BasicTest) { this->Run(); }
 
 // Test case for Col-Col-Row layout
-// TEST_F(ColColRow_F16F16F32F16, BasicTest) { this->Run(); }
+TEST_F(ColColRow_F16F16F32F16, BasicTest) { this->Run(); }
