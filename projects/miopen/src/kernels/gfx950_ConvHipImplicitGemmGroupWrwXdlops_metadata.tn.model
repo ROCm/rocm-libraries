@@ -1,5 +1,5 @@
 {
-    "generated_on": "05 May 2026, 13:04:12",
+    "generated_on": "06 May 2026, 08:35:56",
     "gpu": {
         "num_cu": 256,
         "arch": "gfx950"
@@ -123,7 +123,14 @@
     },
     "split_k_values": [
         -1,
-        1
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128
     ],
     "input_params": [
         "spatial_dim",
@@ -182,7 +189,9 @@
                 "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle": 0,
                 "DeviceGroupedConvBwdWeight_Explicit_Xdl": 1,
                 "DeviceGroupedConvBwdWeight_Xdl_CShuffle": 2,
-                "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3": 3
+                "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3": 3,
+                "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad": 4,
+                "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad_MergedGroups": 5
             },
             "001_GemmSpecialization_layout": {
                 "DeviceBatchedGemmXdlUniversal<Default, CRR>": 0,
@@ -230,7 +239,9 @@
                 "0": "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle",
                 "1": "DeviceGroupedConvBwdWeight_Explicit_Xdl",
                 "2": "DeviceGroupedConvBwdWeight_Xdl_CShuffle",
-                "3": "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3"
+                "3": "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3",
+                "4": "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad",
+                "5": "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad_MergedGroups"
             },
             "001_GemmSpecialization_layout": {
                 "0": "DeviceBatchedGemmXdlUniversal<Default, CRR>",
