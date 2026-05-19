@@ -64,10 +64,20 @@ namespace TensileLite
                 || dt == rocisa::DataType::BFloat8;
         }
 
-        inline bool isMXProblem(const ContractionProblemGemm& problem)
+        inline bool isF6(const TensorDescriptor& tensor)
         {
-            return isMXTensor(problem.a(), problem.mxBlockA())
-                || isMXTensor(problem.b(), problem.mxBlockB());
+            auto const dt = tensor.dataType();
+
+            return dt == rocisa::DataType::Float6
+                || dt == rocisa::DataType::BFloat6;
+        }
+
+        inline bool isMXProblemExceptF6(const ContractionProblemGemm& problem)
+        {
+            bool isAnyF6 = isF6(problem.a()) or isF6(problem.b());
+            return !isAnyF6 &&
+                (isMXTensor(problem.a(), problem.mxBlockA())
+                || isMXTensor(problem.b(), problem.mxBlockB()));
         }
 
         // Problem-indept. from 0~7, and 16, and 23~26 (fixed values for every problem)
@@ -905,7 +915,7 @@ namespace TensileLite
                    && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty())
                 {
-                    bool isMX = isMXProblem(*m_currentGemmProblem);
+                    bool isMX = isMXProblemExceptF6(*m_currentGemmProblem);
                     if(isMX)
                     {
                         initializeMXData(*m_currentGemmProblem);
