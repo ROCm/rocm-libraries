@@ -349,7 +349,7 @@ int main(int argc, char* argv[])
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.1)
+        ->default_val(0.0)
         ->check(CLI::NonNegativeNumber);
     app.add_option("--max_hipfftw_test_len",
                    max_length_for_hipfftw_test,

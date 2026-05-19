@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2018-2022 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -499,9 +499,11 @@ namespace hipsparse
             return rocsparse_spmv_alg_csr_adaptive;
         // case HIPSPARSE_CSRMV_ALG2:
         case HIPSPARSE_SPMV_CSR_ALG2:
-            return rocsparse_spmv_alg_csr_stream;
+            return rocsparse_spmv_alg_csr_rowsplit;
         case HIPSPARSE_SPMV_SELL_ALG1:
             return rocsparse_spmv_alg_sell;
+        case HIPSPARSE_SPMV_BSR_ALG1:
+            return rocsparse_spmv_alg_bsr;
         default:
             throw "Non existent hipsparseSpMVAlg_t";
         }
@@ -650,6 +652,8 @@ namespace hipsparse
             return rocsparse_format_bell;
         case HIPSPARSE_FORMAT_SLICED_ELL:
             return rocsparse_format_sell;
+        case HIPSPARSE_FORMAT_BSR:
+            return rocsparse_format_bsr;
         default:
             throw "Non existent hipsparseFormat_t";
         }
@@ -671,6 +675,8 @@ namespace hipsparse
             return HIPSPARSE_FORMAT_BLOCKED_ELL;
         case rocsparse_format_sell:
             return HIPSPARSE_FORMAT_SLICED_ELL;
+        case rocsparse_format_bsr:
+            return HIPSPARSE_FORMAT_BSR;
         default:
             throw "Non existent rocsparse_format";
         }

@@ -420,9 +420,6 @@ defaultBenchmarkCommonParameters = [
     {"DirectToVgprMXSA": [False]},
     {"DirectToVgprMXSB": [False]},
     {"DirectToVgprSparseMetadata": [False]},
-    # Restricted address remap features (default off unless explicitly enabled in the solution config):
-    {"BAddrInterleave": [False]},
-    {"KRingShift": [False]},
     {"DirectToLds": [0]},
     {"UseSubtileImpl": [False]},
     {"UseSgprForGRO": [-1]},
@@ -430,13 +427,6 @@ defaultBenchmarkCommonParameters = [
     {"AssertSummationElementMultiple": [1]},
     {"AssertFree0ElementMultiple": [1]},
     {"AssertFree1ElementMultiple": [1]},
-    # Address-interleave restriction (default disabled):
-    # When >0, the solution requires tiles1=(SizeJ/MT1) to have lowbit(tiles1)>1 (i.e. G>1),
-    {"AssertFree1DivByMT1LowbitGT1": [0]},
-    # KRingShift wrap restriction (default disabled):
-    # Encodes a runtime predicate that ensures (k + KRingShift) does not wrap in main loop
-    # (wrap is allowed only in tail loop where codegen applies the correction).
-    {"AssertKRingShiftTailWrapOnly": [0]},
     {"AssertAIGreaterThanEqual": [-1]},
     {"AssertAILessThanEqual": [-1]},
     {"StaggerU": [32]},  # recommend [0,32]
@@ -508,7 +498,15 @@ defaultBenchmarkCommonParameters = [
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
-    {"TDMSplit": [False]}
+    {"TDMSplit": [False]},
+    {"MXScaleFormat": ["Auto"]},
+    {"MXLoadInst": ["Auto"]},
+    # SwInstructionPrefetch — True: reserve one scratch SGPR so StinkyTofu can insert software
+    # instruction prefetch when the ISA supports it (SwPrefetchInsertionPass).
+    # Purpose: CP prefetch covers only a bounded window; very large kernels can see early kernel
+    # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
+    # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
+    {"SwInstructionPrefetch": [True]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter
