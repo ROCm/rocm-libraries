@@ -20,7 +20,11 @@ class BuildPyWithExtension(build_py):
 
         ext_dir = os.environ.get("HIPDNN_EXT_DIR", "")
         if not ext_dir:
-            return
+            raise RuntimeError(
+                "HIPDNN_EXT_DIR environment variable is not set. "
+                "It must point to the directory containing the pre-built "
+                "hipdnn_frontend_python extension."
+            )
 
         ext_path = Path(ext_dir)
         extensions = glob.glob(str(ext_path / "hipdnn_frontend_python*"))
