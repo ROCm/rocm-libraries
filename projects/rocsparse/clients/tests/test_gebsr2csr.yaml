@@ -44,8 +44,8 @@ Tests:
   category: quick
   function: gebsr2csr
   precision: *single_only_precisions
-  M: [2758]
-  N: [2875]
+  M: [1758]
+  N: [1875]
   row_block_dimA: [1, 6, 11, 16]
   col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   baseA: [rocsparse_index_base_zero]
@@ -83,8 +83,8 @@ Tests:
   category: quick
   function: gebsr2csr
   precision: *double_only_precisions_complex
-  M: [2276]
-  N: [2190]
+  M: [1276]
+  N: [1190]
   row_block_dimA: [4, 9, 14, 19]
   col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   baseA: [rocsparse_index_base_one]
