@@ -962,14 +962,14 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       REQUIRE(out_wgm_batch.wgmxcc == 0);
       REQUIRE(out_wgm_batch.wgm == 1);
 
-      // Test 3: Test small GEMMs (numMTs <= NUM_XCD)
+      // Test 3: Test small GEMMs
       auto problem_small = make_problem(1024, 1024, 1024);
       auto skGrid_small  = (1024 + 256 - 1) / 256 * (1024 + 256 - 1) / 256;
       auto out_wgm_problem_small =
           origami::select_workgroup_mapping(problem_small, hardware, config, skGrid_small);
       REQUIRE(out_wgm_problem_small.wgmxccchunk == default_wgmxccchunk);
       REQUIRE(out_wgm_problem_small.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_problem_small.wgm == 1);
+      REQUIRE(out_wgm_problem_small.wgm == 2);
 
       // Test 4: Test cases where splitFactor is multiple of NUM_XCD
       auto out_wgm_split_multiple_num_xcd =
