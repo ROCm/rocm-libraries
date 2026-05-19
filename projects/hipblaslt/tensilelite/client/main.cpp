@@ -1090,7 +1090,12 @@ int main(int argc, const char* argv[])
                         maxRotatingBufferNum, problem, inputs, stream);
                     static_cast<void>(hipDeviceSynchronize());
                 }
-                bool resetInput = false;
+                // The first per-solution iteration must re-upload inputs so that
+                // the upload happens after preSolution() and can read the picked
+                // solution's problemType.mxScaleFormat to pick the correct host
+                // upload layout for MX scale tensors. The extra upload is a no-op
+                // cost on non-MX problems.
+                bool resetInput = true;
                 while(solutionIterator->moreSolutionsInProblem())
                 {
                     std::shared_ptr<ContractionSolution> solution;

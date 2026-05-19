@@ -46,13 +46,13 @@ class InsertPhiTest : public ::testing::Test {
 // D and E have a single predecessor (C) so they need no PHIs.
 //
 //       Entry
-//      /  |  \
+//      /  |  \.
 //     A   F   B
 //     |   |   |
 //   v0=x  |  v0=y  (F has no v0)
 //       \ | /
 //         C (pass-through, no v0 use/def)
-//        / \
+//        / \.
 //       D   E  (both use v0)
 // =============================================================================
 
