@@ -254,7 +254,7 @@ def parse_fwd_instances(instances, problem_name):
             scheduler = "Intrawave"
             pipeline_version = "v1"
             direct_load = 0
-            num_groups_to_merge = 0 if split_image else int(args[48])
+            num_groups_to_merge = 1 if split_image else int(args[48])
 
         double_smem_buffer = pipeline_version == "v4"
         num_wave_groups = 1
@@ -269,22 +269,16 @@ def parse_fwd_instances(instances, problem_name):
         else:
             pipeline_version = pipeline_version.upper()
 
+        # Old CK pipeline version V5 maps to V6 for CK Tile
+        if pipeline_version == "V5":
+            pipeline_version = "V6"
+
         m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
         n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
         warp_size = 64
         k_warp = int(block_size / (warp_size * m_warp * n_warp))
         dtype = get_dtype(problem_name)
         k_per_xdl = max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl))
-
-        if split_image:
-            print(f"Skipping instance {instance_id} with split_image since it's not supported yet.")
-            continue
-        if pipeline_version == "V5":
-            print(f"Skipping instance {instance_id} with V5 since it's not supported yet.")
-            continue
-        if pipeline_version == "ASYNC_V4":
-            print(f"Skipping instance {instance_id} with ASYNC_V4 since it's not supported yet.")
-            continue
 
         is_two_stage = False
 
@@ -401,7 +395,7 @@ def parse_bwd_weight_instances(instances, problem_name):
                     raise RuntimeError(f"Wrong number of parameters in the TwoStage instance string: {instance}\n" + 
                                        f"Expected 46 parameters for TwoStage instance. Found {len(args)} parameters.")
                 
-                num_groups_to_merge = args[41]
+                num_groups_to_merge = int(args[41])
 
                 # Block GEMM pipeline parameters
                 block_gemm_pipeline_scheduler = args[39]
@@ -435,7 +429,7 @@ def parse_bwd_weight_instances(instances, problem_name):
         scheduler = block_gemm_pipeline_scheduler
         pipeline_version = blk_gemm_pipeline_version.upper()
 
-        # OLd CK pipeline version V5 maps to V6 for CK Tile
+        # Old CK pipeline version V5 maps to V6 for CK Tile
         if pipeline_version == "V5":
             pipeline_version = "V6"
 
@@ -461,9 +455,7 @@ def parse_bwd_weight_instances(instances, problem_name):
         if check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector) == False:
             print(f"Skipping instance {instance_id} with irregular load since it's not supported yet.")
             continue
-        if pipeline_version == "V6":
-            print(f"Skipping instance {instance_id} with V6 since it's not supported yet.")
-            continue
+
         # Skip multi-warp: when tile_m > warp_size * vec_a (or tile_n > ... * vec_b),
         # a single warp can't cover the tile dimension, requiring multi-warp thread
         # mapping that the codegen doesn't generate.
@@ -593,9 +585,7 @@ def parse_bwd_data_instances(instances, problem_name):
         if check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector) == False:
             print(f"Skipping instance {instance_id} with irregular load since it's not supported yet.")
             continue
-        if pipeline_version == "V6":
-            print(f"Skipping instance {instance_id} with V6 since it's not supported yet.")
-            continue
+
         # Skip multi-warp: single warp can't cover tile dim when it exceeds warp_size * vec
         if k_per_block > (warp_size * a_scalar_per_vector) or n_per_block > (warp_size * b_scalar_per_vector):
             print(f"Skipping instance {instance_id} with multiple warps per continous tile dim since it's not supported yet.")

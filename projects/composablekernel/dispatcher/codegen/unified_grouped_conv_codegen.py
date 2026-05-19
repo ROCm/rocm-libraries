@@ -267,14 +267,10 @@ class GroupedConvKernelConfig:
 
     def is_valid_for_arch(self, arch: Optional[str] = None) -> bool:
         """Check if configuration is valid for target architecture.
-
-        Note: irregular vector sizes and multi-warp tile dimensions are
-        validated upstream in before the JSON configs
-        are generated — they never reach this point.
         """
         target_arch = arch if arch is not None else self.arch
 
-        # Check trait validity
+        # Check trait validity (pipeline+epilogue+scheduler combination)
         if not self.trait.is_valid():
             return False
 
@@ -292,6 +288,59 @@ class GroupedConvKernelConfig:
             ):
                 return False
 
+        # Reject irregular vector sizes.
+        # AMD GPUs only have vector load instructions for widths 1, 2, 4, 8, 16.
+        for vec in (self.vector_size_a, self.vector_size_b, self.vector_size_c):
+            if vec != 1 and vec % 2 != 0:
+                log.warning(
+                    f"Rejecting config: irregular vector size {vec} "
+                    f"(must be 1 or even)"
+                )
+                return False
+
+        # Reject configurations where a tile dimension exceeds what a
+        # single warp can cover with its vector loads.  The check is direction-
+        # aware because the bwd_data implicit GEMM is transposed:
+        #   Forward / bwd_weight:  tile_m > warp_size * vec_a  (M is the A-tile dim)
+        #   Backward data:         tile_k > warp_size * vec_a  (K is the A-tile dim)
+        warp_size = 64
+        t = self.tile
+        a_tile_dim = (
+            t.tile_k
+            if self.variant == GroupedConvVariant.BACKWARD_DATA
+            else t.tile_m
+        )
+        if a_tile_dim > warp_size * self.vector_size_a:
+            log.warning(
+                f"Rejecting config: A-tile dim {a_tile_dim} > "
+                f"warp_size({warp_size}) * vec_a({self.vector_size_a})"
+            )
+            return False
+        if t.tile_n > warp_size * self.vector_size_b:
+            log.warning(
+                f"Rejecting config: tile_n {t.tile_n} > "
+                f"warp_size({warp_size}) * vec_b({self.vector_size_b})"
+            )
+            return False
+
+        # Bwd_data only: vector width must not exceed the number of
+        # elements each thread handles per tile slice.
+        # block_size = warp_size * warp_m * warp_n * warp_k
+        if self.variant == GroupedConvVariant.BACKWARD_DATA:
+            block_size = warp_size * t.warp_m * t.warp_n * t.warp_k
+            if self.vector_size_a > (t.tile_m * t.tile_k) // block_size:
+                log.warning(
+                    f"Rejecting bwd_data config: vec_a({self.vector_size_a}) > "
+                    f"(tile_m({t.tile_m}) * tile_k({t.tile_k})) // block_size({block_size})"
+                )
+                return False
+            if self.vector_size_b > (t.tile_n * t.tile_k) // block_size:
+                log.warning(
+                    f"Rejecting bwd_data config: vec_b({self.vector_size_b}) > "
+                    f"(tile_n({t.tile_n}) * tile_k({t.tile_k})) // block_size({block_size})"
+                )
+                return False
+
         # Check warp configuration (from arch_specs)
         try:
             from arch_specs_generated import WARP_SUPPORTED_COMBINATIONS
@@ -299,7 +348,7 @@ class GroupedConvKernelConfig:
             supported = WARP_SUPPORTED_COMBINATIONS.get(target_arch)
             if supported is None:
                 return False  # Unknown architecture
-            warp_cfg = [self.tile.warp_m, self.tile.warp_n, self.tile.warp_k]
+            warp_cfg = [t.warp_m, t.warp_n, t.warp_k]
             if warp_cfg not in supported:
                 return False
         except ImportError:
