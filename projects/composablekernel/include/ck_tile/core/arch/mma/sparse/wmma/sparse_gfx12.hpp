@@ -368,7 +368,7 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
-        return {__builtin_amdgcn_swmmac_f32_16x16x128_fp8_fp8(aVec, bVec, cVec, idx, 0, 0)};
+        return {__builtin_amdgcn_swmmac_f32_16x16x128_fp8_fp8(bit_cast<int32x8_t>(aVec), bVec, cVec, idx, 0, 0)};
     }
 };
 
@@ -394,7 +394,7 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
-        return {__builtin_amdgcn_swmmac_f32_16x16x128_fp8_bf8(aVec, bVec, cVec, idx, 0, 0)};
+        return {__builtin_amdgcn_swmmac_f32_16x16x128_fp8_bf8(bit_cast<int32x8_t>(aVec), bVec, cVec, idx, 0, 0)};
     }
 };
 
@@ -420,7 +420,7 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
-        return {__builtin_amdgcn_swmmac_f32_16x16x128_bf8_fp8(aVec, bVec, cVec, idx, 0, 0)};
+        return {__builtin_amdgcn_swmmac_f32_16x16x128_bf8_fp8(bit_cast<int32x8_t>(aVec), bVec, cVec, idx, 0, 0)};
     }
 };
 
@@ -446,7 +446,7 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
-        return {__builtin_amdgcn_swmmac_f32_16x16x128_bf8_bf8(aVec, bVec, cVec, idx, 0, 0)};
+        return {__builtin_amdgcn_swmmac_f32_16x16x128_bf8_bf8(bit_cast<int32x8_t>(aVec), bVec, cVec, idx, 0, 0)};
     }
 };
 
@@ -472,7 +472,7 @@ struct amdgcn_mma<fp8_t, fp8_t, fp16_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
-        return {__builtin_amdgcn_swmmac_f16_16x16x128_fp8_fp8(aVec, bVec, cVec, idx, 0, 0)};
+        return {__builtin_amdgcn_swmmac_f16_16x16x128_fp8_fp8(bit_cast<int32x8_t>(aVec), bVec, cVec, idx, 0, 0)};
     }
 };
 
@@ -498,7 +498,7 @@ struct amdgcn_mma<fp8_t, bf8_t, fp16_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
-        return {__builtin_amdgcn_swmmac_f16_16x16x128_fp8_bf8(aVec, bVec, cVec, idx, 0, 0)};
+        return {__builtin_amdgcn_swmmac_f16_16x16x128_fp8_bf8(bit_cast<int32x8_t>(aVec), bVec, cVec, idx, 0, 0)};
     }
 };
 
@@ -524,7 +524,7 @@ struct amdgcn_mma<bf8_t, fp8_t, fp16_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
-        return {__builtin_amdgcn_swmmac_f16_16x16x128_bf8_fp8(aVec, bVec, cVec, idx, 0, 0)};
+        return {__builtin_amdgcn_swmmac_f16_16x16x128_bf8_fp8(bit_cast<int32x8_t>(aVec), bVec, cVec, idx, 0, 0)};
     }
 };
 
@@ -550,7 +550,7 @@ struct amdgcn_mma<bf8_t, bf8_t, fp16_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
-        return {__builtin_amdgcn_swmmac_f16_16x16x128_bf8_bf8(aVec, bVec, cVec, idx, 0, 0)};
+        return {__builtin_amdgcn_swmmac_f16_16x16x128_bf8_bf8(bit_cast<int32x8_t>(aVec), bVec, cVec, idx, 0, 0)};
     }
 };
 
