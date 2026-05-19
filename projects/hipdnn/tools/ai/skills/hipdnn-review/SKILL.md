@@ -41,13 +41,14 @@ If `diff-only` was passed, skip local worktree creation/update. Still capture a 
      ```
    - Branch:
      ```bash
-     git diff --name-only <base>...<branch>
-     git diff --stat <base>...<branch>
+     git diff --name-only <base>...<branch-ref>
+     git diff --stat <base>...<branch-ref>
      ```
-3. Choose a unique diff output path without pasting the full diff into the response. Prefer the workspace's artifact directory if repository instructions define one. For this repository family that is typically `WIP/worktrees/<repo>/<branch>/`; source checkouts belong under `worktrees/<repo>/<branch>/`, not under WIP. If no workspace artifact convention is available, use `mktemp`:
+3. Choose a unique diff output path without pasting the full diff into the response. Use `mktemp` by default:
    ```bash
    DIFF_FILE=$(mktemp "${TMPDIR:-/tmp}/hipdnn-review.XXXXXX.diff")
    ```
+   If repository or workspace instructions define a separate artifact directory, use that location instead. Do not create workspace-specific artifact folders inside a normal source checkout unless the local instructions explicitly require it.
    Pass the chosen `DIFF_FILE` path to every reviewer.
 4. Fetch the diff:
    - PR:
@@ -60,13 +61,13 @@ If `diff-only` was passed, skip local worktree creation/update. Still capture a 
      ```
    - Branch:
      ```bash
-     git diff <base>...<branch> > "$DIFF_FILE"
+     git diff <base>...<branch-ref> > "$DIFF_FILE"
      ```
 5. Prefer a local source checkout for cross-reference. A review based only on the PR page or raw diff is incomplete unless `diff-only` was requested.
    - Follow repository or workspace instructions for source worktree layout. If no local convention is documented, use an existing checkout instead of inventing a new directory layout.
    - For PR reviews, make the PR head and base source available locally before spawning reviewers. Use an existing local worktree/checkout if one already matches the PR head; otherwise fetch the PR/head branch and create or update a local worktree/checkout according to the repository's normal workspace conventions.
    - Fetch the selected base branch and update the base worktree when it can be fast-forwarded. If the base worktree is stale, dirty, detached unexpectedly, or cannot be fast-forwarded, report that limitation before reviewing.
-   - For `branch:<name>` reviews, fetch the branch and base when possible, then compare the local branch source against the refreshed base.
+   - For `branch:<name>` reviews, fetch the branch and base when possible, then resolve the reviewed branch reference before diffing: use the local branch if present, otherwise `origin/<name>` when that remote-tracking ref exists, otherwise the fetched ref such as `FETCH_HEAD`. Report which branch ref was reviewed.
    - For `local` reviews, use the current worktree and the selected base branch for cross-reference.
    - If local source setup is unavailable or skipped, state that the review is `diff-only` and lower confidence accordingly.
 6. Read only the files needed to validate the changed behavior and nearby patterns. Prefer `rg` for call sites, similar implementations, tests, and ownership patterns; fall back to `grep` if `rg` is unavailable.
@@ -116,7 +117,7 @@ hipDNN CI commonly runs sanitizer-enabled tests. Treat leaks and ownership ambig
 ### Compatibility Claims
 
 - For existing public-facing hipDNN API that corresponds to an equivalent cuDNN API, check whether the signature, parameter semantics, defaults, status behavior, ownership/lifetime rules, and documented constraints preserve seamless porting expectations.
-- When validating cuDNN compatibility, use authoritative NVIDIA documentation such as `https://docs.nvidia.com/deeplearning/cudnn/` via `WebFetch` when web access is available. If authoritative documentation is unavailable, do not infer cuDNN semantics from memory; flag the compatibility point for human verification instead.
+- When validating cuDNN compatibility, use an exact authoritative NVIDIA API reference page under `https://docs.nvidia.com/deeplearning/cudnn/` via `WebFetch` when web access is available. If the exact API page cannot be located or fetched, do not infer cuDNN semantics from memory; flag the compatibility point for human verification instead.
 - Flag public API changes that silently diverge from the equivalent cuDNN API unless the divergence is explicit, documented, and intentional.
 - New hipDNN-only API does not need to match cuDNN by default. Review it for consistency with hipDNN design, and only apply cuDNN parity expectations when the API or documentation claims cuDNN compatibility.
 - If docs mention cuDNN migration, compatibility, or parity, ensure the wording is precise and does not promise unimplemented behavior.
@@ -178,7 +179,7 @@ In the final review, include a **Testing Assessment** section with:
 
 ## Default Multi-Agent Review
 
-Default to a multi-agent review using `Task` when reviewer delegation is available. Tell the user which reviewers will run and proceed unless they opt out or ask for a single-pass review. If delegation is unavailable in the active runtime, state that multi-agent review is the skill default and use the direct single-pass fallback.
+Prefer a multi-agent review using `Task` when reviewer delegation is available and allowed by the active system, user, and repository instructions. Tell the user which reviewers will run and proceed only when delegation is permitted by those active policies. If delegation is unavailable, disallowed, or not explicitly permitted in a stricter host environment, state that multi-agent review is preferred by the skill and use the direct single-pass fallback.
 
 Use the Scope Buckets above as the canonical taxonomy. Spawn focused reviewers for affected implementation buckets, plus the required cross-cutting reviewers:
 
