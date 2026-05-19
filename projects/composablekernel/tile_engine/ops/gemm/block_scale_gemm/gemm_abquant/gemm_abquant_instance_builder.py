@@ -111,11 +111,9 @@ class GemmABQuantKernelBuilder(GemmKernelBuilder):
                 pipeline,
                 epilogue,
                 scheduler,
-                b_preshuffle_values,
+                None,
                 self.kernel_name_prefix,
                 self.layout,
-                a_preshuffle_quant=a_preshuffle,
-                b_preshuffle_quant=b_preshuffle,
             ):
                 combinations.append(combo)
             else:
