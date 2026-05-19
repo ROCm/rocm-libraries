@@ -30,45 +30,45 @@
 namespace
 {
     template <typename...>
-    struct testing_set_get_alpha_beta_inc : rocblas_test_valid
+    struct testing_set_get_alpha_beta_stride : rocblas_test_valid
     {
         void operator()(const Arguments&)
         {
             rocblas_handle handle;
             CHECK_ROCBLAS_ERROR(rocblas_create_handle(&handle));
 
-            rocblas_int alpha_inc = -1;
-            rocblas_int beta_inc  = -1;
-            CHECK_ROCBLAS_ERROR(rocblas_get_alpha_inc(handle, &alpha_inc));
-            CHECK_ROCBLAS_ERROR(rocblas_get_beta_inc(handle, &beta_inc));
-            EXPECT_EQ(0, alpha_inc);
-            EXPECT_EQ(0, beta_inc);
+            rocblas_stride stride_alpha = -1;
+            rocblas_stride stride_beta  = -1;
+            CHECK_ROCBLAS_ERROR(rocblas_get_stride_alpha(handle, &stride_alpha));
+            CHECK_ROCBLAS_ERROR(rocblas_get_stride_beta(handle, &stride_beta));
+            EXPECT_EQ(0, stride_alpha);
+            EXPECT_EQ(0, stride_beta);
 
-            CHECK_ROCBLAS_ERROR(rocblas_set_alpha_inc(handle, 7));
-            CHECK_ROCBLAS_ERROR(rocblas_get_alpha_inc(handle, &alpha_inc));
-            EXPECT_EQ(7, alpha_inc);
-            CHECK_ROCBLAS_ERROR(rocblas_get_beta_inc(handle, &beta_inc));
-            EXPECT_EQ(0, beta_inc);
+            CHECK_ROCBLAS_ERROR(rocblas_set_stride_alpha(handle, 7));
+            CHECK_ROCBLAS_ERROR(rocblas_get_stride_alpha(handle, &stride_alpha));
+            EXPECT_EQ(7, stride_alpha);
+            CHECK_ROCBLAS_ERROR(rocblas_get_stride_beta(handle, &stride_beta));
+            EXPECT_EQ(0, stride_beta);
 
-            CHECK_ROCBLAS_ERROR(rocblas_set_beta_inc(handle, 11));
-            CHECK_ROCBLAS_ERROR(rocblas_get_beta_inc(handle, &beta_inc));
-            EXPECT_EQ(11, beta_inc);
-            CHECK_ROCBLAS_ERROR(rocblas_get_alpha_inc(handle, &alpha_inc));
-            EXPECT_EQ(7, alpha_inc);
+            CHECK_ROCBLAS_ERROR(rocblas_set_stride_beta(handle, 11));
+            CHECK_ROCBLAS_ERROR(rocblas_get_stride_beta(handle, &stride_beta));
+            EXPECT_EQ(11, stride_beta);
+            CHECK_ROCBLAS_ERROR(rocblas_get_stride_alpha(handle, &stride_alpha));
+            EXPECT_EQ(7, stride_alpha);
 
-            CHECK_ROCBLAS_ERROR(rocblas_set_alpha_inc(handle, 0));
-            CHECK_ROCBLAS_ERROR(rocblas_set_beta_inc(handle, 0));
-            CHECK_ROCBLAS_ERROR(rocblas_get_alpha_inc(handle, &alpha_inc));
-            CHECK_ROCBLAS_ERROR(rocblas_get_beta_inc(handle, &beta_inc));
-            EXPECT_EQ(0, alpha_inc);
-            EXPECT_EQ(0, beta_inc);
+            CHECK_ROCBLAS_ERROR(rocblas_set_stride_alpha(handle, 0));
+            CHECK_ROCBLAS_ERROR(rocblas_set_stride_beta(handle, 0));
+            CHECK_ROCBLAS_ERROR(rocblas_get_stride_alpha(handle, &stride_alpha));
+            CHECK_ROCBLAS_ERROR(rocblas_get_stride_beta(handle, &stride_beta));
+            EXPECT_EQ(0, stride_alpha);
+            EXPECT_EQ(0, stride_beta);
 
             CHECK_ROCBLAS_ERROR(rocblas_destroy_handle(handle));
         }
     };
 
-    struct set_get_alpha_beta_inc
-        : RocBLAS_Test<set_get_alpha_beta_inc, testing_set_get_alpha_beta_inc>
+    struct set_get_alpha_beta_stride
+        : RocBLAS_Test<set_get_alpha_beta_stride, testing_set_get_alpha_beta_stride>
     {
         static bool type_filter(const Arguments&)
         {
@@ -77,19 +77,19 @@ namespace
 
         static bool function_filter(const Arguments& arg)
         {
-            return !strcmp(arg.function, "set_get_alpha_beta_inc");
+            return !strcmp(arg.function, "set_get_alpha_beta_stride");
         }
 
         static std::string name_suffix(const Arguments& arg)
         {
-            return RocBLAS_TestName<set_get_alpha_beta_inc>(arg.name);
+            return RocBLAS_TestName<set_get_alpha_beta_stride>(arg.name);
         }
     };
 
-    TEST_P(set_get_alpha_beta_inc, auxiliary_tensile)
+    TEST_P(set_get_alpha_beta_stride, auxiliary_tensile)
     {
-        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(testing_set_get_alpha_beta_inc<>{}(GetParam()));
+        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(testing_set_get_alpha_beta_stride<>{}(GetParam()));
     }
-    INSTANTIATE_TEST_CATEGORIES(set_get_alpha_beta_inc)
+    INSTANTIATE_TEST_CATEGORIES(set_get_alpha_beta_stride)
 
 } // namespace

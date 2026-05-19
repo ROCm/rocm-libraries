@@ -3,8 +3,8 @@ include: rocblas_common.yaml
 include: known_bugs.yaml
 
 Tests:
-- name: set_get_alpha_beta_inc
+- name: set_get_alpha_beta_stride
   category: quick
-  function: set_get_alpha_beta_inc
+  function: set_get_alpha_beta_stride
   precision: *single_precision
 ...

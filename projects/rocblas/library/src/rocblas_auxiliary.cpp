@@ -127,17 +127,17 @@ catch(...)
 }
 
 /*******************************************************************************
- * ! \brief get alpha increment
+ * ! \brief get alpha stride
  ******************************************************************************/
-extern "C" rocblas_status rocblas_get_alpha_inc(rocblas_handle handle, rocblas_int* alpha_inc)
+extern "C" rocblas_status rocblas_get_stride_alpha(rocblas_handle handle, rocblas_stride* stride_alpha)
 try
 {
     if(!handle)
         return rocblas_status_invalid_handle;
-    *alpha_inc = handle->alpha_inc;
+    *stride_alpha = handle->stride_alpha;
     rocblas_internal_logger logger;
     if(handle->layer_mode & rocblas_layer_mode_log_trace)
-        logger.log_trace(handle, "rocblas_get_alpha_inc", *alpha_inc);
+        logger.log_trace(handle, "rocblas_get_stride_alpha", *stride_alpha);
     return rocblas_status_success;
 }
 catch(...)
@@ -146,17 +146,17 @@ catch(...)
 }
 
 /*******************************************************************************
- * ! \brief set alpha increment
+ * ! \brief set alpha stride
  ******************************************************************************/
-extern "C" rocblas_status rocblas_set_alpha_inc(rocblas_handle handle, rocblas_int alpha_inc)
+extern "C" rocblas_status rocblas_set_stride_alpha(rocblas_handle handle, rocblas_stride stride_alpha)
 try
 {
     if(!handle)
         return rocblas_status_invalid_handle;
     rocblas_internal_logger logger;
     if(handle->layer_mode & rocblas_layer_mode_log_trace)
-        logger.log_trace(handle, "rocblas_set_alpha_inc", alpha_inc);
-    handle->alpha_inc = alpha_inc;
+        logger.log_trace(handle, "rocblas_set_stride_alpha", stride_alpha);
+    handle->stride_alpha = stride_alpha;
     return rocblas_status_success;
 }
 catch(...)
@@ -165,17 +165,17 @@ catch(...)
 }
 
 /*******************************************************************************
- * ! \brief get beta increment
+ * ! \brief get beta stride
  ******************************************************************************/
-extern "C" rocblas_status rocblas_get_beta_inc(rocblas_handle handle, rocblas_int* beta_inc)
+extern "C" rocblas_status rocblas_get_stride_beta(rocblas_handle handle, rocblas_stride* stride_beta)
 try
 {
     if(!handle)
         return rocblas_status_invalid_handle;
-    *beta_inc = handle->beta_inc;
+    *stride_beta = handle->stride_beta;
     rocblas_internal_logger logger;
     if(handle->layer_mode & rocblas_layer_mode_log_trace)
-        logger.log_trace(handle, "rocblas_get_beta_inc", *beta_inc);
+        logger.log_trace(handle, "rocblas_get_stride_beta", *stride_beta);
     return rocblas_status_success;
 }
 catch(...)
@@ -184,17 +184,17 @@ catch(...)
 }
 
 /*******************************************************************************
- * ! \brief set beta increment
+ * ! \brief set beta stride
  ******************************************************************************/
-extern "C" rocblas_status rocblas_set_beta_inc(rocblas_handle handle, rocblas_int beta_inc)
+extern "C" rocblas_status rocblas_set_stride_beta(rocblas_handle handle, rocblas_stride stride_beta)
 try
 {
     if(!handle)
         return rocblas_status_invalid_handle;
     rocblas_internal_logger logger;
     if(handle->layer_mode & rocblas_layer_mode_log_trace)
-        logger.log_trace(handle, "rocblas_set_beta_inc", beta_inc);
-    handle->beta_inc = beta_inc;
+        logger.log_trace(handle, "rocblas_set_stride_beta", stride_beta);
+    handle->stride_beta = stride_beta;
     return rocblas_status_success;
 }
 catch(...)

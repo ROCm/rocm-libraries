@@ -423,9 +423,9 @@ public:
     // default atomics mode does not allows atomic operations
     rocblas_atomics_mode atomics_mode = rocblas_atomics_not_allowed;
 
-    // optional increment (in elements) between successive alpha/beta values for advanced batched use; 0 is default
-    rocblas_int alpha_inc = 0;
-    rocblas_int beta_inc  = 0;
+    // optional stride between successive alpha/beta values for advanced batched use; 0 is default
+    rocblas_stride stride_alpha = 0;
+    rocblas_stride stride_beta  = 0;
 
     // Selects the benchmark library to be used for solution selection
     rocblas_performance_metric performance_metric = rocblas_default_performance_metric;
