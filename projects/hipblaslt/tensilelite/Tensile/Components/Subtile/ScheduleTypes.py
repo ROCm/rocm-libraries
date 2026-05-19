@@ -22,8 +22,6 @@ Stage progression
     EmittedSchedule    — output of emit():
         [partition][subIterK][EmittedModule] with before-link chains.
 
-These aliases are the foundation for follow-up refactoring tickets that will
-split the pipeline into independently-testable passes.
 """
 
 from __future__ import annotations
