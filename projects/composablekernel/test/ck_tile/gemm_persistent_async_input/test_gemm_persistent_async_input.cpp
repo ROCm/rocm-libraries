@@ -144,26 +144,6 @@ class TestGemmPersistentAsyncInput : public ::testing::Test
         using DsLayout   = ck_tile::tuple<>;
         using DsDataType = ck_tile::tuple<>;
 
-#if 0 // CShuffleEpilogue leads to LDS bank conflicts. Use DefaultGemm2DEpilogue if want to reduce
-      // the bank conflict to 0. This is just for this test suite.
-        using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<
-            ck_tile::DefaultGemm2DEpilogueProblem<ADataType,
-                                                  BDataType,
-                                                  DsDataType,
-                                                  AccDataType,
-                                                  CDataType,
-                                                  DsLayout,
-                                                  CLayout,
-                                                  ck_tile::element_wise::PassThrough,
-                                                  TilePartitioner::MPerBlock,
-                                                  TilePartitioner::NPerBlock,
-                                                  kPadM,
-                                                  kPadN,
-                                                  M_Warp_Tile,
-                                                  N_Warp_Tile,
-                                                  K_Warp_Tile,
-                                                  UniversalGemmProblem::TransposeC>>;
-#else
         using GemmEpilogue = ck_tile::CShuffleEpilogue<
             ck_tile::CShuffleEpilogueProblem<ADataType,
                                              BDataType,
@@ -186,7 +166,6 @@ class TestGemmPersistentAsyncInput : public ::testing::Test
                                              1,     /*VectorSizeC_*/
                                              1,     /*BlockedXDLN_PerWarp_*/
                                              DoubleSmemBuffer /*DoubleSmemBuffer*/>>;
-#endif
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 

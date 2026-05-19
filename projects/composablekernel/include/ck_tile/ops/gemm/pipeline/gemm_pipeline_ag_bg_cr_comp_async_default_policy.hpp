@@ -76,9 +76,6 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
         if constexpr(Base::template is_a_load_tr<Problem>)
         {
-            // TODO: better LDS descriptor for performance
-            // This branch is reusing the logic from
-            // UniversalGemmBasePolicy::MakeALdsBlockDescriptor
             constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor( //
                 make_tuple(number<KPerBlock>{}, number<MPerBlock>{}),
                 make_tuple(number<MPerBlock>{}, number<1>{}),
@@ -142,9 +139,6 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
         if constexpr(Base::template is_b_load_tr<Problem>)
         {
-            // TODO: better LDS descriptor for performance
-            // This branch is reusing the logic from
-            // UniversalGemmBasePolicy::MakeBLdsBlockDescriptor
             constexpr auto b_lds_block_desc_0 =
                 make_naive_tensor_descriptor(make_tuple(number<KPerBlock>{}, number<NPerBlock>{}),
                                              make_tuple(number<NPerBlock>{}, number<1>{}),
@@ -277,7 +271,6 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         const index_t M0                = integer_divide_ceil(rows, M1);
         const auto row_lens             = make_tuple(M0, number<M1>{});
 
-        // TODO: static_assert for tests
         const auto d0 = make_naive_tensor_descriptor_packed(container_concat(row_lens, col_lens));
         const auto desc_0 = decltype(d0)(
             d0.get_transforms(), tensor_view_tmp.get_tensor_descriptor().get_element_space_size());
@@ -318,7 +311,6 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         auto&& origin_tmp = window_tmp.get_window_origin();
 
         // Create tile distribution inline (reuse K2, K1, K0 from above)
-        // TODO: logic is different if KPerBlock > kLdsRowBytes / sizeof(ADataType)
         static_assert(KPerBlock <= kLdsRowBytes / sizeof(ADataType));
         constexpr index_t BlockSize = Problem::kBlockSize;
         constexpr index_t WaveSize  = get_warp_size();

@@ -10,7 +10,6 @@ enum struct GemmPipeline
     COMPUTE_ASYNC,
     COMPUTE_V3,
     COMPUTE_V4,
-    COMPUTE_V4_ASYNC,
     COMPUTE_V5,
     COMPUTE_V6,
     MEMORY,
