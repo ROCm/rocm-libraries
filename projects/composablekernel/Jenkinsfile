@@ -550,6 +550,63 @@ def check_arch_name(){
     }
 }
 
+// Helper function to pull docker images with retry and comprehensive logging
+def pullDockerImageWithRetry(String image, String credId = "ck_docker_cred") {
+    return retryWithExponentialBackoff("Docker pull: ${image}") {
+        sh """
+            echo "[DOCKER] Starting docker pull..."
+            echo "[DOCKER] Image: ${image}"
+            echo "[DOCKER] Timestamp: \$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")"
+            echo "[DOCKER] Node: \${NODE_NAME}"
+
+            echo "[DOCKER] Docker daemon status:"
+            docker info || echo "docker info failed"
+
+            echo "[DOCKER] Docker version:"
+            docker version || echo "docker version failed"
+
+            echo "[DOCKER] Current docker images:"
+            docker images | head -20 || echo "docker images failed"
+
+            echo "[DOCKER] Docker disk usage:"
+            docker system df || echo "docker system df failed"
+
+            echo "[DOCKER] Checking registry connectivity:"
+            REGISTRY_HOST=\$(echo "${image}" | cut -d'/' -f1)
+            echo "[DOCKER] Registry host: \${REGISTRY_HOST}"
+            ping -c 3 "\${REGISTRY_HOST}" || echo "ping to registry failed"
+
+            echo "[DOCKER] Testing HTTPS connectivity to registry:"
+            curl -v -I "https://\${REGISTRY_HOST}" 2>&1 || echo "curl to registry failed"
+        """
+
+        def retimage = docker.image("${image}")
+
+        if (credId != "") {
+            echo "[DOCKER] Attempting pull with credentials: ${credId}"
+            withDockerRegistry([ credentialsId: credId, url: "" ]) {
+                sh """
+                    echo "[DOCKER] Docker login successful"
+                    echo "[DOCKER] Executing: docker pull ${image}"
+                """
+                retimage.pull()
+            }
+        } else {
+            echo "[DOCKER] Attempting pull without credentials"
+            sh "echo '[DOCKER] Executing: docker pull ${image}'"
+            retimage.pull()
+        }
+
+        sh """
+            echo "[DOCKER] Pull completed successfully"
+            echo "[DOCKER] Verifying image:"
+            docker inspect "${image}" | head -50 || echo "docker inspect failed"
+        """
+
+        return retimage
+    }
+}
+
 def getDockerImage(Map conf=[:]){
     def image
     if ( conf.get("docker_name", "") != "" ){
@@ -560,18 +617,16 @@ def getDockerImage(Map conf=[:]){
         image = getDockerImageName()
         echo "Using default docker: ${image}"
     }
-    //Check if image exists
+
+    echo "[DOCKER] Pulling image: ${image}"
     def retimage
-    try
-    {
-        echo "Pulling image: ${image}"
-        retimage = docker.image("${image}")
-        withDockerRegistry([ credentialsId: "ck_docker_cred", url: "" ]) {
-            retimage.pull()
-        }
+    try {
+        retimage = pullDockerImageWithRetry(image, "ck_docker_cred")
     }
-    catch(Exception ex)
-    {
+    catch(Exception ex) {
+        echo "[DOCKER] ERROR: Unable to locate image: ${image}"
+        echo "[DOCKER] Error details: ${ex.getMessage()}"
+        echo "[DOCKER] Stack trace: ${ex.getStackTrace().join('\n')}"
         error "Unable to locate image: ${image}"
     }
     return [retimage, image]
@@ -1145,17 +1200,16 @@ def process_results(Map conf=[:]){
     def image = "${env.CK_DOCKERHUB}:ck_ub22.04_rocm6.3"
 
     setGithubStatus("${env.STAGE_NAME}", 'pending', 'Processing results...')
+    def retimage
     try {
-        try
-        {
-            echo "Pulling image: ${image}"
-            def retimage = docker.image("${image}")
-            withDockerRegistry([ credentialsId: "ck_docker_cred", url: "" ]) {
-                retimage.pull()
-            }
+        try {
+            echo "[DOCKER] Pulling processing image: ${image}"
+            retimage = pullDockerImageWithRetry(image, "ck_docker_cred")
         }
-        catch(Exception ex)
-        {
+        catch(Exception ex) {
+            echo "[DOCKER] ERROR: Unable to locate image: ${image}"
+            echo "[DOCKER] Error details: ${ex.getMessage()}"
+            echo "[DOCKER] Stack trace: ${ex.getStackTrace().join('\n')}"
             error "Unable to locate image: ${image}"
         }
     }
@@ -1289,17 +1343,16 @@ def run_downstream_tests(Map conf=[:]){
     def dockerOpts = get_docker_options() + ' --group-add irc '
 
     setGithubStatus("${env.STAGE_NAME}", 'pending', "Starting ${env.STAGE_NAME}")
+    def retimage
     try {
-        try
-        {
-            echo "Pulling image: ${conf.image}"
-            retimage = docker.image("${conf.image}")
-            withDockerRegistry([ credentialsId: "ck_docker_cred", url: "" ]) {
-                retimage.pull()
-            }
+        try {
+            echo "[DOCKER] Pulling downstream test image: ${conf.image}"
+            retimage = pullDockerImageWithRetry(conf.image, "ck_docker_cred")
         }
-        catch(Exception ex)
-        {
+        catch(Exception ex) {
+            echo "[DOCKER] ERROR: Unable to locate image: ${conf.image}"
+            echo "[DOCKER] Error details: ${ex.getMessage()}"
+            echo "[DOCKER] Stack trace: ${ex.getStackTrace().join('\n')}"
             error "Unable to locate image: ${conf.image}"
         }
     }
