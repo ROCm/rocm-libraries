@@ -243,10 +243,6 @@ struct MmaLayoutTestKernel
             }
             else if constexpr(MmaOpTraits<MmaOp>::IsScale)
             {
-                // The actual scale is computed as pow(2, scale - 127), so:
-                // 125 -> 2^-2 and 129 -> 2^2.
-                int scale_A = 125;
-                int scale_B = 129;
                 c_frag      = MmaOp::exec(a_frag, b_frag, c_frag, scale_A, scale_B);
             }
             else if constexpr(MmaOpTraits<MmaOp>::IsScale)
