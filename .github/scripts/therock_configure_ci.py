@@ -18,6 +18,11 @@ import os
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 from config_loader import load_repo_config
 
+# Add TheRock's github_actions to path for shared utilities
+THEROCK_ACTIONS_PATH = Path("TheRock") / "build_tools" / "github_actions"
+sys.path.insert(0, str(THEROCK_ACTIONS_PATH))
+from amdgpu_family_matrix import BUILD_RUNNER_LABELS, select_weighted_label
+
 logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -148,6 +153,21 @@ def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
     return matched_subtrees
 
 
+def select_build_runner(platform: str) -> str:
+    """Select a build runner label based on platform and build variant."""
+    if platform not in BUILD_RUNNER_LABELS:
+        # Platform not configured for weighted selection, return default
+        print(f"  No build runner config for platform {platform}, using default")
+        return ""
+
+    platform_config = BUILD_RUNNER_LABELS[platform]
+
+    labels_config = platform_config["default"]
+    context_name = f"build-runner ({platform})"
+
+    return select_weighted_label(labels_config, context_name)
+
+
 def retrieve_projects(args):
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
@@ -203,8 +223,13 @@ def retrieve_projects(args):
 def run(args):
     platform = args.get("platform")
     project_to_run, test_type = retrieve_projects(args)
+    build_runs_on = select_build_runner(platform)
     set_github_output(
-        {f"{platform}_projects": json.dumps(project_to_run), "test_type": test_type}
+        {
+            f"{platform}_projects": json.dumps(project_to_run),
+            "test_type": test_type,
+            "build_runs_on": build_runs_on,
+        }
     )
 
 

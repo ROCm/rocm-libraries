@@ -6,10 +6,13 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "ConfigHelpers.hpp"
 #include "GraphTest.hpp"
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
+#include "asm_fmha_v3_fwd_configs.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 
@@ -72,9 +75,25 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
         causalMask);
 }
 
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAvailableKernels)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    std::string deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+
+    for(const auto& test : getCompatibleGraphsForArch(deviceString, cfg_fmha_fwd))
+    {
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
 
     std::string deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
     if(deviceString != "gfx942" && deviceString != "gfx950")

@@ -108,7 +108,8 @@ void BatchnormFwdInferencePlan::execute(const HipdnnMiopenHandle& handle,
                                         [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);

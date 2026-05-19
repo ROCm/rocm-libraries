@@ -102,7 +102,7 @@ TEST_F(DefUseChainTest, LoopBack_TwoBlocks) {
 // =============================================================================
 // CFG:
 //    A    v0 = v0 + v1
-//    | \
+//    | \.
 //    +--+
 // =============================================================================
 TEST_F(DefUseChainTest, LoopBack_SelfLoop) {
@@ -210,7 +210,7 @@ TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA) {
 // =============================================================================
 // CFG:
 //      Entry      v0 = v1 + v2
-//     /  |  \
+//     /  |  \.
 //    B   C   D    v0 = v0 + v3/v4/v5
 //     \  |  /
 //      Exit       v10 = v0 + v11
@@ -329,13 +329,13 @@ TEST_F(DefUseChainTest, PassThrough_ValueUsedBySuccessorsSuccessor) {
 // Edge order: Entry -> A, Entry -> F, Entry -> B (so C's preds = [A, F, B])
 //
 //       Entry
-//      /  |  \
+//      /  |  \.
 //     A   F   B
 //     |   |   |
 //   v0=x  |  v0=y  (F has no v0)
 //       \ | /
 //         C (pass-through, no v0)
-//        / \
+//        / \.
 //       D   E  (both use v0)
 // =============================================================================
 

@@ -101,6 +101,7 @@ endif()
 include(CheckToolVersion)
 include(ClangCheck)
 include(ClangTidy)
+include(Sanitizers)
 
 # Setup testing dependencies
 include(Dependencies)
