@@ -9,7 +9,7 @@
 #
 # Usage:
 #   ctest --test-dir build -R compile_fail
-#   ctest --test-dir build -L compile_fail
+#   ctest --test-dir build -L ROCM_CK_COMPILE_FAIL
 
 file(GLOB COMPILE_FAIL_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 

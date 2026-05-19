@@ -20,6 +20,7 @@
 #include <rocm_ck/datatype.hpp>
 #include <rocm_ck/gpu_target.hpp>
 
+#include <bit>
 #include <cstdint>
 
 namespace rocm_ck {
@@ -50,14 +51,14 @@ constexpr TargetProperties properties(GpuTarget target)
 {
     switch(target)
     {
-    case GpuTarget::gfx90a: return {64, ArchFamily::CDNA};
-    case GpuTarget::gfx942: return {64, ArchFamily::CDNA};
-    case GpuTarget::gfx950: return {64, ArchFamily::CDNA};
-    case GpuTarget::gfx1100: return {32, ArchFamily::RDNA};
-    case GpuTarget::gfx1101: return {32, ArchFamily::RDNA};
-    case GpuTarget::gfx1102: return {32, ArchFamily::RDNA};
-    case GpuTarget::gfx1150: return {32, ArchFamily::RDNA};
-    case GpuTarget::gfx1151: return {32, ArchFamily::RDNA};
+    case GpuTarget::gfx90a: return {.wavefront_size = 64, .arch_family = ArchFamily::CDNA};
+    case GpuTarget::gfx942: return {.wavefront_size = 64, .arch_family = ArchFamily::CDNA};
+    case GpuTarget::gfx950: return {.wavefront_size = 64, .arch_family = ArchFamily::CDNA};
+    case GpuTarget::gfx1100: return {.wavefront_size = 32, .arch_family = ArchFamily::RDNA};
+    case GpuTarget::gfx1101: return {.wavefront_size = 32, .arch_family = ArchFamily::RDNA};
+    case GpuTarget::gfx1102: return {.wavefront_size = 32, .arch_family = ArchFamily::RDNA};
+    case GpuTarget::gfx1150: return {.wavefront_size = 32, .arch_family = ArchFamily::RDNA};
+    case GpuTarget::gfx1151: return {.wavefront_size = 32, .arch_family = ArchFamily::RDNA};
     case GpuTarget::_count:
     default: throw "invalid GpuTarget in properties";
     }
@@ -216,7 +217,6 @@ struct TargetSet
     friend constexpr TargetSet operator&(TargetSet a, TargetSet b) { return a.intersect_with(b); }
     friend constexpr TargetSet operator-(TargetSet a, TargetSet b) { return a.minus(b); }
     friend constexpr bool operator==(TargetSet a, TargetSet b) { return a.bits == b.bits; }
-    friend constexpr bool operator!=(TargetSet a, TargetSet b) { return a.bits != b.bits; }
 
     // ---- Queries ----------------------------------------------------------
 
@@ -233,17 +233,7 @@ struct TargetSet
     constexpr bool is_single_target() const { return bits != 0 && (bits & (bits - 1)) == 0; }
 
     /// Number of targets in the set.
-    constexpr int count() const
-    {
-        uint64_t b = bits;
-        int n      = 0;
-        while(b)
-        {
-            n++;
-            b &= b - 1;
-        }
-        return n;
-    }
+    constexpr int count() const { return std::popcount(bits); }
 
     /// Wavefront size, if uniform across all targets in the set.
     /// Compile error if targets disagree or set is empty.

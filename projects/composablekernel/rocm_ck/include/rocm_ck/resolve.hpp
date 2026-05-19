@@ -206,9 +206,8 @@ consteval std::string_view collectTensorSlotsFromOp(const Op& op,
         }
         else
         {
-            // Unreachable for valid Op alternatives — all are either monostate,
-            // special-cased (GemmOp, ScaleOp), or match BinaryOpLike/UnaryOpLike.
-            return {};
+            throw "unhandled Op type in collectTensorSlotsFromOp — "
+                  "add explicit handling or satisfy BinaryOpLike/UnaryOpLike";
         }
     });
 }
@@ -238,6 +237,11 @@ consteval void propagateRankLayout(const Op& op, auto& propagate_binary, auto& p
         {
             propagate_unary(typed_op.in, typed_op.out);
         }
+        else
+        {
+            throw "unhandled Op type in propagateRankLayout — "
+                  "add explicit handling or satisfy BinaryOpLike/UnaryOpLike";
+        }
     });
 }
 
@@ -259,7 +263,7 @@ consteval void propagateRankLayout(const Op& op, auto& propagate_binary, auto& p
 ///
 /// Binary ops (AddOp, MulOp) and unary ops propagate rank/layout from
 /// the first connected slot that has known values.
-consteval ResolvedSignature resolve(Signature sig)
+consteval ResolvedSignature resolve(const Signature& sig)
 {
     // --- Intermediate tracking ---
     struct Info
