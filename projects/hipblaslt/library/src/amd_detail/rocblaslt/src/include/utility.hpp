@@ -40,7 +40,7 @@
 
 #pragma STDC CX_LIMITED_RANGE ON
 
-static std::mutex log_mutex;
+inline std::mutex log_mutex;
 
 inline bool isAligned(const void* pointer, size_t byte_count)
 {

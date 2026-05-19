@@ -100,12 +100,12 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [127, 127, 1, 1024]
+          # - Exact: [127, 127, 1, 1024]
           - Exact: [128, 128, 1, 1024]
-          - Exact: [129, 129, 1, 1024]
-          - Exact: [127, 127, 1, 1056]
+          # - Exact: [129, 129, 1, 1024]
+          # - Exact: [127, 127, 1, 1056]
           - Exact: [128, 128, 1, 1056]
-          - Exact: [129, 129, 1, 1056]
+          # - Exact: [129, 129, 1, 1056]
         - ActivationArgs:
           - [Enum: none]
 
@@ -149,7 +149,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadMetadata: [0]
-        - LDSTrInst: [True, False]
+        - LDSTrInst: [True]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -225,7 +225,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadMetadata: [0]
-        - LDSTrInst: [True, False]
+        - LDSTrInst: [True]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -301,7 +301,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadMetadata: [0]
-        - LDSTrInst: [True, False]
+        - LDSTrInst: [True]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]

@@ -197,7 +197,7 @@
     LdsPadMetadata: 0
     LocalReadVectorWidth: 16
     LocalReadVectorWidthA: 16
-    LocalReadVectorWidthB: 16
+    LocalReadVectorWidthB: 8
     LocalReadVectorWidthMetadata: 16
     LocalSplitU: 1
     LocalSplitUReuseLDS: 1

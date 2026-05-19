@@ -58,8 +58,9 @@ typedef void* hipsparseDnVecDescr_t;
  *  \details
  *  The hipSPARSE descriptor is an opaque structure holding information for a sparse matrix. It must
  *  be initialized using either hipsparseCreateCoo() (for COO format), hipsparseCreateCooAoS() (for COO AOS format),
- *  hipsparseCreateCsr() (for CSR format), hipsparseCreateCsc() (for CSC format), or hipsparseCreateBlockedEll()
- *  (for Blocked ELL format). The returned descriptor is used in the hipSPARSE generic APIs involving sparse matrices.
+ *  hipsparseCreateCsr() (for CSR format), hipsparseCreateCsc() (for CSC format), hipsparseCreateBlockedEll()
+ *  (for Blocked ELL format), hipsparseCreateSlicedEll() (for Sliced ELL format), or hipsparseCreateBsr()
+ *  (for BSR format). The returned descriptor is used in the hipSPARSE generic APIs involving sparse matrices.
  *  It should be destroyed at the end using hipsparseDestroySpMat().
  */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
@@ -193,7 +194,8 @@ typedef enum
     HIPSPARSE_FORMAT_COO         = 3, /**< Coordinate - structure of arrays */
     HIPSPARSE_FORMAT_COO_AOS     = 4, /**< Coordinate - array of structures */
     HIPSPARSE_FORMAT_BLOCKED_ELL = 5, /**< Blocked ELL */
-    HIPSPARSE_FORMAT_SLICED_ELL  = 6 /**< Sliced ELL */
+    HIPSPARSE_FORMAT_SLICED_ELL  = 6, /**< Sliced ELL */
+    HIPSPARSE_FORMAT_BSR         = 7 /**< Block sparse row */
 } hipsparseFormat_t;
 #else
 #if(CUDART_VERSION >= 12011)
@@ -301,10 +303,22 @@ typedef enum
     HIPSPARSE_SPMV_CSR_ALG1    = 2,
     HIPSPARSE_SPMV_CSR_ALG2    = 3,
     HIPSPARSE_SPMV_COO_ALG2    = 4,
-    HIPSPARSE_SPMV_SELL_ALG1   = 5
+    HIPSPARSE_SPMV_SELL_ALG1   = 5,
+    HIPSPARSE_SPMV_BSR_ALG1    = 6
 } hipsparseSpMVAlg_t;
 #else
-#if(CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 13001)
+typedef enum
+{
+    HIPSPARSE_SPMV_ALG_DEFAULT = 0,
+    HIPSPARSE_SPMV_COO_ALG1    = 1,
+    HIPSPARSE_SPMV_CSR_ALG1    = 2,
+    HIPSPARSE_SPMV_CSR_ALG2    = 3,
+    HIPSPARSE_SPMV_COO_ALG2    = 4,
+    HIPSPARSE_SPMV_SELL_ALG1   = 5,
+    HIPSPARSE_SPMV_BSR_ALG1    = 6
+} hipsparseSpMVAlg_t;
+#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
 typedef enum
 {
     HIPSPARSE_SPMV_ALG_DEFAULT = 0,
