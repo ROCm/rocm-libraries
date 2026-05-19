@@ -106,74 +106,49 @@ void GetLayoutInfo(const TensorDescriptor& desc,
     }
 }
 
-// Compute grid size per batch for a direction/layout combination.
-// Returns grid_size_per_batch. For the reference, no spatial tiling is used.
-size_t ComputeGridSizePerBatch(const std::string& direction,
-                               bool is_default_layout,
-                               int k,
-                               int c,
-                               int n,
-                               int ho,
-                               int hi,
-                               int group,
-                               int k_per_group,
-                               int c_per_group,
-                               int do_ = 1,
-                               int di  = 1)
+// Compute grid size per batch for a 2D direction/layout combination.
+size_t
+ComputeGridSizePerBatch(bool is_fwd, bool is_default_layout, int k, int c, int n, int ho, int hi)
 {
-    if(direction == "fwd")
+    if(is_fwd)
     {
         if(is_default_layout)
             return static_cast<size_t>(k);
         else
             return static_cast<size_t>(ho);
     }
-    else if(direction == "bwd")
+    else // bwd
     {
         if(is_default_layout)
             return static_cast<size_t>(n) * c;
         else
             return static_cast<size_t>(n) * hi;
     }
-    else // wrw
-    {
-        return static_cast<size_t>(k);
-    }
 }
 
-size_t ComputeGridSizePerBatch3D(const std::string& direction,
+// Compute grid size per batch for a 3D direction/layout combination.
+size_t ComputeGridSizePerBatch3D(bool is_fwd,
                                  bool is_default_layout,
-                                 int k,
-                                 int c,
                                  int n,
-                                 int ho,
-                                 int hi,
                                  int do_,
                                  int di,
                                  int group,
                                  int k_per_group,
                                  int c_per_group)
 {
-    if(direction == "fwd")
+    if(is_fwd)
     {
-        // Per-batch grid: caller multiplies by batch chunk size
         if(is_default_layout)
             return static_cast<size_t>(group) * k_per_group;
         else
             return static_cast<size_t>(group) * do_;
     }
-    else if(direction == "bwd")
+    else // bwd
     {
-        // BWD grid includes n (no batch chunking)
         if(is_default_layout)
             return static_cast<size_t>(group) * n * c_per_group;
         else
             return static_cast<size_t>(group) * n * di;
-    }
-    else // wrw
-    {
-        // WRW grid does not include n (no batch chunking)
-        return static_cast<size_t>(group) * k_per_group;
     }
 }
 
@@ -232,8 +207,8 @@ void GpuConvReference::RunFwd(const Handle& handle,
         int sy = strides[0], sx = strides[1];
         int dily = dilations[0], dilx = dilations[1];
 
-        size_t grid_size_per_batch = ComputeGridSizePerBatch(
-            "fwd", is_default_layout, k, c, n, ho, hi, group, k_per_group, c_per_group);
+        size_t grid_size_per_batch =
+            ComputeGridSizePerBatch(true, is_default_layout, k, c, n, ho, hi);
 
         // Batch chunking
         int batch_chunk = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
@@ -315,7 +290,7 @@ void GpuConvReference::RunFwd(const Handle& handle,
         int dilz = dilations[0], dily = dilations[1], dilx = dilations[2];
 
         size_t grid_size_per_batch = ComputeGridSizePerBatch3D(
-            "fwd", is_default_layout, k, c, n, ho, hi, do_, di, group, k_per_group, c_per_group);
+            true, is_default_layout, n, do_, di, group, k_per_group, c_per_group);
 
         int batch_chunk = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
         if(batch_chunk < 1)
@@ -431,8 +406,8 @@ void GpuConvReference::RunBwd(const Handle& handle,
         int sy = strides[0], sx = strides[1];
         int dily = dilations[0], dilx = dilations[1];
 
-        size_t grid_size_per_batch = ComputeGridSizePerBatch(
-            "bwd", is_default_layout, k, c, n, ho, hi, group, k_per_group, c_per_group);
+        size_t grid_size_per_batch =
+            ComputeGridSizePerBatch(false, is_default_layout, k, c, n, ho, hi);
 
         // For BWD, the kernel has no grid-stride loop — thread_length determines gridDim.y
         size_t thread_length = 1;
@@ -502,7 +477,7 @@ void GpuConvReference::RunBwd(const Handle& handle,
         int dilz = dilations[0], dily = dilations[1], dilx = dilations[2];
 
         size_t grid_size_per_batch = ComputeGridSizePerBatch3D(
-            "bwd", is_default_layout, k, c, n, ho, hi, do_, di, group, k_per_group, c_per_group);
+            false, is_default_layout, n, do_, di, group, k_per_group, c_per_group);
 
         size_t thread_length = 1;
         if(is_default_layout)

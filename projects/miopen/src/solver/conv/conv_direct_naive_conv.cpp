@@ -848,8 +848,7 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     size_t spatial           = static_cast<size_t>(n) * ho * wo;
     size_t num_spatial_tiles = 1;
     bool can_use_wrw_atomic  = IsInputFp32(problem) || HasNative16BitFloatAtomic(ctx);
-    if(!IsAccInt32(problem) && can_use_wrw_atomic &&
-       spatial > WRW_SPATIAL_TILING_THRESHOLD)
+    if(!IsAccInt32(problem) && can_use_wrw_atomic && spatial > WRW_SPATIAL_TILING_THRESHOLD)
         num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
@@ -1010,8 +1009,7 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     size_t spatial           = static_cast<size_t>(n) * do_ * ho * wo;
     size_t num_spatial_tiles = 1;
     bool can_use_wrw_atomic  = IsInputFp32(problem) || HasNative16BitFloatAtomic(ctx);
-    if(!IsAccInt32(problem) && can_use_wrw_atomic &&
-       spatial > WRW_SPATIAL_TILING_THRESHOLD)
+    if(!IsAccInt32(problem) && can_use_wrw_atomic && spatial > WRW_SPATIAL_TILING_THRESHOLD)
         num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
