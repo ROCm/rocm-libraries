@@ -7,6 +7,8 @@ The legacy success-path JSON shape must stay backward-compatible: new
 metric fields appear only when populated, never as null sentinels.
 """
 
+import json
+
 from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
     ProviderEngineResult,
@@ -129,6 +131,62 @@ class TestProviderEngineResultFullShape:
             extra_metrics=payload,
         )
         assert pe.to_dict()["extra_metrics"] == payload
+
+    def test_extra_metrics_combined_payload_round_trips_through_json(self):
+        """Regression check: the realistic shape produced by the
+        orchestrator (PMC counters + per-kernel maps, perf with int +
+        float + None, roofline path strings, trace path strings) must
+        survive json.dumps -> json.loads unchanged. Catches any future
+        switch to a non-serialisable type (np.float32, Path, Decimal,
+        ...) in any of the four source modules."""
+        payload = {
+            "pmc": {
+                "set": "basic",
+                "arch": "gfx90a",
+                "counters_requested": ["GRBM_GUI_ACTIVE", "SQ_WAVES"],
+                "counters": {
+                    "GRBM_GUI_ACTIVE": {"sum": 12345.0, "mean_per_kernel": 4115.0},
+                    "SQ_WAVES": {"sum": 832.0, "mean_per_kernel": 104.0},
+                },
+                "per_kernel": {
+                    "conv_kernel": {"GRBM_GUI_ACTIVE": 4115.0, "SQ_WAVES": 104.0},
+                    "gemm_kernel": {"GRBM_GUI_ACTIVE": 8230.0, "SQ_WAVES": 728.0},
+                },
+                "db_path": "/tmp/profiling-output/x/results.db",
+            },
+            "perf": {
+                "cycles_user": 9999,
+                "instructions_user": 8101,
+                "ipc_user": 0.81,
+                "cycles_kernel": None,
+                "instructions_kernel": None,
+                "task_clock_ms": 123.45,
+                "context_switches": 12,
+                "page_faults": 3,
+                "kernel_perf_paranoid": 4,
+                "kernel_events_skipped_reason": "kernel.perf_event_paranoid=4 > 1",
+                "csv_path": "/tmp/profiling-output/x/perf.csv",
+            },
+            "roofline": {
+                "pdf_path": "/tmp/profiling-output/x/roofline.pdf",
+                "db_path": "/tmp/profiling-output/x/workload.db",
+                "data_type": "FP32",
+            },
+            "trace": {
+                "format": "pftrace",
+                "path": "/tmp/profiling-output/x/results.pftrace",
+            },
+        }
+        pe = ProviderEngineResult(
+            provider="miopen",
+            engine_id=1,
+            status="success",
+            extra_metrics=payload,
+        )
+        d = pe.to_dict()
+        # JSON round-trip: any non-serializable nested value would raise.
+        round_tripped = json.loads(json.dumps(d))
+        assert round_tripped["extra_metrics"] == payload
 
 
 class TestErrorAndSkipPathsUnaffected:

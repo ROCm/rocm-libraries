@@ -86,3 +86,26 @@ class TestFailureModes:
             )
         assert extra["roofline"]["returncode"] == 1
         assert "failed" in extra["roofline"]["error_tail"]
+
+    def test_success_with_missing_artifacts_records_warning(
+        self, monkeypatch, tmp_path
+    ):
+        """rocprof-compute exited 0 but produced no PDF and no DB — the
+        run is technically successful but there's nothing to point the
+        user at. We must record the gap rather than silently emit an
+        empty `roofline` slice."""
+        monkeypatch.setattr(
+            roofline_mod,
+            "resolve_rocm_tool",
+            lambda name: "/opt/rocm/bin/rocprof-compute",
+        )
+        proc = MagicMock(returncode=0, stdout="", stderr="")
+        with patch.object(roofline_mod.subprocess, "run", return_value=proc):
+            extra = roofline_mod.run(
+                inner_argv=["python"], out_dir=tmp_path, data_type="FP32"
+            )
+        rl = extra["roofline"]
+        assert rl["data_type"] == "FP32"
+        assert rl["warnings"] == ["no PDF or db produced"]
+        assert "pdf_path" not in rl
+        assert "db_path" not in rl

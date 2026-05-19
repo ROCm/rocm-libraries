@@ -150,3 +150,37 @@ def test_roofline_records_pdf_path(tmp_path):
     roof = extra["roofline"]
     if "pdf_path" in roof:
         assert Path(roof["pdf_path"]).exists()
+
+
+@pytest.mark.rocprofv3
+@pytest.mark.perf
+@pytest.mark.rocprof_compute
+def test_combined_pmc_perf_roofline_merge_into_one_extra_metrics(tmp_path):
+    """All three opt-in sources requested simultaneously must each
+    populate their own top-level key in `extra_metrics`. Regression
+    guard for two failure modes:
+
+    * The duplicate-orchestrator-call bug fixed in commit 196a0fb33ca —
+      that bug ran each replay twice but the second overwrote the first
+      via `result.extra_metrics = extra`. With three slices, an
+      overwrite would have dropped two of them.
+    * Future merge logic in `run_profiling_passes` that loses one source
+      because of dict-update collisions.
+    """
+    _require_gpu()
+    _require_binary("rocprofv3")
+    _require_binary("perf")
+    _require_binary("rocprof-compute")
+    _require_perf_paranoid_low()
+
+    data = _run_dnn_bench(["--pmc", "basic", "--perf", "--roofline"], tmp_path)
+    extra = _first_pe_extra(data)
+    for key in ("pmc", "perf", "roofline"):
+        assert key in extra, f"{key} missing from extra_metrics: {sorted(extra)}"
+
+    # At least one of (real-payload | tool-error) must be populated for
+    # each slice — a slice that's wholly empty would indicate the
+    # orchestrator skipped it without warning.
+    assert any(k in extra["pmc"] for k in ("counters", "error_tail", "skipped"))
+    assert any(k in extra["perf"] for k in ("cycles_user", "error_tail", "skipped"))
+    assert any(k in extra["roofline"] for k in ("pdf_path", "error_tail", "skipped"))

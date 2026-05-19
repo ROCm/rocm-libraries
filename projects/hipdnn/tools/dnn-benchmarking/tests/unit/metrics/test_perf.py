@@ -96,6 +96,39 @@ class TestMissingBinary:
         assert extra["perf"]["skipped"].startswith("perf binary not found")
 
 
+class TestSubprocessFailureModes:
+    """`perf stat` can fail two ways: the binary refuses to launch
+    (OSError) or it launches and exits non-zero (e.g. bad event spec).
+    Both must surface in the perf slice without crashing the run."""
+
+    def test_oserror_returns_skipped(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(perf_mod, "_read_perf_paranoid", lambda: 1)
+        monkeypatch.setattr(perf_mod.shutil, "which", lambda _: "/usr/bin/perf")
+        with patch.object(
+            perf_mod.subprocess, "run", side_effect=OSError("perf killed")
+        ):
+            extra = perf_mod.run(inner_argv=["python"], out_dir=tmp_path)
+        assert "skipped" in extra["perf"]
+        assert "perf killed" in extra["perf"]["skipped"]
+
+    def test_nonzero_exit_records_error_tail(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(perf_mod, "_read_perf_paranoid", lambda: 1)
+        monkeypatch.setattr(perf_mod.shutil, "which", lambda _: "/usr/bin/perf")
+
+        def fake_run(argv, **kwargs):
+            # Drop a CSV so partial parsing succeeds — perf.py records
+            # error_tail in addition to whatever events it could parse.
+            host_dir = Path(argv[argv.index("-o") + 1]).parent
+            host_dir.mkdir(parents=True, exist_ok=True)
+            (host_dir / "perf.csv").write_text(SAMPLE_CSV)
+            return MagicMock(returncode=2, stdout="", stderr="perf: bad event\n")
+
+        with patch.object(perf_mod.subprocess, "run", side_effect=fake_run):
+            extra = perf_mod.run(inner_argv=["python"], out_dir=tmp_path)
+        assert extra["perf"]["returncode"] == 2
+        assert "perf: bad event" in extra["perf"]["error_tail"]
+
+
 class TestIpcDerivation:
     def test_ipc_user_computed_clientside(self, monkeypatch, tmp_path):
         monkeypatch.setattr(perf_mod, "_read_perf_paranoid", lambda: 1)

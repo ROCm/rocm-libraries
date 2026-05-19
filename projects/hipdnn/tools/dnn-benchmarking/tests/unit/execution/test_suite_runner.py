@@ -14,7 +14,7 @@ from dnn_benchmarking.execution.suite_runner import (
     _get_reference_provider,
     _check_correctness,
 )
-from dnn_benchmarking.config.benchmark_config import SuiteConfig
+from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
 from dnn_benchmarking.common.exceptions import ExecutionError, UnsupportedGraphError
 from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
@@ -696,3 +696,118 @@ class TestResolveEngineName:
 
         with patch("builtins.__import__", side_effect=fake_import):
             assert _resolve_engine_name(0xABC) == "engine_0xabc"
+
+
+class TestProfilingPassInvocation:
+    """suite_runner.py:521-542 calls the profiling orchestrator after the
+    timed pass when any opt-in metric is requested. The orchestrator's
+    payload lands on result.extra_metrics; orchestrator exceptions must
+    not bubble out as engine errors."""
+
+    def _setup_mocks(self, mock_exec_cls, mock_bm_cls, mock_get_ref, mock_resolve_name):
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
+        mock_get_ref.return_value = None
+        mock_exec_cls.side_effect = _make_exec_factory(
+            engine_ids=[0], has_kernel_timings=True
+        )
+        mock_bm_cls.return_value = _make_bm_mock()
+
+    @patch("dnn_benchmarking.metrics.profiling_orchestrator.run_profiling_passes")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_orchestrator_called_once_and_payload_lands_in_extra_metrics(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+        mock_orch,
+    ):
+        self._setup_mocks(mock_exec_cls, mock_bm_cls, mock_get_ref, mock_resolve_name)
+        payload = {
+            "pmc": {"set": "basic", "counters": {"GRBM_GUI_ACTIVE": {"sum": 1.0}}}
+        }
+        mock_orch.return_value = payload
+
+        config = _make_config(metrics=MetricsConfig(tier="basic", pmc_set="basic"))
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=config,
+            handle=MagicMock(),
+        )
+
+        # The orchestrator runs exactly once per (graph, engine). Two
+        # calls here would catch the duplicate-block bug fixed in
+        # commit 196a0fb33ca.
+        assert mock_orch.call_count == 1
+        assert len(result.results) == 1
+        assert result.results[0].extra_metrics == payload
+
+    @patch("dnn_benchmarking.metrics.profiling_orchestrator.run_profiling_passes")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_orchestrator_not_called_when_no_opt_in_flag(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+        mock_orch,
+    ):
+        self._setup_mocks(mock_exec_cls, mock_bm_cls, mock_get_ref, mock_resolve_name)
+
+        # Default MetricsConfig() — basic tier, no opt-in source set.
+        config = _make_config(metrics=MetricsConfig())
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=config,
+            handle=MagicMock(),
+        )
+
+        mock_orch.assert_not_called()
+        assert result.results[0].extra_metrics is None
+
+    @patch("dnn_benchmarking.metrics.profiling_orchestrator.run_profiling_passes")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_orchestrator_exception_does_not_fail_engine(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+        mock_orch,
+        capsys,
+    ):
+        """Orchestrator failure (tool missing, parse error, anything) must
+        keep the timed pass's status='success' — the headline timing data
+        already exists; profiling is best-effort."""
+        self._setup_mocks(mock_exec_cls, mock_bm_cls, mock_get_ref, mock_resolve_name)
+        mock_orch.side_effect = RuntimeError("rocprofv3 missing")
+
+        config = _make_config(metrics=MetricsConfig(tier="basic", pmc_set="basic"))
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=config,
+            handle=MagicMock(),
+        )
+
+        # Engine still passes; extra_metrics stays None.
+        assert result.results[0].status == "success"
+        assert result.results[0].extra_metrics is None
+        # warn_once writes to stderr.
+        captured = capsys.readouterr()
+        assert "profiling pass failed" in captured.err
+        assert "rocprofv3 missing" in captured.err
