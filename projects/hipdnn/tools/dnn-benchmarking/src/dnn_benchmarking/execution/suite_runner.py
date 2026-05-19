@@ -541,36 +541,6 @@ def _run_single_provider_engine(
                         f"profiling pass failed: {e}",
                     )
 
-            # Opt-in profiling pass — runs *after* the timed pass and
-            # always-on probes, so PMC sampling / roofline replay can't
-            # pollute the headline numbers. The orchestrator handles
-            # tool-missing / paranoid / parse failures internally and
-            # never raises; we still wrap defensively because anything
-            # bubbling out would otherwise mark a successful timed run
-            # as failed.
-            if config.metrics.opt_in_pass_requested:
-                try:
-                    from ..metrics.profiling_orchestrator import (
-                        run_profiling_passes,
-                    )
-
-                    extra = run_profiling_passes(
-                        graph_path=graph_path,
-                        engine_id=engine_id,
-                        seed=config.seed,
-                        warmup_iters=config.warmup_iters,
-                        benchmark_iters=config.benchmark_iters,
-                        metrics_config=config.metrics,
-                        plugin_path=config.plugin_path,
-                    )
-                    if extra:
-                        result.extra_metrics = extra
-                except Exception as e:
-                    warn_once(
-                        "profiling_orchestrator",
-                        f"profiling pass failed: {e}",
-                    )
-
             if ref_provider is not None:
                 result.correctness = _check_correctness(
                     bm, tensor_infos, graph_json, ref_provider, config
