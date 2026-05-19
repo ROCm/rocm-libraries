@@ -44,7 +44,7 @@ static bool DebugFlag = false;
 static std::unordered_set<std::string> DebugTypes;
 
 bool isDebugOnlyEnabled(const char* TYPE) {
-    return DebugFlag && DebugTypes.count(TYPE);
+    return DebugFlag && DebugTypes.contains(TYPE);
 }
 
 void PassManagerDebugConfig::addDebugOnly(const std::string& passName) {
@@ -93,11 +93,11 @@ void PassManagerDebugConfig::setDumpStreamAfter(std::shared_ptr<std::ostream> st
 }
 
 bool PassManagerDebugConfig::shouldPrintBefore(const std::string& passName) const {
-    return printBeforeAll || onlyPrintBefore.count(passName);
+    return printBeforeAll || onlyPrintBefore.contains(passName);
 }
 
 bool PassManagerDebugConfig::shouldPrintAfter(const std::string& passName) const {
-    return printAfterAll || onlyPrintAfter.count(passName);
+    return printAfterAll || onlyPrintAfter.contains(passName);
 }
 
 std::ostream& PassManagerDebugConfig::getOutputStreamInBefore() const {
