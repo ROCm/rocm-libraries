@@ -47,20 +47,20 @@ constexpr auto hipsparse_datatype2string(hipDataType type)
     {
     case HIP_R_8I:
         return "i8_r";
-    case HIP_R_16F:
-        return "f16_r";
-    case HIP_R_16BF:
-        return "bf16_r";
+    case HIP_R_32I:
+        return "i32_r";
     case HIP_R_32F:
         return "f32_r";
     case HIP_R_64F:
         return "f64_r";
-    case HIP_R_32I:
-        return "i32_r";
     case HIP_C_32F:
         return "f32_c";
     case HIP_C_64F:
         return "f64_c";
+    case HIP_R_16F:
+        return "f16_r";
+    case HIP_R_16BF:
+        return "bf16_r";
     default:
         return "invalid";
     }

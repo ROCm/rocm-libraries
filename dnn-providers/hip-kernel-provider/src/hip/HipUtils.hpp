@@ -16,7 +16,7 @@ namespace hip_kernel_provider
 #define HIP_CHECK(call)                                                        \
     do                                                                         \
     {                                                                          \
-        hipError_t status = (call);                                            \
+        const hipError_t status = (call);                                      \
         if(status != hipSuccess)                                               \
         {                                                                      \
             throw hipdnn_plugin_sdk::HipdnnPluginException(                    \
@@ -29,7 +29,7 @@ namespace hip_kernel_provider
 #define HIPRTC_CHECK(call)                                                        \
     do                                                                            \
     {                                                                             \
-        hiprtcResult status = (call);                                             \
+        const hiprtcResult status = (call);                                       \
         if(status != HIPRTC_SUCCESS)                                              \
         {                                                                         \
             throw hipdnn_plugin_sdk::HipdnnPluginException(                       \

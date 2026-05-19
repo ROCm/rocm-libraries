@@ -27,6 +27,7 @@ for _var, _default in _LOCAL_CACHE_DEFAULTS.items():
 from ..common.exceptions import GraphLoadError
 from ..reporting.reporter import Reporter
 from .ab_runner_cli import run_ab_cli
+from .internal_profiling import run_internal_profiling
 from .parser import create_parser
 from .pytorch_runner_cli import run_pytorch_cli
 from .suite_runner_cli import run_suite_cli
@@ -63,6 +64,12 @@ def main() -> int:
     parser = create_parser()
     args = parser.parse_args()
     reporter = Reporter()
+
+    # Hidden re-exec sub-mode for the profiling orchestrator. Skips
+    # gpu_check / Reporter / engine discovery and runs a single
+    # (graph, engine) workload as quietly as possible.
+    if getattr(args, "internal_profiling_run", False):
+        return run_internal_profiling(args)
 
     if not gpu_is_available():
         reporter.print_error(
