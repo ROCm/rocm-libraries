@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ._diagnostic import warn_once
-from ._arch import detect_arch
+from .arch import detect_arch
 from ._tool_resolver import resolve_rocm_tool
 
 PMC_SETS: Dict[str, Dict[str, List[str]]] = {

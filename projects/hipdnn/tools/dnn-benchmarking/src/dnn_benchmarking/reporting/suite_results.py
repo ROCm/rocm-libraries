@@ -327,6 +327,9 @@ class SuiteMetadata:
         error_combinations: Combinations that errored during execution.
         rocm_version: ROCm version string.
         gpu_model: GPU model name.
+        gpu_arch: GPU gfx target (e.g. "gfx90a", "gfx942"). Useful for
+            keying arch-specific PMC counter sets when analysing the
+            JSON downstream. "fallback" when detection failed.
         python_version: Python version string.
         hipdnn_version: hipDNN version string.
         cpu_model: CPU model string from /proc/cpuinfo.
@@ -359,6 +362,7 @@ class SuiteMetadata:
     error_combinations: int
     rocm_version: Optional[str] = None
     gpu_model: Optional[str] = None
+    gpu_arch: Optional[str] = None
     python_version: Optional[str] = None
     hipdnn_version: Optional[str] = None
     cpu_model: Optional[str] = None
@@ -388,6 +392,7 @@ class SuiteMetadata:
             "error_combinations": self.error_combinations,
             "rocm_version": self.rocm_version,
             "gpu_model": self.gpu_model,
+            "gpu_arch": self.gpu_arch,
             "python_version": self.python_version,
             "hipdnn_version": self.hipdnn_version,
             "cpu_model": self.cpu_model,
@@ -468,6 +473,7 @@ class SuiteResult:
             error_combinations=total_error,
             rocm_version=env_info.get("rocm_version"),
             gpu_model=env_info.get("gpu_model"),
+            gpu_arch=env_info.get("gpu_arch"),
             python_version=env_info.get("python_version"),
             hipdnn_version=env_info.get("hipdnn_version"),
             cpu_model=env_info.get("cpu_model"),
@@ -552,9 +558,21 @@ def collect_environment_info() -> Dict[str, Any]:
     except ImportError:
         pass
 
+    # gfx target via the same torch -> rocminfo -> fallback chain used
+    # by metrics.rocprof_pmc, so the JSON output and the PMC keying
+    # agree on what arch this run targeted.
+    gpu_arch: Optional[str] = None
+    try:
+        from ..metrics.arch import detect_arch
+
+        gpu_arch = detect_arch()
+    except Exception:
+        pass
+
     info: Dict[str, Any] = {
         "rocm_version": rocm_version,
         "gpu_model": gpu_model,
+        "gpu_arch": gpu_arch,
         "python_version": python_version,
         "hipdnn_version": hipdnn_version,
     }

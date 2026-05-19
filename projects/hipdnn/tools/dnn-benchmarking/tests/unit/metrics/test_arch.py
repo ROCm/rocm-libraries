@@ -5,8 +5,8 @@
 
 from unittest.mock import MagicMock, patch
 
-from dnn_benchmarking.metrics import _arch
-from dnn_benchmarking.metrics._arch import detect_arch
+from dnn_benchmarking.metrics import arch as _arch
+from dnn_benchmarking.metrics.arch import detect_arch
 
 
 class TestDetectArchTorchPath:
