@@ -209,4 +209,3 @@ The tests can be executed as follows:
 
    cd rocm-libraries/projects/rocrand/python/rocrand
    python tests/rocrand_test.py
-
