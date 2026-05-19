@@ -162,7 +162,7 @@ uint32_t getBytesPerGlobalLoad(const StinkyInstruction& inst) {
             return 16;
 
         default:
-            assert("Calling getBytesPerGlobalLoad but input is not GlobalRead");
+            assert(false && "Calling getBytesPerGlobalLoad but input is not GlobalRead");
             return 0;
     }
 }

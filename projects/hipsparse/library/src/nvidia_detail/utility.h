@@ -755,7 +755,30 @@ namespace hipsparse
     }
 #endif
 
-#if(CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 13001)
+    inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPMV_ALG_DEFAULT:
+            return CUSPARSE_SPMV_ALG_DEFAULT;
+        case HIPSPARSE_SPMV_COO_ALG1:
+            return CUSPARSE_SPMV_COO_ALG1;
+        case HIPSPARSE_SPMV_COO_ALG2:
+            return CUSPARSE_SPMV_COO_ALG2;
+        case HIPSPARSE_SPMV_CSR_ALG1:
+            return CUSPARSE_SPMV_CSR_ALG1;
+        case HIPSPARSE_SPMV_CSR_ALG2:
+            return CUSPARSE_SPMV_CSR_ALG2;
+        case HIPSPARSE_SPMV_SELL_ALG1:
+            return CUSPARSE_SPMV_SELL_ALG1;
+        case HIPSPARSE_SPMV_BSR_ALG1:
+            return CUSPARSE_SPMV_BSR_ALG1;
+        default:
+            throw "Non existant hipsparseSpMVAlg_t";
+        }
+    }
+#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)

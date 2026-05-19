@@ -32,8 +32,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace stinkytofu {
-// Helper function to format vector as [a,b,c]
-inline std::string vectorToString(const std::vector<int>& vec) {
+static std::string vectorToString(const std::vector<int>& vec) {
     std::string result = "[";
     for (size_t i = 0; i < vec.size(); ++i) {
         result += std::to_string(vec[i]);
@@ -44,7 +43,6 @@ inline std::string vectorToString(const std::vector<int>& vec) {
     result += "]";
     return result;
 }
-
 }  // namespace stinkytofu
 
 namespace stinkytofu {
@@ -63,7 +61,8 @@ static void emitDirective(std::ostream& os, const AsmDirective& directive,
 static void emitBasicBlock(std::ostream& os, const BasicBlock& bb, const AsmEmitterOptions& options,
                            StinkyAsmEmitter* emitter);
 
-// Stream operators for instruction modifiers
+// NOLINTBEGIN(misc-use-internal-linkage)
+// Stream operators for instruction modifiers — must remain in namespace stinkytofu for ADL.
 inline std::ostream& operator<<(std::ostream& os, const SWaitTensorCntData& waitTensorCntData) {
     os << "tlcnt=" << (int)waitTensorCntData.tlcnt;
     return os;
@@ -336,6 +335,7 @@ inline std::ostream& operator<<(std::ostream& os, const VOP3PModifiers& vop3pMod
     }
     return os;
 }
+// NOLINTEND(misc-use-internal-linkage)
 
 static void emitRegister(std::ostream& os, const StinkyRegister& reg,
                          const AsmEmitterOptions& options) {
@@ -574,7 +574,7 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
 
         // Check VOP3 modifiers for this source operand
         if (vop3Mod) {
-            switch (nonSkippedIndex) {
+            switch (nonSkippedIndex) {  // NOLINT(bugprone-switch-missing-default-case)
                 case 0:
                     needsNeg = vop3Mod->neg_src0;
                     needsAbs = vop3Mod->abs_src0;

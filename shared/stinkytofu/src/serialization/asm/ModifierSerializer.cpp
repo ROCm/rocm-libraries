@@ -452,7 +452,7 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         mod.reuseB = getBool(fields, "reuseB", false);
 
         // Neg bits
-        if (fields.count("negLo")) {
+        if (fields.contains("negLo")) {
             auto loVec = getIntVector(fields, "negLo");
             auto hiVec = getIntVector(fields, "negHi");
             mod.negBits.numSrcs =
@@ -466,11 +466,11 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         inst->addModifier(mod);
     } else if (attrKey == "mod.matrix_fmt") {
         MatrixFmtModifiers mod;
-        if (fields.count("fmtA")) mod.fmtA = parseMatrixFmt(getStr(fields, "fmtA"));
-        if (fields.count("fmtB")) mod.fmtB = parseMatrixFmt(getStr(fields, "fmtB"));
-        if (fields.count("scaleFmtA"))
+        if (fields.contains("fmtA")) mod.fmtA = parseMatrixFmt(getStr(fields, "fmtA"));
+        if (fields.contains("fmtB")) mod.fmtB = parseMatrixFmt(getStr(fields, "fmtB"));
+        if (fields.contains("scaleFmtA"))
             mod.scaleFmtA = parseMatrixScaleFmt(getStr(fields, "scaleFmtA"));
-        if (fields.count("scaleFmtB"))
+        if (fields.contains("scaleFmtB"))
             mod.scaleFmtB = parseMatrixScaleFmt(getStr(fields, "scaleFmtB"));
         inst->addModifier(mod);
     } else if (attrKey == "mod.delayalu") {
@@ -480,8 +480,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             if (s == "TRANS") return SDelayAluData::InstType::TRANS;
             return SDelayAluData::InstType::NO_DEP;
         };
-        bool hasInstId1 = getBool(fields, "hasInstId1", false) || fields.count("instid1Type") ||
-                          fields.count("instSkip") || fields.count("instid1Distance");
+        bool hasInstId1 = getBool(fields, "hasInstId1", false) || fields.contains("instid1Type") ||
+                          fields.contains("instSkip") || fields.contains("instid1Distance");
         if (hasInstId1) {
             inst->addModifier(
                 SDelayAluData(toInstType(getStr(fields, "instid0Type", "NO_DEP")),
@@ -518,7 +518,7 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                                            static_cast<uint8_t>(getInt(fields, "fi", 0))));
         }
     } else if (attrKey == "mod.memtoken") {
-        if (fields.count("tokens")) {
+        if (fields.contains("tokens")) {
             inst->addModifier(MemTokenData(getIntVector(fields, "tokens")));
         }
     }
