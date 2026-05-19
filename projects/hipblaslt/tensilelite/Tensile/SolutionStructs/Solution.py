@@ -2661,12 +2661,12 @@ class Solution(collections.abc.Mapping):
 
       if state["LocalReadVectorWidthA"] == -1:
         state["LocalReadVectorWidthA"] = state["LocalReadVectorWidth"]
-        if (not state["enableLDSTrA"]) and (state["ProblemType"]["Sparse"] == 1) and (state["LocalReadVectorWidthA"] != -1):
-          state["LocalReadVectorWidthA"] //= 2
+        if (not state["enableLDSTrA"]) and (state["ProblemType"]["Sparse"] == 1):
+          state["LocalReadVectorWidthA"] = min(state["LocalReadVectorWidthA"], state["MIInputPerThreadA"])
       if state["LocalReadVectorWidthB"] == -1:
         state["LocalReadVectorWidthB"] = state["LocalReadVectorWidth"]
-        if (not state["enableLDSTrB"]) and (state["ProblemType"]["Sparse"] == 2) and (state["LocalReadVectorWidthB"] != -1):
-          state["LocalReadVectorWidthB"] //= 2
+        if (not state["enableLDSTrB"]) and (state["ProblemType"]["Sparse"] == 2):
+          state["LocalReadVectorWidthB"] = min(state["LocalReadVectorWidthB"], state["MIInputPerThreadB"])
 
       def calLRVW():
         # Default LocalReadVectorWidth
@@ -2674,8 +2674,6 @@ class Solution(collections.abc.Mapping):
           # Default LocalReadVectorWidth
           autoLRVWA = False
           maxNumDsLoadBytesA = Solution.MAX_NUM_DS_LOAD_BYTES
-          if (not state["enableLDSTrA"]) and (state["ProblemType"]["Sparse"] == 1):
-            maxNumDsLoadBytesA //= 2
           maxLRVWA = int(maxNumDsLoadBytesA // state["ProblemType"]["MacDataTypeA"].numBytes())
           # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
           if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeA"].numBytes() == 0.75:
@@ -2711,8 +2709,6 @@ class Solution(collections.abc.Mapping):
           # Default LocalReadVectorWidth
           autoLRVWB = False
           maxNumDsLoadBytesB = Solution.MAX_NUM_DS_LOAD_BYTES
-          if (not state["enableLDSTrB"]) and (state["ProblemType"]["Sparse"] == 2):
-            maxNumDsLoadBytesB //= 2
           maxLRVWB = int(maxNumDsLoadBytesB // state["ProblemType"]["MacDataTypeB"].numBytes())
           # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
           if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeB"].numBytes() == 0.75:
@@ -2774,12 +2770,8 @@ class Solution(collections.abc.Mapping):
             wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"], 1)
             if wlrA > wlrB:
               state["LocalReadVectorWidthA"] = wlrB * state["MIInputPerThreadA"]
-              if state["ProblemType"]["Sparse"] == 1:
-                state["LocalReadVectorWidthA"] //= 2
             if wlrA < wlrB:
               state["LocalReadVectorWidthB"] = wlrA * state["MIInputPerThreadB"]
-              if state["ProblemType"]["Sparse"] == 2:
-                state["LocalReadVectorWidthB"] //= 2
 
           if state["ProblemType"]["Sparse"] == 1:
             state["LocalReadVectorWidthMetadata"] = state["LocalReadVectorWidthA"]
@@ -2872,12 +2864,8 @@ class Solution(collections.abc.Mapping):
             wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"], 1)
             if wlrA > wlrB:
               state["LocalReadVectorWidthA"] = wlrB * state["MIInputPerThreadA"]
-              if state["ProblemType"]["Sparse"] == 1:
-                state["LocalReadVectorWidthA"] //= 2
             if wlrA < wlrB:
               state["LocalReadVectorWidthB"] = wlrA * state["MIInputPerThreadB"]
-              if state["ProblemType"]["Sparse"] == 2:
-                state["LocalReadVectorWidthB"] //= 2
 
           if state["ProblemType"]["Sparse"] == 1:
             state["LocalReadVectorWidthMetadata"] = state["LocalReadVectorWidthA"]
