@@ -32,7 +32,7 @@ set(COMMON_TEST_HEADER_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
 set_property(GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS "")
 
-function(add_relative_test test_name test_target)
+function(add_relative_test test_name test_target resource_group)
     get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
     if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
         set(EXE_PATH ".")
@@ -57,6 +57,8 @@ function(add_relative_test test_name test_target)
       )
     endif()
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
+    # Set the resource group for the test. This must correspond to a GPU resource present in resources.json.
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${test_name} PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
 endfunction()
 
 function(add_hip_test TEST_NAME TEST_SOURCES)
@@ -116,7 +118,7 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
   )
 
-  add_relative_test(${TEST_NAME} ${TEST_TARGET})
+  add_relative_test(${TEST_NAME} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
   if (WIN32 AND NOT DEFINED DLLS_COPIED)
     set(DLLS_COPIED "YES")
     set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
@@ -157,3 +159,18 @@ if (ROCPRIM_INSTALL)
       RENAME "CTestTestfile.cmake"
   )
 endif()
+
+# Build the executable used for generating the resource spec file.
+add_executable(generate_resource_spec ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
+set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+target_link_libraries(generate_resource_spec PRIVATE hip::host)
+
+# Install the executable using the standard install command instead of rocm_install
+# since we want to put it in a custom DESTINATION (rocm_install does not support
+# the DESTINATION option for TARGETS).
+set_property(TARGET generate_resource_spec APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
+install(
+    TARGETS generate_resource_spec
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+    COMPONENT tests
+)

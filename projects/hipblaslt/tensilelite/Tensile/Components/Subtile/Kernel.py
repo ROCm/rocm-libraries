@@ -314,10 +314,14 @@ AB_B16_TLU1_16x1 = ABTilePair(
 
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
+_MXS_B8 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp8', 'bf8'))
+
 # GR: subtileShape=None -> derived from kernel as (mt_mma, du_scale) to span entire macro tile
 # LR: subtileShape=(2,2) -> 2 scale MMA tiles in M x 2 in K per local read
 MXSA_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4, loadWidth=4))
 MXSB_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4, loadWidth=4))
+MXSA_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
+MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
@@ -328,6 +332,8 @@ def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   dtype = kernel["ProblemType"][f"DataType{data_tc}"]
   if dtype.is6bitFloat() or dtype.isFloat4():
     return MXSA_B4 if tc == 'MXSA' else MXSB_B4
+  if dtype.is8bitFloat():
+    return MXSA_B8 if tc == 'MXSA' else MXSB_B8
   raise NotImplementedError(f"selectMXScaleGeometry: unsupported dtype {dtype} for tc={tc}")
 
 
