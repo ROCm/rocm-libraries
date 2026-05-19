@@ -242,7 +242,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  <table>
 *  <caption id="spmm_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithms
-*  <tr><td>CUSPARSE_SPMM_BSR_ALG1</td>
+*  <tr><td>HIPSPARSE_SPMM_BSR_ALG1</td>
 *  </table>
 *
 *  Users can also pass \ref HIPSPARSE_SPMM_ALG_DEFAULT, which will automatically select from the algorithms listed above

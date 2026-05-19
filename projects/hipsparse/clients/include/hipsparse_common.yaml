@@ -152,6 +152,7 @@ Datatypes:
         HIPSPARSE_SPMM_CSR_ALG2: 6
         HIPSPARSE_SPMM_CSR_ALG3: 12
         HIPSPARSE_SPMM_BLOCKED_ELL_ALG1: 13
+        HIPSPARSE_SPMM_BSR_ALG1: 14
   - hipsparseSPGEMMAlg_t:
       bases: [c_int ]
       attr:

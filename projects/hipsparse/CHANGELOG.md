@@ -9,6 +9,7 @@ Documentation for hipSPARSE is available at
 ### Added
 * Add `hipsparseCreateBsr` and `hipsparseCreateConstBsr` in order to enable BSR format support in generic routines.
 * Add BSR format support to `hipsparseSpMV`.
+* Add BSR format support to `hipsparseSpMM` via the new `HIPSPARSE_SPMM_BSR_ALG1` algorithm.
 
 ## hipSPARSE 4.5.0 for ROCm 7.12.0
 
