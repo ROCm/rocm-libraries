@@ -171,8 +171,8 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "s.setprio": ("declare void @llvm.amdgcn.s.setprio(i16 immarg)"),
     "s.waitcnt": ("declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"),
     "make.buffer.rsrc.p1": (
-        "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
-        "ptr addrspace(1) nocapture readnone, i16, i32, i32)"
+        "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+        "ptr addrspace(1) readnone, i16, i64, i32)"
     ),
     "raw.ptr.buffer.load.lds": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.load.lds("
@@ -1504,14 +1504,17 @@ class _Lowerer:
         """
         self._need("make.buffer.rsrc.p1")
         ptr, num_bytes = op.operands
-        # CK Tile uses 0x00027000 — the buffer rsrc DWORD3 flag word
-        # that gives "32-bit-uint, structured buffer, bounds-checked".
+        # num_bytes is i32 in the IR; zero-extend to i64 for the intrinsic.
+        zext_name = f"{op.result.name}.zext"
+        self._current().emit(
+            f"  {zext_name} = zext i32 {self._operand(num_bytes)} to i64"
+        )
         self._current().emit(
             f"  {op.result.name} = call ptr addrspace(8) "
-            f"@llvm.amdgcn.make.buffer.rsrc.p1("
+            f"@llvm.amdgcn.make.buffer.rsrc.p8.p1("
             f"ptr addrspace(1) {self._operand(ptr)}, "
             f"i16 0, "
-            f"i32 {self._operand(num_bytes)}, "
+            f"i64 {zext_name}, "
             f"i32 159744)"  # 0x00027000
         )
 
