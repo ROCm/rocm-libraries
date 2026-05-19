@@ -371,9 +371,27 @@ class InstructionEmitter:
 
         module = Module()
         workKVgpr = writer.vgprPool.checkOut(1, f"mask_k_work_k{subIterK}")
-        vMask = writer.vgprPool.checkOut(1, f"mask_k_vmask_k{subIterK}") if isBF16 else None
+
+        def _unique_ids(key):
+            m = source.vgpr_tile_map.get(key, [{}])[0]
+            return sorted(set(m.values()))
+
+        # For BF16: all A/B tiles in this subIterK have the same vgprs-per-lane count
+        # and the same K layout across vgprs, so the i-th vgpr of every tile gets the
+        # same mask. Compute one mask per i and reuse across all tiles.
+        vgprPerInUnroll = 0
+        if isBF16:
+            for ids, tilesDict in ((_unique_ids('A'), self.vgprTilesA),
+                                   (_unique_ids('B'), self.vgprTilesB)):
+                if ids:
+                    vgprPerInUnroll = len(list(tilesDict[ids[0]]))
+                    break
+
         vDiff = writer.vgprPool.checkOut(1, f"mask_k_vdiff_k{subIterK}") if isBF16 else None
         vNegOne = writer.vgprPool.checkOut(1, f"mask_k_vneg1_k{subIterK}") if isBF16 else None
+        maskVgprs = [writer.vgprPool.checkOut(1, f"mask_k_msk{i}_k{subIterK}")
+                     for i in range(vgprPerInUnroll)]
+
         with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
 
@@ -404,9 +422,30 @@ class InstructionEmitter:
                     dst=vgpr(vNegOne), src=-1,
                     comment="BF16 full-mask vgpr (constant-bus dodge)"))
 
-            def _unique_ids(key):
-                m = source.vgpr_tile_map.get(key, [{}])[0]
-                return sorted(set(m.values()))
+                # Compute diff = rem - laneK once; per-i mask is derived by comparing
+                # the shared diff against (2*i+1, 2*i+2) — no per-i diff recomputation.
+                module.add(VSubI32(
+                    dst=vgpr(vDiff), src0=sgpr(loopCounterName), src1=vgpr(workKVgpr),
+                    comment="diff = rem - laneK (shared across all i)"))
+                for i in range(vgprPerInUnroll):
+                    kOff = i * kStride
+                    module.add(VCmpLtI32(
+                        dst=sgpr(maskSgpr, laneSGPRCount),
+                        src0=vgpr(vDiff), src1=kOff + 2,
+                        comment=f"diff < {kOff+2} ? (vgpr {i} has < 2 valid K)"))
+                    module.add(VCndMaskB32(
+                        dst=vgpr(maskVgprs[i]),
+                        src0=vgpr(vNegOne), src1=vgpr(self._tail_halfMaskVgpr),
+                        src2=sgpr(maskSgpr, laneSGPRCount),
+                        comment=f"mask[{i}] = (diff<{kOff+2}) ? halfKeep : full"))
+                    module.add(VCmpLtI32(
+                        dst=sgpr(maskSgpr, laneSGPRCount),
+                        src0=vgpr(vDiff), src1=kOff + 1,
+                        comment=f"diff < {kOff+1} ? (vgpr {i} has 0 valid K)"))
+                    module.add(VCndMaskB32(
+                        dst=vgpr(maskVgprs[i]), src0=vgpr(maskVgprs[i]), src1=0,
+                        src2=sgpr(maskSgpr, laneSGPRCount),
+                        comment=f"mask[{i}] = (diff<{kOff+1}) ? 0 : prev"))
 
             def _mask_all_whole(tile_vgprs, label):
                 for v in tile_vgprs:
@@ -417,41 +456,9 @@ class InstructionEmitter:
 
             def _mask_all_partial(tile_vgprs, label):
                 for i, v in enumerate(tile_vgprs):
-                    kOff = i * kStride
-                    # vDiff = rem - (laneK + kOff)
-                    if kOff:
-                        module.add(VAddU32(
-                            dst=vgpr(vDiff), src0=vgpr(workKVgpr), src1=kOff,
-                            comment=f"vgprK0 = laneK + {kOff}"))
-                        module.add(VSubI32(
-                            dst=vgpr(vDiff), src0=sgpr(loopCounterName), src1=vgpr(vDiff),
-                            comment=f"diff = rem - vgprK0 ({label}[{i}])"))
-                    else:
-                        module.add(VSubI32(
-                            dst=vgpr(vDiff), src0=sgpr(loopCounterName), src1=vgpr(workKVgpr),
-                            comment=f"diff = rem - laneK ({label}[{i}])"))
-                    # mask = (diff < 2) ? sHalf : 0xFFFFFFFF
-                    module.add(VCmpLtI32(
-                        dst=sgpr(maskSgpr, laneSGPRCount),
-                        src0=vgpr(vDiff), src1=2,
-                        comment="diff < 2 ?"))
-                    module.add(VCndMaskB32(
-                        dst=vgpr(vMask),
-                        src0=vgpr(vNegOne), src1=vgpr(self._tail_halfMaskVgpr),
-                        src2=sgpr(maskSgpr, laneSGPRCount),
-                        comment="mask = (diff<2) ? halfKeep : full"))
-                    # if diff < 1: mask = 0
-                    module.add(VCmpLtI32(
-                        dst=sgpr(maskSgpr, laneSGPRCount),
-                        src0=vgpr(vDiff), src1=1,
-                        comment="diff < 1 ?"))
-                    module.add(VCndMaskB32(
-                        dst=vgpr(vMask), src0=vgpr(vMask), src1=0,
-                        src2=sgpr(maskSgpr, laneSGPRCount),
-                        comment="mask = (diff<1) ? 0 : prev"))
                     module.add(VAndB32(
-                        dst=vgpr(v), src0=vgpr(v), src1=vgpr(vMask),
-                        comment=f"mask {label}[{i}] (K=[{kOff},{kOff+kStride-1}])"))
+                        dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
+                        comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
 
             mask_ab = _mask_all_partial if isBF16 else _mask_all_whole
             for tid in _unique_ids('A'):
@@ -472,8 +479,8 @@ class InstructionEmitter:
                     _mask_all_whole(list(self.vgprTilesSB[tid]), "MXSB")
 
         writer.vgprPool.checkIn(workKVgpr)
-        if vMask is not None:
-            writer.vgprPool.checkIn(vMask)
+        for m in maskVgprs:
+            writer.vgprPool.checkIn(m)
         if vDiff is not None:
             writer.vgprPool.checkIn(vDiff)
         if vNegOne is not None:
