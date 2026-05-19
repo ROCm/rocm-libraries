@@ -48,6 +48,7 @@ jobs:
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt
+          pip install hatchling
 
       - name: Patch rocm-libraries
         run: |

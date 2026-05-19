@@ -11,7 +11,9 @@ import sys
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build the hipDNN frontend Python wheel.")
+    parser = argparse.ArgumentParser(
+        description="Build the hipDNN frontend Python wheel."
+    )
     parser.add_argument(
         "--source-dir",
         type=Path,
