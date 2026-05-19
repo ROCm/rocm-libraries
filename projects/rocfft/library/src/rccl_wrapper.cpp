@@ -205,7 +205,7 @@ rocfft_rccl_group_t::~rocfft_rccl_group_t()
     ncclGroupEnd();
 }
 
-bool rocfft_rccl_comm_t::alltoall(const void*       sendbuf,
+void rocfft_rccl_comm_t::alltoall(const void*       sendbuf,
                                   void*             recvbuf,
                                   size_t            count,
                                   int               device_id,
@@ -213,10 +213,7 @@ bool rocfft_rccl_comm_t::alltoall(const void*       sendbuf,
                                   rocfft_precision  precision,
                                   rocfft_array_type array_type)
 {
-    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
-    if(!comm)
-        return false;
-
+    ncclComm_t comm          = static_cast<ncclComm_t>(get_comm(device_id));
     auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
 
     ncclResult_t result = ncclAllToAll(sendbuf, recvbuf, count * multiplier, dtype, comm, stream);
@@ -224,13 +221,13 @@ bool rocfft_rccl_comm_t::alltoall(const void*       sendbuf,
     if(result != ncclSuccess)
     {
         log_trace(__func__, "ncclAllToAll failed", result);
-        return false;
+        throw rocfft_rccl_exception_t("ncclAllToAll failed on device "
+                                      + std::to_string(device_id) + ": "
+                                      + ncclGetErrorString(result));
     }
-
-    return true;
 }
 
-bool rocfft_rccl_comm_t::send(const void*       sendbuf,
+void rocfft_rccl_comm_t::send(const void*       sendbuf,
                               size_t            count,
                               int               peer_rank,
                               int               device_id,
@@ -238,10 +235,7 @@ bool rocfft_rccl_comm_t::send(const void*       sendbuf,
                               rocfft_precision  precision,
                               rocfft_array_type array_type)
 {
-    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
-    if(!comm)
-        return false;
-
+    ncclComm_t comm          = static_cast<ncclComm_t>(get_comm(device_id));
     auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
 
     ncclResult_t result = ncclSend(sendbuf, count * multiplier, dtype, peer_rank, comm, stream);
@@ -249,13 +243,13 @@ bool rocfft_rccl_comm_t::send(const void*       sendbuf,
     if(result != ncclSuccess)
     {
         log_trace(__func__, "ncclSend failed", result);
-        return false;
+        throw rocfft_rccl_exception_t("ncclSend failed on device " + std::to_string(device_id)
+                                      + " to peer " + std::to_string(peer_rank) + ": "
+                                      + ncclGetErrorString(result));
     }
-
-    return true;
 }
 
-bool rocfft_rccl_comm_t::recv(void*             recvbuf,
+void rocfft_rccl_comm_t::recv(void*             recvbuf,
                               size_t            count,
                               int               peer_rank,
                               int               device_id,
@@ -263,10 +257,7 @@ bool rocfft_rccl_comm_t::recv(void*             recvbuf,
                               rocfft_precision  precision,
                               rocfft_array_type array_type)
 {
-    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
-    if(!comm)
-        return false;
-
+    ncclComm_t comm          = static_cast<ncclComm_t>(get_comm(device_id));
     auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
 
     ncclResult_t result = ncclRecv(recvbuf, count * multiplier, dtype, peer_rank, comm, stream);
@@ -274,10 +265,10 @@ bool rocfft_rccl_comm_t::recv(void*             recvbuf,
     if(result != ncclSuccess)
     {
         log_trace(__func__, "ncclRecv failed", result);
-        return false;
+        throw rocfft_rccl_exception_t("ncclRecv failed on device " + std::to_string(device_id)
+                                      + " from peer " + std::to_string(peer_rank) + ": "
+                                      + ncclGetErrorString(result));
     }
-
-    return true;
 }
 
 #endif // ROCFFT_RCCL_ENABLE

@@ -717,19 +717,13 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
             {
                 rocfft_scoped_device dev(loc.device);
 
-                bool success = rccl.alltoall(send_ptrs[i],
-                                             recv_ptrs[i],
-                                             count_per_rank,
-                                             loc.device,
-                                             streams[stream_idx],
-                                             precision,
-                                             arrayType);
-
-                if(!success)
-                {
-                    throw std::runtime_error("RCCL AllToAll failed on device "
-                                             + std::to_string(loc.device));
-                }
+                rccl.alltoall(send_ptrs[i],
+                              recv_ptrs[i],
+                              count_per_rank,
+                              loc.device,
+                              streams[stream_idx],
+                              precision,
+                              arrayType);
 
                 ++stream_idx;
             }
@@ -812,33 +806,25 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                                         precision,
                                         arrayType);
 
-            bool success;
             if(t.is_send)
             {
-                success = rccl.send(data_ptr,
-                                    t.count,
-                                    t.peer_rank,
-                                    t.local_location.device,
-                                    t.stream,
-                                    precision,
-                                    arrayType);
+                rccl.send(data_ptr,
+                          t.count,
+                          t.peer_rank,
+                          t.local_location.device,
+                          t.stream,
+                          precision,
+                          arrayType);
             }
             else
             {
-                success = rccl.recv(data_ptr,
-                                    t.count,
-                                    t.peer_rank,
-                                    t.local_location.device,
-                                    t.stream,
-                                    precision,
-                                    arrayType);
-            }
-
-            if(!success)
-            {
-                throw std::runtime_error("RCCL " + std::string(t.is_send ? "Send" : "Recv")
-                                         + " failed on device "
-                                         + std::to_string(t.local_location.device));
+                rccl.recv(data_ptr,
+                          t.count,
+                          t.peer_rank,
+                          t.local_location.device,
+                          t.stream,
+                          precision,
+                          arrayType);
             }
         }
     }

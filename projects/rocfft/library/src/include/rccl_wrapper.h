@@ -30,10 +30,20 @@
 #include <hip/hip_runtime.h>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <vector>
 
 #include <rccl/rccl.h>
 #include <rocfft/rocfft.h>
+
+// thrown by rocfft_rccl_comm_t communication primitives when the
+// underlying RCCL call fails.  the distinct type lets callers
+// recognize and handle RCCL failures specifically while still
+// being catchable via std::runtime_error / std::exception.
+struct rocfft_rccl_exception_t : std::runtime_error
+{
+    using std::runtime_error::runtime_error;
+};
 
 // value-semantic handle to an RCCL communicator set for single-process
 // multi-GPU transfers.
@@ -79,7 +89,8 @@ public:
     // logical rocFFT type described by (precision, array_type); the
     // wrapper internally maps this to the matching ncclDataType_t and
     // adjusts the element count for complex/planar layouts.
-    bool alltoall(const void*       sendbuf,
+    // throws rocfft_rccl_exception_t on RCCL failure.
+    void alltoall(const void*       sendbuf,
                   void*             recvbuf,
                   size_t            count,
                   int               device_id,
@@ -87,8 +98,8 @@ public:
                   rocfft_precision  precision,
                   rocfft_array_type array_type);
 
-    // point-to-point send
-    bool send(const void*       sendbuf,
+    // point-to-point send.  throws rocfft_rccl_exception_t on RCCL failure.
+    void send(const void*       sendbuf,
               size_t            count,
               int               peer_rank,
               int               device_id,
@@ -96,8 +107,8 @@ public:
               rocfft_precision  precision,
               rocfft_array_type array_type);
 
-    // point-to-point receive
-    bool recv(void*             recvbuf,
+    // point-to-point receive.  throws rocfft_rccl_exception_t on RCCL failure.
+    void recv(void*             recvbuf,
               size_t            count,
               int               peer_rank,
               int               device_id,
