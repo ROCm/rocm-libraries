@@ -334,8 +334,8 @@ void testing_spmm_bsr(Arguments argus)
     auto dbsr_row_ptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(I) * (mb + 1)), device_free};
     auto dbsr_col_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(J) * nnzb), device_free};
-    auto dbsr_val_managed     = hipsparse_unique_ptr{
-        device_malloc(sizeof(T) * nnzb * blockDim * blockDim), device_free};
+    auto dbsr_val_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnzb * blockDim * blockDim), device_free};
     auto dB_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_B), device_free};
     auto dC_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_C), device_free};
     auto dC_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_C), device_free};
