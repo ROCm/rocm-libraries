@@ -318,6 +318,14 @@ void invoke_with_params(Check&& check)
         [&]() { FAIL() << MSG; }(); \
     } while(false);
 
+/// repalcement of gtest's GTEST_SKIP() because GTEST_SKIP() returns void and messes up the
+/// return type deduction
+#define MIOPEN_FRIENDLY_SKIP(MSG)         \
+    do                                    \
+    {                                     \
+        [&]() { GTEST_SKIP() << MSG; }(); \
+    } while(false);
+
 /// Env variables
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_FIND_ONLY_SOLVER)
 MIOPEN_LIB_ENV_VAR(MIOPEN_FIND_MODE)

@@ -25,6 +25,8 @@ using Conv2DBaseTestCase =
                          NamedParameter<bool>,                // int8_vectorize
                          NamedParameter<bool>,                // use_input_dims
                          NamedParameter<bool>,                // use_weight_tensor_dims
+                         NamedParameter<miopenDataType_t>,    // data_type,
+                         NamedParameter<double>,              // tolerance,
                          TParams...>;
 
 template <typename T, ConvApi api = ConvApi::Find_1_0>
@@ -32,26 +34,21 @@ struct Conv2DBaseTestParameters
 {
     using ct = conv_test<T, Conv2DBaseTestCase<>, api>;
 
-    Conv2DBaseTestParameters(bool smoke_test)
-        : batch_size(generate_data_limited(ct::get_batch_sizes(), 1, !smoke_test)),
-          input_channels(generate_data_limited(ct::get_input_channels(), 1, {32}, !smoke_test)),
-          output_channels(generate_data_limited(ct::get_output_channels(), 1, {64}, !smoke_test)),
-          spatial_dim_elements(
-              generate_data_limited(ct::get_2d_spatial_dims(), 1, {28, 28}, !smoke_test)),
-          filter_dims(generate_data_limited(ct::get_2d_filter_dims(), 2, {3, 3}, !smoke_test)),
-          pads_strides_dilations(
-              generate_data_limited(ct::get_2d_pads_strides_dilations(), 2, !smoke_test)),
+    Conv2DBaseTestParameters(bool smoke_test, int limit_set = 2)
+        : batch_size(generate_data_limited(ct::get_batch_sizes(), 1, !smoke_test, limit_set)),
+          input_channels(
+              generate_data_limited(ct::get_input_channels(), 1, {32}, !smoke_test, limit_set)),
+          output_channels(
+              generate_data_limited(ct::get_output_channels(), 1, {64}, !smoke_test, limit_set)),
+          spatial_dim_elements(generate_data_limited(
+              ct::get_2d_spatial_dims(), 1, {28, 28}, !smoke_test, limit_set)),
+          filter_dims(
+              generate_data_limited(ct::get_2d_filter_dims(), 2, {3, 3}, !smoke_test, limit_set)),
+          pads_strides_dilations(generate_data_limited(
+              ct::get_2d_pads_strides_dilations(), 2, !smoke_test, limit_set)),
           trans_output_pads(
               smoke_test ? std::vector<std::vector<int>>{*ct::get_2d_trans_output_pads().begin()}
-                         : ct::get_2d_trans_output_pads()) //,
-    //   in_layout({std::string{"NCHW"}}),
-    //   fil_layout({std::string{"NCHW"}}),
-    //   out_layout({std::string{"NCHW"}}),
-    //   deterministic({false}),
-    //   tensor_vect({0}),
-    //   vector_length({1}),
-    //   output_type({std::string{"int32"}}),
-    //   int8_vectorize({false})
+                         : ct::get_2d_trans_output_pads())
     {
     }
 
@@ -71,6 +68,9 @@ struct Conv2DBaseTestParameters
     std::vector<size_t> vector_length{1};
     std::vector<std::string> output_type{std::string{"int32"}};
     std::vector<bool> int8_vectorize{false};
+
+    double tolerance{80.0f};
+    miopenDataType_t input_data_type{miopenFloat};
 
     // Dummy values have to be supplied to avoid empty parameter lists in the test instantiations.
     std::vector<std::vector<std::size_t>> input_dims{{0}};
@@ -104,6 +104,8 @@ struct conv2d_test_base : public conv_test<T, TestCase, api>
                                                    this->int8_vectorize,
                                                    this->use_input_dims,
                                                    this->use_weight_tensor_dims,
+                                                   this->input_data_type,
+                                                   this->tolerance,
                                                    params...);
     }
 
@@ -141,9 +143,15 @@ struct conv2d_test_base : public conv_test<T, TestCase, api>
                                                             conv2dBaseParams.output_type),
             MakeNamedParameterCollectionValues<bool>("int8_vectorize",
                                                      conv2dBaseParams.int8_vectorize),
-            MakeNamedParameterCollectionValues<bool>("use_input_dims", std::vector<bool>{conv2dBaseParams.use_input_dims}),
-            MakeNamedParameterCollectionValues<bool>("use_weight_tensor_dims",
-                                           std::vector<bool>{conv2dBaseParams.use_weight_tensor_dims}),
+            MakeNamedParameterCollectionValues<bool>(
+                "use_input_dims", std::vector<bool>{conv2dBaseParams.use_input_dims}),
+            MakeNamedParameterCollectionValues<bool>(
+                "use_weight_tensor_dims",
+                std::vector<bool>{conv2dBaseParams.use_weight_tensor_dims}),
+            MakeNamedParameterCollectionValues<miopenDataType_t>(
+                "input_data_type", std::vector<miopenDataType_t>{conv2dBaseParams.input_data_type}),
+            MakeNamedParameterCollectionValues<double>(
+                "tolerance", std::vector<double>{conv2dBaseParams.tolerance}),
             std::forward<TParams>(params)...);
     }
 };

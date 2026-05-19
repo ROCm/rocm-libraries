@@ -1976,6 +1976,9 @@ struct conv_test : public testing::TestWithParam<TestCase>
     bool deterministic       = false;
     bool preallocate         = false;
 
+    double tolerance                 = 80.0f;
+    miopenDataType_t input_data_type = miopenFloat;
+
     // The following two members are used to discard the values stored in
     // 'input_dims' and 'weight_tensor_dims' when empty vectors should be supplied instead.
     // This is necessary as GTest does not support empty parameter vectors.
@@ -2652,42 +2655,49 @@ struct conv_test : public testing::TestWithParam<TestCase>
                     {
                         if(output_type == "float")
                         {
-                            test_helpers::CompareResults(verify_forward_conv<api, T, float>{
-                                input,
-                                weights,
-                                get_output_tensor<T, float>(filter, input, weights, out_layout),
-                                filter,
-                                stats,
-                                preallocate,
-                                0,
-                                search,
-                                int8_vectorize});
+                            test_helpers::CompareResults(
+                                verify_forward_conv<api, T, float>{
+                                    input,
+                                    weights,
+                                    get_output_tensor<T, float>(filter, input, weights, out_layout),
+                                    filter,
+                                    stats,
+                                    preallocate,
+                                    0,
+                                    search,
+                                    int8_vectorize},
+                                this->tolerance);
                         }
                         else if(output_type == "int32")
                         {
-                            test_helpers::CompareResults(verify_forward_conv<api, T, int>{
-                                input,
-                                weights,
-                                get_output_tensor<T, int>(filter, input, weights, out_layout),
-                                filter,
-                                stats,
-                                preallocate,
-                                0,
-                                search,
-                                int8_vectorize});
+                            test_helpers::CompareResults(
+                                verify_forward_conv<api, T, int>{
+                                    input,
+                                    weights,
+                                    get_output_tensor<T, int>(filter, input, weights, out_layout),
+                                    filter,
+                                    stats,
+                                    preallocate,
+                                    0,
+                                    search,
+                                    int8_vectorize},
+                                this->tolerance);
                         }
                         else if(output_type == "int8")
                         {
-                            test_helpers::CompareResults(verify_forward_conv<api, T, int8_t>{
-                                input,
-                                weights,
-                                get_output_tensor<T, int8_t>(filter, input, weights, out_layout),
-                                filter,
-                                stats,
-                                preallocate,
-                                0,
-                                search,
-                                int8_vectorize});
+                            test_helpers::CompareResults(
+                                verify_forward_conv<api, T, int8_t>{
+                                    input,
+                                    weights,
+                                    get_output_tensor<T, int8_t>(
+                                        filter, input, weights, out_layout),
+                                    filter,
+                                    stats,
+                                    preallocate,
+                                    0,
+                                    search,
+                                    int8_vectorize},
+                                this->tolerance);
                         }
                         else
                         {
@@ -2696,23 +2706,35 @@ struct conv_test : public testing::TestWithParam<TestCase>
                     }
                     else
                     {
-                        test_helpers::CompareResults(verify_forward_conv<api, T>{
-                            input, weights, output, filter, stats, preallocate, 0, search, false});
+                        test_helpers::CompareResults(verify_forward_conv<api, T>{input,
+                                                                                 weights,
+                                                                                 output,
+                                                                                 filter,
+                                                                                 stats,
+                                                                                 preallocate,
+                                                                                 0,
+                                                                                 search,
+                                                                                 false},
+                                                     this->tolerance);
                     }
                 }
 
                 if(do_backward_data && !skip_backward_data)
                 {
-                    test_helpers::CompareResults(verify_backward_conv<api, T>{
-                        input, weights, output, filter, stats, preallocate, 0, search});
+                    test_helpers::CompareResults(
+                        verify_backward_conv<api, T>{
+                            input, weights, output, filter, stats, preallocate, 0, search},
+                        this->tolerance);
                 }
 
                 if(do_backward_weights && !skip_backward_weights)
                 {
                     output.generate(gen_sign_value);
 
-                    test_helpers::CompareResults(verify_backward_weights_conv<api, T>{
-                        input, weights, output, filter, stats, preallocate, 0, search});
+                    test_helpers::CompareResults(
+                        verify_backward_weights_conv<api, T>{
+                            input, weights, output, filter, stats, preallocate, 0, search},
+                        this->tolerance);
                 }
             }
         }

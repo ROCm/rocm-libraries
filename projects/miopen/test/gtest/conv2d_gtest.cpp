@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "conv_common_gtest.hpp"
+#include "gtest/gtest_common.hpp"
+#include <gtest/gtest.h>
 #include "conv2d_gtest.hpp"
 
 namespace {
@@ -11,7 +13,18 @@ using TestCase = Conv2DBaseTestCase<>;
 template <typename T>
 auto GenCases(bool smoke_test)
 {
-    Conv2DBaseTestParameters<T> params(smoke_test);
+    const bool cmdline_smoke_test = !conv2d_test_base<T>::has_commandline_arg("--all");
+
+    if(cmdline_smoke_test != smoke_test)
+    {
+        MIOPEN_FRIENDLY_SKIP("Skipping " << (smoke_test ? "smoke" : "full")
+                                         << " tests as per command line argument.");
+    }
+
+    const int limit_set =
+        conv2d_test_base<T>::template get_commandline_arg_as_value<int>("--limit", 2);
+
+    Conv2DBaseTestParameters<T> params(smoke_test, limit_set);
 
     if(conv2d_test_base<T>::has_commandline_arg("--disable-forward"))
     {
@@ -180,6 +193,33 @@ auto GenCases(bool smoke_test)
         params.use_weight_tensor_dims = true;
     }
 
+    if(conv2d_test_base<T>::has_commandline_arg("--half"))
+    {
+        params.input_data_type = miopenHalf;
+    }
+    else if(conv2d_test_base<T>::has_commandline_arg("--float"))
+    {
+        params.input_data_type = miopenFloat;
+    }
+    else if(conv2d_test_base<T>::has_commandline_arg("--double"))
+    {
+        params.input_data_type = miopenDouble;
+    }
+    else if(conv2d_test_base<T>::has_commandline_arg("--int8"))
+    {
+        params.input_data_type = miopenInt8;
+    }
+    else if(conv2d_test_base<T>::has_commandline_arg("--bfloat16"))
+    {
+        params.input_data_type = miopenBFloat16;
+    }
+
+    if(conv2d_test_base<T>::has_commandline_arg("--tolerance"))
+    {
+        params.tolerance = conv2d_test_base<T>::template get_commandline_arg_as_value<double>(
+            "--tolerance", params.tolerance);
+    }
+
     return conv2d_test_base<T>::GenTestParams(params);
 }
 
@@ -199,26 +239,76 @@ auto GetCasesSmoke()
 
 } // namespace
 
-using GPU_Conv2d_FP32  = conv2d_test_base<float>;
 using GPU_Conv2d_FP16  = conv2d_test_base<half_float::half>;
+using GPU_Conv2d_FP32  = conv2d_test_base<float>;
+using GPU_Conv2d_FP64  = conv2d_test_base<double>;
+using GPU_Conv2d_I8    = conv2d_test_base<int8_t>;
 using GPU_Conv2d_BFP16 = conv2d_test_base<bfloat16>;
-
-TEST_P(GPU_Conv2d_FP32, TestFloat)
-{
-    GetTestParams();
-    run();
-}
 
 TEST_P(GPU_Conv2d_FP16, TestFloat16)
 {
     GetTestParams();
+
+    if(this->input_data_type != miopenHalf)
+    {
+        MIOPEN_FRIENDLY_SKIP("Test for half data type requested. Skipping current test.");
+    }
+
     run();
 }
+
+TEST_P(GPU_Conv2d_FP32, TestFloat)
+{
+    GetTestParams();
+
+    if(this->input_data_type != miopenFloat)
+    {
+        MIOPEN_FRIENDLY_SKIP("Test for float data type requested. Skipping current test.");
+    }
+    run();
+}
+
+TEST_P(GPU_Conv2d_FP64, TestFloat64)
+{
+    GetTestParams();
+
+    if(this->input_data_type != miopenDouble)
+    {
+        MIOPEN_FRIENDLY_SKIP("Test for double data type requested. Skipping current test.");
+    }
+    run();
+}
+
+TEST_P(GPU_Conv2d_I8, TestInt8)
+{
+    GetTestParams();
+
+    if(this->input_data_type != miopenInt8)
+    {
+        MIOPEN_FRIENDLY_SKIP("Test for int8 data type requested. Skipping current test.");
+    }
+    run();
+}
+
 TEST_P(GPU_Conv2d_BFP16, TestBFloat16)
 {
     GetTestParams();
+
+    if(this->input_data_type != miopenBFloat16)
+    {
+        MIOPEN_FRIENDLY_SKIP("Test for bfloat16 data type requested. Skipping current test.");
+    }
     run();
 }
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv2d_FP16,
+                         GetCasesSmoke<half_float::half>(),
+                         DefaultTestNameGenerator<TestCase>{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv2d_FP16,
+                         GetCasesFull<half_float::half>(),
+                         DefaultTestNameGenerator<TestCase>{});
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Conv2d_FP32,
@@ -230,12 +320,21 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          DefaultTestNameGenerator<TestCase>{});
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv2d_FP16,
-                         GetCasesSmoke<half_float::half>(),
+                         GPU_Conv2d_FP64,
+                         GetCasesSmoke<double>(),
                          DefaultTestNameGenerator<TestCase>{});
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv2d_FP16,
-                         GetCasesFull<half_float::half>(),
+                         GPU_Conv2d_FP64,
+                         GetCasesFull<double>(),
+                         DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv2d_I8,
+                         GetCasesSmoke<int8_t>(),
+                         DefaultTestNameGenerator<TestCase>{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv2d_I8,
+                         GetCasesFull<int8_t>(),
                          DefaultTestNameGenerator<TestCase>{});
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
