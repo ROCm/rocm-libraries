@@ -102,7 +102,7 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dy, sizeof(float) * m));
     HIP_CHECK(hipMemcpy(dy, hy, sizeof(float) * m, hipMemcpyHostToDevice));
 
-    hipsparseDnMatDescr_t vecY;
+    hipsparseDnVecDescr_t vecY;
     HIPSPARSE_CHECK(hipsparseCreateDnVec(&vecY, m, dy, HIP_R_32F));
 
     // Compute buffersize
