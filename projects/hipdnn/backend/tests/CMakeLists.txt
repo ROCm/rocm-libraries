@@ -74,11 +74,17 @@ add_executable(
     descriptors/TestGraphDescriptorReduction.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestRMSNormOperationFromNode.cpp
+    descriptors/TestRMSNormBackwardOperationDescriptor.cpp
+    descriptors/TestRMSNormBackwardOperationFromNode.cpp
+    descriptors/TestGraphDescriptorRMSNormBackward.cpp
     descriptors/TestSdpaBwdOperationDescriptor.cpp
     descriptors/TestSdpaBwdOperationFromNode.cpp
     descriptors/TestSdpaFwdOperationDescriptor.cpp
     descriptors/TestSdpaFwdOperationFromNode.cpp
     descriptors/TestGraphDescriptorSdpaBwd.cpp
+    descriptors/TestResampleFwdOperationDescriptor.cpp
+    descriptors/TestResampleFwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorResampleFwd.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp
@@ -102,6 +108,9 @@ add_executable(
     TestHeuristicPluginManagerValidationPaths.cpp
     TestSelectionHeuristic.cpp
     TestHeuristicPluginResourceManager.cpp
+    heuristics/TestStaticOrderingBuiltIn.cpp
+    heuristics/TestEngineOverrideConfig.cpp
+    heuristics/TestConfigBuiltIn.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     heuristics/TestDeviceProperties.cpp

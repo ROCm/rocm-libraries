@@ -18,6 +18,7 @@
 #include "plugin/HeuristicPluginResourceManager.hpp"
 
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_backend;
 
@@ -26,7 +27,10 @@ class TestHeuristicPolicyFramework : public ::testing::Test
 protected:
     void SetUp() override
     {
-        // Create handle for tests that need it
+        // hipdnnCreate loads real heuristic plugins (e.g. hipBLASLt in the
+        // superbuild) whose initializers probe the device. Skip on no-GPU
+        // runners to avoid a hard abort from the plugin's HIP error path.
+        SKIP_IF_NO_DEVICES();
         const hipdnnStatus_t status = hipdnnCreate(&_handle);
         ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
         ASSERT_NE(_handle, nullptr);
@@ -52,8 +56,8 @@ TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyCountReturnsNonZero)
     const hipdnnStatus_t status = hipdnnGetHeuristicPolicyCount_ext(_handle, &numPolicies);
 
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    // At minimum, Config and StaticOrdering should be loaded
-    EXPECT_GE(numPolicies, 2u);
+    // At minimum, the StaticOrdering built-in should be loaded.
+    EXPECT_GE(numPolicies, 1u);
 }
 
 TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyInfoReturnsValidData)
@@ -65,6 +69,7 @@ TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyInfoReturnsValidData)
     // Query first policy (two-call pattern)
     int64_t policyId = -1;
     size_t policyNameLen = 0;
+    size_t pluginNameLen = 0;
     size_t pluginVersionLen = 0;
     size_t apiVersionLen = 0;
 
@@ -75,6 +80,8 @@ TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyInfoReturnsValidData)
                                                              nullptr,
                                                              &policyNameLen,
                                                              nullptr,
+                                                             &pluginNameLen,
+                                                             nullptr,
                                                              &pluginVersionLen,
                                                              nullptr,
                                                              &apiVersionLen);
@@ -82,11 +89,13 @@ TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyInfoReturnsValidData)
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     EXPECT_NE(policyId, -1);
     EXPECT_GT(policyNameLen, 0u);
+    EXPECT_GT(pluginNameLen, 0u);
     EXPECT_GT(pluginVersionLen, 0u);
     EXPECT_GT(apiVersionLen, 0u);
 
     // Second call: retrieve strings
     std::vector<char> policyName(policyNameLen);
+    std::vector<char> pluginName(pluginNameLen);
     std::vector<char> pluginVersion(pluginVersionLen);
     std::vector<char> apiVersion(apiVersionLen);
 
@@ -95,6 +104,8 @@ TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyInfoReturnsValidData)
                                               &policyId,
                                               policyName.data(),
                                               &policyNameLen,
+                                              pluginName.data(),
+                                              &pluginNameLen,
                                               pluginVersion.data(),
                                               &pluginVersionLen,
                                               apiVersion.data(),
@@ -102,6 +113,7 @@ TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyInfoReturnsValidData)
 
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
     EXPECT_GT(std::strlen(policyName.data()), 0u);
+    EXPECT_GT(std::strlen(pluginName.data()), 0u);
     EXPECT_GT(std::strlen(pluginVersion.data()), 0u);
     EXPECT_GT(std::strlen(apiVersion.data()), 0u);
 }
@@ -114,6 +126,7 @@ TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyInfoOutOfRangeFails)
     // Try to query beyond range
     int64_t policyId = -1;
     size_t policyNameLen = 0;
+    size_t pluginNameLen = 0;
     size_t pluginVersionLen = 0;
     size_t apiVersionLen = 0;
 
@@ -122,6 +135,8 @@ TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyInfoOutOfRangeFails)
                                                                    &policyId,
                                                                    nullptr,
                                                                    &policyNameLen,
+                                                                   nullptr,
+                                                                   &pluginNameLen,
                                                                    nullptr,
                                                                    &pluginVersionLen,
                                                                    nullptr,
@@ -132,9 +147,9 @@ TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyInfoOutOfRangeFails)
 
 // Policy order resolution (descriptor / env / default), policy decline behavior,
 // and "no policy succeeds" failure paths are covered with mocked plugin managers
-// in TestEngineHeuristicDescriptorAdditional.cpp. The StaticOrdering "never
-// declines" contract is enforced by the plugin's Finalize implementation and
-// exercised in plugins/heuristics/static_ordering/tests/TestStaticOrderingPlugin.cpp.
+// in descriptors/TestEngineHeuristicDescriptor.cpp. The StaticOrdering "never
+// declines" contract is enforced by the built-in's Finalize implementation and
+// exercised in heuristics/TestStaticOrderingBuiltIn.cpp.
 
 // ========== Integration Tests ==========
 
@@ -145,26 +160,19 @@ TEST_F(TestHeuristicPolicyFramework, HeuristicResourceManagerLoadsDefaultPolicie
 
     auto policyInfos = heurRm->getHeuristicPolicyInfos();
 
-    // Should have at least Config and StaticOrdering
-    EXPECT_GE(policyInfos.size(), 2u);
+    // The StaticOrdering built-in is registered at construction time and is the
+    // canonical fallback policy.
+    EXPECT_GE(policyInfos.size(), 1u);
 
-    // Check for expected policy names
-    bool hasConfig = false;
     bool hasStaticOrdering = false;
-
     for(const auto& info : policyInfos)
     {
-        if(info.policyName.find("Config") != std::string::npos)
-        {
-            hasConfig = true;
-        }
         if(info.policyName.find("StaticOrdering") != std::string::npos)
         {
             hasStaticOrdering = true;
         }
     }
 
-    EXPECT_TRUE(hasConfig) << "Config policy should be loaded";
     EXPECT_TRUE(hasStaticOrdering) << "StaticOrdering policy should be loaded";
 }
 
@@ -190,8 +198,17 @@ TEST_F(TestHeuristicPolicyFramework, GetPolicyInfoWithNullLengthPointersFails)
     int64_t policyId = -1;
 
     // All length pointers are required (not nullptr)
-    const hipdnnStatus_t status = hipdnnGetHeuristicPolicyInfo_ext(
-        _handle, 0, &policyId, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+    const hipdnnStatus_t status = hipdnnGetHeuristicPolicyInfo_ext(_handle,
+                                                                   0,
+                                                                   &policyId,
+                                                                   nullptr,
+                                                                   nullptr,
+                                                                   nullptr,
+                                                                   nullptr,
+                                                                   nullptr,
+                                                                   nullptr,
+                                                                   nullptr,
+                                                                   nullptr);
 
     EXPECT_NE(status, HIPDNN_STATUS_SUCCESS);
 }

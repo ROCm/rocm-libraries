@@ -1740,9 +1740,80 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesInvalidDataType)
 // unpackGraphDataType tests
 // ---------------------------------------------------------------------------
 
-TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeBackendFails)
+TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeAbsentReturnsNotSet)
 {
-    // getDescriptorAttrScalar for the compute data type returns error
+    // Count query reports zero (backend storage is at the UNSET sentinel) -- the
+    // helper must surface this as DataType::NOT_SET with no error.
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{0}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto [dt, err] = unpackGraphDataType(desc, HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, "compute type");
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(dt, DataType::NOT_SET);
+}
+
+TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeNotSupportedReturnsNotSet)
+{
+    // Count query returns NOT_SUPPORTED (older backends or genuinely missing
+    // attributes) -- treat the same as count=0.
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 0, _, nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto [dt, err] = unpackGraphDataType(desc, HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, "compute type");
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(dt, DataType::NOT_SET);
+}
+
+TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeCountQueryFails)
+{
+    // Count query reports a backend error -- propagate as HIPDNN_BACKEND_ERROR.
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 0, _, nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto [dt, err] = unpackGraphDataType(desc, HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, "compute type");
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(dt, DataType::NOT_SET);
+}
+
+TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeSuccess)
+{
+    // Count query reports 1, value-fetch returns HIPDNN_DATA_FLOAT -- the
+    // helper must surface DataType::FLOAT with no error.
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}), Return(HIPDNN_STATUS_SUCCESS)));
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 1, _, Ne(nullptr)))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            auto val = HIPDNN_DATA_FLOAT;
+                            std::memcpy(arrayOfElements, &val, sizeof(hipdnnDataType_t));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto [dt, err] = unpackGraphDataType(desc, HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, "compute type");
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(dt, DataType::FLOAT);
+}
+
+TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeValueFetchFails)
+{
+    // Count query succeeds with 1, then the value-fetch call fails.
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}), Return(HIPDNN_STATUS_SUCCESS)));
     EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 1, _, _))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());

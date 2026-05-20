@@ -133,8 +133,10 @@ TEST_F(TestHeuristicPluginManager, MultipleInstancesAreIndependent)
     manager2.loadPlugins({std::filesystem::temp_directory_path() / "path2"},
                          HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    EXPECT_TRUE(manager1.getPlugins().empty());
-    EXPECT_TRUE(manager2.getPlugins().empty());
+    // Only the always-registered Config + StaticOrdering built-ins remain; no
+    // external plugin loaded from a non-existent path.
+    EXPECT_EQ(manager1.getPlugins().size(), 2u);
+    EXPECT_EQ(manager2.getPlugins().size(), 2u);
 }
 
 // ========== Edge Cases Tests ==========
@@ -205,7 +207,7 @@ TEST_F(TestHeuristicPluginManager, LoadPluginsWithAdditiveModeAdds)
 
 TEST_F(TestHeuristicPluginManager, PolicyNameToIdIsConsistent)
 {
-    const std::string name1 = "SelectionHeuristic::Config";
+    const std::string name1 = "Vendor::PolicyA";
     const int64_t id1a = hipdnn_data_sdk::utilities::policyNameToId(name1);
     const int64_t id1b = hipdnn_data_sdk::utilities::policyNameToId(name1);
 
@@ -214,7 +216,7 @@ TEST_F(TestHeuristicPluginManager, PolicyNameToIdIsConsistent)
 
 TEST_F(TestHeuristicPluginManager, DifferentNamesProduceDifferentIds)
 {
-    const std::string name1 = "SelectionHeuristic::Config";
+    const std::string name1 = "Vendor::PolicyA";
     const std::string name2 = "SelectionHeuristic::StaticOrdering";
 
     const int64_t id1 = hipdnn_data_sdk::utilities::policyNameToId(name1);
@@ -225,7 +227,7 @@ TEST_F(TestHeuristicPluginManager, DifferentNamesProduceDifferentIds)
 
 TEST_F(TestHeuristicPluginManager, PolicyIdIsNonZero)
 {
-    const std::string name = "SelectionHeuristic::Config";
+    const std::string name = "Vendor::PolicyA";
     const int64_t id = hipdnn_data_sdk::utilities::policyNameToId(name);
 
     EXPECT_NE(id, 0);
@@ -252,5 +254,7 @@ TEST_F(TestHeuristicPluginManager, GetPluginsAfterEmptyLoadReturnsEmpty)
         std::filesystem::temp_directory_path() / uniqueName);
 
     manager.loadPlugins({emptyDir.path()}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
-    EXPECT_TRUE(manager.getPlugins().empty());
+    // Only the always-registered Config + StaticOrdering built-ins remain; the
+    // empty dir contributed nothing.
+    EXPECT_EQ(manager.getPlugins().size(), 2u);
 }

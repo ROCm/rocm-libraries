@@ -517,7 +517,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     LOG_API_ENTRY("unloadingMode={}", unloadingMode);
 
     return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        // Apply to both plugin resource managers so the public ABI behaves
+        // uniformly regardless of plugin kind.
         hipdnn_backend::plugin::EnginePluginResourceManager::setPluginUnloadingMode(unloadingMode);
+        hipdnn_backend::plugin::HeuristicPluginResourceManager::setPluginUnloadingMode(
+            unloadingMode);
         LOG_API_SUCCESS(apiName, "set_plugin_unloading_mode={}", unloadingMode);
         return HIPDNN_STATUS_SUCCESS;
     });
@@ -708,23 +712,27 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHand
                                                                       int64_t* policyId,
                                                                       char* policyName,
                                                                       size_t* policyNameLen,
+                                                                      char* pluginName,
+                                                                      size_t* pluginNameLen,
                                                                       char* pluginVersion,
                                                                       size_t* pluginVersionLen,
                                                                       char* apiVersion,
                                                                       size_t* apiVersionLen)
 {
     LOG_API_ENTRY("handle={:p}, policyIndex={}, policyId_ptr={:p}, policyName_ptr={:p}, "
-                  "pluginVersion_ptr={:p}, apiVersion_ptr={:p}",
+                  "pluginName_ptr={:p}, pluginVersion_ptr={:p}, apiVersion_ptr={:p}",
                   static_cast<void*>(handle),
                   policyIndex,
                   static_cast<void*>(policyId),
                   static_cast<void*>(policyName),
+                  static_cast<void*>(pluginName),
                   static_cast<void*>(pluginVersion),
                   static_cast<void*>(apiVersion));
 
     return hipdnn_backend::tryCatch([&, apiName = __func__] {
         throwIfNull(handle);
         throwIfNull(policyNameLen);
+        throwIfNull(pluginNameLen);
         throwIfNull(pluginVersionLen);
         throwIfNull(apiVersionLen);
 
@@ -747,20 +755,24 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHand
         }
 
         const size_t requiredPolicyNameLen = info.policyName.size() + 1;
+        const size_t requiredPluginNameLen = info.pluginName.size() + 1;
         const size_t requiredPluginVersionLen = info.pluginVersion.size() + 1;
         const size_t requiredApiVersionLen = info.apiVersion.size() + 1;
 
         // Query mode: return required sizes
-        if(policyName == nullptr || pluginVersion == nullptr || apiVersion == nullptr)
+        if(policyName == nullptr || pluginName == nullptr || pluginVersion == nullptr
+           || apiVersion == nullptr)
         {
             *policyNameLen = requiredPolicyNameLen;
+            *pluginNameLen = requiredPluginNameLen;
             *pluginVersionLen = requiredPluginVersionLen;
             *apiVersionLen = requiredApiVersionLen;
             return;
         }
 
         // Retrieve mode: check buffer sizes
-        if(*policyNameLen < requiredPolicyNameLen || *pluginVersionLen < requiredPluginVersionLen
+        if(*policyNameLen < requiredPolicyNameLen || *pluginNameLen < requiredPluginNameLen
+           || *pluginVersionLen < requiredPluginVersionLen
            || *apiVersionLen < requiredApiVersionLen)
         {
             throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Insufficient buffer space provided.");
@@ -769,15 +781,19 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHand
         hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
             policyName, info.policyName.c_str(), *policyNameLen);
         hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            pluginName, info.pluginName.c_str(), *pluginNameLen);
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
             pluginVersion, info.pluginVersion.c_str(), *pluginVersionLen);
         hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
             apiVersion, info.apiVersion.c_str(), *apiVersionLen);
 
         LOG_API_SUCCESS(apiName,
-                        "policy[{}]: policyId={}, policyName={}, pluginVersion={}, apiVersion={}",
+                        "policy[{}]: policyId={}, policyName={}, pluginName={}, "
+                        "pluginVersion={}, apiVersion={}",
                         policyIndex,
                         info.policyId,
                         info.policyName,
+                        info.pluginName,
                         info.pluginVersion,
                         info.apiVersion);
     });

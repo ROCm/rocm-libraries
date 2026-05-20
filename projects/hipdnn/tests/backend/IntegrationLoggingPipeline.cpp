@@ -190,8 +190,7 @@ TEST_F(IntegrationGpuLoggingPipeline, FullWorkflowLogging)
                   heuristicPaths.size(), heuristicPaths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
               HIPDNN_STATUS_SUCCESS);
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter policyEnv(
-        "HIPDNN_HEURISTIC_POLICY_ORDER",
-        hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName());
+        "HIPDNN_HEUR_POLICY_ORDER", hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName());
 
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);

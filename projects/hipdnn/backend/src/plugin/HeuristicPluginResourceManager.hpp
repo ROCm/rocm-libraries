@@ -40,6 +40,7 @@ struct HeuristicPolicyInfo
 {
     std::string policyName; ///< Canonical policy name (UTF-8)
     int64_t policyId; ///< Stable policy ID (policyNameToId hash)
+    std::string pluginName; ///< Plugin (library) name; "hipdnn-builtin" for built-in policies
     std::string pluginVersion; ///< Plugin implementation version
     std::string apiVersion; ///< Heuristic C ABI version
 };

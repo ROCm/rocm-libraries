@@ -116,13 +116,24 @@ TEST_F(TestSelectionHeuristic, MoveConstructor)
     // Destroy should be called exactly once (when moved-to object is destroyed)
     EXPECT_CALL(*_mockPlugin, destroyPolicyDescriptor(mockDescriptor)).Times(1);
 
+    // Regression: the move must carry _inputEngineIds too, otherwise the
+    // validator in getSortedEngineIds sees an empty candidate set and rejects
+    // every legitimate plugin output with HIPDNN_STATUS_PLUGIN_ERROR.
+    const std::vector<int64_t> inputIds = {1, 2, 3};
+    const std::vector<int64_t> sortedIds = {3, 1, 2};
+    EXPECT_CALL(*_mockPlugin, setEngineIds(mockDescriptor, ::testing::_, inputIds.size())).Times(1);
+    EXPECT_CALL(*_mockPlugin, getSortedEngineIds(mockDescriptor))
+        .WillOnce(::testing::Return(sortedIds));
+
     {
         SelectionHeuristic heuristic1(_mockResourceManager, _policyId);
+        heuristic1.setEngineIds(inputIds);
 
         // Move construct
         SelectionHeuristic heuristic2(std::move(heuristic1)); // NOLINT(misc-const-correctness)
 
-        // heuristic2 should now own the descriptor
+        // heuristic2 should now own the descriptor and the input-ID candidate set
+        EXPECT_EQ(heuristic2.getSortedEngineIds(), sortedIds);
         // heuristic1 should be empty (moved-from state)
     } // Both destructors called, but only heuristic2 has valid descriptor
 }
@@ -143,16 +154,27 @@ TEST_F(TestSelectionHeuristic, MoveAssignment)
     EXPECT_CALL(*_mockPlugin, destroyPolicyDescriptor(mockDescriptor1)).Times(1);
     EXPECT_CALL(*_mockPlugin, destroyPolicyDescriptor(mockDescriptor2)).Times(1);
 
+    // Regression: the move must carry _inputEngineIds too, so the validator
+    // in getSortedEngineIds still has the candidate set after the assignment.
+    const std::vector<int64_t> inputIds = {10, 20, 30};
+    const std::vector<int64_t> sortedIds = {30, 20, 10};
+    EXPECT_CALL(*_mockPlugin, setEngineIds(mockDescriptor2, ::testing::_, inputIds.size()))
+        .Times(1);
+    EXPECT_CALL(*_mockPlugin, getSortedEngineIds(mockDescriptor2))
+        .WillOnce(::testing::Return(sortedIds));
+
     {
         SelectionHeuristic heuristic1(_mockResourceManager, _policyId);
         SelectionHeuristic heuristic2(_mockResourceManager, _policyId);
+        heuristic2.setEngineIds(inputIds);
 
         // Move assign
         heuristic1 = std::move(heuristic2);
 
-        // heuristic1 should now own mockDescriptor2
+        // heuristic1 should now own mockDescriptor2 and heuristic2's input IDs
         // heuristic2 should be empty
         // mockDescriptor1 should have been destroyed
+        EXPECT_EQ(heuristic1.getSortedEngineIds(), sortedIds);
     }
 }
 

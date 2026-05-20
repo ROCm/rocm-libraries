@@ -24,8 +24,10 @@
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
+#include "RMSNormBackwardOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
 #include "ReductionOperationDescriptor.hpp"
+#include "ResampleFwdOperationDescriptor.hpp"
 #include "SdpaBwdOperationDescriptor.hpp"
 #include "SdpaFwdOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
@@ -128,6 +130,12 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR:
         privateDesc = std::make_shared<ReductionOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR:
+        privateDesc = std::make_shared<ResampleFwdOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<RMSNormBackwardOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

@@ -268,8 +268,9 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, ConstructorSetsUpValidationInf
     // otherwise the test is just re-checking SetUp's invariant.
     const HeuristicPluginManager manager;
 
-    // Should start with no plugins
-    EXPECT_TRUE(manager.getPlugins().empty());
+    // A freshly-constructed manager always contains the Config + StaticOrdering
+    // built-ins (registered in HeuristicPluginManager's constructor); nothing else yet.
+    EXPECT_EQ(manager.getPlugins().size(), 2u);
 }
 
 // ========== Destructor Path Coverage ==========
@@ -395,7 +396,8 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, BadApiVersionPluginRejected)
 
     _manager->loadPlugins({badPlugin}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    EXPECT_TRUE(_manager->getPlugins().empty()) << "Bad API version plugin should be rejected";
+    // Built-in Config + StaticOrdering are always present; no external plugin should have loaded.
+    EXPECT_EQ(_manager->getPlugins().size(), 2u) << "Bad API version plugin should be rejected";
 }
 
 TEST_F(TestHeuristicPluginManagerValidationPaths, EmptyNamePluginRejected)
@@ -408,7 +410,8 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, EmptyNamePluginRejected)
 
     _manager->loadPlugins({emptyNamePlugin}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    EXPECT_TRUE(_manager->getPlugins().empty()) << "Empty policy name plugin should be rejected";
+    // Built-in Config + StaticOrdering are always present; no external plugin should have loaded.
+    EXPECT_EQ(_manager->getPlugins().size(), 2u) << "Empty policy name plugin should be rejected";
 }
 
 TEST_F(TestHeuristicPluginManagerValidationPaths, DuplicatePolicyIdPluginsRejected)
@@ -425,19 +428,92 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, DuplicatePolicyIdPluginsReject
 
     _manager->loadPlugins({pluginA, pluginB}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    // Only one plugin should have loaded - the second should be rejected due to duplicate ID.
+    // Built-in Config + StaticOrdering are always present, plus the first of the
+    // duplicate pair (pluginA). The second (pluginB) is rejected for duplicate policy ID.
     const auto& plugins = _manager->getPlugins();
-    ASSERT_EQ(plugins.size(), 1u) << "Only first duplicate plugin should load";
+    ASSERT_EQ(plugins.size(), 3u) << "Built-ins + first duplicate plugin should be present";
 
-    // The survivor must be the first one offered (pluginA). Verifying the
-    // policy id pins down ordering — without this the size check would still
-    // pass if pluginA was rejected for an unrelated reason and pluginB loaded.
+    // The survivor must be pluginA (first offered). Probe pluginA on its own to
+    // capture its policy IDs, then verify those IDs appear in the loaded set —
+    // without this, the size check would still pass if pluginA was rejected for
+    // an unrelated reason and pluginB loaded.
     HeuristicPluginManager probeA;
     probeA.loadPlugins({pluginA}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
-    ASSERT_EQ(probeA.getPlugins().size(), 1u)
-        << "pluginA should load successfully on its own to be a valid baseline";
-    EXPECT_EQ(plugins.front()->getAllPolicyIds(), probeA.getPlugins().front()->getAllPolicyIds())
-        << "Survivor should be pluginA (the first offered), not pluginB";
+    ASSERT_EQ(probeA.getPlugins().size(), 3u)
+        << "pluginA should load successfully alongside the built-ins to be a valid baseline";
+
+    // Find the non-built-in plugin in the probe to get pluginA's policy IDs.
+    std::vector<int64_t> pluginAPolicyIds;
+    for(const auto& plugin : probeA.getPlugins())
+    {
+        const std::string name(plugin->name());
+        if(name != "BuiltInStaticOrderingHeuristic" && name != "BuiltInConfigHeuristic")
+        {
+            pluginAPolicyIds = plugin->getAllPolicyIds();
+            break;
+        }
+    }
+    ASSERT_FALSE(pluginAPolicyIds.empty()) << "Probe failed to identify pluginA";
+
+    bool foundPluginA = false;
+    for(const auto& plugin : plugins)
+    {
+        if(plugin->getAllPolicyIds() == pluginAPolicyIds)
+        {
+            foundPluginA = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundPluginA) << "Survivor should be pluginA (the first offered), not pluginB";
+}
+
+// ========== loadPluginFromFile Return-Value Regression ==========
+
+// Expose loadPluginFromFile() so we can directly observe its bool return.
+// The bug it guards against: success was set to true at the top of the
+// tryCatch lambda, so a throwing validateBeforeAdding() (e.g. bad API
+// version) left success == true and the caller's failedCount silently
+// stayed at zero.
+class LoadPluginFromFileProbe : public HeuristicPluginManager
+{
+public:
+    using HeuristicPluginManager::loadPluginFromFile;
+};
+
+TEST_F(TestHeuristicPluginManagerValidationPaths, LoadPluginFromFileReturnsFalseOnValidationFailure)
+{
+    const auto badPlugin
+        = _testPluginPath / hipdnn_data_sdk::utilities::getLibraryName(BAD_API_VERSION_PLUGIN);
+    ASSERT_TRUE(std::filesystem::exists(badPlugin))
+        << "Test precondition: bad-API-version plugin missing at " << badPlugin;
+
+    LoadPluginFromFileProbe probe;
+    const size_t pluginCountBefore = probe.getPlugins().size();
+
+    EXPECT_FALSE(probe.loadPluginFromFile(badPlugin))
+        << "loadPluginFromFile must report failure when validateBeforeAdding throws";
+    EXPECT_EQ(probe.getPlugins().size(), pluginCountBefore)
+        << "Rejected plugin must not be appended to _plugins";
+}
+
+TEST_F(TestHeuristicPluginManagerValidationPaths, LoadPluginFromFileReturnsTrueOnSuccess)
+{
+    const auto goodPlugin = getHeuristicPluginPath("test_good_heuristic_plugin");
+    ASSERT_TRUE(std::filesystem::exists(goodPlugin))
+        << "Test precondition: good plugin missing at " << goodPlugin;
+
+    LoadPluginFromFileProbe probe;
+    const size_t pluginCountBefore = probe.getPlugins().size();
+
+    EXPECT_TRUE(probe.loadPluginFromFile(goodPlugin));
+    EXPECT_EQ(probe.getPlugins().size(), pluginCountBefore + 1u);
+
+    // A second load of the same file is an idempotent no-op (already in
+    // _loadedPluginFiles); it must also return true so failedCount is
+    // not inflated by retries.
+    EXPECT_TRUE(probe.loadPluginFromFile(goodPlugin))
+        << "Idempotent reload of an already-loaded plugin must not count as failure";
+    EXPECT_EQ(probe.getPlugins().size(), pluginCountBefore + 1u);
 }
 
 // ========== Edge Case: Empty Plugin Directory ==========
@@ -454,5 +530,6 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, EmptyDirectorySkipsValidation)
     // Load from empty directory - no plugins to validate
     _manager->loadPlugins({emptyDir.path()}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    EXPECT_TRUE(_manager->getPlugins().empty());
+    // Built-in Config + StaticOrdering are always present; the empty directory contributed nothing.
+    EXPECT_EQ(_manager->getPlugins().size(), 2u);
 }

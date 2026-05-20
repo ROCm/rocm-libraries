@@ -23,8 +23,10 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <set>
@@ -37,28 +39,28 @@ namespace hipdnn_backend
 std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
 {
     // Policy order resolution.
-    // Priority: descriptor attr > handle > env > default
+    // Priority: env > descriptor attr > default
     // Storage and ABI are policy IDs (FNV-1a of the policy name); names are
-    // hashed at the point they enter the system.
+    // hashed at the point they enter the system. The Config built-in
+    // (HIPDNN_HEUR_CONFIG_PATH JSON rules) is a regular policy in this
+    // list, not a precursor; it declines when no rule matches so subsequent
+    // policies still run. The explicit Graph.preferred_engine_id setter is
+    // handled by the frontend as a post-hoc reorder of the heuristic-ranked
+    // engine configs.
 
-    // 1. Descriptor attribute (highest priority)
-    if(_policyOrderSet)
+    // 1. Environment variable HIPDNN_HEUR_POLICY_ORDER (highest priority)
+    // Use the data_sdk getEnv() wrapper rather than std::getenv() so that this
+    // reads the live process environment block on Windows.
+    //
+    // Tokens may be either policy names ("SelectionHeuristic::Config") or raw
+    // int64 policy IDs (decimal, optionally signed). A token parses as an ID
+    // only when std::strtoll consumes the *entire* trimmed token; anything
+    // else — including names that happen to start with digits — is hashed
+    // through policyNameToId.
+    const std::string envStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_HEUR_POLICY_ORDER");
+    if(!envStr.empty())
     {
-        HIPDNN_BACKEND_LOG_DEBUG("Using descriptor-level policy order: {} policies",
-                                 _policyOrder.size());
-        return _policyOrder;
-    }
-    // 2. Handle-level override (TODO: implement handle API)
-    // else if (handle has override)
-    // {
-    //     return handle->getHeuristicPolicyOrder();
-    // }
-    // 3. Environment variable HIPDNN_HEURISTIC_POLICY_ORDER
-    if(const char* envPolicyOrder = std::getenv("HIPDNN_HEURISTIC_POLICY_ORDER"))
-    {
-        // Parse comma-separated policy names and hash to IDs
         std::vector<int64_t> policyIds;
-        const std::string envStr(envPolicyOrder);
         std::istringstream iss(envStr);
         std::string token;
         while(std::getline(iss, token, ','))
@@ -66,21 +68,42 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
             // Trim whitespace
             token.erase(0, token.find_first_not_of(" \t\n\r"));
             token.erase(token.find_last_not_of(" \t\n\r") + 1);
-            if(!token.empty())
+            if(token.empty())
             {
-                policyIds.push_back(hipdnn_data_sdk::utilities::policyNameToId(token));
+                continue;
             }
+
+            char* end = nullptr;
+            errno = 0;
+            const int64_t asId = std::strtoll(token.c_str(), &end, 10);
+            const bool fullyParsed = (end != nullptr) && (*end == '\0') && (errno == 0);
+            policyIds.push_back(fullyParsed ? asId
+                                            : hipdnn_data_sdk::utilities::policyNameToId(token));
         }
-        HIPDNN_BACKEND_LOG_DEBUG("Using environment variable policy order: {} policies",
-                                 policyIds.size());
+        HIPDNN_BACKEND_LOG_WARN("Using environment variable policy order: {} policies",
+                                policyIds.size());
         return policyIds;
     }
-    // 4. Default policy list
+    // 2. Descriptor attribute
+    if(_policyOrderSet)
+    {
+        HIPDNN_BACKEND_LOG_DEBUG("Using descriptor-level policy order: {} policies",
+                                 _policyOrder.size());
+        return _policyOrder;
+    }
+    // 3. Default policy list — Config first so HIPDNN_HEUR_CONFIG_PATH
+    // rules win when set; StaticOrdering is the canonical last-resort fallback
+    // and always succeeds when there is at least one candidate. Vendor
+    // heuristic plugins may be inserted via env or descriptor attribute above.
     std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"),
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),
     };
-    HIPDNN_BACKEND_LOG_DEBUG("Using default policy order: {} policies", policyIds.size());
+    HIPDNN_BACKEND_LOG_WARN(
+        "No heuristic policy order configured, falling back to built-in defaults "
+        "[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]. "
+        "Set HIPDNN_HEUR_POLICY_ORDER or the descriptor attribute to silence "
+        "this warning.");
     return policyIds;
 }
 
@@ -114,7 +137,33 @@ void EngineHeuristicDescriptor::syncPolicySlots(const std::vector<int64_t>& orde
             continue;
         }
 
-        _policySlots.push_back(std::make_unique<heuristics::SelectionHeuristic>(heurRm, policyId));
+        // SelectionHeuristic's constructor calls into the plugin to create the
+        // policy descriptor, which can throw. Treat a failed slot the same way
+        // we treat a not-loaded policy: log and insert a null placeholder so
+        // the policy loop in finalize() simply skips it via its existing
+        // nullptr branch instead of aborting the whole descriptor.
+        // HipdnnException derives from std::exception, so one catch covers both.
+        try
+        {
+            _policySlots.push_back(
+                std::make_unique<heuristics::SelectionHeuristic>(heurRm, policyId));
+            continue;
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_WARN("Failed to construct SelectionHeuristic for policy ID {}: {}. "
+                                    "Slot will be skipped during finalize().",
+                                    policyId,
+                                    e.what());
+        }
+        catch(...)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Failed to construct SelectionHeuristic for policy ID {} (unknown exception). "
+                "Slot will be skipped during finalize().",
+                policyId);
+        }
+        _policySlots.push_back(nullptr);
     }
 }
 
@@ -149,16 +198,27 @@ void EngineHeuristicDescriptor::finalize()
         return;
     }
 
-    // Query and serialize device properties
-    int currentDevice;
-    auto status = hipGetDevice(&currentDevice);
+    // findFirst is a fast applicability probe (Graph::is_supported_ext) — the
+    // caller only needs to know whether *any* engine can run the graph.
+    if(_findFirst)
+    {
+        _engineIds = std::move(candidates);
+        HipdnnBackendDescriptorImpl<EngineHeuristicDescriptor>::finalize();
+        return;
+    }
+
+    // Query and serialize device properties for the device the handle's stream
+    // is bound to.
+    int deviceId = 0;
+    auto status = hipStreamGetDevice(handle->getStream(), &deviceId);
     if(status != hipSuccess)
     {
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get current device");
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Failed to get device from handle's stream");
     }
 
     hipDeviceProp_t hipProps;
-    status = hipGetDeviceProperties(&hipProps, currentDevice);
+    status = hipGetDeviceProperties(&hipProps, deviceId);
     if(status != hipSuccess)
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get device properties");
@@ -166,7 +226,7 @@ void EngineHeuristicDescriptor::finalize()
 
     // Create DevicePropertiesT from HIP device properties
     hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT devProps;
-    devProps.device_id = currentDevice;
+    devProps.device_id = deviceId;
     devProps.multi_processor_count = hipProps.multiProcessorCount;
     devProps.total_global_mem = hipProps.totalGlobalMem;
     devProps.architecture_name = hipProps.gcnArchName;
@@ -212,17 +272,55 @@ void EngineHeuristicDescriptor::finalize()
         }
     }
 
-    // Call SetDeviceProperties on each distinct handle
-    // Convert to vector and sort by handle pointer for deterministic iteration
+    // Call SetDeviceProperties on each distinct handle.
+    // Sort by handle pointer so the call order is stable *within this process
+    // run* — std::unordered_map iteration order is otherwise unspecified, which
+    // would scramble the order of any per-handle log lines emitted below and
+    // make the fail-soft disable order non-reproducible from one finalize() to
+    // the next on the same descriptor. Pointers vary across runs (ASLR), so
+    // this is reproducible-per-run, not reproducible-across-runs.
     std::vector<std::pair<hipdnnHeuristicHandle_t, const plugin::HeuristicPlugin*>> sortedHandles(
         distinctHandles.begin(), distinctHandles.end());
     std::sort(sortedHandles.begin(), sortedHandles.end(), [](const auto& a, const auto& b) {
         return a.first < b.first;
     });
 
+    // Mirror the policy loop's fail-soft contract below: a single plugin's
+    // setDeviceProperties failure must not break the chain. Disable every slot
+    // backed by a failed plugin handle so the policy loop skips it via the
+    // existing nullptr branch.
+    auto disableSlotsForHandle = [&](hipdnnHeuristicHandle_t failedHandle) {
+        for(size_t i = 0; i < _policySlots.size(); ++i)
+        {
+            if(_policySlots[i] != nullptr
+               && heurRm->getHeuristicHandleForPolicyId(_orderedPolicyIds[i]) == failedHandle)
+            {
+                _policySlots[i].reset();
+            }
+        }
+    };
+
     for(const auto& [pluginHandle, plugin] : sortedHandles)
     {
-        plugin->setDeviceProperties(pluginHandle, &devicePropsWrapper);
+        try
+        {
+            plugin->setDeviceProperties(pluginHandle, &devicePropsWrapper);
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_WARN("setDeviceProperties failed for heuristic plugin '{}': {}. "
+                                    "Disabling all policies provided by this plugin.",
+                                    plugin->name(),
+                                    e.what());
+            disableSlotsForHandle(pluginHandle);
+        }
+        catch(...)
+        {
+            HIPDNN_BACKEND_LOG_WARN("setDeviceProperties threw unknown exception for heuristic "
+                                    "plugin '{}'. Disabling all policies provided by this plugin.",
+                                    plugin->name());
+            disableSlotsForHandle(pluginHandle);
+        }
     }
 
     // Outer policy loop: try each policy in order until one succeeds
@@ -643,8 +741,8 @@ void EngineHeuristicDescriptor::getPolicyOrder(hipdnnBackendAttributeType_t attr
                   "EngineHeuristicDescriptor failed to get policy order: Null pointer.");
 
     // The dispatcher requires isFinalized() before reaching here, so
-    // _orderedPolicyIds reflects the resolved order (descriptor > handle > env
-    // > default) actually used during finalize().
+    // _orderedPolicyIds reflects the resolved order (env > descriptor > default)
+    // actually used during finalize(). See resolveHeuristicPolicyOrder().
     if(requestedElementCount == 0)
     {
         *elementCount = static_cast<int64_t>(_orderedPolicyIds.size());

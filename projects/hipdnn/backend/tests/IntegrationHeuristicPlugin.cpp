@@ -155,10 +155,13 @@ TEST_F(IntegrationHeuristicPlugin, SetDevicePropertiesOnHandle)
     const auto policyInfos = rm->getHeuristicPolicyInfos();
     ASSERT_FALSE(policyInfos.empty());
 
-    const HeuristicPlugin* plugin = rm->getPluginForPolicyId(policyInfos[0].policyId);
+    // policyInfos ordering comes from an unordered_map iteration; target the
+    // test plugin by known policy ID so behavior is stable across platforms.
+    const auto goodPolicyId = hipdnn_data_sdk::utilities::policyNameToId("TestGoodHeuristicPolicy");
+    const HeuristicPlugin* plugin = rm->getPluginForPolicyId(goodPolicyId);
     ASSERT_NE(plugin, nullptr);
 
-    hipdnnHeuristicHandle_t handle = rm->getHeuristicHandleForPolicyId(policyInfos[0].policyId);
+    hipdnnHeuristicHandle_t handle = rm->getHeuristicHandleForPolicyId(goodPolicyId);
     ASSERT_NE(handle, nullptr);
 
     // Create device properties
@@ -207,10 +210,13 @@ TEST_F(IntegrationHeuristicPlugin, CompleteWorkflowWithDevicePropertiesAndFinali
     const auto policyInfos = rm->getHeuristicPolicyInfos();
     ASSERT_FALSE(policyInfos.empty());
 
-    const HeuristicPlugin* plugin = rm->getPluginForPolicyId(policyInfos[0].policyId);
+    // Target the test plugin by known policy ID; built-ins reject the
+    // synthetic graph payload below.
+    const auto goodPolicyId = hipdnn_data_sdk::utilities::policyNameToId("TestGoodHeuristicPolicy");
+    const HeuristicPlugin* plugin = rm->getPluginForPolicyId(goodPolicyId);
     ASSERT_NE(plugin, nullptr);
 
-    hipdnnHeuristicHandle_t handle = rm->getHeuristicHandleForPolicyId(policyInfos[0].policyId);
+    hipdnnHeuristicHandle_t handle = rm->getHeuristicHandleForPolicyId(goodPolicyId);
     ASSERT_NE(handle, nullptr);
 
     // Set device properties on handle
@@ -227,8 +233,8 @@ TEST_F(IntegrationHeuristicPlugin, CompleteWorkflowWithDevicePropertiesAndFinali
     plugin->setDeviceProperties(handle, &devicePropsData);
 
     // Create policy descriptor (RAII so destroy runs even on ASSERT_* abort)
-    const auto descGuard = makeScopedPolicyDescriptor(
-        *plugin, plugin->createPolicyDescriptor(handle, policyInfos[0].policyId));
+    const auto descGuard
+        = makeScopedPolicyDescriptor(*plugin, plugin->createPolicyDescriptor(handle, goodPolicyId));
     ASSERT_NE(descGuard.get(), nullptr);
 
     // Set engine IDs
@@ -261,7 +267,10 @@ TEST_F(IntegrationHeuristicPlugin, GetPluginTypeFromLoadedPlugin)
     const auto policyInfos = rm->getHeuristicPolicyInfos();
     ASSERT_FALSE(policyInfos.empty());
 
-    const HeuristicPlugin* plugin = rm->getPluginForPolicyId(policyInfos[0].policyId);
+    // policyInfos ordering comes from an unordered_map iteration; target the
+    // test plugin by known policy ID so behavior is stable across platforms.
+    const auto goodPolicyId = hipdnn_data_sdk::utilities::policyNameToId("TestGoodHeuristicPolicy");
+    const HeuristicPlugin* plugin = rm->getPluginForPolicyId(goodPolicyId);
     ASSERT_NE(plugin, nullptr);
 
     // Heuristic plugins report HEURISTIC type
@@ -306,15 +315,17 @@ TEST_F(IntegrationHeuristicPlugin, MultipleDescriptorsFromSameHandle)
     const auto policyInfos = rm->getHeuristicPolicyInfos();
     ASSERT_FALSE(policyInfos.empty());
 
-    const HeuristicPlugin* plugin = rm->getPluginForPolicyId(policyInfos[0].policyId);
+    // policyInfos ordering comes from an unordered_map iteration; target the
+    // test plugin by known policy ID so behavior is stable across platforms.
+    const auto policyId = hipdnn_data_sdk::utilities::policyNameToId("TestGoodHeuristicPolicy");
+    const HeuristicPlugin* plugin = rm->getPluginForPolicyId(policyId);
     ASSERT_NE(plugin, nullptr);
 
-    hipdnnHeuristicHandle_t handle = rm->getHeuristicHandleForPolicyId(policyInfos[0].policyId);
+    hipdnnHeuristicHandle_t handle = rm->getHeuristicHandleForPolicyId(policyId);
     ASSERT_NE(handle, nullptr);
 
     // Create multiple descriptors from the same handle (RAII-wrapped so any
     // assertion abort below still releases them).
-    const auto policyId = policyInfos[0].policyId;
     const auto desc1
         = makeScopedPolicyDescriptor(*plugin, plugin->createPolicyDescriptor(handle, policyId));
     const auto desc2
@@ -373,14 +384,17 @@ TEST_F(IntegrationHeuristicPlugin, FinalizeWithEmptyEngineIdsSucceeds)
     const auto policyInfos = rm->getHeuristicPolicyInfos();
     ASSERT_FALSE(policyInfos.empty());
 
-    const HeuristicPlugin* plugin = rm->getPluginForPolicyId(policyInfos[0].policyId);
+    // Target the test plugin by known policy ID; built-ins reject finalize()
+    // without a real graph payload.
+    const auto goodPolicyId = hipdnn_data_sdk::utilities::policyNameToId("TestGoodHeuristicPolicy");
+    const HeuristicPlugin* plugin = rm->getPluginForPolicyId(goodPolicyId);
     ASSERT_NE(plugin, nullptr);
 
-    hipdnnHeuristicHandle_t handle = rm->getHeuristicHandleForPolicyId(policyInfos[0].policyId);
+    hipdnnHeuristicHandle_t handle = rm->getHeuristicHandleForPolicyId(goodPolicyId);
     ASSERT_NE(handle, nullptr);
 
-    const auto descGuard = makeScopedPolicyDescriptor(
-        *plugin, plugin->createPolicyDescriptor(handle, policyInfos[0].policyId));
+    const auto descGuard
+        = makeScopedPolicyDescriptor(*plugin, plugin->createPolicyDescriptor(handle, goodPolicyId));
     ASSERT_NE(descGuard.get(), nullptr);
 
     // Don't set any engine IDs - just finalize
@@ -401,7 +415,9 @@ TEST_F(IntegrationHeuristicPlugin, MultipleGetHandleCallsReturnSameHandle)
     const auto policyInfos = rm->getHeuristicPolicyInfos();
     ASSERT_FALSE(policyInfos.empty());
 
-    const auto policyId = policyInfos[0].policyId;
+    // Pin to a known policy ID so the test does not depend on the
+    // unordered_map iteration order behind getHeuristicPolicyInfos().
+    const auto policyId = hipdnn_data_sdk::utilities::policyNameToId("TestGoodHeuristicPolicy");
 
     // Multiple calls should return the same handle (cached)
     auto handle1 = rm->getHeuristicHandleForPolicyId(policyId);
@@ -419,7 +435,9 @@ TEST_F(IntegrationHeuristicPlugin, MultipleGetPluginCallsReturnSamePlugin)
     const auto policyInfos = rm->getHeuristicPolicyInfos();
     ASSERT_FALSE(policyInfos.empty());
 
-    const auto policyId = policyInfos[0].policyId;
+    // Pin to a known policy ID so the test does not depend on the
+    // unordered_map iteration order behind getHeuristicPolicyInfos().
+    const auto policyId = hipdnn_data_sdk::utilities::policyNameToId("TestGoodHeuristicPolicy");
 
     // Multiple calls should return the same plugin pointer
     const HeuristicPlugin* plugin1 = rm->getPluginForPolicyId(policyId);

@@ -1,12 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <optional>
 
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
@@ -70,28 +70,21 @@ protected:
         Tensor<DataType> yTensor;
     };
 
-    // This suite verifies preferred_engine_id behavior, which is implemented
-    // by the Config policy hosted inside the merged DefaultHeuristicsPlugin.
-    // The frontend test main() wires in only test_good_heuristic_plugin
-    // globally, so for this suite load DefaultHeuristicsPlugin as the primary
-    // and chain test_good_heuristic_plugin as the fallback for the cases where
-    // Config returns "not applicable".
+    // This suite verifies preferred_engine_id behavior, which the frontend
+    // resolves as a post-hoc reorder of the heuristic-ranked engine configs
+    // (see Graph::initializeEngineConfig). The HIPDNN_HEUR_CONFIG_PATH
+    // env knob lives in the SelectionHeuristic::Config built-in instead. We
+    // only need to chain test_good_heuristic_plugin so the heuristic loop has
+    // a ranked list to reorder against.
     static void SetUpTestSuite()
     {
-        const auto defaultPluginPath
-            = (std::filesystem::path(".") / "hipdnn_plugins" / "heuristics"
-               / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_heuristic_default"))
-                  .string();
-        const std::array<const char*, 2> heuristicPaths
-            = {defaultPluginPath.c_str(),
-               hipdnn_tests::plugin_constants::testGoodHeuristicPluginPath().c_str()};
+        const std::array<const char*, 1> heuristicPaths
+            = {hipdnn_tests::plugin_constants::testGoodHeuristicPluginPath().c_str()};
         ASSERT_EQ(hipdnnSetHeuristicPluginPaths_ext(
                       heuristicPaths.size(), heuristicPaths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
-        sPolicyOrderEnv.emplace(
-            "HIPDNN_HEURISTIC_POLICY_ORDER",
-            std::string("SelectionHeuristic::Config,")
-                + hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName());
+        sPolicyOrderEnv.emplace("HIPDNN_HEUR_POLICY_ORDER",
+                                hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName());
     }
 
     static void TearDownTestSuite()
@@ -190,6 +183,14 @@ protected:
         result = graph->build_operation_graph(_handle);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
+        // Capture the heuristic-ranked engine list before plan creation. The
+        // preferred-engine setter is a post-hoc reorder over this list, so when
+        // the preferred ID isn't present, execute() must follow rankedEngineIds[0].
+        std::vector<int64_t> rankedEngineIds;
+        result = graph->get_ranked_engine_ids(rankedEngineIds);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_FALSE(rankedEngineIds.empty());
+
         result = graph->create_execution_plans();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -205,7 +206,6 @@ protected:
 
         result = graph->execute(_handle, variantPack, nullptr);
 
-        // For non-deterministic engine selection we don't check if it's successful.
         if(testCase.shouldSucceed.has_value() && testCase.shouldSucceed.value())
         {
             ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -213,6 +213,31 @@ protected:
         else if(testCase.shouldSucceed.has_value() && !testCase.shouldSucceed.value())
         {
             ASSERT_NE(result.code, ErrorCode::OK) << "Execute should have failed";
+        }
+        else
+        {
+            // No fixed expectation: derive it from the ranked list. For the
+            // nonexistent-preferred-ID case, confirm the ID is not among the
+            // candidates (so we're actually exercising the fallback path),
+            // then assert execute() outcome matches the heuristic's top pick.
+            ASSERT_TRUE(testCase.preferredEngineId.has_value());
+            ASSERT_EQ(std::find(rankedEngineIds.begin(),
+                                rankedEngineIds.end(),
+                                testCase.preferredEngineId.value()),
+                      rankedEngineIds.end())
+                << "Nonexistent preferred engine ID unexpectedly found among candidates";
+
+            const int64_t failingEngineId
+                = hipdnn_tests::plugin_constants::engineId<ExecuteFailsPlugin>();
+            if(rankedEngineIds.front() == failingEngineId)
+            {
+                ASSERT_NE(result.code, ErrorCode::OK)
+                    << "Top-ranked engine is the failing plugin; execute should have failed";
+            }
+            else
+            {
+                ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+            }
         }
     }
 

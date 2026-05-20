@@ -56,10 +56,12 @@ inline Error
                 "No engine configurations available for the graph."};
     }
 
-    // Fetch only the top engine config unless the caller needs to scan the full
-    // list (e.g. HIPDNN_DEFAULT_ENGINE override, or get_ranked_engine_ids).
-    // Preferred-engine reordering happens inside the heuristic chain
-    // (SelectionHeuristic::Config), so no frontend post-hoc search is needed.
+    // Fetch only the top engine config unless the caller needs the full ranked
+    // list (e.g. get_ranked_engine_ids, or the explicit Graph.preferred_engine_id
+    // post-hoc reorder in initializeEngineConfig). HIPDNN_HEUR_CONFIG_PATH
+    // reordering happens inside the SelectionHeuristic::Config built-in and is
+    // already reflected in the ranked list — no extra frontend search is needed
+    // for that knob.
     const int64_t requiredCount = getAll ? availableEngineCount : 1;
     std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
     for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)

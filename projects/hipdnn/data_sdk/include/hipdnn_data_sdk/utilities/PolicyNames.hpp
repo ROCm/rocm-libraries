@@ -15,8 +15,8 @@ namespace hipdnn_data_sdk::utilities
  *
  * Uses the FNV-1a hash. The same input always produces the same output, so the
  * hash is stable across processes and platforms. Used to identify selection
- * heuristic policies (e.g., "SelectionHeuristic::Config") on the C ABI without
- * shipping null-separated string blobs.
+ * heuristic policies (e.g., "SelectionHeuristic::StaticOrdering") on the C ABI
+ * without shipping null-separated string blobs.
  *
  * @param policyName The policy name to convert to an ID
  * @return int64_t The policy ID

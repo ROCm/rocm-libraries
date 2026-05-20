@@ -26,6 +26,7 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"

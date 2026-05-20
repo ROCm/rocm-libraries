@@ -46,6 +46,7 @@
 
 #include "HipdnnBackendAttributeName.h"
 #include "HipdnnBackendAttributeType.h"
+#include "HipdnnBackendBehaviorNote.h"
 #include "HipdnnBackendCallbackTypes.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendHeuristicType.h"
@@ -54,7 +55,9 @@
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnPaddingMode.h"
 #include "HipdnnReduceTensorOp.h"
+#include "HipdnnResampleMode.h"
 #include "HipdnnStatus.h"
 
 // NOLINTBEGIN
@@ -717,7 +720,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyCount_ext(hipdnnHan
  * @brief Gets information about a loaded heuristic policy by index.
  *
  * Retrieves metadata for a heuristic policy plugin, including policy ID, policy
- * name, plugin version, and API version.
+ * name, plugin name, plugin version, and API version.
  *
  * @note The enumeration order is unspecified and may change between calls or
  * between backend versions. Callers must not assume a stable ordering across
@@ -725,8 +728,9 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyCount_ext(hipdnnHan
  *
  * This function uses a two-call pattern for string fields:
  * 1. First call: Pass all string buffers as `nullptr` to query required sizes.
- *    - Sets `policyNameLen`, `pluginVersionLen`, and `apiVersionLen` to the required
- *      buffer sizes (including null terminator).
+ *    - Sets `policyNameLen`, `pluginNameLen`, `pluginVersionLen`, and `apiVersionLen`
+ *      to the required buffer sizes (including null terminator). Note: if any
+ *      string buffer is null, all sizes are updated.
  *
  * 2. Second call: Pass allocated buffers with sizes set from the first call.
  *
@@ -735,6 +739,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyCount_ext(hipdnnHan
  * @param[out]    policyId          Pointer where the policy ID will be stored, or `nullptr` to skip.
  * @param[out]    policyName        Buffer for the policy name, or `nullptr` to query size.
  * @param[in,out] policyNameLen     Pointer to buffer size; updated with required size.
+ * @param[out]    pluginName        Buffer for the plugin name, or `nullptr` to query size.
+ * @param[in,out] pluginNameLen     Pointer to buffer size; updated with required size.
  * @param[out]    pluginVersion     Buffer for the plugin version, or `nullptr` to query size.
  * @param[in,out] pluginVersionLen  Pointer to buffer size; updated with required size.
  * @param[out]    apiVersion        Buffer for the API version, or `nullptr` to query size.
@@ -751,6 +757,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHand
                                                                       int64_t* policyId,
                                                                       char* policyName,
                                                                       size_t* policyNameLen,
+                                                                      char* pluginName,
+                                                                      size_t* pluginNameLen,
                                                                       char* pluginVersion,
                                                                       size_t* pluginVersionLen,
                                                                       char* apiVersion,

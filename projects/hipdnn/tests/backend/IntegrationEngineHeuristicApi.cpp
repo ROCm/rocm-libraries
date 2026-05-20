@@ -4,6 +4,7 @@
 #include "TestUtil.hpp"
 #include "hipdnn_backend.h"
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <optional>
 #include <test_plugins/TestPluginConstants.hpp>
 
@@ -23,10 +24,15 @@ protected:
     hipdnnBackendDescriptor_t _engineHeuristic = nullptr;
     hipdnnBackendDescriptor_t _graph = nullptr;
     hipdnnHandle_t _handle = nullptr;
+    hipStream_t _stream = nullptr;
     std::optional<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _policyOrderEnv;
 
     void SetUp() override
     {
+        // finalize() resolves the device from the handle's stream, so the
+        // fixture binds a real stream and skips when no devices are present.
+        SKIP_IF_NO_DEVICES();
+
         const std::array<const char*, 1> enginePaths
             = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
@@ -39,10 +45,12 @@ protected:
                       heuristicPaths.size(), heuristicPaths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
 
-        _policyOrderEnv.emplace("HIPDNN_HEURISTIC_POLICY_ORDER",
+        _policyOrderEnv.emplace("HIPDNN_HEUR_POLICY_ORDER",
                                 hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName());
 
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
         EXPECT_EQ(
             hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, &_engineHeuristic),
             HIPDNN_STATUS_SUCCESS);
@@ -63,6 +71,11 @@ protected:
         {
             EXPECT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
             _handle = nullptr;
+        }
+        if(_stream != nullptr)
+        {
+            EXPECT_EQ(hipStreamDestroy(_stream), hipSuccess);
+            _stream = nullptr;
         }
     }
 

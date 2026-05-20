@@ -49,7 +49,7 @@ enum class RegType {
 ///
 /// For new code, prefer tryParseRegType() which returns std::optional.
 inline RegType stringToRegType(const std::string& str) {
-#define REGISTER_TYPE(ENUM, STR, DESC) \
+#define REGISTER_TYPE(ENUM, STR, DESC) /* NOLINT(bugprone-macro-parentheses) */ \
     if (str == STR) return RegType::ENUM;
 #include "stinkytofu/ir/asm/RegisterType.def"
     // Don't assert on invalid input - return UNKNOWN for error handling
@@ -60,6 +60,13 @@ inline RegType stringToRegType(const std::string& str) {
 /// Check if a register type is valid (not UNKNOWN)
 inline bool isValidRegType(RegType type) {
     return type != RegType::UNKNOWN;
+}
+
+/// Check if a register type is an allocatable register (VGPR, SGPR, AGPR).
+/// Excludes special registers (SCC, VCC, EXEC, M0, LDS).
+inline bool isAllocatableReg(RegType type) {
+    return type == RegType::V || type == RegType::S || type == RegType::A || type == RegType::ACC ||
+           type == RegType::AGPR;
 }
 
 /// Validate if a string represents a valid register type

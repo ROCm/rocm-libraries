@@ -5,7 +5,10 @@
  * @file IntegrationHeuristicPolicyPlugins.cpp
  * @brief Integration tests for real heuristic policy plugins
  *
- * These tests verify the actual heuristic policy plugins (Config, StaticOrdering):
+ * These tests verify the heuristic policy chain seen at runtime:
+ *   - The StaticOrdering built-in (registered at HeuristicPluginManager
+ *     construction time as a function-table-shaped pseudo-plugin).
+ *   - Any external heuristic .so found in HIPDNN_HEURISTIC_PLUGIN_DIR.
  * - Plugin discovery and loading from installed location
  * - Symbol resolution and ABI validation
  * - Plugin handle creation and lifecycle
@@ -30,12 +33,39 @@
 
 #include <filesystem>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
 
 namespace
 {
+// RAII guards so ASSERT_* aborts mid-test do not leak the underlying
+// plugin-allocated resources under ASAN. Mirrors makeScopedHandle /
+// makeScopedPolicyDescriptor in IntegrationHeuristicPlugin.cpp.
+inline auto makeScopedHipdnnHandle(hipdnnHandle_t handle)
+{
+    return hipdnn_data_sdk::utilities::ScopedResource<hipdnnHandle_t>(handle, [](hipdnnHandle_t h) {
+        if(h != nullptr)
+        {
+            hipdnnDestroy(h);
+        }
+    });
+}
+
+inline auto makeScopedPolicyDescriptor(const HeuristicPlugin& plugin,
+                                       hipdnnHeuristicPolicyDescriptor_t desc)
+{
+    return hipdnn_data_sdk::utilities::ScopedResource<hipdnnHeuristicPolicyDescriptor_t>(
+        desc, [p = &plugin](hipdnnHeuristicPolicyDescriptor_t d) {
+            if(d != nullptr)
+            {
+                p->destroyPolicyDescriptor(d);
+            }
+        });
+}
+
 // Helper to get the plugin directory for tests
 // Tests binaries are in build/bin/, plugins could be in:
 // - build/lib/hipdnn_plugins/heuristics/ (Linux/Unix)
@@ -87,6 +117,10 @@ class IntegrationHeuristicPolicyPlugins : public ::testing::Test
 protected:
     void SetUp() override
     {
+        // hipdnnCreate loads real heuristic plugins (e.g. hipBLASLt in the
+        // superbuild) whose initializers probe the device. Skip on no-GPU
+        // runners to avoid a hard abort from the plugin's HIP error path.
+        SKIP_IF_NO_DEVICES();
         const hipdnnStatus_t status = hipdnnCreate(&_handle);
         ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
         ASSERT_NE(_handle, nullptr);
@@ -121,8 +155,9 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PluginManagerLoadsFromDefaultPath)
     // Enumerate loaded policies via resource manager
     const auto& policyInfos = resourceMgr->getHeuristicPolicyInfos();
 
-    // At minimum, we expect Config and StaticOrdering
-    EXPECT_GE(policyInfos.size(), 2u) << "Expected at least Config and StaticOrdering plugins";
+    // The StaticOrdering built-in is always registered; vendor plugins (if any)
+    // discovered under the search path raise the count further.
+    EXPECT_GE(policyInfos.size(), 1u) << "Expected at least the StaticOrdering built-in";
 }
 
 TEST_F(IntegrationHeuristicPolicyPlugins, PluginManagerRejectsInvalidPlugins)
@@ -213,6 +248,7 @@ TEST_F(IntegrationHeuristicPolicyPlugins, HandleDestructionCleansUpResources)
     // Create and destroy a handle
     hipdnnHandle_t tempHandle = nullptr;
     ASSERT_EQ(hipdnnCreate(&tempHandle), HIPDNN_STATUS_SUCCESS);
+    auto scopedHandle = makeScopedHipdnnHandle(tempHandle);
 
     // Get resource manager (creates plugin handles)
     auto heurRm = tempHandle->getHeuristicPluginResourceManager();
@@ -220,9 +256,6 @@ TEST_F(IntegrationHeuristicPolicyPlugins, HandleDestructionCleansUpResources)
 
     const size_t policyCount = heurRm->getHeuristicPolicyInfos().size();
     EXPECT_GT(policyCount, 0u);
-
-    // Destroy handle (should clean up plugin handles)
-    EXPECT_EQ(hipdnnDestroy(tempHandle), HIPDNN_STATUS_SUCCESS);
 }
 
 // ========== Policy Descriptor Tests ==========
@@ -233,8 +266,11 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PolicyDescriptorCreationSucceeds)
     auto policyInfos = heurRm->getHeuristicPolicyInfos();
     ASSERT_GT(policyInfos.size(), 0u);
 
-    // Try to create a policy descriptor for the first loaded policy
-    auto policyId = policyInfos[0].policyId;
+    // Pin to the StaticOrdering built-in: it is always registered, so the
+    // test is deterministic regardless of which vendor plugins are present
+    // (policyInfos ordering is derived from an unordered_map iteration).
+    const auto policyId
+        = hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering");
     auto pluginHandle = heurRm->getHeuristicHandleForPolicyId(policyId);
     auto plugin = heurRm->getPluginForPolicyId(policyId);
 
@@ -242,14 +278,9 @@ TEST_F(IntegrationHeuristicPolicyPlugins, PolicyDescriptorCreationSucceeds)
     ASSERT_NE(plugin, nullptr);
 
     // Create policy descriptor
-    auto descriptor = plugin->createPolicyDescriptor(pluginHandle, policyId);
-    EXPECT_NE(descriptor, nullptr);
-
-    // Clean up
-    if(descriptor != nullptr)
-    {
-        plugin->destroyPolicyDescriptor(descriptor);
-    }
+    auto descriptor = makeScopedPolicyDescriptor(
+        *plugin, plugin->createPolicyDescriptor(pluginHandle, policyId));
+    EXPECT_NE(descriptor.get(), nullptr);
 }
 
 // ========== Logging Tests ==========
@@ -345,11 +376,22 @@ TEST_F(IntegrationHeuristicPolicyPlugins, EnumerationMatchesResourceManager)
     // Counts should match
     EXPECT_EQ(apiCount, rmInfos.size());
 
-    // Each policy from resource manager should be queryable via C API
-    for(size_t i = 0; i < rmInfos.size(); ++i)
+    // Enumeration order of getHeuristicPolicyInfos() is documented as unspecified
+    // (built from an unordered_map). Compare by set of policy IDs instead of by
+    // index so the test does not implicitly depend on the cache happening to
+    // return the same vector for two successive calls.
+    std::set<int64_t> rmPolicyIds;
+    for(const auto& info : rmInfos)
+    {
+        rmPolicyIds.insert(info.policyId);
+    }
+
+    std::set<int64_t> apiPolicyIds;
+    for(size_t i = 0; i < apiCount; ++i)
     {
         int64_t apiPolicyId = -1;
         size_t nameLen = 0;
+        size_t pluginNameLen = 0;
         size_t pluginVerLen = 0;
         size_t apiVerLen = 0;
 
@@ -359,38 +401,37 @@ TEST_F(IntegrationHeuristicPolicyPlugins, EnumerationMatchesResourceManager)
                                                    nullptr,
                                                    &nameLen,
                                                    nullptr,
+                                                   &pluginNameLen,
+                                                   nullptr,
                                                    &pluginVerLen,
                                                    nullptr,
                                                    &apiVerLen),
                   HIPDNN_STATUS_SUCCESS);
 
-        // Policy ID should match
-        EXPECT_EQ(apiPolicyId, rmInfos[i].policyId);
+        apiPolicyIds.insert(apiPolicyId);
     }
+
+    EXPECT_EQ(apiPolicyIds, rmPolicyIds);
 }
 
 // ========== Stress Tests ==========
 
 TEST_F(IntegrationHeuristicPolicyPlugins, MultipleResourceManagersCanCoexist)
 {
-    // Create multiple handles, each with its own resource manager
-    std::vector<hipdnnHandle_t> handles;
+    // Create multiple handles, each with its own resource manager.
+    // ScopedResource entries destroy their handle on test exit (including
+    // ASSERT_* short-circuit), so a mid-loop abort cannot leak earlier ones.
+    std::vector<hipdnn_data_sdk::utilities::ScopedResource<hipdnnHandle_t>> handles;
 
     for(int i = 0; i < 5; ++i)
     {
         hipdnnHandle_t h = nullptr;
         ASSERT_EQ(hipdnnCreate(&h), HIPDNN_STATUS_SUCCESS);
-        handles.push_back(h);
+        handles.push_back(makeScopedHipdnnHandle(h));
 
         // Access resource manager (triggers creation)
         auto heurRm = h->getHeuristicPluginResourceManager();
         EXPECT_NE(heurRm, nullptr);
-    }
-
-    // Clean up
-    for(auto h : handles)
-    {
-        EXPECT_EQ(hipdnnDestroy(h), HIPDNN_STATUS_SUCCESS);
     }
 }
 

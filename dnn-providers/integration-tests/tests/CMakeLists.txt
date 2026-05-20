@@ -12,6 +12,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuReferenceGraphExecutor.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
+    TestReferenceGraphExecutorFactory.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
@@ -64,4 +65,4 @@ target_compile_options(hipdnn_gpu_ref_tests
 
 clang_tidy_check(hipdnn_gpu_ref_tests)
 
-add_unit_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_tiered_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})

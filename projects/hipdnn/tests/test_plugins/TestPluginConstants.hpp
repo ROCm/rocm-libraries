@@ -116,7 +116,7 @@ inline const std::string& testIncompatibleVersionPluginPath()
 }
 
 // Heuristic test plugins. Policy name registered by test_good_heuristic_plugin --
-// callers that need a specific policy should set HIPDNN_HEURISTIC_POLICY_ORDER to
+// callers that need a specific policy should set HIPDNN_HEUR_POLICY_ORDER to
 // this value via a scoped env guard.
 inline const char* testGoodHeuristicPolicyName()
 {
