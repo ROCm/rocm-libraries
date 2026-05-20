@@ -50,6 +50,7 @@
 
 #include <algorithm>
 #include <assert.h>
+#include <cctype>
 #include <cstring>
 #include <functional>
 #include <iterator>
@@ -2398,7 +2399,12 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         Grouped,
     };
     static const RcclBackend backend_choice = []() {
-        const auto v = rocfft_getenv("ROCFFT_RCCL_BACKEND");
+        auto v = rocfft_getenv("ROCFFT_RCCL_BACKEND");
+        // case-insensitive match: GROUPED, Grouped, grouped, ... all map
+        // to the same backend
+        std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
         if(v == "grouped" || v == "send_recv")
             return RcclBackend::Grouped;
         return RcclBackend::AllToAll;
@@ -2417,10 +2423,9 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
                      + ")\n");
         else
         {
-            const char* reason
-                = (backend_choice == RcclBackend::Grouped)
-                      ? (alltoall_eligible ? ", forced via ROCFFT_RCCL_BACKEND=grouped" : "")
-                      : ", pattern not alltoall-eligible";
+            const char* reason = (backend_choice == RcclBackend::Grouped)
+                                     ? (alltoall_eligible ? ", forced via ROCFFT_RCCL_BACKEND" : "")
+                                     : ", pattern not alltoall-eligible";
             log_plan(std::string("RCCL backend: using grouped ncclSend/ncclRecv (")
                      + std::to_string(cross_device_count) + " cross-device transfers, "
                      + std::to_string(nbricks_in) + " input bricks" + reason + ")\n");
@@ -2455,40 +2460,36 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
 
     // cross-device path
 
-    std::vector<TempBufferLease> packBufs;
-
     if(use_alltoall)
     {
-        // allocate alltoall scratch with disjoint send and recv buffers
-        // a2aSendBufs[d]: slot[dst_rank] at offset dst_rank * uniform_count
-        //                 (written by pack kernels, read by ncclAllToAll)
-        // a2aRecvBufs[d]: slot[src_rank] at offset src_rank * uniform_count
-        //                 (written by ncclAllToAll, read by unpack kernels)
+        // a2aSendBufs and a2aRecvBufs are indexed by RCCL rank: entry r
+        // lives on rccl_devs_vec[r], which is the device owning rank r.
+        //   a2aSendBufs[r]: slot[dst_rank] at offset dst_rank * uniform_count
+        //                   (written by pack kernels, read by ncclAllToAll)
+        //   a2aRecvBufs[r]: slot[src_rank] at offset src_rank * uniform_count
+        //                   (written by ncclAllToAll, read by unpack kernels)
+        // indexing by rank (rather than brick index) keeps the rank-based
+        // RCCL view and the buffer arrays in lockstep, and removes the
+        // need for a device-id-to-brick-index map.
+        const size_t                 nranks = rccl_devs_vec.size();
         std::vector<TempBufferLease> a2aSendBufs;
         std::vector<TempBufferLease> a2aRecvBufs;
-        a2aSendBufs.reserve(nbricks_in);
-        a2aRecvBufs.reserve(nbricks_in);
-        for(size_t d = 0; d < nbricks_in; ++d)
+        a2aSendBufs.reserve(nranks);
+        a2aRecvBufs.reserve(nranks);
+        for(size_t r = 0; r < nranks; ++r)
         {
-            a2aSendBufs.emplace_back(tempBuffers,
-                                     local_comm_rank,
-                                     inField.bricks[d].location,
-                                     nbricks_in * uniform_count * elem_size);
-            a2aRecvBufs.emplace_back(tempBuffers,
-                                     local_comm_rank,
-                                     inField.bricks[d].location,
-                                     nbricks_in * uniform_count * elem_size);
+            const rocfft_location_t loc{local_comm_rank, rccl_devs_vec[r]};
+            a2aSendBufs.emplace_back(
+                tempBuffers, local_comm_rank, loc, nranks * uniform_count * elem_size);
+            a2aRecvBufs.emplace_back(
+                tempBuffers, local_comm_rank, loc, nranks * uniform_count * elem_size);
         }
-
-        // build device_id -> brick index mapping for offset calculation
-        std::map<int, size_t> device_to_brick;
-        for(size_t d = 0; d < nbricks_in; ++d)
-            device_to_brick[inField.bricks[d].location.device] = d;
 
         std::vector<size_t> packItems;
 
         // pack each cross-device intersection into the correct slot of
-        // the SEND buffer
+        // the SEND buffer.  the send buffer lives on src_rank's device
+        // and its slot[dst_rank] is the target.
         for(const auto& info : intersections)
         {
             const auto& inBrick  = inField.bricks[info.inBrickIdx];
@@ -2496,43 +2497,36 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
             if(inBrick.location == outBrick.location)
                 continue;
 
-            size_t src_brick_idx = device_to_brick[inBrick.location.device];
-            size_t dst_brick_idx = device_to_brick[outBrick.location.device];
+            const int src_rank = rccl.get_rank(inBrick.location.device);
+            const int dst_rank = rccl.get_rank(outBrick.location.device);
 
-            auto packIdx = AddMultiPlanItem(
-                transpose_brick(local_comm_rank,
-                                inBrick.location,
-                                info.intersection.lengths_and_batches(),
-                                precision,
-                                desc.inArrayType,
-                                input[info.inBrickIdx],
-                                info.intersection.offset_in(inBrick.layout),
-                                inBrick.layout.strides_and_distances(),
-                                BufferPtr::temp(a2aSendBufs[src_brick_idx].data()),
-                                dst_brick_idx * uniform_count,
-                                info.intersection.strides_and_distances(),
-                                "pack for ncclAllToAll"),
-                {inputAntecedents[info.inBrickIdx]});
+            auto packIdx
+                = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                   inBrick.location,
+                                                   info.intersection.lengths_and_batches(),
+                                                   precision,
+                                                   desc.inArrayType,
+                                                   input[info.inBrickIdx],
+                                                   info.intersection.offset_in(inBrick.layout),
+                                                   inBrick.layout.strides_and_distances(),
+                                                   BufferPtr::temp(a2aSendBufs[src_rank].data()),
+                                                   dst_rank * uniform_count,
+                                                   info.intersection.strides_and_distances(),
+                                                   "pack for ncclAllToAll"),
+                                   {inputAntecedents[info.inBrickIdx]});
             multiPlan[packIdx]->group = itemGroup;
             packItems.push_back(packIdx);
         }
 
-        // build the CommRCCLAllToAll item with one agent per device,
-        // indexed by RCCL rank.  RCCL ranks are assigned in sorted
-        // device-id order, so we collect per-device entries in a map
-        // (sorted by device id) and then flatten to a vector.
-        std::map<int /*device*/, CommRCCLAllToAll::agent_t> deviceAgents;
-        for(size_t d = 0; d < nbricks_in; ++d)
+        // a2aSendBufs/a2aRecvBufs are already indexed by RCCL rank, so
+        // build the agents vector directly, no intermediate map needed.
+        std::vector<CommRCCLAllToAll::agent_t> agents(nranks);
+        for(size_t r = 0; r < nranks; ++r)
         {
-            auto& a      = deviceAgents[inField.bricks[d].location.device];
-            a.sendBuffer = BufferPtr::temp(a2aSendBufs[d].data());
-            a.recvBuffer = BufferPtr::temp(a2aRecvBufs[d].data());
-            // a.stream left default-constructed; allocated by CommRCCLAllToAll ctor
+            agents[r].sendBuffer = BufferPtr::temp(a2aSendBufs[r].data());
+            agents[r].recvBuffer = BufferPtr::temp(a2aRecvBufs[r].data());
+            // agents[r].stream left default-constructed; allocated by CommRCCLAllToAll ctor
         }
-        std::vector<CommRCCLAllToAll::agent_t> agents;
-        agents.reserve(nbricks_in);
-        for(auto& [dev, a] : deviceAgents)
-            agents.push_back(std::move(a));
 
         auto rcclAllToAll = std::make_unique<CommRCCLAllToAll>(
             rccl, precision, desc.inArrayType, uniform_count, std::move(agents));
@@ -2542,7 +2536,8 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         auto a2aIdx              = AddMultiPlanItem(std::move(rcclAllToAll), packItems);
         multiPlan[a2aIdx]->group = itemGroup;
 
-        // unpack from the RECV buffer into output
+        // unpack from the RECV buffer into output.  the recv buffer
+        // lives on dst_rank's device and its slot[src_rank] is the source.
         for(const auto& info : intersections)
         {
             const auto& inBrick  = inField.bricks[info.inBrickIdx];
@@ -2550,32 +2545,31 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
             if(inBrick.location == outBrick.location)
                 continue;
 
-            size_t src_brick_idx = device_to_brick[inBrick.location.device];
-            size_t dst_brick_idx = device_to_brick[outBrick.location.device];
+            const int src_rank = rccl.get_rank(inBrick.location.device);
+            const int dst_rank = rccl.get_rank(outBrick.location.device);
 
-            auto unpackIdx = AddMultiPlanItem(
-                transpose_brick(local_comm_rank,
-                                outBrick.location,
-                                info.intersection.lengths_and_batches(),
-                                precision,
-                                desc.inArrayType,
-                                BufferPtr::temp(a2aRecvBufs[dst_brick_idx].data()),
-                                src_brick_idx * uniform_count,
-                                info.intersection.strides_and_distances(),
-                                output[info.outBrickIdx],
-                                info.intersection.offset_in(outBrick.layout),
-                                outBrick.layout.strides_and_distances(),
-                                "unpack from ncclAllToAll"),
-                {a2aIdx});
+            auto unpackIdx
+                = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                   outBrick.location,
+                                                   info.intersection.lengths_and_batches(),
+                                                   precision,
+                                                   desc.inArrayType,
+                                                   BufferPtr::temp(a2aRecvBufs[dst_rank].data()),
+                                                   src_rank * uniform_count,
+                                                   info.intersection.strides_and_distances(),
+                                                   output[info.outBrickIdx],
+                                                   info.intersection.offset_in(outBrick.layout),
+                                                   outBrick.layout.strides_and_distances(),
+                                                   "unpack from ncclAllToAll"),
+                                   {a2aIdx});
             multiPlan[unpackIdx]->group = itemGroup;
             outputItems.push_back(unpackIdx);
         }
 
-        // keep alltoall buffers alive for the duration of plan execution
-        for(auto& buf : a2aSendBufs)
-            packBufs.push_back(std::move(buf));
-        for(auto& buf : a2aRecvBufs)
-            packBufs.push_back(std::move(buf));
+        // a2aSendBufs / a2aRecvBufs leases die at end-of-scope; the
+        // underlying InternalTempBuffers stay alive via the shared_ptr
+        // refs held by agents[r].sendBuffer / .recvBuffer (BufferPtr::temp)
+        // that are now owned by the CommRCCLAllToAll plan item.
     }
     else
     {
@@ -2585,8 +2579,14 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         rcclGrouped->group = itemGroup;
         rcclGrouped->description = "RCCL grouped send/recv";
 
-        std::vector<size_t> packItems;
-        packBufs.reserve(packBufs.size() + 2 * cross_device_count);
+        // packBufs only holds the leases so the TempBufferLease& aliases
+        // captured below stay valid for the BufferPtr::temp(pack.data()) /
+        // BufferPtr::temp(recv.data()) calls in the loop body; the leases
+        // themselves are not needed after the loop because the
+        // BufferPtr::temp shared_ptrs co-own the underlying buffers.
+        std::vector<TempBufferLease> packBufs;
+        std::vector<size_t>          packItems;
+        packBufs.reserve(2 * cross_device_count);
 
         for(const auto& info : intersections)
         {
