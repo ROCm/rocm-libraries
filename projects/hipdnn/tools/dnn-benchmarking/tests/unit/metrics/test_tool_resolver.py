@@ -81,3 +81,26 @@ class TestResolveRocmTool:
         location on every standard host."""
         monkeypatch.delenv("ROCM_PATH", raising=False)
         assert _tool_resolver._preferred_rocm_root() == "/opt/rocm"
+
+    def test_path_fallback_warns_loudly(self, tmp_path, monkeypatch, capsys):
+        """The PATH-fallback case is exactly when the user is at risk
+        of picking up the broken venv shim that this module's docstring
+        warns about. Surface a warn_once so silent SIGABRT crashes
+        downstream have a breadcrumb pointing back here."""
+        # Force the diagnostic's seen-set to drop our message; otherwise
+        # an earlier test in the same suite may have already fired it.
+        from dnn_benchmarking.metrics._diagnostic import reset as reset_warn_once
+
+        reset_warn_once()
+        monkeypatch.setenv("ROCM_PATH", str(tmp_path))  # tmp_path/bin missing
+        monkeypatch.setattr(
+            _tool_resolver.shutil,
+            "which",
+            lambda _name: "/some/venv/bin/rocprofv3",
+        )
+        result = _tool_resolver.resolve_rocm_tool("rocprofv3")
+        assert result == "/some/venv/bin/rocprofv3"
+        captured = capsys.readouterr()
+        assert "[metrics:tool_resolver]" in captured.err
+        assert "PATH-resolved" in captured.err
+        assert "/some/venv/bin/rocprofv3" in captured.err

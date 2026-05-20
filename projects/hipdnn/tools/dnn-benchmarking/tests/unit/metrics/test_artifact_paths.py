@@ -40,7 +40,7 @@ class TestFlattenHostnameDir:
         """The mainline case: rocprofv3 wrote one ``<hostname>/`` dir
         containing the artifact files. After flattening, files sit
         directly under ``out_dir`` and the hostname dir is gone."""
-        host = tmp_path / "ctr2-alola-login-04.adc.amd.com"
+        host = tmp_path / "host-1"
         host.mkdir()
         # rocprofv3-shaped filenames with the _results infix.
         (host / "results_results.db").write_bytes(b"sqlite")

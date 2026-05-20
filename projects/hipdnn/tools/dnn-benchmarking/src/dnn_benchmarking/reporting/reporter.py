@@ -158,6 +158,14 @@ class Reporter:
         """
         self._print(f"ERROR: {message}")
 
+    def print_warning(self, message: str) -> None:
+        """Print non-fatal warning message.
+
+        Args:
+            message: Warning message.
+        """
+        self._print(f"WARNING: {message}")
+
     def _print(self, text: str) -> None:
         """Print a line of text.
 
@@ -749,11 +757,20 @@ class Reporter:
 
         trace = extra.get("trace")
         if isinstance(trace, dict):
-            path = trace.get("path") or trace.get("db_path")
+            # Trace and rocpd db are distinct artefacts — kineto in
+            # particular emits both: `path` is the chrome JSON the user
+            # opens in Perfetto/Chrome, `db_path` is the rocpd source.
+            # Folding them onto one line with a `fmt` suffix would
+            # mislabel a database as a trace whenever convert failed and
+            # only `db_path` was present.
             fmt = trace.get("format", "?")
-            if path:
-                self._print(f"  Trace ({fmt}):         {path}")
-            elif "skipped" in trace:
+            trace_path = trace.get("path")
+            db_path = trace.get("db_path")
+            if trace_path:
+                self._print(f"  Trace ({fmt}):         {trace_path}")
+            if db_path:
+                self._print(f"  Trace DB:              {db_path}")
+            if not trace_path and not db_path and "skipped" in trace:
                 self._print(f"  Trace ({fmt}):         skipped — {trace['skipped']}")
 
         pmc = extra.get("pmc")

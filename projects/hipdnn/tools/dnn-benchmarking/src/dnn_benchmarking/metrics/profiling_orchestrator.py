@@ -23,6 +23,7 @@ slice with a ``skipped`` / ``error_tail`` / ``warnings`` key, and a
 single ``warn_once`` line goes to stderr.
 """
 
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,14 +40,35 @@ from . import roofline as _roofline_mod
 def resolve_output_dir(metrics_config: MetricsConfig) -> Path:
     """Pick the root profiling-output directory, defaulting to a UTC stamp.
 
-    Mutates ``metrics_config.profiling_output_dir`` so the same path is
-    reused across (graph, engine) pairs in one suite.
+    **Mutates the shared MetricsConfig instance**: on first call with
+    ``profiling_output_dir is None``, this writes the resolved path
+    back into the config so every subsequent (graph, engine) pair in
+    the same suite lands under the same root. Without this, each engine
+    would generate its own timestamped directory and per-suite output
+    would stop being a single browsable tree.
+
+    Callers that need a fresh resolution per call (e.g. parallel suites
+    sharing a config) must clone the MetricsConfig first — today's
+    sequential suite runner is the only caller and shares one config
+    intentionally.
     """
     if metrics_config.profiling_output_dir is None:
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
         metrics_config.profiling_output_dir = Path("profiling-output") / stamp
     metrics_config.profiling_output_dir.mkdir(parents=True, exist_ok=True)
     return metrics_config.profiling_output_dir
+
+
+# Characters that are safe in path segments across Linux filesystems
+# without quoting at the shell. Anything else (slash, space, colon,
+# brackets, $, &, ...) gets collapsed to '_' so a future plugin that
+# returns an awkward engine name can't break the artifact tree or
+# require the user to shell-quote artifact paths.
+_PATH_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def _safe_segment(name: str) -> str:
+    return _PATH_SAFE_RE.sub("_", name) or "unnamed"
 
 
 def build_inner_argv(
@@ -97,8 +119,18 @@ def _subdir(out_dir: Path, graph_path: Path, engine_name: str, source: str) -> P
     engine, then profiling source. Replaces the legacy flat scheme
     ``<graph>_<engine_id>_<source>/`` whose engine_id segment was a
     19-digit hash that no one could read or type.
+
+    Both the graph stem and engine name are sanitised before joining:
+    today's engines (MIOPEN_ENGINE, etc.) are alphanumeric and safe,
+    but a future plugin returning an awkward name (with slashes,
+    spaces, colons) would otherwise break the artifact tree.
     """
-    sub = out_dir / graph_path.stem / engine_name / source
+    sub = (
+        out_dir
+        / _safe_segment(graph_path.stem)
+        / _safe_segment(engine_name)
+        / _safe_segment(source)
+    )
     sub.mkdir(parents=True, exist_ok=True)
     return sub
 

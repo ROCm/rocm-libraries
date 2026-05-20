@@ -123,6 +123,47 @@ class TestResolveOutputDir:
         assert captured_pmc_dirs[1] == first_root / "g" / "ENGINE_B" / "pmc_basic"
 
 
+class TestPathSanitization:
+    """Engine names come from hipdnn's plugin registry. Today's engines
+    (MIOPEN_ENGINE, etc.) are alphanumeric and would round-trip through
+    a path segment unchanged. A future plugin returning something with
+    slashes, spaces, colons, or other awkward characters would
+    otherwise break the artifact tree (or force users to shell-quote
+    every artifact path). ``_safe_segment`` collapses anything outside
+    `[A-Za-z0-9._-]` to underscores."""
+
+    def test_safe_segment_passes_through_alphanumeric(self):
+        assert orch._safe_segment("MIOPEN_ENGINE") == "MIOPEN_ENGINE"
+        assert orch._safe_segment("engine-v2.1") == "engine-v2.1"
+
+    def test_safe_segment_collapses_unsafe_chars(self):
+        # Slash, space, colon, brackets, $, & — the usual suspects.
+        assert orch._safe_segment("eng/v1") == "eng_v1"
+        assert orch._safe_segment("eng v1") == "eng_v1"
+        assert orch._safe_segment("eng:v1") == "eng_v1"
+        assert orch._safe_segment("eng[0]$") == "eng_0__"
+
+    def test_safe_segment_empty_input_returns_unnamed(self):
+        # An empty input mustn't produce an empty path segment, which
+        # would silently collapse `<root>//<source>/` and break the
+        # layout. All-unsafe inputs collapse to underscores instead —
+        # ugly but still a valid, distinct path segment.
+        assert orch._safe_segment("") == "unnamed"
+        assert orch._safe_segment("///") == "___"
+
+    def test_subdir_sanitizes_engine_name(self, tmp_path):
+        sub = orch._subdir(
+            tmp_path,
+            graph_path=Path("graphs/sample.json"),
+            engine_name="weird/engine name",
+            source="pmc_basic",
+        )
+        # No literal '/' or ' ' anywhere except path separators between
+        # graph_stem / engine_name / source.
+        assert "weird_engine_name" in sub.parts
+        assert sub.exists()
+
+
 class TestDispatch:
     def test_no_op_when_nothing_requested(self, tmp_path):
         cfg = MetricsConfig()  # no opt-in flags

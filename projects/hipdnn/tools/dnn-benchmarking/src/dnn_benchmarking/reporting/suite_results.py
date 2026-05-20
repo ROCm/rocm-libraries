@@ -194,6 +194,20 @@ class ProviderEngineResult:
             "engine_id": self.engine_id,
             "status": self.status,
         }
+        # extra_metrics is exclusively populated by the opt-in
+        # profiling orchestrator, which the suite runner only fires on
+        # the success path. Asserting the invariant here makes it
+        # load-bearing: if a future caller routes profiling onto a
+        # non-success status, the assertion fires and forces a
+        # decision (emit always when present, or gate explicitly)
+        # rather than silently dropping the slice from the JSON.
+        if self.status != "success":
+            assert self.extra_metrics is None, (
+                f"extra_metrics is set on status={self.status!r}; "
+                "the orchestrator only runs on success today, so this "
+                "indicates either a new caller or a regression in the "
+                "success-gating in suite_runner._run_single_provider_engine"
+            )
         if self.status == "success":
             d["cpu_build_time_ms"] = self.cpu_build_time_ms
             d["gpu_kernel_stats"] = (

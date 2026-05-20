@@ -73,6 +73,12 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
     # if we left them on, polluting the inner run. Force tier=off for
     # the inner pass; the parent already collected basic metrics on the
     # timed pass.
+    #
+    # `plugin_path` is forwarded so the child's SuiteConfig matches the
+    # parent's. hipdnn.set_engine_plugin_paths above is what actually
+    # loads the plugin today, but any future code that reads
+    # config.plugin_path from inside _run_single_provider_engine would
+    # otherwise silently see None in the child.
     suite_config = SuiteConfig(
         warmup_iters=args.warmup,
         benchmark_iters=args.iters,
@@ -82,6 +88,7 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
         reference_provider="none",
         verbose=False,
         metrics=MetricsConfig(tier="off"),
+        plugin_path=args.plugin_path,
     )
 
     try:

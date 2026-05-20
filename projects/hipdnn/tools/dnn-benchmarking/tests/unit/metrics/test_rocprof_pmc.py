@@ -184,6 +184,10 @@ class TestRunHappyPath:
             extra = rocprof_pmc.run(
                 inner_argv=["python"], out_dir=out_dir, pmc_set="basic"
             )
+        # Assert key presence first so a regression that drops
+        # "warnings" surfaces as a clear AssertionError instead of a
+        # KeyError that obscures the actual failure.
+        assert "warnings" in extra["pmc"]
         assert "info_kernel_symbol" in extra["pmc"]["warnings"][0]
 
 

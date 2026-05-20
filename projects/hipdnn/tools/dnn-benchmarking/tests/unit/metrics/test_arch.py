@@ -10,17 +10,20 @@ from dnn_benchmarking.metrics.arch import detect_arch
 
 
 class TestDetectArchTorchPath:
-    def test_torch_returns_gfx942(self):
-        fake_props = MagicMock()
-        fake_props.gcnArchName = "gfx942:sramecc+:xnack-"
-        with patch.object(_arch, "_detect_via_rocminfo", return_value=None):
-            with patch("torch.cuda.is_available", return_value=True), patch(
-                "torch.cuda.get_device_properties", return_value=fake_props
-            ):
-                assert detect_arch() == "gfx942"
+    """Patches ``_arch._detect_via_torch`` directly rather than the
+    ``torch.cuda.*`` symbols. The latter form raises
+    ``ModuleNotFoundError`` at collection time on hosts without torch —
+    a real concern for the unit suite, which is supposed to run cleanly
+    on a CI box without ROCm or torch installed."""
 
-    def test_torch_present_but_no_cuda_falls_through(self):
-        with patch("torch.cuda.is_available", return_value=False), patch.object(
+    def test_torch_returns_gfx942(self):
+        with patch.object(
+            _arch, "_detect_via_torch", return_value="gfx942"
+        ), patch.object(_arch, "_detect_via_rocminfo", return_value=None):
+            assert detect_arch() == "gfx942"
+
+    def test_torch_path_returns_none_falls_through_to_rocminfo(self):
+        with patch.object(_arch, "_detect_via_torch", return_value=None), patch.object(
             _arch, "_detect_via_rocminfo", return_value="gfx90a"
         ):
             assert detect_arch() == "gfx90a"

@@ -54,9 +54,15 @@ class TestKernelEventGate:
 
         def fake_run(argv, **kwargs):
             captured["argv"] = argv
-            host_dir = Path(argv[argv.index("-o") + 1]).parent
-            host_dir.mkdir(parents=True, exist_ok=True)
-            (host_dir / "perf.csv").write_text(SAMPLE_CSV)
+            # Write the CSV at the exact `-o` value rather than
+            # reconstructing the path from out_dir. If a future
+            # _build_argv change moves -o, this assertion fails loudly
+            # instead of silently routing the fake's CSV elsewhere and
+            # making _parse_perf_csv return {} — which would let the
+            # rest of the test pass for completely broken behavior.
+            csv_path = Path(argv[argv.index("-o") + 1])
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(SAMPLE_CSV)
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch.object(perf_mod.subprocess, "run", side_effect=fake_run):
@@ -76,9 +82,15 @@ class TestKernelEventGate:
 
         def fake_run(argv, **kwargs):
             captured["argv"] = argv
-            host_dir = Path(argv[argv.index("-o") + 1]).parent
-            host_dir.mkdir(parents=True, exist_ok=True)
-            (host_dir / "perf.csv").write_text(SAMPLE_CSV)
+            # Write the CSV at the exact `-o` value rather than
+            # reconstructing the path from out_dir. If a future
+            # _build_argv change moves -o, this assertion fails loudly
+            # instead of silently routing the fake's CSV elsewhere and
+            # making _parse_perf_csv return {} — which would let the
+            # rest of the test pass for completely broken behavior.
+            csv_path = Path(argv[argv.index("-o") + 1])
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(SAMPLE_CSV)
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch.object(perf_mod.subprocess, "run", side_effect=fake_run):
@@ -118,9 +130,15 @@ class TestSubprocessFailureModes:
         def fake_run(argv, **kwargs):
             # Drop a CSV so partial parsing succeeds — perf.py records
             # error_tail in addition to whatever events it could parse.
-            host_dir = Path(argv[argv.index("-o") + 1]).parent
-            host_dir.mkdir(parents=True, exist_ok=True)
-            (host_dir / "perf.csv").write_text(SAMPLE_CSV)
+            # Write the CSV at the exact `-o` value rather than
+            # reconstructing the path from out_dir. If a future
+            # _build_argv change moves -o, this assertion fails loudly
+            # instead of silently routing the fake's CSV elsewhere and
+            # making _parse_perf_csv return {} — which would let the
+            # rest of the test pass for completely broken behavior.
+            csv_path = Path(argv[argv.index("-o") + 1])
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(SAMPLE_CSV)
             return MagicMock(returncode=2, stdout="", stderr="perf: bad event\n")
 
         with patch.object(perf_mod.subprocess, "run", side_effect=fake_run):
@@ -153,9 +171,15 @@ class TestIpcDerivation:
         monkeypatch.setattr(perf_mod.shutil, "which", lambda _: "/usr/bin/perf")
 
         def fake_run(argv, **kwargs):
-            host_dir = Path(argv[argv.index("-o") + 1]).parent
-            host_dir.mkdir(parents=True, exist_ok=True)
-            (host_dir / "perf.csv").write_text(SAMPLE_CSV)
+            # Write the CSV at the exact `-o` value rather than
+            # reconstructing the path from out_dir. If a future
+            # _build_argv change moves -o, this assertion fails loudly
+            # instead of silently routing the fake's CSV elsewhere and
+            # making _parse_perf_csv return {} — which would let the
+            # rest of the test pass for completely broken behavior.
+            csv_path = Path(argv[argv.index("-o") + 1])
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(SAMPLE_CSV)
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch.object(perf_mod.subprocess, "run", side_effect=fake_run):

@@ -307,9 +307,11 @@ def run(
             }
         }
 
-    # Hoist results.db out of <out_dir>/<hostname>/ to <out_dir>/.
-    # Safe to run on the error path too — anything rocprofv3 wrote
-    # before exiting non-zero ends up alongside the success-path files.
+    # Hoist results.db out of <out_dir>/<hostname>/ to <out_dir>/ so
+    # the artifact path the user sees in the JSON doesn't carry the
+    # hostname segment. Runs on the error path too so any partial
+    # files rocprofv3 wrote before exiting are still reachable on
+    # disk for manual inspection, even though we don't parse them.
     flatten_hostname_dir(out_dir)
 
     result: Dict[str, Any] = {

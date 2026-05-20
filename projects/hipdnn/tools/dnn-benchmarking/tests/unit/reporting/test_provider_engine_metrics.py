@@ -119,6 +119,25 @@ class TestProviderEngineResultFullShape:
         assert d["cpu_kernel_time_per_iter_us"] == 2.5
         assert d["vram_used_mb"] == 4096.0
 
+    def test_extra_metrics_on_non_success_status_asserts(self):
+        """The orchestrator only fires on the success path, so any
+        non-success ProviderEngineResult that carries extra_metrics is
+        either a regression in the success-gating in suite_runner or a
+        new caller wiring profiling to a different path. Either way we
+        want a loud AssertionError at serialization time rather than
+        silently dropping the slice from the JSON."""
+        import pytest
+
+        pe = ProviderEngineResult(
+            provider="miopen",
+            engine_id=1,
+            status="error",
+            error_message="boom",
+            extra_metrics={"pmc": {"set": "basic"}},
+        )
+        with pytest.raises(AssertionError, match="extra_metrics is set"):
+            pe.to_dict()
+
     def test_extra_metrics_passthrough(self):
         # Always-on collection never populates this; the schema must
         # still round-trip an arbitrary dict so opt-in profiling

@@ -179,6 +179,18 @@ class MetricsConfig:
     profiling_output_dir: Optional[Path] = None
 
     def __post_init__(self) -> None:
+        # Normalise empty / whitespace-only strings to None. The CLI
+        # uses argparse `choices=` so this only matters for programmatic
+        # / TOML callers, but the `Optional[Literal[...]]` annotation
+        # isn't enforced at runtime: without this, ``pmc_set=""`` slips
+        # past every downstream check (the `is not None` guards see a
+        # truthy-empty string, `== "all"` is false, and the empty value
+        # rides into the orchestrator as ``--pmc ""``).
+        if isinstance(self.emit_trace, str) and not self.emit_trace.strip():
+            self.emit_trace = None
+        if isinstance(self.pmc_set, str) and not self.pmc_set.strip():
+            self.pmc_set = None
+
         valid_tiers = {"basic", "off"}
         if self.tier not in valid_tiers:
             raise ValueError(

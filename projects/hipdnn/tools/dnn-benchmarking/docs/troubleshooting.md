@@ -41,10 +41,13 @@ On a host with `/opt/rocm/bin/rocprofv3`, `perf` and
 `rocprof-compute` installed:
 
 ```bash
-# Single sources
-pytest -m rocprofv3 tests/integration/test_profiling.py
-pytest -m perf tests/integration/test_profiling.py
-pytest -m rocprof_compute tests/integration/test_profiling.py
+# Single sources — the `not perf and not rocprof_compute` exclusions
+# matter: the combined-source smoke also carries the `rocprofv3`
+# marker, so the bare `-m rocprofv3` form would collect it and demand
+# perf + rocprof-compute too.
+pytest -m "rocprofv3 and not perf and not rocprof_compute" tests/integration/test_profiling.py
+pytest -m "perf and not rocprofv3 and not rocprof_compute" tests/integration/test_profiling.py
+pytest -m "rocprof_compute and not rocprofv3 and not perf" tests/integration/test_profiling.py
 
 # Combined-source smoke (requires all three binaries + paranoid<=1)
 pytest -m "rocprofv3 and perf and rocprof_compute" tests/integration/test_profiling.py

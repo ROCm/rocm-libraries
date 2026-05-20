@@ -22,6 +22,8 @@ import os
 import shutil
 from typing import Optional
 
+from ._diagnostic import warn_once
+
 
 def _preferred_rocm_root() -> str:
     return os.environ.get("ROCM_PATH", "/opt/rocm")
@@ -30,6 +32,12 @@ def _preferred_rocm_root() -> str:
 def resolve_rocm_tool(name: str) -> Optional[str]:
     """Return the absolute path of ``$ROCM_PATH/bin/<name>`` when it exists,
     otherwise ``shutil.which(name)``, otherwise ``None``.
+
+    When falling back to PATH, emit a single ``warn_once`` per tool —
+    activated venvs may put a broken shim earlier on PATH (the
+    rocm_sdk_core wheel's rocprofv3 SIGABRTs under torch; see module
+    docstring) and the user otherwise has no clue why profiling
+    silently produced a crash or empty output.
 
     Args:
         name: Bare tool name, e.g. ``"rocprofv3"`` or ``"rocprof-compute"``.
@@ -40,4 +48,12 @@ def resolve_rocm_tool(name: str) -> Optional[str]:
     candidate = os.path.join(_preferred_rocm_root(), "bin", name)
     if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
         return candidate
-    return shutil.which(name)
+    path_resolved = shutil.which(name)
+    if path_resolved is not None:
+        warn_once(
+            "tool_resolver",
+            f"{name}: preferred root {candidate!r} not found; using "
+            f"PATH-resolved {path_resolved!r} (may be a broken venv shim — "
+            "see metrics/_tool_resolver.py docstring)",
+        )
+    return path_resolved
