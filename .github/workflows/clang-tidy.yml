@@ -1,23 +1,16 @@
 name: clang-tidy
 
 on:
+  # Paths filtering is intentionally not used at the trigger level.
+  # - For pushes, dorny/paths-filter in the setup job determines which opted-in
+  #   libraries changed (via each library's path_filters) and builds the matrix.
+  # - For PRs, the workflow must always run so the required check is registered
+  #   for every PR; the clang-tidy job is skipped when no opted-in component is affected.
   push:
     branches:
       - develop
       - release/therock-*
-    paths:
-      - 'projects/hipdnn/**/*.[ch]p?p?'
-      - 'projects/hipdnn/cmake/ClangTidy.cmake'
-      - 'projects/hipdnn/.clang-tidy'
-      # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
-      # - 'dnn-providers/miopen-provider/**/*.[ch]p?p?'
-      # - 'dnn-providers/miopen-provider/cmake/ClangTidy.cmake'
-      # - 'dnn-providers/miopen-provider/.clang-tidy'
-      - '.github/workflows/clang-tidy.yml'
   pull_request:
-    # No paths: filter — workflow must always run so the required check is registered
-    # for every PR. The clang-tidy job itself is skipped when no opted-in component
-    # is affected (guarded by the setup job output).
   workflow_dispatch:
 
 concurrency:
@@ -42,41 +35,70 @@ jobs:
           sparse-checkout-cone-mode: true
           fetch-depth: 2
 
+      - name: Define opted-in libraries
+        id: lib-config
+        run: |
+          # To opt in a new library: add one jq -cn block to LIBS below, then add an
+          # "Install deps (<name>)" step in the clang-tidy job if custom deps are needed.
+          # Required fields: name, path_filters (array), src, build, cmake_flags
+          # Optional fields: target — clang-tidy build target (default: "tidy" if omitted)
+          # path_filters controls which file changes trigger clang-tidy for this library;
+          # use specific globs (e.g. *.[ch]p?p?) rather than /** to avoid false triggers.
+          LIBS=()
+
+          # hipDNN
+          LIBS+=($(jq -cn '{
+            name:         "hipdnn",
+            path_filters: [
+              "projects/hipdnn/**/*.[ch]p?p?",
+              "projects/hipdnn/cmake/ClangTidy.cmake",
+              "projects/hipdnn/.clang-tidy"
+            ],
+            src:          "projects/hipdnn",
+            build:        "build-hipdnn",
+            cmake_flags:  "-DENABLE_CLANG_TIDY=ON -DROCM_PATH=/opt/rocm -DCMAKE_PREFIX_PATH=/opt/rocm -DENABLE_CLANG_FORMAT=OFF -DHIP_PLATFORM=amd"
+          }'))
+
+          # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
+          # LIBS+=($(jq -cn '{
+          #   name:         "miopen-provider",
+          #   path_filters: [
+          #     "dnn-providers/miopen-provider/**/*.[ch]p?p?",
+          #     "dnn-providers/miopen-provider/cmake/ClangTidy.cmake",
+          #     "dnn-providers/miopen-provider/.clang-tidy"
+          #   ],
+          #   src:          "dnn-providers/miopen-provider",
+          #   build:        "build-miopen-provider",
+          #   cmake_flags:  "-DENABLE_CLANG_TIDY=ON -DROCM_PATH=/opt/rocm -DCMAKE_PREFIX_PATH=/opt/rocm -DENABLE_CLANG_FORMAT=OFF -DHIP_PLATFORM=amd"
+          # }'))
+
+          printf '%s\n' "${LIBS[@]}" \
+            | jq -rs '.[] | "\(.name):\n" + (.path_filters[] | "  - \"\(.)\"") + "\n"' \
+            > path-filters.yml
+
+          LIBS_JSON=$(printf '%s\n' "${LIBS[@]}" | jq -sc '.')
+          echo "libs=${LIBS_JSON}" >> "$GITHUB_OUTPUT"
+
       - name: Detect changed opted-in projects
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: changes
         with:
-          filters: |
-            # To opt in a new library: add a filter here and one ENTRIES line
-            # in the build-matrix step below.
-            hipdnn:
-              - 'projects/hipdnn/**'
-            # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
-            # miopen-provider:
-            #   - 'dnn-providers/miopen-provider/**'
+          filters: path-filters.yml
 
       - name: Build job matrix
         id: build-matrix
         run: |
-          ENTRIES=()
-          if [[ "${{ steps.changes.outputs.hipdnn }}" == "true" ]] \
-              || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            ENTRIES+=('{"name":"hipdnn","src":"projects/hipdnn","build":"build-hipdnn","cmake_flags":"-DENABLE_CLANG_TIDY=ON -DROCM_PATH=/opt/rocm -DCMAKE_PREFIX_PATH=/opt/rocm -DENABLE_CLANG_FORMAT=OFF -DHIP_PLATFORM=amd"}')
-          fi
-          # To opt in a new library: uncomment or add an ENTRIES line here, and
-          # add a filter above. Required fields: name, src, build, cmake_flags.
-          # Optional fields: target (default: "tidy").
-          # Add an "Install deps (<name>)" step in the clang-tidy job if needed.
-          # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
-          # if [[ "${{ steps.changes.outputs.miopen-provider }}" == "true" ]] \
-          #     || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          #   ENTRIES+=('{"name":"miopen-provider","src":"dnn-providers/miopen-provider","build":"build-miopen-provider","cmake_flags":"-DENABLE_CLANG_TIDY=ON -DROCM_PATH=/opt/rocm -DCMAKE_PREFIX_PATH=/opt/rocm -DENABLE_CLANG_FORMAT=OFF -DHIP_PLATFORM=amd"}')
-          # fi
-          if [[ ${#ENTRIES[@]} -gt 0 ]]; then
-            MATRIX=$(printf '%s\n' "${ENTRIES[@]}" | jq -sc '{"include": .}')
-          else
-            MATRIX='{"include":[]}'
-          fi
+          CHANGED='${{ steps.changes.outputs.changes }}'
+          LIBS='${{ steps.lib-config.outputs.libs }}'
+          IS_DISPATCH=${{ github.event_name == 'workflow_dispatch' }}
+
+          MATRIX=$(
+            echo "$LIBS" | jq -c \
+              --argjson changed "$CHANGED" \
+              --argjson dispatch "$IS_DISPATCH" \
+              '[.[] | select($dispatch or (.name as $n | $changed | index($n) != null))]
+               | {"include": .}'
+          )
           echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
 
   clang-tidy:
