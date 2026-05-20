@@ -302,6 +302,10 @@ inline std::map<std::string, int>
         isaVersion, assemblerPath, "v_fma_f64 v[20:21], v[22:23], v[24:25], v[20:21]", isDebug);
 
     rv["v_mov_b64"] = tryAssembler(isaVersion, assemblerPath, "v_mov_b64 v[0:1], v[2:3]", isDebug);
+
+    rv["v_tanh_f16"] = tryAssembler(isaVersion, assemblerPath, "v_tanh_f16 v20, v21", isDebug);
+    rv["v_tanh_f32"] = tryAssembler(isaVersion, assemblerPath, "v_tanh_f32 v20, v21", isDebug);
+
     rv["s_sub_u64"]
         = tryAssembler(isaVersion, assemblerPath, "s_sub_u64 s[0:1], s[0:1], s[2:3]", isDebug);
 

@@ -1919,6 +1919,28 @@ void common_inst(nb::module_ m_common)
             return new rocisa::VLShiftLeftAddU32(self);
         });
 
+    nb::class_<rocisa::VTanhF16, rocisa::CommonInstruction>(m_common, "VTanhF16")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VTanhF16& self, nb::dict&) {
+            return new rocisa::VTanhF16(self);
+        });
+
+    nb::class_<rocisa::VTanhF32, rocisa::CommonInstruction>(m_common, "VTanhF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VTanhF32& self, nb::dict&) {
+            return new rocisa::VTanhF32(self);
+        });
+
     nb::class_<rocisa::VMovB32, rocisa::CommonInstruction>(m_common, "VMovB32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,

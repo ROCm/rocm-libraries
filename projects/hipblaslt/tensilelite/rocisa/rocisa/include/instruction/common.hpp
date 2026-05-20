@@ -4703,6 +4703,48 @@ namespace rocisa
         }
     };
 
+    struct VTanhF16 : public CommonInstruction
+    {
+        VTanhF16(const std::shared_ptr<Container>& dst,
+                 const InstructionInput&           src,
+                 const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F16, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_tanh_f16");
+        }
+
+        VTanhF16(const VTanhF16& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VTanhF16>(*this);
+        }
+    };
+
+    struct VTanhF32 : public CommonInstruction
+    {
+        VTanhF32(const std::shared_ptr<Container>& dst,
+                 const InstructionInput&           src,
+                 const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_tanh_f32");
+        }
+
+        VTanhF32(const VTanhF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VTanhF32>(*this);
+        }
+    };
+
     struct VMovB32 : public CommonInstruction
     {
         VMovB32(const std::shared_ptr<Container>&   dst,
