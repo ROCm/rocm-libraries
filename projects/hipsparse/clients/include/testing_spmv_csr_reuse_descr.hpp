@@ -213,12 +213,11 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(
         hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType));
 
-    const hipsparseOperation_t ops[]  = {HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                                         HIPSPARSE_OPERATION_TRANSPOSE,
-                                         HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
-    const hipsparseSpMVAlg_t   algs[] = {HIPSPARSE_SPMV_ALG_DEFAULT,
-                                         HIPSPARSE_SPMV_CSR_ALG1,
-                                         HIPSPARSE_SPMV_CSR_ALG2};
+    const hipsparseOperation_t ops[] = {HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                                        HIPSPARSE_OPERATION_TRANSPOSE,
+                                        HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
+    const hipsparseSpMVAlg_t   algs[]
+        = {HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_CSR_ALG1, HIPSPARSE_SPMV_CSR_ALG2};
 
     constexpr int number_of_passes = 3;
     for(int pass = 0; pass < number_of_passes; ++pass)
