@@ -28,7 +28,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAndB32, \
   SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
-  SCBranchSCC0, SCBranchSCC1, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, \
+  SCBranchSCC0, SCBranchSCC1, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, \
   SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, \
   SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
   SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
@@ -52,6 +52,14 @@ from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackD
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 
 from math import ceil, log2
+
+
+def _scmpGtU32(writer, src, imm, comment=""):
+    """ISA-aware scalar compare: s_cmpk_gt_u32 on gfx9, s_cmp_gt_u32 on gfx12+."""
+    if writer.states.asmCaps.get("HasSCMPK", False):
+        return SCmpKGtU32(src=src, simm16=imm, comment=comment)
+    else:
+        return SCmpGtU32(src0=src, src1=imm, comment=comment)
 
 class GlobalWriteBatchComponent(GlobalWriteComponents):
   kernel = {"ProblemType": {"OperationType": "GEMM" }}
@@ -469,14 +477,14 @@ class GlobalWriteBatchWriter:
             d1, d0 = element[0], element[1]
             # N guard: emit once per d1 group.
             if nGuardSgpr is not None and d1 != self._subtileCloadPrevD1:
-              module.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=d1,
+              module.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), d1,
                                     comment="subtile C load: numNBlocks > d1=%d?" % d1))
               module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0="BufferOOB", src1=0,
                                      comment="SrdC+2 = BufferOOB if N valid, else 0"))
               self._subtileCloadPrevD1 = d1
             # M guard: emit per element, AND into SrdC+2.
             if mGuardSgpr is not None:
-              module.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=d0,
+              module.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), d0,
                                     comment="subtile C load: numMBlocks > d0=%d?" % d0))
               if nGuardSgpr is not None:
                 module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0=sgpr("SrdC+2"), src1=0,
@@ -893,6 +901,7 @@ class GlobalWriteBatchWriter:
       and (self.kernel["ProblemType"]["DestDataType"].isBFloat16() or
            self.kernel["ProblemType"]["DestDataType"].isHalf())
       and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
+      and self.kernel["WavefrontSize"] != 32  # wave32: skip permute-based packed store (uses wave64-only ops)
     )
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
@@ -1634,7 +1643,7 @@ class GlobalWriteBatchWriter:
         f"{labelPrefix}_N{blockIdxN}_end")
       nGroupEndLabel = Label(nGroupEndLabelName,
                              f"end of N group blockIdxN={blockIdxN} (M cbranch target)")
-      targetModule.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=blockIdxN,
+      targetModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), blockIdxN,
                                    comment=f"quick-exit: numValidNBlocks > {blockIdxN}? (OOB -> skip all stores)"))
       targetModule.add(SCBranchSCC0(labelName=self._subtileAllStoresEndLabel.getLabelName(),
                                      comment=f"quick-exit: N OOB at blockIdxN={blockIdxN}, skip all remaining stores"))
@@ -1647,7 +1656,7 @@ class GlobalWriteBatchWriter:
     # is OOB then all subsequent M elements in this N group are also OOB.
     if guardMSgpr is None:
       return None
-    targetModule.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=blockIdxM,
+    targetModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), blockIdxM,
                                  comment=f"quick-exit: numValidMBlocks > {blockIdxM}? (OOB -> skip N group)"))
     if guardNSgpr is not None and self._subtileNGroupSkipLabel is not None:
       # M OOB → jump to end of this N group (no per-element label needed).
