@@ -42,6 +42,7 @@ from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
 
 from .KernelWriterModules import *
+
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
@@ -247,6 +248,7 @@ class StateValues:
   unifiedVgprRegs: bool                  = False
   useAtomicAdd: bool                     = False
   serializedStore: bool                  = False
+  storeAlign8: bool                      = False
 
   a: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
   b: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
@@ -4447,6 +4449,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tileInfo.deallocOffsetRegisters(self, kernel)
 
     # For subtile kernels, free SGPRs that were only needed during the main loop
+    self.states.storeAlign8 = False
     if kernel["UseSubtileImpl"]:
       # Remove SrdWS from the free pool before defineSgprIdx calls below,
       # otherwise checkOutAligned can grab registers overlapping SrdWS.
@@ -4465,6 +4468,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(RegSet("s", "sgprSubtileNGuard", self.states.subtileN16ValidBlocksSgpr))
       self.states.nonPostLoopSgpr.append("SubtileMGuard")
       self.states.nonPostLoopSgpr.append("SubtileNGuard")
+      self.states.storeAlign8 = True
 
     # Start of post-loop code
     if 1:
