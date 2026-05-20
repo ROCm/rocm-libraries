@@ -429,20 +429,23 @@ void GpuConvReference::RunBwd(const Handle& handle,
         auto in_strides =
             MakeStrideArray<5>(SplitStrideCtoGC(group, dxDesc.GetStrides(), G_stride_idx));
 
+        // The kernel's p_in is the result (dx) and p_out is the input (dy).
+        // This matches the solver's reversed tensor convention
+        // (see backward_tensors_reversed_why in conv_direct_naive_conv.cpp).
         handle.AddKernel("gpu_ref_conv",
                          "",
                          kernel_file,
                          kernel_name,
                          {REF_BLOCK_SIZE, 1, 1},
                          {grid_size_per_batch * REF_BLOCK_SIZE, num_spatial_tiles, 1},
-                         comp_opts)(dy,
+                         comp_opts)(dx,
                                     w,
                                     1.0,
                                     0.0,
-                                    dx,
-                                    out_strides,
-                                    wei_strides,
+                                    dy,
                                     in_strides,
+                                    wei_strides,
+                                    out_strides,
                                     hi,
                                     wi,
                                     n,
@@ -497,20 +500,21 @@ void GpuConvReference::RunBwd(const Handle& handle,
         auto in_strides =
             MakeStrideArray<6>(SplitStrideCtoGC(group, dxDesc.GetStrides(), G_stride_idx));
 
+        // Reversed tensor convention — see 2D BWD comment above.
         handle.AddKernel("gpu_ref_conv",
                          "",
                          kernel_file,
                          kernel_name,
                          {REF_BLOCK_SIZE, 1, 1},
                          {grid_size_per_batch * REF_BLOCK_SIZE, num_spatial_tiles, 1},
-                         comp_opts)(dy,
+                         comp_opts)(dx,
                                     w,
                                     1.0,
                                     0.0,
-                                    dx,
-                                    out_strides,
-                                    wei_strides,
+                                    dy,
                                     in_strides,
+                                    wei_strides,
+                                    out_strides,
                                     di,
                                     hi,
                                     wi,
