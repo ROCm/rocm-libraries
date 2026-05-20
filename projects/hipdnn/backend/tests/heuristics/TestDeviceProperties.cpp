@@ -13,18 +13,19 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_backend::heuristics;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 
+// Serialize/wrap tests build DevicePropertiesT in-memory and don't touch HIP,
+// so they can run on CPU-only CI runners. GPU-requiring tests that call
+// queryDeviceProperties() live in TestGpuDeviceProperties below.
 class TestDeviceProperties : public ::testing::Test
 {
 protected:
-    void SetUp() override {}
-
-    void TearDown() override {}
-
     // Helper to create test device properties
     static DevicePropertiesT createTestProperties()
     {
@@ -36,44 +37,6 @@ protected:
         return props;
     }
 };
-
-// ========== queryDeviceProperties Tests ==========
-
-TEST_F(TestDeviceProperties, QueryDevicePropertiesSucceeds)
-{
-    // Should not throw when HIP device is available
-    DevicePropertiesT props;
-    EXPECT_NO_THROW({ props = queryDeviceProperties(); });
-
-    // Basic sanity checks on returned properties
-    EXPECT_GE(props.device_id, 0);
-    EXPECT_GT(props.multi_processor_count, 0);
-    EXPECT_GT(props.total_global_mem, 0ULL);
-    EXPECT_FALSE(props.architecture_name.empty());
-}
-
-TEST_F(TestDeviceProperties, QueryDevicePropertiesHasValidArchitecture)
-{
-    const auto props = queryDeviceProperties();
-
-    // Architecture name should be a valid GCN/CDNA architecture
-    // Common formats: gfx908, gfx90a, gfx942, etc.
-    EXPECT_TRUE(props.architecture_name.find("gfx") == 0
-                || props.architecture_name.find("CDNA") == 0 || !props.architecture_name.empty())
-        << "Architecture name: " << props.architecture_name;
-}
-
-TEST_F(TestDeviceProperties, QueryDevicePropertiesIsConsistent)
-{
-    // Multiple queries should return the same device info
-    const auto props1 = queryDeviceProperties();
-    const auto props2 = queryDeviceProperties();
-
-    EXPECT_EQ(props1.device_id, props2.device_id);
-    EXPECT_EQ(props1.multi_processor_count, props2.multi_processor_count);
-    EXPECT_EQ(props1.total_global_mem, props2.total_global_mem);
-    EXPECT_EQ(props1.architecture_name, props2.architecture_name);
-}
 
 // ========== serializeDeviceProperties Tests ==========
 
@@ -225,28 +188,6 @@ TEST_F(TestDeviceProperties, WrapSerializedDevicePropertiesPreservesSize)
 
 // ========== Integration Tests ==========
 
-TEST_F(TestDeviceProperties, CompleteWorkflowQuerySerializeWrap)
-{
-    // Complete workflow: query -> serialize -> wrap
-    const auto props = queryDeviceProperties();
-    const auto serialized = serializeDeviceProperties(props);
-    const auto wrapper = wrapSerializedDeviceProperties(serialized);
-
-    // Wrapper should be valid
-    EXPECT_NE(wrapper.ptr, nullptr);
-    EXPECT_GT(wrapper.size, 0u);
-
-    // Should be deserializable
-    const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(wrapper.ptr);
-    ASSERT_NE(deviceProps, nullptr);
-
-    // Values should match queried properties
-    EXPECT_EQ(deviceProps->device_id(), props.device_id);
-    EXPECT_EQ(deviceProps->multi_processor_count(), props.multi_processor_count);
-    EXPECT_EQ(deviceProps->total_global_mem(), props.total_global_mem);
-    EXPECT_EQ(deviceProps->architecture_name()->str(), props.architecture_name);
-}
-
 TEST_F(TestDeviceProperties, CompleteWorkflowWithCustomProperties)
 {
     // Test with manually created properties
@@ -303,4 +244,66 @@ TEST_F(TestDeviceProperties, SerializeDevicePropertiesWithLongArchitectureName)
 
     EXPECT_EQ(deviceProps->architecture_name()->str(),
               "gfx90a-very-long-architecture-name-for-testing-purposes");
+}
+
+// ========== queryDeviceProperties Tests (GPU required) ==========
+
+// queryDeviceProperties() goes through hipGetDevice/hipGetDeviceProperties;
+// SKIP rather than fail on no-device CI runners.
+class TestGpuDeviceProperties : public ::testing::Test
+{
+protected:
+    void SetUp() override { SKIP_IF_NO_DEVICES(); }
+};
+
+TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesSucceeds)
+{
+    DevicePropertiesT props;
+    EXPECT_NO_THROW({ props = queryDeviceProperties(); });
+
+    EXPECT_GE(props.device_id, 0);
+    EXPECT_GT(props.multi_processor_count, 0);
+    EXPECT_GT(props.total_global_mem, 0ULL);
+    EXPECT_FALSE(props.architecture_name.empty());
+}
+
+TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesHasValidArchitecture)
+{
+    const auto props = queryDeviceProperties();
+
+    // Architecture name should be a valid GCN/CDNA architecture
+    // Common formats: gfx908, gfx90a, gfx942, etc.
+    EXPECT_TRUE(props.architecture_name.find("gfx") == 0
+                || props.architecture_name.find("CDNA") == 0 || !props.architecture_name.empty())
+        << "Architecture name: " << props.architecture_name;
+}
+
+TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesIsConsistent)
+{
+    const auto props1 = queryDeviceProperties();
+    const auto props2 = queryDeviceProperties();
+
+    EXPECT_EQ(props1.device_id, props2.device_id);
+    EXPECT_EQ(props1.multi_processor_count, props2.multi_processor_count);
+    EXPECT_EQ(props1.total_global_mem, props2.total_global_mem);
+    EXPECT_EQ(props1.architecture_name, props2.architecture_name);
+}
+
+TEST_F(TestGpuDeviceProperties, CompleteWorkflowQuerySerializeWrap)
+{
+    // Complete workflow: query -> serialize -> wrap
+    const auto props = queryDeviceProperties();
+    const auto serialized = serializeDeviceProperties(props);
+    const auto wrapper = wrapSerializedDeviceProperties(serialized);
+
+    EXPECT_NE(wrapper.ptr, nullptr);
+    EXPECT_GT(wrapper.size, 0u);
+
+    const auto* deviceProps = flatbuffers::GetRoot<DeviceProperties>(wrapper.ptr);
+    ASSERT_NE(deviceProps, nullptr);
+
+    EXPECT_EQ(deviceProps->device_id(), props.device_id);
+    EXPECT_EQ(deviceProps->multi_processor_count(), props.multi_processor_count);
+    EXPECT_EQ(deviceProps->total_global_mem(), props.total_global_mem);
+    EXPECT_EQ(deviceProps->architecture_name()->str(), props.architecture_name);
 }
