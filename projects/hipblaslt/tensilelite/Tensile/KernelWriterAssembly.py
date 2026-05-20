@@ -637,9 +637,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
 
     if kernel["enableTDMB"]:
-      # Alias B→A descriptors when waves share descriptors (multi-wave) or when
-      # subtile needs to save SGPRs (gfx1250 is at the 106-SGPR limit).
-      if kernel["UseSubtileImpl"] or prod(kernel["MIWaveGroup"]) > 1:
+      if prod(kernel["MIWaveGroup"]) > 1:
         module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
         module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
         if kernel["ProblemType"]["MXBlockB"]:

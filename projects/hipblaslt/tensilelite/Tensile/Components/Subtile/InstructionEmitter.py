@@ -9,6 +9,8 @@ instructions by dispatching each opType to its emit method.
 
 from __future__ import annotations
 
+from functools import reduce
+from operator import mul
 from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
 from Tensile.Components.Subtile.SubtileGREmit import (
     emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
@@ -166,11 +168,13 @@ class InstructionEmitter:
         tensor = placement.tensor
         if tensor in ('A', 'B'):
             ti = self.tileInfoMap[tensor]
-            # TDM aliased: reprogram descriptor before loading this tensor
+            # TDM aliased descriptors: reprogram before each tensor load (multi-wave only)
             if self.kernel["enableTDMA"] and self.kernel["enableTDMB"]:
-                module.add(SWaitTensorcnt(tensorcnt=0, comment="drain TDM before aliased descriptor reprogram"))
-                tensorParams = self.writer.tPA if tensor == 'A' else self.writer.tPB
-                module.add(self.writer.initTDMDescriptorSubtile(self.kernel, tensorParams, setLds=False))
+                numWaves = reduce(mul, self.kernel["MIWaveGroup"], 1)
+                if numWaves > 1:
+                    module.add(SWaitTensorcnt(tensorcnt=0, comment="drain TDM before aliased descriptor reprogram"))
+                    tensorParams = self.writer.tPA if tensor == 'A' else self.writer.tPB
+                    module.add(self.writer.initTDMDescriptorSubtile(self.kernel, tensorParams, setLds=False))
             grGran = self.config.grA if tensor == 'A' else self.config.grB
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
