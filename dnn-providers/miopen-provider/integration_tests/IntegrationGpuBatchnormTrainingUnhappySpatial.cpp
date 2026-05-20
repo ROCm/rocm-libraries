@@ -41,8 +41,8 @@ Graph makeUnhappySpatialGraph(const UnhappyBnTrainingSpatialCase& tc)
     const auto cDims = getDerivedShape(dims);
 
     // Input tensor
-    auto X = std::make_shared<TensorAttributes>(
-        makeTensorAttributes("X", DataType::FLOAT, dims, generateStrides(dims)));
+    auto x = std::make_shared<TensorAttributes>(
+        makeTensorAttributes("x", DataType::FLOAT, dims, generateStrides(dims)));
 
     // Required BN parameters
     auto scale = std::make_shared<TensorAttributes>(
@@ -52,13 +52,13 @@ Graph makeUnhappySpatialGraph(const UnhappyBnTrainingSpatialCase& tc)
         makeTensorAttributes("bias", DataType::FLOAT, cDims, generateStrides(cDims)));
 
     // Forward BatchNorm training
-    BatchnormAttributes bn;
+    const BatchnormAttributes bn;
 
-    auto bnOutputs = g.batchnorm(X, scale, bias, bn);
+    const auto bnOutputs = g.batchnorm(x, scale, bias, bn);
 
     // Output tensor
-    auto Y = bnOutputs[0];
-    Y->set_output(true);
+    const auto& y = bnOutputs[0];
+    y->set_output(true);
 
     return g;
 }
@@ -127,24 +127,13 @@ TEST_P(IntegrationGpuBatchnormTrainingUnhappySpatial, RejectsInsufficientSpatial
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormTrainingUnhappySpatial,
-    ::testing::Values(
-        // batch * spatial = 1
-        UnhappyBnTrainingSpatialCase{{1, 4, 1, 1}, "SingleElement"},
-
-        // batch = 0
-        UnhappyBnTrainingSpatialCase{{0, 4, 8, 8}, "ZeroBatch"},
-
-        // zero spatial dimensions
-        UnhappyBnTrainingSpatialCase{{2, 4, 0, 8}, "ZeroHeight"},
-        UnhappyBnTrainingSpatialCase{{2, 4, 8, 0}, "ZeroWidth"},
-        UnhappyBnTrainingSpatialCase{{2, 4, 0, 0}, "ZeroSpatial"},
-
-        // combined edge case
-        UnhappyBnTrainingSpatialCase{{0, 4, 1, 1}, "ZeroBatchSingleSpatial"},
-
-        // rank-3 input case
-        UnhappyBnTrainingSpatialCase{{2, 4, 1}, "Rank3SingleSpatial"}
-    ),
+    ::testing::Values(UnhappyBnTrainingSpatialCase{{1, 4, 1, 1}, "SingleElement"},
+                      UnhappyBnTrainingSpatialCase{{0, 4, 8, 8}, "ZeroBatch"},
+                      UnhappyBnTrainingSpatialCase{{2, 4, 0, 8}, "ZeroHeight"},
+                      UnhappyBnTrainingSpatialCase{{2, 4, 8, 0}, "ZeroWidth"},
+                      UnhappyBnTrainingSpatialCase{{2, 4, 0, 0}, "ZeroSpatial"},
+                      UnhappyBnTrainingSpatialCase{{0, 4, 1, 1}, "ZeroBatchSingleSpatial"},
+                      UnhappyBnTrainingSpatialCase{{2, 4, 1}, "Rank3SingleSpatial"}),
     [](const ::testing::TestParamInfo<UnhappyBnTrainingSpatialCase>& info) {
-        return info.param.name;
-    }); 
+        return std::string(info.param.name);
+    });
