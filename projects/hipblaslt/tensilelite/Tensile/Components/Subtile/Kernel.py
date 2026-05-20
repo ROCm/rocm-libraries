@@ -697,13 +697,10 @@ class TileInfo:
     numDword = int(math.ceil(self.mmaTileRegCount))
 
     isDTile = isinstance(self.geometry, CDTileGeometry)
-    # On gfx1250 (MIArchVgpr), accVGPR indices alias regular VGPRs.
-    # D tiles must use vgprPool to avoid overlapping with A/B data tiles.
-    useAgpr = isDTile and not kernel.get("MIArchVgpr", False)
-    maxAgpr = writer.states.regCaps["PhysicalMaxVgpr"] - writer.states.regCaps["MaxVgpr"] if useAgpr else 0
+    maxAgpr = writer.states.regCaps["PhysicalMaxVgpr"] - writer.states.regCaps["MaxVgpr"] if isDTile else 0
 
     for i in range(numMMATiles):
-      if useAgpr and writer.agprPool.size() < maxAgpr:
+      if isDTile and writer.agprPool.size() < maxAgpr:
         pool = writer.agprPool
         regType = RegisterType.Accvgpr
       else:
