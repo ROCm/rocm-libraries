@@ -1826,9 +1826,14 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ScheduleIterAlg"] == 2 and kernel["CUOccupancy"] < 2:
       self.states.overflowedResources = 6
 
-    vgprPerThreadPerOccupancy = self.states.regCaps["PhysicalMaxVgprCU"] // kernel["NumThreads"]
-    numWorkGroupsPerCU = vgprPerThreadPerOccupancy // mkb.getNextFreeVgpr()
-    if numWorkGroupsPerCU < 1:
+    if self.states.asmCaps["HasWMMA"]:
+      # RDNA: workgroup executes on a WGP (2 CUs, 4 SIMDs)
+      physicalMaxVgprPerWGP = self.states.regCaps["PhysicalMaxVgprCU"] * 2
+      vgprBudgetPerThread = physicalMaxVgprPerWGP // kernel["NumThreads"]
+    else:
+      vgprBudgetPerThread = self.states.regCaps["PhysicalMaxVgprCU"] // kernel["NumThreads"]
+    numWorkGroupsPerExecUnit = vgprBudgetPerThread // mkb.getNextFreeVgpr()
+    if numWorkGroupsPerExecUnit < 1:
       self.states.overflowedResources = 4
 
     if self.states.invalidLSUCode:
