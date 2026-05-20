@@ -1364,11 +1364,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:
         reject(state, printRejectionReason, "ScheduleLocalWrite not supported with Stream-K")
-      isGfx1250Sia0TdmPgr2 = state["ScheduleIterAlg"] == 0 \
-        and tuple(state["ISA"]) == (12, 5, 0) \
+      isSia0TdmPgr2 = state["ScheduleIterAlg"] == 0 \
         and state["TDMInst"] == 3 \
         and state["PrefetchGlobalRead"] == 2
-      if state["ScheduleIterAlg"] not in (2, 3) and not isGfx1250Sia0TdmPgr2:
+      if state["ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr2:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
       if state["StreamKAtomic"] == 1:
         if not state["ProblemType"]["DataType"].isSingle():
