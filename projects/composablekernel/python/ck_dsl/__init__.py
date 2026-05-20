@@ -84,6 +84,7 @@ from .core.passes import PassStats, optimize_kernel
 # ---- runtime ----
 from .runtime.comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
 from .runtime.hip_module import HipError, Runtime
+from .runtime.launcher import StreamConfig, launch_kernel, make_kernel
 
 # ---- helpers ----
 from .helpers import (
@@ -183,7 +184,10 @@ __all__ = [
     "ComgrTimings",
     "HipError",
     "Runtime",
+    "StreamConfig",
     "build_hsaco_from_llvm_ir",
+    "launch_kernel",
+    "make_kernel",
     # helpers
     "MFMA_F16_ATOMS",
     "Attention2DConfig",

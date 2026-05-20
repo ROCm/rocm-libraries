@@ -344,5 +344,94 @@ class TestExtendedKernelParity(unittest.TestCase):
                 )
 
 
+class TestCkStyleLaunchKernelGpu(unittest.TestCase):
+    """GPU smoke test for the new CK-Tile-style launch primitive.
+
+    Exercises :func:`ck_dsl.launch_kernel` /
+    :func:`ck_dsl.make_kernel` /
+    :class:`ck_dsl.StreamConfig` end-to-end on a real HIP device:
+    compile a trivial elementwise copy kernel, build three closures
+    over three independent buffer pairs through the same launcher,
+    dispatch via ``launch_kernel(StreamConfig(time_kernel=True),
+    c0, c1, c2)``, and verify that (a) all three output slices match
+    their inputs (per-closure values are correctly captured and the
+    callables are run in declaration order), and (b) the timing path
+    returns a positive ms (the GPU-event timer is wired up correctly).
+    """
+
+    def test_launch_kernel_three_callables_smoke(self):
+        try:
+            import torch
+        except Exception:
+            self.skipTest("torch not available")
+        if not torch.cuda.is_available():
+            self.skipTest("HIP / CUDA device not available")
+
+        from ck_dsl import (
+            StreamConfig,
+            compile_kernel,
+            launch_kernel,
+            make_kernel,
+        )
+        from ck_dsl.instances.elementwise import (
+            ElementwiseSpec,
+            build_elementwise,
+            elementwise_grid,
+            elementwise_signature,
+        )
+        from ck_dsl.runtime.launcher import KernelLauncher
+
+        spec = ElementwiseSpec(op="copy", dtype="f16", block_size=64, vec=2)
+        artifact = compile_kernel(build_elementwise(spec), capture_ir_text=False)
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=elementwise_signature(spec),
+            cache_key=("test_launch_kernel_smoke", spec.kernel_name()),
+        )
+
+        n = 256
+        device = "cuda"
+        a0 = torch.arange(n, dtype=torch.float16, device=device)
+        a1 = (torch.arange(n, dtype=torch.float32, device=device) + 100.0).to(
+            torch.float16
+        )
+        a2 = (torch.arange(n, dtype=torch.float32, device=device) + 200.0).to(
+            torch.float16
+        )
+        c0 = torch.zeros(n, dtype=torch.float16, device=device)
+        c1 = torch.zeros(n, dtype=torch.float16, device=device)
+        c2 = torch.zeros(n, dtype=torch.float16, device=device)
+
+        grid = elementwise_grid(n, spec)
+        block = (spec.block_size, 1, 1)
+
+        # Per-closure values dicts: each closure must dispatch its
+        # own (A, C) pair so the verification at the end can attribute
+        # correctness back to declaration order.
+        closures = [
+            make_kernel(launcher, {"A": a0, "C": c0, "N": n}, grid, block),
+            make_kernel(launcher, {"A": a1, "C": c1, "N": n}, grid, block),
+            make_kernel(launcher, {"A": a2, "C": c2, "N": n}, grid, block),
+        ]
+
+        # Drive the timing path -- GPU-event timer, small repeat count
+        # to keep the smoke test fast. ``stream_id=0`` auto-resolves
+        # to torch's current stream so the launches are visible to
+        # the caching allocator.
+        s = StreamConfig(time_kernel=True, cold_niters=1, nrepeat=2)
+        ms = launch_kernel(s, *closures)
+
+        # Drain anything still in flight so the host-side compares
+        # observe the final kernel output and not torch's
+        # zero-initialized fill.
+        torch.cuda.synchronize()
+
+        self.assertTrue(torch.equal(c0, a0), "closure 0 did not write c0 = a0")
+        self.assertTrue(torch.equal(c1, a1), "closure 1 did not write c1 = a1")
+        self.assertTrue(torch.equal(c2, a2), "closure 2 did not write c2 = a2")
+        self.assertGreater(ms, 0.0, "timing path returned non-positive ms")
+
+
 if __name__ == "__main__":
     unittest.main()

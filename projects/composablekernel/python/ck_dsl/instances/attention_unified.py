@@ -18,9 +18,15 @@ from ..helpers.compile import compile_kernel
 from ..runtime.launcher import (
     KernelLauncher,
     LaunchConfig,
+    LaunchSummary,
     PipelineLauncher,
+    StreamConfig,
     WorkspaceSpec,
     WorkspacePool,
+    _resolved_fence,
+    launch_kernel,
+    make_kernel,
+    wait_stream_and_release,
 )
 
 from ..helpers.attention import (
@@ -922,23 +928,44 @@ def _run_3d_tiled(
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seqused_k,
     }
-    seg_cfg = LaunchConfig(
-        grid=(
-            int(total_num_q_blocks),
-            int(problem.num_kv_heads),
-            int(num_segments),
-        ),
-        block=(64, 1, 1),
+    seg_grid = (
+        int(total_num_q_blocks),
+        int(problem.num_kv_heads),
+        int(num_segments),
     )
-    red_cfg = LaunchConfig(
-        grid=(int(problem.total_q), int(problem.num_query_heads), 1),
-        block=(64, 1, 1),
+    seg_block = (64, 1, 1)
+    red_grid = (int(problem.total_q), int(problem.num_query_heads), 1)
+    red_block = (64, 1, 1)
+
+    # M1: drive the segment + reduce chain through the CK-Tile-style
+    # primitive instead of ``PipelineLauncher.__call__``. ``pipeline``
+    # is still the cache anchor (one ``KernelLauncher`` per stage,
+    # built once and held over the problem's lifetime); we just
+    # extract its stages here and bake one closure per stage with
+    # :func:`make_kernel`. ``launch_kernel`` then submits both
+    # closures on ``stream`` in declaration order under
+    # :func:`no_fence`. Same-stream FIFO ordering still guarantees
+    # the reduce kernel observes the segment kernel's writes.
+    seg_launcher, red_launcher = pipeline.stages
+    launch_kernel(
+        StreamConfig(stream_id=int(stream)),
+        make_kernel(seg_launcher, seg_vals, seg_grid, seg_block),
+        make_kernel(red_launcher, red_vals, red_grid, red_block),
     )
-    return pipeline(
-        [seg_vals, red_vals],
-        [seg_cfg, red_cfg],
-        stream=int(stream),
-    )
+    # Preserve :class:`PipelineLauncher`'s implicit last-stage fence
+    # semantic when not under an outer :func:`no_fence` context. The
+    # closures produced by :func:`make_kernel` are always
+    # ``fence=False``, and :func:`launch_kernel` itself does not
+    # implicitly sync on the non-timing path -- so without this
+    # explicit drain, callers that read the output tensor on the
+    # host immediately after :func:`run_unified_attention_torch`
+    # returns would race the reduce kernel. ``_resolved_fence(True)``
+    # returns False inside :func:`time_launches`'s :func:`no_fence`
+    # body (so the timing loop's outer event-sync remains the only
+    # sync point) and True everywhere else.
+    if _resolved_fence(True):
+        wait_stream_and_release(int(stream))
+    return LaunchSummary(launches=2)
 
 
 # Per-cache-key (pipeline, workspace_pool) pairs. Built lazily at first

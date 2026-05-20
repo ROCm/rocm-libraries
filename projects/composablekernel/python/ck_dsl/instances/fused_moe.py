@@ -64,7 +64,7 @@ Limitations of v1 (tracked in the wave plan):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Tuple
+from typing import Any, Callable, Dict, List, Literal, Mapping, Tuple
 
 from ..core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from ..helpers.gather_scatter import (
@@ -554,36 +554,89 @@ def moe_fused_workspace_bytes(spec: FusedMoeSpec) -> int:
 # ---------------------------------------------------------------------
 
 
+_PHASE_ORDER: Tuple[str, str, str] = ("gather", "silu_mul", "topk_reduce")
+
+
 @dataclass
 class FusedMoeLauncher:
-    """Documentation-grade launcher for the full fused-MoE forward.
+    """Launcher for the MoE-specific phases of the fused-MoE forward.
 
-    This class does not own any GPU memory or launch primitives; it
-    enumerates the *call graph* that a runtime driver should issue
-    to execute :class:`FusedMoeSpec` end-to-end. The intended use::
+    Drives the three MoE-specific kernels (gather, SwiGLU activation,
+    top-k weighted reduce) as a CK-Tile-style chained launch on a
+    single HIP stream. The call graph mirrors the C++ reference at
+    ``example/ck_tile/15_fused_moe`` but uses the
+    :func:`~ck_dsl.runtime.launcher.launch_kernel` /
+    :func:`~ck_dsl.runtime.launcher.make_kernel` primitive instead of
+    a hand-rolled launch loop. Same-stream FIFO ordering on HIP is
+    the only correctness primitive between phases -- no events, no
+    intermediate fences -- which matches both the CK Tile semantic
+    and the
+    ``ck_tile::launch_kernel(s, MOE_SORTING_MP_0, MOE_SORTING_MP_1,
+    MOE_SORTING_MP_23)`` macro pattern in the fused-MoE example
+    sorting dispatcher.
 
-    spec = FusedMoeSpec(tokens=..., experts=..., topk=...,
-    hidden=..., intermediate=..., dtype="f16")
-    launcher = FusedMoeLauncher(spec)
-    for phase, kernel_def, grid, signature in launcher.plan():
-    # ... dispatch via your KernelLauncher of choice ...
-    pass
+    Production usage::
 
-    The ``plan`` method yields the MoE-specific phases (sort, gather,
-    silu_mul, reduce). Per-expert GEMMs are *not* iterated by the
-    launcher (their grid depends on per-expert ``Counts[e]`` known
-    only after the sort completes); supply a separate
-    ``expert_gemm_fn(expert_idx, ...)`` callback at runtime and call
-    it inside the gather -> gemm -> silu loop.
+        spec = FusedMoeSpec(tokens=..., experts=..., topk=...,
+                            hidden=..., intermediate=..., dtype="f16")
+        launcher = FusedMoeLauncher(spec)
+        ms = launcher.run(
+            {
+                "gather":      {"X": X, "SortedTokenIds": sids,
+                                "GroupedInput": grouped, "tokens": T,
+                                "hidden": H},
+                "silu_mul":    {"GateOut": gate, "UpOut": up,
+                                "Hidden": hidden, "total_pairs": T*K,
+                                "intermediate": I},
+                "topk_reduce": {"DownOut": down, "SortedTokenIds": sids,
+                                "SortedWeights": weights, "Y": Y,
+                                "total_pairs": T*K, "hidden": H,
+                                "tokens": T},
+            },
+            stream=stream,
+        )
 
-    For a production launcher with per-expert dispatch + workspace
-    reuse, see the planned follow-on (the v1 launcher here is
-    intentionally a callgraph descriptor, not a runtime loop, to keep
-    the IR module pure-Python and import-time-safe).
+    The launcher is the v2 production runtime. It compiles each of
+    the three IR kernels lazily on first :meth:`run` /
+    :meth:`make_callables` call, caches the resulting
+    :class:`~ck_dsl.runtime.launcher.KernelLauncher` instances on
+    ``self`` (one HSACO + module + function per phase), and reuses
+    them across every subsequent dispatch. Construct one
+    :class:`FusedMoeLauncher` per :class:`FusedMoeSpec` and reuse it
+    for the lifetime of the problem.
+
+    Scope notes
+    -----------
+    The MoE forward also requires per-expert gate / up / down GEMMs
+    (block-scale or universal) and an optional smoothquant pass --
+    these are *not* iterated by the launcher because their per-expert
+    grids depend on ``Counts[e]`` (only known after the sort). The
+    caller composes them around the gather + silu_mul + topk_reduce
+    chain using the standard instance builders
+    (:func:`build_block_scale_gemm`, :func:`build_universal_gemm`,
+    :func:`build_moe_smoothquant`) and an
+    ``expert_gemm_fn(expert_idx, a_ptr, b_ptr, c_ptr, m, n, k)``
+    callback. The MoE sort phases (histogram / scan / scatter) live
+    in :mod:`ck_dsl.instances.moe_sorting` and chain analogously
+    through :func:`launch_kernel`.
+
+    The legacy :meth:`plan` method is preserved as a pure descriptor
+    -- it returns the list of ``(phase, kernel_def, grid, signature)``
+    tuples without compiling anything, for callers that want to
+    inspect the call graph or drive their own dispatch.
     """
 
     spec: FusedMoeSpec
     name_prefix: str = "fused_moe"
+
+    def __post_init__(self) -> None:
+        # Lazy KernelLauncher cache: built on first :meth:`run` /
+        # :meth:`make_callables` call, reused thereafter. Holds one
+        # HSACO + HIP module + kernel function handle per phase.
+        # Stored via ``object.__setattr__`` so dataclass-generated
+        # ``__repr__`` stays stable (the launchers are not part of
+        # the spec identity).
+        object.__setattr__(self, "_launchers", None)
 
     def plan(self) -> "list[tuple[str, KernelDef, Tuple[int, int, int], object]]":
         """Return ``[(phase_name, kernel_def, grid, signature), ...]``
@@ -593,6 +646,10 @@ class FusedMoeLauncher:
         are NOT included; the caller composes them via the standard
         instance builders (``build_block_scale_gemm``,
         ``build_universal_gemm``, ``build_moe_smoothquant``).
+
+        Pure descriptor: does not compile anything, does not allocate
+        :class:`KernelLauncher` instances. Use :meth:`make_callables`
+        or :meth:`run` for the runtime path.
         """
         s = self.spec
         return [
@@ -636,3 +693,130 @@ class FusedMoeLauncher:
 
     def workspace_bytes(self) -> int:
         return moe_fused_workspace_bytes(self.spec)
+
+    def _ensure_launchers(self) -> Dict[str, Any]:
+        """Compile the 3 MoE-specific kernels on first call and cache
+        one :class:`~ck_dsl.runtime.launcher.KernelLauncher` per
+        phase. Subsequent calls return the cached dict directly.
+
+        Imports the runtime helpers lazily to keep
+        :mod:`ck_dsl.instances.fused_moe` import-time-safe (the
+        module is exercised by static IR tests in environments
+        without a HIP runtime).
+        """
+        if self._launchers is not None:  # type: ignore[has-type]
+            return self._launchers  # type: ignore[has-type]
+        from ..helpers.compile import compile_kernel
+        from ..runtime.launcher import KernelLauncher
+
+        s = self.spec
+        out: Dict[str, Any] = {}
+        for phase, kernel_def, _grid, signature in self.plan():
+            artifact = compile_kernel(kernel_def, capture_ir_text=False)
+            out[phase] = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=signature,
+                cache_key=("fused_moe", phase, s.kernel_name(phase)),
+            )
+        object.__setattr__(self, "_launchers", out)
+        return out
+
+    def make_callables(
+        self,
+        values: Mapping[str, Mapping[str, Any]],
+    ) -> List[Callable[[Any], None]]:
+        """Bake per-phase ``(values, grid, block, lds_bytes=0)`` into
+        three :func:`~ck_dsl.runtime.launcher.make_kernel` closures,
+        ready for :func:`~ck_dsl.runtime.launcher.launch_kernel`.
+
+        ``values`` is a phase-keyed mapping with entries for each of
+        ``"gather"``, ``"silu_mul"``, ``"topk_reduce"`` matching the
+        per-phase signature returned by :func:`moe_gather_signature`,
+        :func:`moe_silu_mul_signature`, and
+        :func:`moe_topk_weighted_reduce_signature`. All three phases
+        use ``block=(spec.block_size, 1, 1)`` and ``lds_bytes=0``.
+
+        Returns the closures in declaration order (gather, silu_mul,
+        topk_reduce). Use this entry point if you want to interleave
+        :func:`make_kernel` closures with arbitrary host lambdas
+        (for example, a ``maybe_clear_workspace`` callable that
+        zeroes the output ``Y`` accumulator before topk_reduce
+        starts) before passing the full list to
+        :func:`launch_kernel`. For the simple case of "just run all
+        three on one stream", :meth:`run` is the one-call shortcut.
+        """
+        from ..runtime.launcher import make_kernel
+
+        missing = [p for p in _PHASE_ORDER if p not in values]
+        if missing:
+            raise KeyError(
+                f"FusedMoeLauncher.make_callables: missing values for phase(s) "
+                f"{missing!r}; expected keys {list(_PHASE_ORDER)!r}"
+            )
+        s = self.spec
+        block = (s.block_size, 1, 1)
+        launchers = self._ensure_launchers()
+        return [
+            make_kernel(
+                launchers["gather"],
+                values["gather"],
+                moe_gather_grid(s),
+                block,
+            ),
+            make_kernel(
+                launchers["silu_mul"],
+                values["silu_mul"],
+                moe_silu_mul_grid(s),
+                block,
+            ),
+            make_kernel(
+                launchers["topk_reduce"],
+                values["topk_reduce"],
+                moe_topk_weighted_reduce_grid(s),
+                block,
+            ),
+        ]
+
+    def run(
+        self,
+        values: Mapping[str, Mapping[str, Any]],
+        *,
+        stream: int = 0,
+        time_kernel: bool = False,
+        cold_niters: int = 3,
+        nrepeat: int = 10,
+        is_gpu_timer: bool = True,
+    ) -> float:
+        """Drive gather -> silu_mul -> topk_reduce as a CK-Tile-style
+        chained launch on ``stream``.
+
+        Returns ``0.0`` when ``time_kernel=False`` (production
+        dispatch) and the average per-iteration wall time in
+        milliseconds when ``time_kernel=True`` (benchmark loop with
+        ``cold_niters`` warmup iters + ``nrepeat`` timed iters
+        wrapping the whole 3-callable group; see
+        :func:`launch_kernel` for the full timing contract).
+
+        Production callers that read the output tensors on the host
+        immediately after :meth:`run` returns should add an explicit
+        :func:`~ck_dsl.runtime.launcher.wait_stream_and_release`
+        (or rely on torch's stream-aware next-read sync). The
+        primitive does not implicitly fence at the end of the
+        non-timing path; the timing path's outer
+        :class:`~ck_dsl.runtime.hip_module.Event` synchronize is the
+        only sync point.
+        """
+        from ..runtime.launcher import StreamConfig, launch_kernel
+
+        callables = self.make_callables(values)
+        return launch_kernel(
+            StreamConfig(
+                stream_id=int(stream),
+                time_kernel=bool(time_kernel),
+                cold_niters=int(cold_niters),
+                nrepeat=int(nrepeat),
+                is_gpu_timer=bool(is_gpu_timer),
+            ),
+            *callables,
+        )
