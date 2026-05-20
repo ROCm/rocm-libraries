@@ -17195,6 +17195,7 @@ class KernelWriterAssembly(KernelWriter):
 
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter: int = 1 if dtype.isFloat4() else 0
+    is6bit: bool = dtype.is6bitFloat()
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
     mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
     dim0Idx, dim1Idx = (3, ti) if unrolledMajor else (ti, 3)
@@ -17207,13 +17208,25 @@ class KernelWriterAssembly(KernelWriter):
       # isSparseTrack/isMetadata apply to the K dimension (index 3).
       # For unrolledMajor (TN): K is dim0. For tlu (NN): K is dim1.
       dim0IsK = unrolledMajor
-      mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(dim0Idx), self, sizeShifter, False,
-                                  isSparseTrack=isSparseTrack if dim0IsK else False,
-                                  isMetadata=isMetadata if dim0IsK else False))
+      if is6bit:
+        # F6: 0.75 bytes/element. dim0 in bytes = elements * 3 / 4.
+        # NOTE: F6 currently dense-only (TN GEMM). Composition with isSparseTrack/isMetadata
+        # is not yet exercised — both code paths assume they are mutually exclusive.
+        with self.allocTmpSgpr(1) as tmpF6:
+          mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(sizeRefName(dim0Idx)), "F6: elements / 4"))
+          mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
+          mod.add(comp.setTensorDim0(descSgprName(1), tmpF6.idx, self, 0))
+      else:
+        mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(dim0Idx), self, sizeShifter, False,
+                                    isSparseTrack=isSparseTrack if dim0IsK else False,
+                                    isMetadata=isMetadata if dim0IsK else False))
       mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(dim1Idx), self, 0, False,
                                   isSparseTrack=isSparseTrack if not dim0IsK else False,
                                   isMetadata=isMetadata if not dim0IsK else False))
-      mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
+      if is6bit:
+        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0 * 3 // 4, self, 0))
+      else:
+        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
       mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves // dim1Divisor, self))
 
     # --- Tensor stride ---
@@ -17222,6 +17235,15 @@ class KernelWriterAssembly(KernelWriter):
     elif isMetadataML1:
       ia = kernel["ProblemType"]["IndexAssignmentsMetadata"]
       mod.add(comp.setTensorStride0(descSgprName(1), f"Stride{tc}{self.states.indexChars[ia[1]]}", sizeShifter))
+    elif is6bit:
+      with self.allocTmpSgpr(1) as tmpF6:
+        strRef = strideRefName()
+        if isinstance(strRef, RegisterContainer):
+          mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), strRef, "F6: stride / 4"))
+        else:
+          mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(strRef), "F6: stride / 4"))
+        mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
+        mod.add(comp.setTensorStride0(descSgprName(1), tmpF6.idx, 0))
     else:
       mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
 
@@ -17327,10 +17349,19 @@ class KernelWriterAssembly(KernelWriter):
 #        mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, ceil(log2(mxUnit)), True))
 #        mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(3), self, ceil(log2(duScale*mxUnit)), True))
       else:
+        is6bit = dtype.is6bitFloat()
         dim0Idx, dim1Idx = (3, ti) if unrolledMajor else (ti, 3)
         dim0 = sizeRefName(dim0Idx) if unrolledMajor else tmpSgprIdx
         dim1 = tmpSgprIdx if unrolledMajor else sizeRefName(dim1Idx)
-        mod.add(comp.setTensorDim0(descSgprName(1), dim0, self, sizeShifter, False, isSparseTrack if unrolledMajor else False, isMetadata if unrolledMajor else False))
+        if is6bit:
+          with self.allocTmpSgpr(1) as tmpF6:
+            mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(dim0), "F6: elements / 4"))
+            mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
+            mod.add(comp.setTensorDim0(descSgprName(1), tmpF6.idx, self, 0))
+        else:
+          mod.add(comp.setTensorDim0(descSgprName(1), dim0, self, sizeShifter, False,
+                                      isSparseTrack if unrolledMajor else False,
+                                      isMetadata if unrolledMajor else False))
         with self.allocTmpSgpr(1) as tmpSgpr:
           tmpSgprWaveOffset = tmpSgpr.idx
           if unrolledMajor:
@@ -17355,9 +17386,23 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // dim1Divisor, self))
       mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), ceil(log2(mxUnit)), True))
     else:
-      mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
+      is6bit = dtype.is6bitFloat()
+      if is6bit:
+        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0 * 3 // 4, self, 0))
+      else:
+        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
       mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp // dim1Divisor, self))
-      mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
+      if is6bit:
+        with self.allocTmpSgpr(1) as tmpF6:
+          strRef = strideRefName()
+          if isinstance(strRef, RegisterContainer):
+            mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), strRef, "F6: stride / 4"))
+          else:
+            mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(strRef), "F6: stride / 4"))
+          mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
+          mod.add(comp.setTensorStride0(descSgprName(1), tmpF6.idx, 0))
+      else:
+        mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
 
     if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]):
       extraPadSize: int = round(mt * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
@@ -17538,7 +17583,14 @@ class KernelWriterAssembly(KernelWriter):
       if (not unrolledMajor or mxKSplitting) and tmpSgprWaveOffset != None:
         mod.add(SSubU32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
         mod.add(SCMovB32(sgpr(tmpSgpr.idx), 0, "set to 0 for waves that no enough data to load"))
-      mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, sizeShifter, isMXS, isSparseTrack))
+      if dtype.is6bitFloat() and tdmDescIdx == 1 and not isMXS:
+        # F6: 0.75 bytes/element — convert tail-K element count to bytes (elements * 3 / 4).
+        # F6 currently dense-only; isSparseTrack is False here, so omitted.
+        mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(2), sgpr(tmpSgpr.idx), "F6 tail: / 4"))
+        mod.add(SMulI32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), 3, "F6 tail: * 3 = bytes"))
+        mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, 0, isMXS))
+      else:
+        mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, sizeShifter, isMXS, isSparseTrack))
     return mod
 
   def resetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:
