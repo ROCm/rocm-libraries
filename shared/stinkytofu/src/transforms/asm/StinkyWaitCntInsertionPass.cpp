@@ -111,6 +111,13 @@ bool isLdsWriterAnchor(const StinkyInstruction& inst) {
     return isTensorLoad(inst) || isDSWrite(inst);
 }
 
+/// True for instructions that may consume tensor-load output via LDS and therefore
+/// need an @c s_wait_tensorcnt before they issue. Tensor loads themselves are excluded
+/// because the hardware FIFO already orders them on tlcnt.
+bool isTensorWaitAnchor(const StinkyInstruction& inst) {
+    return isBarrier(inst) || isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
+}
+
 /// True when @p a and @p b share the same hardware memory pipeline, so the
 /// hardware-side FIFO retirement orders them implicitly and no synthetic wait
 /// is required between them.
@@ -138,6 +145,20 @@ bool isOnSameDSPipeline(const StinkyInstruction& a, const StinkyInstruction& b) 
 struct LdsWarResult {
     std::unordered_set<StinkyInstruction*> deps;
     bool forceDsDrain = false;
+};
+
+/// Result of tensor-wait dependency analysis for a tagged anchor (barrier / DS op).
+///
+/// When the anchor carries MemTokenData and the per-token overlap path runs
+/// normally, @c deps holds the conflicting prior tensor loads and
+/// @c forceTensorDrain stays false. When the anchor lacks MemTokenData, the
+/// pass cannot prove disjointness against any pending tensor load, so
+/// @c forceTensorDrain is set and @c deps is left empty: the caller emits
+/// @c s_wait_tensorcnt 0 instead of running the per-pair @c min(count - 1)
+/// computation.
+struct TensorWaitDepResult {
+    std::unordered_set<StinkyInstruction*> deps;
+    bool forceTensorDrain = false;
 };
 
 /// Descriptor for the wait counter immediate(s) to emit before an anchor instruction.
@@ -170,6 +191,8 @@ struct PendingMemOpTracker {
     std::unordered_set<int> activeDSTokens;
     /// Global loads/stores in issue order.
     std::deque<StinkyInstruction*> pendingBufferOps;
+    /// Tensor loads (tensor_load_to_lds) in issue order, tracked on tlcnt.
+    std::deque<StinkyInstruction*> pendingTensorLoadOps;
 
     int pendingDSCount() const {
         return static_cast<int>(pendingDSOps.size());
@@ -177,6 +200,10 @@ struct PendingMemOpTracker {
 
     int pendingBufferCount() const {
         return static_cast<int>(pendingBufferOps.size());
+    }
+
+    int pendingTensorLoadCount() const {
+        return static_cast<int>(pendingTensorLoadOps.size());
     }
 
     /// Number of DS ops from @p inst (inclusive) to the end of the queue. Returns 0 if
@@ -199,6 +226,16 @@ struct PendingMemOpTracker {
         return 0;
     }
 
+    /// Number of tensor loads from @p inst (inclusive) to the end of the queue.
+    /// Returns 0 if @p inst is not in the queue.
+    int pendingTensorLoadCountFrom(StinkyInstruction* inst) const {
+        auto it = std::find(pendingTensorLoadOps.begin(), pendingTensorLoadOps.end(), inst);
+        if (it != pendingTensorLoadOps.end()) {
+            return static_cast<int>(std::distance(it, pendingTensorLoadOps.end()));
+        }
+        return 0;
+    }
+
     /// True iff any in-flight DS op lacks MemTokenData. Used by the conservative
     /// barrier-vs-DS conflict path: an untagged pending DS op cannot be proven
     /// disjoint from a barrier, so a tagged barrier must still drain.
@@ -208,9 +245,19 @@ struct PendingMemOpTracker {
             [](const StinkyInstruction* op) { return op->getModifier<MemTokenData>() == nullptr; });
     }
 
+    /// True iff any in-flight tensor load lacks MemTokenData. Used by the conservative
+    /// tensor-wait path: an untagged pending tensor load cannot be proven disjoint
+    /// from a tagged anchor, so the anchor still drains.
+    bool hasUntaggedTensorLoadOp() const {
+        return std::any_of(
+            pendingTensorLoadOps.begin(), pendingTensorLoadOps.end(),
+            [](const StinkyInstruction* op) { return op->getModifier<MemTokenData>() == nullptr; });
+    }
+
     void clear() {
         pendingDSOps.clear();
         pendingBufferOps.clear();
+        pendingTensorLoadOps.clear();
         activeDSTokens.clear();
     }
 
@@ -237,6 +284,34 @@ struct PendingMemOpTracker {
 
         pendingBufferOps.push_back(inst);
         return true;
+    }
+
+    /// Append @p inst to the tensor-load queue. Returns true iff appended.
+    bool recordTensorLoadOperation(StinkyInstruction* inst) {
+        if (inst == nullptr || !isTensorLoad(*inst)) {
+            return false;
+        }
+
+        pendingTensorLoadOps.push_back(inst);
+        return true;
+    }
+
+    /// Tensor-only merge used by @c computeRequiredWaits to seed @c localState
+    /// with cross-block tensor in-flight ops at block entry. Appends every
+    /// pending tensor load from @p other while skipping pointers already
+    /// present, so multiple converging CFG paths do not duplicate the same op.
+    ///
+    /// The tracker has no @c activeTensorTokens companion to @c activeDSTokens;
+    /// tensor token-overlap is computed per-op against each pending load's
+    /// @c MemTokenData modifier, so seeding the @c pendingTensorLoadOps deque
+    /// alone is sufficient for both the barrier and DS-op tensor-wait anchors.
+    void mergeTensorFrom(const PendingMemOpTracker& other) {
+        for (StinkyInstruction* op : other.pendingTensorLoadOps) {
+            if (std::find(pendingTensorLoadOps.begin(), pendingTensorLoadOps.end(), op) ==
+                pendingTensorLoadOps.end()) {
+                pendingTensorLoadOps.push_back(op);
+            }
+        }
     }
 
     /// Trim @p queue so only the last @p lastWait ops remain. No-op when there is no
@@ -283,6 +358,9 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         buildUseDefChain(func, domInfo, true);
         const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
 
+        // Strip pre-existing tensor waits.
+        removeTensorWaits(passCtx, rpo);
+
         buildBlockExitStates(func, passCtx);
 
         for (auto* bb : rpo) {
@@ -292,8 +370,6 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             WaitInsertionList waits = computeRequiredWaits(*bb);
             emitWaitInstructions(*bb, arch, waits);
         }
-
-        reinsertTensorWaitsHeuristic(arch, passCtx, rpo);
 
         removePHIs(passCtx, rpo);
         return preserveCFGAnalyses();
@@ -347,6 +423,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
 
             state.recordDSOperation(inst);
             state.recordBufferOperation(inst);
+            state.recordTensorLoadOperation(inst);
         }
     }
 
@@ -492,17 +569,128 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         return result;
     }
 
+    /// Collect prior tensor loads whose MemTokenData tokens overlap @p anchor's.
+    /// Scans @p localState only -- @c computeRequiredWaits seeds @c localState
+    /// with every predecessor's pending tensor loads at block entry (via
+    /// @c PendingMemOpTracker::mergeTensorFrom), so the local queue already
+    /// reflects cross-block in-flight tensor state. Surfaces dependencies that
+    /// flow through LDS pseudo-registers rather than the SSA def-use chain.
+    ///
+    /// Anchors are barriers / DS reads / DS writes / DS atomics (see
+    /// @c isTensorWaitAnchor). Tensor loads themselves are excluded because
+    /// the hardware FIFO already orders them on the shared tlcnt counter, so
+    /// no synthetic pipeline filter is needed here.
+    ///
+    /// Conservative fallback (hybrid policy for missing MemTokenData):
+    ///   - Anchor lacks MemTokenData: we cannot prove disjointness against any
+    ///     pending tensor load. Returns with @c forceTensorDrain == true; the
+    ///     caller emits @c s_wait_tensorcnt 0.
+    ///   - Candidate tensor load lacks MemTokenData (anchor has tokens):
+    ///     conservatively treat it as conflicting and add it to @c deps so the
+    ///     normal @c min(count - 1) algorithm computes the wait value.
+    TensorWaitDepResult collectTensorLoadDependencies(StinkyInstruction* anchor, BasicBlock& bb,
+                                                      const PendingMemOpTracker& localState) {
+        (void)bb;
+        TensorWaitDepResult result;
+        const MemTokenData* anchorTokens = anchor->getModifier<MemTokenData>();
+        const bool anchorLacksTokens = (anchorTokens == nullptr);
+
+        auto isCandidate = [&](StinkyInstruction* op) {
+            if (op == nullptr || op == anchor) {
+                return false;
+            }
+            return isTensorLoad(*op);
+        };
+
+        if (anchorLacksTokens) {
+            // Conservative branch: any pending tensor load (seeded from preds +
+            // augmented locally) forces a full tlcnt drain.
+            auto anyCandidate = [&](const std::deque<StinkyInstruction*>& q) {
+                return std::any_of(q.begin(), q.end(), isCandidate);
+            };
+            if (anyCandidate(localState.pendingTensorLoadOps)) {
+                result.forceTensorDrain = true;
+                PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative tensor drain: anchor "
+                                     << "lacks MemTokenData (" << anchor->getHwInstDesc()->mnemonic
+                                     << ")\n");
+            }
+            return result;
+        }
+
+        // Anchor has tokens: per-token overlap path with conservative widening
+        // for candidates that lack MemTokenData.
+        auto isConflictingLoad = [&](StinkyInstruction* op) {
+            if (!isCandidate(op)) {
+                return false;
+            }
+            const MemTokenData* mt = op->getModifier<MemTokenData>();
+            if (mt == nullptr) {
+                PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative tensor include: candidate "
+                                     << "lacks MemTokenData (" << op->getHwInstDesc()->mnemonic
+                                     << "), anchor (" << anchor->getHwInstDesc()->mnemonic
+                                     << ")\n");
+                return true;
+            }
+            return hasTokenOverlap(mt->tokens, anchorTokens->tokens);
+        };
+
+        for (StinkyInstruction* op : localState.pendingTensorLoadOps) {
+            if (isConflictingLoad(op)) {
+                result.deps.insert(op);
+            }
+        }
+
+        return result;
+    }
+
     /// Phase 2: walk @p bb in program order; return (anchor, WaitCountSpec) pairs.
     WaitInsertionList computeRequiredWaits(BasicBlock& bb) {
         PendingMemOpTracker localState;
         WaitInsertionList waits;
         CounterWaitState dsState;
         CounterWaitState bufferState;
+        CounterWaitState tensorState;
+
+        // Seed the tensor queue from every predecessor's exit state so the
+        // tensor-wait anchor branch and the tensor-counter computation see
+        // cross-block in-flight tensor loads via localState alone.
+        for (BasicBlock* pred : bb.getPredecessors()) {
+            auto it = blockExitMemState.find(pred);
+            if (it == blockExitMemState.end()) {
+                continue;
+            }
+            localState.mergeTensorFrom(it->second);
+        }
 
         for (auto it = bb.begin(); it != bb.end(); ++it) {
             StinkyInstruction* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
             if (inst == nullptr || inst->getUnifiedOpcode() == GFX::PHI) {
                 continue;
+            }
+
+            // tensor-wait check (token-based, independent counter).
+            if (isTensorWaitAnchor(*inst)) {
+                auto twResult = collectTensorLoadDependencies(inst, bb, localState);
+                if (twResult.forceTensorDrain) {
+                    if (tensorState.needsNewWait(0)) {
+                        waits.emplace_back(
+                            inst, WaitCountSpec(WaitCountSpec::kUnused, WaitCountSpec::kUnused, 0));
+                        tensorState.recordEmittedWait(0);
+                        localState.pendingTensorLoadOps.clear();
+                    }
+                } else if (!twResult.deps.empty()) {
+                    auto tResult = computeWaitValueForCounter(
+                        localState.pendingTensorLoadCount(), localState, twResult.deps, tensorState,
+                        [](const PendingMemOpTracker& tracker, StinkyInstruction* src) {
+                            return tracker.pendingTensorLoadCountFrom(src);
+                        });
+                    if (tResult.second && tensorState.needsNewWait(tResult.first)) {
+                        waits.emplace_back(
+                            inst, WaitCountSpec(WaitCountSpec::kUnused, WaitCountSpec::kUnused,
+                                                tResult.first));
+                        tensorState.recordEmittedWait(tResult.first);
+                    }
+                }
             }
 
             // Barrier-vs-DS conflict (see doc: section "Barrier token conflict handling").
@@ -613,20 +801,23 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             if (localState.recordBufferOperation(inst)) {
                 bufferState.recordNewOp();
             }
+            if (localState.recordTensorLoadOperation(inst)) {
+                tensorState.recordNewOp();
+            }
         }
 
         // Trim exit-state queues using the last emitted wait so successor blocks see
         // only ops still genuinely in flight.
         localState.trimQueueToLastWait(localState.pendingDSOps, dsState.lastEmittedWait);
         localState.trimQueueToLastWait(localState.pendingBufferOps, bufferState.lastEmittedWait);
+        localState.trimQueueToLastWait(localState.pendingTensorLoadOps,
+                                       tensorState.lastEmittedWait);
 
         blockExitMemState[&bb] = localState;
         return waits;
     }
 
-    /// Phase 3: insert wait IR nodes immediately before each anchor. The caller
-    /// (computeRequiredWaits) is responsible for redundancy elision via
-    /// CounterWaitState::needsNewWait; this method emits exactly what it is given.
+    /// insert wait IR nodes immediately before each anchor.
     void emitWaitInstructions(BasicBlock& bb, GfxArchID arch, const WaitInsertionList& waits) {
         auto irBuilder = AsmIRBuilder(bb, arch);
 
@@ -666,21 +857,10 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         }
     }
 
-    /// Phase 4: tensor wait heuristic.
-    ///   1. Remove existing tensor waits in label_LoopBeginL / label_LoopEndL blocks.
-    ///   2. Reinsert tensor waits before barriers using token matching against a
-    ///      cross-block deque of tensor loads.
-    void reinsertTensorWaitsHeuristic(GfxArchID arch, PassContext& passCtx,
-                                      const std::vector<BasicBlock*>& rpo) {
-        const std::unordered_set<std::string> processedLabels = {"label_LoopBeginL",
-                                                                 "label_LoopEndL"};
-
+    /// strip pre-existing tensor waits.
+    void removeTensorWaits(PassContext& passCtx, const std::vector<BasicBlock*>& rpo) {
         for (auto* bb : rpo) {
             if (!passCtx.shouldProcessBasicBlock(*bb)) {
-                continue;
-            }
-
-            if (processedLabels.find(bb->getLabel()) == processedLabels.end()) {
                 continue;
             }
 
@@ -692,87 +872,6 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                     ++it;
                 }
             }
-        }
-
-        // Cross-block deque: tensor loads accumulated in RPO order across all processed
-        // blocks. At each barrier, we pop loads whose tokens overlap with the barrier's
-        // tokens and emit a wait for the remaining count.
-        //
-        // Conservative fallback for missing MemTokenData (hybrid policy):
-        //   * Every tensor load is pushed into the deque, whether or not it carries
-        //     MemTokenData. An untagged load cannot be proven disjoint from any
-        //     barrier and must therefore stay visible.
-        //   * If the barrier lacks MemTokenData (anchor-missing-tokens branch):
-        //     emit s_wait_tensorcnt 0 and clear the deque.
-        //   * If a tensor load in the deque lacks MemTokenData while the barrier
-        //     has tokens (candidate-missing-tokens branch): treat that load as
-        //     the youngest conflicting entry, so all loads up to and including
-        //     it are drained.
-        std::deque<StinkyInstruction*> tensorLoads;
-        for (auto* bb : rpo) {
-            if (!passCtx.shouldProcessBasicBlock(*bb)) {
-                continue;
-            }
-
-            WaitInsertionList tensorWaits;
-            for (auto it = bb->begin(); it != bb->end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (inst == nullptr) {
-                    continue;
-                }
-
-                if (isTensorLoad(*inst)) {
-                    tensorLoads.push_back(inst);
-                }
-
-                if (isBarrier(*inst) && !tensorLoads.empty()) {
-                    auto* memTokenData = inst->getModifier<MemTokenData>();
-                    if (memTokenData == nullptr) {
-                        // Anchor-missing-tokens branch: drain everything in flight.
-                        PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative tensor drain: "
-                                             << "barrier lacks MemTokenData (" << bb->getLabel()
-                                             << ")\n");
-                        tensorWaits.emplace_back(
-                            inst, WaitCountSpec(WaitCountSpec::kUnused, WaitCountSpec::kUnused, 0));
-                        tensorLoads.clear();
-                        continue;
-                    }
-
-                    const auto& barrierTokens = memTokenData->tokens;
-                    int lastDependentIndex = -1;
-                    for (int i = static_cast<int>(tensorLoads.size()) - 1; i >= 0; --i) {
-                        auto* tlMemTokenData = tensorLoads[i]->getModifier<MemTokenData>();
-                        if (tlMemTokenData == nullptr) {
-                            // Candidate-missing-tokens branch: cannot prove disjoint,
-                            // treat as the youngest conflicting load.
-                            PASS_DEBUG(std::cerr
-                                       << "[WaitCntInsertion] conservative tensor include: "
-                                       << "tensor load lacks MemTokenData ("
-                                       << tensorLoads[i]->getHwInstDesc()->mnemonic << ")\n");
-                            lastDependentIndex = i;
-                            break;
-                        }
-                        if (hasTokenOverlap(tlMemTokenData->tokens, barrierTokens)) {
-                            lastDependentIndex = i;
-                            break;
-                        }
-                    }
-
-                    if (lastDependentIndex >= 0) {
-                        int remainingTensorLoads =
-                            static_cast<int>(tensorLoads.size()) - 1 - lastDependentIndex;
-                        tensorWaits.emplace_back(
-                            inst, WaitCountSpec(WaitCountSpec::kUnused, WaitCountSpec::kUnused,
-                                                remainingTensorLoads));
-
-                        // Loads up to lastDependentIndex are guaranteed complete after wait.
-                        tensorLoads.erase(tensorLoads.begin(),
-                                          tensorLoads.begin() + lastDependentIndex + 1);
-                    }
-                }
-            }
-
-            emitWaitInstructions(*bb, arch, tensorWaits);
         }
     }
 
