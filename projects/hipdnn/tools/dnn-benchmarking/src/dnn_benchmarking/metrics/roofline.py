@@ -26,6 +26,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ._artifact_paths import profiling_subprocess_timeout_seconds
 from ._diagnostic import warn_once
 from ._tool_resolver import resolve_rocm_tool
 
@@ -80,8 +81,21 @@ def run(
     workload_dir = out_dir / "workload"
     argv = _build_argv(workload_dir, inner_argv, binary)
 
+    timeout_s = profiling_subprocess_timeout_seconds() or None
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, check=False, timeout=timeout_s
+        )
+    except subprocess.TimeoutExpired:
+        warn_once(
+            "roofline",
+            f"rocprof-compute timed out after {timeout_s}s — roofline replay "
+            "fires the workload ~3 times; raise DNN_BENCH_PROFILING_TIMEOUT_S "
+            "for slow workloads",
+        )
+        return {
+            "roofline": {"skipped": f"rocprof-compute timed out after {timeout_s}s"}
+        }
     except (OSError, subprocess.SubprocessError) as e:
         warn_once("roofline", f"rocprof-compute invocation failed: {e}")
         return {"roofline": {"skipped": f"rocprof-compute invocation failed: {e}"}}

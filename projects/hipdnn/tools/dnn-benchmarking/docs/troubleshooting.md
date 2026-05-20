@@ -62,3 +62,39 @@ one is wired up, the gate is: anyone touching
 should run the relevant marker-gated tests manually on a gfx90a or
 gfx942 host before merging. Tracking a nightly GPU runner job is
 follow-up work, not a blocker.
+
+### Tuning the profiling subprocess timeout
+
+Every external profiler invocation (rocprofv3 PMC, rocprofv3 trace,
+rocpd convert, perf stat, rocprof-compute) is capped at a per-process
+wall-clock budget. A wedged child surfaces as
+`extra_metrics["<source>"]["skipped"] == "timed out after Ns"`
+instead of blocking the entire suite.
+
+Default is **600 s (10 min)** per subprocess. Override via env var:
+
+```bash
+# Bump to 30 min for genuinely-long workloads (large convs under
+# multi-pass PMC replay on a slow host).
+DNN_BENCH_PROFILING_TIMEOUT_S=1800 python -m dnn_benchmarking ...
+
+# Disable the timeout entirely (not recommended — a wedged
+# subprocess will hang the suite indefinitely).
+DNN_BENCH_PROFILING_TIMEOUT_S=0 python -m dnn_benchmarking ...
+```
+
+The budget applies *per subprocess*, not per suite — a four-source
+`--pmc basic --emit-trace pftrace --perf --roofline` invocation can
+spend up to 4 × the budget under the worst case.
+
+### Profiling VRAM headroom
+
+The opt-in profiling pass spawns a fresh dnn-benchmarking subprocess
+that re-runs the same workload under the external profiler. The parent
+process tears down its `BufferManager` and `Executor` (releasing
+workspace + I/O buffers) *before* spawning, so the subprocess gets the
+full VRAM headroom the parent had — there is no double-allocation
+peak. If you still see OOMs only under `--pmc` / `--roofline` and not
+on the headline timed run, the cause is the profiler's own overhead
+(rocprof-compute's roofline replay in particular allocates extra
+device buffers); reduce `--iters` or run sources one at a time.

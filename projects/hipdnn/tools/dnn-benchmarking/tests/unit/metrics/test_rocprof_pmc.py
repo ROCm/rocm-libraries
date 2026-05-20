@@ -241,3 +241,110 @@ class TestRunFailureModes:
             inner_argv=["python"], out_dir=tmp_path, pmc_set="basic"
         )
         assert extra["pmc"]["skipped"] == "rocprofv3 binary not found"
+
+    def test_timeout_returns_skipped(self, tmp_path, monkeypatch):
+        """A wedged rocprofv3 invocation surfaces as skipped, not a
+        hung suite. Default budget is 600s; users can raise it via
+        DNN_BENCH_PROFILING_TIMEOUT_S for genuinely-long workloads."""
+        import subprocess
+
+        monkeypatch.setattr(rocprof_pmc, "detect_arch", lambda: "gfx942")
+        monkeypatch.setattr(
+            rocprof_pmc, "resolve_rocm_tool", lambda name: "/opt/rocm/bin/rocprofv3"
+        )
+        with patch.object(
+            rocprof_pmc.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(cmd="rocprofv3", timeout=600),
+        ):
+            extra = rocprof_pmc.run(
+                inner_argv=["python"], out_dir=tmp_path, pmc_set="basic"
+            )
+        assert "timed out" in extra["pmc"]["skipped"]
+
+
+class TestArchNarrowing:
+    """`--pmc all` on an arch without a PMC table silently narrows to
+    the 2-counter fallback set. The user paid the
+    --pmc-allow-multipass opt-in cost expecting a union of all groups
+    and would otherwise see no diagnostic. The narrowing should both
+    fire warn_once and set arch_narrowed_to_fallback in the result."""
+
+    def test_all_on_unknown_arch_marks_narrowed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(rocprof_pmc, "detect_arch", lambda: "gfx-mystery")
+        monkeypatch.setattr(
+            rocprof_pmc, "resolve_rocm_tool", lambda name: "/opt/rocm/bin/rocprofv3"
+        )
+
+        def fake_run(argv, **kwargs):
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch.object(rocprof_pmc.subprocess, "run", side_effect=fake_run):
+            extra = rocprof_pmc.run(
+                inner_argv=["python"], out_dir=tmp_path, pmc_set="all"
+            )
+        pmc = extra["pmc"]
+        assert pmc.get("arch_narrowed_to_fallback") is True
+        # Sanity: the narrowed counter set is the fallback's basic group,
+        # not a real union.
+        assert pmc["counters_requested"] == ["GRBM_GUI_ACTIVE", "SQ_WAVES"]
+
+    def test_all_on_known_arch_does_not_mark_narrowed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(rocprof_pmc, "detect_arch", lambda: "gfx942")
+        monkeypatch.setattr(
+            rocprof_pmc, "resolve_rocm_tool", lambda name: "/opt/rocm/bin/rocprofv3"
+        )
+
+        def fake_run(argv, **kwargs):
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch.object(rocprof_pmc.subprocess, "run", side_effect=fake_run):
+            extra = rocprof_pmc.run(
+                inner_argv=["python"], out_dir=tmp_path, pmc_set="all"
+            )
+        # Field is absent entirely on the non-narrowed path so JSON
+        # consumers don't see a noisy False.
+        assert "arch_narrowed_to_fallback" not in extra["pmc"]
+
+
+class TestSqlitePathEscaping:
+    def test_db_path_with_question_mark_opens_cleanly(self, tmp_path, monkeypatch):
+        """sqlite3 URI parsing treats `?` as the start of a query
+        string. The earlier `file:<path>?mode=ro` form would break on
+        any user-controlled profiling output directory containing a
+        `?`, `#`, or `%`. Opening by str path with PRAGMA query_only
+        sidesteps the URI parser entirely."""
+        monkeypatch.setattr(rocprof_pmc, "detect_arch", lambda: "gfx942")
+        monkeypatch.setattr(
+            rocprof_pmc, "resolve_rocm_tool", lambda name: "/opt/rocm/bin/rocprofv3"
+        )
+        # Pathological dir name with characters that broke the URI form.
+        out_dir = tmp_path / "weird?dir#name%2F"
+        out_dir.mkdir()
+        # Pre-populate a minimal-but-valid rocpd db; the test exercises
+        # _parse_rocpd_db's connect call, not the parse contents.
+        db_path = out_dir / "results.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE rocpd_pmc_event_z (event_id INTEGER, pmc_id INTEGER, value REAL);
+                CREATE TABLE rocpd_kernel_dispatch_z (id INTEGER, kernel_id INTEGER, dispatch_id INTEGER);
+                CREATE TABLE rocpd_info_kernel_symbol_z (id INTEGER, kernel_name TEXT);
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        def fake_run(argv, **kwargs):
+            # rocprofv3 already "wrote" the db above; just succeed.
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch.object(rocprof_pmc.subprocess, "run", side_effect=fake_run):
+            extra = rocprof_pmc.run(
+                inner_argv=["python"], out_dir=out_dir, pmc_set="basic"
+            )
+        # The schema lacks info_kernel_symbol rows; we just want the
+        # connect+pragma path to succeed without a URI parse error.
+        assert "skipped" not in extra["pmc"]

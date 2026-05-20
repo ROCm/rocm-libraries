@@ -511,43 +511,6 @@ def _run_single_provider_engine(
                     analytical_io_bytes=analytical_io_bytes,
                 )
 
-            # Opt-in profiling pass — runs *after* the timed pass and
-            # always-on probes, so the profiler's overhead can't
-            # pollute the headline numbers. The orchestrator handles
-            # tool-missing / paranoid / parse failures internally and
-            # never raises; we still wrap defensively because anything
-            # bubbling out would otherwise mark a successful timed run
-            # as failed.
-            if config.metrics.opt_in_pass_requested:
-                try:
-                    from ..metrics.profiling_orchestrator import (
-                        run_profiling_passes,
-                    )
-
-                    extra = run_profiling_passes(
-                        graph_path=graph_path,
-                        engine_id=engine_id,
-                        # `provider` is the human-readable engine name
-                        # set by run_graph_all_providers (see
-                        # ``_resolve_engine_name``) — use it for the
-                        # per-engine output subdirectory so the
-                        # artifact path doesn't carry the 19-digit
-                        # engine ID hash.
-                        engine_name=provider,
-                        seed=config.seed,
-                        warmup_iters=config.warmup_iters,
-                        benchmark_iters=config.benchmark_iters,
-                        metrics_config=config.metrics,
-                        plugin_path=config.plugin_path,
-                    )
-                    if extra:
-                        result.extra_metrics = extra
-                except Exception as e:
-                    warn_once(
-                        "profiling_orchestrator",
-                        f"profiling pass failed: {e}",
-                    )
-
             if ref_provider is not None:
                 result.correctness = _check_correctness(
                     bm, tensor_infos, graph_json, ref_provider, config
@@ -573,6 +536,52 @@ def _run_single_provider_engine(
                     rtol=config.rtol,
                     atol=config.atol,
                     error_message="No reference provider requested",
+                )
+
+        # BufferManager context has exited — I/O buffers are freed.
+        # Drop the executor reference too so its workspace allocation
+        # is released before the profiling subprocess fires. Without
+        # this, the inner profiling process allocates its own VRAM on
+        # top of the parent's still-pinned workspace, which roughly
+        # doubles peak VRAM and can OOM on large graphs that fit fine
+        # on the headline run.
+        del executor
+
+        # Opt-in profiling pass — runs *after* the timed pass and
+        # always-on probes (so profiler overhead can't pollute the
+        # headline numbers) and *after* the bm/executor teardown above
+        # (so the subprocess gets the full VRAM headroom the parent
+        # had). The orchestrator handles tool-missing / paranoid /
+        # parse failures internally and never raises; we still wrap
+        # defensively because anything bubbling out would mark a
+        # successful timed run as failed.
+        if config.metrics.opt_in_pass_requested:
+            try:
+                from ..metrics.profiling_orchestrator import (
+                    run_profiling_passes,
+                )
+
+                extra = run_profiling_passes(
+                    graph_path=graph_path,
+                    engine_id=engine_id,
+                    # `provider` is the human-readable engine name set
+                    # by run_graph_all_providers (see
+                    # ``_resolve_engine_name``) — use it for the
+                    # per-engine output subdirectory so the artifact
+                    # path doesn't carry the 19-digit engine ID hash.
+                    engine_name=provider,
+                    seed=config.seed,
+                    warmup_iters=config.warmup_iters,
+                    benchmark_iters=config.benchmark_iters,
+                    metrics_config=config.metrics,
+                    plugin_path=config.plugin_path,
+                )
+                if extra:
+                    result.extra_metrics = extra
+            except Exception as e:
+                warn_once(
+                    "profiling_orchestrator",
+                    f"profiling pass failed: {type(e).__name__}: {e}",
                 )
 
         result.status = "success"

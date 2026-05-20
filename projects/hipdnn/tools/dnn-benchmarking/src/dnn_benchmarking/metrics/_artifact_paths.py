@@ -8,7 +8,33 @@ Lives in its own module to avoid a circular import between
 modules (which need these helpers).
 """
 
+import os
 from pathlib import Path
+
+
+def profiling_subprocess_timeout_seconds() -> int:
+    """Wall-clock budget for a single profiling subprocess invocation.
+
+    Every external profiler we shell out to (rocprofv3 PMC + trace,
+    perf, rocprof-compute, rocpd convert) can wedge — a hung kernel
+    under PMC, a perf paranoid race, a rocprof-compute multi-stage
+    pipeline that silently stalls. Without a timeout the entire
+    benchmark suite blocks on the wedged child indefinitely, which
+    breaks the orchestrator's "nothing about profiling is fatal"
+    contract.
+
+    Default is 600 s (10 min) — long enough for a heavy graph under
+    multi-pass PMC replay on a slow host, short enough that a stuck
+    child doesn't burn a CI slot. Override via the
+    ``DNN_BENCH_PROFILING_TIMEOUT_S`` env var for known-long workloads;
+    set to ``0`` to disable the timeout entirely (not recommended).
+    """
+    raw = os.environ.get("DNN_BENCH_PROFILING_TIMEOUT_S", "600")
+    try:
+        value = int(raw)
+    except ValueError:
+        return 600
+    return max(value, 0)
 
 
 def _strip_rocprofv3_suffix(name: str) -> str:

@@ -811,3 +811,58 @@ class TestProfilingPassInvocation:
         captured = capsys.readouterr()
         assert "profiling pass failed" in captured.err
         assert "rocprofv3 missing" in captured.err
+
+    @patch("dnn_benchmarking.metrics.profiling_orchestrator.run_profiling_passes")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_orchestrator_runs_after_buffermanager_teardown(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+        mock_orch,
+    ):
+        """Profiling pass must fire *after* the BufferManager context
+        exits — only then are the parent's I/O buffers and the
+        executor's workspace freed. Without this ordering, the inner
+        profiling subprocess allocates its own VRAM on top of the
+        parent's still-pinned tensors, which roughly doubles peak VRAM
+        and can OOM on large graphs that fit fine on the headline run.
+        """
+        self._setup_mocks(mock_exec_cls, mock_bm_cls, mock_get_ref, mock_resolve_name)
+
+        # Track __exit__ vs orchestrator invocation order via shared list.
+        order: list[str] = []
+        bm_instance = mock_bm_cls.return_value
+        original_exit = bm_instance.__exit__
+
+        def tracking_exit(*args, **kwargs):
+            order.append("bm_exit")
+            return original_exit(*args, **kwargs)
+
+        bm_instance.__exit__ = tracking_exit
+
+        def tracking_orch(**kwargs):
+            order.append("orch")
+            return {"pmc": {"set": "basic"}}
+
+        mock_orch.side_effect = tracking_orch
+
+        config = _make_config(metrics=MetricsConfig(tier="basic", pmc_set="basic"))
+        run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=config,
+            handle=MagicMock(),
+        )
+
+        # Strict ordering: bm context must exit BEFORE the orchestrator
+        # runs. Reversing this (the pre-fix state) is the bug.
+        assert order == [
+            "bm_exit",
+            "orch",
+        ], f"profiling must run after BufferManager teardown; got {order}"

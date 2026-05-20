@@ -91,26 +91,28 @@ class TestPftracePath:
 
 
 class TestKineto:
-    def test_kineto_falls_back_to_pftrace_when_rocpd_missing(
+    def test_kineto_records_pftrace_directly_when_rocpd_missing(
         self, tmp_path, monkeypatch, _force_rocprofv3_present
     ):
+        """When rocpd isn't importable, kineto downgrades to pftrace on
+        the *first* (and only) rocprofv3 invocation. The earlier
+        implementation ran rocprofv3 twice — once for the rocpd db,
+        once for the pftrace fallback. That doubled profiling time
+        silently; the upfront probe collapses it to a single run."""
         out_dir = tmp_path / "trace_out"
 
-        # Hide the rocpd module from the converter probe.
+        # Hide the rocpd module from the upfront probe.
         monkeypatch.setitem(sys.modules, "rocpd", None)
 
         call_count = {"n": 0}
+        recorded_fmts: list[str] = []
 
         def fake_run(argv, **kwargs):
             host_dir = Path(argv[argv.index("-d") + 1])
             host_dir.mkdir(parents=True, exist_ok=True)
             call_count["n"] += 1
-            if call_count["n"] == 1:
-                # First invocation = kineto request -> rocpd db
-                (host_dir / "results.db").write_bytes(b"fake-db")
-            else:
-                # Second invocation = pftrace fallback
-                (host_dir / "results.pftrace").write_bytes(b"fake-pftrace")
+            recorded_fmts.append(argv[argv.index("--output-format") + 1])
+            (host_dir / "results.pftrace").write_bytes(b"fake-pftrace")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch.object(rocprof_trace.subprocess, "run", side_effect=fake_run):
@@ -118,7 +120,12 @@ class TestKineto:
                 inner_argv=["python"], out_dir=out_dir, fmt="kineto"
             )
         trace = extra["trace"]
+        assert call_count["n"] == 1, "rocprofv3 must run exactly once"
+        assert recorded_fmts == ["pftrace"]
+        # Caller-requested format echoed unchanged so downstream knows
+        # what was asked for; recorded_format reveals what we actually
+        # captured; kineto_unavailable explains the downgrade.
         assert trace["format"] == "kineto"
+        assert trace["recorded_format"] == "pftrace"
         assert "kineto_unavailable" in trace
-        assert trace.get("fallback_format") == "pftrace"
         assert trace["path"].endswith(".pftrace")

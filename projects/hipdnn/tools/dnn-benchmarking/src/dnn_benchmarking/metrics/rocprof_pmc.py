@@ -31,7 +31,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ._artifact_paths import flatten_hostname_dir
+from ._artifact_paths import flatten_hostname_dir, profiling_subprocess_timeout_seconds
 from ._diagnostic import warn_once
 from ._tool_resolver import resolve_rocm_tool
 from .arch import detect_arch
@@ -142,7 +142,12 @@ def _parse_rocpd_db(db_path: Path) -> Dict[str, Any]:
         ``kernel_name`` column. ``kernel_dispatch`` itself has no
         ``kernel_name``.
     """
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    # Open by str path rather than a `file:<path>?mode=ro` URI so a
+    # `?`, `#`, or `%` anywhere in the user-controlled profiling-output
+    # directory doesn't get parsed as a URI query string. PRAGMA
+    # query_only enforces the read-only intent at the connection level.
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA query_only = ON")
     try:
         tables = {
             row[0]
@@ -243,6 +248,18 @@ def run(
             }
         }
 
+    # `--pmc all` on an arch not in PMC_SETS silently narrows to the
+    # fallback's 2-counter `basic` group — the user paid the
+    # --pmc-allow-multipass opt-in cost expecting a unioned counter set
+    # and would otherwise see no diagnostic explaining the small result.
+    arch_narrowed = pmc_set == "all" and arch not in PMC_SETS
+    if arch_narrowed:
+        warn_once(
+            "rocprof_pmc",
+            f"arch '{arch}' has no PMC table; --pmc all narrowed to "
+            f"fallback basic ({len(counters)} counters)",
+        )
+
     rocprofv3_binary = resolve_rocm_tool("rocprofv3")
     if rocprofv3_binary is None:
         warn_once("rocprof_pmc", "rocprofv3 binary not found; skipping PMC pass")
@@ -261,8 +278,25 @@ def run(
     out_dir.mkdir(parents=True, exist_ok=True)
     argv = _build_argv(counters, out_dir, inner_argv, rocprofv3_binary)
 
+    timeout_s = profiling_subprocess_timeout_seconds() or None
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, check=False, timeout=timeout_s
+        )
+    except subprocess.TimeoutExpired:
+        warn_once(
+            "rocprof_pmc",
+            f"rocprofv3 PMC pass timed out after {timeout_s}s — likely a "
+            "wedged kernel or multi-pass replay; set "
+            "DNN_BENCH_PROFILING_TIMEOUT_S to extend",
+        )
+        return {
+            "pmc": {
+                "set": pmc_set,
+                "arch": arch,
+                "skipped": f"rocprofv3 PMC pass timed out after {timeout_s}s",
+            }
+        }
     except (OSError, subprocess.SubprocessError) as e:
         warn_once("rocprof_pmc", f"rocprofv3 invocation failed: {e}")
         return {
@@ -283,6 +317,8 @@ def run(
         "arch": arch,
         "counters_requested": counters,
     }
+    if arch_narrowed:
+        result["arch_narrowed_to_fallback"] = True
     if proc.returncode != 0:
         tail = "\n".join(proc.stderr.strip().splitlines()[-40:])
         warn_once(

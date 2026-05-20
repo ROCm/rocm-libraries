@@ -25,6 +25,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ._artifact_paths import profiling_subprocess_timeout_seconds
 from ._diagnostic import warn_once
 
 PERF_EVENTS_USER = [
@@ -129,8 +130,14 @@ def run(
     csv_path = out_dir / "perf.csv"
     argv = _build_argv(events, csv_path, inner_argv)
 
+    timeout_s = profiling_subprocess_timeout_seconds() or None
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, check=False, timeout=timeout_s
+        )
+    except subprocess.TimeoutExpired:
+        warn_once("perf", f"perf invocation timed out after {timeout_s}s")
+        return {"perf": {"skipped": f"perf invocation timed out after {timeout_s}s"}}
     except (OSError, subprocess.SubprocessError) as e:
         warn_once("perf", f"perf invocation failed: {e}")
         return {"perf": {"skipped": f"perf invocation failed: {e}"}}

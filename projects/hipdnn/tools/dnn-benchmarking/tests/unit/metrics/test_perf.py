@@ -128,6 +128,24 @@ class TestSubprocessFailureModes:
         assert extra["perf"]["returncode"] == 2
         assert "perf: bad event" in extra["perf"]["error_tail"]
 
+    def test_timeout_returns_skipped(self, monkeypatch, tmp_path):
+        """A wedged perf child must surface as a `skipped: timed out
+        after Ns` slice without blocking the suite. The orchestrator's
+        'profiling is never fatal' contract requires every subprocess
+        call to carry a wall-clock budget."""
+        import subprocess
+
+        monkeypatch.setattr(perf_mod, "_read_perf_paranoid", lambda: 1)
+        monkeypatch.setattr(perf_mod.shutil, "which", lambda _: "/usr/bin/perf")
+        with patch.object(
+            perf_mod.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(cmd="perf", timeout=600),
+        ):
+            extra = perf_mod.run(inner_argv=["python"], out_dir=tmp_path)
+        assert "skipped" in extra["perf"]
+        assert "timed out" in extra["perf"]["skipped"]
+
 
 class TestIpcDerivation:
     def test_ipc_user_computed_clientside(self, monkeypatch, tmp_path):
