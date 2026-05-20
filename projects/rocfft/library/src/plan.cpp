@@ -2262,18 +2262,36 @@ void rocfft_plan_t::GlobalTranspose(size_t                     elem_size,
 {
     std::string itemGroup = "transpose_" + std::to_string(transposeNumber);
 
+    // single-process multi-device transposes prefer RCCL when available
+    // and fall back to P2P; multi-process transposes use A2A.  The
+    // single-proc predicate matches the one used where the RCCL
+    // communicator is constructed.
+    if(desc.get_local_comm_size() == 1)
+    {
 #ifdef ROCFFT_RCCL_ENABLE
-    if(rccl)
-    {
-        GlobalTransposeRCCL(
-            elem_size, inField, outField, input, output, inputAntecedents, outputItems, itemGroup);
-        return;
-    }
+        if(rccl)
+        {
+            try
+            {
+                GlobalTransposeRCCL(elem_size,
+                                    inField,
+                                    outField,
+                                    input,
+                                    output,
+                                    inputAntecedents,
+                                    outputItems,
+                                    itemGroup);
+                return;
+            }
+            catch(const std::exception& e)
+            {
+                if(LOG_PLAN_ENABLED())
+                    *LogSingleton::GetInstance().GetPlanOS()
+                        << "GlobalTransposeRCCL could not be used, falling back to P2P: "
+                        << e.what() << std::endl;
+            }
+        }
 #endif
-
-    if(rocfft_plan_description_t::multiple_devices_in_rank(inField)
-       || rocfft_plan_description_t::multiple_devices_in_rank(outField))
-    {
         GlobalTransposeP2P(
             elem_size, inField, outField, input, output, inputAntecedents, outputItems, itemGroup);
     }
