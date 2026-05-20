@@ -82,7 +82,7 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
           issueCycles(mcid->issue),
           latencyCycles(mcid->latency) {}
 
-    ~StinkyInstruction() = default;
+    ~StinkyInstruction() override = default;
 
    public:
     void addSrcReg(const StinkyRegister& srcReg) {
