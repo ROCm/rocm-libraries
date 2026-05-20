@@ -6,6 +6,7 @@ from rocisa.code import Module
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32, SMulLOU32
 from rocisa.container import sgpr, vgpr, RegisterContainer, MemTokenData
+from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
 # from ..KernelWriterAssembly import KernelWriterAssembly
 
@@ -88,7 +89,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 if kernel["ProblemType"]["StridedBatched"]:
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
-                    mod.add(SLShiftLeftB64(dst=sgpr(tmpSgprIdx, 2), src=sgpr(tmpSgprIdx, 2), shiftHex=int(log2(bpe)), comment="scale by bpe"))
+                    with writer.allocTmpSgpr(1) as bpeTmp:
+                        mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, bpe, bpeTmp.idx, comment="scale by bpe"))
                     mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
                     mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
                 else:
@@ -161,14 +163,21 @@ class TensorDataMoverLoad(TensorDataMover):
             else:
                 mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
                 mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
-            
+
             if kernel["ProblemType"]["Batched"]:
                 if kernel["ProblemType"]["StridedBatched"]:
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
-                    mod.add(SLShiftLeftB64(dst=sgpr(tmpSgprIdx, 2), src=sgpr(tmpSgprIdx, 2), shiftHex=int(log2(bpe)), comment="scale by bpe"))
-                    mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
-                    mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
+                    with writer.allocTmpSgpr(1) as bpeTmp:
+                        mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, bpe, bpeTmp.idx, comment="scale by bpe"))
+                    if dstGroup0 is not None:
+                        # For wave-separated path: descriptor was set from base AddressA before this runs.
+                        # Add batch offset directly to descriptor to match where tile offset goes.
+                        mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(f"{dstGroup0}+2"), sgpr(tmpSgprIdx), "+= batchOffset(lo)"))
+                        mod.add(SAddCU32(sgpr(f"{dstGroup0}+3"), sgpr(f"{dstGroup0}+3"), sgpr(tmpSgprIdx+1), "+= batchOffset(hi)"))
+                    else:
+                        mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
+                        mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
                 else:
                     #TODO: support general batch
                     assert False, "Currently, TDM does not support general batch"
@@ -222,9 +231,7 @@ class TensorDataMoverLoad(TensorDataMover):
         mod = Module()
         dataSizeOp = None
 
-        if isMetadata:
-            dataSizeOp = 0
-        elif dtype.isInt8() or dtype.is8bitFloat() or dtype.isFloat4():
+        if isMetadata or dtype.isInt8() or dtype.is8bitFloat() or dtype.isFloat4() or dtype.is6bitFloat():
             dataSizeOp = 0
         elif dtype.isBFloat16() or dtype.isHalf():
             dataSizeOp = 1

@@ -36,7 +36,7 @@ using Map = std::unordered_map<std::string, std::string>;
 
 bool genSimpleOneToOneMapping(const GpuArch& arch, const Map& rocisaToHwInstMap,
                               std::ofstream& os) {
-    std::string archName = arch.getName();
+    const std::string& archName = arch.getName();
 
     bool success = true;
 
@@ -135,10 +135,11 @@ bool genRocisaMappings(const GpuArchManager& manager, const std::string& archNam
 }  // namespace
 
 namespace stinkytofu {
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 bool genAllArchRocisaMappings(GpuArchManager& manager, const std::string& outdir) {
     bool success = true;
 
-    for (auto archName : manager.getRegisteredArchNames()) {
+    for (const auto& archName : manager.getRegisteredArchNames()) {
         const GpuArch* arch = manager.getArch(archName);
         const auto& rocisaMap = arch->getRocisaToArchMap();
         const auto& mapForRocisaInc = rocisaMap.empty() ? arch->getLogicalToArchMap() : rocisaMap;

@@ -650,6 +650,7 @@ class SizeMapping:
                  'LocalSplitU',
                  'DirectToLdsA',
                  'DirectToLdsB',
+                 'ExpertSchedulingMode'
                  ]
 
     @classmethod
@@ -739,6 +740,7 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
+                   ExpertSchedulingMode     = d['ExpertSchedulingMode'],
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
