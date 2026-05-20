@@ -2,13 +2,13 @@
 
 Full documentation for hipSPARSELt is available at [rocm.docs.amd.com/projects/hipSPARSELt](https://rocm.docs.amd.com/projects/hipSPARSELt/en/latest/index.html).
 
-## hipSPARSELt 0.2.8 since ROCm 7.12
+## hipSPARSELt 0.2.8 since ROCm 7.13
 
 ### Added
 * CTest and test categories support (`--smoke`, `--pre_checkin`, and `--nightly`).
 
 ### Optimized
-* Provided more kernels for the FP16, BF16 and Int8 datatypes.
+* Provided more kernels for the FP16, BF16, and Int8 datatypes.
 * Improved the performance of the `HIPSPARSELT_PRUNE_SPMMA_TILE` function.
 
 ### Resolved issues
