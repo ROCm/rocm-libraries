@@ -53,8 +53,8 @@ set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
   --api bwd
-  --receipt 3
-  --optdim 32,64,96,128,256
+  --receipt 400
+  --optdim 64
   # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
 )
 
