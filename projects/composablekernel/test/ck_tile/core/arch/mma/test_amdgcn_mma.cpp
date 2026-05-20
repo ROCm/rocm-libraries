@@ -504,8 +504,9 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_16x16x32_Real)
 // Do a live test. At minimum, there should be a solution on real hardware for F16_F16_F32_16x16x32
 // The selector should be able to pick the correct MmaOp as a multiple of 16x16x32, even if the
 // WaveTile sizes are larger than 16x16x32. This tests that the selector can handle larger WaveTile
-// sizes and still select the correct MmaOp.
-TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_112x112x128_Real)
+// sizes and still select the correct MmaOp. NOTE: M and N composition disabled for now so only
+// testing K composition.
+TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_16x16x128_Real)
 {
     int devCount;
     hipDevice_t dev;
@@ -531,8 +532,8 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_112x112x128_Real)
 
     // WaveTile size to test for decomposition.
     // We expect the selector to pick a 16x16 WaveTile
-    static constexpr uint32_t WaveTileM = 112;
-    static constexpr uint32_t WaveTileN = 112;
+    static constexpr uint32_t WaveTileM = 16;
+    static constexpr uint32_t WaveTileN = 16;
     static constexpr uint32_t WaveTileK = 128;
 
     // The expected fragment size from the selector (MmaTile, multiple of 16).

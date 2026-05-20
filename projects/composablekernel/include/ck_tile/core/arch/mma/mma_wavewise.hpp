@@ -102,9 +102,9 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
     using BDataType = typename MmaOp::BDataType;
     using CDataType = typename MmaOp::CDataType;
 
-    static_assert(std::is_same_v<ADataType, ADataType_>);
-    static_assert(std::is_same_v<BDataType, BDataType_>);
-    static_assert(std::is_same_v<CDataType, CDataType_>);
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported || std::is_same_v<ADataType, ADataType_>);
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported || std::is_same_v<BDataType, BDataType_>);
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported || std::is_same_v<CDataType, CDataType_>);
 
     // WaveTile dimensions (Used to be fragment dims but higher level expects these to include k
     // iteration!)
@@ -118,8 +118,8 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
     constexpr static uint32_t FragsK = WaveTileK / MmaOp::kK;
 
     // No MN composition for now! Only K composition (kIter).
-    static_assert(FragsM == 1);
-    static_assert(FragsN == 1);
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported || FragsM == 1);
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported || FragsN == 1);
 
     // K0 or kABKPerLane (plus MmaPipeline k iter!)
     // TODO: Check if this makes sense with numAccess and Compression.
@@ -161,6 +161,18 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
     using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
     using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
     using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
+
+    // Old types only for pipeline tests. TODO: Remove and update pipeline tests with newer
+    // definitions.
+    // --------------------------------------------------------------------------------------------
+    using AVecType = typename MmaOp::AVecType[FragsM][FragsK];
+    using BVecType = typename MmaOp::BVecType[FragsN][FragsK];
+    using CVecType = typename MmaOp::CVecType[FragsM][FragsN];
+
+    static constexpr uint32_t FragM = MmaOp::kM;
+    static constexpr uint32_t FragN = MmaOp::kM;
+    static constexpr uint32_t FragK = MmaOp::kM;
+    // --------------------------------------------------------------------------------------------
 
     // Transforms
     using ATransform = typename MmaTransforms::ATransform;

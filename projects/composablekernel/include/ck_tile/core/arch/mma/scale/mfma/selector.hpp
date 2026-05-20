@@ -129,14 +129,20 @@ struct MmaDefaultSelector<ADataType,
                                                         1u,
                                                         CompilerTarget>::SelectedOp;
 
+    // TODO: We do not allow M / N composition for now, since it is not used in current CK Tile.
+
+    // TODO: We do not allow K composition for now because that would require multiple scale values
+    // per lane, which neither the calling code (CK Tile) nor our Mma pipeline code can handle right
+    // now.
+
     // Check if each candidate is supported for the given fragment sizes
     // For this case, we require the fragment sizes to be multiples of the MFMA shape
     static constexpr bool IsSupported16x16 =
-        MmaOpTraits<CandidateOp16x16>::IsSupported && (WaveTileM % CandidateOp16x16::kM == 0u) &&
-        (WaveTileN % CandidateOp16x16::kN == 0u) && (WaveTileK % CandidateOp16x16::kK == 0u);
+        MmaOpTraits<CandidateOp16x16>::IsSupported && (WaveTileM == CandidateOp16x16::kM) &&
+        (WaveTileN == CandidateOp16x16::kN) && (WaveTileK == CandidateOp16x16::kK);
     static constexpr bool IsSupported32x32 =
-        MmaOpTraits<CandidateOp32x32>::IsSupported && (WaveTileM % CandidateOp32x32::kM == 0u) &&
-        (WaveTileN % CandidateOp32x32::kN == 0u) && (WaveTileK % CandidateOp32x32::kK == 0u);
+        MmaOpTraits<CandidateOp32x32>::IsSupported && (WaveTileM == CandidateOp32x32::kM) &&
+        (WaveTileN == CandidateOp32x32::kN) && (WaveTileK == CandidateOp32x32::kK);
 
     public:
     // Select the largest supported MFMA operation for the given fragment shape
@@ -145,9 +151,9 @@ struct MmaDefaultSelector<ADataType,
                            CandidateOp32x32,
                            std::conditional_t<IsSupported16x16, CandidateOp16x16, DefaultOp>>;
 
-    // TODO: Do not allow M / N composition for now.
-    static_assert(SelectedOp::kM == WaveTileM);
-    static_assert(SelectedOp::kN == WaveTileN);
+    // TODO: Do not allow M / N / K composition for now.
+    static_assert(!MmaOpTraits<SelectedOp>::IsSupported || SelectedOp::kM == WaveTileM);
+    static_assert(!MmaOpTraits<SelectedOp>::IsSupported || SelectedOp::kN == WaveTileN);
 };
 
 } // namespace ck_tile::core::arch::mma

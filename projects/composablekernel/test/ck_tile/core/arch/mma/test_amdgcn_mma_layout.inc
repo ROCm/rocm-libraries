@@ -147,7 +147,10 @@ struct MmaLayoutTestKernel
             }
             else if constexpr(MmaOpTraits<MmaOp>::IsScale)
             {
-                c_frag = MmaOp::exec(a_frag, b_frag, c_frag, scale_A, scale_B);
+                static constexpr index_t opselA = 0;
+                static constexpr index_t opselB = 0;
+                c_frag =
+                    MmaOp::template exec<opselA, opselB>(a_frag, b_frag, c_frag, scale_A, scale_B);
             }
             else
             {
