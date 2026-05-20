@@ -6,10 +6,86 @@
 Build MIOpen from source
 ********************************************************************
 
+To build MIOpen as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build MIOpen standalone using the following
+instructions.
+
 This topic discusses how to build MIOpen from source and configure the resulting application.
 It also explains how to build the library and driver and run the tests. For a list of MIOpen
 prerequisites, see :doc:`MIOpen prerequisites <./prerequisites>`. To install MIOpen from a
-package, see :doc:`install MIOpen <./install>`.
+package, see :doc:`Install MIOpen <./install>`.
+
+Prerequisites
+=============
+
+To install MIOpen, you must first install these prerequisites. These prerequisites apply to
+all types of MIOpen installations.
+
+* A :doc:`ROCm <rocm:index>`-enabled platform
+* A base software stack that includes either:
+
+  * :doc:`HIP <hip:index>` (HIP and HCC libraries and header files)
+  * OpenCL (OpenCL libraries and header files) (Using MIOpen with OpenCL is now deprecated.)
+
+* `ROCm CMake <https://github.com/ROCm/rocm-cmake>`_: CMake modules for common
+  build tasks needed for the ROCm software stack
+* `Half <http://half.sourceforge.net/>`_: An IEEE 754-based, half-precision floating-point library
+* `SQLite3 <https://sqlite.org/index.html>`_: A read-write performance database
+* lbzip2: A multi-threaded compression and decompression utility
+* :doc:`rocBLAS <rocblas:index>`: AMD's library for Basic Linear Algebra Subprograms (BLAS) on the
+  ROCm platform.
+
+  * Minimum version for pre-ROCm 3.5
+    `master-rocm-2.10 <https://github.com/ROCm/rocBLAS/tree/master-rocm-2.10>`_
+  * Minimum version for post-ROCm 3.5
+    `master-rocm-3.5 <https://github.com/ROCm/rocBLAS/tree/master-rocm-3.5>`_
+
+* `Multi-Level Intermediate Representation (MLIR) <https://github.com/ROCm/rocMLIR>`_, with an
+  MIOpen dialect to support and complement kernel development
+* :doc:`Composable Kernel <composable_kernel:index>`: A C++ templated device library for
+  GEMM-like and reduction-like operators.
+
+Installing dependencies
+================================================
+
+To install the MIOpen dependencies, use the ``install_deps.cmake`` command:
+
+.. note::
+
+   You can run ``install_deps.cmake`` from the ``rocm-libraries/projects/miopen`` directory.
+
+.. code:: shell
+
+   cmake -P install_deps.cmake
+
+By default, this installs the dependencies in ``/usr/local``, but you can specify another location using the ``--prefix``
+argument:
+
+.. code:: shell
+
+  cmake -P install_deps.cmake --prefix <miopen-dependency-path>
+
+The following example demonstrates how to use ``cmake`` with a specific installation directory:
+
+.. code:: shell
+
+   cmake -P install_deps.cmake --minimum --prefix /root/MIOpen/install_dir
+
+You can specify this directory during the configuration phase using ``CMAKE_PREFIX_PATH``.
+
+MIOpen's HIP backend uses :doc:`rocBLAS <rocblas:index>` by default. You can install the rocBLAS
+minimum release using ``apt-get install rocblas``. To disable rocBLAS, set the configuration flag
+``-DMIOPEN_USE_ROCBLAS=Off``. rocBLAS is **not** available with OpenCL.
+
+MIOpen's HIP backend can use :doc:`hipBLASLt <hipblaslt:index>`. To install the minimum release of hipBLASLt,
+use ``apt-get install hipblaslt``. In addition to installing hipBLASLt, you must also
+install :doc:`hipBLAS <hipblas:index>`. To install the hipBLAS minimum release, use ``apt-get install hipblas``.
+To disable hipBLASLt, set the configuration flag ``-DMIOPEN_USE_HIPBLASLT=Off``.
+hipBLASLt is **not** available with OpenCL.
 
 Building MIOpen
 ================================================

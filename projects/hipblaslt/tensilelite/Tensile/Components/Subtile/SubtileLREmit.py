@@ -420,25 +420,29 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
 
   wavesize = kernel["WavefrontSize"]
   subIterKBytes = tileInfo.subIterKBytes
-  MT = tileInfo.globalMMATileGrid[0] * tileInfo.mmaTileShape[0]
+  loadWidth = tileInfo.loadWidthGR
 
   waveId = writer.vgprPool.checkOut(1)
   module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="waveId"))
 
-  if tileInfo.loadRatioGR == 1.0:
-    # W0 W2
-    # W1 W3
-    # W1-3 : A / W2-3 : B
-    if tc == 'A':
-      module.add(VAndB32(dst=vgpr(waveId), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
-    else:
-      module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
+  partitionOffset = tileInfo.mmaTileShape[0] * tileInfo.localSubtileGrid[0]
+  numRowsPerWave = wavesize // (subIterKBytes // loadWidth)
 
-    sInterval = MT * subIterKBytes // 2
+  if tileInfo.loadRatioGR == 1.0:
+    mWaves = kernel["MIWaveGroup"][0]
+    if tc == 'A':
+      module.add(VAndB32(dst=vgpr(waveId), src0=hex(mWaves - 1), src1=vgpr(waveId), comment="%s: waveId %% %d"%(tc, mWaves)))
+    else:
+      module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(mWaves.bit_length()-1), src=vgpr(waveId), comment="%s: waveId / %d"%(tc, mWaves)))
+    sInterval = partitionOffset * subIterKBytes
   elif tileInfo.loadRatioGR == 0.5:
-    sInterval = MT * subIterKBytes // 4
+    sInterval = partitionOffset * subIterKBytes
   else:
     raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfo.loadRatioGR))
+
+  if sInterval == 0:
+    writer.vgprPool.checkIn(waveId)
+    return
 
   tmpSgpr = writer.sgprPool.checkOut(1)
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(sInterval), comment="%s: interleave stride"%tc))
