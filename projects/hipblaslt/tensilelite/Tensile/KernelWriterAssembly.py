@@ -7589,7 +7589,7 @@ class KernelWriterAssembly(KernelWriter):
     # halfPLR
     halfPLR = (tP["isA"] or tP["isB"]) and kernel["HalfPLR%c"%tc]
     if halfPLR:
-        halfPLRGroups = self.getHalfPLRGroups(kernel, lc, m_or_u)
+        halfPLRGroups = self.getHalfPLRGroups(kernel, lc, u)
         bkVal = 0 if bk == None else bk
         abStr = self.getHalfPLRValuStr(halfPLRGroups, ab_new + vgprBuffer_new_offset + iui_new_offset + bkVal, tc)
     return abStr
