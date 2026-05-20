@@ -4645,7 +4645,7 @@ extern "C" miopenStatus_t miopenKthvalueForward(miopenHandle_t handle,
                                                    int32_t dim,
                                                    bool keepDim)
 {
-    return miopenKthvalueForward_impl(handle, inputDesc, input, outputDesc, output, indicesDesc, indices, k, dim, false);
+    return miopenKthvalueForward_impl(handle, inputDesc, input, outputDesc, output, indicesDesc, indices, k, dim, keepDim);
 }
 
 extern "C" miopenStatus_t miopenGetPReLUBackwardWorkspaceSize(miopenHandle_t handle,
@@ -4694,7 +4694,7 @@ extern "C" miopenStatus_t miopenSoftMarginLossForward(miopenHandle_t handle,
                                                          void* workspace,
                                                          size_t workspaceSizeInBytes)
 {
-    return miopenSoftMarginLossForward_impl(handle, inputDesc, input, targetDesc, target, outputDesc, output, reduction, nullptr, workspaceSizeInBytes);
+    return miopenSoftMarginLossForward_impl(handle, inputDesc, input, targetDesc, target, outputDesc, output, reduction, workspace, workspaceSizeInBytes);
 }
 
 extern "C" miopenStatus_t miopenSoftMarginLossBackward(miopenHandle_t handle,
