@@ -618,6 +618,20 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             else HANDLE_INST_TYPE(rocisa::SWaitCnt, handleSWaitCntModifiers(stinkyInst, typedInst, asmCaps))
             else HANDLE_INST_TYPE(rocisa::_SWaitDscnt, handleSWaitDscntModifiers(stinkyInst, typedInst, asmCaps))
             else HANDLE_INST_TYPE(rocisa::_SWaitLoadcnt, handleSWaitLoadcntModifiers(stinkyInst, typedInst, asmCaps))
+
+            // global_wb / global_inv: device-scope memory fences with no
+            // register operands. The only encoded modifier is the cache
+            // scope, which we attach as a dedicated CacheScopeModifiers so
+            // MUBUFModifiers can evolve independently without affecting
+            // fence emission.
+            else HANDLE_INST_TYPE(rocisa::GlobalWb,
+                                stinkyInst->addModifier<stinkytofu::CacheScopeModifiers>(
+                                    stinkytofu::CacheScopeModifiers(
+                                        convertMUBUFScope(typedInst->scope))))
+            else HANDLE_INST_TYPE(rocisa::GlobalInv,
+                                stinkyInst->addModifier<stinkytofu::CacheScopeModifiers>(
+                                    stinkytofu::CacheScopeModifiers(
+                                        convertMUBUFScope(typedInst->scope))))
         }
     // clang-format on
 

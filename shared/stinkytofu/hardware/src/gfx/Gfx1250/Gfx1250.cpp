@@ -30,6 +30,7 @@
 namespace stinkytofu {
 // Rocisa (tensilelite) type name -> mnemonic; original map (pre-66fabbd) for
 // RocisaGfx1250Mappings.inc.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void setGfx1250RocisaToArchMap(GpuArch& registry) {
     std::unordered_map<std::string, std::string> rocisaToArchMap = {
         /* branch.hpp */
@@ -227,6 +228,9 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"SSetRegIMM32B32", "s_setreg_IMM32_b32"},
         {"SWaitCnt", "s_waitcnt"},
         {"SWaitTensorcnt", "s_wait_tensorcnt"},
+        {"SWaitXCnt", "s_wait_xcnt"},
+        {"GlobalWb", "global_wb"},
+        {"GlobalInv", "global_inv"},
         {"SDelayAlu", "s_delay_alu"},
         {"VAddF16", "v_add_f16"},
         {"VAddF32", "v_add_f32"},
@@ -312,6 +316,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
     registry.setRocisaToArchMap(std::move(rocisaToArchMap));
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void setGfx1250ConversionMap(GpuArch& registry) {
     std::unordered_map<std::string, std::string> conversion = {
         {"SSchedulingFence", "lowerRocisaSchedulingFence"},
