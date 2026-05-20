@@ -672,7 +672,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("tdmMetadataGroup1", 8, 4))
 
     # TDM LDS address tracking for aliased descriptors with subtile double-buffering
-    if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel.get("UseSubtileImpl", False):
+    if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["UseSubtileImpl"]:
       module.add(self.defineSgpr("tdmLdsAddrA", 1))
       module.add(self.defineSgpr("tdmLdsAddrB", 1))
       module.add(self.defineSgpr("tdmLdsSwapMaskA", 1))
@@ -17213,7 +17213,7 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
       # Save to tracking SGPR for runtime swap
       ldsTrackSgpr = f"tdmLdsAddr{tc}"
-      mod.add(TextBlock(f"s_mov_b32 s[sgpr{ldsTrackSgpr}], s{waveOffsetSgprIdx} // save LDS addr for {tc} buffer tracking\n"))
+      mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx), comment=f"save LDS addr for {tc} buffer tracking"))
 
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter: int = 1 if dtype.isFloat4() else 0

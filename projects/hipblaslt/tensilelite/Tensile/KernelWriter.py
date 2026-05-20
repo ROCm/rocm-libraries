@@ -4495,7 +4495,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # On gfx1250 subtile, WMMA accumulators are in regular VGPRs (D-tile allocation).
       # Point ValuC directly at the D-tile base instead of allocating a new range,
       # since there are no accVGPRs and the mapping phase is empty.
-      if kernel.get("UseSubtileImpl") and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None:
+      if kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None:
         self.states.c.startVgprValu = self._subtileDtileBaseVgpr
       else:
         self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4)
@@ -4533,7 +4533,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(storeModule)
 
       # When ValuC aliases D-tile VGPRs (gfx1250 subtile), the D-tile dealloc handles cleanup
-      if not (kernel.get("UseSubtileImpl") and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
+      if not (kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
         self.vgprPool.checkIn(self.states.c.startVgprValu)
 
     # Deallocate registers used for C/D tiles after store code instructions are emitted
