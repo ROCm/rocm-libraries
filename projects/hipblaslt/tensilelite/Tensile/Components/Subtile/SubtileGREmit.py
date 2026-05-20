@@ -828,13 +828,13 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
 
   # TDM path: emit one tensor_load_to_lds per tensor, skip all per-subtile DTL loads
   if kernel["enableTDM%s" % tileInfo.tc[0]]:
-      if sId0 == 0 and sId1 == 0:
-          tc = tileInfo.tc
-          group0 = "tdm%sGroup0" % tc
-          group1 = "tdm%sGroup1" % tc
-          module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), None, None,
-                                     comment="TDM: global->LDS for %s" % tc))
-      return module
+    if sId0 == 0 and sId1 == 0:
+      tc = tileInfo.tc
+      group0 = "tdm%sGroup0" % tc
+      group1 = "tdm%sGroup1" % tc
+      module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), None, None,
+                                 comment="TDM: global->LDS for %s" % tc))
+    return module
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
   grBaseId = int(math.floor(linearId / tileInfo.loadRatioGR))
@@ -930,12 +930,12 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
   if tc in ['A', 'B']:
     ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
     if kernel["enableTDM%s" % tc]:
-        ldsAddrSgpr = "tdmLdsAddr%s" % tc
-        swapSgpr = "tdmLdsSwapMask%s" % tc
-        module = Module()
-        module.addComment0("TDM: swap %s LDS buffer (XOR with per-tensor swap mask)" % tc)
-        module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
-        return module
+      ldsAddrSgpr = "tdmLdsAddr%s" % tc
+      swapSgpr = "tdmLdsSwapMask%s" % tc
+      module = Module()
+      module.addComment0("TDM: swap %s LDS buffer (XOR with per-tensor swap mask)" % tc)
+      module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
+      return module
     return ti_.emitGRLDSBufferSwap(writer, kernel)
   else:
     ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
@@ -948,10 +948,10 @@ def globalReadPtrUpdates(tc, writer, kernel):
   ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
   hasTDM = kernel["enableTDM%s" % tc]
   if hasTDM:
-      module = Module()
-      inc = int(ti_.localSubtileGrid[1] * ti_.mmaTileShape[1] * ti_.subtileShape[1] * ti_.bpe)
-      module.addComment0("TDM addr update: %s += %u" % (tc, inc))
-      module.add(SAddU32(dst=sgpr("Address%s" % tc), src0=sgpr("Address%s" % tc), src1=inc))
-      module.add(SAddCU32(dst=sgpr("Address%s+1" % tc), src0=sgpr("Address%s+1" % tc), src1=0))
-      return module
+    module = Module()
+    inc = int(ti_.localSubtileGrid[1] * ti_.mmaTileShape[1] * ti_.subtileShape[1] * ti_.bpe)
+    module.addComment0("TDM addr update: %s += %u" % (tc, inc))
+    module.add(SAddU32(dst=sgpr("Address%s" % tc), src0=sgpr("Address%s" % tc), src1=inc))
+    module.add(SAddCU32(dst=sgpr("Address%s+1" % tc), src0=sgpr("Address%s+1" % tc), src1=0))
+    return module
   return ti_.emitGRPtrUpdate(writer, kernel)
