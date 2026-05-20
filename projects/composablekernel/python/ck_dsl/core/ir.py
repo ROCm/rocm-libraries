@@ -527,22 +527,35 @@ class IRBuilder:
         ).result
 
     def cvt_scalef32_pk_f32_fp8x4(self, v: Value, scale_f32: Value) -> Value:
-        """Convert ``<4 x fp8e4m3> -> <4 x f32>`` with **fused scale** via
-        AMDGPU's gfx950 ``v_cvt_scalef32_pk_f32_fp8``.
+        """Convert ``<4 x fp8e4m3> -> <4 x f32>`` with **E8M0-scaled** fused
+        cvt via AMDGPU's gfx950 ``v_cvt_scalef32_pk_f32_fp8``.
 
-        This is the FUSED dequant+scale primitive: a single hardware
-        instruction does ``out[i] = scale * fp8_to_f32(in[i])`` for two
-        fp8 bytes at a time. We chain 2 calls (i1=false/true to select
-        bytes 0,1 vs 2,3) to cover all 4 input bytes.
+        IMPORTANT — E8M0 semantics, NOT plain f32 multiply:
 
-        Replaces the 3-instruction sequence ``cvt_pk_f32_fp8 + v_pk_mul
-        (× scale) + ...`` with a single fused instruction. Triton's
-        long-prefill FP8 kernel emits exactly this op for its FP8 KV
-        dequant. Measured on the production trace's worst bucket
-        (``n=16 q=1024 k=4096 fp8``): switching cvt_pk_f32_fp8x4 →
-        cvt_scalef32_pk_f32_fp8x4 cut the inner-loop ``v_pk_mul`` count
-        from 64 to ~16 per iter (those mul ops were the per-byte scale
-        application that's now fused into the cvt).
+            The hardware uses the f32 scale operand's *exponent bits
+            only* (an E8M0 microscaling factor). The sign and mantissa
+            of the f32 are SILENTLY DISCARDED. Effective scale is
+            ``2^(unbiased_exp)`` rounded toward the f32's exponent
+            bits. A scale of ``0.011`` (exp bits 120 ⇒ 2^-7 = 0.0078)
+            produces outputs ~0.71x of expected; only power-of-two
+            scales work bit-correctly.
+
+            This is the MX (microscaling) instruction family: it's
+            designed for tensors with block-scale metadata, not for
+            arbitrary per-tensor f32 scales. The naming is misleading
+            ("scalef32" suggests f32 mul) but matches the LLVM
+            intrinsic naming.
+
+            For arbitrary f32 scales (paged-attention
+            ``k_scale``/``v_scale``), use :meth:`cvt_pk_f32_fp8x4`
+            followed by an explicit ``fmul`` against the scale. The
+            cost is ~4 extra packed muls per quad; correctness is
+            non-negotiable.
+
+        The intrinsic remains useful for MX-style workloads where the
+        scale is naturally power-of-two. The signature accepts an f32
+        scale parameter because that's what the LLVM intrinsic
+        signature is; the *value* must encode an E8M0 exponent.
 
         ``scale_f32`` is a single ``f32`` value broadcast to all packs.
         Per AMDGPU spec, the hardware treats this as an "implicit scalar"

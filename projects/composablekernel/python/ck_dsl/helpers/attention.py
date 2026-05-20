@@ -336,6 +336,71 @@ def warp_xor_reduce_sum(b: IRBuilder, v: Value, stages: int = 4) -> Value:
     return cur
 
 
+def warp_xor_reduce_max_32lane(b: IRBuilder, v: Value) -> Value:
+    """Reduce ``v`` across one 32-lane half of a wave64 with XOR stages.
+
+    This is the reduction shape used by gfx950
+    ``mfma_f32_32x32x16_*`` output tiles. Per CK Tile's
+    ``WarpGemmAttributeMfmaImpl*F32M32N32K16`` traits, a row of the
+    32x32 accumulator is wholly contained within one 32-lane half:
+
+    - lanes 0..31 own the even 4-row groups
+      ``{0-3, 8-11, 16-19, 24-27}``
+    - lanes 32..63 own the odd 4-row groups
+      ``{4-7, 12-15, 20-23, 28-31}``
+
+    So the row-reduce needs a 5-stage intra-half butterfly
+    (xor masks 1,2,4,8,16), not the old 16-lane 4-stage pattern.
+    ``IRBuilder.warp_shuffle_xor`` lowers these intra-32 masks to
+    ``ds_swizzle_b32`` SWAP mode, not ``ds_bpermute``.
+    """
+    cur = v
+    for k in range(5):
+        remote = b.warp_shuffle_xor(cur, 1 << k)
+        cur = b.fmax(cur, remote)
+    return cur
+
+
+def warp_xor_reduce_sum_32lane(b: IRBuilder, v: Value) -> Value:
+    """Sum-reduction sibling of :func:`warp_xor_reduce_max_32lane`."""
+    cur = v
+    for k in range(5):
+        remote = b.warp_shuffle_xor(cur, 1 << k)
+        cur = b.fadd(cur, remote)
+    return cur
+
+
+def mfma_32x32x16_c_row(b: IRBuilder, lane: Value, elem_idx: int) -> Value:
+    """Return the MFMA-local output row for a ``32x32x16`` C element.
+
+    ``elem_idx`` is the element number inside the per-lane ``<16 x f32>``
+    accumulator. The formula mirrors CK Tile's distribution encoding:
+
+    ``row = (elem_idx // 4) * 8 + (lane // 32) * 4 + (elem_idx % 4)``.
+
+    This is intentionally a helper rather than open-coded arithmetic: the
+    32x32x16 migration needs to use the same row mapping for QK mask,
+    softmax state, P register layout, PV accumulation, and epilogue.
+    """
+    if not (0 <= elem_idx < 16):
+        raise ValueError(f"mfma_32x32x16 elem_idx must be 0..15, got {elem_idx}")
+    lane_half = b.div(lane, b.const_i32(32))
+    return b.add(
+        b.add(b.const_i32((elem_idx // 4) * 8), b.mul(lane_half, b.const_i32(4))),
+        b.const_i32(elem_idx % 4),
+    )
+
+
+def mfma_32x32x16_c_col(b: IRBuilder, lane: Value, n_tile32: int = 0) -> Value:
+    """Return the MFMA-local output col for ``32x32x16`` C elements.
+
+    Every element in a lane's ``<16 x f32>`` accumulator shares the same
+    column. ``n_tile32`` is the 32-column tile index within the current
+    KV tile, so for T=64 the two QK N-tiles use ``n_tile32`` 0 and 1.
+    """
+    return b.add(b.const_i32(n_tile32 * 32), b.mod(lane, b.const_i32(32)))
+
+
 # ---------------------------------------------------------------------------
 # Softcap (log2-domain)
 # ---------------------------------------------------------------------------

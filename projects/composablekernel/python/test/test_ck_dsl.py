@@ -536,8 +536,12 @@ class TestHelpers(unittest.TestCase):
         # MFMA atoms for QK (16x16x32) and PV (16x16x16 since T=16 < 32).
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
-        # Cross-lane softmax reduction.
-        self.assertIn("@llvm.amdgcn.ds.bpermute", ll)
+        # Cross-lane softmax reduction. The 16-lane intra-row-group
+        # butterfly lowers to ``ds_swizzle`` SWAP mode rather than
+        # ``ds_bpermute`` for the row-group masks ≤ 16. (Larger butterfly
+        # stages — e.g. cross-half xor 32 in the 32x32 path — still use
+        # bpermute, but they're not present in this default decode spec.)
+        self.assertIn("@llvm.amdgcn.ds.swizzle", ll)
         # NaN-guard select on neg_inf row max.
         self.assertIn("0xFFF0000000000000", ll)
         # `qq_bias_stride_0` is the very last kernel param.

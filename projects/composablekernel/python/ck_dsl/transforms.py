@@ -72,7 +72,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .core.ir import F16, IRBuilder, Type, Value
+from .core.ir import F16, I32, IRBuilder, Type, Value
 
 
 # ---------------------------------------------------------------------
@@ -501,16 +501,42 @@ class Indirect(Transform):
         lower_name: str,
         table: Value,
         base: Value,
+        max_idx: Optional[Value] = None,
+        default_value: int = 0,
     ) -> None:
         object.__setattr__(self, "upper", (upper_name,))
         object.__setattr__(self, "lower", (lower_name,))
         object.__setattr__(self, "_table", table)
         object.__setattr__(self, "_base", base)
+        object.__setattr__(self, "_max_idx", max_idx)
+        object.__setattr__(self, "_default_value", int(default_value))
 
     def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
         u = coords[self.upper[0]]
         idx = b.add(self._base, u.value)
-        physical = b.global_load_i32(self._table, idx)
+        if self._max_idx is None:
+            # Unguarded: caller promises ``base + upper`` is in range. Kept
+            # for the call sites that have stronger invariants than the
+            # rounded-up multi-block tile (they read exactly
+            # ``ceil(kv_len / bs)`` entries per seq).
+            physical = b.global_load_i32(self._table, idx)
+        else:
+            # OOB-safe load: when the per-seq block-table footprint is
+            # smaller than what the multi-block tile chain over-fetches
+            # (paged-attention with ``T > kv_len[i]`` or ``T > bs *
+            # ceil(kv_len[i] / bs)``), the chain can synthesise indices
+            # past the tensor end. Clamp them with a regular masked
+            # load returning ``default_value`` so the downstream
+            # ``global_load`` lands on a guaranteed-valid block.
+            mask = b.cmp_lt(idx, self._max_idx)
+            physical = b.masked_global_load(
+                self._table,
+                idx,
+                mask,
+                b.const_i32(self._default_value),
+                dtype=I32,
+                align=4,
+            )
         return {self.lower[0]: CoordVar(self.lower[0], physical, u.valid)}
 
 
@@ -520,6 +546,8 @@ def indirect(
     into: str,
     table: Value,
     base: Value,
+    max_idx: Optional[Value] = None,
+    default_value: int = 0,
 ) -> Indirect:
     """One-line page-table lookup transform.
 
@@ -527,8 +555,23 @@ def indirect(
     ``embed(("seq", "tile"), into="idx", strides=(stride, 1))``
     followed by an ad-hoc ``global_load_i32`` -- but explicit about
     the indirection step so legality / explainer tooling can see it.
+
+    When ``max_idx`` is supplied the lookup uses ``masked_global_load``
+    that clamps OOB indices to ``default_value`` (default: 0). This is
+    needed for paged attention when the kernel's KV-tile loop
+    over-fetches block-table entries past the per-seq footprint (e.g.
+    short ``kv_len`` with ``T > kv_len``); the over-fetched index
+    otherwise reads adjacent (uninitialised) memory and the downstream
+    ``buffer_load`` can fault on an unmapped page.
     """
-    return Indirect(upper, lower_name=into, table=table, base=base)
+    return Indirect(
+        upper,
+        lower_name=into,
+        table=table,
+        base=base,
+        max_idx=max_idx,
+        default_value=default_value,
+    )
 
 
 # ---------------------------------------------------------------------
