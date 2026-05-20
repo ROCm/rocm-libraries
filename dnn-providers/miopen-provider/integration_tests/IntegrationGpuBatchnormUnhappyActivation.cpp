@@ -25,7 +25,7 @@ struct UnhappyBnActivationCase
     const char* name;
 };
 
-/// Builds a minimal BN - Pointwise graph that should fail at build time
+/// Builds a minimal BN + Pointwise graph that should fail at build time
 /// due to unsupported activation fusion.
 Graph makeGraph(const UnhappyBnActivationCase& tc)
 {
@@ -41,8 +41,8 @@ Graph makeGraph(const UnhappyBnActivationCase& tc)
     const std::vector<int64_t> cDims = getDerivedShape(dims);
 
     // Input
-    auto X = std::make_shared<TensorAttributes>(
-        makeTensorAttributes("X", DataType::FLOAT, dims, generateStrides(dims)));
+    auto x = std::make_shared<TensorAttributes>(
+        makeTensorAttributes("x", DataType::FLOAT, dims, generateStrides(dims)));
 
     // BN parameters
     auto mean = std::make_shared<TensorAttributes>(
@@ -59,8 +59,8 @@ Graph makeGraph(const UnhappyBnActivationCase& tc)
     if(!tc.isBackward)
     {
         // Forward BatchNorm
-        BatchnormInferenceAttributes bn;
-        bnOut = g.batchnorm_inference(X, mean, invVar, scale, bias, bn);
+        const BatchnormInferenceAttributes bn;
+        bnOut = g.batchnorm_inference(x, mean, invVar, scale, bias, bn);
     }
     else
     {
@@ -68,24 +68,24 @@ Graph makeGraph(const UnhappyBnActivationCase& tc)
         auto dY = std::make_shared<TensorAttributes>(
             makeTensorAttributes("dY", DataType::FLOAT, dims, generateStrides(dims)));
 
-        BatchnormBackwardAttributes bn;
+        const BatchnormBackwardAttributes bn;
 
-        auto bnOutputs = g.batchnorm_backward(dY, X, scale, bn);
-        bnOut = bnOutputs[0]; // Select dX
+        auto bnOutputs = g.batchnorm_backward(dY, x, scale, bn);
+        bnOut = bnOutputs[0]; // dX
     }
 
     // Add activation via pointwise op
     PointwiseAttributes pw;
     pw.set_mode(tc.pointwiseMode);
 
-    // LeakyReLU workaround:
+    // LeakyReLU workaround
     if(std::string(tc.name).find("LeakyRelu") != std::string::npos)
     {
         pw.set_relu_lower_clip_slope(0.01f);
     }
 
-    auto Z = g.pointwise(bnOut, pw);
-    Z->set_output(true);
+    auto z = g.pointwise(bnOut, pw);
+    z->set_output(true);
 
     return g;
 }
@@ -124,10 +124,14 @@ protected:
     void TearDown() override
     {
         if(_handle != nullptr)
+        {
             ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
+        }
 
         if(_stream != nullptr)
+        {
             ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
+        }
     }
 };
 
@@ -147,13 +151,12 @@ TEST_P(IntegrationGpuBatchnormUnhappyActivation, RejectsUnsupportedActivations)
     // Must provide an error message
     EXPECT_FALSE(result.err_msg.empty()) << "Expected non-empty error message";
 
-    // Classify failure using structured error code only
-    bool isBackendFailure = result.code == ErrorCode::HIPDNN_BACKEND_ERROR;
+    // Classify failure
+    const bool isBackendFailure = result.code == ErrorCode::HIPDNN_BACKEND_ERROR;
 
-    bool isFrontendFailure
+    const bool isFrontendFailure
         = result.code != ErrorCode::OK && result.code != ErrorCode::HIPDNN_BACKEND_ERROR;
 
-    // Accept either expected failure path
     EXPECT_TRUE(isBackendFailure || isFrontendFailure)
         << "Unexpected error code: " << static_cast<int>(result.code)
         << ", err_msg: " << result.err_msg;
@@ -163,15 +166,11 @@ TEST_P(IntegrationGpuBatchnormUnhappyActivation, RejectsUnsupportedActivations)
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormUnhappyActivation,
-    ::testing::Values(
-        // Forward unsupported
-        UnhappyBnActivationCase{PointwiseMode::SIGMOID_FWD, false, "SigmoidFwd"},
-        UnhappyBnActivationCase{PointwiseMode::TANH_FWD, false, "TanhFwd"},
-        UnhappyBnActivationCase{PointwiseMode::RELU_FWD, false, "LeakyReluFwd"},
-
-        // Backward unsupported
-        UnhappyBnActivationCase{PointwiseMode::SIGMOID_BWD, true, "SigmoidBwd"},
-        UnhappyBnActivationCase{PointwiseMode::RELU_FWD, true, "ReluFwdInBackward"}),
+    ::testing::Values(UnhappyBnActivationCase{PointwiseMode::SIGMOID_FWD, false, "SigmoidFwd"},
+                      UnhappyBnActivationCase{PointwiseMode::TANH_FWD, false, "TanhFwd"},
+                      UnhappyBnActivationCase{PointwiseMode::RELU_FWD, false, "LeakyReluFwd"},
+                      UnhappyBnActivationCase{PointwiseMode::SIGMOID_BWD, true, "SigmoidBwd"},
+                      UnhappyBnActivationCase{PointwiseMode::RELU_FWD, true, "ReluFwdInBackward"}),
     [](const ::testing::TestParamInfo<UnhappyBnActivationCase>& info) {
         return std::string(info.param.name);
     });
