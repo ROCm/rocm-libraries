@@ -23,7 +23,7 @@
 ################################################################################
 
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
-            countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, getMFMAs
+            countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, MemTokenData
 from rocisa.label import LabelManager
@@ -876,34 +876,40 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # simple schedule, just add the modules in-order
       if kernel["HalfPLR"]:
         assert len(packCode.flatitems()) == 0, "Pack code should be empty for half PLR case"
-        if kernel["PrefetchGlobalRead"] != 2: 
+        if kernel["PrefetchGlobalRead"] < 2: 
           iterCode.add(globalReadCode)
         iterCode.add(waitLWCode)
         iterCode.add(syncCode)
         iterCode.add(localReadCode)
         iterCode.add(localWriteCode)
         iterCode.add(waitCode)
-        macToSchedule = countInstruction(macIterCode) / 2
+        macCnt = countMFMA(macIterCode)
+        assert macCnt % 2 == 0, "HalfPLR does not support odd number of matrix instructions"
+        macToSchedule = macCnt // 2
         macItems = macIterCode.flatitems()
         while macItems:
           item = macItems.pop(0)
           iterCode.add(item)
-          macsThisItem = countInstruction(item)
+          macsThisItem = countMFMA(item)
           if macsThisItem:
             assert macsThisItem==1, "Scheduler assumes 1 mac per item"
             macToSchedule -= 1
             if macToSchedule == 0:
               break
-        iterCode.add(localReadCodeSecondHalf)
+        iterCode.add(localReadCodeSecondHalf.popFirstItem())
+        # when HalfPLR == 3, we need to add mac before the second half of LR of B (the inner tile index for mac)
+        if kernel["HalfPLR"] == 3:
+          iterCode.addItems(macItems)
+          iterCode.add(localReadCodeSecondHalf)
+          macItems = []
         iterCode.add(pointerLWCode)
         iterCode.add(pointerLRCode)
-        if kernel["PrefetchGlobalRead"] == 2: 
+        if kernel["PrefetchGlobalRead"] >= 2: 
           iterCode.add(globalReadCode)
         # add rest of the mac here
-        for item in macItems:
-          iterCode.add(item)
+        iterCode.addItems(macItems)
       else:
-        if(kernel["PrefetchGlobalRead"] == 2):
+        if(kernel["PrefetchGlobalRead"] >= 2):
           iterCode.add(waitLWCode)
           iterCode.add(syncCode)
           iterCode.add(localReadCode)
@@ -4011,19 +4017,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
             bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadA + vregSetIdxLR * kernel["LoopIters"]
           localReadCodeA, packCodeA, packPreA = self.localReadDo(kernel, bufferIdx, iui*self.states.numReadsIterCoalescedA, 0, tensorParametersA)
           if kernel["HalfPLRA"]:
-            halfCnt = countLocalRead(localReadCodeA) / 2
+            lrCnt = countLocalRead(localReadCodeA)
+            assert lrCnt % 2 == 0, "HalfPLR does not support odd number of local reads"
+            halfCnt = lrCnt // 2
             readItems = localReadCodeA.flatitems()
             while readItems:
               item = readItems.pop(0)
               localReads.add(item)
-              readsThisItem = countLocalRead(item)
-              if readsThisItem:
-                assert readsThisItem==1, "Scheduler assumes 1 read per item"
-                halfCnt -= 1
-                if halfCnt == 0:
-                  break
-            for item in readItems:
-              localReadsSecondHalf.add(item)
+              halfCnt -= countLocalRead(item)
+              if halfCnt <= 0:
+                assert halfCnt == 0, "two half not balanced"
+                break
+            tmpModule = Module()
+            tmpModule.addItems(readItems)
+            localReadsSecondHalf.add(tmpModule)
           else:
             localReads.add(localReadCodeA)
           localReadsA.add(localReadCodeA)
@@ -4090,19 +4097,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
             bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadB + vregSetIdxLR * kernel["LoopIters"]
           localReadCodeB, packCodeB, packPreB = self.localReadDo(kernel, bufferIdx, iui*self.states.numReadsIterCoalescedB, 0, tensorParametersB)
           if kernel["HalfPLRB"]:
-            halfCnt = countLocalRead(localReadCodeB) / 2
+            lrCnt = countLocalRead(localReadCodeB)
+            assert lrCnt % 2 == 0, "HalfPLR does not support odd number of local reads"
+            halfCnt = lrCnt // 2
             readItems = localReadCodeB.flatitems()
             while readItems:
               item = readItems.pop(0)
               localReads.add(item)
-              readsThisItem = countLocalRead(item)
-              if readsThisItem:
-                assert readsThisItem==1, "Scheduler assumes 1 read per item"
-                halfCnt -= 1
-                if halfCnt == 0:
-                  break
-            for item in readItems:
-              localReadsSecondHalf.add(item)
+              halfCnt -= countLocalRead(item)
+              if halfCnt <= 0:
+                assert halfCnt == 0, "two half not balanced"
+                break
+            tmpModule = Module()
+            tmpModule.addItems(readItems)
+            localReadsSecondHalf.add(tmpModule)
           else:
             localReads.add(localReadCodeB)
           localReadsB.add(localReadCodeB)

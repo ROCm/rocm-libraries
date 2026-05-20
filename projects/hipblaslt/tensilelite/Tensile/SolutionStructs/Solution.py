@@ -2199,7 +2199,7 @@ class Solution(collections.abc.Mapping):
         return
       if (state["HalfPLRA"] and (state["MIWaveTileA"] % 2 != 0)) or \
         (state["HalfPLRB"] and (state["MIWaveTileB"] % 2 != 0)):
-        reject(state, printRejectionReason, "HalfPLR does not supports odd WaveTile")
+        reject(state, printRejectionReason, "HalfPLR does not support odd WaveTile")
         return
       if not state["EnableMatrixInstruction"]:
         reject(state, printRejectionReason, "Currently HalfPLR only supports MatrixInstruction")
@@ -2209,13 +2209,16 @@ class Solution(collections.abc.Mapping):
         return
       if (state["HalfPLRA"] and not (state["UnrollMajorLDSA"] or state["enableLDSTrA"])) or \
         (state["HalfPLRB"] and not (state["UnrollMajorLDSB"] or state["enableLDSTrB"])):
-        reject(state, printRejectionReason, "Currently HalfPLR does not supports packing (need UnrollMajorLDS or use LDSTrInst)")
+        reject(state, printRejectionReason, "Currently HalfPLR does not support packing (need UnrollMajorLDS or use LDSTrInst)")
         return
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "Currently HalfPLR only supports InnerUnroll = 1")
         return
       if state["ConvertAfterDS"]:
-        reject(state, printRejectionReason, "Currently HalfPLR does not supports ConvertAfterDS")
+        reject(state, printRejectionReason, "Currently HalfPLR does not support ConvertAfterDS")
+        return
+      if state["UseF32XEmulation"]:
+        reject(state, printRejectionReason, "Currently HalfPLR does not support UseF32XEmulation")
         return
 
     if state["UseDirect32XEmulation"] == True:

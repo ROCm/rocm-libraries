@@ -1029,7 +1029,8 @@ validParameters = { # we need to make sure this matches develop
     # 0: Disabled
     # 1: Use PLR 0.5 for A
     # 2: Use PLR 0.5 for B
-    "HalfPLR": [0, 1, 2]
+    # 3: Use PLR 0.5 for both A and B
+    "HalfPLR": [0, 1, 2, 3]
 }
 
 newMIValidParameters = {
