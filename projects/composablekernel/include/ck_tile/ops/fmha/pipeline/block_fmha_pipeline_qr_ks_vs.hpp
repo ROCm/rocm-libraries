@@ -904,8 +904,12 @@ struct BlockFmhaPipelineQRKSVS
             // precision, so rescaling by less than this is a no-op at output precision.
             // Adapted from FlashAttention-4 (Tri Dao, 2025).
             // Eliminates 70-90% of rescale operations in practice.
+            // FP8 quant modes cast P to FP8 after softmax. In the skip
+            // branch P can exceed the FP8 representable range, corrupting
+            // the P*V GEMM. Disable skip for all FP8 paths (threshold 0).
             static constexpr SMPLComputeDataType kRescaleThreshold =
-                type_convert<SMPLComputeDataType>(8.0f);
+                type_convert<SMPLComputeDataType>(
+                    QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ? 8.0f : 0.0f);
 
             auto p_row_correction =
                 make_static_distributed_tensor<SMPLComputeDataType>(m.get_tile_distribution());
