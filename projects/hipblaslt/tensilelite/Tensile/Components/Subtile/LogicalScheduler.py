@@ -396,17 +396,6 @@ class SyncOp(BaseOp):
 
 
 @dataclass
-class MaskKInitOp(BaseOp):
-    """Compute the per-lane K-index vgpr once at tail-loop entry.
-
-    The emitter checks out a vgpr holding (Serial%WavefrontSize) /
-    (MatrixInstN*MatrixInstB) and reuses it for every MaskKOp in the body.
-    """
-    def __post_init__(self):
-        self.kind = 'mask_k_init'
-
-
-@dataclass
 class MaskKOp(BaseOp):
     """Zero A (and MXSA if scaled) vgprs whose K-index >= remaining tail K,
     for one subIterK group. Emits VCmpGEI32 against the tail loop counter
@@ -420,13 +409,6 @@ class MaskKOp(BaseOp):
 
     def __str__(self):
         return f"mask_k(k={self.subIterK})"
-
-
-@dataclass
-class MaskKDoneOp(BaseOp):
-    """Release the vgpr allocated by MaskKInitOp. Emits no instructions."""
-    def __post_init__(self):
-        self.kind = 'mask_k_done'
 
 
 @dataclass
@@ -2127,8 +2109,6 @@ class LogicalScheduler:
         # waitcount 0 + sync
         preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
         preamble.append(SyncOp())
-        # Per-lane K-index vgpr for the tail mask; reused by every MaskKOp.
-        preamble.append(MaskKInitOp())
 
         # Loop over partitions to re-use vgpr tile maps.
         all_partitions = []
@@ -2161,9 +2141,6 @@ class LogicalScheduler:
                 ops.append(mfma)
                 groups.append(self._to_emitted(ops))
             all_partitions.append(groups)
-
-        # Release the tail mask kReg vgpr (allocated by MaskKInitOp).
-        all_partitions[-1].append(self._to_emitted([MaskKDoneOp()]))
 
         self._tailloop_emitted = all_partitions
         return self._tailloop_emitted
@@ -2458,9 +2435,16 @@ class LogicalScheduler:
             return module
 
         module.addComment0("TAILLOOP")
+        # init must run before populate so each MaskKOp in the body can read
+        # the mask vgprs (kReg, vDiff, …) that init allocates.
+        for inst in self._emitter.emit_mask_k_init():
+            module.add(inst)
+        self._emitter.populate(self._tailloop_emitted, unroll_iter=0)
         module.add(self._emitLoop(writer, kernel, "TAILLOOP",
                                   self._tailloop_emitted,
                                   schedule=False))
+        for inst in self._emitter.emit_mask_k_done():
+            module.add(inst)
         return module
 
     # ── VGPR tile allocation ──────────────────────────────
@@ -2604,8 +2588,7 @@ class LogicalScheduler:
             emitter.populate(nll_copy, unroll_iter=ui)
             self._nll_per_unroll.append(nll_copy)
 
-        emitter.populate(self._tailloop_emitted, unroll_iter=0)
-
+        self._emitter = emitter
         self._completed.add(Pass.POPULATE)
 
     # ── Print helpers ───────────────────────────────────────

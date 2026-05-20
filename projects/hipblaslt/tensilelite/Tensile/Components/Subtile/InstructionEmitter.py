@@ -95,9 +95,7 @@ class InstructionEmitter:
             'tail_srd_advance': lambda em, ui: self.emit_tail_srd_advance(em.source),
             'tail_lr_inc':      lambda em, ui: self.emit_tail_lr_inc(em.source),
             'skip':             lambda em, ui: self.emit_skip(em.source),
-            'mask_k_init':  lambda em, ui: self.emit_mask_k_init(),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
-            'mask_k_done':  lambda em, ui: self.emit_mask_k_done(),
         }
 
         # Per-lane K-index vgpr for the tail-loop K mask. Set by emit_mask_k_init,
@@ -632,3 +630,4 @@ class InstructionEmitter:
                     handler = self._dispatch.get(em.opType)
                     if handler:
                         em.instructions = handler(em, unroll_iter)
+
