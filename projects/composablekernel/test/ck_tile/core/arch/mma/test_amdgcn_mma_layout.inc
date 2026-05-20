@@ -203,7 +203,10 @@ struct MmaLayoutTestKernel
 
                     if constexpr(std::is_same_v<typename MmaOp::OpType, WmmaOp>)
                     {
-                        sparse_idx = (k_rem_sparse << vec_value_item_idx);
+                        // Use non-zero baseline for all bits, then set the target bit to
+                        // k_rem_sparse. This avoids all-zeros index which may not be handled
+                        // correctly. Other bits don't affect result since their A elements are 0.
+                        sparse_idx = 0xFFFFu ^ ((k_rem_sparse ^ 1u) << vec_value_item_idx);
                     }
                     else
                     {
