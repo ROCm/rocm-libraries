@@ -905,10 +905,8 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   tileCopyInst = VAccvgprWrite if isAgpr else VMovB32
   regsPerMfma = 16
   numMfma = totalRegs // regsPerMfma
-  # MFMA zeroing uses v_mfma_i32_32x32x16_i8 which only exists on MFMA-capable archs.
-  # Fall back to scalar v_mov_b32 when MFMA is not available (e.g. WMMA-only gfx12).
-  hasMfma = hasattr(writer, 'states') and writer.states.asmCaps.get("HasMFMA", False)
-  if not hasMfma:
+  # MFMA zeroing uses v_mfma_i32_32x32x16_i8 which doesn't exist on WMMA-only archs.
+  if not writer.states.asmCaps.get("HasMFMA", False):
     numMfma = 0
 
   if numMfma > 0:
