@@ -142,28 +142,31 @@ struct CKArgs
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
-    int G;
-    int N;
-    int K1;
-    int C1;
-    int K;
-    int C;
-    int Hi;
-    int Wi;
-    int Ho;
-    int Wo;
-    int Y;
-    int X;
-    std::array<ck::index_t, 5> input;
-    std::array<ck::index_t, 5> in_strides;
-    std::array<ck::index_t, 5> output;
-    std::array<ck::index_t, 5> out_strides;
-    std::array<ck::index_t, 5> weight;
-    std::array<ck::index_t, 5> wei_strides;
-    std::array<ck::index_t, 2> strides;
-    std::array<ck::index_t, 2> dilation;
-    std::array<ck::index_t, 2> lPadding;
-    std::array<ck::index_t, 2> rPadding;
+    // See CKArgsSplitK in ck_grouped_conv_impl_helpers.hpp for the rationale
+    // behind int64 storage (avoid silent overflow in the NCHW stride builder
+    // above, dispatch to CK's long_index_t MakeArgumentPointer overload).
+    int64_t G;
+    int64_t N;
+    int64_t K1;
+    int64_t C1;
+    int64_t K;
+    int64_t C;
+    int64_t Hi;
+    int64_t Wi;
+    int64_t Ho;
+    int64_t Wo;
+    int64_t Y;
+    int64_t X;
+    std::array<ck::long_index_t, 5> input;
+    std::array<ck::long_index_t, 5> in_strides;
+    std::array<ck::long_index_t, 5> output;
+    std::array<ck::long_index_t, 5> out_strides;
+    std::array<ck::long_index_t, 5> weight;
+    std::array<ck::long_index_t, 5> wei_strides;
+    std::array<ck::long_index_t, 2> strides;
+    std::array<ck::long_index_t, 2> dilation;
+    std::array<ck::long_index_t, 2> lPadding;
+    std::array<ck::long_index_t, 2> rPadding;
 };
 
 template <typename DataType>

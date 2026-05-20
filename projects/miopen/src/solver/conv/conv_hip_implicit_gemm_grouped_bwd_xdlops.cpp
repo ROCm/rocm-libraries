@@ -496,8 +496,6 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
         return false;
     if(problem.HasMixedDataTypes())
         return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
-        return false;
     if(problem.IsTensorsCasted())
         return false;
     if(!problem.IsDirectionBackwardData())
