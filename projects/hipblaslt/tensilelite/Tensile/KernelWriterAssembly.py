@@ -1823,7 +1823,7 @@ class KernelWriterAssembly(KernelWriter):
     # TODO: Add target occupancy or kept the occupancy settings from globalWriteBatch
     kernel["CUOccupancy"] = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size(), self.sgprPool.size(), \
       self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
-    if kernel["ScheduleIterAlg"] == 2 and kernel["CUOccupancy"] < 2:
+    if kernel["_ScheduleIterAlg"] == 2 and kernel["CUOccupancy"] < 2:
       self.states.overflowedResources = 6
 
     vgprPerThreadPerOccupancy = self.states.regCaps["PhysicalMaxVgprCU"] // kernel["NumThreads"]
@@ -16659,7 +16659,7 @@ class KernelWriterAssembly(KernelWriter):
           needToWait -= numGlobalReadNonDTV
       # adjustment for oddLast
       # oddLast case or ScheduleIterAlg < 3 case, ignore all of above and set 0
-      if oddLast or kernel["ScheduleIterAlg"] < 3:
+      if oddLast or kernel["_ScheduleIterAlg"] < 3:
         needToWait = 0
 
       # generate waitcnt code

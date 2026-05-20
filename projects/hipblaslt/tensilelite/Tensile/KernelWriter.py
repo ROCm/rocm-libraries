@@ -2938,7 +2938,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     condSkip = False
     # skip wait for SIA=3 and oneLDSBuffer scheduling and PLR and PGR==2 and u > localWriteStartIter
     # in this case, all local read is executed before 1LDSBuffer sync and no need to wait for local read
-    if (kernel["ScheduleIterAlg"] == 3 and oneBufferScheduling and kernel["PrefetchLocalRead"] and kernel["PrefetchGlobalRead"] >= 2):
+    if (kernel["_ScheduleIterAlg"] == 3 and oneBufferScheduling and kernel["PrefetchLocalRead"] and kernel["PrefetchGlobalRead"] >= 2):
       localWriteStartIter = self.states.lwStartMfmaIndex//self.states.numMfmaPerIter
       if u > localWriteStartIter:
         condSkip = True
@@ -3088,7 +3088,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       isResetLroIter = 1 if kernel["ForceUnrollSubIter"] else (u == localWriteEndIter)
       isSwapAndResetLwoIter = (u == localWriteEndIter)
       isSwapLroIter = isResetLroIter
-      if kernel["ScheduleIterAlg"] == 3:
+      if kernel["_ScheduleIterAlg"] == 3:
         isSwapAndResetLwoIter = (u == self.states.lwEndMfmaIndex//(self.states.numMfmaPerIter))
 
       extraComment = ""
@@ -3284,7 +3284,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # put barrier at localWriteEndIter+1
           if (u == localWriteEndIter+1 and not self.states.doFullPackCodePrefetch) or \
              (self.states.doFullPackCodePrefetch and (u == self.states.syncPlrMfmaIndex // self.states.numMfmaPerIter)) or \
-             (u == (localWriteEndIter+1)%kernel["LoopIters"] and kernel["ScheduleIterAlg"] == 2):
+             (u == (localWriteEndIter+1)%kernel["LoopIters"] and kernel["_ScheduleIterAlg"] == 2):
             if not kernel["NoLdsWriteCode"]:
               waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "3wait for local write"))
             elif kernel["enableTDMA"] and kernel["enableTDMB"]:
@@ -3589,7 +3589,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # not generate openLoop for firstIter
     if not firstIter:
       module.addComment2("Unrolled Loop %u/%u - Begin" % (lc+1, loopCopies))
-    if kernel["PrefetchGlobalRead"] and not self.states.numItersPLR and not kernel["ScheduleIterAlg"] == 2 and not kernel["UseCustomMainLoopSchedule"]:
+    if kernel["PrefetchGlobalRead"] and not self.states.numItersPLR and not kernel["_ScheduleIterAlg"] == 2 and not kernel["UseCustomMainLoopSchedule"]:
       if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
         vlcntVal = kernel["PrefetchGlobalRead"] - 1 if kernel["PrefetchGlobalRead"] >= 2 else 0
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "11wait for global read"))
@@ -3866,7 +3866,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       isResetLroIter = 1 if kernel["ForceUnrollSubIter"] else (u == localWriteEndIter)
       isSwapAndResetLwoIter = (u == localWriteEndIter)
       isSwapLroIter = isResetLroIter
-      if kernel["ScheduleIterAlg"] == 3:
+      if kernel["_ScheduleIterAlg"] == 3:
         isSwapAndResetLwoIter = (u == self.states.lwEndMfmaIndex//(self.states.numMfmaPerIter))
       extraComment = ""
       if isResetLroIter:
@@ -4084,7 +4084,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         isBarrier = localWriteEndIter+1 if not self.states.doFullPackCodePrefetch else (u == self.states.syncPlrMfmaIndex // self.states.numMfmaPerIter)
         if (u == isBarrier) or \
            (self.states.doFullPackCodePrefetch and (u == self.states.syncPlrMfmaIndex // self.states.numMfmaPerIter)) or \
-           (u == isBarrier%kernel["LoopIters"] and kernel["ScheduleIterAlg"] == 2):
+           (u == isBarrier%kernel["LoopIters"] and kernel["_ScheduleIterAlg"] == 2):
           if (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]) and not self.states.scheduleGROverBarrier:
             vlcntVal = kernel["PrefetchGlobalRead"] - 1 if kernel["PrefetchGlobalRead"] >= 2 else 0
             waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, \
@@ -4113,7 +4113,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if isSwapAndResetLwoIter: # ResetLroIter
           if kernel["ExpertSchedulingMode"] > 0:
             pointerLWCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
-          if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
+          if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
             pointerLWCode.add(self._syncThreads(
               kernel,
               "Waiting current LR finish for next GR(TDM), sync LDS%u"%(self.states.ldsReadTokenIdx),
@@ -5051,7 +5051,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["ExpertSchedulingMode"] > 0:
       module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
-    if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
+    if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
       module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="disable expert scheduling mode = 0"))
     module.addComment1("Before NLL: Check VGPR.checkin for INT8 LW")
 
@@ -5463,7 +5463,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # tail: re-init local read addresses
       if kernel["PrefetchGlobalRead"]:
-        if kernel["ScheduleIterAlg"] != 0:
+        if kernel["_ScheduleIterAlg"] != 0:
           module.addComment1("Tail: local read reset offsets a")
           module.add(self.localReadResetOffsets(kernel, tensorParametersA))
           if kernel["ProblemType"]["MXBlockA"]:
@@ -6047,7 +6047,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.scheduleLocalWrite = kernel["ScheduleLocalWrite"] \
           and kernel["PrefetchGlobalRead"] \
           and kernel["BufferLoad"]  # flat updates lgkmcnt counts = hard to schedule writes and loads?
-      self.states.scheduleIterAlg = kernel["ScheduleIterAlg"]
+      self.states.scheduleIterAlg = kernel["_ScheduleIterAlg"]
     else:
       self.states.scheduleGlobalRead = 0
       self.states.scheduleLocalWrite = 0
@@ -6277,7 +6277,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numReadsIterCoalescedMetadata  = 1
     self.states.numIterPerCoalescedReadMetadata = max(1,self.states.numReadsIterCoalescedMetadata // kernel["InnerUnroll"])
 
-    if kernel["ScheduleIterAlg"] == 3 or kernel["ScheduleIterAlg"] == 2:
+    if kernel["_ScheduleIterAlg"] == 3 or kernel["_ScheduleIterAlg"] == 2:
       self.states.numMfmaPerIter = kernel["MIWaveTile"][0] * kernel["MIWaveTile"][1] * kernel["InnerUnroll"]
       if kernel["ProblemType"]["DataType"].isComplex(): self.states.numMfmaPerIter *= 4
       elif kernel["UseF32XEmulation"]: self.states.numMfmaPerIter *= 3

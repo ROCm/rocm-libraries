@@ -475,9 +475,10 @@ class Solution(collections.abc.Mapping):
                f"ScheduleIterAlg=4 is not supported for {state['ISA']}: no StinkyTofu backend for this architecture. "
                f"Supported: {supported}")
         return
-      state["ScheduleIterAlg"] = 0
+      state["_ScheduleIterAlg"] = 0
       state["_StinkyTofuOptLevel"] = 3
     else:
+      state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
 
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
@@ -654,7 +655,7 @@ class Solution(collections.abc.Mapping):
       state["tailLoopOptMXSB"] = False
 
     # reorder globalread instructions if dtv and TN cases. (along coalesced dim)
-    if state["ScheduleIterAlg"] == 3:
+    if state["_ScheduleIterAlg"] == 3:
       state["reorderGRInstForDTVA"] = True if state["ProblemType"]["TransposeA"] and \
                                               state["DirectToVgprA"] and \
                                               not state["ProblemType"]["SwizzleTensorA"] else False
@@ -748,7 +749,7 @@ class Solution(collections.abc.Mapping):
                "UseSubtileImpl=1 requires PrefetchGlobalRead 0, 1 or 2, got %d" % state["PrefetchGlobalRead"])
       if not (state["MatrixInstM"] == 16 and state["MatrixInstN"] == 16):
         reject(state, printRejectionReason, "UseSubtileImpl=1 requires MatrixInst 16x16")
-      if state["ScheduleIterAlg"] == 1 or state["ScheduleIterAlg"] == 2:
+      if state["_ScheduleIterAlg"] == 1 or state["_ScheduleIterAlg"] == 2:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
@@ -1071,7 +1072,7 @@ class Solution(collections.abc.Mapping):
       return False
 
     # Does not work with SIA<3
-    if state["ScheduleIterAlg"] < 3:
+    if state["_ScheduleIterAlg"] < 3:
       reject(state, printRejectionReason, "DirectToVgpr%c does not supports ScheduleIterAlg < 3"%(tc))
       return False
 
@@ -1368,7 +1369,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:
         reject(state, printRejectionReason, "ScheduleLocalWrite not supported with Stream-K")
-      if state["ScheduleIterAlg"] != 2 and state["ScheduleIterAlg"] != 3:
+      if state["_ScheduleIterAlg"] != 2 and state["_ScheduleIterAlg"] != 3:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
       if state["StreamKAtomic"] == 1:
         if not state["ProblemType"]["DataType"].isSingle():
@@ -1475,14 +1476,14 @@ class Solution(collections.abc.Mapping):
             return
       if state["ProblemType"]["ComputeDataType"].isDouble():
         # See [4,4,4,4] snop for more info
-        if state["MatrixInstruction"] == [4,4,4,4] and (not state['ISA'] == IsaVersion(9,0,10)) and state["ScheduleIterAlg"] == 3:
+        if state["MatrixInstruction"] == [4,4,4,4] and (not state['ISA'] == IsaVersion(9,0,10)) and state["_ScheduleIterAlg"] == 3:
           reject(state, printRejectionReason, "Currently Matrix instructions [4,4,4,4] is disabled.")
           return
       if state["UseF32XEmulation"]:
         if not isaInfoMap[isa].archCaps["HasF32XEmulation"]:
           reject(state, printRejectionReason, "Missing emulation for F32X")
           return
-        if state["ScheduleIterAlg"] not in (1, 3):
+        if state["_ScheduleIterAlg"] not in (1, 3):
           reject(state, printRejectionReason, "F32X Emulation only supported with Schedule Iter Alg == (1 or 3)")
           return
         if tuple(state["MatrixInstruction"])[:3] in ((16, 16, 8), (16, 16, 16), (32, 32, 4)):
@@ -1504,7 +1505,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Invalid value for ThreadTile")
         return
 
-      if state["ScheduleIterAlg"] == 2 or state["ScheduleIterAlg"] == 3:
+      if state["_ScheduleIterAlg"] == 2 or state["_ScheduleIterAlg"] == 3:
         reject(state, printRejectionReason, "SIA2 and SIA3 only support MatrixInstruction")
         return
 
@@ -1812,7 +1813,7 @@ class Solution(collections.abc.Mapping):
     if state["enableLDSTrB"] or state["enableGLTrB"]:
       state["VectorWidthB"] = 1
 
-    if state["ScheduleIterAlg"] == 2:
+    if state["_ScheduleIterAlg"] == 2:
       state["ExpandPointerSwap"] = True
       print2("\nSet SIA=2, force ExpandPointerSwap=1")
 
@@ -2199,7 +2200,7 @@ class Solution(collections.abc.Mapping):
         if not state["UseF32XEmulation"]:
           state["UsePLRPack"] = 0
         # SIA3 only
-        if state["ScheduleIterAlg"] != 3:
+        if state["_ScheduleIterAlg"] != 3:
           state["UsePLRPack"] = 0
         # enable UsePLRPack for SubIter only
         if not state["ForceUnrollSubIter"]:
@@ -2240,7 +2241,7 @@ class Solution(collections.abc.Mapping):
       # parameters not tested yet:
       supportedParameters = {
         "EnableMatrixInstruction": state["EnableMatrixInstruction"],
-        "ScheduleIterAlg": state["ScheduleIterAlg"] == 3,
+        "_ScheduleIterAlg": state["_ScheduleIterAlg"] == 3,
         "WavefrontSize": state["WavefrontSize"] == 32,
         "UnrollLoopSwapGlobalReadOrder": not state["UnrollLoopSwapGlobalReadOrder"],
         "SuppressNoLoadLoop": not state["SuppressNoLoadLoop"],
@@ -3361,7 +3362,7 @@ class Solution(collections.abc.Mapping):
       return
     assert(state["DepthU"]> 0)
 
-    if state["ScheduleIterAlg"] == 2:
+    if state["_ScheduleIterAlg"] == 2:
       state["InnerUnroll"] = state["DepthU"] // state["MatrixInstK"]
       state["PrefetchLocalRead"] = 1
       #state["ExpandPointerSwap"] = 1 # EPS is adjusted in advance
@@ -4077,7 +4078,7 @@ class Solution(collections.abc.Mapping):
       if state["PrefetchGlobalRead"] < 2:
         state["DtlPlusLdsBuf"] = 0
       # SIA==3 only
-      if state["ScheduleIterAlg"] != 3:
+      if state["_ScheduleIterAlg"] != 3:
         state["DtlPlusLdsBuf"] = 0
       # restrict feature combinations
       if state["DtlPlusLdsBuf"]:
@@ -4192,7 +4193,7 @@ class Solution(collections.abc.Mapping):
       if not state["PrefetchGlobalRead"]:
         reject(state, printRejectionReason, "PGR=0 already use 1 LDS buffer only")
       # Should be able to support as long as NO scheduleLocalWrite
-      if (not state["ScheduleIterAlg"] == 2) and (not state["ScheduleIterAlg"] == 3) and (state["ScheduleLocalWrite"]):
+      if (not state["_ScheduleIterAlg"] == 2) and (not state["_ScheduleIterAlg"] == 3) and (state["ScheduleLocalWrite"]):
         reject(state, printRejectionReason, "1LDSBuffer only support SIA2 or SIA3, or SIA1 without SLW")
       state["LdsOffsetA"] = 0
       state["LdsOffsetMXSA"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
@@ -4384,7 +4385,7 @@ class Solution(collections.abc.Mapping):
 
       # if LDS is bound by RemapC (SRVW), then 1LDSBuffer actually doesn't help in SIA3
       # since LDS usage couldn't be reduced
-      if state["1LDSBuffer"] and (state["ScheduleIterAlg"] == 3) and (ldsNumBytes < ldsNumBytesRemapC):
+      if state["1LDSBuffer"] and (state["_ScheduleIterAlg"] == 3) and (ldsNumBytes < ldsNumBytesRemapC):
         # TODO- Remove this DataType test condition,
         # Currently we do this test is just because we don't want to affect existing logic in rocBLAS
         if state["ProblemType"]["DataType"].isInt8():
@@ -4520,7 +4521,7 @@ class Solution(collections.abc.Mapping):
 
     # Since we use PLR >= LoopIters for allocating numberOfIters vgprBuffer for a while
     # we need to support both PLR >= LoopIters and CLR parameter for solutions in rocBLAS
-    if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"]:
+    if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["_ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"]:
       # Reject configuration: DTV enabled on one side is incompatible with PLR = 0
       if state["DirectToVgprA"] ^ state["DirectToVgprB"]:
         reject(state, printRejectionReason, "DirectToVgpr does not work with PrefetchLocalRead(%u) >= LoopIters(%u)"%(state["PrefetchLocalRead"], state["LoopIters"]))
@@ -4589,7 +4590,7 @@ class Solution(collections.abc.Mapping):
       if state["PrefetchLocalRead"] == 0:
         reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only PrefetchLocalRead >= 1")
       # support SIA==3 only
-      if state["ScheduleIterAlg"] != 3:
+      if state["_ScheduleIterAlg"] != 3:
         reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only ScheduleIterAlg == 3")
       # TODO: enable PGR>=3 for Sparse
       if state["ProblemType"]["Sparse"]:
