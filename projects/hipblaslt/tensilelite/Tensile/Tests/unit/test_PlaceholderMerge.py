@@ -46,6 +46,11 @@ _LOGIC_ROOT = (
     / "Tensile" / "Logic" / "asm_full"
 )
 
+pytestmark = pytest.mark.xfail(
+    not _LOGIC_ROOT.is_dir(),
+    reason="Logic files not found: https://github.com/ROCm/rocm-libraries/issues/7481",
+)
+
 _DEVICE_NAMES_RE = re.compile(r"^\s*-\s*\[\s*Device\s+([^\]]+)\]\s*$")
 _ID_SUFFIX_LITERAL = "_ID"
 _GATE_FUNC_NAME = "supportsChipIdPredicate"
@@ -61,7 +66,8 @@ def _iter_arch_dirs():
 
 
 def _all_arch_names():
-    assert _LOGIC_ROOT.is_dir(), f"Logic file root is required but not found: {_LOGIC_ROOT}"
+    if not _LOGIC_ROOT.is_dir():
+        return []
     return sorted({arch_dir.name for _, arch_dir in _iter_arch_dirs()})
 
 

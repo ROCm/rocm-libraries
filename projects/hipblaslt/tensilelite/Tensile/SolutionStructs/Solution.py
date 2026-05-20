@@ -2273,6 +2273,7 @@ class Solution(collections.abc.Mapping):
 
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
 
+    state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
     # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
     isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
@@ -4020,6 +4021,12 @@ class Solution(collections.abc.Mapping):
     for tc in ['A', 'B']:
       if state["LdsPad%s"%tc] == 0:
         state["LdsBlockSizePerPad%s"%tc] = 0
+
+    if state["TDMInst"]:
+      for tc in ['A', 'B']:
+        if state["LdsPad%s"%tc] > 0 and state["LdsBlockSizePerPad%s"%tc] == 0:
+          reject(state, printRejectionReason, f"TDM requires LdsBlockSizePerPad{tc} != 0 when LdsPad{tc} != 0")
+          return
 
     # Normalize lds block-size-per-pad fields to native Python int.
     assert(int(state["LdsBlockSizePerPadA"]) == state["LdsBlockSizePerPadA"])
