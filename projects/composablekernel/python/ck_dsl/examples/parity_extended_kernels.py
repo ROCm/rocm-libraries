@@ -68,6 +68,8 @@ from ck_dsl.helpers import QkScaleSpec, compile_kernel  # noqa: E402
 from ck_dsl.helpers.rotary import RotarySpec  # noqa: E402
 from ck_dsl.instances import (  # noqa: E402
     BlockScaleGemmSpec,
+    FusedMoeForward,
+    FusedMoeForwardSpec,
     FusedMoeLauncher,
     FmhaAppendKvSpec,
     FmhaBwdSpec,
@@ -611,6 +613,160 @@ def case_moe_fused_chain() -> Result:
             f"silu_mul, topk_reduce); timed_ms={ms_timed:.3f}"
         ),
     )
+
+
+def _torch_fused_moe_reference(
+    routing_logits: torch.Tensor,  # (T, E) f32
+    X: torch.Tensor,  # (T, H) act dtype
+    W_gate: torch.Tensor,  # (E, I, H)
+    W_up: torch.Tensor,  # (E, I, H)
+    W_down: torch.Tensor,  # (E, H, I)
+    topk: int,
+) -> torch.Tensor:
+    """Plain torch fused-MoE forward, for parity comparison.
+
+    Mirrors :class:`FusedMoeForward` semantics:
+    * router : top-k of routing_logits, then softmax over the K picked
+      values (matches CK Tile / topk_softmax kernel semantics, *not*
+      softmax-then-topk).
+    * per-token-expert pair: gate / up GEMMs in f32, SwiGLU, down GEMM.
+    * weighted sum over the K experts per token.
+    """
+    T, H = X.shape
+    E, I, _ = W_gate.shape
+    top_vals, top_ids = torch.topk(routing_logits, k=topk, dim=-1)  # (T, K)
+    top_weights = torch.softmax(top_vals.float(), dim=-1)  # (T, K)
+
+    Y = torch.zeros(T, H, dtype=torch.float32, device=X.device)
+    for t in range(T):
+        x = X[t, :].float()  # (H,)
+        for k in range(topk):
+            e = int(top_ids[t, k].item())
+            w = float(top_weights[t, k].item())
+            gate = x @ W_gate[e].float().T  # (I,)
+            up = x @ W_up[e].float().T  # (I,)
+            hidden = torch.nn.functional.silu(gate) * up  # (I,)
+            out = hidden @ W_down[e].float().T  # (H,)
+            Y[t, :] += w * out
+    return Y.to(X.dtype)
+
+
+def case_moe_e2e_forward() -> Result:
+    """End-to-end fused-MoE forward via :class:`FusedMoeForward`.
+
+    Drives the full pipeline (router -> sort -> gather -> per-expert
+    gate + up GEMMs -> silu_mul -> per-expert down GEMM -> topk_reduce)
+    and validates the output against the torch eager reference. The
+    pipeline issues 5 streaming kernels via :func:`launch_kernel`
+    chains plus 3*E grouped-GEMM launches via
+    :class:`GroupedGemmLauncher` -- all on a single HIP stream.
+    """
+    spec = FusedMoeForwardSpec(
+        tokens=32,
+        experts=4,
+        topk=2,
+        hidden=128,
+        intermediate=256,
+        dtype="f16",
+        streaming_block_size=64,
+        streaming_vec=4,
+        sort_block_size=64,
+        router_block_size=64,
+    )
+    fwd = FusedMoeForward(spec)
+
+    torch.manual_seed(11939)
+    device = "cuda"
+    act = torch.float16
+
+    # Inputs: routing logits (f32 for the topk-softmax kernel) plus
+    # the activation tensors that flow through the MoE forward.
+    routing_logits = torch.randn(
+        spec.tokens, spec.experts, dtype=torch.float32, device=device
+    )
+    X = (
+        torch.randn(spec.tokens, spec.hidden, dtype=torch.float32, device=device) * 0.1
+    ).to(act)
+    # Small weight magnitude so the f16 down-GEMM accumulator stays in
+    # fp16-representable range -- standard practice for MoE smoke tests.
+    W_gate = (
+        torch.randn(
+            spec.experts,
+            spec.intermediate,
+            spec.hidden,
+            dtype=torch.float32,
+            device=device,
+        )
+        * 0.05
+    ).to(act)
+    W_up = (
+        torch.randn(
+            spec.experts,
+            spec.intermediate,
+            spec.hidden,
+            dtype=torch.float32,
+            device=device,
+        )
+        * 0.05
+    ).to(act)
+    W_down = (
+        torch.randn(
+            spec.experts,
+            spec.hidden,
+            spec.intermediate,
+            dtype=torch.float32,
+            device=device,
+        )
+        * 0.05
+    ).to(act)
+    Y = torch.zeros(spec.tokens, spec.hidden, dtype=act, device=device)
+
+    fwd.forward(
+        routing_logits=routing_logits,
+        X=X,
+        W_gate=W_gate,
+        W_up=W_up,
+        W_down=W_down,
+        Y=Y,
+        stream=0,
+    )
+    torch.cuda.synchronize()
+
+    Y_ref = _torch_fused_moe_reference(
+        routing_logits=routing_logits,
+        X=X,
+        W_gate=W_gate,
+        W_up=W_up,
+        W_down=W_down,
+        topk=spec.topk,
+    )
+
+    # End-to-end fused MoE accumulates many fp16 ops; the per-element
+    # tolerance is loose. We also gate on the *relative* error to
+    # catch genuine drift (not just fp16 ULP wobble on a large
+    # accumulator).
+    return (
+        _summarise(
+            Y, Y_ref, tol=0.05, note="end-to-end fused MoE forward via FusedMoeForward"
+        )._replace(name="moe_e2e_forward")
+        if hasattr(Result, "_replace")
+        else _annotate_result(
+            _summarise(
+                Y,
+                Y_ref,
+                tol=0.05,
+                note="end-to-end fused MoE forward via FusedMoeForward",
+            ),
+            "moe_e2e_forward",
+        )
+    )
+
+
+def _annotate_result(r: "Result", name: str) -> "Result":
+    """Helper: stamp a ``name`` onto a :class:`Result` (it's a regular
+    dataclass so we can't use ``_replace``)."""
+    r.name = name
+    return r
 
 
 # ---------------------------------------------------------------------
@@ -2224,6 +2380,7 @@ ALL_CASES: Dict[str, Callable[[], Result]] = {
     "moe_silu_mul": case_moe_silu_mul,
     "moe_topk_weighted_reduce": case_moe_topk_weighted_reduce,
     "moe_fused_chain": case_moe_fused_chain,
+    "moe_e2e_forward": case_moe_e2e_forward,
     "fmha_appendkv_norope": case_fmha_appendkv_norope,
     "fmha_appendkv_rotary": case_fmha_appendkv_rotary,
     "fmha_varlen_causal": case_fmha_varlen_causal,

@@ -824,9 +824,31 @@ def _emit_epilogue_default(
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
     is_32x32 = (t.warp_tile_m, t.warp_tile_n) == (32, 32)
+    pad_m = bool(spec.trait.pad_m)
+    pad_n = bool(spec.trait.pad_n)
 
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
+
+    def _store_masked(c_m: Value, c_n: Value, c_off: Value, h: Value) -> None:
+        """Per-element global store with optional ``pad_m`` / ``pad_n`` guard.
+
+        Lane-level scatter does not benefit from the vec-aligned check
+        used in the cshuffle path; per-element ``c_n < N`` is the
+        natural mask here and matches what the partially-tiled output
+        column requires.
+        """
+        if not (pad_m or pad_n):
+            b.global_store(C, c_off, h, align=2)
+            return
+        checks: List[Value] = []
+        if pad_m:
+            checks.append(b.cmp_lt(c_m, M))
+        if pad_n:
+            checks.append(b.cmp_lt(c_n, N))
+        in_bounds = checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
+        with b.scf_if(in_bounds):
+            b.global_store(C, c_off, h, align=2)
 
     if is_32x32:
         # 32x32 layout: lane % 32 -> n_in_atom; lane / 32 -> M sub-block (0 or 1).
@@ -863,7 +885,7 @@ def _emit_epilogue_default(
                         c_off = b.add(batch_off_c, c_off)
                     v = b.vec_extract(acc, i)
                     h = b.cast_f32_to(v, storage_dtype)
-                    b.global_store(C, c_off, h, align=2)
+                    _store_masked(c_m, c_n, c_off, h)
     else:
         # 16x16 atoms: lane = (m_blk * 16 + n_in_atom)
         c_atom_n = b.const_i32(t.warp_tile_n)
@@ -891,7 +913,7 @@ def _emit_epilogue_default(
                         c_off = b.add(batch_off_c, c_off)
                     v = b.vec_extract(acc, i)
                     h = b.cast_f32_to(v, storage_dtype)
-                    b.global_store(C, c_off, h, align=2)
+                    _store_masked(c_m, c_n, c_off, h)
 
 
 def _emit_epilogue_cshuffle(
@@ -1036,6 +1058,8 @@ def _emit_epilogue_cshuffle(
     c_threads = b.const_i32(threads)
     c_tile_n_div_vec = b.const_i32(t.tile_n // store_vec)
     vecs_per_thread = (t.tile_m * t.tile_n // store_vec) // threads
+    pad_m = bool(spec.trait.pad_m)
+    pad_n = bool(spec.trait.pad_n)
     for e in range(vecs_per_thread):
         vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
         row = b.div(vec_idx, c_tile_n_div_vec)
@@ -1048,6 +1072,29 @@ def _emit_epilogue_cshuffle(
         if batch_off_c is not None:
             c_off = b.add(batch_off_c, c_off)
 
+        # Out-of-bounds guard: when ``pad_m`` / ``pad_n`` is set the
+        # caller may launch with grid dims that round up past the
+        # logical ``M`` / ``N``. The cshuffle staging is sized to the
+        # full tile (always in-bounds for LDS), but the global store
+        # must skip rows / columns past the logical extent. The check
+        # is vec-aligned: every wide store covers ``store_vec``
+        # columns starting at ``c_n``; we skip the entire vec when its
+        # last column exceeds ``N``, which is correct as long as
+        # ``N % store_vec == 0`` (true for every typical fp16 / bf16
+        # MoE / GEMM shape, where ``N`` is a multiple of 8 or 16).
+        in_bounds: Optional[Value] = None
+        if pad_m or pad_n:
+            checks: List[Value] = []
+            if pad_m:
+                checks.append(b.cmp_lt(c_m, M))
+            if pad_n:
+                if store_vec == 1:
+                    checks.append(b.cmp_lt(c_n, N))
+                else:
+                    c_n_last = b.add(c_n, b.const_i32(store_vec - 1))
+                    checks.append(b.cmp_lt(c_n_last, N))
+            in_bounds = checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
+
         if store_vec == 1:
             h = _load_smem_scalar(b, Cs, row, col, storage_dtype)
             if fused_epilogue is not None:
@@ -1056,12 +1103,20 @@ def _emit_epilogue_cshuffle(
                 # activation, scale, ...); we then unpack back to scalar
                 # before the global store.
                 h = fused_epilogue.apply_scalar(b, h, c_m, c_n)
-            b.global_store(C, c_off, h, align=2)
+            if in_bounds is not None:
+                with b.scf_if(in_bounds):
+                    b.global_store(C, c_off, h, align=2)
+            else:
+                b.global_store(C, c_off, h, align=2)
         else:
             hv = _load_smem_vec(b, Cs, row, col, store_vec, storage_dtype)
             if fused_epilogue is not None:
                 hv = fused_epilogue.apply_vec(b, hv, c_m, c_n, n_elems=store_vec)
-            b.global_store_vN(C, c_off, hv, store_vec)
+            if in_bounds is not None:
+                with b.scf_if(in_bounds):
+                    b.global_store_vN(C, c_off, hv, store_vec)
+            else:
+                b.global_store_vN(C, c_off, hv, store_vec)
 
 
 def _load_smem_scalar(
