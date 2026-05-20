@@ -276,8 +276,8 @@ struct FmhaBwdDQDKDVTypes
 ///   scalars[S::SCALE].f32     = raw_scale * log2(e)
 ///
 ///   (dropout only):
-///   scalars[S::P_UNDROP].f32    = 1/(1-dropout_rate)
-///   scalars[S::RP_UNDROP].f32   = 1/p_undrop  (== 1 - dropout_rate)
+///   scalars[S::P_UNDROP].f32    = 1/(1-dropout_rate) (CK Tile rp_undrop)
+///   scalars[S::RP_UNDROP].f32   = 1 - dropout_rate   (keep_prob)
 ///   scalars[S::DROP_SEED].u64   = dropout RNG seed
 ///   scalars[S::DROP_OFFSET].u64 = dropout RNG offset
 ///
@@ -494,10 +494,14 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     if constexpr(K.has_dropout)
     {
         const TensorArg& t_randval = args.tensors[S::RANDVAL];
-        const float p_undrop       = args.scalars[S::P_UNDROP].f32;
-        const float rp_undrop      = args.scalars[S::RP_UNDROP].f32;
-        kargs.rp_undrop            = rp_undrop;
-        kargs.scale_rp_undrop      = rp_undrop * raw_scale;
+        // rocm_ck's historical slot names are inverted relative to CK Tile's
+        // kargs naming: P_UNDROP stores the reciprocal keep probability used
+        // as CK Tile's rp_undrop, while RP_UNDROP stores the keep probability
+        // used for the uint8 dropout threshold.
+        const float rp_undrop = args.scalars[S::P_UNDROP].f32;
+        const float p_undrop  = args.scalars[S::RP_UNDROP].f32;
+        kargs.rp_undrop       = rp_undrop;
+        kargs.scale_rp_undrop = rp_undrop * raw_scale;
         // Clamp before the uint8_t cast: out-of-range float-to-int
         // conversion is UB. Host setup may pass p_undrop > 1.0 for
         // dropout-disabled "no-drop" launches.
