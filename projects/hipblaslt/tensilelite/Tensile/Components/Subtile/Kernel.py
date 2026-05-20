@@ -526,8 +526,6 @@ class TileInfo:
     self.mmaTileShape = list(geometry.mmaTileShape)
     self.mmaTileSize = geometry.mmaTileSize
     self.mmaTileRegCount = geometry.mmaTileRegCount
-    # MMA layout for A/B input (used by LR emit for K-split / rotation decisions)
-    self.mmaLayout = geometry.gr.mmaLayout if isinstance(geometry, ABTilePair) else None
     if isinstance(geometry, ABTilePair):
       self.loadWidthGR = geometry.gr.loadWidth
       self.loadWidthLR = geometry.lr.loadWidth

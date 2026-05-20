@@ -143,16 +143,6 @@ class MMALayout:
     """Input bytes per lane = vgprs * 4."""
     return self.vgprs * 4
 
-  @property
-  def hasKSplit(self) -> bool:
-    """True when A/B VGPRs are split across two K-halves (WMMA V3 wave32)."""
-    return self.kGroups < 4 and self.vgprs > 4
-
-  @property
-  def needsLdsRotation(self) -> bool:
-    """Whether LDS bank conflict rotation is needed (kGroups >= 4)."""
-    return self.kGroups >= 4
-
   def tileSizeBytes(self, instK: int, elementBytes: float) -> int:
     """Total tile size in bytes."""
     return int(self.instM * instK * elementBytes)

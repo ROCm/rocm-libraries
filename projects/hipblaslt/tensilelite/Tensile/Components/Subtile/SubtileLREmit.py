@@ -498,10 +498,9 @@ def _lraTileAssignment_legacy(writer, kernel):
   module.add(VAndB32(dst=vgpr(lane16Group), src0=vgpr("Serial"), src1=wavesize-1, comment="laneId"))
   module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId %% 16"))
-  needsRotation = tileInfoA.mmaLayout.needsLdsRotation if tileInfoA.mmaLayout else True
-  if not needsRotation:
-    # Skip rotation when kGroups < 4 (e.g. wave32 WMMA with 2 kGroups).
-    # colOffset = lane16Group directly selects the kGroup's K-column.
+  isWave32 = kernel["WavefrontSize"] == 32
+  if isWave32:
+    # gfx1250 wave32: skip LDS bank conflict rotation (gfx950-specific optimization).
     module.add(VMovB32(dst=vgpr(colOffset), src=vgpr(lane16Group), comment="colOffset = lane16Group (wave32, no rotation)"))
   else:
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
@@ -509,7 +508,7 @@ def _lraTileAssignment_legacy(writer, kernel):
     module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
     module.add(VAddU32(dst=vgpr(colOffset), src0=vgpr(rotation), src1=vgpr(lane16Group), comment="colOffset = rotation + lane16Group"))
   module.add(VAndB32(dst=vgpr(colOffset), src0=vgpr(colOffset), src1=hex(blockSize-1), comment="colOffset = colOffset %% blockSize"))
-  swizzling = needsRotation  # swizzle pairs with rotation (both need kGroups >= 4)
+  swizzling = not isWave32  # swizzle pairs with rotation (gfx950 wave64 only)
   if swizzling:
     setExecMask(module, writer, 0x33333333, 0x33333333, kernel=kernel)
     module.add(VPermlane16SwapB32(dst=vgpr(colOffset), src=vgpr(colOffset), comment="apply swizzling"))
