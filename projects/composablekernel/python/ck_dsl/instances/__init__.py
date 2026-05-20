@@ -168,6 +168,13 @@ from .transpose import (  # noqa: F401
     transpose2d_grid,
     transpose2d_signature,
 )
+from .transpose_bc import (  # noqa: F401
+    TransposeBcSpec,
+    build_transpose_bc,
+    is_valid_spec as is_valid_transpose_bc_spec,
+    transpose_bc_grid,
+    transpose_bc_signature,
+)
 from .batched_transpose import (  # noqa: F401
     BatchedTranspose2DSpec,
     batched_transpose2d_grid,
