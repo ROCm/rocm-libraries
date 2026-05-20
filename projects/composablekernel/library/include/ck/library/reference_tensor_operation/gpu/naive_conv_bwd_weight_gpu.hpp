@@ -30,36 +30,35 @@ template <index_t NDimSpatial,
           typename DDataType, // D tensor data type
           typename InElementOp,
           typename WeiElementOp,
-          typename OutElementOp,
-          typename IndexType = index_t>
+          typename OutElementOp>
 __global__ void
 naive_conv_bwd_weight_packed_multi_abd(const InDataType* const* __restrict__ p_ins,
                                        WeiDataType* __restrict__ p_wei_grad,
                                        const OutDataType* const* __restrict__ p_out_grads,
                                        const DDataType* const* __restrict__ p_ds,
                                        const index_t* const* __restrict__ p_d_strides,
-                                       IndexType G,
-                                       IndexType N,
-                                       IndexType K,
-                                       IndexType C,
-                                       IndexType Di,
-                                       IndexType Hi,
-                                       IndexType Wi,
-                                       IndexType Z,
-                                       IndexType Y,
-                                       IndexType X,
-                                       IndexType Do,
-                                       IndexType Ho,
-                                       IndexType Wo,
-                                       IndexType stride_z,
-                                       IndexType stride_y,
-                                       IndexType stride_x,
-                                       IndexType dilation_z,
-                                       IndexType dilation_y,
-                                       IndexType dilation_x,
-                                       IndexType pad_z,
-                                       IndexType pad_y,
-                                       IndexType pad_x,
+                                       index_t G,
+                                       index_t N,
+                                       index_t K,
+                                       index_t C,
+                                       index_t Di,
+                                       index_t Hi,
+                                       index_t Wi,
+                                       index_t Z,
+                                       index_t Y,
+                                       index_t X,
+                                       index_t Do,
+                                       index_t Ho,
+                                       index_t Wo,
+                                       index_t stride_z,
+                                       index_t stride_y,
+                                       index_t stride_x,
+                                       index_t dilation_z,
+                                       index_t dilation_y,
+                                       index_t dilation_x,
+                                       index_t pad_z,
+                                       index_t pad_y,
+                                       index_t pad_x,
                                        InElementOp in_op,
                                        WeiElementOp wei_op,
                                        OutElementOp out_op)
@@ -73,26 +72,26 @@ naive_conv_bwd_weight_packed_multi_abd(const InDataType* const* __restrict__ p_i
 
     if constexpr(NDimSpatial == 1)
     {
-        const long_index_t num_wei      = static_cast<long_index_t>(G) * K * C * X;
-        const long_index_t in_stride_g  = static_cast<long_index_t>(N) * C * Wi;
-        const long_index_t in_stride_n  = static_cast<long_index_t>(C) * Wi;
-        const long_index_t in_stride_c  = static_cast<long_index_t>(Wi);
-        const long_index_t out_stride_g = static_cast<long_index_t>(N) * K * Wo;
-        const long_index_t out_stride_n = static_cast<long_index_t>(K) * Wo;
-        const long_index_t out_stride_k = static_cast<long_index_t>(Wo);
-        const long_index_t wei_stride_g = static_cast<long_index_t>(K) * C * X;
-        const long_index_t wei_stride_k = static_cast<long_index_t>(C) * X;
-        const long_index_t wei_stride_c = static_cast<long_index_t>(X);
+        const long_index_t num_wei      = G * K * C * X;
+        const long_index_t in_stride_g  = N * C * Wi;
+        const long_index_t in_stride_n  = C * Wi;
+        const long_index_t in_stride_c  = Wi;
+        const long_index_t out_stride_g = N * K * Wo;
+        const long_index_t out_stride_n = K * Wo;
+        const long_index_t out_stride_k = Wo;
+        const long_index_t wei_stride_g = K * C * X;
+        const long_index_t wei_stride_k = C * X;
+        const long_index_t wei_stride_c = X;
 
         for(long_index_t idx = tid; idx < num_wei; idx += num_threads)
         {
-            long_index_t remaining = idx;
-            const IndexType x      = remaining % X;
+            index_t remaining = idx;
+            const index_t x   = remaining % X;
             remaining /= X;
-            const IndexType c = remaining % C;
+            const index_t c = remaining % C;
             remaining /= C;
-            const IndexType k = remaining % K;
-            const IndexType g = remaining / K;
+            const index_t k = remaining % K;
+            const index_t g = remaining / K;
 
             float acc = 0.0f;
             // Base pointers for current group
@@ -100,17 +99,16 @@ naive_conv_bwd_weight_packed_multi_abd(const InDataType* const* __restrict__ p_i
             const OutDataType* output_grad_g = p_out_grads[0] + g * out_stride_g;
 
             // Loop over batch and output positions
-            for(IndexType n = 0; n < N; ++n)
+            for(index_t n = 0; n < N; ++n)
             {
                 // Pointers at current batch and input channel
                 const InDataType* input_at_n_c = input_g + n * in_stride_n + c * in_stride_c;
                 const OutDataType* output_grad_at_n_k =
                     output_grad_g + n * out_stride_n + k * out_stride_k;
 
-                for(IndexType wo = 0; wo < Wo; ++wo)
+                for(index_t wo = 0; wo < Wo; ++wo)
                 {
-                    long_index_t wi =
-                        static_cast<long_index_t>(wo) * stride_x + x * dilation_x - pad_x;
+                    long_index_t wi = wo * stride_x + x * dilation_x - pad_x;
                     if(wi >= 0 && wi < Wi)
                     {
                         // Handle input element-wise operation with extra A tensors
@@ -144,31 +142,31 @@ naive_conv_bwd_weight_packed_multi_abd(const InDataType* const* __restrict__ p_i
     }
     else if constexpr(NDimSpatial == 2)
     {
-        const long_index_t num_wei      = static_cast<long_index_t>(G) * K * C * Y * X;
-        const long_index_t in_stride_g  = static_cast<long_index_t>(N) * C * Hi * Wi;
-        const long_index_t in_stride_n  = static_cast<long_index_t>(C) * Hi * Wi;
-        const long_index_t in_stride_c  = static_cast<long_index_t>(Hi) * Wi;
-        const long_index_t in_stride_h  = static_cast<long_index_t>(Wi);
-        const long_index_t out_stride_g = static_cast<long_index_t>(N) * K * Ho * Wo;
-        const long_index_t out_stride_n = static_cast<long_index_t>(K) * Ho * Wo;
-        const long_index_t out_stride_k = static_cast<long_index_t>(Ho) * Wo;
-        const long_index_t out_stride_h = static_cast<long_index_t>(Wo);
-        const long_index_t wei_stride_g = static_cast<long_index_t>(K) * C * Y * X;
-        const long_index_t wei_stride_k = static_cast<long_index_t>(C) * Y * X;
-        const long_index_t wei_stride_c = static_cast<long_index_t>(Y) * X;
-        const long_index_t wei_stride_y = static_cast<long_index_t>(X);
+        const long_index_t num_wei      = G * K * C * Y * X;
+        const long_index_t in_stride_g  = N * C * Hi * Wi;
+        const long_index_t in_stride_n  = C * Hi * Wi;
+        const long_index_t in_stride_c  = Hi * Wi;
+        const long_index_t in_stride_h  = Wi;
+        const long_index_t out_stride_g = N * K * Ho * Wo;
+        const long_index_t out_stride_n = K * Ho * Wo;
+        const long_index_t out_stride_k = Ho * Wo;
+        const long_index_t out_stride_h = Wo;
+        const long_index_t wei_stride_g = K * C * Y * X;
+        const long_index_t wei_stride_k = C * Y * X;
+        const long_index_t wei_stride_c = Y * X;
+        const long_index_t wei_stride_y = X;
 
         for(long_index_t idx = tid; idx < num_wei; idx += num_threads)
         {
-            long_index_t remaining = idx;
-            const IndexType x      = remaining % X;
+            index_t remaining = idx;
+            const index_t x   = remaining % X;
             remaining /= X;
-            const IndexType y = remaining % Y;
+            const index_t y = remaining % Y;
             remaining /= Y;
-            const IndexType c = remaining % C;
+            const index_t c = remaining % C;
             remaining /= C;
-            const IndexType k = remaining % K;
-            const IndexType g = remaining / K;
+            const index_t k = remaining % K;
+            const index_t g = remaining / K;
 
             float acc = 0.0f;
             // Base pointers for current group
@@ -176,17 +174,16 @@ naive_conv_bwd_weight_packed_multi_abd(const InDataType* const* __restrict__ p_i
             const OutDataType* output_grad_g = p_out_grads[0] + g * out_stride_g;
 
             // Loop over batch and output positions
-            for(IndexType n = 0; n < N; ++n)
+            for(index_t n = 0; n < N; ++n)
             {
                 // Pointers at current batch and input channel
                 const InDataType* input_at_n_c = input_g + n * in_stride_n + c * in_stride_c;
                 const OutDataType* output_grad_at_n_k =
                     output_grad_g + n * out_stride_n + k * out_stride_k;
 
-                for(IndexType ho = 0; ho < Ho; ++ho)
+                for(index_t ho = 0; ho < Ho; ++ho)
                 {
-                    long_index_t hi =
-                        static_cast<long_index_t>(ho) * stride_y + y * dilation_y - pad_y;
+                    long_index_t hi = ho * stride_y + y * dilation_y - pad_y;
                     if(hi >= 0 && hi < Hi)
                     {
                         // Pointers at current spatial height
@@ -194,10 +191,9 @@ naive_conv_bwd_weight_packed_multi_abd(const InDataType* const* __restrict__ p_i
                         const OutDataType* output_grad_at_h =
                             output_grad_at_n_k + ho * out_stride_h;
 
-                        for(IndexType wo = 0; wo < Wo; ++wo)
+                        for(index_t wo = 0; wo < Wo; ++wo)
                         {
-                            long_index_t wi =
-                                static_cast<long_index_t>(wo) * stride_x + x * dilation_x - pad_x;
+                            long_index_t wi = wo * stride_x + x * dilation_x - pad_x;
                             if(wi >= 0 && wi < Wi)
                             {
                                 // Handle input element-wise operation with extra A tensors
@@ -245,36 +241,36 @@ naive_conv_bwd_weight_packed_multi_abd(const InDataType* const* __restrict__ p_i
     }
     else if constexpr(NDimSpatial == 3)
     {
-        const long_index_t num_wei      = static_cast<long_index_t>(G) * K * C * Z * Y * X;
-        const long_index_t in_stride_g  = static_cast<long_index_t>(N) * C * Di * Hi * Wi;
-        const long_index_t in_stride_n  = static_cast<long_index_t>(C) * Di * Hi * Wi;
-        const long_index_t in_stride_c  = static_cast<long_index_t>(Di) * Hi * Wi;
-        const long_index_t in_stride_d  = static_cast<long_index_t>(Hi) * Wi;
-        const long_index_t in_stride_h  = static_cast<long_index_t>(Wi);
-        const long_index_t out_stride_g = static_cast<long_index_t>(N) * K * Do * Ho * Wo;
-        const long_index_t out_stride_n = static_cast<long_index_t>(K) * Do * Ho * Wo;
-        const long_index_t out_stride_k = static_cast<long_index_t>(Do) * Ho * Wo;
-        const long_index_t out_stride_d = static_cast<long_index_t>(Ho) * Wo;
-        const long_index_t out_stride_h = static_cast<long_index_t>(Wo);
-        const long_index_t wei_stride_g = static_cast<long_index_t>(K) * C * Z * Y * X;
-        const long_index_t wei_stride_k = static_cast<long_index_t>(C) * Z * Y * X;
-        const long_index_t wei_stride_c = static_cast<long_index_t>(Z) * Y * X;
-        const long_index_t wei_stride_z = static_cast<long_index_t>(Y) * X;
-        const long_index_t wei_stride_y = static_cast<long_index_t>(X);
+        const long_index_t num_wei      = G * K * C * Z * Y * X;
+        const long_index_t in_stride_g  = N * C * Di * Hi * Wi;
+        const long_index_t in_stride_n  = C * Di * Hi * Wi;
+        const long_index_t in_stride_c  = Di * Hi * Wi;
+        const long_index_t in_stride_d  = Hi * Wi;
+        const long_index_t in_stride_h  = Wi;
+        const long_index_t out_stride_g = N * K * Do * Ho * Wo;
+        const long_index_t out_stride_n = K * Do * Ho * Wo;
+        const long_index_t out_stride_k = Do * Ho * Wo;
+        const long_index_t out_stride_d = Ho * Wo;
+        const long_index_t out_stride_h = Wo;
+        const long_index_t wei_stride_g = K * C * Z * Y * X;
+        const long_index_t wei_stride_k = C * Z * Y * X;
+        const long_index_t wei_stride_c = Z * Y * X;
+        const long_index_t wei_stride_z = Y * X;
+        const long_index_t wei_stride_y = X;
 
         for(long_index_t idx = tid; idx < num_wei; idx += num_threads)
         {
-            long_index_t remaining = idx;
-            const IndexType x      = remaining % X;
+            index_t remaining = idx;
+            const index_t x   = remaining % X;
             remaining /= X;
-            const IndexType y = remaining % Y;
+            const index_t y = remaining % Y;
             remaining /= Y;
-            const IndexType z = remaining % Z;
+            const index_t z = remaining % Z;
             remaining /= Z;
-            const IndexType c = remaining % C;
+            const index_t c = remaining % C;
             remaining /= C;
-            const IndexType k = remaining % K;
-            const IndexType g = remaining / K;
+            const index_t k = remaining % K;
+            const index_t g = remaining / K;
 
             float acc = 0.0f;
             // Base pointers for current group
@@ -282,17 +278,16 @@ naive_conv_bwd_weight_packed_multi_abd(const InDataType* const* __restrict__ p_i
             const OutDataType* output_grad_g = p_out_grads[0] + g * out_stride_g;
 
             // Loop over batch and output positions
-            for(IndexType n = 0; n < N; ++n)
+            for(index_t n = 0; n < N; ++n)
             {
                 // Pointers at current batch and input channel
                 const InDataType* input_at_n_c = input_g + n * in_stride_n + c * in_stride_c;
                 const OutDataType* output_grad_at_n_k =
                     output_grad_g + n * out_stride_n + k * out_stride_k;
 
-                for(IndexType do_idx = 0; do_idx < Do; ++do_idx)
+                for(index_t do_idx = 0; do_idx < Do; ++do_idx)
                 {
-                    long_index_t di =
-                        static_cast<long_index_t>(do_idx) * stride_z + z * dilation_z - pad_z;
+                    long_index_t di = do_idx * stride_z + z * dilation_z - pad_z;
                     if(di >= 0 && di < Di)
                     {
                         // Pointers at current spatial depth
@@ -300,10 +295,9 @@ naive_conv_bwd_weight_packed_multi_abd(const InDataType* const* __restrict__ p_i
                         const OutDataType* output_grad_at_d =
                             output_grad_at_n_k + do_idx * out_stride_d;
 
-                        for(IndexType ho = 0; ho < Ho; ++ho)
+                        for(index_t ho = 0; ho < Ho; ++ho)
                         {
-                            long_index_t hi =
-                                static_cast<long_index_t>(ho) * stride_y + y * dilation_y - pad_y;
+                            long_index_t hi = ho * stride_y + y * dilation_y - pad_y;
                             if(hi >= 0 && hi < Hi)
                             {
                                 // Pointers at current spatial depth and height
@@ -311,10 +305,9 @@ naive_conv_bwd_weight_packed_multi_abd(const InDataType* const* __restrict__ p_i
                                 const OutDataType* output_grad_at_d_h =
                                     output_grad_at_d + ho * out_stride_h;
 
-                                for(IndexType wo = 0; wo < Wo; ++wo)
+                                for(index_t wo = 0; wo < Wo; ++wo)
                                 {
-                                    long_index_t wi = static_cast<long_index_t>(wo) * stride_x +
-                                                      x * dilation_x - pad_x;
+                                    long_index_t wi = wo * stride_x + x * dilation_x - pad_x;
                                     if(wi >= 0 && wi < Wi)
                                     {
                                         // Handle input element-wise operation with extra A tensors
@@ -378,8 +371,7 @@ template <ck::index_t NumAElementwise = 0,
           typename InElementwiseOperation,
           typename WeiElementwiseOperation,
           typename OutElementwiseOperation,
-          typename TD        = TWei, // D tensor type, defaults to TWei for backward compatibility
-          typename IndexType = index_t> // index type for large tensor support
+          typename TD = TWei> // D tensor type, defaults to TWei for backward compatibility
 void naive_conv_bwd_weight_multi_abd(
     const std::array<const TIn*, NumAElementwise + 1>& p_ins,
     TWei* p_wei_grad,
@@ -395,17 +387,14 @@ void naive_conv_bwd_weight_multi_abd(
 {
     const auto ndim = conv_param.num_dim_spatial_;
 
-    const IndexType G = static_cast<IndexType>(conv_param.G_);
-    const IndexType N = static_cast<IndexType>(conv_param.N_);
-    const IndexType C = static_cast<IndexType>(conv_param.C_);
-    const IndexType K = static_cast<IndexType>(conv_param.K_);
+    const index_t G = conv_param.G_;
+    const index_t N = conv_param.N_;
+    const index_t C = conv_param.C_;
+    const index_t K = conv_param.K_;
 
-    std::vector<index_t> in_lengths = {
-        static_cast<index_t>(G), static_cast<index_t>(N), static_cast<index_t>(C)};
-    std::vector<index_t> wei_lengths = {
-        static_cast<index_t>(G), static_cast<index_t>(K), static_cast<index_t>(C)};
-    std::vector<index_t> out_lengths = {
-        static_cast<index_t>(G), static_cast<index_t>(N), static_cast<index_t>(K)};
+    std::vector<index_t> in_lengths  = {G, N, C};
+    std::vector<index_t> wei_lengths = {G, K, C};
+    std::vector<index_t> out_lengths = {G, N, K};
 
     for(index_t i = 0; i < ndim; ++i)
     {
@@ -566,14 +555,14 @@ void naive_conv_bwd_weight_multi_abd(
     }
 
     // Build conv parameter vectors for kernel invocation
-    std::vector<IndexType> conv_strides(ndim);
-    std::vector<IndexType> conv_dilations(ndim);
-    std::vector<IndexType> input_pads(ndim);
+    std::vector<index_t> conv_strides(ndim);
+    std::vector<index_t> conv_dilations(ndim);
+    std::vector<index_t> input_pads(ndim);
     for(index_t i = 0; i < ndim; ++i)
     {
-        conv_strides[i]   = static_cast<IndexType>(conv_param.conv_filter_strides_[i]);
-        conv_dilations[i] = static_cast<IndexType>(conv_param.conv_filter_dilations_[i]);
-        input_pads[i]     = static_cast<IndexType>(conv_param.input_left_pads_[i]);
+        conv_strides[i]   = static_cast<index_t>(conv_param.conv_filter_strides_[i]);
+        conv_dilations[i] = static_cast<index_t>(conv_param.conv_filter_dilations_[i]);
+        input_pads[i]     = static_cast<index_t>(conv_param.input_left_pads_[i]);
     }
 
     // Run backward weight convolution kernel on packed data
@@ -591,8 +580,7 @@ void naive_conv_bwd_weight_multi_abd(
                                                TD,
                                                InElementwiseOperation,
                                                WeiElementwiseOperation,
-                                               OutElementwiseOperation,
-                                               IndexType>
+                                               OutElementwiseOperation>
             <<<wei_grid, block_size, 0, stream>>>(d_ins_ptrs,
                                                   p_wei_grad_packed,
                                                   d_out_grads_ptrs,
@@ -602,23 +590,23 @@ void naive_conv_bwd_weight_multi_abd(
                                                   N,
                                                   K,
                                                   C,
-                                                  IndexType{1},
-                                                  IndexType{1},
-                                                  static_cast<IndexType>(in_lengths[3]),
-                                                  IndexType{1},
-                                                  IndexType{1},
-                                                  static_cast<IndexType>(wei_lengths[3]),
-                                                  IndexType{1},
-                                                  IndexType{1},
-                                                  static_cast<IndexType>(out_lengths[3]),
-                                                  IndexType{1},
-                                                  IndexType{1},
+                                                  1,
+                                                  1,
+                                                  in_lengths[3],
+                                                  1,
+                                                  1,
+                                                  wei_lengths[3],
+                                                  1,
+                                                  1,
+                                                  out_lengths[3],
+                                                  1,
+                                                  1,
                                                   conv_strides[0],
-                                                  IndexType{1},
-                                                  IndexType{1},
+                                                  1,
+                                                  1,
                                                   conv_dilations[0],
-                                                  IndexType{0},
-                                                  IndexType{0},
+                                                  0,
+                                                  0,
                                                   input_pads[0],
                                                   in_element_op,
                                                   wei_element_op,
@@ -636,8 +624,7 @@ void naive_conv_bwd_weight_multi_abd(
                                                TD,
                                                InElementwiseOperation,
                                                WeiElementwiseOperation,
-                                               OutElementwiseOperation,
-                                               IndexType>
+                                               OutElementwiseOperation>
             <<<wei_grid, block_size, 0, stream>>>(d_ins_ptrs,
                                                   p_wei_grad_packed,
                                                   d_out_grads_ptrs,
@@ -647,22 +634,22 @@ void naive_conv_bwd_weight_multi_abd(
                                                   N,
                                                   K,
                                                   C,
-                                                  IndexType{1},
-                                                  static_cast<IndexType>(in_lengths[3]),
-                                                  static_cast<IndexType>(in_lengths[4]),
-                                                  IndexType{1},
-                                                  static_cast<IndexType>(wei_lengths[3]),
-                                                  static_cast<IndexType>(wei_lengths[4]),
-                                                  IndexType{1},
-                                                  static_cast<IndexType>(out_lengths[3]),
-                                                  static_cast<IndexType>(out_lengths[4]),
-                                                  IndexType{1},
+                                                  1,
+                                                  in_lengths[3],
+                                                  in_lengths[4],
+                                                  1,
+                                                  wei_lengths[3],
+                                                  wei_lengths[4],
+                                                  1,
+                                                  out_lengths[3],
+                                                  out_lengths[4],
+                                                  1,
                                                   conv_strides[0],
                                                   conv_strides[1],
-                                                  IndexType{1},
+                                                  1,
                                                   conv_dilations[0],
                                                   conv_dilations[1],
-                                                  IndexType{0},
+                                                  0,
                                                   input_pads[0],
                                                   input_pads[1],
                                                   in_element_op,
@@ -681,8 +668,7 @@ void naive_conv_bwd_weight_multi_abd(
                                                TD,
                                                InElementwiseOperation,
                                                WeiElementwiseOperation,
-                                               OutElementwiseOperation,
-                                               IndexType>
+                                               OutElementwiseOperation>
             <<<wei_grid, block_size, 0, stream>>>(d_ins_ptrs,
                                                   p_wei_grad_packed,
                                                   d_out_grads_ptrs,
@@ -692,15 +678,15 @@ void naive_conv_bwd_weight_multi_abd(
                                                   N,
                                                   K,
                                                   C,
-                                                  static_cast<IndexType>(in_lengths[3]),
-                                                  static_cast<IndexType>(in_lengths[4]),
-                                                  static_cast<IndexType>(in_lengths[5]),
-                                                  static_cast<IndexType>(wei_lengths[3]),
-                                                  static_cast<IndexType>(wei_lengths[4]),
-                                                  static_cast<IndexType>(wei_lengths[5]),
-                                                  static_cast<IndexType>(out_lengths[3]),
-                                                  static_cast<IndexType>(out_lengths[4]),
-                                                  static_cast<IndexType>(out_lengths[5]),
+                                                  in_lengths[3],
+                                                  in_lengths[4],
+                                                  in_lengths[5],
+                                                  wei_lengths[3],
+                                                  wei_lengths[4],
+                                                  wei_lengths[5],
+                                                  out_lengths[3],
+                                                  out_lengths[4],
+                                                  out_lengths[5],
                                                   conv_strides[0],
                                                   conv_strides[1],
                                                   conv_strides[2],
@@ -733,8 +719,7 @@ template <typename InLayout,
           typename TOut,
           typename InElementwiseOperation,
           typename WeiElementwiseOperation,
-          typename OutElementwiseOperation,
-          typename IndexType = index_t>
+          typename OutElementwiseOperation>
 inline void
 naive_conv_bwd_weight(const TIn* p_in,
                       TWei* p_wei_grad,
@@ -751,30 +736,17 @@ naive_conv_bwd_weight(const TIn* p_in,
     std::array<std::vector<index_t>, 0> d_lengths = {};
     std::array<std::vector<index_t>, 0> d_strides = {};
 
-    naive_conv_bwd_weight_multi_abd<0,
-                                    0,
-                                    0,
-                                    InLayout,
-                                    WeiLayout,
-                                    OutLayout,
-                                    TIn,
-                                    TWei,
-                                    TOut,
-                                    InElementwiseOperation,
-                                    WeiElementwiseOperation,
-                                    OutElementwiseOperation,
-                                    TWei,
-                                    IndexType>(p_ins,
-                                               p_wei_grad,
-                                               p_outs,
-                                               p_ds,
-                                               conv_param,
-                                               d_lengths,
-                                               d_strides,
-                                               in_element_op,
-                                               wei_element_op,
-                                               out_element_op,
-                                               stream);
+    naive_conv_bwd_weight_multi_abd<0, 0, 0, InLayout, WeiLayout, OutLayout>(p_ins,
+                                                                             p_wei_grad,
+                                                                             p_outs,
+                                                                             p_ds,
+                                                                             conv_param,
+                                                                             d_lengths,
+                                                                             d_strides,
+                                                                             in_element_op,
+                                                                             wei_element_op,
+                                                                             out_element_op,
+                                                                             stream);
 }
 
 } // namespace ref
