@@ -239,20 +239,26 @@ class InstructionEmitter:
         return list(module.flatitems())
 
     def emit_tail_srd_advance(self, source):
-        """SRD-only advance for tail entry, gated by `K >= 2*DepthU`.
+        """SRD-only advance for tail entry, gated by `K >= pgr * DepthU`.
 
-        Runs only on the NGLL path where PRELOOP's MT1 GR loaded without an
-        accompanying SRD advance. NLL-only path (K < 2*DU) skips the body.
+        PRELOOP issues `pgr` GR's without intervening SRD advances, so the
+        SRD is `pgr-1` DU's behind the next unread block when the tail starts.
+        We need exactly one DU advance to land on the tail data:
+          - PGR=1: NLL drains the single PRELOOP load, SRD stays at 0.
+                   Fires when K >= DU (PRELOOP ran).
+          - PGR=2 NGLL path: PRELOOP's MT1 GR loaded without an SRD advance.
+                   Fires when K >= 2*DU (NGLL ran).
+        Body skipped when K < pgr*DU (PRELOOP didn't fully load).
         """
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
-        two_du = 2 * self.kernel["DepthU"]
+        threshold = self.config.pgr * self.kernel["DepthU"]
         skipLabel = Label(self.writer.labels.getNameInc(f"TailSkipSrdAdv_{tc}"), "")
         module = Module()
-        module.add(SCmpLtU32(src0=sgpr("SizesSum+0"), src1=two_du,
-                             comment=f"K < 2*DepthU? skip tail SRD advance for {tc}"))
+        module.add(SCmpLtU32(src0=sgpr("SizesSum+0"), src1=threshold,
+                             comment=f"K < {self.config.pgr}*DepthU? skip tail SRD advance for {tc}"))
         module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
-                                comment="NLL-only path: SRD already in place"))
+                                comment="PRELOOP not fully run: SRD already in place"))
         if tensor in ('SA', 'SB'):
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
         else:

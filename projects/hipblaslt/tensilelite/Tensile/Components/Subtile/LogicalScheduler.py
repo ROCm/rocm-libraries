@@ -2102,17 +2102,20 @@ class LogicalScheduler:
         
         preamble = []
         # No unconditional GR_INC: mainloop's last iter (PGR=0) or PRELOOP
-        # (PGR=2) already handled the SRD advance + LW swap that the tail body
-        # would otherwise need. For PGR>=2 two opposite entry paths arrive
-        # here and need opposite fixups, dispatched at runtime on K vs 2*DU:
-        #   - NLL-only (K < 2*DU): PRELOOP swapped LW but not LR → TailLRIncOp
-        #     aligns LR with LW. No SRD advance needed.
-        #   - NGLL ran (K >= 2*DU): NGLL swapped LR (aligned with LW), but
+        # (PGR>=1) already handled the SRD advance + LW swap that the tail body
+        # would otherwise need. Two opposite entry paths arrive here and need
+        # opposite fixups, dispatched at runtime on K:
+        #   - NLL-only (PGR=2, DU<=K<2*DU): PRELOOP swapped LW but not LR
+        #     → TailLRIncOp aligns LR with LW. No SRD advance needed.
+        #   - NGLL ran (PGR=2, K>=2*DU): NGLL swapped LR (aligned with LW), but
         #     PRELOOP's MT1 GR loaded data without advancing SRD afterwards
         #     → TailSrdAdvanceOp bumps SRD by one DU. No LR swap needed.
-        # Each op emits its own runtime branch so only one body executes.
+        #   - PGR=1 with K>=DU: PRELOOP loaded MT0 without advancing SRD; NLL
+        #     drains it leaving SRD at offset 0 → TailSrdAdvanceOp bumps SRD.
+        # Each op emits its own runtime branch so only the right body executes.
         if cfg.pgr >= 2:
             preamble.extend(self._make_depops_all_tensors(TailLRIncOp))
+        if cfg.pgr >= 1:
             preamble.extend(self._make_depops_all_tensors(TailSrdAdvanceOp))
 
         # GRs entire MT at once for all tensors.
