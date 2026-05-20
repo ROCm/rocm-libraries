@@ -23,6 +23,7 @@ Documentation for rocSPARSE is available at
 * Fix `rocsparse_[s|d|c|z]csric0` where `rocsparse_status_invalid_value` was being returned when the maximum number of non-zeros in any row is between 513 and 1024.
 * Fix compilation when using `--rocsparse_ILP64`
 * Fix off-by-one heap-buffer-overflow in temporary buffer allocation for `rocsparse_csrsort`, `rocsparse_check_matrix_csr`, and `rocsparse_check_matrix_gebsr` (and their delegating routines `rocsparse_cscsort`, `rocsparse_coosort`, `rocsparse_check_matrix_csc`, and `rocsparse_check_matrix_gebsc`) where the `shift_offsets_kernel` temp buffer was sized for `m` elements instead of `m+1`.
+* Fixed incorrect usage of `rocsparse_conj` in `bsric0` for complex matrices
 
 ### Removed
 * The deprecated C++14 support, which is no longer supported by the rocPRIM dependency.
