@@ -1,9 +1,0 @@
-# CUDA/NVIDIA GPU dependencies for dnn-benchmarking
-# Use this for PyTorch CUDA benchmarking on NVIDIA GPUs
-
-# Base dependencies
--r requirements.txt
-
-# CUDA PyTorch for GPU benchmarking and reference validation
---index-url https://download.pytorch.org/whl/cu124
-torch>=2.0.0

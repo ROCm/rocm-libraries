@@ -10,6 +10,10 @@
 #include <string>
 #include <type_traits>
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 #if !defined(CK_TILE_HAS_ROW_NEWBCAST)
 // row_newbcast (DPP modifier 0x157) support by architecture:
 // - Not supported: gfx908 (MI100) and older
@@ -456,9 +460,6 @@ struct MoeSortingKernel
     template <typename T, typename F, index_t wave_size_ = get_warp_size()>
     __device__ static constexpr T wave_reduce(T local, F reduce_f, number<wave_size_> = {})
     {
-        // constexpr int wave_size = 64;
-        // constexpr int reduce_stage = 6; // 1<<6=64
-        // clang-format off
         constexpr int reduce_stage = [](){
             if constexpr(wave_size_ == 2) return 1;
             else if constexpr(wave_size_ == 4) return 2;
@@ -1206,17 +1207,21 @@ CK_TILE_HOST_DEVICE index_t moe_sorting_mp_sem_smem_size()
 template <typename T, typename F, index_t wave_size_ = get_warp_size()>
 CK_TILE_DEVICE constexpr T moe_sorting_wave_reduce(T local, F reduce_f, number<wave_size_> = {})
 {
-    // constexpr int wave_size = 64;
-    // constexpr int reduce_stage = 6; // 1<<6=64
-    // clang-format off
-    constexpr int reduce_stage = [](){
-        if constexpr(wave_size_ == 2) return 1;
-        else if constexpr(wave_size_ == 4) return 2;
-        else if constexpr(wave_size_ == 8) return 3;
-        else if constexpr(wave_size_ == 16) return 4;
-        else if constexpr(wave_size_ == 32) return 5;
-        else if constexpr(wave_size_ == 64) return 6;
-        else return 0;
+    constexpr int reduce_stage = []() {
+        if constexpr(wave_size_ == 2)
+            return 1;
+        else if constexpr(wave_size_ == 4)
+            return 2;
+        else if constexpr(wave_size_ == 8)
+            return 3;
+        else if constexpr(wave_size_ == 16)
+            return 4;
+        else if constexpr(wave_size_ == 32)
+            return 5;
+        else if constexpr(wave_size_ == 64)
+            return 6;
+        else
+            return 0;
     }();
     // clang-format on
     T v_local = local;
@@ -1681,7 +1686,7 @@ struct MoeSortingMultiPhaseKernel_P0_v1
                 IndexType eid = x[j.value]; // ext_vector_type must use int to []
                 uint32_t curr_token_id, curr_topk_id;
                 kargs.topk_mdiv.divmod(i * Problem::SubTokenTile + j, curr_token_id, curr_topk_id);
-                if(eid < kargs.num_experts)
+                if(eid < kargs.num_experts && eid >= 0)
                 {
                     if constexpr(Problem::LocalToken)
                     {
@@ -3047,53 +3052,6 @@ struct MoeSortingMultiPhaseKernel_P23
                 x_r = x_v;
 #endif
                 {
-#if 0
-#pragma unroll
-                    for(int j = 0; j < index_pack / 2; j++)
-                    {
-                        int i_token = i * kBlockSize * index_pack + threadIdx.x + j * kBlockSize;
-                        index_t x   = x_d[j];
-                        int i_topk  = x - 1;          // topk of this token
-                        int i_show  = x != 0 ? 1 : 0; // has this token or not
-                        int cumsum  = i_show;
-                        impl::moe_sorting_wave_cumsum<int, get_warp_size()>(cumsum);
-
-                        __syncthreads();
-                        if(lane_id == get_warp_size() - 1)
-                        {
-                            s[4 + wave_id] = cumsum;
-                        }
-                        __syncthreads();
-
-                        // reduce cross wave
-                        static_for<0, kBlockSize / get_warp_size() - 1, 1>{}([&](auto i_w) {
-                            IndexType prev = s[4 + i_w];
-                            prev           = wave_id > i_w ? prev : 0; // mask out
-                            cumsum += prev;
-                        });
-                        cumsum += prev_cumsum; // add previous round cumsum
-                        if(threadIdx.x == kBlockSize - 1)
-                        {
-                            s[0] = cumsum;
-                        }
-                        __syncthreads();
-
-                        int position = cumsum - i_show;
-                        prev_cumsum  = s[0]; // update the last cumsum
-
-                        if(i_show)
-                        {
-#if CK_TILE_REFERENCE_MOE_SORTING_MOCK_ID
-                            p_sorted_token_ids[e_start + position] =
-                                MOE_SORTING_MOCK_ID(i_token, i_topk);
-#else
-                            p_sorted_token_ids[e_start + position] = i_token;
-#endif
-                            p_sorted_weights[e_start + position] =
-                                p_weights[i_token * kargs.topk_mdiv.divisor + i_topk];
-                        }
-                    }
-#endif
                     {
                         d_t i_topk;
                         d_t i_show;
@@ -3151,68 +3109,6 @@ struct MoeSortingMultiPhaseKernel_P23
                             }
                             position += i_show[j];
                         });
-
-#if 0
-                        int i_token = i * kBlockSize * index_pack + threadIdx.x * 2 + j * kBlockSize * 2;
-                        index_t x   = x_d[j];
-                        index_t x0  = static_cast<index_t>(x & 0xffff);
-                        index_t x1  = static_cast<index_t>(x >> 16);
-                        int i_topk_0  = x0 - 1;          // topk of this token
-                        int i_show_0  = x0 != 0 ? 1 : 0; // has this token or not
-                        int i_topk_1  = x1 - 1;          // topk of this token
-                        int i_show_1  = x1 != 0 ? 1 : 0; // has this token or not
-                        int cumsum  = i_show_0 + i_show_1;
-                        impl::moe_sorting_wave_cumsum<int, get_warp_size()>(cumsum);
-
-                        __syncthreads();
-                        if(lane_id == get_warp_size() - 1)
-                        {
-                            s[4 + wave_id] = cumsum;
-                        }
-                        __syncthreads();
-
-                        // reduce cross wave
-                        static_for<0, kBlockSize / get_warp_size() - 1, 1>{}([&](auto i_w) {
-                            IndexType prev = s[4 + i_w];
-                            prev           = wave_id > i_w ? prev : 0; // mask out
-                            cumsum += prev;
-                        });
-                        cumsum += prev_cumsum; // add previous round cumsum
-                        if(threadIdx.x == kBlockSize - 1)
-                        {
-                            s[0] = cumsum;
-                        }
-                        __syncthreads();
-
-                        int position_0 = cumsum - i_show_0 - i_show_1;
-                        prev_cumsum  = s[0]; // update the last cumsum
-
-                        if(i_show_0)
-                        {
-#if CK_TILE_REFERENCE_MOE_SORTING_MOCK_ID
-                            p_sorted_token_ids[e_start + position_0] =
-                                MOE_SORTING_MOCK_ID(i_token, i_topk_0);
-#else
-                            p_sorted_token_ids[e_start + position_0] = i_token;
-#endif
-                            p_sorted_weights[e_start + position_0] =
-                                p_weights[i_token * kargs.topk_mdiv.divisor + i_topk_0];
-                        }
-
-                        int position_1 = cumsum - i_show_1;
-
-                        if(i_show_1)
-                        {
-#if CK_TILE_REFERENCE_MOE_SORTING_MOCK_ID
-                            p_sorted_token_ids[e_start + position_1] =
-                                MOE_SORTING_MOCK_ID(i_token + 1, i_topk_1);
-#else
-                            p_sorted_token_ids[e_start + position_1] = i_token + 1;
-#endif
-                            p_sorted_weights[e_start + position_1] =
-                                p_weights[(i_token + 1) * kargs.topk_mdiv.divisor + i_topk_1];
-                        }
-#endif
                     }
                 }
             }
@@ -3233,3 +3129,5 @@ struct MoeSortingMultiPhaseKernel_P23
 #undef MOE_SORTING_MOCK_ID
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

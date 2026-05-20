@@ -14,7 +14,7 @@ using namespace hipdnn_data_sdk::types;
 
 TEST(TestUtilsFp16, BasicUsage)
 {
-    half h = 1.0_h;
+    const half h = 1.0_h;
     EXPECT_EQ(h, 1.0_h);
 }
 
@@ -36,15 +36,15 @@ TEST(TestUtilsFp16, Comparison)
 
 TEST(TestUtilsFp16, Max)
 {
-    half a = 1.0_h;
-    half b = 2.0_h;
+    const half a = 1.0_h;
+    const half b = 2.0_h;
     EXPECT_EQ(max(a, b), 2.0_h);
     EXPECT_EQ(max(b, a), 2.0_h);
 }
 
 TEST(TestUtilsBfp16, BasicUsage)
 {
-    bfloat16 bf = 1.0_bf;
+    const bfloat16 bf = 1.0_bf;
     EXPECT_EQ(bf, 1.0_bf);
 }
 
@@ -66,8 +66,8 @@ TEST(TestUtilsBfp16, Comparison)
 
 TEST(TestUtilsBfp16, Max)
 {
-    bfloat16 a = 1.0_bf;
-    bfloat16 b = 2.0_bf;
+    const bfloat16 a = 1.0_bf;
+    const bfloat16 b = 2.0_bf;
     EXPECT_EQ(max(a, b), 2.0_bf);
     EXPECT_EQ(max(b, a), 2.0_bf);
 }

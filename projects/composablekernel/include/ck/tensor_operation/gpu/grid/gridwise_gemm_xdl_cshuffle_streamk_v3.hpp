@@ -17,6 +17,10 @@
 #include "ck/utility/reduction_functions_accumulate.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -243,7 +247,11 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
           lcm_AK1_BK1 <= 4) ||
          (is_same<ComputeTypeA, int8_t>::value && lcm_AK1_BK1 <= 8) ||
          ((is_same<ComputeTypeA, f8_t>::value || is_same<ComputeTypeA, bf8_t>::value) &&
+#if defined(__gfx125__)
+          lcm_AK1_BK1 < 128))
+#else
           lcm_AK1_BK1 < 32))
+#endif
             ? true
             : false;
     static constexpr auto is_scale_mfma = false;
@@ -351,74 +359,6 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
             make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
 
         return a_grid_desc_ak0_m_ak1;
-#if 0
-        using GemmSpecialization = tensor_operation::device::GemmSpecialization;
-
-        if constexpr(GemmSpec == GemmSpecialization::MKPadding ||
-                     GemmSpec == GemmSpecialization::MNKPadding)
-        {
-            // pad both M and K
-            const auto a_grid_desc_m_k =
-                transform_tensor_descriptor(a_grid_desc_mraw_kraw,
-                                            make_tuple(make_right_pad_transform(M, MPad - M),
-                                                       make_right_pad_transform(K, KPad - K)),
-                                            make_tuple(Sequence<0>{}, Sequence<1>{}),
-                                            make_tuple(Sequence<0>{}, Sequence<1>{}));
-
-            const auto a_grid_desc_ak0_m_ak1 = transform_tensor_descriptor(
-                a_grid_desc_m_k,
-                make_tuple(make_unmerge_transform(make_tuple(AK0, AK1Value)),
-                           make_pass_through_transform(MPad)),
-                make_tuple(Sequence<1>{}, Sequence<0>{}),
-                make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
-
-            return a_grid_desc_ak0_m_ak1;
-        }
-        else if constexpr(GemmSpec == GemmSpecialization::MPadding ||
-                          GemmSpec == GemmSpecialization::MNPadding)
-        {
-            // pad M, but not K
-            const auto a_grid_desc_ak0_m_ak1 = transform_tensor_descriptor(
-                a_grid_desc_mraw_kraw,
-                make_tuple(make_unmerge_transform(make_tuple(AK0, AK1Value)),
-                           make_right_pad_transform(M, MPad - M)),
-                make_tuple(Sequence<1>{}, Sequence<0>{}),
-                make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
-
-            return a_grid_desc_ak0_m_ak1;
-        }
-        else if constexpr(GemmSpec == GemmSpecialization::KPadding ||
-                          GemmSpec == GemmSpecialization::NKPadding)
-        {
-            // pad K, but not M
-            const auto a_grid_desc_m_k = transform_tensor_descriptor(
-                a_grid_desc_mraw_kraw,
-                make_tuple(make_pass_through_transform(M), make_right_pad_transform(K, KPad - K)),
-                make_tuple(Sequence<0>{}, Sequence<1>{}),
-                make_tuple(Sequence<0>{}, Sequence<1>{}));
-
-            const auto a_grid_desc_ak0_m_ak1 = transform_tensor_descriptor(
-                a_grid_desc_m_k,
-                make_tuple(make_unmerge_transform(make_tuple(AK0, AK1Value)),
-                           make_pass_through_transform(M)),
-                make_tuple(Sequence<1>{}, Sequence<0>{}),
-                make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
-
-            return a_grid_desc_ak0_m_ak1;
-        }
-        else
-        {
-            // not pad M or K
-            const auto a_grid_desc_ak0_m_ak1 = transform_tensor_descriptor(
-                a_grid_desc_mraw_kraw,
-                make_tuple(make_unmerge_transform(make_tuple(AK0, AK1Value)),
-                           make_pass_through_transform(M)),
-                make_tuple(Sequence<1>{}, Sequence<0>{}),
-                make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
-
-            return a_grid_desc_ak0_m_ak1;
-        }
-#endif
     }
 
     __device__ static auto MakeBGridDescriptor_BK0_N_BK1(
@@ -451,74 +391,6 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
             make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
 
         return b_grid_desc_bk0_n_bk1;
-#if 0     
-        using GemmSpecialization = tensor_operation::device::GemmSpecialization;
-
-        if constexpr(GemmSpec == GemmSpecialization::NKPadding ||
-                     GemmSpec == GemmSpecialization::MNKPadding)
-        {
-            // pad both N and K
-            const auto b_grid_desc_n_k =
-                transform_tensor_descriptor(b_grid_desc_nraw_kraw,
-                                            make_tuple(make_right_pad_transform(N, NPad - N),
-                                                       make_right_pad_transform(K, KPad - K)),
-                                            make_tuple(Sequence<0>{}, Sequence<1>{}),
-                                            make_tuple(Sequence<0>{}, Sequence<1>{}));
-
-            const auto b_grid_desc_bk0_n_bk1 = transform_tensor_descriptor(
-                b_grid_desc_n_k,
-                make_tuple(make_unmerge_transform(make_tuple(BK0, BK1Value)),
-                           make_pass_through_transform(NPad)),
-                make_tuple(Sequence<1>{}, Sequence<0>{}),
-                make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
-
-            return b_grid_desc_bk0_n_bk1;
-        }
-        else if constexpr(GemmSpec == GemmSpecialization::NPadding ||
-                          GemmSpec == GemmSpecialization::MNPadding)
-        {
-            // pad N, but not K
-            const auto b_grid_desc_bk0_n_bk1 = transform_tensor_descriptor(
-                b_grid_desc_nraw_kraw,
-                make_tuple(make_unmerge_transform(make_tuple(BK0, BK1Value)),
-                           make_right_pad_transform(N, NPad - N)),
-                make_tuple(Sequence<1>{}, Sequence<0>{}),
-                make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
-
-            return b_grid_desc_bk0_n_bk1;
-        }
-        else if constexpr(GemmSpec == GemmSpecialization::KPadding ||
-                          GemmSpec == GemmSpecialization::MKPadding)
-        {
-            // pad K, but not N
-            const auto b_grid_desc_n_k = transform_tensor_descriptor(
-                b_grid_desc_nraw_kraw,
-                make_tuple(make_pass_through_transform(N), make_right_pad_transform(K, KPad - K)),
-                make_tuple(Sequence<0>{}, Sequence<1>{}),
-                make_tuple(Sequence<0>{}, Sequence<1>{}));
-
-            const auto b_grid_desc_bk0_n_bk1 = transform_tensor_descriptor(
-                b_grid_desc_n_k,
-                make_tuple(make_unmerge_transform(make_tuple(BK0, BK1Value)),
-                           make_pass_through_transform(N)),
-                make_tuple(Sequence<1>{}, Sequence<0>{}),
-                make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
-
-            return b_grid_desc_bk0_n_bk1;
-        }
-        else
-        {
-            // not pad N or K
-            const auto b_grid_desc_bk0_n_bk1 = transform_tensor_descriptor(
-                b_grid_desc_nraw_kraw,
-                make_tuple(make_unmerge_transform(make_tuple(BK0, BK1Value)),
-                           make_pass_through_transform(N)),
-                make_tuple(Sequence<1>{}, Sequence<0>{}),
-                make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
-
-            return b_grid_desc_bk0_n_bk1;
-        }
-#endif
     }
 
     template <typename ABlockDesc_AK0_M_AK1>
@@ -559,45 +431,6 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
                                                       make_right_pad_transform(N, NPad - N)),
                                            make_tuple(Sequence<0>{}, Sequence<1>{}),
                                            make_tuple(Sequence<0>{}, Sequence<1>{}));
-#if 0
-        using GemmSpecialization = tensor_operation::device::GemmSpecialization;
-
-        if constexpr(GemmSpec == GemmSpecialization::MNPadding ||
-                     GemmSpec == GemmSpecialization::MNKPadding)
-        {
-            // pad M and N
-            return transform_tensor_descriptor(c_grid_desc_mraw_nraw,
-                                               make_tuple(make_right_pad_transform(M, MPad - M),
-                                                          make_right_pad_transform(N, NPad - N)),
-                                               make_tuple(Sequence<0>{}, Sequence<1>{}),
-                                               make_tuple(Sequence<0>{}, Sequence<1>{}));
-        }
-        else if constexpr(GemmSpec == GemmSpecialization::MPadding ||
-                          GemmSpec == GemmSpecialization::MKPadding)
-        {
-            // pad M, but not N
-            return transform_tensor_descriptor(
-                c_grid_desc_mraw_nraw,
-                make_tuple(make_right_pad_transform(M, MPad - M), make_pass_through_transform(N)),
-                make_tuple(Sequence<0>{}, Sequence<1>{}),
-                make_tuple(Sequence<0>{}, Sequence<1>{}));
-        }
-        else if constexpr(GemmSpec == GemmSpecialization::NPadding ||
-                          GemmSpec == GemmSpecialization::NKPadding)
-        {
-            // pad N, but not M
-            return transform_tensor_descriptor(
-                c_grid_desc_mraw_nraw,
-                make_tuple(make_pass_through_transform(M), make_right_pad_transform(N, NPad - N)),
-                make_tuple(Sequence<0>{}, Sequence<1>{}),
-                make_tuple(Sequence<0>{}, Sequence<1>{}));
-        }
-        else
-        {
-            // not pad M or N
-            return c_grid_desc_mraw_nraw;
-        }
-#endif
     }
 
     struct Problem
@@ -1647,7 +1480,8 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
                         }
                     }
                 } // shuffle c and write-out end
-
+                // make sure next loop LDS is ready for use
+                block_sync_lds();
                 // exit condition
                 iter_end -= current_iter_length;
                 if(iter_end <= iter_start)
@@ -1656,8 +1490,6 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
                 {
                     block_acc_offset -= MPerBlock * NPerBlock;
                 }
-                // make sure next loop LDS is ready for use
-                block_sync_lds();
             } // while loop
 
         } // for loop
@@ -2331,3 +2163,5 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
 };
 
 } // namespace ck
+
+#pragma clang diagnostic pop

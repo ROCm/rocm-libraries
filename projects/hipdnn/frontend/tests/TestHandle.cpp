@@ -24,7 +24,7 @@ protected:
 
         ON_CALL(*_mockBackend, getLastErrorString(_, _))
             .WillByDefault([](char* errorString, size_t size) {
-                std::string fakeError = "Fake backend error";
+                const std::string fakeError = "Fake backend error";
                 hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
                     errorString, fakeError.c_str(), size - 1);
             });
@@ -212,7 +212,7 @@ TEST_F(TestHandle, NullHandleDeleterIsNoop)
     EXPECT_CALL(*_mockBackend, destroy(_)).Times(0);
 
     {
-        HipdnnHandlePtr handle{nullptr};
+        const HipdnnHandlePtr handle{nullptr};
     }
 }
 
@@ -255,7 +255,7 @@ TEST_F(TestHandle, SetStreamOnValidHandle)
 
 TEST_F(TestHandle, SetStreamOnNullHandle)
 {
-    HipdnnHandlePtr handle{nullptr};
+    const HipdnnHandlePtr handle{nullptr};
     auto fakeStream = reinterpret_cast<hipStream_t>(0xF012);
 
     auto error = setHipdnnHandleStream(handle, fakeStream);
@@ -265,7 +265,7 @@ TEST_F(TestHandle, SetStreamOnNullHandle)
 
 TEST_F(TestHandle, GetStreamFromNullHandle)
 {
-    HipdnnHandlePtr handle{nullptr};
+    const HipdnnHandlePtr handle{nullptr};
     hipStream_t stream = nullptr;
 
     auto error = getHipdnnHandleStream(handle, &stream);

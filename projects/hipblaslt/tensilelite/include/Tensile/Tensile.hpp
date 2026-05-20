@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <map>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <tuple>
@@ -74,6 +75,7 @@
 /**
  * @brief Primary namespace for Tensile host code.
  */
+TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     /**
@@ -148,9 +150,10 @@ namespace TensileLite
         Hardware();
         virtual ~Hardware();
 
-        virtual size_t      id() const          = 0;
-        virtual std::string description() const = 0;
-        virtual std::string archName() const    = 0;
+        virtual size_t                id() const            = 0;
+        virtual std::string           description() const   = 0;
+        virtual std::string           archName() const      = 0;
+        virtual std::optional<int>    pciChipId() const  { return std::nullopt; }
     };
 
     /**
@@ -203,5 +206,6 @@ namespace TensileLite
         LoadLibraryData(std::vector<uint8_t> const& data);
 #endif
 } // namespace TensileLite
+TENSILE_HIDDEN_END
 
 /** @} */

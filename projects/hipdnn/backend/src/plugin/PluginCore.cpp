@@ -40,6 +40,10 @@ void PluginBase::resolveSymbols()
     {
         HIPDNN_BACKEND_LOG_INFO("Plugin does not support logging callback");
     }
+    if(!tryAssignSymbol(_funcSetLogLevel, "hipdnnPluginSetLogLevel"))
+    {
+        HIPDNN_BACKEND_LOG_INFO("Plugin does not support log level synchronization");
+    }
 
 #ifndef NDEBUG
     _initialized = true;
@@ -68,7 +72,14 @@ std::string_view PluginBase::apiVersion() const
     const char* version;
     if(_funcGetApiVersion == nullptr)
     {
-        return "0.0.0";
+        // Plugins that do not export hipdnnPluginGetApiVersion are assumed
+        // to conform to the "1.0.0" plugin SDK baseline. Per RFC 0008 §4.5,
+        // the rollout invariant is that the in-tree plugin SDK is bumped
+        // to 1.0.0 before any new feature symbols are added, so any pre-
+        // existing plugin built against an earlier SDK is still compatible
+        // with the 1.0.0 surface and must not be filtered out as version-
+        // zero unknown.
+        return "1.0.0";
     }
     invokePluginFunction("get plugin api version", _funcGetApiVersion, &version);
     return version;
@@ -100,6 +111,18 @@ hipdnnPluginStatus_t PluginBase::setLoggingCallback(hipdnnCallback_t callback) c
     }
 
     return _funcSetLoggingCallback(callback);
+}
+
+hipdnnPluginStatus_t PluginBase::setLogLevel(hipdnnSeverity_t level) const
+{
+    assert(_initialized);
+    if(_funcSetLogLevel == nullptr)
+    {
+        // Plugin does not support log level synchronization, so we vacuously return success
+        return HIPDNN_PLUGIN_STATUS_SUCCESS;
+    }
+
+    return _funcSetLogLevel(level);
 }
 
 } // namespace plugin

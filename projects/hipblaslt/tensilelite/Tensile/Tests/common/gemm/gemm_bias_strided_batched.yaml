@@ -1,7 +1,8 @@
 TestParameters:
-  marks: [skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
   NewClient: 2

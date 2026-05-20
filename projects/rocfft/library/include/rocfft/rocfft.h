@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -279,6 +279,7 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_scale_factor(
  *  Offset, stride, and distance for either input or output provided
  *  here is ignored if a field is set for the corresponding input or
  *  output.
+ *  @note Non-zero offsets are not supported yet.
  * 
  *  @param[in, out] description description handle
  *  @param[in] in_array_type array type of input buffer
@@ -431,8 +432,16 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_add_infield(rocfft_plan_desc
 ROCFFT_EXPORT rocfft_status
     rocfft_plan_description_add_outfield(rocfft_plan_description description, rocfft_field field);
 
-/*! @brief Get work buffer size
- *  @details Get the work buffer size required for a plan.
+/*! @brief Get work buffer size on current HIP device
+ *  @details Get the work buffer size required for a plan on the current HIP device.
+ *
+ *  Work memory may be required on any device(s) with input or output
+ *  data for the transform, and also the current device when the plan
+ *  was created.  If the FFT plan uses multiple devices then this
+ *  function can be called repeatedly with each of those devices as
+ *  the current HIP device, to know the complete work memory
+ *  requirements for all devices.
+ *
  *  @param[in] plan plan handle
  *  @param[out] size_in_bytes size of needed work buffer in bytes
  *  */
@@ -475,12 +484,18 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_create(rocfft_execution_info* 
  *  */
 ROCFFT_EXPORT rocfft_status rocfft_execution_info_destroy(rocfft_execution_info info);
 
-/*! @brief Set work buffer in execution info
+/*! @brief Set work buffer in execution info for the current HIP device
  *
  *  @details This is one of the execution info functions to specify
  *  optional additional information to control execution.  This API
  *  provides a work buffer for the transform. It must be called
  *  before ::rocfft_execute.
+ *
+ *  Work memory may be required on any device(s) with input or output
+ *  data for the transform, and also the current device when the plan
+ *  was created.  If the FFT plan uses multiple devices then this
+ *  function can be called repeatedly with each of those devices as
+ *  the current HIP device, to set work memory for all devices.
  *
  *  When a non-zero value is obtained from
  *  ::rocfft_plan_get_work_buffer_size, that means the library needs a
@@ -540,8 +555,10 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *
  *  Callback function pointers/data are given as arrays, with one
  *  function/data pointer per brick in the input field of the plan.
- *  A plan with no input field specified is considered to have one
- *  brick.
+ *  Load callbacks require at least one brick in the input field to
+ *  be assigned to the current device used at plan creation. A plan
+ *  with no input field specified is considered to have one brick on
+ *  the current device used at plan creation.
  *
  *  All functions in the array must perform the same logical
  *  operation.  That is, any function in the array must be
@@ -574,7 +591,8 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  @param[in] info execution info handle
  *  @param[in] cb_functions callback function pointers
  *  @param[in] cb_data callback function data, passed to the function pointer when it is called
- *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use */
+ *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use 
+ * */
 ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execution_info info,
                                                                     void** cb_functions,
                                                                     void** cb_data,
@@ -587,8 +605,10 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *
  *  Callback function pointers/data are given as arrays, with one
  *  function/data pointer per brick in the output field of the plan.
- *  A plan with no output field specified is considered to have one
- *  brick.
+ *  Store callbacks require at least one brick in the output field to
+ *  be assigned to the current device used at plan creation. A plan
+ *  with no output field specified is considered to have one brick on
+ *  the current device used at plan creation.
  *
  *  All functions in the array must perform the same logical
  *  operation.  That is, any function in the array must be

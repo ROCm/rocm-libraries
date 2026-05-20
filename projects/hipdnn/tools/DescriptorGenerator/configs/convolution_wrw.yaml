@@ -1,0 +1,153 @@
+operation:
+  name: "ConvolutionWrw"
+  class_name: "ConvolutionWrwOperationDescriptor"
+  fbs_table: "ConvolutionWrwAttributes"
+  fbs_generated_header: "convolution_wrw_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER"
+
+  frontend:
+    packer_function: "createConvWgradOperation"
+    unpacker_function: "unpackConvWgradOperation"
+    node_class: "ConvolutionWgradNode"
+    attributes_class: "ConvWgradAttributes"
+
+    inputs:
+      - name: "dy"
+        enum_name: "DY"
+        required: true
+        getter_name: "get_dy"
+        setter_name: "set_dy"
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+    outputs:
+      - name: "dw"
+        enum_name: "DW"
+        required: true
+        getter_name: "get_dw"
+        setter_name: "set_dw"
+    graph_method_name: "conv_wgrad"
+    graph_method_params:
+      - name: "dy"
+        tensor_name: "dy"
+      - name: "x"
+        tensor_name: "x"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "dw"
+    node_type_enum: "NodeType::CONVOLUTION_WGRAD"
+    attributes_filename: "ConvolutionWgrad"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X"
+      required: true
+
+    - name: "dy"
+      fbs_field: "dy_tensor_uid"
+      attr_suffix: "DY"
+      required: true
+
+    - name: "dw"
+      fbs_field: "dw_tensor_uid"
+      attr_suffix: "DW"
+      required: true
+
+  data_fields:
+    - name: "pre_padding"
+      fbs_field: "pre_padding"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_pre_padding()"
+      shared: true
+      test_constant_name: "K_WGRAD_CONV_PADDING"
+
+    - name: "post_padding"
+      fbs_field: "post_padding"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_post_padding()"
+      shared: true
+      test_constant_name: "K_WGRAD_CONV_PADDING"
+
+    - name: "stride"
+      fbs_field: "stride"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_stride()"
+      shared: true
+      test_constant_name: "K_WGRAD_CONV_STRIDE"
+
+    - name: "dilation"
+      fbs_field: "dilation"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_DILATIONS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_dilation()"
+      shared: true
+      test_constant_name: "K_WGRAD_CONV_DILATION"
+
+    - name: "conv_mode"
+      fbs_field: "conv_mode"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_CONV_MODE"
+      type: "mode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::ConvMode"
+      frontend_type: "ConvolutionMode"
+      required: false
+      frontend_getter: "get_convolution_mode()"
+      backend_setter: "setConvMode"
+      backend_getter: "getConvMode"
+      backend_converter: "toBackendConvMode"
+      frontend_inverse_converter: "fromHipdnnConvMode"
+      backend_type_name: "HIPDNN_TYPE_CONVOLUTION_MODE"
+      shared: true
+      test_enum_value: "CROSS_CORRELATION"
+      test_alt_enum_value: "CONVOLUTION"
+      test_backend_value: "HIPDNN_CROSS_CORRELATION"
+      test_c_type: "hipdnnConvolutionMode_t"
+      test_default_value: "HIPDNN_CONVOLUTION"
+      enum_def:
+        backend_header: "HipdnnConvolutionMode.h"
+        backend_prefix: "HIPDNN_"
+        values:
+          - { name: "UNSET", value: 0, sentinel: true }
+          - { name: "CONVOLUTION", value: 0, frontend_value: 2, description: "Mathematical convolution (filter is flipped)" }
+          - { name: "CROSS_CORRELATION", value: 1, frontend_value: 1, description: "Cross-correlation mode (standard deep learning convolution)" }
+
+  tensor_array_fields: []
+
+  data_fields_helper:
+    pack_function: "packConvolutionParams"
+    unpack_function: "unpackConvolutionParams"
+    include: "ConvolutionPackerHelpers"
+    label: "convolution"
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_CONVOLUTION_COMP_TYPE"
+  compute_data_type_shared: true
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT"
+
+  test_data:
+    constants_include: "ConvWgradConstants"
+    tensor_const_prefix: "K_WGRAD_"
+    tensor_uids: { x: 1200, dy: 1201, dw: 1202 }
+    tensor_configs:
+      x: { dims: [1, 3, 32, 32], strides: [3072, 1024, 32, 1] }
+      dy: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      dw: { dims: [64, 3, 3, 3], strides: [27, 9, 3, 1] }
+    field_values:
+      pre_padding: [1, 1]
+      post_padding: [1, 1]
+      stride: [1, 1]
+      dilation: [1, 1]

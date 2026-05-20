@@ -10,6 +10,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -48,7 +49,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
     y->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
@@ -97,10 +98,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto validator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool yValid = validator.allClose(yRefTensor, yTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
+        bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout, "y", validator, yRefTensor, yTensor, tolerance, tolerance);
 
         validationPassed = yValid;
     }

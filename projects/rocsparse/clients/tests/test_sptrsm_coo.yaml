@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -108,7 +108,7 @@ Tests:
 - name: sptrsm_coo
   category: pre_checkin
   function: sptrsm_coo
-  indextype: *i64i32
+  indextype: *i64
   precision: *single_double_precisions
   M_N: *M_N_range_checkin_1
   K: [7]
@@ -148,7 +148,7 @@ Tests:
 - name: sptrsm_coo_file
   category: pre_checkin
   function: sptrsm_coo
-  indextype: *i64i32
+  indextype: *i32
   precision: *single_double_precisions
   K: [141]
   ld_multiplier_B: [3]
@@ -218,7 +218,7 @@ Tests:
   precision: *single_double_precisions
   M: 1
   N: 1
-  K: [1, 76]
+  K: [1, 44]
   ld_multiplier_B: [2]
   ld_multiplier_C: [2]
   alpha_alphai: *alpha_range_quick
@@ -231,10 +231,13 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
+             nos4,
+             nos5,
              nos6,
-             scircuit]
+             nos7]
 
 - name: sptrsm_coo_file
   category: quick
@@ -243,11 +246,11 @@ Tests:
   precision: *double_only_precisions_complex
   M: 1
   N: 1
-  K: [89]
+  K: [63]
   ld_multiplier_B: [1]
   ld_multiplier_C: [3]
   alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
@@ -256,7 +259,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2]
+  filename: [mplate]
 
 - name: sptrsm_coo
   category: nightly

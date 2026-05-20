@@ -34,7 +34,7 @@ from Tensile.Utilities.ConditionalImports import yamlLoader
 
 ################################################################################
 # Locate Executables
-# rocm-smi, hip-clang, rocm_agent_enumerator
+# amd-smi, hip-clang, rocm_agent_enumerator
 ################################################################################
 def isExe( filePath ):
   return os.path.isfile(filePath) and os.access(filePath, os.X_OK)

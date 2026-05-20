@@ -27,9 +27,9 @@ from unittest.mock import mock_open, patch
 from pathlib import Path
 from Tensile.Common.Utilities import isRhel8
 from Tensile.Common.Architectures import (
-    SUPPORTED_ARCH_DEVICE_IDS,
-    SUPPORTED_ARCH_CU_COUNTS,
-    ARCH_DEVICE_ID_FALLBACKS,
+    SUPPORTED_BUILD_CHIP_IDS,
+    SUPPORTED_BUILD_CU_COUNTS,
+    SUPPORTED_CHIP_ID_FALLBACKS,
     ArchInfo,
     splitArchsFromPredicates,
     LogicFileError,
@@ -40,6 +40,12 @@ from Tensile.Common.Architectures import (
 
 # Test data
 VALID_LOGIC_FILE_CONTENT = """- {MinimumRequiredVersion: 4.33.0}
+- gfx950 
+- gfx950
+- [Device 75a2]
+"""
+
+VALID_LOGIC_FILE_CONTENT_WITH_SCALAR_VERSION = """- MinimumRequiredVersion: 4.33.0
 - gfx950 
 - gfx950
 - [Device 75a2]
@@ -102,6 +108,15 @@ def test_extractArchInfo_success(mock_logic_file):
     assert result.DeviceIds == {"id=75a2"}
     assert result.CUCount is None
 
+def test_extractArchInfo_with_scalar_version():
+    with patch("builtins.open", mock_open(read_data=VALID_LOGIC_FILE_CONTENT_WITH_SCALAR_VERSION)):
+        result = _extractArchInfo("dummy.yaml")
+    assert isinstance(result, ArchInfo)
+    assert result.Name == "gfx950"
+    assert result.Gfx == "gfx950"
+    assert result.DeviceIds == {"id=75a2"}
+    assert result.CUCount is None
+
 def test_extractArchInfo_with_cu_count(mock_logic_file_with_cu):
     result = _extractArchInfo("dummy.yaml")
     assert isinstance(result, ArchInfo)
@@ -113,6 +128,26 @@ def test_extractArchInfo_with_cu_count(mock_logic_file_with_cu):
 def test_extractArchInfo_with_invalid_version(mock_logic_file_invalid_version):
     with pytest.raises(LogicFileError):
         _extractArchInfo("dummy.yaml")
+
+
+# Negative coverage for the relaxed `MinimumRequiredVersion` regex: the loosened
+# pattern must still reject near-miss forms so callers can rely on the field
+# actually being present.
+@pytest.mark.parametrize(
+    "first_line",
+    [
+        "- MinimumRequiredVersion 4.33.0\n",   # missing colon after key
+        "-MinimumRequiredVersion: 4.33.0\n",   # missing space after dash
+        "- {MinimumRequired: 4.33.0}\n",       # wrong key
+        "MinimumRequiredVersion: 4.33.0\n",    # missing list dash
+        "- # MinimumRequiredVersion: 4.33.0\n",  # commented out
+    ],
+)
+def test_extractArchInfo_rejects_minimum_required_version_near_misses(first_line):
+    content = first_line + "- gfx950\n- gfx950\n- [Device 75a0]\n"
+    with patch("builtins.open", mock_open(read_data=content)):
+        with pytest.raises(LogicFileError):
+            _extractArchInfo("dummy.yaml")
 
 def test_extractArchInfo_with_invalid_arch(mock_logic_file_invalid_arch):
     with pytest.raises(LogicFileError):
@@ -249,13 +284,13 @@ def test_splitArchsFromPredicates_empty():
     assert variants is None
 
 def test_verifyPredicate_valid_device_id():
-    for device_id in SUPPORTED_ARCH_DEVICE_IDS:
-        arch = SUPPORTED_ARCH_DEVICE_IDS[device_id]
+    for device_id in SUPPORTED_BUILD_CHIP_IDS:
+        arch = SUPPORTED_BUILD_CHIP_IDS[device_id]
         assert _verifyPredicate(device_id, arch) == device_id
 
 def test_verifyPredicate_valid_cu_count():
-    for cu_count in SUPPORTED_ARCH_CU_COUNTS:
-        arch = SUPPORTED_ARCH_CU_COUNTS[cu_count]
+    for cu_count in SUPPORTED_BUILD_CU_COUNTS:
+        arch = SUPPORTED_BUILD_CU_COUNTS[cu_count]
         assert _verifyPredicate(cu_count, arch) == cu_count
 
 def test_verifyPredicate_invalid_device_id():

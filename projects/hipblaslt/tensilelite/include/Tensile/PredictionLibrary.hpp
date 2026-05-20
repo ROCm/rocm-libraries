@@ -32,6 +32,10 @@
 
 #include <Tensile/UtilsOrigami.hpp>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
 
@@ -163,7 +167,7 @@ namespace TensileLite
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
             const origami::hardware_t& analytical_hardware = *(pAMDGPU->analyticalHardware);
-            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
 
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
                 miDataType = origami::data_type_t::XFloat32;
@@ -218,3 +222,5 @@ namespace TensileLite
         }
     };
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

@@ -33,6 +33,7 @@ from ..Common import print1, ensurePath
 from ..Common.TimingInstrumentation import timing_context
 
 from .Component import Compiler, Bundler
+from .HelperKernelCache import HelperKernelCache
 
 class SourceToolchain(NamedTuple):
    compiler: Compiler
@@ -93,6 +94,7 @@ def buildSourceCodeObjectFiles(
         List of paths to the created code objects.
     """
     start = timer()
+    cache = HelperKernelCache()
 
     with timing_context("python_kernel_build_src_co.setup"):
         tmpObjDir = Path(ensurePath(tmpObjDir))
@@ -102,6 +104,15 @@ def buildSourceCodeObjectFiles(
         objFilename = kernelPath.stem + '.o'
         coPathsRaw = []
         coPaths= []
+
+    # Try to restore pre-built code objects from the helper-kernel cache.
+    # On a hit we skip compilation/unbundling entirely and return early.
+    with timing_context("python_kernel_build_src_co.cache_check"):
+        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destDir)
+    if hit:
+        stop = timer()
+        print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}  [cache hit]")
+        return coPaths
 
     objPath = str(tmpObjDir / objFilename)
     with timing_context("python_kernel_build_src_co.compile"):
@@ -123,6 +134,11 @@ def buildSourceCodeObjectFiles(
     with timing_context("python_kernel_build_src_co.move"):
         for src, dst in zip(coPathsRaw, coPaths):
             shutil.move(src, dst)
+
+    # Save the freshly built code objects into the cache so subsequent
+    # builds with the same inputs can skip recompilation.
+    with timing_context("python_kernel_build_src_co.cache_populate"):
+        cache.store(coPaths)
 
     stop = timer()
     print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}")

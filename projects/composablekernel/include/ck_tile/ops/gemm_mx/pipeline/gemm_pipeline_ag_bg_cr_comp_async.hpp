@@ -181,7 +181,8 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        return Policy::template GetSmemSize<Problem>();
+        constexpr index_t smem_size = Policy::template GetSmemSize<Problem>();
+        return 2 * smem_size;
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto IsTransposeC()
@@ -315,14 +316,36 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                 },
                 number<BsLayout::size()>{});
 
-            ////////////// MX Scale windows /////////////////
+            ////////////// MX Scale windows (pre-packed int32_t) /////////////////
             // Get WarpGemm configuration
             using BlockWarps        = typename BlockGemmShape::BlockWarps;
+            using WarpTile          = typename BlockGemmShape::WarpTile;
             constexpr index_t MWarp = BlockWarps::at(I0{});
             constexpr index_t NWarp = BlockWarps::at(I1{});
 
-            // Calculate scale dimensions: KPerBlock elements need KPerBlock/32 e8m0_t scales
-            constexpr index_t ScaleKDimPerBlock = KPerBlock / ScaleBlockSize;
+            // Compute effective XdlPack sizes (fall back to 1 when iter count < pack)
+            constexpr index_t MPerXdl      = WarpTile::at(I0{});
+            constexpr index_t NPerXdl      = WarpTile::at(I1{});
+            constexpr index_t KPerXdl      = WarpTile::at(I2{});
+            constexpr index_t MIterPerWarp = MPerBlock / (MWarp * MPerXdl);
+            constexpr index_t NIterPerWarp = NPerBlock / (NWarp * NPerXdl);
+            constexpr index_t KIterPerWarp = KPerBlock / KPerXdl;
+
+            constexpr index_t MXdlPackEff =
+                (MIterPerWarp >= Policy::MXdlPack && MIterPerWarp % Policy::MXdlPack == 0)
+                    ? Policy::MXdlPack
+                    : 1;
+            constexpr index_t NXdlPackEff =
+                (NIterPerWarp >= Policy::NXdlPack && NIterPerWarp % Policy::NXdlPack == 0)
+                    ? Policy::NXdlPack
+                    : 1;
+            constexpr index_t KXdlPackEff =
+                (KIterPerWarp >= Policy::KXdlPack && KIterPerWarp % Policy::KXdlPack == 0)
+                    ? Policy::KXdlPack
+                    : 1;
+
+            // Packed scale dimensions
+            constexpr index_t ScaleKDimPerBlock = KPerBlock / ScaleBlockSize / KXdlPackEff;
 
             // Scale tensor views and base origins for creating tile windows per iteration
             const auto& scale_a_tensor_view = scale_a_window.get_bottom_tensor_view();
@@ -330,18 +353,18 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
             auto scale_a_base_origin        = scale_a_window.get_window_origin();
             auto scale_b_base_origin        = scale_b_window.get_window_origin();
 
-            // Create sample scale windows to determine tile types
-            auto scale_a_dram_window =
-                make_tile_window(scale_a_tensor_view,
-                                 make_tuple(number<MPerBlock>{}, number<ScaleKDimPerBlock>{}),
-                                 scale_a_base_origin,
-                                 Policy::template MakeMX_ScaleA_DramTileDistribution<Problem>());
+            // Create scale windows with packed int32_t dimensions
+            auto scale_a_dram_window = make_tile_window(
+                scale_a_tensor_view,
+                make_tuple(number<MPerBlock / MXdlPackEff>{}, number<ScaleKDimPerBlock>{}),
+                scale_a_base_origin,
+                Policy::template MakeMX_ScaleA_DramTileDistribution<Problem>());
 
-            auto scale_b_dram_window =
-                make_tile_window(scale_b_tensor_view,
-                                 make_tuple(number<NPerBlock>{}, number<ScaleKDimPerBlock>{}),
-                                 scale_b_base_origin,
-                                 Policy::template MakeMX_ScaleB_DramTileDistribution<Problem>());
+            auto scale_b_dram_window = make_tile_window(
+                scale_b_tensor_view,
+                make_tuple(number<NPerBlock / NXdlPackEff>{}, number<ScaleKDimPerBlock>{}),
+                scale_b_base_origin,
+                Policy::template MakeMX_ScaleB_DramTileDistribution<Problem>());
 
             // this pipeline has a pair of LDS buffers per logical tile
             auto&& [a_lds_block0, b_lds_block0] = Base::GetABLdsTensorViews(p_smem_0);
@@ -427,8 +450,8 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                           "SmemSizeB size is wrong!");
 
             ////////////// MX Scale register tiles (ping-pong buffers) /////////////////
-            // No packing needed - each thread gets e8m0_t elements directly
-            // Each thread will cast e8m0_t to int32_t for WarpGemm with OpSel=0
+            // Scales are pre-packed int32_t: each int32_t holds 2M/N x 2K e8m0_t values
+            // Block GEMM uses OpSel (0-3) to select the right byte per MFMA call
 
             using ScaleATileType = decltype(load_tile(scale_a_dram_window));
             using ScaleBTileType = decltype(load_tile(scale_b_dram_window));
@@ -666,9 +689,11 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                                    const ScaleADramBlockWindowTmp& scale_a_window,
                                    const ScaleBDramBlockWindowTmp& scale_b_window,
                                    index_t num_loop,
-                                   void* __restrict__ p_smem_0,
-                                   void* __restrict__ p_smem_1) const
+                                   void* __restrict__ p_smem) const
     {
+        constexpr index_t smem_size = Policy::template GetSmemSize<Problem>();
+        const auto smem             = reinterpret_cast<uint8_t*>(p_smem);
+
         const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
         const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
 
@@ -681,8 +706,8 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                 scale_a_window,
                 scale_b_window,
                 num_loop,
-                p_smem_0,
-                p_smem_1);
+                smem,
+                smem + smem_size);
         };
 
         return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
@@ -698,9 +723,11 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                                    const ScaleADramBlockWindowTmp& scale_a_window,
                                    const ScaleBDramBlockWindowTmp& scale_b_window,
                                    const index_t num_loop,
-                                   void* __restrict__ p_smem_0,
-                                   void* __restrict__ p_smem_1) const
+                                   void* __restrict__ p_smem) const
     {
+        constexpr index_t smem_size = Policy::template GetSmemSize<Problem>();
+        const auto smem             = reinterpret_cast<uint8_t*>(p_smem);
+
         const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
         const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
 
@@ -713,8 +740,8 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                 scale_a_window,
                 scale_b_window,
                 num_loop,
-                p_smem_0,
-                p_smem_1);
+                smem,
+                smem + smem_size);
         };
 
         return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);

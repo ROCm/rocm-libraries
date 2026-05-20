@@ -34,6 +34,10 @@
 
 #include <msgpack.hpp>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     namespace Serialization
@@ -272,11 +276,31 @@ namespace TensileLite
             template <typename T>
             void enumCase(T& member, const char* key, T value)
             {
-                assert(object.type == msgpack::type::object_type::STR);
-                std::string result;
-                object.convert(result);
+                bool match = false;
+                if(object.type == msgpack::type::object_type::STR)
+                {
+                    std::string result;
+                    object.convert(result);
 
-                if(result == key)
+                    if(result == key)
+                        match = true;
+                }
+                else if(object.type == msgpack::type::POSITIVE_INTEGER ||
+                        object.type == msgpack::type::NEGATIVE_INTEGER)
+                {
+                    int64_t intValue;
+                    object.convert(intValue);
+
+                    if(static_cast<int64_t>(value) == intValue)
+                        match = true;
+                }
+                else
+                {
+                    addError(concatenate("Unexpected msgpack type for enum: ", (int)object.type,
+                                       " (expected STRING or INTEGER)"));
+                }
+                    
+                if(match)
                 {
                     enumFound++;
                     member = value;
@@ -357,3 +381,5 @@ namespace TensileLite
         };
     }
 }
+
+TENSILE_HIDDEN_END

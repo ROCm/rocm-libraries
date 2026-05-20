@@ -801,9 +801,9 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
         solver::KernelInfo ss_kernel_info = GetSubSampleKernelInfo(problem);
 
         result.invoker_factory =
-            [N, C, H, W, K, n_groups, ss_kernel_info = std::move(ss_kernel_info)](
+            [N, C, H, W, K, n_groups, ss_kernel_info_ = std::move(ss_kernel_info)](
                 const std::vector<Kernel>& kernels) mutable {
-                return [=, ss_kernel_info = std::move(ss_kernel_info)](
+                return [=, ss_kernel_info2 = std::move(ss_kernel_info_)](
                            const Handle& handle, const AnyInvokeParams& primitive_params) {
                     const auto main_kernel = handle.Run(kernels[0]);
                     const auto& invoke_params =
@@ -812,32 +812,31 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
                     const auto& dy        = invoke_params.tensors.dy;
                     const auto& dw        = invoke_params.tensors.dw;
                     const auto& workSpace = invoke_params.workSpace;
-                    auto elapsed          = 0.f;
+                    float elapsed{0.f};
 
                     if(invoke_params.type != InvokeType::AutoTune)
                     {
-                        auto&& ss_kernels = handle.GetKernels(ss_kernel_info.kernel_name,
-                                                              ss_kernel_info.comp_options);
+                        auto&& ss_kernels = handle.GetKernels(ss_kernel_info2.kernel_name,
+                                                              ss_kernel_info2.comp_options);
                         if(!ss_kernels.empty())
                         {
-                            auto kernel = ss_kernels.front();
-                            kernel(x, workSpace);
+                            ss_kernels.front()(x, workSpace);
                         }
                         else
                         {
-                            handle.AddKernel(ss_kernel_info.kernel_name,
-                                             ss_kernel_info.comp_options,
-                                             ss_kernel_info.kernel_file,
-                                             ss_kernel_info.kernel_name,
-                                             ss_kernel_info.l_wk,
-                                             ss_kernel_info.g_wk,
-                                             ss_kernel_info.comp_options)(x, workSpace);
+                            handle.AddKernel(ss_kernel_info2.kernel_name,
+                                             ss_kernel_info2.comp_options,
+                                             ss_kernel_info2.kernel_file,
+                                             ss_kernel_info2.kernel_name,
+                                             ss_kernel_info2.l_wk,
+                                             ss_kernel_info2.g_wk,
+                                             ss_kernel_info2.comp_options)(x, workSpace);
                         }
                         if(handle.IsProfilingEnabled())
                             elapsed += handle.GetKernelTime();
                     }
 
-                    int unused       = 0;
+                    int unused{0};
                     int* return_addr = nullptr;
                     main_kernel(
                         N, C, H, W, K, n_groups, unused, unused, workSpace, dw, dy, return_addr);

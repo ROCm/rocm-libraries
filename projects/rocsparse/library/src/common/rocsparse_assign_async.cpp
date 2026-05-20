@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,26 @@ namespace rocsparse
             dest[batch_index] = value;
         }
     }
+
+    template <typename T>
+    ROCSPARSE_KERNEL(32)
+    void assign_device_kernel(T* dest, const T* value)
+    {
+        const uint32_t batch_index = blockIdx.y;
+        if(hipThreadIdx_x == 0)
+        {
+            dest[batch_index] = value[0];
+        }
+    }
+}
+
+template <typename T>
+rocsparse_status
+    rocsparse::assign_device_async(int64_t n, T* dest, const T* value, hipStream_t stream)
+{
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+        rocsparse::assign_device_kernel, dim3(1, n), dim3(32), 0, stream, dest, value);
+    return rocsparse_status_success;
 }
 
 template <typename T>
@@ -52,6 +72,16 @@ template rocsparse_status
 template rocsparse_status
     rocsparse::assign_async(int64_t n, int64_t* dest, int64_t value, hipStream_t stream);
 
+template rocsparse_status rocsparse::assign_device_async(int64_t        n,
+                                                         int32_t*       dest,
+                                                         const int32_t* value,
+                                                         hipStream_t    stream);
+
+template rocsparse_status rocsparse::assign_device_async(int64_t        n,
+                                                         int64_t*       dest,
+                                                         const int64_t* value,
+                                                         hipStream_t    stream);
+
 rocsparse_status rocsparse::assign_max_async(int64_t             n,
                                              rocsparse_indextype indextype,
                                              void*               dest,
@@ -63,6 +93,7 @@ rocsparse_status rocsparse::assign_max_async(int64_t             n,
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_async(
             n, reinterpret_cast<int32_t*>(dest), std::numeric_limits<int32_t>::max(), stream));
+
         return rocsparse_status_success;
     }
     case rocsparse_indextype_i64:

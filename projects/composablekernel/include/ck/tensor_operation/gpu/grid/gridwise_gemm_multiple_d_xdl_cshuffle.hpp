@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck/utility/common_header.hpp"
+#include "ck/utility/env.hpp"
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
@@ -352,10 +353,54 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         return true;
     }
 
+    template <bool IsGfx11>
+    static constexpr index_t GetEstimateVgprCount()
+    {
+        constexpr index_t MWave    = MPerBlock / (MXdlPerWave * MPerXdl);
+        constexpr index_t NWave    = NPerBlock / (NXdlPerWave * NPerXdl);
+        constexpr index_t WaveSize = BlockSize / (MWave * NWave);
+
+        // VGPR used in LDS loading and WMMA
+        constexpr index_t BaseInputVgprCount =
+            MPerBlock * KPerBlock / MWave / WaveSize * sizeof(ADataType) / sizeof(uint32_t) +
+            NPerBlock * KPerBlock / NWave / WaveSize * sizeof(BDataType) / sizeof(uint32_t);
+        // WMMA input is duplicated in GFX11
+        constexpr index_t InputVgprCount = IsGfx11 ? BaseInputVgprCount * 2 : BaseInputVgprCount;
+        // VGPR used in Accumulator
+        constexpr index_t AccVgprCount =
+            MPerBlock * NPerBlock / BlockSize * sizeof(AccDataType) / sizeof(uint32_t);
+
+        if constexpr(PipelineVer == PipelineVersion::v1)
+        {
+            return InputVgprCount + AccVgprCount + BaseInputVgprCount * (NumGemmKPrefetchStage - 1);
+        }
+        else if constexpr(PipelineVer == PipelineVersion::v2)
+        {
+            return InputVgprCount + AccVgprCount + BaseInputVgprCount;
+        }
+        else if constexpr(PipelineVer == PipelineVersion::weight_only)
+        {
+            return InputVgprCount + AccVgprCount;
+        }
+        else if constexpr(PipelineVer == PipelineVersion::v4)
+        {
+            return InputVgprCount * 2 + AccVgprCount;
+        }
+        else
+        {
+            // invalid pipeline version
+            static_assert(0);
+        }
+    }
+
     __host__ static index_t GetSharedMemoryNumberOfByteOnHost()
     {
 #if !defined(__HIPCC_RTC__) || !defined(CK_CODE_GEN_RTC)
-        if(ck::get_device_name() == "gfx950")
+        if(is_gfx125_supported())
+        {
+            return Base::GetSharedMemoryNumberOfByte(gfx125_t{});
+        }
+        else if(ck::get_device_name() == "gfx950")
         {
             return Base::GetSharedMemoryNumberOfByte(gfx950_t{});
         }
@@ -370,7 +415,7 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         InMemoryDataOperationEnum CGlobalMemoryDataOperation_ = InMemoryDataOperationEnum::Set>
     __device__ static bool constexpr IsValidCompilationParameter()
     {
-#if defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx11__) || defined(__gfx120__)
         if constexpr(is_same_v<AComputeDataType_, float>)
         {
 
@@ -382,8 +427,33 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         }
 #endif
 
+#if defined(__gfx125__)
+        if constexpr(sizeof(AComputeDataType) == 1)
+        {
+            if constexpr(KPerBlock % 64)
+            {
+                return false;
+            }
+        }
+        else if constexpr(sizeof(AComputeDataType) == 2)
+        {
+            if constexpr(KPerBlock % 32)
+            {
+                return false;
+            }
+        }
+#endif
+
         if constexpr(Base::GetSharedMemoryNumberOfByte(get_device_arch()) >
                      get_lds_size(get_device_arch()))
+        {
+            return false;
+        }
+
+        constexpr bool IsGfx11            = is_same_v<decltype(get_device_arch()), gfx11_t>;
+        constexpr auto EstimateVgprCount  = GetEstimateVgprCount<IsGfx11>();
+        constexpr auto AvailableVgprCount = get_max_vgpr_count(get_device_arch());
+        if constexpr(EstimateVgprCount > (AvailableVgprCount + AvailableVgprCount / 4))
         {
             return false;
         }
@@ -464,12 +534,6 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
             return false;
         }
 
-        // check block-to-E-tile
-        // if(!block_2_etile_map.CheckValidity(e_grid_desc_m_n))
-        //{
-        // return false;
-        //}
-
         // TODO: also check validity of all components (blockwise-copy, threadwise-copy, etc)
         // check tensor size: cannot be larger than 2GB each
         constexpr long_index_t TwoGB = (long_index_t{1} << 31);
@@ -480,12 +544,50 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         {
             return false;
         }
+
 #if !defined(__HIPCC_RTC__) || !defined(CK_CODE_GEN_RTC)
+        if(!is_xdl_wmma_k_supported<AComputeDataType, KPerBlock>())
+        {
+            return false;
+        }
+
         if(GetSharedMemoryNumberOfByteOnHost() > get_lds_size())
         {
             return false;
         }
+        const auto availableVgprCount = []() {
+            if(ck::is_gfx125_supported())
+            {
+                return get_max_vgpr_count(gfx125_t{});
+            }
+            else if(ck::is_gfx120_supported())
+            {
+                return get_max_vgpr_count(gfx120_t{});
+            }
+            else if(ck::is_gfx11_supported())
+            {
+                return get_max_vgpr_count(gfx11_t{});
+            }
+            else
+            {
+                return get_max_vgpr_count(gfx9_t{});
+            }
+        }();
+        const auto estimateVgprCount =
+            ck::is_gfx11_supported() ? GetEstimateVgprCount<true>() : GetEstimateVgprCount<false>();
+        if(estimateVgprCount > (availableVgprCount + availableVgprCount / 4))
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Estimated VGPR count (" << estimateVgprCount
+                          << ") exceeds available VGPR count (" << availableVgprCount << ")! "
+                          << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                          << std::endl;
+            }
+            return false;
+        }
 #endif
+
         return true;
     }
 
@@ -602,7 +704,8 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
               typename BGridDesc_BK0_N_BK1,
               typename DsGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
               typename EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-              typename Block2ETileMap>
+              typename Block2ETileMap,
+              typename EGridDesc_M_N_Direct = Tuple<>>
     __device__ static void Run(const ADataType* __restrict__ p_a_grid,
                                const BDataType* __restrict__ p_b_grid,
                                DsGridPointer p_ds_grid,
@@ -618,8 +721,9 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
                                const EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                    e_grid_desc_mblock_mperblock_nblock_nperblock,
                                const Block2ETileMap& block_2_etile_map,
-                               const index_t k_batch = 1,
-                               const index_t k_idx   = 0)
+                               const index_t k_batch                              = 1,
+                               const index_t k_idx                                = 0,
+                               const EGridDesc_M_N_Direct& e_grid_desc_m_n_direct = {})
     {
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
@@ -737,7 +841,11 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
               lcm_AK1_BK1 <= 4) ||
              (is_same<AComputeDataType, int8_t>::value && lcm_AK1_BK1 <= 8) ||
              ((is_same<AComputeDataType, f8_t>::value || is_same<AComputeDataType, bf8_t>::value) &&
+#if defined(__gfx125__)
+              lcm_AK1_BK1 < 128))
+#else
               lcm_AK1_BK1 < 32))
+#endif
                 ? true
                 : false;
         constexpr auto is_scale_mfma = false;
@@ -804,18 +912,61 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
                                                                c_thread_buf,
                                                                num_k_block_main_loop);
 
-        // Shuffle C and write out.
-        Base::template RunMultiDEpilogue<EGlobalMemoryDataOperation, false, false, true>(
-            blockwise_gemm,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            e_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf,
-            block_work_idx[I0],
-            block_work_idx[I1],
-            p_shared,
-            p_ds_grid,
-            p_e_grid,
-            cde_element_op);
+        // Use RunEpilogueNoShuffle from gridwise_common (the base class) for
+        // direct VGPR-to-global output when conditions are met:
+        // (1) no D tensors, (2) scalar-per-vector is 1, (3) PassThrough element-wise op.
+        if constexpr(NumDTensor == 0 && CDEShuffleBlockTransferScalarPerVector_NPerBlock == 1 &&
+                     is_same_v<CDEElementwiseOperation,
+                               tensor_operation::element_wise::PassThrough>)
+        {
+            const auto e_grid_desc_m_n = [&]() {
+                if constexpr(!is_same_v<EGridDesc_M_N_Direct, Tuple<>>)
+                {
+                    return e_grid_desc_m_n_direct;
+                }
+                else
+                {
+                    return transform_tensor_descriptor(
+                        e_grid_desc_mblock_mperblock_nblock_nperblock,
+                        make_tuple(make_merge_transform(make_tuple(
+                                       e_grid_desc_mblock_mperblock_nblock_nperblock.GetLength(I0),
+                                       Number<MPerBlock>{})),
+                                   make_merge_transform(make_tuple(
+                                       e_grid_desc_mblock_mperblock_nblock_nperblock.GetLength(I2),
+                                       Number<NPerBlock>{}))),
+                        make_tuple(Sequence<0, 1>{}, Sequence<2, 3>{}),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}));
+                }
+            }();
+
+            const auto c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2 =
+                blockwise_gemm.MakeCGridDescriptor_M0_N0_M1_N1_M2_M3_M4_N2(e_grid_desc_m_n);
+
+            Base::template RunEpilogueNoShuffle<EGlobalMemoryDataOperation,
+                                                false,
+                                                Sequence<0, 1, 2, 3, 4, 5, 6, 7>,
+                                                7>(blockwise_gemm,
+                                                   c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2,
+                                                   c_thread_buf,
+                                                   block_work_idx[I0],
+                                                   block_work_idx[I1],
+                                                   p_e_grid,
+                                                   cde_element_op);
+        }
+        else
+        {
+            Base::template RunMultiDEpilogue<EGlobalMemoryDataOperation, false, false, true>(
+                blockwise_gemm,
+                ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                e_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_work_idx[I0],
+                block_work_idx[I1],
+                p_shared,
+                p_ds_grid,
+                p_e_grid,
+                cde_element_op);
+        }
     }
 
     template <bool HasMainKBlockLoop,

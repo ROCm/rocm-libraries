@@ -19,6 +19,10 @@
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp"
 #include "ck/host_utility/io.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -406,3 +410,5 @@ struct DeviceImageToColumnImpl
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+
+#pragma clang diagnostic pop

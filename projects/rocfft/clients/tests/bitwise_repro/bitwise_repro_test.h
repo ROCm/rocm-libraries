@@ -126,7 +126,7 @@ void compute_fft_data(Tparams&              params,
     {
         ++n_hip_failures;
         std::stringstream msg;
-        msg << "Work buffer allocation failed with size: " << params.workbuffersize;
+        msg << "Work buffer allocation failed with size: " << e.attempted_size;
         if(skip_runtime_fails)
             throw ROCFFT_SKIP{msg.str()};
         else
@@ -143,8 +143,8 @@ void compute_fft_data(Tparams&              params,
         {
             std::stringstream msg;
             msg << "hipMalloc failure for input buffer " << i << " size " << ibuffer_sizes[i] << "("
-                << bytes_to_GiB(ibuffer_sizes[i]) << " GiB)"
-                << " with code " << hipError_to_string(hip_status);
+                << byte_size_to_str(ibuffer_sizes[i]) << ") with code "
+                << hipError_to_string(hip_status);
             ++n_hip_failures;
             if(skip_runtime_fails)
                 throw ROCFFT_SKIP{msg.str()};
@@ -235,8 +235,8 @@ void compute_fft_data(Tparams&              params,
                 ++n_hip_failures;
                 std::stringstream msg;
                 msg << "hipMalloc failure for output buffer " << i << " size " << obuffer_sizes[i]
-                    << "(" << bytes_to_GiB(obuffer_sizes[i]) << " GiB)"
-                    << " with code " << hipError_to_string(hip_status);
+                    << "(" << byte_size_to_str(obuffer_sizes[i]) << ") with code "
+                    << hipError_to_string(hip_status);
                 if(skip_runtime_fails)
                     throw ROCFFT_SKIP{msg.str()};
                 else

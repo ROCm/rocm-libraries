@@ -14,6 +14,10 @@
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/host_utility/stream_utility.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -153,3 +157,5 @@ struct DevicePutElementImpl
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+
+#pragma clang diagnostic pop

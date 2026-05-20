@@ -25,4 +25,4 @@
 #include "testing_spvv.hpp"
 
 TEST_ROUTINE_WITH_CONFIG(
-    spvv, generic, hipsparse_test_config_it, arg.M, arg.N, arg.transA, arg.baseA, arg.graph_test);
+    spvv, generic, hipsparse_test_config_it, arg.N, arg.nnz, arg.transA, arg.baseA, arg.graph_test);
