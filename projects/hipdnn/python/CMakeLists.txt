@@ -1,14 +1,14 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.18)
+if(DEFINED SKBUILD)
+    cmake_minimum_required(VERSION 3.18)
+    project(hipdnn_python_bindings LANGUAGES CXX)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
-project(hipdnn_python_bindings LANGUAGES CXX)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 

@@ -255,8 +255,7 @@ function(_fetch_tsl-robin-map VERSION HASH)
         tsl-robin-map
         GIT_REPOSITORY https://github.com/Tessil/robin-map.git
         GIT_TAG v${VERSION}
-        DOWNLOAD_EXTRACT_TIMESTAMP
-        TRUE
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
 
     fetchcontent_makeavailable(tsl-robin-map)
