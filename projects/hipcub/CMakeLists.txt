@@ -35,11 +35,11 @@ endif()
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.5.0")
+set(VERSION_STRING "5.0.0")
 # Set the CCCL-compatible version.
-set(HIPCUB_CCCL_VERSION_MAJOR 2)
-set(HIPCUB_CCCL_VERSION_MINOR 8)
-set(HIPCUB_CCCL_VERSION_PATCH 2)
+set(HIPCUB_CCCL_VERSION_MAJOR 3)
+set(HIPCUB_CCCL_VERSION_MINOR 0)
+set(HIPCUB_CCCL_VERSION_PATCH 3)
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
