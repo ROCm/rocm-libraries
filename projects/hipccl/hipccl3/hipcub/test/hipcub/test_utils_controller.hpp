@@ -36,6 +36,7 @@
 #include <iostream>
 #include <optional>
 #include <stack>
+#include <numeric>
 
 #ifdef _WIN32
 // This macro prevents windows.h from defining min/max functions
@@ -87,9 +88,10 @@ namespace test_controller
 // test case or test size is disabled on a given architecture.
 // It can also filter a given vector of sizes down to just those
 // sizes that are enabled.
-// The main implementation feature are:
-// - Locates and parses a test control file (a text file). For details
-//   on the syntax of this file, please see hipcub/test/control.txt.
+//
+// The main feature are:
+// - Uses a "test control file" (a text file) that specifies which tests are
+//   disabled. For details on the syntax of this file, see hipcub/test/control.txt.
 // - Processes relational (eg. >, <) operators and evaluates arithmetic
 //   expressions for size-based filtering.
 // - Translates architecture keywords used in the control file into
@@ -103,14 +105,15 @@ namespace test_controller
 //	 - of a normal test fixture.
 //   - Inheriting from ControlledTest ensures that the main test disablement check is performed automatically before
 //	   each test in the suite. Tests will be skipped if they are completely (i.e. for all sizes) disabled.
+//
 // 2. Call a maco to filter the input sizes your test uses.
 //	 - If your test uses a single input size, call:
 //     CHECK_SIZE_ENABLEMENT(size);
 //     This will cause the test to be skipped if the size matches any of the rules in the control file.
 //   - If your test iterates through a vector of sizes, use CHECK_SIZE_FILTERS(sizes) to filter out any sizes
 //     that have been disabled by rules in the control file.
-//     This macro both modified the sizes vector in place, and also returns the filtered vector,
-//     so it can be used directly in a loop. For example:
+//     This macro both modifies the sizes vector in place, and returns the filtered vector so that
+//     it can be used directly in a loop. For example:
 //     for (auto size : CHECK_SIZE_FILTERS(sizes))
 //        <do your test work using size>
 class TestController
@@ -222,17 +225,7 @@ private:
     FRIEND_TEST(HipcubTestControllerTests, FilterSizes);
     FRIEND_TEST(HipcubTestControllerTests, CheckSizeEnablement);
     
-    // Convenience struct to encapsulate information about paths to the test control file.
-    struct PathInfo
-    {
-        // This is the absolute path to the "binary directory" (build or install directory)
-        // containing the control file (it may be in a subfolder - see rel_control_file_path, below).
-        std::filesystem::path abs_bin_path;
-        // This is the relative path (relative to abs_bin_path, above) to the actual control file.
-        std::filesystem::path rel_control_file_path;
-    };
-
-    // Represents one line from the control file.
+    // Convenience struct to encapsulate all of the information from a single line from the control file.
     struct ControlInfo
     {
         // This regex is applied to the fully-qualified test name (<TestSuite.TestName>).
@@ -253,7 +246,7 @@ private:
         size_t line_num;
     };
 
-    // Represents a single token (operator or numeric value) in a arithmetic size expression.
+    // Represents a single token (operator or numeric value) in an arithmetic size expression.
     // Eg. the expression "1 << 2" contains tokens: "1", "<<", "2".
     struct Token
     {
@@ -269,13 +262,6 @@ private:
         Token(std::string op) : op(op), val(0), is_val(false)
         {}
     };
-
-    // These are filled in by cmake.
-    // Convert the binary paths to canonical paths in order to eliminate symbolic links
-    // so that the control-file-finding code doesn't get confused.
-    inline const static std::string control_file_name = "@TEST_CONTROL_FILE_NAME@";
-    inline const static PathInfo build_binary_paths = {std::filesystem::canonical("@CMAKE_BINARY_DIR@/test"), TestController::control_file_name};
-    inline const static PathInfo install_binary_paths = {std::filesystem::canonical("@CMAKE_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@"), "@PROJECT_NAME@/" + TestController::control_file_name};
 
     // Resets the internal state of the controller (i.e. the control data)
     // and reparses it from the (optional) string it's passed. If no string is passed,
@@ -321,9 +307,11 @@ private:
     }
 
     // Checks if the HIPCUB_EXTRA_TC_INFO exists and is set to 1. If so,
-    // individual skipped sizes will be appended to msgs in the filtering functions.
+    // individual skipped sizes and the control file line numbers that caused them to
+	// be skipped will be appended to msgs in the filtering functions.
+	// Information about the path to the control file will also be displayed.
     // This can be useful for debugging when adding new size constraints.
-    inline bool should_print_extra_info() const
+    inline static bool should_print_extra_info()
     {
         char* val_str = test_common_utils::__get_env("HIPCUB_EXTRA_TC_INFO");
         const bool result = (val_str && std::strlen(val_str) == 1 && val_str[0] == '1');
@@ -354,7 +342,7 @@ private:
 #endif
     }
 
-    // Uses OS-specific mechanisms to get the path to the currently running test binary.
+    // Uses system calls to get the path to the currently running test binary.
     inline bool get_running_binary_path(std::filesystem::path& path) const
     {
         char path_buf[256];
@@ -383,6 +371,14 @@ private:
         // At this point we have the path to the binary executable.
         // We want the path to the directory it's in.
         path = std::filesystem::path(path_buf).parent_path();
+
+		// Make sure it exists.
+        if (!std::filesystem::exists(path))
+        {
+            std::cerr << "Could not determine path to running binary." << std::endl;
+            return false;
+        }
+        
         return true;
     }
 
@@ -390,70 +386,71 @@ private:
     // If we're running from the install location, it will be in a different place than if
     // we're running from the build directory.
     // So we locate it relative to the current test binary.
-    // Three locations are checked, in this order:
-    // - the build location: <build directory>/test/
-    // - the install location: <install directory>/hipcub/
-    // - the current binary directory
+    // If multiple control files are found, the most recently modified one will be used.
     inline bool get_control_file_path(std::filesystem::path& path) const
     {
-        std::filesystem::path cur_bin_path;
-        if (!this->get_running_binary_path(cur_bin_path))
+		// Note: if you change either of these, you'll also need to update the CMake rule that copies
+		// it to the build folder. See hipcub/test_CMakeLists.txt.
+        const static std::filesystem::path control_file_name("control.txt");
+        const static std::filesystem::path project_dir("hipcub");
+
+        std::filesystem::path cur_bin_dir;
+        if (!this->get_running_binary_path(cur_bin_dir))
         {
-            std::cerr << "Error: Unable to determine path to control file." << std::endl;
+            std::cout << "Error: Unable to determine path to test control file." << std::endl;
             return false;
         }
 
-        // Check if the binary is being run from a build directory.
-        // TestController::build_binary_paths.abs_bin_path points to the build/test/ directory.
-        // Binaries are in subfolders like build/test/hipcub/, build/test/extra/, etc.
-        // So we need to check if the currently running binary's parent directly is buid/test/.
-        if (cur_bin_path.parent_path() == TestController::build_binary_paths.abs_bin_path)
+        // We will grab the path to the currently running binary, and then look for the test
+        // control file in these locations relative to it.
+        // When running a test binary that exists in the install directory (eg. /opt/rocm/bin/), we expect the control file to be at hipcub/control.txt
+        // When running a test binary that lives in the build directory (eg. build/test/hipcub/), we expect the control file to be at ../control.txt.
+        std::vector<std::filesystem::path> possible_paths = {
+            cur_bin_dir / project_dir / control_file_name,
+            cur_bin_dir.parent_path() / control_file_name
+        };
+        path.clear();
+
+		// Filter out any paths that don't exist.
+        std::vector<std::filesystem::path> existing_paths(possible_paths);
+        auto it = std::remove_if(existing_paths.begin(), existing_paths.end(), [](const std::filesystem::path& path) {
+            return !std::filesystem::exists(path);
+        });
+        existing_paths.erase(it, existing_paths.end());
+
+		// If nothing was found, let the user know which paths were searched.
+		// We'll return false below.
+        if (existing_paths.empty())
         {
-            // TestController::build_binary_paths.rel_control_file_path gives the relative
-            // path to the control file.
-            path = TestController::build_binary_paths.abs_bin_path / TestController::build_binary_paths.rel_control_file_path;
+            std::cerr << "Error: unable to locate control file." << std::endl
+                      << "Locations searched: " << std::endl;
+            for (auto const& path : possible_paths)
+                std::cerr << path << std::endl;
         }
-        // Otherwise, check if the binary is being run from the installation directory.
-        // TestController::install_binary_paths.abs_bin_path points to the /opt/rocm/bin directory.
-        // Test binaries reside right in this directory.
-        else if (cur_bin_path == TestController::install_binary_paths.abs_bin_path)
+        // Only one path exists - use it.
+        else if (existing_paths.size() == 1)
         {
-            path = TestController::install_binary_paths.abs_bin_path / TestController::install_binary_paths.rel_control_file_path;
+            path = existing_paths[0];
         }
-        // Otherwise, we're running from an unknown path (eg. user has moved the binary).
-        // Try the relative paths to the control file that we know about and see if they work.
+        // Multiple paths exist - choose the one that was created most recently.
         else
         {
-            const std::vector<std::filesystem::path> possible_paths = {
-                // In the build directory, the control file should be located in the parent directory.
-                cur_bin_path.parent_path() / TestController::build_binary_paths.rel_control_file_path,
-                // In the install directory, the control file should be located in the hipcub/ subfolder.
-                cur_bin_path / TestController::install_binary_paths.rel_control_file_path,
-                // As a final option, also check in the current directory
-                cur_bin_path / TestController::control_file_name
-            };
-
-            const auto it = std::find_if(possible_paths.begin(),
-                         possible_paths.end(),
-                         [](const auto& p){
-                             return std::filesystem::exists(p);
-                         }
-            );
-
-            if (it == possible_paths.end())
+	        if (TestController::should_print_extra_info())
             {
-                std::cerr << "Error: Unable to determine path to control file." << std::endl
-                          << "Locations searched:" << std::endl;
-                for (const auto& path : possible_paths)
-                    std::cerr << "- " << path << std::endl;
-                
-                return false;
+                std::cout << "Multiple matches, selecting path with last write time from these candidates:" << std::endl;
+                for (auto p : existing_paths)
+                    std::cout << p << std::endl;
+                std::cout << std::endl;
             }
-            else
-                path = *it;
+            // Note: the selected path will be printed by the caller.
+            
+            path = std::accumulate(existing_paths.begin() + 1, existing_paths.end(), existing_paths.front(), [](auto const& path1, auto const path2) {
+                // last_write_time returns time size last epoch, so a higher value means more recent (closer to now).
+                return (std::filesystem::last_write_time(path1) > std::filesystem::last_write_time(path2) ? path1 : path2);
+            });
         }
 
-        return true;
+        return !path.empty();
     }
 
     // Filters out disabled sizes (in-place) using the data parsed from the control file.
@@ -466,8 +463,11 @@ private:
         
         // Maps control file line numbers to the sizes that they caused to be skipped.
         std::map<size_t, std::set<T>> skipped_sources;
+		// Each time a size is skipped, we'll generate a message saying which control line
+		// is responsible. It's possible for multiple sizes to be skipped by the same control file line.
+		// Store the skip messages in a set to prevent duplicates (but preserve ordering).
         std::set<std::string> skip_msgs;
-        // Remember this so we can figure out how many sizes were filtered out later.
+        // Remember this so we can figure out how many sizes were removed later.
         const size_t num_unfiltered_sizes = sizes.size();
 
         // Each line of the control file has create a ControlInfo object (stored in this->control_data)
@@ -477,7 +477,7 @@ private:
         // Note: we can short-circuit here if all sizes have been filtered out.
         for (size_t i = 0; !sizes.empty() && i < this->control_data.size(); i++)
         {
-            // Grab the filter information (comes from one line of the control file).
+            // Grab the filter information that was parsed from the current line.
             ControlInfo info = this->control_data[i];
             
             // Check if the name of the currently running test and the current architecture match
@@ -494,15 +494,16 @@ private:
                 {
                     skipped_sources[info.line_num] = std::set<T>(sizes.begin(), sizes.end());
                     sizes.clear();
+					skip_msgs.clear();
                     skip_msgs.insert(info.skip_msg);
                 }
 
-                // Otherwise, we need to check if any individual sizes are filtered out.
+                // Otherwise, we need to check if any individual sizes should be filtered out.
                 else
                 {
                     // Each ControlInfo (line of the control file) generates one or more "test functions"
                     // that accept a size as an argument and return true if that size should be disabled.
-                    // This lambda function returns true if any of info's test functions return true.
+                    // This lambda function returns true if any of info's individual test functions return true.
                     const auto is_skipped = [&info, &skipped_sources](size_t size) {
                         size_t j;
                         for (j = 0; j < info.size_test_fns.size() && !info.size_test_fns[j](size); j++);
@@ -519,6 +520,7 @@ private:
                             skipped_sources[info.line_num] = std::set<T>();
 
                         skipped_sources[info.line_num].insert(new_end, sizes.end());
+						// Erase the sizes that were pushed past the new end
                         sizes.erase(new_end, sizes.end());
                         skip_msgs.insert(info.skip_msg);
                     }
@@ -535,7 +537,7 @@ private:
                 ss << cur_msg << std::endl;
             }
             
-            if (this->should_print_extra_info())
+            if (TestController::should_print_extra_info())
             {
                 const size_t num_skipped_sizes = num_unfiltered_sizes - sizes.size();
                 ss << "Skipping " << num_skipped_sizes << " size(s) based on matches on test control file lines described below." << std::endl;
@@ -573,12 +575,12 @@ private:
 
         // Tests compiled in parallel have a prefix of "Id<digits>/".
         // Strip off this prefix if it's present.
-        const std::regex par_prefix_regex(R"(^(?:Id\d+\/)?(.+)$)");
+        const std::regex par_prefix_regex(R"(^(Id\d+\/)(.+)$)");
         std::smatch match;
         if (std::regex_match(qualified_name, match, par_prefix_regex))
-            qualified_name = match[1].str();
-        else
-            std::cerr << "Warning: unable to parse test name. Test control rules may not be applied correctly." << std::endl;
+		{
+            qualified_name = match[2].str();
+		}
         
         return qualified_name;
     }
@@ -622,7 +624,7 @@ private:
         {
             std::stringstream ss;
             ss << info.skip_msg;
-            if (this->should_print_extra_info())
+            if (TestController::should_print_extra_info())
             {
                 ss << std::endl;
                 ss << "Test is marked as disabled for all sizes on test control file line " << info.line_num << ".";
@@ -848,8 +850,13 @@ private:
         return operands.top();
     }
 
-    // Expects consecutive matches for each of parts_regexes, optionally followed by a delimiter (unless delimiter is std::nullopt) and the another set of matches, etc.
-    std::vector<std::vector<std::string>> regex_split(const std::string line, const size_t line_num, const std::vector<std::regex>& parts_regexes, const std::optional<std::regex> delim_regex=std::nullopt)
+    // Splits a given line using a vector or regexes.
+    // Expects consecutive matches for each of parts_regexes, optionally followed by a delimiter and then another set of matches, etc.
+    // Returns a vector of vectors (of strings). Each inner vector represents on set of matches (with parts_regexes.size() elements).
+    std::vector<std::vector<std::string>> regex_split(const std::string line,
+													  const size_t line_num,
+													  const std::vector<std::regex>& parts_regexes,
+													  const std::optional<std::regex> delim_regex=std::nullopt)
     {
 		const std::vector<std::string> part_descriptions = {"test name regex", "arch regex", "sizes", "build types", "skip message"};
         std::vector<std::vector<std::string>> results;
@@ -1087,20 +1094,20 @@ private:
 
         // -- Process the build_type_part --
 
-        // Maps build types to functions that check if they match the type of the currently running build.
-        const std::unordered_map<std::string, std::function<bool()>> str_to_build_type({
-                {"*",        []() { return true; }},
-                {"asan",     TestController::is_running_asan},
-                {"valgrind", TestController::is_running_valgrind},
-                {"windows",  TestController::is_windows},
-                {"linux",    TestController::is_linux},
-            });
-
         const std::regex build_type_regex = std::regex(R"(^\s*(asan|valgrind|windows|linux|\*)\s*)");
         const std::regex build_type_delim_regex = std::regex(R"(\s*\,\s*)");
 
         const std::vector<std::regex> build_type_parts_regexes = {build_type_regex};
         const std::vector<std::vector<std::string>> build_type_parts = this->regex_split(build_type_part, line_num, build_type_parts_regexes, build_type_delim_regex);
+
+		// Maps build types to functions that check if they match the type of the currently running build.
+		const std::unordered_map<std::string, std::function<bool()>> str_to_build_type({
+				{"*",        []() { return true; }},
+				{"asan",     TestController::is_running_asan},
+				{"valgrind", TestController::is_running_valgrind},
+				{"windows",  TestController::is_windows},
+				{"linux",    TestController::is_linux},
+		});
         
         for (std::vector<std::string> groups : build_type_parts)
         {
@@ -1165,7 +1172,7 @@ private:
             return;
         }
 
-		if (this->should_print_extra_info())
+		if (TestController::should_print_extra_info())
 			std::cout << "Using test control file at: " << control_path << std::endl;
         
         std::ifstream control_file(control_path.c_str());
@@ -1214,7 +1221,8 @@ private:
     // Store the regexes as strings since they will be substituted into user-provided strings.
     // Note: these should be enclosed in parenthesis to ensure correctness.
     const std::unordered_map<std::string, std::string> keywords = {
-        {"all",           "(gfx[0-9a-f]+)"},
+		{"all",           "(.+)"},
+        {"amd",           "(gfx[0-9a-f]+)"},
 		{"nvidia",        "(nvidia)"}, // see TestController::get_arch
         {"apus",          "(gfx1103|gfx1150|gfx1151|gfx1152)"},
         {"navi2x-family", "(gfx1030|gfx1031|gfx1032)"},
