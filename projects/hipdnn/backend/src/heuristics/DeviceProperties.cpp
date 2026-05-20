@@ -11,33 +11,33 @@
 namespace hipdnn_backend::heuristics
 {
 
-hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties()
+hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(int deviceId)
 {
-    hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT devProps;
-
-    // Get current device
-    int currentDevice;
-    auto status = hipGetDevice(&currentDevice);
-    if(status != hipSuccess)
-    {
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get current device");
-    }
-
-    // Get device properties
     hipDeviceProp_t hipProps;
-    status = hipGetDeviceProperties(&hipProps, currentDevice);
+    auto status = hipGetDeviceProperties(&hipProps, deviceId);
     if(status != hipSuccess)
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get device properties");
     }
 
-    // Populate DevicePropertiesT
-    devProps.device_id = currentDevice;
+    hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT devProps;
+    devProps.device_id = deviceId;
     devProps.multi_processor_count = hipProps.multiProcessorCount;
     devProps.total_global_mem = hipProps.totalGlobalMem;
     devProps.architecture_name = hipProps.gcnArchName;
 
     return devProps;
+}
+
+hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties()
+{
+    int currentDevice = 0;
+    auto status = hipGetDevice(&currentDevice);
+    if(status != hipSuccess)
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get current device");
+    }
+    return queryDeviceProperties(currentDevice);
 }
 
 std::vector<uint8_t>

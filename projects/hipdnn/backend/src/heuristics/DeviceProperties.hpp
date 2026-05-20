@@ -13,10 +13,26 @@ namespace hipdnn_backend::heuristics
 {
 
 /**
- * @brief Query device properties from HIP.
+ * @brief Query device properties for an explicit device id.
  *
- * Calls hipGetDevice() and hipGetDeviceProperties() to populate
- * a DevicePropertiesT structure with current device information.
+ * Calls hipGetDeviceProperties() for @p deviceId and populates a
+ * DevicePropertiesT structure. Use this overload when the caller already
+ * knows which device to query (e.g. the device a handle's stream is bound to).
+ *
+ * RFC 0007 Reference: Section 6.2
+ *
+ * @param deviceId HIP device id to query.
+ * @return DevicePropertiesT populated from HIP device properties.
+ * @throws HipdnnException if the HIP call fails.
+ */
+hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(int deviceId);
+
+/**
+ * @brief Query device properties for the current HIP device.
+ *
+ * Calls hipGetDevice() to resolve the current device, then delegates to
+ * the explicit-id overload. Default acquisition path when no device id
+ * has been resolved by the caller.
  *
  * RFC 0007 Reference: Section 6.2
  *
