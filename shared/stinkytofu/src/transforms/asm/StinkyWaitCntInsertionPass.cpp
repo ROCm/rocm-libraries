@@ -358,9 +358,6 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         buildUseDefChain(func, domInfo, true);
         const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
 
-        // Strip pre-existing tensor waits.
-        removeTensorWaits(passCtx, rpo);
-
         buildBlockExitStates(func, passCtx);
 
         for (auto* bb : rpo) {
@@ -853,24 +850,6 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                 SWaitTensorCntData waitCntData;
                 waitCntData.tlcnt = waitSpec.tensorCount;
                 waitInst->addModifier<SWaitTensorCntData>(waitCntData);
-            }
-        }
-    }
-
-    /// strip pre-existing tensor waits.
-    void removeTensorWaits(PassContext& passCtx, const std::vector<BasicBlock*>& rpo) {
-        for (auto* bb : rpo) {
-            if (!passCtx.shouldProcessBasicBlock(*bb)) {
-                continue;
-            }
-
-            for (auto it = bb->begin(); it != bb->end();) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (inst && inst->is(InstFlag::IF_WaitTensorCnt)) {
-                    it = bb->eraseIR(it);
-                } else {
-                    ++it;
-                }
             }
         }
     }

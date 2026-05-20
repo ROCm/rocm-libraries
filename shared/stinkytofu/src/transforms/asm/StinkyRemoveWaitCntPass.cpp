@@ -30,19 +30,26 @@
 namespace {
 using namespace stinkytofu;
 
-bool tryRemoveTensorWaitCnt(StinkyInstruction* stinkyInst) {
-    if (stinkyInst && stinkyInst->is(InstFlag::IF_WaitTensorCnt)) {
-        return true;
-    }
-    return false;
+/// True iff @p stinkyInst is @c s_wait_tensorcnt (the only opcode carrying
+/// @c IF_WaitTensorCnt). The standard wait-counter opcodes carry @c IF_WaitCnt
+/// instead and are matched by @c isWaitCnt().
+bool isTensorWaitCnt(StinkyInstruction* stinkyInst) {
+    return stinkyInst != nullptr && stinkyInst->is(InstFlag::IF_WaitTensorCnt);
 }
 
+/// Remove every wait-counter instruction in @p bb.
+///
+/// @param bb The basic block to process.
+/// @param removeTensorWaitCnt When true (default) also strip
+///                            @c s_wait_tensorcnt; when false leave tensor
+///                            waits in place so a subsequent insertion pass
+///                            can reuse them.
 void removeWaitCntsInBlock(BasicBlock& bb, bool removeTensorWaitCnt) {
     for (auto it = bb.begin(); it != bb.end();) {
         auto* stinkyInst = dyn_cast<StinkyInstruction>(it.getNodePtr());
 
-        if (stinkyInst && (isWaitCnt(*stinkyInst) ||
-                           (removeTensorWaitCnt && tryRemoveTensorWaitCnt(stinkyInst)))) {
+        if (stinkyInst &&
+            (isWaitCnt(*stinkyInst) || (removeTensorWaitCnt && isTensorWaitCnt(stinkyInst)))) {
             it = bb.eraseIR(it);
         } else {
             ++it;
