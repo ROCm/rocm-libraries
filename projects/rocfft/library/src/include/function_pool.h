@@ -30,6 +30,7 @@
 #include "function_map_key.h"
 #include <functional>
 #include <optional>
+#include <shared_mutex>
 #include <sstream>
 #include <unordered_map>
 
@@ -186,6 +187,18 @@ struct function_pool_data
         static function_pool_data data;
         return data;
     }
+
+    // Protects the maps against concurrent access from parallel
+    // rocfft_plan_create calls.  Read methods (has_function /
+    // get_kernel / get_lengths) take std::shared_lock; the runtime
+    // write path (add_new_kernel) takes std::unique_lock.  Mirrors the
+    // pattern used by RTCKernel::active_modules_mutex and the
+    // host_memory singleton.
+    static std::shared_mutex& get_function_pool_mutex()
+    {
+        static std::shared_mutex mutex;
+        return mutex;
+    }
 };
 
 class function_pool
@@ -281,8 +294,15 @@ public:
     // add a new kernel in runtime
     void add_new_kernel(const FMKey& new_key)
     {
-        // already has this kernel
-        if(has_function(new_key))
+        // Check-then-insert under the write lock so the dedup check and
+        // the emplace are atomic.  We can't call has_function() here:
+        // std::shared_mutex is not recursive, so reacquiring as shared
+        // while holding unique would be UB -- inline the lookup instead.
+        std::unique_lock<std::shared_mutex> lock(
+            function_pool_data::get_function_pool_mutex());
+
+        auto real_key = get_actual_key(new_key, def_key_pool);
+        if(find_key_in_map(function_map, real_key) != function_map.end())
             return;
 
         FMKey new_key_with_lds          = new_key;
@@ -293,12 +313,16 @@ public:
 
     bool has_function(const FMKey& key) const
     {
+        std::shared_lock<std::shared_mutex> lock(
+            function_pool_data::get_function_pool_mutex());
         auto real_key = get_actual_key(key, def_key_pool);
         return find_key_in_map(function_map, real_key) != function_map.end();
     }
 
     bool has_function(const PPFMKey& key) const
     {
+        std::shared_lock<std::shared_mutex> lock(
+            function_pool_data::get_function_pool_mutex());
         auto real_key = get_actual_key(key, def_pp_key_pool);
         return find_key_in_map(pp_function_map, real_key) != pp_function_map.end();
     }
@@ -318,6 +342,8 @@ public:
                                     ComputeScheme               scheme,
                                     std::function<bool(size_t)> filter = {}) const
     {
+        std::shared_lock<std::shared_mutex> lock(
+            function_pool_data::get_function_pool_mutex());
         std::vector<size_t> lengths;
         for(auto const& kv : function_map)
         {
@@ -338,6 +364,8 @@ public:
 
     FFTKernel get_kernel(const FMKey& key) const
     {
+        std::shared_lock<std::shared_mutex> lock(
+            function_pool_data::get_function_pool_mutex());
         auto real_key = get_actual_key(key, def_key_pool);
         auto it       = find_key_in_map(function_map, real_key);
         if(it == function_map.end())
@@ -347,6 +375,8 @@ public:
 
     FFTKernel get_kernel(const PPFMKey& key, ComputeScheme scheme) const
     {
+        std::shared_lock<std::shared_mutex> lock(
+            function_pool_data::get_function_pool_mutex());
         auto real_key = get_actual_key(key, def_pp_key_pool);
         auto it       = find_key_in_map(pp_function_map, real_key);
         if(it == pp_function_map.end())
