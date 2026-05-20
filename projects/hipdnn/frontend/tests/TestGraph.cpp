@@ -178,6 +178,260 @@ TEST_F(TestGraph, ValidateUnsetNodeComputeTypeUnsetGraphComputeType)
     EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
 }
 
+TEST_F(TestGraph, GetBehaviorNotesForEngineFailsBeforeGraphFinalized)
+{
+    const Graph graph;
+    std::vector<BehaviorNote> notes = {BehaviorNote::RUNTIME_COMPILATION};
+
+    auto result = graph.get_behavior_notes_for_engine(0, notes);
+
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_TRUE(notes.empty());
+}
+
+TEST_F(TestGraph, GetBehaviorNotesForEngineReturnsNotes)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 3;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 3, _, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void* arrayOfElements) {
+            *elementCount = 3;
+            auto* notes = static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements);
+            notes[0] = HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
+            notes[1] = HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY;
+            notes[2] = HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
+    auto result = graph.get_behavior_notes_for_engine(7, notes);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(notes.size(), 3u);
+    EXPECT_EQ(notes[0], BehaviorNote::RUNTIME_COMPILATION);
+    EXPECT_EQ(notes[1], BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY);
+    EXPECT_EQ(notes[2], BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+}
+
+TEST_F(TestGraph, GetBehaviorNotesForEnginePropagatesCountQueryFailure)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
+    auto result = graph.get_behavior_notes_for_engine(7, notes);
+
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_TRUE(notes.empty());
+}
+
+TEST_F(TestGraph, GetBehaviorNotesForEnginePropagatesNoteQueryFailure)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, _, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
+    auto result = graph.get_behavior_notes_for_engine(7, notes);
+
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_TRUE(notes.empty());
+}
+
+TEST_F(TestGraph, GetBehaviorNotesForEnginePreservesUnknownNotes)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 3;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 3, _, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void* arrayOfElements) {
+            *elementCount = 3;
+            auto* notes = static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements);
+            notes[0] = HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
+            notes[1]
+                = static_cast<hipdnnBackendBehaviorNote_t>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1);
+            notes[2] = HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<BehaviorNote> notes;
+    auto result = graph.get_behavior_notes_for_engine(7, notes);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(notes.size(), 3u);
+    EXPECT_EQ(notes[0], BehaviorNote::RUNTIME_COMPILATION);
+    EXPECT_EQ(notes[1], static_cast<BehaviorNote>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1));
+    EXPECT_EQ(notes[2], BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+}
+
+TEST_F(TestGraph, GetBehaviorNotesForEngineRejectsMismatchedReturnedNoteCount)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 2;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 2, _, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void* arrayOfElements) {
+            *elementCount = 1;
+            auto* notes = static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements);
+            notes[0] = HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
+            notes[1] = HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
+    auto result = graph.get_behavior_notes_for_engine(7, notes);
+
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_TRUE(notes.empty());
+}
+
+TEST_F(TestGraph, GetBehaviorNotesForEngineRejectsNegativeNoteCount)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = -1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<BehaviorNote> notes = {BehaviorNote::RUNTIME_COMPILATION};
+    auto result = graph.get_behavior_notes_for_engine(7, notes);
+
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_TRUE(notes.empty());
+}
+
+TEST_F(TestGraph, GetBehaviorNotesForEngineClearsOutputWhenNoNotes)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
+    auto result = graph.get_behavior_notes_for_engine(7, notes);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(notes.empty());
+}
+
 TEST_F(TestGraph, SerializeCompiledPlanRejectsMissingExecutionPlan)
 {
     const Graph graph;

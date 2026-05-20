@@ -210,7 +210,6 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["LocalSplitU"] = 1
     kernel["StoreRemapVectorWidth"] = 0
     kernel["SourceSwap"] = False
-    kernel["BAddrInterleave"] = False
     kernel["EnableMatrixInstruction"] = True
     kernel["AdaptiveGemm"] = 0
     kernel["AdaptiveGemmGSUA"] = 0
