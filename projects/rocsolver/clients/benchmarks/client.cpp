@@ -132,6 +132,11 @@ try
             "                           Only applicable to functions with hybrid support.\n"
             "                           ")
 
+        ("matrix",
+         value<std::string>(&argus.matrix)->default_value("rands"),
+            "Test matrix to generate. Options: rands (default), identity.\n"
+            "                           ")
+
         ("mem_query",
          value<rocblas_int>(&argus.mem_query)->default_value(0),
             "Calculate the required amount of device workspace memory? 0 = No, 1 = Yes.\n"
