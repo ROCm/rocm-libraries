@@ -84,12 +84,18 @@ __all__ = [
     "FusedMoeSpec",
     "build_moe_gather",
     "build_moe_silu_mul",
+    "build_moe_silu_mul_packed",
+    "build_moe_static_scatter_gather",
     "build_moe_topk_weighted_reduce",
     "is_valid_spec",
     "moe_gather_grid",
     "moe_gather_signature",
     "moe_silu_mul_grid",
+    "moe_silu_mul_packed_grid",
+    "moe_silu_mul_packed_signature",
     "moe_silu_mul_signature",
+    "moe_static_scatter_gather_grid",
+    "moe_static_scatter_gather_signature",
     "moe_topk_weighted_reduce_grid",
     "moe_topk_weighted_reduce_signature",
     "moe_fused_workspace_bytes",
@@ -378,6 +384,241 @@ def build_moe_silu_mul(spec: FusedMoeSpec) -> KernelDef:
             store_scalar_from_f32(b, Hidden, off, h, dtype=dtype)
 
     return b.kernel
+
+
+# ---------------------------------------------------------------------
+# Stage (4'): silu_mul packed variant.
+# Mirrors AITER's "G1U1" gate-up packing: one (M, 2*I) input buffer
+# instead of two separate (M, I) buffers. Halves the global-memory
+# traffic vs the unpacked path (one B-tensor in the gate+up GEMM
+# instead of two; one fused output buffer here instead of two
+# separate gate / up buffers); pairs with a single batched GEMM
+# whose N axis = 2*I and W = concat(W_gate, W_up, dim=1).
+# ---------------------------------------------------------------------
+
+
+def build_moe_silu_mul_packed(spec: FusedMoeSpec) -> KernelDef:
+    """SwiGLU activation reading from a packed gate+up buffer.
+
+    ``Hidden[b, i] = silu(GateUp[b, i]) * GateUp[b, I + i]`` where
+    ``GateUp`` has shape ``(M, 2*I)`` row-major. The "G1U1" weight
+    packing convention: column slab ``[0, I)`` holds the gate output,
+    ``[I, 2*I)`` holds the up output. This kernel is the activation
+    half of the gate+up fusion -- the matching GEMM is one batched
+    GEMM with ``N = 2*I`` and ``W_gate_up = torch.cat([W_gate, W_up],
+    dim=1)`` (shape ``(E, 2*I, H)``).
+
+    Kernel signature::
+
+        (GateUp:    ptr<dtype, global>,   # (tokens*topk, 2*intermediate)
+         Hidden:    ptr<dtype, global>,   # (tokens*topk, intermediate)
+         total_pairs: i32,
+         intermediate: i32)
+
+    Grid: ``(total_pairs, 1, 1)``; one CTA per bucket row, each
+    thread handling ``elems_per_thread_inter`` consecutive
+    intermediate columns. Identical numerics to
+    :func:`build_moe_silu_mul` (sigmoid via
+    ``exp2(-x * log2(e))``, all compute in f32, truncate to dtype on
+    store) so parity tests can compare the two paths.
+    """
+    ok, why = is_valid_spec(spec)
+    if not ok:
+        raise ValueError(f"invalid fused_moe spec: {why}")
+
+    I_DIM = spec.intermediate
+    BS = spec.block_size
+    EPT = spec.elems_per_thread_inter
+    dtype = spec.dtype
+
+    b = IRBuilder(spec.kernel_name("silu_mul_packed"))
+    b.kernel.attrs["max_workgroup_size"] = BS
+
+    ty = io_ir_type(dtype)
+    GateUp = b.param(
+        "GateUp", PtrType(ty, "global"), noalias=True, readonly=True, align=16
+    )
+    Hidden = b.param(
+        "Hidden", PtrType(ty, "global"), noalias=True, writeonly=True, align=16
+    )
+    _total_pairs = b.param("total_pairs", I32)  # noqa: F841 - ABI
+    _inter = b.param("intermediate", I32)  # noqa: F841 - ABI
+
+    bid = b.block_id_x()
+    tid = b.thread_id_x()
+    # Row stride for the packed buffer is 2*I; row b's gate slab
+    # starts at b * 2*I, up slab starts at b * 2*I + I. Output row
+    # stride is I (Hidden is unpacked).
+    two_i = b.const_i32(2 * I_DIM)
+    i_const = b.const_i32(I_DIM)
+    gate_base = b.mul(bid, two_i)
+    up_base = b.add(gate_base, i_const)
+    out_base = b.mul(bid, i_const)
+
+    c_neg_log2e = b.const_f32(-1.4426950408889634)
+    one_f32 = b.const_f32(1.0)
+
+    for k in range(EPT):
+        i_col = b.add(b.mul(tid, b.const_i32(EPT)), b.const_i32(k))
+        in_i = b.cmp_lt(i_col, b.const_i32(I_DIM))
+        with b.scf_if(in_i):
+            g_off = b.add(gate_base, i_col)
+            u_off = b.add(up_base, i_col)
+            o_off = b.add(out_base, i_col)
+            g = load_scalar_as_f32(b, GateUp, g_off, dtype=dtype)
+            u = load_scalar_as_f32(b, GateUp, u_off, dtype=dtype)
+            sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
+            silu = b.fmul(g, sig)
+            h = b.fmul(silu, u)
+            store_scalar_from_f32(b, Hidden, o_off, h, dtype=dtype)
+
+    return b.kernel
+
+
+def moe_silu_mul_packed_grid(spec: FusedMoeSpec) -> Tuple[int, int, int]:
+    return (spec.total_pairs, 1, 1)
+
+
+def moe_silu_mul_packed_signature(spec: FusedMoeSpec):
+    return (
+        SignatureBuilder()
+        .ptr("GateUp", spec.dtype)
+        .ptr("Hidden", spec.dtype)
+        .scalar("total_pairs", "i32")
+        .scalar("intermediate", "i32")
+        .build()
+    )
+
+
+# ---------------------------------------------------------------------
+# Static-mode scatter+gather fusion.
+# ---------------------------------------------------------------------
+
+
+def build_moe_static_scatter_gather(spec: FusedMoeSpec) -> KernelDef:
+    """Static-offset scatter and gather in one kernel.
+
+    This is the static-offset fast path's replacement for the separate
+    ``moe_sort_scatter`` and ``moe_gather`` kernels:
+
+    * read ``TopkIds[t, k]`` and ``TopkWeights[t, k]``;
+    * claim the next slot in expert ``eid`` via
+      ``atomic_add(Counter[eid], 1)``;
+    * write ``SortedTokenIds[slot] = t`` and
+      ``SortedWeights[slot] = weight``;
+    * copy ``X[t, :]`` directly into ``GroupedInput[slot, :]``.
+
+    Static slot layout is ``slot = eid * slot_size + local_off``. Padded
+    rows are initialized by the caller (``SortedTokenIds=-1``,
+    ``GroupedInput=0``) and untouched by this kernel.
+
+    Kernel signature::
+
+        (TopkIds: ptr<i32>, TopkWeights: ptr<f32>, Counter: ptr<i32>,
+         X: ptr<dtype>, SortedTokenIds: ptr<i32>, SortedWeights: ptr<f32>,
+         GroupedInput: ptr<dtype>,
+         tokens: i32, topk: i32, num_experts: i32,
+         hidden: i32, slot_size: i32)
+
+    Grid: ``(tokens * topk, 1, 1)``; one CTA per routed pair. Threads in
+    the CTA cooperatively copy the hidden row.
+    """
+    ok, why = is_valid_spec(spec)
+    if not ok:
+        raise ValueError(f"invalid fused_moe spec: {why}")
+
+    H = spec.hidden
+    BS = spec.block_size
+    EPT = spec.elems_per_thread_hidden
+    dtype = spec.dtype
+
+    b = IRBuilder(spec.kernel_name("static_scatter_gather"))
+    b.kernel.attrs["max_workgroup_size"] = BS
+
+    ty = io_ir_type(dtype)
+    TopkIds = b.param(
+        "TopkIds", PtrType(I32, "global"), noalias=True, readonly=True, align=4
+    )
+    TopkWeights = b.param(
+        "TopkWeights", PtrType(F32, "global"), noalias=True, readonly=True, align=4
+    )
+    Counter = b.param("Counter", PtrType(I32, "global"), align=4)
+    X = b.param("X", PtrType(ty, "global"), noalias=True, readonly=True, align=16)
+    SortedTokenIds = b.param(
+        "SortedTokenIds", PtrType(I32, "global"), writeonly=True, align=4
+    )
+    SortedWeights = b.param(
+        "SortedWeights", PtrType(F32, "global"), writeonly=True, align=4
+    )
+    GroupedInput = b.param(
+        "GroupedInput", PtrType(ty, "global"), writeonly=True, align=16
+    )
+    tokens = b.param("tokens", I32)
+    topk = b.param("topk", I32)
+    num_experts = b.param("num_experts", I32)
+    _hidden = b.param("hidden", I32)  # noqa: F841 - ABI compatibility
+    slot_size = b.param("slot_size", I32)
+
+    bid = b.block_id_x()
+    tid = b.thread_id_x()
+    out_row_slot = b.smem_alloc(I32, [1], name_hint="sg_out_row")
+    num_pairs = b.mul(tokens, topk)
+    in_bounds = b.cmp_lt(bid, num_pairs)
+
+    with b.scf_if(in_bounds):
+        eid = b.global_load_i32(TopkIds, bid)
+        valid_e = b.land(b.cmp_ge(eid, b.const_i32(0)), b.cmp_lt(eid, num_experts))
+        with b.scf_if(valid_e):
+            t_idx = b.div(bid, topk)
+            is_lead = b.cmp_eq(tid, b.const_i32(0))
+            with b.scf_if(is_lead):
+                local = b.global_atomic_add(Counter, eid, b.const_i32(1))
+                base = b.mul(eid, slot_size)
+                out_row_lead = b.add(base, local)
+                b.smem_store_vN(out_row_slot, [b.const_i32(0)], out_row_lead, n=1)
+
+                w = b.global_load_f32(TopkWeights, bid)
+                b.global_store(SortedTokenIds, out_row_lead, t_idx, align=4)
+                b.global_store(SortedWeights, out_row_lead, w, align=4)
+            b.sync()
+            out_row = b.vec_extract(
+                b.smem_load_vN(out_row_slot, b.const_i32(0), dtype=I32, n=1), 0
+            )
+
+            # Copy X[t_idx, :] -> GroupedInput[out_row, :].
+            for k in range(EPT):
+                h_col = b.add(b.mul(tid, b.const_i32(EPT)), b.const_i32(k))
+                in_h = b.cmp_lt(h_col, b.const_i32(H))
+                with b.scf_if(in_h):
+                    src = b.add(b.mul(t_idx, b.const_i32(H)), h_col)
+                    dst = b.add(b.mul(out_row, b.const_i32(H)), h_col)
+                    v = load_scalar_as_f32(b, X, src, dtype=dtype)
+                    store_scalar_from_f32(b, GroupedInput, dst, v, dtype=dtype)
+
+    return b.kernel
+
+
+def moe_static_scatter_gather_grid(spec: FusedMoeSpec) -> Tuple[int, int, int]:
+    return (spec.total_pairs, 1, 1)
+
+
+def moe_static_scatter_gather_signature(spec: FusedMoeSpec):
+    return (
+        SignatureBuilder()
+        .ptr("TopkIds", "i32")
+        .ptr("TopkWeights", "f32")
+        .ptr("Counter", "i32")
+        .ptr("X", spec.dtype)
+        .ptr("SortedTokenIds", "i32")
+        .ptr("SortedWeights", "f32")
+        .ptr("GroupedInput", spec.dtype)
+        .scalar("tokens", "i32")
+        .scalar("topk", "i32")
+        .scalar("num_experts", "i32")
+        .scalar("hidden", "i32")
+        .scalar("slot_size", "i32")
+        .build()
+    )
 
 
 # ---------------------------------------------------------------------
