@@ -73,14 +73,16 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
         kernels_registered = true;
     }
 
-    // Get backward data kernels matching data type and spatial dims
+    // Get backward data kernels matching data type, spatial dims, and layout
     constexpr const char* dtype_str = get_dtype_string<SIGNATURE>();
+    constexpr const char* layout_str = get_layout_string<SIGNATURE>();
     constexpr int ndim = SIGNATURE.spatial_dim;
     auto& registry = ck_tile::dispatcher::GroupedConvRegistry::instance();
     auto all_kernels = registry.filter([](const ck_tile::dispatcher::GroupedConvKernelInstance& k) {
         return k.key().op == ck_tile::dispatcher::GroupedConvOp::BackwardData &&
                k.key().dtype_in == dtype_str &&
-               k.key().ndim_spatial == ndim;
+               k.key().ndim_spatial == ndim &&
+               k.key().layout == layout_str;
     });
 
     // Set up thread-local buffer context

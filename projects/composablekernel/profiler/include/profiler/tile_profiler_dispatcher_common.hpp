@@ -33,6 +33,21 @@ constexpr const char* get_dtype_string()
         return "bf16";
 }
 
+/// Get dispatcher layout string from SIGNATURE.
+template <auto SIGNATURE>
+constexpr const char* get_layout_string()
+{
+    constexpr auto layout = SIGNATURE.input.config.layout;
+    if constexpr(layout == ckb::TensorLayout::NHWGC)
+        return "nhwgc";
+    else if constexpr(layout == ckb::TensorLayout::NDHWGC)
+        return "ndhwgc";
+    else if constexpr(layout == ckb::TensorLayout::NGCHW)
+        return "ngchw";
+    else
+        return "unknown";
+}
+
 /// Query the runtime GPU architecture name (e.g. "gfx950").
 inline std::string get_runtime_arch_name()
 {
