@@ -3,11 +3,20 @@
 
 import os
 import sys
+<<<<<<< HEAD
+=======
+import json
+import csv
+>>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
 import time
 import argparse
 import importlib.util
 from pathlib import Path
+<<<<<<< HEAD
 from typing import List, Dict, Tuple
+=======
+from typing import List, Dict, Tuple, Optional
+>>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
 
 
 def _import_gemm_benchmark():
@@ -123,6 +132,25 @@ class GroupedRowColQuantGemmBenchmark(GemmBenchmark):
 
         return results
 
+<<<<<<< HEAD
+=======
+    def find_best_kernel(
+        self, results: List[Dict], metric: str = "tflops"
+    ) -> Optional[Dict]:
+        """Find the best performing kernel based on metric."""
+        if not results:
+            return None
+
+        if metric == "tflops":
+            return max(results, key=lambda x: x.get("tflops", 0))
+        elif metric == "time_ms":
+            return min(results, key=lambda x: x.get("time_ms", float("inf")))
+        elif metric == "bandwidth_gb_s":
+            return max(results, key=lambda x: x.get("bandwidth_gb_s", 0))
+        else:
+            raise ValueError(f"Unknown metric: {metric}")
+
+>>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
     def benchmark_sweep(
         self,
         problem_sizes: List[Tuple[int, int, int]],
@@ -163,7 +191,11 @@ class GroupedRowColQuantGemmBenchmark(GemmBenchmark):
                     all_results.extend(results)
 
                     # Find best kernel for this configuration
+<<<<<<< HEAD
                     best = benchmark_utils.find_best_kernel(results)
+=======
+                    best = self.find_best_kernel(results)
+>>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
                     if best:
                         key = f"g{group_count}_m{m}_n{n}_k{k}_kbatch{kbatch}"
                         best_kernels[key] = best
@@ -175,6 +207,198 @@ class GroupedRowColQuantGemmBenchmark(GemmBenchmark):
         self.results = all_results
         return best_kernels
 
+<<<<<<< HEAD
+=======
+    def export_csv(self, filename: str):
+        """Export all results to CSV."""
+        if not self.results:
+            print("No results to export")
+            return
+
+        # Get all unique keys from results
+        all_keys = set()
+        for result in self.results:
+            all_keys.update(result.keys())
+
+        # Sort keys for consistent output
+        fieldnames = sorted(all_keys)
+
+        with open(filename, "w", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.results)
+
+        print(f"Results exported to {filename}")
+
+    def export_best_kernels(self, best_kernels: Dict, filename: str):
+        """Export best kernel selections to file."""
+        with open(filename, "w") as f:
+            f.write("# Best kernel selections for grouped rowcolquant GEMM\n")
+            f.write(
+                "# Format: problem_size -> kernel_name (TFLOPS, bandwidth, latency)\n\n"
+            )
+
+            for key, kernel in sorted(best_kernels.items()):
+                f.write(
+                    f"{key}: {kernel['name']} ({kernel['tflops']:.2f} TFLOPS, "
+                    f"{kernel['bandwidth_gb_s']:.2f} GB/s, {kernel['time_ms']:.2f}ms)\n"
+                )
+
+        print(f"Best kernels exported to {filename}")
+
+    def export_json(self, filename: str, best_kernels: Dict = None):
+        """Export all results and best kernels to JSON with comprehensive metadata."""
+        from datetime import datetime
+
+        # Calculate comprehensive summary statistics for all metrics
+        successful_results = [r for r in self.results if r.get("tflops", 0) > 0]
+
+        tflops_values = [r.get("tflops", 0) for r in successful_results]
+        bandwidth_values = [r.get("bandwidth_gb_s", 0) for r in successful_results]
+        latency_values = [
+            r.get("time_ms", 0) for r in successful_results if r.get("time_ms", 0) > 0
+        ]
+
+        # Performance breakdown by kernel type
+        pipeline_stats = {}
+        scheduler_stats = {}
+        data_type_stats = {}
+
+        for result in successful_results:
+            config = result.get("config", {})
+
+            # Pipeline statistics
+            pipeline = config.get("pipeline", "unknown")
+            if pipeline not in pipeline_stats:
+                pipeline_stats[pipeline] = {
+                    "count": 0,
+                    "avg_tflops": 0,
+                    "best_tflops": 0,
+                }
+            pipeline_stats[pipeline]["count"] += 1
+            pipeline_stats[pipeline]["best_tflops"] = max(
+                pipeline_stats[pipeline]["best_tflops"], result.get("tflops", 0)
+            )
+
+            # Scheduler statistics
+            scheduler = config.get("scheduler", "unknown")
+            if scheduler not in scheduler_stats:
+                scheduler_stats[scheduler] = {
+                    "count": 0,
+                    "avg_tflops": 0,
+                    "best_tflops": 0,
+                }
+            scheduler_stats[scheduler]["count"] += 1
+            scheduler_stats[scheduler]["best_tflops"] = max(
+                scheduler_stats[scheduler]["best_tflops"], result.get("tflops", 0)
+            )
+
+            # Data type statistics
+            data_type = config.get("data_type", "unknown")
+            if data_type not in data_type_stats:
+                data_type_stats[data_type] = {
+                    "count": 0,
+                    "avg_tflops": 0,
+                    "best_tflops": 0,
+                }
+            data_type_stats[data_type]["count"] += 1
+            data_type_stats[data_type]["best_tflops"] = max(
+                data_type_stats[data_type]["best_tflops"], result.get("tflops", 0)
+            )
+
+        # Calculate averages for breakdown stats
+        for stats_dict, field_name in [
+            (pipeline_stats, "pipeline"),
+            (scheduler_stats, "scheduler"),
+            (data_type_stats, "data_type"),
+        ]:
+            for key in stats_dict:
+                relevant_results = [
+                    r
+                    for r in successful_results
+                    if r.get("config", {}).get(field_name, "unknown") == key
+                ]
+                if relevant_results:
+                    stats_dict[key]["avg_tflops"] = sum(
+                        r.get("tflops", 0) for r in relevant_results
+                    ) / len(relevant_results)
+
+        output_data = {
+            "benchmark_metadata": {
+                "timestamp": datetime.now().isoformat(),
+                "operation": "grouped_gemm_rowcolquant",
+                "total_kernels_tested": len(self.results),
+                "unique_kernels": len(
+                    set(r.get("name", "unknown") for r in self.results)
+                ),
+                "successful_runs": len(successful_results),
+                "failed_runs": len(self.results) - len(successful_results),
+            },
+            "performance_summary": {
+                "tflops_stats": {
+                    "best": max(tflops_values, default=0),
+                    "average": (
+                        sum(tflops_values) / len(tflops_values) if tflops_values else 0
+                    ),
+                    "min": min(tflops_values, default=0),
+                    "median": (
+                        sorted(tflops_values)[len(tflops_values) // 2]
+                        if tflops_values
+                        else 0
+                    ),
+                },
+                "bandwidth_stats": {
+                    "best_gb_s": max(bandwidth_values, default=0),
+                    "average_gb_s": (
+                        sum(bandwidth_values) / len(bandwidth_values)
+                        if bandwidth_values
+                        else 0
+                    ),
+                    "min_gb_s": min(bandwidth_values, default=0),
+                    "median_gb_s": (
+                        sorted(bandwidth_values)[len(bandwidth_values) // 2]
+                        if bandwidth_values
+                        else 0
+                    ),
+                },
+                "latency_stats": {
+                    "best_ms": min(latency_values, default=0),
+                    "average_ms": (
+                        sum(latency_values) / len(latency_values)
+                        if latency_values
+                        else 0
+                    ),
+                    "max_ms": max(latency_values, default=0),
+                    "median_ms": (
+                        sorted(latency_values)[len(latency_values) // 2]
+                        if latency_values
+                        else 0
+                    ),
+                },
+                "kernel_type_breakdown": {
+                    "by_pipeline": pipeline_stats,
+                    "by_scheduler": scheduler_stats,
+                    "by_data_type": data_type_stats,
+                },
+                "total_problem_configurations": (
+                    len(best_kernels) if best_kernels else 0
+                ),
+            },
+            "kernel_results": self.results,
+            "best_kernels_by_problem": best_kernels or {},
+        }
+
+        with open(filename, "w") as f:
+            json.dump(output_data, f, indent=2)
+
+        print(f"JSON results exported to {filename}")
+        print(f"  - Total kernels: {len(self.results)}")
+        print(f"  - Successful runs: {len(successful_results)}")
+        print(f"  - Best TFLOPS: {max(tflops_values, default=0):.2f}")
+        print(f"  - Best bandwidth: {max(bandwidth_values, default=0):.2f} GB/s")
+        print(f"  - Best latency: {min(latency_values, default=0):.2f}ms")
+
+>>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -280,10 +504,17 @@ def main():
 
     # Export results
     if benchmark.results:
+<<<<<<< HEAD
         benchmark_utils.export_csv(benchmark.results, args.csv)
         benchmark_utils.export_best_kernels(best_kernels, args.best)
         if args.json:
             benchmark_utils.export_json(benchmark.results, args.json, best_kernels)
+=======
+        benchmark.export_csv(args.csv)
+        benchmark.export_best_kernels(best_kernels, args.best)
+        if args.json:
+            benchmark.export_json(args.json, best_kernels)
+>>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
 
     print("\nBenchmark complete!")
     return 0

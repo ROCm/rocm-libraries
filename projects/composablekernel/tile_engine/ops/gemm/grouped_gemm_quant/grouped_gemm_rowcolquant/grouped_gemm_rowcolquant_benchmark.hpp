@@ -79,7 +79,11 @@ void gemm_host_reference_grouped(int verify,
 {
     const int group_count = problem.group_count_;
 
+<<<<<<< HEAD
     if(verify > 0)
+=======
+    if(verify == 1)
+>>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
     {
         for(int i = 0; i < group_count; ++i)
         {
