@@ -2003,8 +2003,6 @@ class LogicalScheduler:
                     src = em.source
                     if em.opType == 'gr' and src.mtIteration == 2:
                         removed.add(em.moduleId)
-                    elif em.opType == 'gr_inc':
-                        removed.add(em.moduleId)
                     elif em.opType == 'wait_gr':
                         if src.wait_gr_counts is not None:
                             src.wait_gr_counts = WaitGRCounts()
@@ -2036,7 +2034,7 @@ class LogicalScheduler:
                         removed.add(em.moduleId)
                     elif em.opType == 'lr' and src.mtIteration == 1:
                         removed.add(em.moduleId)
-                    elif em.opType in ('gr_inc', 'lr_inc'):
+                    elif em.opType == 'gr_inc':
                         removed.add(em.moduleId)
 
                 # Zero inflight counts on remaining WaitGR.
@@ -2083,21 +2081,13 @@ class LogicalScheduler:
                      for pi in range(cfg.numPartitions)]
         
         preamble = []
-        # No unconditional GR_INC: mainloop's last iter (PGR=0) or PRELOOP
-        # (PGR>=1) already handled the SRD advance + LW swap that the tail body
-        # would otherwise need. Two opposite entry paths arrive here and need
-        # opposite fixups, dispatched at runtime on K:
-        #   - NLL-only (PGR=2, DU<=K<2*DU): PRELOOP swapped LW but not LR
-        #     → TailLRIncOp aligns LR with LW. No SRD advance needed.
-        #   - NGLL ran (PGR=2, K>=2*DU): NGLL swapped LR (aligned with LW), but
-        #     PRELOOP's MT1 GR loaded data without advancing SRD afterwards
-        #     → TailSrdAdvanceOp bumps SRD by one DU. No LR swap needed.
-        #   - PGR=1 with K>=DU: PRELOOP loaded MT0 without advancing SRD; NLL
-        #     drains it leaving SRD at offset 0 → TailSrdAdvanceOp bumps SRD.
-        # Each op emits its own runtime branch so only the right body executes.
-        if cfg.pgr >= 2:
-            preamble.extend(self._make_depops_all_tensors(TailLRIncOp))
-        if cfg.pgr >= 1:
+        # PGR=2: NGLL keeps gr_inc (settles PRELOOP MT1's deferred SRD advance
+        # + LW swap) and NLL keeps lr_inc (closes the LR/LW gap for the
+        # NLL-only path). Both tail-entry paths therefore arrive with LR==LW
+        # and SRD correctly advanced — no preamble fixup needed.
+        # PGR=1: no NGLL exists, so PRELOOP's MT0 GR leaves SRD un-advanced
+        # → TailSrdAdvanceOp still required.
+        if cfg.pgr == 1:
             preamble.extend(self._make_depops_all_tensors(TailSrdAdvanceOp))
 
         # GRs entire MT at once for all tensors.
