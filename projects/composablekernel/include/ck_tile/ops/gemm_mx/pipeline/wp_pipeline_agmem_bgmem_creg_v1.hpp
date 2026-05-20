@@ -133,6 +133,11 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr bool DoubleSmemBuffer = false;
     static constexpr bool Preshuffle       = true;
 
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    {
+        return 2 * PipelinePolicy::template GetSmemSize<Problem>();
+    }
+
     template <GemmPipelineScheduler>
     struct PipelineImpl
     {

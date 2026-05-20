@@ -13,6 +13,34 @@
 
 namespace ck_tile {
 
+template <typename Problem, typename Policy>
+struct MXGemmPipelineAgBgCrCompAsyncEightWaves;
+
+namespace detail {
+template <typename Problem>
+struct MXGemmPipelineAgBgCrCompAsyncEightWavesPolicy;
+
+template <typename Pipeline>
+struct MXGemmKernelScaleTraits
+{
+    static constexpr index_t ScaleGranularityK = Pipeline::ScaleGranularityK;
+    static constexpr index_t MXdlPack          = Pipeline::MXdlPack;
+    static constexpr index_t NXdlPack          = Pipeline::NXdlPack;
+    static constexpr index_t KXdlPack          = Pipeline::KXdlPack;
+};
+
+template <typename Problem, typename Policy>
+struct MXGemmKernelScaleTraits<MXGemmPipelineAgBgCrCompAsyncEightWaves<Problem, Policy>>
+{
+    using PolicyTraits = MXGemmPipelineAgBgCrCompAsyncEightWavesPolicy<Problem>;
+
+    static constexpr index_t ScaleGranularityK = PolicyTraits::BlockScaleSize;
+    static constexpr index_t MXdlPack          = PolicyTraits::MXdlPack;
+    static constexpr index_t NXdlPack          = PolicyTraits::NXdlPack;
+    static constexpr index_t KXdlPack          = PolicyTraits::KXdlPack;
+};
+} // namespace detail
+
 template <typename ScaleM    = MXScalePointer<e8m0_t, -1>,
           typename ScaleN    = MXScalePointer<e8m0_t, -1>,
           index_t NumATensor = 1,
@@ -99,10 +127,11 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
     static constexpr auto BPackedSize = numeric_traits<BDataType>::PackedSize;
 
     // XdlPack: desired packing of e8m0_t scale values into int32_t
-    static constexpr index_t ScaleGranularityK = MXGemmPipeline::ScaleGranularityK;
-    static constexpr index_t MXdlPack          = MXGemmPipeline::MXdlPack;
-    static constexpr index_t NXdlPack          = MXGemmPipeline::NXdlPack;
-    static constexpr index_t KXdlPack          = MXGemmPipeline::KXdlPack;
+    using ScaleTraits                          = detail::MXGemmKernelScaleTraits<MXGemmPipeline>;
+    static constexpr index_t ScaleGranularityK = ScaleTraits::ScaleGranularityK;
+    static constexpr index_t MXdlPack          = ScaleTraits::MXdlPack;
+    static constexpr index_t NXdlPack          = ScaleTraits::NXdlPack;
+    static constexpr index_t KXdlPack          = ScaleTraits::KXdlPack;
 
     // Effective pack sizes: fall back to 1 when dimension is too small
     using BlockWarps_                      = typename BlockGemmShape::BlockWarps;
@@ -453,12 +482,28 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                           || ScaleN::GranularityMN == -1,          // or ScaleB is disable
                       "ScaleM and ScaleN should have the same GranularityK");
 
-        const auto& c_block_tile = MXGemmPipeline{}(a_block_window[number<0>{}],
-                                                    b_block_window[number<0>{}],
-                                                    scale_a_block_window,
-                                                    scale_b_block_window,
-                                                    num_loop,
-                                                    smem_ptr);
+        const auto& c_block_tile = [&]() {
+            if constexpr(MXGemmPipeline::Preshuffle)
+            {
+                constexpr index_t smem_ping_pong_size = MXGemmPipeline::GetSmemSize() / 2;
+                return MXGemmPipeline{}(a_block_window[number<0>{}],
+                                        b_block_window[number<0>{}],
+                                        scale_a_block_window,
+                                        scale_b_block_window,
+                                        num_loop,
+                                        smem_ptr,
+                                        static_cast<char*>(smem_ptr) + smem_ping_pong_size);
+            }
+            else
+            {
+                return MXGemmPipeline{}(a_block_window[number<0>{}],
+                                        b_block_window[number<0>{}],
+                                        scale_a_block_window,
+                                        scale_b_block_window,
+                                        num_loop,
+                                        smem_ptr);
+            }
+        }();
 
         // Run Epilogue Pipeline - create C block window directly
         auto c_block_window = MakeCBlockWindows(e_ptr, kargs, i_m, i_n);

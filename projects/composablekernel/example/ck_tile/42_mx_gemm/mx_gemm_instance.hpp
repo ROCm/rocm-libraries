@@ -62,12 +62,12 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
     // the new MX comp_async pipeline with MX scaling support
     constexpr bool IsEightWave =
         (GemmConfig::M_Warp * GemmConfig::N_Warp * GemmConfig::K_Warp) == 8;
-    using MXGemmPipeline =
-        std::conditional_t<GemmConfig::Preshuffle,
-                           ck_tile::MXGemmPreshufflePipelineAGmemBGmemCRegV1<MXPipelineProblem>,
-                           std::conditional_t<IsEightWave,
-                               ck_tile::MXGemmPipelineAgBgCrCompAsyncEightWaves<MXPipelineProblem>,
-                               ck_tile::MXGemmPipelineAgBgCrCompAsync<MXPipelineProblem>>>;
+    using MXGemmPipeline = std::conditional_t<
+        GemmConfig::Preshuffle,
+        ck_tile::MXGemmPreshufflePipelineAGmemBGmemCRegV1<MXPipelineProblem>,
+        std::conditional_t<IsEightWave,
+                           ck_tile::MXGemmPipelineAgBgCrCompAsyncEightWaves<MXPipelineProblem>,
+                           ck_tile::MXGemmPipelineAgBgCrCompAsync<MXPipelineProblem>>>;
 
     using TilePartitioner =
         ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
@@ -95,13 +95,13 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                          GemmConfig::K_Warp_Tile,
                                          MXPipelineProblem::TransposeC,
                                          GemmConfig::NumWaveGroups,
-                                         false,            // FixedVectorSize_ (Default)
-                                         1,                // VectorSizeC_ (Default)
+                                         false, // FixedVectorSize_ (Default)
+                                         1,     // VectorSizeC_ (Default)
                                          kBlockedXDLNPerWarp,
-                                         false,            // DoubleSmemBuffer_ (Default)
-                                         ComputeDataType,  // AComputeDataType
-                                         ComputeDataType,  // BComputeDataType
-                                         true>>;           // TilesPacked_ (because of packed scales)
+                                         false,           // DoubleSmemBuffer_ (Default)
+                                         ComputeDataType, // AComputeDataType
+                                         ComputeDataType, // BComputeDataType
+                                         true>>;          // TilesPacked_ (because of packed scales)
 
     using Kernel = ck_tile::MXGemmKernel<TilePartitioner, MXGemmPipeline, GemmEpilogue>;
 
