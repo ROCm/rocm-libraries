@@ -1,0 +1,337 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+
+#######################################################################
+# Subtile path — MXFP4 (F4) — TAIL-LOOP variant (medium coverage)
+#
+# K is restricted to multiples of 32 (the MX ASEM target) but NOT
+# multiples of DepthU; every problem exercises the subtile tail loop.
+# MIK = 128 for FP4, so K_rem partitions into:
+#   - Partial-MFMA cases (K_rem mod 128 != 0): tail does 1-2 MFMAs,
+#     the last with lane-masked partial-K inputs.
+#   - Full-last-MFMA cases (K_rem mod 128 == 0): tail does N full
+#     MFMAs; no per-MFMA partial masking needed.
+# Both MX scale tensors (MXSA, MXSB) get the same per-K-block (32)
+# lane mask.
+#
+# Coverage (~14 kernels, ~80 problem runs):
+#   - Section 1: full K_rem × PGR × StreamK matrix on MT 128x128
+#                (single scale group, smoke epicenter).
+#   - Section 2: full K_rem × PGR matrix on MT 256x256
+#                (multi scale-group surface).
+#   - Section 3: DU=512 proof-of-life.
+#   - Sections 4-6: bias / F16 dest / F32 dest one-PGR=0 cell each.
+#
+# Wave-tile shape diversity is delegated to the aligned-K
+# subtile_mxfp4.yaml; tail logic only depends on MIK and K_rem.
+#######################################################################
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeBias: 1
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  #PrintSolutionRejectionReason: True
+  #GenerateSourcesAndExit: False
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  ########################################
+  # Section 1: FP4 TN — MT 128x128, full PGR × StreamK matrix
+  #
+  # Six kernels (3 PGR × 2 SK). Drives the canonical single-scale-group
+  # tail surface. K-tail values cover partial-first-MFMA, full-last-MFMA,
+  # partial-second-MFMA, and main-loop+tail combos.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128 (canonical / single scale group)
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]                 # 2*MI_K = 2*128
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # K_rem=32 (partial): single sub-MFMA's worth of K, mostly masked
+          - Exact: [128, 128, 1,  32]
+          # K_rem=96 (partial): 3 of 4 K-blocks
+          - Exact: [128, 128, 1,  96]
+          # K_rem=128 (full last MFMA, no partial): K = exactly 1 MIK
+          - Exact: [128, 128, 1, 128]
+          # K_rem=160 (partial): 1 full + 1 partial sub-MFMA (K_tail > MIK)
+          - Exact: [128, 128, 1, 160]
+          # K_rem=224 (partial, near-full): 7 of 8 K-blocks
+          - Exact: [128, 128, 1, 224]
+          # K = 1*DU + tail (PGR=2 small-counter realign path)
+          - Exact: [128, 128, 1, 288]   # K = 256 + 32
+          # Decorative: batched + partial-MFMA tail
+          - Exact: [128, 128, 2, 160]
+          # Decorative: odd M,N + smallest tail
+          - Exact: [ 63,  63, 1,  32]
+
+  ########################################
+  # Section 2: FP4 TN — MT 256x256, full PGR × SK=0 matrix
+  #
+  # Three kernels (3 PGR × 1 SK). Multi-scale-group MT — the surface
+  # where the `lrLocalSubtileGrid` fix landed (was emitting 1 ds_read
+  # per scale group instead of lrLocalSubtileGrid[0] * [1]).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256 (multi scale group)
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # K_rem=32 (partial, smallest): scale-group emit fix surface
+          - Exact: [256, 256, 1,  32]
+          # K_rem=96 (partial)
+          - Exact: [256, 256, 1,  96]
+          # K_rem=128 (full last MFMA): scale-group emit fix surface
+          - Exact: [256, 256, 1, 128]
+          # K_rem=224 (partial, near-full)
+          - Exact: [256, 256, 1, 224]
+          # K = 1*DU + 128 (main + full-last-MFMA tail)
+          - Exact: [256, 256, 1, 384]
+
+  ########################################
+  # Section 3: FP4 TN — DU=512 proof-of-life
+  #
+  # Two kernels (PGR ∈ {0, 2}, SK=0). Same tail logic as DU=256, just a
+  # bigger main loop. PGR=0 covers the baseline path; PGR=2 covers the
+  # small-counter realign path with K = 1*DU + tail.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # K_rem=32 (tail-only, K << DU)
+          - Exact: [128, 128, 1,  32]
+          # K_rem=256 (2 full last MFMAs, K_rem mod 128 == 0)
+          - Exact: [128, 128, 1, 256]
+
+  ########################################
+  # Section 4: F4HS TN — bias epilogue, F16 output
+  #
+  # One kernel. Confirms tail loop composes with bias + F16 destination
+  # conversion. Two bias dtypes × two activations on a single K-tail.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 1
+      BiasDataTypeList: [s, h]
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1,  96]   # partial-MFMA tail with bias + F16 dest
+        - BiasTypeArgs: ['s', 'h']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+
+  ########################################
+  # Section 5: F4SS TN — F32 destination, no bias
+  #
+  # One kernel. Confirms tail loop composes with the F32 epilogue path.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1,  96]   # partial-MFMA tail with F32 dest
+
+  ########################################
+  # Section 6: F4BS TN — bias epilogue, BF16 output
+  #
+  # One kernel. Confirms tail loop composes with bias + activation + BF16
+  # destination conversion.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 1
+      BiasDataTypeList: [s]
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1,  96]   # partial-MFMA tail with bias + BF16 dest
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]

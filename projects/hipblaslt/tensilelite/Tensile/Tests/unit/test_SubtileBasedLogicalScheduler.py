@@ -30,6 +30,11 @@ from Tensile.Components.Subtile.LogicalScheduler import (
     WaitGRCounts,
     fmt_mt,
 )
+from Tensile.Tests.unit._subtile_tailloop_fixtures import (
+    build_minimal_subtile_kwa,
+    setdefault_tail_scaffold_kernel_keys,
+    wrap_with_skiptoend,
+)
 from unittest.mock import MagicMock
 
 
@@ -1590,6 +1595,66 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
+    def test_emitAllLoops_bf16_pgr0_emits_mainloop_underflow_preguard(self):
+        """PGR=0: mainLoop must emit a pre-guard against `LoopCounterL == 0`.
+
+        Without this pre-guard an initial `LoopCounterL == 0` (the
+        K < DepthU case now possible since ASEM=32 admits K < DU)
+        runs the do-while body once, decrements counter 0 -> 0xFFFFFFFF,
+        and the last-ui `s_cbranch_scc0 label_LoopBeginL` branches back
+        forever while each iter advances SrdA/SrdB by depthUBytes;
+        BufferLoad eventually faults out-of-descriptor.
+
+        Pre-guard: `s_cmp_eq_u32 LoopCounterL, 0` + `s_cbranch_scc1
+        label_SkipMainloop`, emitted immediately before
+        `label_LoopBeginL`.
+        """
+        import re
+        kernel = create_kernel(256, 256, fp4=False)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=False)
+
+        cfg = make_cfg_bf16_pgr0(MT0=256, MT1=256, depthU=64)
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB)
+
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+            )
+
+            module = sched.emitAllLoops(writer, kernel)
+            asm = str(module)
+
+            assert "LoopBeginL:" in asm
+            assert "label_SkipMainloop:" in asm, (
+                "SkipMainloop label must be emitted after mainLoop body"
+            )
+
+            preguard_pattern = re.compile(
+                r"s_cmp_eq_u32\s+s\[sgprLoopCounterL\],\s*0[^\n]*\n"
+                r"\s*s_cbranch_scc1\s+label_SkipMainloop",
+            )
+            match = preguard_pattern.search(asm)
+            assert match, (
+                "PGR=0 mainLoop must emit `s_cmp_eq_u32 LoopCounterL, 0` + "
+                "`s_cbranch_scc1 label_SkipMainloop` pre-guard before "
+                "`label_LoopBeginL`. ASM excerpt:\n"
+                + "\n".join(asm.splitlines()[:40])
+            )
+
+            preguard_idx = match.start()
+            loopbegin_idx = asm.find("label_LoopBeginL:")
+            assert preguard_idx < loopbegin_idx, (
+                "Pre-guard must appear before label_LoopBeginL "
+                f"(preguard@{preguard_idx} loopbegin@{loopbegin_idx})"
+            )
+
+        finally:
+            sched.deallocVgprTiles(writer)
+
     @pytest.mark.parametrize("pgr", [1, 2])
     def test_nll_scale_vgprs_differ_across_unroll_copies(self, pgr):
         """NLL for each unroll copy must use distinct scale VGPRs matching LR loads."""
@@ -2134,3 +2199,168 @@ class TestBuildLoopVariants_PGR0:
         sched.emit()
         nll = sched.build_nll()
         assert nll == [[[]]]
+
+
+# ── Tail-loop emission assertions ──────────────────────────────
+#
+# Structural / placement / label assertions for the subtile tail-loop
+# scaffold. Complements `test_subtile_tailloop_emit.py`, which pins
+# the *content* of the emitted body.
+
+
+def _tail_kernel_bf16(MT0=256, MT1=256, depthU=64, no_tail_loop=False):
+    """BF16 mock kernel with NoTailLoop set (real solutions populate this)."""
+    kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU)
+    kernel["NoTailLoop"] = no_tail_loop
+    return kernel
+
+
+def _tail_kernel_fp4(MT0=256, MT1=256, depthU=256, no_tail_loop=False):
+    """FP4 mock kernel with NoTailLoop set."""
+    kernel = create_kernel(MT0, MT1, fp4=True, depthU=depthU)
+    kernel["NoTailLoop"] = no_tail_loop
+    return kernel
+
+
+def _emit_subtile_tailloop_scaffold_asm(*, fp4: bool, no_tail_loop: bool,
+                                         pgr: int = 0) -> str:
+    """Drive `KernelWriter._emitTailLoopScaffoldSubtile` directly.
+
+    Mirrors the emit-site of `kernelBodySubtile` and delegates the
+    kwa-build and tile-info setup to `_subtile_tailloop_fixtures` so
+    this file and `test_subtile_tailloop_emit.py` exercise identical
+    scaffolding state. `pgr != 0` returns the empty string here since
+    the PGR>0 paths are pinned in `test_subtile_tailloop_emit.py`.
+    """
+    if pgr != 0:
+        return ""
+
+    kernel = _tail_kernel_fp4(no_tail_loop=no_tail_loop) if fp4 \
+             else _tail_kernel_bf16(no_tail_loop=no_tail_loop)
+    setdefault_tail_scaffold_kernel_keys(kernel, pgr)
+    if fp4:
+        # `create_kernel(fp4=True)` already sets MXBlockA/B; the
+        # `_bf16` builder leaves them at the default 0 from
+        # `setdefault_tail_scaffold_kernel_keys`. Pin the FP4 default
+        # explicitly to match the prior inline value.
+        kernel["ProblemType"]["MXBlockA"] = 32
+        kernel["ProblemType"]["MXBlockB"] = 32
+
+    kwa = build_minimal_subtile_kwa(kernel)
+    tPA = {"is_sparse": False, "tpsMetadata": None}
+    tPB = {"is_sparse": False, "tpsMetadata": None}
+    module = kwa._emitTailLoopScaffoldSubtile(kernel, tPA, tPB)
+    return wrap_with_skiptoend(module)
+
+
+class TestEmitAllLoopsTail_PGR0:
+    """Structural tail-loop scaffold assertions for PGR=0 kernels.
+
+    Drives `KernelWriter._emitTailLoopScaffoldSubtile` via the shared
+    fixture and pins: SkipTailLoopL is always emitted; the Tail Loop
+    banner / TailLoopBeginL / TailLoopEndL labels appear when
+    `NoTailLoop=False`; and the LoopCounterL early-exit branch fires
+    before the tail body.
+    """
+
+    def test_omits_tail_when_NoTailLoop_true(self):
+        """Aligned-K kernels (NoTailLoop=True) emit no tail body.
+
+        The scaffold still always emits `SkipTailLoopL:` so any branches
+        targeting it (e.g. the early-exit from `calculateLoopNumIter`)
+        resolve. Only the body (Tail Loop banner, TailLoopBeginL,
+        TailLoopEndL) is gated by NoTailLoop.
+        """
+        asm = _emit_subtile_tailloop_scaffold_asm(fp4=True, no_tail_loop=True)
+        assert "Tail Loop" not in asm, \
+            "Tail body must not be emitted when NoTailLoop=True"
+        assert "TAILLOOP" not in asm
+        assert "TailLoopBeginL" not in asm
+        assert "TailLoopEndL" not in asm
+        assert "SkipTailLoopL" in asm, \
+            "SkipTailLoopL must remain emitted even with NoTailLoop=True"
+
+    def test_emits_SkipTailLoopL_label(self):
+        """Tail block uses the standard SkipTailLoopL label.
+
+        The legacy non-subtile tail-loop emitter (KernelWriterAssembly.py)
+        uses `SkipTailLoopL` as both the early-exit destination and the
+        post-tail join point. The subtile path matches for symmetry.
+        """
+        asm = _emit_subtile_tailloop_scaffold_asm(fp4=True, no_tail_loop=False)
+        assert "SkipTailLoopL:" in asm, \
+            "Tail block must declare a SkipTailLoopL label " \
+            "(early-exit destination + post-tail join). Got:\n" + asm[-2000:]
+
+    def test_tail_appears_before_SkipToEnd(self):
+        """Tail block must be placed before SkipToEnd in code order so
+        fall-through reaches the post-tail join point.
+        """
+        asm = _emit_subtile_tailloop_scaffold_asm(fp4=True, no_tail_loop=False)
+        assert "Tail Loop" in asm, "Tail block must be emitted"
+        tail_pos = asm.find("Tail Loop")
+        skip_to_end_pos = asm.find("SkipToEnd:")
+        assert skip_to_end_pos > 0, \
+            "SkipToEnd label missing from emit output"
+        assert tail_pos < skip_to_end_pos, (
+            f"Tail block must appear before SkipToEnd. "
+            f"Tail Loop at offset {tail_pos}, SkipToEnd at offset "
+            f"{skip_to_end_pos}: tail is currently unreachable."
+        )
+
+    def test_emits_LoopCounterL_early_exit_branch(self):
+        """Tail emit must compute LoopCounterL = K%DU and skip on zero.
+
+        Step 2-1-1 of the tail-loop init: derive the per-tail iteration
+        count from SizesSum and branch over the body when the remainder
+        is zero. The asm should contain references to LoopCounterL and a
+        comparison-against-zero / SCBranchSCC* sequence within the tail
+        section. The scaffold's `calculateLoopNumIter(-1)` emit is the
+        canonical source of these instructions.
+        """
+        asm = _emit_subtile_tailloop_scaffold_asm(fp4=True, no_tail_loop=False)
+        assert "LoopCounterL" in asm, \
+            "Tail emit must reference LoopCounterL " \
+            "(set to SizesSum % DepthU)"
+        assert ("s_cmp_eq" in asm.lower() or "scmpequ" in asm.lower()), \
+            "Tail emit must compare LoopCounterL against zero"
+        assert "SkipTailLoopL" in asm, \
+            "Early-exit branch needs a SkipTailLoopL target"
+
+
+@pytest.mark.xfail(reason="PGR>0 preloop tail-skip routing handled by the "
+                          "tail scaffold's c=0 reset / SkipOp(LE 1, NLL); "
+                          "no SkipOp target points at TailLoopEnd here",
+                   strict=False)
+class TestPreloopSkipsTail_PGR2:
+    """Pre-existing xfail: PGR=2 preloop routes K-small cases through
+    `SkipOp(LE 1, NLL)` (handled in `build_preloop`) and the tail
+    scaffold's c=0 reset path, neither of which exposes a SkipOp
+    target named `Tail*`. Kept as a regression guard so a future
+    refactor that *does* add such a target lights this up.
+    """
+
+    def test_preloop_emits_skip_past_tail_when_K_zero(self):
+        cfg = make_cfg_bf16(MT0=256, MT1=256, depthU=64)
+        assert cfg.pgr == 2, "make_cfg_bf16 should default to PGR=2"
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        preloop = sched.build_preloop()
+
+        from Tensile.Components.Subtile.LogicalScheduler import SkipOp
+        skip_targets = []
+        for partition in preloop:
+            for em_or_list in partition:
+                ems = em_or_list if isinstance(em_or_list, list) else [em_or_list]
+                for em in ems:
+                    for op in getattr(em, 'ops', []):
+                        if isinstance(op, SkipOp):
+                            skip_targets.append(op.target)
+
+        tail_safe = [t for t in skip_targets
+                     if 'Tail' in t or t in ('SkipTailLoopL', 'TailLoopEnd')]
+        assert tail_safe, (
+            f"Preloop emitted SkipOp targets {skip_targets!r} but none route "
+            f"past the tail block. Expected at least one target referring to "
+            f"the tail-end label so K==0 paths bypass the tail."
+        )

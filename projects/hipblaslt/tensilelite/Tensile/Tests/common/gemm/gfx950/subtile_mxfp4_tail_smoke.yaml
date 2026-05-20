@@ -1,0 +1,81 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+# Smallest possible FP4 tail-K smoke. Validates the FP4 + MX scale tail
+# loop with two fixes landed together (May 2026):
+#
+#   1. `SubtileScaleEmit.localReadDoScaleSubtile` now emits one ds_read per
+#      scale group as ``lrLocalSubtileGrid[0] * lrLocalSubtileGrid[1]``
+#      (was hard-wired to 1 via a stale `localSubtileGrid/2` formula),
+#      so the tail LR loads every scale-VGPR group consumed by the MFMA
+#      stream instead of just group 0.
+#   2. `client/src/DataInitialization.cpp` re-scatters DGen's canonical
+#      unpadded scale layout (``byte[m*K_blocks_raw + k]``) into the padded
+#      strided layout the host-side mxsa/mxsb tensor descriptors and the
+#      GPU kernel both read (``byte[k*stride_k + m*stride_m]`` with
+#      ``K_blocks_padded = max(K_blocks_raw, 8)``).
+#
+# Drives only the MT128x128 (PGR=0) cells that the pre-fix yaml ran
+# 9/16384 mismatches on K=32 and 90/16384 on K=128, so a 0-error result
+# here is a strong signal that both fixes land the regression.
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 1
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeBias: 1
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 1
+  RotatingBufferSize: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128 (the bug epicenter)
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1,  32]   # K_tail=32 (partial-MFMA, was 9/16384)
+          - Exact: [128, 128, 1, 128]   # K_tail=128 (full last MFMA, was 90/16384)

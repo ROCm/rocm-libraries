@@ -1,0 +1,269 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+
+#######################################################################
+# Subtile path — BF16 / BSS / BBS — TAIL-LOOP variant
+#
+# K is restricted to multiples of 32 (the BF16 ASEM minimum) but NOT
+# multiples of DepthU. Every problem here exercises the subtile tail
+# loop (Solution.py minASEMforMX must be 32, NoTailLoop must be False).
+#
+# Mirror of subtile_bf16.yaml with these reductions to keep CI bounded:
+#   - Trimmed wave-tile coverage (3-5 per group instead of 25+)
+#   - Only the BF16, BSS, and BBS-bias groups
+#   - No 'BBS-all-acts + ScaleAlphaVec' coverage (already exercised on
+#     aligned-K sizes in subtile_bf16.yaml)
+#######################################################################
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  DataInitTypeBias: 1
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  #PrintSolutionRejectionReason: True
+  #GenerateSourcesAndExit: False
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  ########################################
+  # BF16 TN — no bias, DU = 2*MI_K = 64
+  #
+  # K-tail values: K%32==0, K%64!=0  →  K ∈ {32, 96, 160, 224}
+  # remainK = K (since K < DU): exercises the full DU rewind.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # 1x1 wave group
+          - [16, 16, 32, 1,  1, 4, 4,  1, 1]  # MT 64x64
+          # 2x2 wave group — symmetric small + large
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256
+          # 4x1 / 1x4 wave groups
+          - [16, 16, 32, 1,  1, 2, 2,  4, 1]  # MT 128x32
+          - [16, 16, 32, 1,  1, 2, 2,  1, 4]  # MT 32x128
+          # Odd wavetile (3xN)
+          - [16, 16, 32, 1,  1, 3, 4,  2, 2]  # MT 96x128
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]                  # 2*MI_K = 2*32
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # K_rem (K mod DU=64) ∈ {32}: K = 32 (single tail iter, no main iters)
+          - Exact: [128, 128, 1,  32]
+          - Exact: [256, 256, 1,  32]
+          # K_rem ∈ {32}: K = 96 = 1*DU + 32 (one main + tail)
+          - Exact: [128, 128, 1,  96]
+          - Exact: [256, 256, 1,  96]
+          - Exact: [ 96,  96, 1,  96]   # M,N = 3*32 (edge for MT >= 128)
+          # K_rem ∈ {32}: K = 160 = 2*DU + 32 (two main + tail)
+          - Exact: [128, 128, 1, 160]
+          - Exact: [256, 256, 1, 160]
+          - Exact: [160, 160, 1, 160]   # M,N = 5*32 (edge for MT >= 192)
+          # K_rem ∈ {32}: K = 224 = 3*DU + 32 (three main + tail)
+          - Exact: [128, 128, 1, 224]
+          - Exact: [256, 256, 1, 224]
+          - Exact: [224, 224, 1, 224]   # M,N = 7*32
+          # Asymmetric M/N with tail K
+          - Exact: [128,  32, 1,  96]
+          - Exact: [ 32, 128, 1,  96]
+          # Batched
+          - Exact: [128, 128, 2,  96]   # batch=2
+          - Exact: [128, 128, 3,  32]   # batch=3, K = 1 tail iter
+
+  ########################################
+  # BF16 TN — large DU (DU = 128, DU = 192)
+  #
+  # K-tail values: multiples of 32 that are neither multiples of 128
+  # nor of 192. K ∈ {32, 64, 96, 160, 224, 288, 320, 352}.
+  # remainK varies: e.g., K=64 with DU=192 → remainK=64; K=288 with
+  # DU=128 → remainK=32. Covers small remainK (32) and large remainK
+  # (up to DU-32) cases.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256
+          - [16, 16, 32, 1,  1, 6, 4,  2, 2]  # MT 192x128 (asymmetric)
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128, 192]            # K must NOT be multiple of either
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # K = 32: K < DU(128) and K < DU(192) → tail-only, remainK = K
+          - Exact: [128, 128, 1,  32]
+          - Exact: [256, 256, 1,  32]
+          # K = 64: tail-only for DU=128 (remainK=64), tail-only for DU=192 (remainK=64)
+          - Exact: [128, 128, 1,  64]
+          - Exact: [256, 256, 1,  64]
+          # K = 96: tail-only for DU=128 (remainK=96), tail-only for DU=192 (remainK=96)
+          - Exact: [128, 128, 1,  96]
+          # K = 160: 1*DU+32 for DU=128, tail-only for DU=192 (remainK=160)
+          - Exact: [128, 128, 1, 160]
+          - Exact: [256, 256, 1, 160]
+          # K = 224: 1*DU+96 for DU=128, 1*DU+32 for DU=192
+          - Exact: [128, 128, 1, 224]
+          # K = 288: 2*DU+32 for DU=128, 1*DU+96 for DU=192
+          - Exact: [128, 128, 1, 288]
+          - Exact: [256, 256, 1, 288]
+          # K = 320: 2*DU+64 for DU=128, 1*DU+128 for DU=192
+          - Exact: [128, 128, 1, 320]
+          # K = 352: 2*DU+96 for DU=128, 1*DU+160 for DU=192
+          - Exact: [128, 128, 1, 352]
+          # Edge M,N at K-tail
+          - Exact: [192, 192, 1,  96]   # MT-aligned for 192x128 wave
+          - Exact: [192, 128, 1, 160]
+          # Batched
+          - Exact: [128, 128, 2, 160]
+
+  ########################################
+  # BSS TN — BF16 input, F32 output, DU = 2*MI_K = 64
+  #
+  # Smaller wavetile coverage. K-tail values from the BF16 group.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256
+          - [16, 16, 32, 1,  1, 3, 4,  2, 2]  # MT 96x128 (odd M wavetile)
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]                  # 2*MI_K = 2*32
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1,  32]   # K = tail-only
+          - Exact: [128, 128, 1,  96]   # K = 1*DU + tail
+          - Exact: [256, 256, 1, 160]   # K = 2*DU + tail
+          - Exact: [256, 256, 1, 224]   # K = 3*DU + tail
+          - Exact: [ 96,  96, 1,  96]   # M,N edge × K = 1 tail iter
+          - Exact: [128, 128, 2, 160]   # batched × tail K
+
+  ########################################
+  # BBS TN — BF16 bias epilogue + activation, DU = 2*MI_K = 64
+  #
+  # Minimal wavetile + activation coverage to confirm tail loop
+  # composes cleanly with bias / activation epilogues.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 1
+      BiasDataTypeList: [s]
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1,  96]   # K = 1*DU + tail, with bias
+          - Exact: [128, 128, 1, 160]   # K = 2*DU + tail, with bias
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+          - [Enum: gelu]
