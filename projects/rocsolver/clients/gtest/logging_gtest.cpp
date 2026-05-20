@@ -462,7 +462,7 @@ TEST(checkin_misc_FORMATTING, join_tuple)
 {
     int a = 1;
     double b = 2.5;
-    auto t = std::tie(a, b);
+    auto t = std::tuple(a, b);
     std::string result = rocsolver::formatting::join(t, " ");
     EXPECT_EQ(result, "1 2.5");
 }
