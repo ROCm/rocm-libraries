@@ -37,8 +37,6 @@
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
-#include "print_matrix.hpp"
-
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <bool BATCHED, typename T>
@@ -197,8 +195,6 @@ rocblas_status rocsolver_ormtr_unmtr_template(rocblas_handle handle,
                     "shiftA:", shiftA, "lda:", lda, "shiftC:", shiftC, "ldc:", ldc,
                     "bc:", batch_count);
 
-printf( "%s:%d\n", __func__, __LINE__ );
-
     // quick return
     if(!n || !m || !batch_count)
         return rocblas_status_success;
@@ -273,8 +269,6 @@ rocblas_status rocsolver_ormtr_unmtr_template(rocblas_handle handle,
                     "shiftA:", shiftA, "lda:", lda, "shiftC:", shiftC, "ldc:", ldc,
                     "bc:", batch_count);
 
-printf( "%s:%d\n", __func__, __LINE__ );  // this one is called.
-
     // quick return
     if(!n || !m || !batch_count)
         return rocblas_status_success;
@@ -301,7 +295,6 @@ printf( "%s:%d\n", __func__, __LINE__ );  // this one is called.
 
     if(uplo == rocblas_fill_upper)
     {
-printf( "unmql\n" );
         rocsolver_ormql_unmql_template<BATCHED, STRIDED, T>(
             handle, side, trans, rows, cols, nq - 1, A, shiftA + idx2D(0, 1, lda), lda, strideA,
             ipiv, strideP, C, shiftC, ldc, strideC, batch_count, scalars, AbyxORwork, work2, work3,
@@ -309,7 +302,6 @@ printf( "unmql\n" );
     }
     else
     {
-printf( "unmqr\n" );
         rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
             handle, side, trans, rows, cols, nq - 1, A, shiftA + idx2D(1, 0, lda), lda, strideA,
             ipiv, strideP, C, shiftC + idx2D(rowC, colC, ldc), ldc, strideC, batch_count, scalars,
@@ -344,8 +336,6 @@ rocblas_status rocsolver_ormtr_unmtr_template(rocblas_handle handle,
                                               T* trfact,
                                               T** workArr)
 {
-printf( "%s:%d\n", __func__, __LINE__ );
-
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
@@ -387,8 +377,6 @@ rocblas_status rocsolver_ormtr_unmtr_template(rocblas_handle handle,
                                               T** workArr,
                                               bool optim_mem)
 {
-printf( "%s:%d\n", __func__, __LINE__ );
-
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 

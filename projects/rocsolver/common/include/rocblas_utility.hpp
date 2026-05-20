@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -576,11 +576,10 @@ __device__ __host__ constexpr auto roundup(Ix x, Iy y)
 //------------------------------------------------------------------------------
 // return true if arg is nan. Extends std::nan to rocblas and complex types.
 template <typename T,
-          std::enable_if_t<
-                ! rocblas_is_complex<T>
-                && ! std::is_same_v<T, rocblas_half>
-                && ! std::is_same_v<T, rocblas_bfloat16>,
-            int> = 0>
+          std::enable_if_t<!rocblas_is_complex<T> && !std::is_same_v<T, rocblas_half>
+                               && !std::is_same_v<T, rocblas_bfloat16>,
+                           int>
+          = 0>
 __device__ __host__ inline bool rocblas_isnan(T arg)
 {
     return std::isnan(arg);
@@ -613,11 +612,11 @@ __device__ __host__ inline bool rocblas_isnan(rocblas_bfloat16 arg)
 // max that propagates NaNs consistently:
 //   rocblas_max_nan( 1,   NaN ) = NaN
 //   rocblas_max_nan( NaN, 1   ) = NaN
-template <typename T, std::enable_if_t<
-                            ! rocblas_is_complex<T>
-                            && ! std::is_same_v<T, rocblas_half>
-                            && ! std::is_same_v<T, rocblas_bfloat16>,
-                        int> = 0>
+template <typename T,
+          std::enable_if_t<!rocblas_is_complex<T> && !std::is_same_v<T, rocblas_half>
+                               && !std::is_same_v<T, rocblas_bfloat16>,
+                           int>
+          = 0>
 __device__ __host__ inline T rocblas_max_nan(T x, T y)
 {
     return (rocblas_isnan(y) || y >= x) ? y : x;

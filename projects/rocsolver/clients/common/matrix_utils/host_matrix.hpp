@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -471,7 +471,7 @@ public:
         for(I i = 0; i < size(); ++i)
         {
             S el = detail::abs(this->operator[](i));
-            norm = rocblas_max_nan( norm, el );
+            norm = rocblas_max_nan(norm, el);
         }
 
         return norm;
@@ -1208,8 +1208,7 @@ HostMatrix_<T, I> adjoint(const HostMatrix_<T, I>& A)
 }
 
 template <template <typename, typename> class HostMatrix_, typename T, typename I>
-auto qr(const HostMatrix_<T, I>& A)
-    -> std::tuple<HostMatrix_<T, I> /* Q */, HostMatrix_<T, I> /* R */>
+auto qr(const HostMatrix_<T, I>& A) -> std::tuple<HostMatrix_<T, I> /* Q */, HostMatrix_<T, I> /* R */>
 {
     I nrows = A.nrows();
     I ncols = A.ncols();

@@ -40,11 +40,7 @@
 #include "roclapack_sytrd_hetrd.hpp"
 #include "rocsolver/rocsolver.h"
 
-#include "print_matrix.hpp"
-
 ROCSOLVER_BEGIN_NAMESPACE
-
-//------------------------------------------------------------------------------
 
 /** Helper to calculate workspace sizes **/
 template <bool BATCHED, typename T, typename S>
@@ -276,15 +272,13 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     ROCSOLVER_ENTER("syevd_heevd", "evect:", evect, "uplo:", uplo, "n:", n, "shiftA:", shiftA,
                     "lda:", lda, "bc:", batch_count);
 
-printf( "%s:%d: n = %d )\n", __func__, __LINE__, n );
-
     // quick return
     if(batch_count == 0)
         return rocblas_status_success;
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
-    //{
+    {
         // memory workspace sizes:
         // size for constants in rocblas calls
         size_t size_scalars;
@@ -313,7 +307,7 @@ printf( "%s:%d: n = %d )\n", __func__, __LINE__, n );
         HIP_CHECK(hipMemsetAsync((void*)tmptau_W, 0, size_tmptau_W, stream));
         HIP_CHECK(hipMemsetAsync((void*)tau, 0, size_tau, stream));
         HIP_CHECK(hipMemsetAsync((void*)workArr, 0, size_workArr, stream));
-    //}
+    }
 
     rocsolver_alg_mode sterf_mode;
     ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &sterf_mode));
@@ -380,7 +374,6 @@ printf( "%s:%d: n = %d )\n", __func__, __LINE__, n );
     return rocblas_status_success;
 }
 
-// This one adds work4 and optim_mem.
 template <bool BATCHED, bool STRIDED, typename T, typename S, typename W>
 rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                                               const rocblas_evect evect,
@@ -411,16 +404,13 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     ROCSOLVER_ENTER("syevd_heevd", "evect:", evect, "uplo:", uplo, "n:", n, "shiftA:", shiftA,
                     "lda:", lda, "bc:", batch_count);
 
-int p = 3;  // precision
-printf( "%s:%d: n = %d )\n", __func__, __LINE__, n );
-
     // quick return
     if(batch_count == 0)
         return rocblas_status_success;
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
-    //{
+    {
         // memory workspace sizes:
         // size for constants in rocblas calls
         size_t size_scalars;
@@ -452,7 +442,7 @@ printf( "%s:%d: n = %d )\n", __func__, __LINE__, n );
         HIP_CHECK(hipMemsetAsync((void*)tmptau_W, 0, size_tmptau_W, stream));
         HIP_CHECK(hipMemsetAsync((void*)tau, 0, size_tau, stream));
         HIP_CHECK(hipMemsetAsync((void*)workArr, 0, size_workArr, stream));
-    //}
+    }
 
     rocsolver_alg_mode sterf_mode;
     ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &sterf_mode));
@@ -477,61 +467,15 @@ printf( "%s:%d: n = %d )\n", __func__, __LINE__, n );
     }
 
     // TODO: Scale the matrix
-if constexpr (! BATCHED && ! STRIDED)
-{
-check_nan( "A", n, n, A, lda, stream );
-}
-
-/*
-rocblas_status rocsolver_sytrd_hetrd_template(
-    rocblas_handle handle,
-    const rocblas_fill uplo,
-    const rocblas_int n,
-    U A,
-    const rocblas_int shiftA,
-    const rocblas_int lda,
-    const rocblas_stride strideA,
-    S* D,
-    const rocblas_stride strideD,
-    S* E,
-    const rocblas_stride strideE,
-    T* tau,
-    const rocblas_stride strideP,
-    const rocblas_int batch_count,
-    T* scalars,
-    T* work_Acpy,
-    T* norms,
-    T* tmptau_W,
-    T** workArr,
-    bool recover_A = true)
-*/
 
     // reduce A to tridiagonal form
-    rocsolver_sytrd_hetrd_template<BATCHED>(
-        handle, uplo, n,
-        A, shiftA, lda, strideA,
-        D, strideD,
-        E, strideE,
-        tau, n,
-        batch_count, scalars, (T*)work1, (T*)work2, tmptau_W, workArr, false);
-
-if constexpr (! BATCHED && ! STRIDED)
-{
-printf( "size tau %lld, work1 %llu, work2 %llu\n",
-        (unsigned long long) size_tau / sizeof(T),
-        (unsigned long long) size_work1 / sizeof(T),
-        (unsigned long long) size_work2 / sizeof(T) );
-assert( size_tau / sizeof(T) >= n-1 );
-check_nan( "A", n,   n, A, lda, stream );
-check_nan( "D", n,   1, D, n,   stream );
-check_nan( "E", n-1, 1, E, n-1, stream );
-check_nan( "tau", n-1, 1, tau, n-1, stream );
-}
+    rocsolver_sytrd_hetrd_template<BATCHED>(handle, uplo, n, A, shiftA, lda, strideA, D, strideD, E,
+                                            strideE, tau, n, batch_count, scalars, (T*)work1,
+                                            (T*)work2, tmptau_W, workArr, false);
 
     if(sterf_mode == rocsolver_alg_mode_hybrid && evect != rocblas_evect_original)
     {
         // only in hybrid mode, compute eigenvalues using sterf
-        printf( "sterf\n" );
         rocsolver_sterf_template<S>(handle, n, D, 0, strideD, E, 0, strideE, info, batch_count,
                                     (rocblas_int*)work1);
     }
@@ -542,92 +486,23 @@ check_nan( "tau", n-1, 1, tau, n-1, stream );
         const rocblas_int ldw = n;
         const rocblas_stride strideW = n * n;
 
-/*
-rocblas_status rocsolver_stedc_template(
-    rocblas_handle handle,
-    const rocblas_evect evect,
-    const rocblas_int n,
-
-    S* D,
-    const rocblas_int shiftD,
-    const rocblas_stride strideD,
-
-    S* E,
-    const rocblas_int shiftE,
-    const rocblas_stride strideE,
-
-    U C,
-    const rocblas_int shiftC,
-    const rocblas_int ldc,
-    const rocblas_stride strideC,
-
-    rocblas_int* info,
-    const rocblas_int batch_count,
-
-    void* work_stack,
-    S* tempvect,
-    S* tempgemm,
-    S* tmpz,
-    rocblas_int* splits,
-    S** workArr)
-*/
-        printf( "stedc\n" );
         rocsolver_stedc_template<false, ISBATCHED, T>(
-            handle, rocblas_evect_tridiagonal, n,
-            D, 0, strideD,
-            E, 0, strideE,
-            tmptau_W, 0, ldw, strideW,
-            info, batch_count,
-            work3, (S*)work2, (S*)work1, tmpz, splits, (S**)workArr);
-
-if constexpr (! BATCHED && ! STRIDED)
-{
-check_nan( "D", n,   1, D, n,   stream );
-check_nan( "E", n-1, 1, E, n-1, stream );
-check_nan( "tmptau_W", n, n, tmptau_W, ldw, stream );
-}
+            handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmptau_W, 0, ldw,
+            strideW, info, batch_count, work3, (S*)work2, (S*)work1, tmpz, splits, (S**)workArr);
 
         // update the eigenvectors (if applicable)
         if(evect == rocblas_evect_original)
         {
-printf( "unmtr\n" );
-if constexpr (! BATCHED && ! STRIDED)
-{
-//print_matrix( "A",   n, n, A, lda, p, stream );
-//print_matrix( "tau", n, 1, tau, n, p, stream );
-//print_matrix( "W",   n, n, tmptau_W, ldw, p, stream );
-}
             rocsolver_ormtr_unmtr_template<BATCHED, STRIDED>(
-                handle, rocblas_side_left, uplo, rocblas_operation_none, n, n,
-                A, shiftA, lda, strideA,
-                tau, n,
-                tmptau_W, 0, ldw, strideW,
-                batch_count, scalars,
-                (T*)work2, tmpz, splits, work4, (T*)work1, (T*)work3, workArr, optim_mem);
+                handle, rocblas_side_left, uplo, rocblas_operation_none, n, n, A, shiftA, lda,
+                strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count, scalars, (T*)work2, tmpz,
+                splits, work4, (T*)work1, (T*)work3, workArr, optim_mem);
 
-if constexpr (! BATCHED && ! STRIDED)
-{
-printf( "unmtr output\n" );
-//print_matrix( "A",   n, n, A, lda, p, stream );
-//print_matrix( "tau", n, 1, tau, n, p, stream );
-//print_matrix( "W",   n, n, tmptau_W, ldw, p, stream );
-check_nan( "A", n, n, A, lda,   stream );
-check_nan( "tau", n-1, 1, tau, n-1, stream );
-check_nan( "tmptau_W", n, n, tmptau_W, ldw, stream );
-}
-
-            printf( "copy_mat\n" );
             // copy matrix product into A
             const rocblas_int copyblocks = (n - 1) / BS2 + 1;
             ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(copyblocks, copyblocks, batch_count),
-                                    dim3(BS2, BS2), 0, stream, n, n,
-                                    tmptau_W, 0, ldw, strideW,
-                                    A, shiftA, lda, strideA);
-
-if constexpr (! BATCHED && ! STRIDED)
-{
-check_nan( "A", n, n, A, lda, stream );
-}
+                                    dim3(BS2, BS2), 0, stream, n, n, tmptau_W, 0, ldw, strideW, A,
+                                    shiftA, lda, strideA);
         }
     }
 

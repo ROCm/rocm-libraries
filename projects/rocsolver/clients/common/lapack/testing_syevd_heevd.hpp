@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -531,32 +531,27 @@ void syevd_heevd_initData(const rocblas_handle handle,
                           std::vector<T>& A,
                           bool test = true)
 {
-    if(matrix == "identity"
-       || (std::getenv("TEST_IDENTITY") != nullptr)
+    if(matrix == "identity" || (std::getenv("TEST_IDENTITY") != nullptr)
        || (std::getenv("SYEVD_TEST_IDENTITY") != nullptr))
     {
         syevd_heevd_identity_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
     }
-    else if(matrix == "eig7"
-            || (std::getenv("TEST_EIG7") != nullptr)
+    else if(matrix == "eig7" || (std::getenv("TEST_EIG7") != nullptr)
             || (std::getenv("SYEVD_TEST_EIG7") != nullptr))
     {
         syevd_heevd_eig7_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
     }
-    else if(matrix == "wilkinson"
-            || (std::getenv("TEST_WILKINSON") != nullptr)
+    else if(matrix == "wilkinson" || (std::getenv("TEST_WILKINSON") != nullptr)
             || (std::getenv("SYEVD_TEST_WILKINSON") != nullptr))
     {
         syevd_heevd_wilkinson_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
     }
-    else if(matrix == "clement"
-            || (std::getenv("TEST_CLEMENT") != nullptr)
+    else if(matrix == "clement" || (std::getenv("TEST_CLEMENT") != nullptr)
             || (std::getenv("SYEVD_TEST_CLEMENT") != nullptr))
     {
         syevd_heevd_clement_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
     }
-    else if(matrix == "toeplitz"
-            || (std::getenv("TEST_TOEPLITZ") != nullptr)
+    else if(matrix == "toeplitz" || (std::getenv("TEST_TOEPLITZ") != nullptr)
             || (std::getenv("SYEVD_TEST_TOEPLITZ") != nullptr))
     {
         syevd_heevd_toeplitz_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
@@ -682,12 +677,12 @@ void syevd_heevd_getError(const rocblas_handle handle,
                 // Orthogonal error
                 auto OE = U * adjoint(U) - HMat::Eye(n, n);
                 err = OE.max_col_norm();
-                *max_ortho_err = rocblas_max_nan( err, *max_ortho_err );
+                *max_ortho_err = rocblas_max_nan(err, *max_ortho_err);
 
                 // Residual error
                 auto RE = M - U * D * adjoint(U);
                 err = RE.norm() / M.norm();
-                *max_err = rocblas_max_nan( err, *max_err );
+                *max_err = rocblas_max_nan(err, *max_err);
             }
         }
     }
@@ -804,8 +799,6 @@ void testing_syevd_heevd(Arguments& argus)
     rocblas_stride stD = argus.get<rocblas_stride>("strideD", n);
     rocblas_stride stE = argus.get<rocblas_stride>("strideE", n);
     std::string matrix = argus.get<std::string>("matrix");
-
-std::cout << "matrix " << matrix << "\n";
 
     rocblas_evect evect = char2rocblas_evect(evectC);
     rocblas_fill uplo = char2rocblas_fill(uploC);
@@ -936,18 +929,18 @@ std::cout << "matrix " << matrix << "\n";
         // check computations
         if(argus.unit_check || argus.norm_check)
         {
-            syevd_heevd_getError<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD, stD, dE, stE,
-                                             dinfo, bc, hA, hAres, hD, hDres, hinfo, hinfoRes,
-                                             &max_error, &max_ortho_error);
+            syevd_heevd_getError<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD, stD,
+                                             dE, stE, dinfo, bc, hA, hAres, hD, hDres, hinfo,
+                                             hinfoRes, &max_error, &max_ortho_error);
         }
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
         {
-            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD, stD, dE,
-                                                stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,
-                                                &cpu_time_used, hot_calls, argus.profile,
-                                                argus.profile_kernels, argus.perf);
+            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD,
+                                                stD, dE, stE, dinfo, bc, hA, hD, hinfo,
+                                                &gpu_time_used, &cpu_time_used, hot_calls,
+                                                argus.profile, argus.profile_kernels, argus.perf);
         }
     }
     else
@@ -975,18 +968,18 @@ std::cout << "matrix " << matrix << "\n";
         // check computations
         if(argus.unit_check || argus.norm_check)
         {
-            syevd_heevd_getError<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD, stD, dE, stE,
-                                             dinfo, bc, hA, hAres, hD, hDres, hinfo, hinfoRes,
-                                             &max_error, &max_ortho_error);
+            syevd_heevd_getError<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD, stD,
+                                             dE, stE, dinfo, bc, hA, hAres, hD, hDres, hinfo,
+                                             hinfoRes, &max_error, &max_ortho_error);
         }
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
         {
-            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD, stD, dE,
-                                                stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,
-                                                &cpu_time_used, hot_calls, argus.profile,
-                                                argus.profile_kernels, argus.perf);
+            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, evect, uplo, n, dA, lda, stA, dD,
+                                                stD, dE, stE, dinfo, bc, hA, hD, hinfo,
+                                                &gpu_time_used, &cpu_time_used, hot_calls,
+                                                argus.profile, argus.profile_kernels, argus.perf);
         }
     }
 
