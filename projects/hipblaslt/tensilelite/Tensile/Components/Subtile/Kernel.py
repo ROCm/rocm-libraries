@@ -905,10 +905,6 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   tileCopyInst = VAccvgprWrite if isAgpr else VMovB32
   regsPerMfma = 16
   numMfma = totalRegs // regsPerMfma
-  # MFMA zeroing uses v_mfma_i32_32x32x16_i8 which doesn't exist on WMMA-only archs.
-  if not writer.states.asmCaps.get("HasMFMA", False):
-    numMfma = 0
-
   if numMfma > 0:
     tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
     module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment=""))
@@ -932,6 +928,14 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
   module.addComment0("Init %s vgprTiles to zero"%(tileInfo.tc))
 
   if not tileInfo.vgprTiles:
+    return module
+
+  # WMMA-only archs (gfx12): no MFMA available for fast zeroing, use scalar moves
+  if not writer.states.asmCaps.get("HasMFMA", False):
+    tileAlias = vgpr
+    for tile in tileInfo.vgprTiles:
+      for reg in tile.regList.indices:
+        module.add(VMovB32(dst=tileAlias(reg), src=0, comment="init%s" % tileInfo.tc))
     return module
 
   # Group contiguous tiles by pool type (agpr vs vgpr) since D tiles can use both
