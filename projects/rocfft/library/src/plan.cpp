@@ -2315,18 +2315,36 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
     const auto   local_comm_rank = desc.get_local_comm_rank();
     const size_t nbricks_in      = inField.bricks.size();
 
-    // compute all intersections and check alltoall eligibility
+    // compute all intersections and check alltoall eligibility.
     struct IntersectionInfo
     {
         size_t        inBrickIdx;
         size_t        outBrickIdx;
         data_layout_t intersection;
-        size_t        count;
-        bool          same_device;
     };
     std::vector<IntersectionInfo> intersections;
 
-    bool   alltoall_eligible  = (nbricks_in == outField.bricks.size()) && (nbricks_in >= 2);
+    // alltoall eligibility requires:
+    //   (a) same brick count on input and output (>= 2),
+    //   (b) one brick per device on both sides (no duplicates),
+    //   (c) input and output cover the same set of devices,
+    //   (d) the RCCL communicator covers exactly that device set,
+    //   (e) the intersection pattern is a complete N x N exchange with
+    //       a uniform per-pair element count.
+    std::set<int> in_devices, out_devices;
+    for(const auto& brick : inField.bricks)
+        in_devices.insert(brick.location.device);
+    for(const auto& brick : outField.bricks)
+        out_devices.insert(brick.location.device);
+
+    const auto          rccl_devs_vec = rccl.get_devices();
+    const std::set<int> rccl_devices(rccl_devs_vec.begin(), rccl_devs_vec.end());
+
+    bool alltoall_eligible = (nbricks_in == outField.bricks.size()) && (nbricks_in >= 2)
+                             && (in_devices.size() == nbricks_in)
+                             && (out_devices.size() == nbricks_in) && (in_devices == out_devices)
+                             && (rccl_devices == in_devices);
+
     size_t uniform_count      = 0;
     size_t cross_device_count = 0;
 
@@ -2342,11 +2360,9 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
             if(xsect.is_empty())
                 continue;
 
-            bool same_dev = (inBrick.location.device == outBrick.location.device
-                             && inBrick.location.comm_rank == outBrick.location.comm_rank);
-
-            size_t count = xsect.logical_count();
-            intersections.push_back({inBrickIdx, outBrickIdx, std::move(xsect), count, same_dev});
+            const bool   same_dev = (inBrick.location == outBrick.location);
+            const size_t count    = xsect.logical_count();
+            intersections.push_back({inBrickIdx, outBrickIdx, std::move(xsect)});
 
             if(!same_dev)
             {
@@ -2359,11 +2375,11 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         }
     }
 
-    // alltoall requires a complete NxN cross-device pattern and all
-    // ranks in the communicator to participate
+    // (e): the cross-device pattern must form a complete N x N exchange.
+    // combined with (b)-(c) above, this guarantees that each ordered
+    // pair of distinct devices contributes exactly one cross-device
+    // intersection of size uniform_count.
     if(cross_device_count != nbricks_in * (nbricks_in - 1))
-        alltoall_eligible = false;
-    if(alltoall_eligible && rccl && static_cast<size_t>(rccl.num_ranks()) != nbricks_in)
         alltoall_eligible = false;
 
     // two RCCL collective strategies are supported:
@@ -2414,11 +2430,10 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
     // handle same-device intersections (identical for both paths)
     for(const auto& info : intersections)
     {
-        if(!info.same_device)
-            continue;
-
         const auto& inBrick  = inField.bricks[info.inBrickIdx];
         const auto& outBrick = outField.bricks[info.outBrickIdx];
+        if(!(inBrick.location == outBrick.location))
+            continue;
 
         auto transposeIdx
             = AddMultiPlanItem(transpose_brick(local_comm_rank,
@@ -2476,11 +2491,10 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         // the SEND buffer
         for(const auto& info : intersections)
         {
-            if(info.same_device)
-                continue;
-
             const auto& inBrick  = inField.bricks[info.inBrickIdx];
             const auto& outBrick = outField.bricks[info.outBrickIdx];
+            if(inBrick.location == outBrick.location)
+                continue;
 
             size_t src_brick_idx = device_to_brick[inBrick.location.device];
             size_t dst_brick_idx = device_to_brick[outBrick.location.device];
@@ -2531,11 +2545,10 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         // unpack from the RECV buffer into output
         for(const auto& info : intersections)
         {
-            if(info.same_device)
-                continue;
-
             const auto& inBrick  = inField.bricks[info.inBrickIdx];
             const auto& outBrick = outField.bricks[info.outBrickIdx];
+            if(inBrick.location == outBrick.location)
+                continue;
 
             size_t src_brick_idx = device_to_brick[inBrick.location.device];
             size_t dst_brick_idx = device_to_brick[outBrick.location.device];
@@ -2577,16 +2590,16 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
 
         for(const auto& info : intersections)
         {
-            if(info.same_device)
-                continue;
-
             const auto& inBrick  = inField.bricks[info.inBrickIdx];
             const auto& outBrick = outField.bricks[info.outBrickIdx];
+            if(inBrick.location == outBrick.location)
+                continue;
+            const size_t count = info.intersection.logical_count();
 
             TempBufferLease& pack = packBufs.emplace_back(
-                tempBuffers, local_comm_rank, inBrick.location, info.count * elem_size);
+                tempBuffers, local_comm_rank, inBrick.location, count * elem_size);
             TempBufferLease& recv = packBufs.emplace_back(
-                tempBuffers, local_comm_rank, outBrick.location, info.count * elem_size);
+                tempBuffers, local_comm_rank, outBrick.location, count * elem_size);
 
             auto packIdx
                 = AddMultiPlanItem(transpose_brick(local_comm_rank,
@@ -2612,7 +2625,7 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
                                                         inBrick.location,
                                                         BufferPtr::temp(pack.data()),
                                                         0,
-                                                        info.count,
+                                                        count,
                                                         local_comm_rank);
             }
 
@@ -2623,7 +2636,7 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
                                                         outBrick.location,
                                                         BufferPtr::temp(recv.data()),
                                                         0,
-                                                        info.count,
+                                                        count,
                                                         local_comm_rank);
             }
 
