@@ -173,6 +173,7 @@ Numpy-only paths (the manifest runner) go through `Runtime.alloc` / `memcpy_h2d`
 ## Common Failure Modes
 
 - `ComgrError: do_action(COMPILE_SOURCE_TO_BC): status=4`: malformed LLVM IR (unknown intrinsic, wrong type, wrong address space). Inspect `art.llvm_text` and `core/lower_llvm.py::_INTRINSIC_DECLS`.
+- `ComgrError: do_action(COMPILE_SOURCE_TO_BC): status=1`: most commonly an intrinsic signature mismatch between the toolchain and the emitted IR (e.g. `make.buffer.rsrc.p1` vs `.p8.p1` between LLVM 20 and LLVM 21+). The DSL picks the right flavor automatically — see "LLVM Intrinsic Flavor" in `dsl_docs/ir_lowering/backend_details.md` for the override knob.
 - `ComgrError: ... status=5`: undefined intrinsic at link time. Likely a bf16 path that needs the `_1k` variant (see `mfma.f32.16x16x16bf16.1k` in `_INTRINSIC_DECLS`).
 - `HipError: hipModuleLoadData: hipError(700)`: HSACO failed to load — usually an ISA mismatch (HSACO built for gfx950, runtime device is gfx940/gfx942).
 - `HipError: hipModuleGetFunction: hipError(500)`: function name mismatch. Check `art.kernel_name` matches what the launcher was constructed with.

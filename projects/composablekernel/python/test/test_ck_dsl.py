@@ -24,6 +24,7 @@ import unittest
 from ck_dsl import (
     F16,
     I32,
+    I64,
     IRBuilder,
     PtrType,
     TensorDescriptor,
@@ -1270,6 +1271,138 @@ class TestBufferView(unittest.TestCase):
         ll = lower_kernel_to_llvm(b.kernel)
         # raw_ptr_buffer_load.u16 is the scalar half buffer load.
         self.assertIn("raw.ptr.buffer.load", ll)
+
+
+class TestLlvmFlavorPolymorphism(unittest.TestCase):
+    """The LLVM lowering must work against both LLVM 20 (ROCm 7.0/7.1)
+    and LLVM 21+ (ROCm 7.2; ships LLVM 22) toolchains. The two
+    affected intrinsic families are:
+
+    1. ``llvm.amdgcn.make.buffer.rsrc``: renamed to ``...p8.p1`` and
+       widened ``num_records`` from i32 to i64 in LLVM 21+ (PR #126828).
+    2. ``llvm.amdgcn.mfma.f32.*.{fp8,bf8}.{fp8,bf8}``: A/B operand types
+       collapsed from ``<2 x i32>`` to scalar ``i64`` in LLVM 21+.
+    """
+
+    def _buffer_rsrc_kernel(self):
+        from ck_dsl.helpers import (
+            make_buffer_resource,
+            make_buffer_view,
+            make_tile_window,
+        )
+
+        b = IRBuilder("flavor_buf_rsrc")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        N_bytes = b.param("N_bytes", I32)
+        rsrc = make_buffer_resource(b, X, num_bytes=N_bytes)
+        view = make_buffer_view(rsrc, shape=(0,), dtype=F16)
+        tile = make_tile_window(view, lengths=(0,), origin=(b.const_i32(0),))
+        tile.load_vec(b, b.const_i32(0), n=4)
+        return b.kernel
+
+    def _fp8_mfma_kernel(self):
+        from ck_dsl.instances import BlockScaleGemmSpec
+        from ck_dsl.instances.block_scale_gemm import build_block_scale_gemm
+
+        return build_block_scale_gemm(
+            BlockScaleGemmSpec(
+                M=32,
+                N=32,
+                K=64,
+                block_tile_m=16,
+                block_tile_n=16,
+                quant_mode="abquant",
+                mantissa_dtype="fp8e4m3",
+                group_size_mnk=(1, 1, 64),
+            )
+        )
+
+    def test_buffer_rsrc_llvm20_emits_p1_with_i32_num_records(self):
+        from ck_dsl.core.lower_llvm import LLVM_FLAVOR_LLVM20
+
+        ll = lower_kernel_to_llvm(
+            self._buffer_rsrc_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM20
+        )
+        self.assertIn(
+            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
+            "ptr addrspace(1) nocapture readnone, i16, i32, i32)",
+            ll,
+        )
+        self.assertIn("i32 %N_bytes, i32 159744)", ll)
+        self.assertNotIn("make.buffer.rsrc.p8.p1", ll)
+
+    def test_buffer_rsrc_llvm22_emits_p8_p1_with_i64_num_records(self):
+        from ck_dsl.core.lower_llvm import LLVM_FLAVOR_LLVM22
+
+        ll = lower_kernel_to_llvm(
+            self._buffer_rsrc_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM22
+        )
+        self.assertIn(
+            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+            "ptr addrspace(1) nocapture readnone, i16, i64, i32)",
+            ll,
+        )
+        self.assertIn("zext i32 %N_bytes to i64", ll)
+        # The legacy ``.p1`` declare must NOT appear; mixing would
+        # produce conflicting declarations in the same module.
+        self.assertNotIn("@llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1)", ll)
+
+    def test_buffer_rsrc_llvm22_passes_i64_num_bytes_without_zext(self):
+        """``i64`` ``num_bytes`` must reach the intrinsic directly --
+        buffers larger than 4 GiB rely on it; a silent zext-then-trunc
+        would land KV-cache tail reads at zero."""
+        from ck_dsl.core.lower_llvm import LLVM_FLAVOR_LLVM22
+
+        b = IRBuilder("flavor_buf_rsrc_i64")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        N_bytes = b.param("N_bytes", I64)
+        b.buffer_rsrc(X, N_bytes)
+        ll = lower_kernel_to_llvm(b.kernel, llvm_flavor=LLVM_FLAVOR_LLVM22)
+        self.assertNotIn("zext", ll)
+        self.assertIn("i64 %N_bytes, i32 159744)", ll)
+
+    def test_mfma_fp8_llvm20_uses_v2i32_operands(self):
+        from ck_dsl.core.lower_llvm import LLVM_FLAVOR_LLVM20
+
+        ll = lower_kernel_to_llvm(
+            self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM20
+        )
+        self.assertIn(
+            "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
+            "<2 x i32>, <2 x i32>, <4 x float>, "
+            "i32 immarg, i32 immarg, i32 immarg)",
+            ll,
+        )
+        self.assertIn("bitcast <8 x i8>", ll)
+        self.assertIn("to <2 x i32>", ll)
+        self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8(i64", ll)
+
+    def test_mfma_fp8_llvm22_uses_i64_operands(self):
+        from ck_dsl.core.lower_llvm import LLVM_FLAVOR_LLVM22
+
+        ll = lower_kernel_to_llvm(
+            self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM22
+        )
+        self.assertIn(
+            "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
+            "i64, i64, <4 x float>, "
+            "i32 immarg, i32 immarg, i32 immarg)",
+            ll,
+        )
+        self.assertIn("bitcast <8 x i8>", ll)
+        self.assertIn(
+            " = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8(i64 ",
+            ll,
+        )
+        self.assertNotIn("mfma.f32.16x16x32.fp8.fp8(<2 x i32>", ll)
+
+    def test_unknown_flavor_raises(self):
+        with self.assertRaises(ValueError):
+            lower_kernel_to_llvm(
+                self._buffer_rsrc_kernel(), llvm_flavor="not-a-real-flavor"
+            )
 
 
 class TestTransformsBridge(unittest.TestCase):
@@ -3430,9 +3563,13 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         # parent process's module table after ``mock.patch.dict`` exits.
         import torch  # noqa: F401
 
-        module_path = Path(
-            "/workspace/rocm-libraries-streaming/projects/composablekernel/python/"
-            "ck_dsl/examples/attention/parity_unified_attention.py"
+        # Resolve relative to the test file so the harness is found
+        # regardless of where the composablekernel checkout lives.
+        # The previous absolute ``/workspace/rocm-libraries-streaming``
+        # path only worked on one author's machine.
+        module_path = (
+            Path(__file__).resolve().parents[1]
+            / "ck_dsl/examples/attention/parity_unified_attention.py"
         )
         fake_aiter = types.ModuleType("aiter")
         fake_ops = types.ModuleType("aiter.ops")

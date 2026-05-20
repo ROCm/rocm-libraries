@@ -53,6 +53,8 @@ Two things to add:
    )
    ```
 
+   If the LLVM 21+ toolchain takes a different signature for the same intrinsic, add a matching entry to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` and branch on `self._flavor` inside the `_op_*` handler. `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` are worked examples.
+
 2. Add an `_op_<dotted_name>` handler in `_Lowerer`. For `math.my_op`:
 
    ```python
