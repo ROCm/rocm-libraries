@@ -9,8 +9,15 @@
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/bfloat16.hpp"
+#include "ck_tile/core/numeric/float8.hpp"
 #include "ck_tile/core/numeric/half.hpp"
+#include "ck_tile/core/numeric/int8.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
+
+#include <cstdint>
 
 namespace ck_tile::core::arch::mma {
 
@@ -1244,12 +1251,77 @@ struct amdgcn_mma<fp64_t, fp64_t, fp64_t, 16u, 16u, 4u, CtrlFlags, CompilerTarge
     {
         // Note: BLGP flag has another meaning for f64 builtins: BLGP bits [0:2] cause negation of
         // the A, B, and C input matrices respectively (ref. ISA docs for MI300 Instinct)
-        return {__builtin_amdgcn_mfma_f64_16x16x4f64(bit_cast<fp64_t>(aVec),
-                                                     bit_cast<fp64_t>(bVec),
-                                                     cVec,
-                                                     0, // CBSZ ignored for f64
-                                                     0, // ABID ignored for f64
-                                                     static_cast<int>(CtrlFlags::Blgp))};
+        return {__builtin_amdgcn_mfma_f64_16x16x4f64(
+            bit_cast<fp64_t>(aVec),
+            bit_cast<fp64_t>(bVec),
+            cVec,
+            static_cast<int>(CtrlFlags::Cbsz), // CBSZ ignored for f64
+            static_cast<int>(CtrlFlags::Abid), // ABID ignored for f64
+            static_cast<int>(CtrlFlags::Blgp))};
+    }
+};
+
+/**
+ * @struct amdgcn_mma
+ * @brief Specialization of amdgcn_mma for fp64_t, fp64_t, fp64_t MMA operation on GFX90A, GFX942,
+ * GFX950 architecture.
+ * @tparam CtrlFlags Control flags for the MFMA operation
+ * @tparam CompilerTarget Current compiler target
+ */
+// TODO: c++20 template <CtrlFlagsCdna2I CtrlFlags, amdgcn_target CompilerTarget>
+// TODO: c++20 requires
+template <typename CtrlFlags, typename CompilerTarget>
+// clang-format off
+//               |A B C DataTypes       |MNK         |
+struct amdgcn_mma<fp64_t, fp64_t, fp64_t, 4u, 16u, 4u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX90A, amdgcn_target_id::GFX942, amdgcn_target_id::GFX950>>
+//                                                   |WS  |AParams |BPar |CPar |
+: amdgcn_mma_base<fp64_t, fp64_t, fp64_t, 4u, 16u, 4u, 64u, 1, 1, 4, 1, 1, 1, 1, MfmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f64_4x4x4f64";
+
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+    {
+        return {__builtin_amdgcn_mfma_f64_4x4x4f64(
+            bit_cast<fp64_t>(aVec),
+            bit_cast<fp64_t>(bVec),
+            bit_cast<fp64_t>(cVec),
+            static_cast<int>(CtrlFlags::Cbsz), // CBSZ ignored for f64
+            static_cast<int>(CtrlFlags::Abid), // ABID ignored for f64
+            static_cast<int>(CtrlFlags::Blgp))};
+    }
+};
+
+/**
+ * @struct amdgcn_mma
+ * @brief Specialization of amdgcn_mma for fp64_t, fp64_t, fp64_t MMA operation on GFX90A, GFX942,
+ * GFX950 architecture.
+ * @tparam CtrlFlags Control flags for the MFMA operation
+ * @tparam CompilerTarget Current compiler target
+ */
+// TODO: c++20 template <CtrlFlagsCdna2I CtrlFlags, amdgcn_target CompilerTarget>
+// TODO: c++20 requires
+template <typename CtrlFlags, typename CompilerTarget>
+// clang-format off
+//               |A B C DataTypes       |MNK         |
+struct amdgcn_mma<fp64_t, fp64_t, fp64_t, 16u, 4u, 4u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX90A, amdgcn_target_id::GFX942, amdgcn_target_id::GFX950>>
+//                                                   |WS  |AParams |BPar |CPar |
+: amdgcn_mma_base<fp64_t, fp64_t, fp64_t, 16u, 4u, 4u, 64u, 1, 1, 1, 1, 4, 1, 1, MfmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f64_4x4x4f64";
+
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+    {
+        return {__builtin_amdgcn_mfma_f64_4x4x4f64(
+            bit_cast<fp64_t>(aVec),
+            bit_cast<fp64_t>(bVec),
+            bit_cast<fp64_t>(cVec),
+            static_cast<int>(CtrlFlags::Cbsz), // CBSZ ignored for f64
+            static_cast<int>(CtrlFlags::Abid), // ABID ignored for f64
+            static_cast<int>(CtrlFlags::Blgp))};
     }
 };
 
