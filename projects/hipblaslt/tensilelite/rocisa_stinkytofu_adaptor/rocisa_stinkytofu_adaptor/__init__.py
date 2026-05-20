@@ -157,6 +157,12 @@ class rocIsa:
         # ISA-keyed snapshot mirroring rocIsa::m_isainfo. Populated by
         # ``init()`` and shipped to workers by ``setData(getData())``.
         self._data: Dict[Tuple[int, int, int], IsaInfo] = {}
+        # Symbol -> base-index map shared by all ``RegName`` instances
+        # (mirrors ``rocIsa::m_vgprIdx``). KernelWriter registers a name via
+        # ``setVgprIdx`` (typically when emitting a ``.set name, idx`` macro
+        # or a ``v_mov_b32`` rename) and consumes it via ``getTotalIdx`` on
+        # the RegName side, which calls ``getVgprIdx()[name]``.
+        self._vgpr_idx: Dict[str, int] = {}
 
     @staticmethod
     def getInstance() -> "rocIsa":
@@ -240,6 +246,14 @@ class rocIsa:
     def setData(self, data: Dict[Tuple[int, int, int], IsaInfo]) -> None:
         self._data = dict(data)
         self._is_init = bool(self._data)
+
+    # --- Symbol -> base-index map (consumed by ``RegName.getTotalIdx``). ---
+
+    def getVgprIdx(self) -> Dict[str, int]:
+        return self._vgpr_idx
+
+    def setVgprIdx(self, name: str, idx: int) -> None:
+        self._vgpr_idx[name] = idx
 
 isaToGfx = make_dummy_func(f"{_P}.isaToGfx")
 getGlcBitName = make_dummy_func(f"{_P}.getGlcBitName")

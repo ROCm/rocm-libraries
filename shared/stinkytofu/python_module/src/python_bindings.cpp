@@ -24,6 +24,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
@@ -149,11 +150,38 @@ NB_MODULE(_stinkytofu, m) {
     // We need to expose StinkyRegister so nanobind can convert it properly.
     // However, users typically don't construct Register directly - they use helper functions.
     nb::class_<StinkyRegister>(m, "Register")
+        // --- Constructors ---------------------------------------------------
         .def(nb::init<>(), "Create a null register")
-        .def(nb::init<const std::string&, uint32_t, uint16_t>(), nb::arg("type"), nb::arg("index"),
-             nb::arg("count") = 1, "Create a register (e.g., Register('v', 0, 1) for v0)")
+        // Reg ctor with validation: silently accepting unknown type strings (the
+        // raw nb::init binding) lets typos like Register("vgprFoo", 0, 1) build
+        // a UNKNOWN-typed register that fails far away from the call site.
+        .def(
+            "__init__",
+            [](StinkyRegister* self, const std::string& type, uint32_t index, uint16_t count) {
+                if (!isValidRegTypeString(type)) {
+                    throw nb::value_error(
+                        ("Register: unknown register type '" + type +
+                         "'; expected one of v/s/a/m/... (see RegisterType.def)")
+                            .c_str());
+                }
+                new (self) StinkyRegister(type, index, count);
+            },
+            nb::arg("type"), nb::arg("index"), nb::arg("count") = 1,
+            "Create a register (e.g., Register('v', 0, 1) for v0). Raises on unknown type.")
         .def(nb::init<float>(), nb::arg("value"), "Create a float literal")
         .def(nb::init<int>(), nb::arg("value"), "Create an int literal")
+        // Single-string ctor → LiteralString. Used for keywords like MUBUF "off".
+        // Distinct from the (type,index,count) overload by arg count.
+        .def(
+            "__init__",
+            [](StinkyRegister* self, const std::string& literal_string) {
+                new (self) StinkyRegister(literal_string);
+            },
+            nb::arg("literal_string"),
+            "Create a literal string register (e.g., Register('off') for the MUBUF "
+            "'off' keyword). Stored as LiteralString.")
+
+        // --- Type / identity properties ------------------------------------
         .def_prop_ro(
             "reg_type",
             [](const StinkyRegister& r) -> RegType {
@@ -162,7 +190,7 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return RegType::UNKNOWN;
             },
-            "Get the register type (V, S, A, etc.)")
+            "Get the register type (V, S, A, etc.). UNKNOWN for non-Register values.")
         .def_prop_ro(
             "index",
             [](const StinkyRegister& r) -> int {
@@ -171,7 +199,7 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return -1;
             },
-            "Get the register index")
+            "Get the register index (-1 for non-Register values).")
         .def_prop_ro(
             "count",
             [](const StinkyRegister& r) -> int {
@@ -180,14 +208,150 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return 0;
             },
-            "Get the register count (number of consecutive registers)")
+            "Get the register count (number of consecutive registers).")
+        .def_prop_ro(
+            "is_register",
+            [](const StinkyRegister& r) { return r.dataType == StinkyRegister::Type::Register; },
+            "True iff this carries a register reference (not a literal).")
         .def_prop_ro(
             "is_literal",
             [](const StinkyRegister& r) -> bool {
                 return r.dataType == StinkyRegister::Type::LiteralInt ||
-                       r.dataType == StinkyRegister::Type::LiteralDouble;
+                       r.dataType == StinkyRegister::Type::LiteralDouble ||
+                       r.dataType == StinkyRegister::Type::LiteralString;
             },
-            "Check if this is a literal value")
+            "True iff this is any literal (int/double/string).")
+        .def_prop_ro(
+            "is_literal_string",
+            [](const StinkyRegister& r) {
+                return r.dataType == StinkyRegister::Type::LiteralString;
+            },
+            "True iff this is a LiteralString (e.g., MUBUF 'off' keyword).")
+        .def_prop_ro(
+            "literal_string",
+            [](const StinkyRegister& r) -> std::optional<std::string> {
+                if (r.dataType == StinkyRegister::Type::LiteralString) {
+                    return r.literalValue;
+                }
+                return std::nullopt;
+            },
+            "Get the literal string content, or None if not a LiteralString.")
+
+        // --- RegName accessors (rocisa-style symbolic name carrier) --------
+        // stinkytofu's literalValue field doubles as the symbolic name slot for
+        // Register-typed values. We marshal rocisa's (name, offsets[]) struct
+        // to a "name+1+2+..." string at the binding boundary so stinkytofu's
+        // existing IR transforms (e.g. LegalizationUtils::adjustSymbolicRegName)
+        // can act on it without learning a new struct type.
+        .def(
+            "set_reg_name",
+            [](StinkyRegister& r, const std::string& name, std::vector<int> offsets) {
+                std::string full = name;
+                for (int o : offsets) {
+                    full += "+" + std::to_string(o);
+                }
+                r.setSymbolicName(full);
+            },
+            nb::arg("name"), nb::arg("offsets") = std::vector<int>{},
+            "Attach a rocisa-style RegName (name + offsets) to this register. "
+            "Stored on `literalValue`; encoded as 'name+offset1+offset2+...'.")
+        .def(
+            "get_reg_name",
+            [](const StinkyRegister& r) -> std::pair<std::string, std::vector<int>> {
+                std::string s = r.getSymbolicName();
+                std::vector<int> offsets;
+                if (s.empty()) {
+                    return {"", offsets};
+                }
+                auto pos = s.find('+');
+                std::string base = (pos == std::string::npos) ? s : s.substr(0, pos);
+                while (pos != std::string::npos) {
+                    auto next = s.find('+', pos + 1);
+                    std::string token =
+                        s.substr(pos + 1, next == std::string::npos ? std::string::npos
+                                                                    : next - pos - 1);
+                    offsets.push_back(std::stoi(token));
+                    pos = next;
+                }
+                return {base, offsets};
+            },
+            "Read the attached RegName as (name, offsets[]). Returns ('', []) when no name set.")
+        .def(
+            "has_reg_name", [](const StinkyRegister& r) { return r.hasSymbolicName(); },
+            "Whether this register currently carries a symbolic RegName.")
+        .def(
+            "clear_reg_name", [](StinkyRegister& r) { r.setSymbolicName(""); },
+            "Detach any RegName, leaving the numeric (type,index,count) identity.")
+
+        // --- Modifier flags (isMinus / isAbs) ------------------------------
+        // C++ already stores isMinus/isAbs as 1-bit fields on reg; we just
+        // expose Python toggles. Both setters are no-ops on literals.
+        .def_prop_ro(
+            "is_minus",
+            [](const StinkyRegister& r) -> bool {
+                return r.dataType == StinkyRegister::Type::Register && r.reg.isMinus;
+            },
+            "Whether the `-` (negate) modifier is set (`-v0`).")
+        .def(
+            "set_minus",
+            [](StinkyRegister& r, bool value) {
+                if (r.dataType == StinkyRegister::Type::Register) {
+                    r.reg.isMinus = value ? 1u : 0u;
+                }
+            },
+            nb::arg("value"), "Toggle the `-` modifier. No-op on literals.")
+        .def_prop_ro(
+            "is_abs",
+            [](const StinkyRegister& r) -> bool {
+                return r.dataType == StinkyRegister::Type::Register && r.reg.isAbs;
+            },
+            "Whether the `abs(...)` modifier is set (`abs(v0)`).")
+        .def(
+            "set_abs",
+            [](StinkyRegister& r, bool value) {
+                if (r.dataType == StinkyRegister::Type::Register) {
+                    r.reg.isAbs = value ? 1u : 0u;
+                }
+            },
+            nb::arg("value"), "Toggle the `abs(...)` modifier. No-op on literals.")
+
+        // --- Hash / equality (KernelWriter uses Registers as dict keys) ----
+        .def(
+            "__hash__",
+            [](const StinkyRegister& r) -> Py_hash_t {
+                return static_cast<Py_hash_t>(r.hash());
+            })
+        .def(
+            "__eq__",
+            [](const StinkyRegister& r, nb::object other) -> bool {
+                if (!nb::isinstance<StinkyRegister>(other)) {
+                    return false;
+                }
+                return r == nb::cast<StinkyRegister>(other);
+            },
+            nb::arg("other").none(true))
+        .def(
+            "__ne__",
+            [](const StinkyRegister& r, nb::object other) -> bool {
+                if (!nb::isinstance<StinkyRegister>(other)) {
+                    return true;
+                }
+                return r != nb::cast<StinkyRegister>(other);
+            },
+            nb::arg("other").none(true))
+
+        // --- Copy semantics (KernelWriter does copy.deepcopy on registers) -
+        // StinkyRegister is value-like (trivially copyable for the union; the
+        // std::string literalValue copies fine). Same impl for both shallow
+        // and deep copy because there are no nested references.
+        .def("__copy__", [](const StinkyRegister& r) { return StinkyRegister(r); })
+        .def(
+            "__deepcopy__", [](const StinkyRegister& r, nb::handle /*memo*/) {
+                return StinkyRegister(r);
+            },
+            nb::arg("memo"))
+
+        // --- Debug repr -----------------------------------------------------
         .def("__repr__", [](const StinkyRegister& r) -> std::string {
             if (r.dataType == StinkyRegister::Type::Register) {
                 std::string typeStr;
@@ -205,16 +369,27 @@ NB_MODULE(_stinkytofu, m) {
                         typeStr = "?";
                         break;
                 }
+                std::string body;
                 if (r.reg.num == 1) {
-                    return "<Register " + typeStr + std::to_string(r.reg.idx) + ">";
+                    body = typeStr + std::to_string(r.reg.idx);
                 } else {
-                    return "<Register " + typeStr + "[" + std::to_string(r.reg.idx) + ":" +
-                           std::to_string(r.reg.idx + r.reg.num - 1) + "]>";
+                    body = typeStr + "[" + std::to_string(r.reg.idx) + ":" +
+                           std::to_string(r.reg.idx + r.reg.num - 1) + "]";
                 }
+                std::string mods;
+                if (r.reg.isMinus) mods += " -";
+                if (r.reg.isAbs) mods += " abs";
+                std::string name;
+                if (!r.literalValue.empty()) {
+                    name = " name=" + r.literalValue;
+                }
+                return "<Register " + body + mods + name + ">";
             } else if (r.dataType == StinkyRegister::Type::LiteralInt) {
                 return "<Literal " + std::to_string(r.literalInt) + ">";
             } else if (r.dataType == StinkyRegister::Type::LiteralDouble) {
                 return "<Literal " + std::to_string(r.literalDouble) + ">";
+            } else if (r.dataType == StinkyRegister::Type::LiteralString) {
+                return "<LiteralString \"" + r.literalValue + "\">";
             }
             return std::string("<Register (invalid)>");
         });

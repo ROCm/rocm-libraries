@@ -21,51 +21,982 @@
 ################################################################################
 """Shim for ``rocisa.container``.
 
-What this file is:
-    Mirrors ``rocisa/rocisa/src/container.cpp`` — register references
-    (``RegisterContainer``, ``RegName``, ``Holder*``), factory helpers
-    (``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``, ``replaceHolder``),
-    asm modifier descriptors (``DS/FLAT/SMEM/...Modifiers``), hardware
-    aliases (``VCC``, ``EXEC``, ``HWRegContainer``), and small value
-    objects (``ContinuousRegister``, ``MemTokenData``).
+Register references (``RegisterContainer``, ``RegName``, ``Holder*``),
+factory helpers (``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``,
+``replaceHolder``), asm modifier descriptors, hardware aliases
+(``VCC``, ``EXEC``, ``HWRegContainer``), and small value objects.
 
-What it does (real):
-    - None.
+Done (real):
+    - ``RegName``, ``RegisterContainer``                      (T2)
+    - ``Holder``, ``HolderContainer``, ``replaceHolder``      (T2)
 
-Not yet done (dummy):
-    - ``RegName``, ``RegisterContainer``                      (Step 2)
-    - ``sgpr``, ``vgpr``                                      (Step 3)
-    - ``accvgpr``, ``mgpr``                                   (Step 4)
-    - ``ContinuousRegister``                                  (Step 5)
-    - ``VCC``, ``EXEC``, ``EXECLO``, ``EXECHI``               (Step 6)
-    - ``HWRegContainer``                                      (Step 7)
-    - ``Holder``, ``HolderContainer``, ``replaceHolder``      (Step 8)
-    - ``MemTokenData``                                        (Step 10)
+TODO (dummy):
+    - ``sgpr``, ``vgpr``                                      (T3)
+    - ``accvgpr``, ``mgpr``                                   (T3)
+    - ``ContinuousRegister``                                  (T4)
+    - ``VCC``, ``EXEC``, ``EXECLO``, ``EXECHI``               (T4)
+    - ``HWRegContainer``                                      (T4)
+    - ``MemTokenData``                                        (T5)
     - Modifier classes (``DS/FLAT/GLOBAL/MUBUF/SMEM/SDWA/DPP/
       VOP3P/True16Modifiers``) — deferred to instruction-emit phase.
     - ``Container`` base class.
-
-logicalIR correspondence:
-    ``StinkyRegister`` (``shared/stinkytofu/python_module/src/
-    python_bindings.cpp``) covers the instance-level data carried by
-    ``RegisterContainer``; modifier classes are encoded as intrinsic
-    attributes on each operation, not as stand-alone objects.
 """
 
 from __future__ import annotations
+
+import math
+from copy import deepcopy
+from typing import List, Optional, Tuple, Union
 
 from ._dummy import make_dummy_class, make_dummy_func
 
 _P = "rocisa.container"
 
 
-replaceHolder = make_dummy_func(f"{_P}.replaceHolder")
+# ---------------------------------------------------------------------------
+# RegName -- symbolic register name + per-offset chain.
+# ---------------------------------------------------------------------------
+#
+# Single source of truth for the (name, offsets) struct view that
+# KernelWriter touches. Stinkytofu encodes the same idea as a
+# "name+off1+off2+..." string on StinkyRegister.literalValue; that
+# string is rehydrated only at to_stinky() time.
+class RegName:
+    """Symbolic register name with optional offset chain.
+
+    Encodings:
+        * ``str(rn)`` -> ``"name+off1+off2+..."``.
+        * ``rn.getTotalIdx()`` -> ``rocIsa.getVgprIdx()[name] +
+          sum(offsets)``.
+    """
+
+    __slots__ = ("name", "offsets", "nameIdx")
+
+    def __init__(self, name: str = "", offsets: Optional[List[int]] = None) -> None:
+        self.name: str = name
+        # Copy on assign to avoid sharing the caller's list.
+        self.offsets: List[int] = list(offsets) if offsets else []
+        self.nameIdx: int = 0
+
+    # --- Offset accessors. ------------------------------------------------
+
+    def getOffsets(self) -> List[int]:
+        return self.offsets
+
+    def setOffset(self, i: int, offset: int) -> None:
+        if i >= len(self.offsets):
+            raise IndexError("Index out of range")
+        self.offsets[i] = offset
+
+    def addOffset(self, offset: int) -> None:
+        self.offsets.append(offset)
+
+    def getTotalOffsets(self) -> int:
+        return sum(self.offsets)
+
+    # --- Symbol -> base-index resolution. ---------------------------------
+
+    def setNameIdx(self) -> None:
+        # Lazy import: avoids pulling the rocIsa singleton at module
+        # import time (otherwise hits an adapter -> caps -> adapter loop).
+        from . import rocIsa  # noqa: WPS433  (runtime import is intentional)
+
+        self.nameIdx = rocIsa.getInstance().getVgprIdx().get(self.name, 0)
+
+    def getTotalIdx(self) -> int:
+        self.setNameIdx()
+        return self.getTotalOffsets() + self.nameIdx
+
+    # --- Dunder surface. --------------------------------------------------
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, RegName):
+            return NotImplemented
+        return self.name == other.name and self.offsets == other.offsets
+
+    def __ne__(self, other: object) -> bool:
+        eq = self.__eq__(other)
+        return NotImplemented if eq is NotImplemented else not eq
+
+    def __hash__(self) -> int:
+        return hash((self.name, tuple(self.offsets)))
+
+    def __str__(self) -> str:
+        if not self.offsets:
+            return self.name
+        return self.name + "".join("+" + str(o) for o in self.offsets)
+
+    def __repr__(self) -> str:
+        return f"RegName(name={self.name!r}, offsets={self.offsets!r})"
+
+    def __deepcopy__(self, memo: dict) -> "RegName":
+        return RegName(self.name, list(self.offsets))
+
+    def __copy__(self) -> "RegName":
+        return RegName(self.name, list(self.offsets))
+
+    # Pickle support. Used by KernelWriter when shipping kernels across
+    # worker processes.
+    def __getstate__(self) -> Tuple[str, List[int]]:
+        return (self.name, list(self.offsets))
+
+    def __setstate__(self, state: Tuple[str, List[int]]) -> None:
+        name, offsets = state
+        self.name = name
+        self.offsets = list(offsets)
+        self.nameIdx = 0
+
+
+# ---------------------------------------------------------------------------
+# RegisterContainer -- register reference with rocisa-specific decorations.
+# ---------------------------------------------------------------------------
+#
+# Stores the full attribute set (regType, regName, regIdx, regNum plus
+# the isInlineAsm/isMacro/isOff/msb decoration flags) as plain Python
+# fields and rebuilds a stinky.Register on demand via to_stinky().
+#
+# Why not subclass / hold an eager stinky.Register?
+#   * Nanobind-exposed classes are not natural Python bases.
+#   * Most attributes (isInlineAsm/isMacro/isOff/msb, regName as a
+#     struct) have no stinkytofu equivalent; this wrapper has to be
+#     the single source of truth.
+#   * Lazy to_stinky avoids the build cost (and the unknown-regtype
+#     validation) for wrappers that never reach emit.
+class RegisterContainer:
+    """Reference to one or more architectural registers.
+
+    Optional kwargs ``isAbs`` / ``isMacro`` / ``isOff`` mirror the
+    extended ctor variant.
+
+    Attributes (all mutable):
+        regType (str)    -- "v" / "s" / "a" / "m".
+        regName (RegName | None)
+        regIdx  (int)
+        regNum  (int)    -- stored as ``int(ceil(regNum))``.
+        msb     (int)    -- transient, populated by ``setMsb``.
+        isInlineAsm, isMinus, isAbs, isMacro, isOff (bool)
+    """
+
+    __slots__ = (
+        "regType",
+        "regName",
+        "regIdx",
+        "regNum",
+        "msb",
+        "isInlineAsm",
+        "isMinus",
+        "isAbs",
+        "isMacro",
+        "isOff",
+    )
+
+    def __init__(
+        self,
+        regType: str,
+        regName: Optional[RegName],
+        regIdx: int = 0,
+        regNum: float = 1,
+        *,
+        isAbs: bool = False,
+        isMacro: bool = False,
+        isOff: bool = False,
+    ) -> None:
+        self.regType: str = regType
+        self.regName: Optional[RegName] = regName
+        self.regIdx: int = regIdx
+        # Round up so regNum=1.5 -> 2.
+        self.regNum: int = int(math.ceil(regNum))
+        self.msb: int = 0
+        self.isInlineAsm: bool = False
+        self.isMinus: bool = False
+        self.isAbs: bool = isAbs
+        self.isMacro: bool = isMacro
+        self.isOff: bool = isOff
+
+    # --- Setters. ---------------------------------------------------------
+
+    def setInlineAsm(self, setting: bool) -> None:
+        self.isInlineAsm = setting
+
+    def setMinus(self, isMinus: bool) -> None:
+        self.isMinus = isMinus
+
+    def setAbs(self, isAbs: bool) -> None:
+        self.isAbs = isAbs
+
+    def getMinus(self) -> "RegisterContainer":
+        """Return a copy with ``isMinus=True`` (for negation operands)."""
+        c = self._shallow_clone()
+        c.setMinus(True)
+        return c
+
+    # --- regName mutation. ------------------------------------------------
+
+    def replaceRegName(self, srcName: str, dst: Union[int, str]) -> None:
+        """In-place substitute ``srcName`` in ``regName.name``.
+
+        Two overloads:
+            * ``dst: int``  -> exact match collapses the symbolic name
+              into a literal index (``regIdx``); partial match substring-
+              replaces ``str(dst)``.
+            * ``dst: str``  -> substring-replace ``srcName`` with ``dst``.
+        """
+        if self.regName is None:
+            return
+        if isinstance(dst, bool):
+            # bool is a subclass of int; reject so callers don't hit the
+            # int overload accidentally.
+            raise TypeError("replaceRegName dst must be int or str, not bool")
+        if isinstance(dst, int):
+            if self.regName.name == srcName:
+                self.regIdx = dst + self.regName.getTotalOffsets()
+                self.regName = None
+                return
+            pos = self.regName.name.find(srcName)
+            if pos != -1:
+                self.regName.name = (
+                    self.regName.name[:pos]
+                    + str(dst)
+                    + self.regName.name[pos + len(srcName) :]
+                )
+            return
+        if isinstance(dst, str):
+            pos = self.regName.name.find(srcName)
+            if pos != -1:
+                self.regName.name = (
+                    self.regName.name[:pos] + dst + self.regName.name[pos + len(srcName) :]
+                )
+            return
+        raise TypeError(f"replaceRegName dst must be int or str, not {type(dst).__name__}")
+
+    # --- Composite name accessors. ----------------------------------------
+
+    def getRegNameWithType(self) -> str:
+        # Crashes if regName is None (caller's responsibility).
+        return self.regType + "gpr" + self.regName.name  # type: ignore[union-attr]
+
+    def getCompleteRegNameWithType(self) -> str:
+        return self.regType + "gpr" + str(self.regName)  # type: ignore[arg-type]
+
+    def getCompleteRegName(self) -> str:
+        return str(self.regName)  # type: ignore[arg-type]
+
+    # --- splitRegContainer. -----------------------------------------------
+
+    def splitRegContainer(self) -> Tuple["RegisterContainer", "RegisterContainer"]:
+        """Split into two halves; second half is offset by 1 reg.
+
+        Returns two independent instances; caller can mutate either side.
+        """
+        r1 = self._deep_clone()
+        r2 = self._deep_clone()
+        new_reg_num = math.ceil(self.regNum / 2)
+        if self.regName is not None:
+            r2.regName.addOffset(1)  # type: ignore[union-attr]
+        else:
+            r2.regIdx += 1
+        r1.regNum = new_reg_num
+        r2.regNum = self.regNum - new_reg_num
+        return (r1, r2)
+
+    # --- msb (HasVgprMSB byte-pair encoding). -----------------------------
+
+    def setMsb(self) -> None:
+        if self.regName is not None:
+            self.msb = self.regName.getTotalIdx() // 256
+        else:
+            self.msb = self.regIdx // 256
+
+    # --- Hash / equality. -------------------------------------------------
+
+    def __hash__(self) -> int:
+        return hash((self.regType, self.regIdx, self.regNum, self.regName))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, RegisterContainer):
+            return False
+        return (
+            self.regType == other.regType
+            and self.regIdx == other.regIdx
+            and self.regNum == other.regNum
+            and self.regName == other.regName
+        )
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    # --- Aliasing predicates. ---------------------------------------------
+
+    def sameRegBaseAddr(self, b: "RegisterContainer") -> bool:
+        if self.regName is not None and b.regName is not None:
+            return self.regName.name == b.regName.name
+        if self.regName is None and b.regName is None:
+            return self.regIdx == b.regIdx
+        return False
+
+    def __and__(self, b: "RegisterContainer") -> bool:
+        # Overlap check on the (offset, offset+regNum) interval.
+        if not self.sameRegBaseAddr(b):
+            return False
+        len_a = self.regNum
+        off_a = sum(self.regName.offsets) if self.regName is not None else 0
+        len_b = b.regNum
+        off_b = sum(b.regName.offsets) if b.regName is not None else 0
+        range_a = (off_a, off_a + len_a)
+        range_b = (off_b, off_b + len_b)
+        if range_a[0] > range_b[0]:
+            range_a, range_b = range_b, range_a
+        return range_a[1] > range_b[0]
+
+    # --- Stringification. -------------------------------------------------
+
+    def toString(self) -> str:
+        if self.isOff:
+            return "off"
+
+        minus_str = "-" if self.isMinus else ""
+        if self.isAbs:
+            minus_str = "abs(" + minus_str
+        abs_str = ")" if self.isAbs else ""
+
+        # Empty when HasVgprMSB cap isn't set or rocIsa wasn't initialised,
+        # so __str__ stays side-effect-free for unit tests.
+        msb_str = self._msb_suffix()
+
+        if self.isInlineAsm:
+            return minus_str + "%" + str(self.regIdx) + abs_str
+
+        if self.regName is not None:
+            macro_slash = "\\" if self.isMacro else ""
+            if self.regNum == 1:
+                return (
+                    minus_str
+                    + self.regType
+                    + "["
+                    + macro_slash
+                    + self.regType
+                    + "gpr"
+                    + str(self.regName)
+                    + msb_str
+                    + "]"
+                    + abs_str
+                )
+            return (
+                minus_str
+                + self.regType
+                + "["
+                + macro_slash
+                + self.regType
+                + "gpr"
+                + str(self.regName)
+                + msb_str
+                + ":"
+                + self.regType
+                + "gpr"
+                + str(self.regName)
+                + msb_str
+                + "+"
+                + str(self.regNum - 1)
+                + "]"
+                + abs_str
+            )
+
+        if self.regNum == 1:
+            if self.msb > 0:
+                return (
+                    minus_str
+                    + self.regType
+                    + "["
+                    + str(self.regIdx)
+                    + msb_str
+                    + "]"
+                    + abs_str
+                )
+            return minus_str + self.regType + str(self.regIdx) + abs_str
+
+        return (
+            minus_str
+            + self.regType
+            + "["
+            + str(self.regIdx)
+            + msb_str
+            + ":"
+            + str(self.regIdx + self.regNum - 1)
+            + msb_str
+            + "]"
+            + abs_str
+        )
+
+    def _msb_suffix(self) -> str:
+        """Compute the ``-256*msb`` suffix appended to ``toString``."""
+        try:
+            from . import rocIsa  # lazy import; see RegName.setNameIdx
+        except ImportError:
+            return ""
+        inst = rocIsa.getInstance()
+        if not inst.isInit():
+            return ""
+        try:
+            asm_caps = inst.getAsmCaps()
+        except RuntimeError:
+            return ""
+        if not asm_caps.get("HasVgprMSB", 0) or self.regType != "v":
+            return ""
+        self.setMsb()
+        if self.msb > 0:
+            return str(-256 * self.msb)
+        return ""
+
+    def __str__(self) -> str:
+        return self.toString()
+
+    def __repr__(self) -> str:
+        return (
+            f"RegisterContainer(regType={self.regType!r}, regName={self.regName!r}, "
+            f"regIdx={self.regIdx}, regNum={self.regNum})"
+        )
+
+    # --- Copy semantics. --------------------------------------------------
+
+    def _shallow_clone(self) -> "RegisterContainer":
+        # regName is rebuilt as a new RegName so downstream mutation
+        # (e.g. getMinus -> setMinus) does not bleed back.
+        c = RegisterContainer.__new__(RegisterContainer)
+        c.regType = self.regType
+        c.regName = (
+            RegName(self.regName.name, list(self.regName.offsets))
+            if self.regName is not None
+            else None
+        )
+        c.regIdx = self.regIdx
+        c.regNum = self.regNum
+        c.msb = self.msb
+        c.isInlineAsm = self.isInlineAsm
+        c.isMinus = self.isMinus
+        c.isAbs = self.isAbs
+        c.isMacro = self.isMacro
+        c.isOff = self.isOff
+        return c
+
+    def _deep_clone(self) -> "RegisterContainer":
+        # Independent regName so splitRegContainer.addOffset(1) on the
+        # right half does not contaminate the left.
+        return self._shallow_clone()
+
+    def __copy__(self) -> "RegisterContainer":
+        return self._shallow_clone()
+
+    def __deepcopy__(self, memo: dict) -> "RegisterContainer":
+        return self._shallow_clone()
+
+    def __getstate__(self) -> Tuple[str, Optional[RegName], int, int, bool, bool, bool, bool, bool, int]:
+        return (
+            self.regType,
+            deepcopy(self.regName),
+            self.regIdx,
+            self.regNum,
+            self.isInlineAsm,
+            self.isMinus,
+            self.isAbs,
+            self.isMacro,
+            self.isOff,
+            self.msb,
+        )
+
+    def __setstate__(
+        self,
+        state: Tuple[str, Optional[RegName], int, int, bool, bool, bool, bool, bool, int],
+    ) -> None:
+        (
+            self.regType,
+            self.regName,
+            self.regIdx,
+            self.regNum,
+            self.isInlineAsm,
+            self.isMinus,
+            self.isAbs,
+            self.isMacro,
+            self.isOff,
+            self.msb,
+        ) = state
+
+    # --- logicalIR handoff -------------------------------------------------
+
+    def to_stinky(self):
+        """Build a fresh ``stinky.Register`` from this wrapper's state.
+
+        ``RegisterContainer`` is the source of truth; the stinky register
+        is built fresh on each call so wrapper mutations
+        (``replaceRegName``, ``setMinus``, ``setAbs``) become visible
+        without an explicit sync step. rocisa-only emit decorations
+        (``isMacro`` / ``isInlineAsm`` / ``msb`` / ``isOff``-as-flag) are
+        translated here into stinky's vocabulary.
+
+        Returns:
+            ``stinky.Register`` -- register-typed for normal wrappers,
+            ``LiteralString("off")`` for ``isOff=True``.
+
+        Raises:
+            NotImplementedError: when ``isInlineAsm=True``.
+
+        TODO:
+            - isMacro currently injects a backslash into the symbolic
+              name as a stop-gap; T6 should route macros through proper
+              TEXTBLOCK handling at the Module layer.
+            - isInlineAsm has no stinkytofu path; T6 Module layer must
+              gate inline-asm modules and route them back to rocisa
+              native via ``$ROCISA_BACKEND``.
+        """
+        import stinkytofu as _stinky  # noqa: WPS433  (runtime: optional dep)
+
+        if self.isOff:
+            return _stinky.Register("off")
+
+        if self.isInlineAsm:
+            raise NotImplementedError(
+                "RegisterContainer.to_stinky: isInlineAsm=True has no "
+                "stinkytofu emit path (rocisa-only %-operand format). "
+                "Module layer (T6) must route inline-asm modules back "
+                "to rocisa native."
+            )
+
+        # Resolve physical index.
+        if self.regName is not None and self.regType == "v":
+            physical_idx = self.regName.getTotalIdx()
+        else:
+            physical_idx = self.regIdx
+
+        reg = _stinky.Register(self.regType, physical_idx, self.regNum)
+
+        if self.isMinus:
+            reg.set_minus(True)
+        if self.isAbs:
+            reg.set_abs(True)
+
+        # MSB offset is left to InsertVgprMsbPass; binding has no
+        # set_offset.
+
+        if self.regName is not None:
+            # Single-string encoding: "<regType>gpr" + name + "+off1+off2...".
+            symbolic = self.getCompleteRegNameWithType()
+            if self.isMacro:
+                # TODO(T6): proper TEXTBLOCK handling for macro blocks;
+                # this backslash injection is a byte-parity stop-gap.
+                symbolic = "\\" + symbolic
+            reg.set_reg_name(symbolic, [])
+
+        return reg
+
+
+# ---------------------------------------------------------------------------
+# generateRegName -- "Foo+1+2" -> RegName(name="Foo", offsets=[1, 2]).
+# ---------------------------------------------------------------------------
+#
+# Parses a string-form symbolic ref back into a structured RegName.
+# Inverse of RegName.__str__. Used by Holder(name=...) ctor.
+def _generateRegName(rawText: str) -> RegName:
+    parts = rawText.split("+")
+    name = parts[0]
+    offsets = [int(p) for p in parts[1:]] if len(parts) > 1 else []
+    return RegName(name, offsets)
+
+
+# ---------------------------------------------------------------------------
+# Holder -- deferred register reference resolved at replaceHolder time.
+# ---------------------------------------------------------------------------
+#
+# An unresolved register reference: KernelWriter creates a Holder before
+# knowing the final register index, hands it to an instruction inside a
+# Module template, and later calls replaceHolder(module, dst) to resolve
+# all Holders in the tree to concrete RegisterContainer instances.
+#
+# Two flavours:
+#   * Holder(idx)   -- numeric base; resolved idx = holder_idx + dst
+#   * Holder(name)  -- symbolic base ("Foo" or "Foo+1+2"); resolved
+#                      regName = RegName(name, [dst, *parsed_offsets])
+class Holder:
+    """Deferred register reference (resolved later by ``replaceHolder``).
+
+    Constructors:
+        * ``Holder(idx)``  -- int. Stores ``idx``, leaves ``name=None``.
+        * ``Holder(name)`` -- str. Stores ``idx=-1``, ``name=
+          generateRegName(name)``.
+
+    Attributes (both mutable):
+        idx (int):              numeric base, or ``-1`` when ``name`` set.
+        name (RegName | None):  symbolic base, or ``None`` when ``idx`` set.
+    """
+
+    __slots__ = ("idx", "name")
+
+    def __init__(self, *args, **kwargs) -> None:
+        # Dispatch on keyword first, then positional arg type. bool is
+        # rejected so callers don't accidentally hit the int overload.
+        if "idx" in kwargs and "name" not in kwargs:
+            arg = kwargs["idx"]
+            if isinstance(arg, bool):
+                raise TypeError("Holder(idx=...): idx must be int, not bool")
+            if not isinstance(arg, int):
+                raise TypeError(
+                    f"Holder(idx=...): idx must be int, got {type(arg).__name__}"
+                )
+            self.idx = arg
+            self.name = None
+            return
+        if "name" in kwargs and "idx" not in kwargs:
+            arg = kwargs["name"]
+            if not isinstance(arg, str):
+                raise TypeError(
+                    f"Holder(name=...): name must be str, got {type(arg).__name__}"
+                )
+            self.idx = -1
+            self.name = _generateRegName(arg)
+            return
+        if kwargs:
+            raise TypeError(
+                "Holder() takes exactly one of (idx, name); got: " + ", ".join(kwargs)
+            )
+        if len(args) != 1:
+            raise TypeError("Holder() takes exactly one positional arg (idx or name)")
+        arg = args[0]
+        if isinstance(arg, bool):
+            raise TypeError("Holder(): arg must be int or str, not bool")
+        if isinstance(arg, int):
+            self.idx = arg
+            self.name = None
+        elif isinstance(arg, str):
+            self.idx = -1
+            self.name = _generateRegName(arg)
+        else:
+            raise TypeError(
+                f"Holder(): arg must be int or str, got {type(arg).__name__}"
+            )
+
+    def __repr__(self) -> str:
+        return f"Holder(idx={self.idx}, name={self.name!r})"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Holder):
+            return NotImplemented
+        return self.idx == other.idx and self.name == other.name
+
+    def __ne__(self, other: object) -> bool:
+        eq = self.__eq__(other)
+        return NotImplemented if eq is NotImplemented else not eq
+
+    def __hash__(self) -> int:
+        return hash((self.idx, self.name))
+
+    def __copy__(self) -> "Holder":
+        c = Holder.__new__(Holder)
+        c.idx = self.idx
+        c.name = (
+            RegName(self.name.name, list(self.name.offsets))
+            if self.name is not None
+            else None
+        )
+        return c
+
+    def __deepcopy__(self, memo: dict) -> "Holder":
+        return self.__copy__()
+
+    # Pickle support.
+    def __getstate__(self) -> Tuple[int, Optional[RegName]]:
+        return (self.idx, self.name)
+
+    def __setstate__(self, state: Tuple[int, Optional[RegName]]) -> None:
+        self.idx, self.name = state
+
+
+# ---------------------------------------------------------------------------
+# HolderContainer -- RegisterContainer subclass with deferred resolution.
+# ---------------------------------------------------------------------------
+#
+# Three ctors:
+#   * (regType, holderName: str, regNum)   -- type 1, named via string
+#   * (regType, regName: RegName, regNum)  -- type 1, named via RegName
+#                                             (preserves RegName's
+#                                             own offsets in holderOffsets)
+#   * (regType, holderIdx: int, regNum)    -- type 0, numeric
+#
+# setRegNum(dst) is the deferred-resolution mutator: it mutates the
+# parent RegisterContainer state in place using dst as the resolved
+# offset/idx. replaceHolder() calls it before swapping the
+# HolderContainer out for a plain RegisterContainer snapshot via
+# getCopiedRC().
+class HolderContainer(RegisterContainer):
+    """Deferred-resolution ``RegisterContainer`` subclass.
+
+    Two ``holderType`` modes:
+        * ``holderType == 0``: numeric -- ``setRegNum(num)`` resolves
+          ``regIdx = holderIdx + num``.
+        * ``holderType == 1``: named -- ``setRegNum(num)`` resolves
+          ``regName = RegName(holderName, [num, *holderOffsets])``.
+
+    Attributes (all mutable):
+        holderName (str)
+        holderIdx (int)
+        holderType (int)        -- 0 (numeric) or 1 (named)
+        holderOffsets (list[int])
+    """
+
+    __slots__ = ("holderName", "holderIdx", "holderType", "holderOffsets")
+
+    def __init__(self, regType: str, holderArg, regNum: float) -> None:
+        # bool is a subclass of int; reject so True/False doesn't fall
+        # into the numeric branch silently.
+        if isinstance(holderArg, bool):
+            raise TypeError(
+                "HolderContainer: 2nd arg must be str/RegName/int, not bool"
+            )
+        if isinstance(holderArg, str):
+            # Named via string: parent gets bare RegName(holderName, [])
+            # so toString/emit still works before setRegNum lands.
+            super().__init__(regType, RegName(holderArg), 0, regNum)
+            self.holderName = holderArg
+            self.holderIdx = 0
+            self.holderType = 1
+            self.holderOffsets: List[int] = []
+        elif isinstance(holderArg, RegName):
+            # Named via RegName: RegName.offsets become holderOffsets so
+            # setRegNum can later prepend dst and re-append them.
+            super().__init__(regType, holderArg, 0, regNum)
+            self.holderName = holderArg.name
+            self.holderIdx = 0
+            self.holderType = 1
+            self.holderOffsets = list(holderArg.offsets)
+        elif isinstance(holderArg, int):
+            # Numeric: parent regName=None, regIdx=holderIdx so toString
+            # prints a placeholder numeric register pre-resolution.
+            super().__init__(regType, None, holderArg, regNum)
+            self.holderName = ""
+            self.holderIdx = holderArg
+            self.holderType = 0
+            self.holderOffsets = []
+        else:
+            raise TypeError(
+                f"HolderContainer: 2nd arg must be str/RegName/int, "
+                f"got {type(holderArg).__name__}"
+            )
+
+    # --- Deferred resolution. ---------------------------------------------
+
+    def setRegNum(self, num: int) -> None:
+        """Resolve the holder using ``num`` as the produced offset/idx.
+
+        Mutates the parent RegisterContainer state in place. After this
+        call ``getCopiedRC()`` returns a fully-resolved snapshot.
+        """
+        if self.holderType == 0:
+            self.regIdx = self.holderIdx + num
+        elif self.holderType == 1:
+            # Re-seed regName from holderName (drop stale offsets), then
+            # prepend num and append the saved holderOffsets.
+            self.regName = RegName(self.holderName)
+            self.regName.offsets.insert(0, num)
+            for off in self.holderOffsets:
+                self.regName.offsets.append(off)
+
+    # --- Snapshot to plain RegisterContainer. -----------------------------
+
+    def getCopiedRC(self) -> "RegisterContainer":
+        """Snapshot current state as a plain ``RegisterContainer``.
+
+        Called by ``replaceHolder`` after ``setRegNum`` to substitute the
+        HolderContainer with a fully-resolved RC. The snapshot is
+        independent: subsequent mutation of either side does not bleed.
+        """
+        if self.holderType == 0:
+            return RegisterContainer(self.regType, None, self.regIdx, self.regNum)
+        return RegisterContainer(
+            self.regType,
+            RegName(self.regName.name, list(self.regName.offsets))
+            if self.regName is not None
+            else None,
+            self.regIdx,
+            self.regNum,
+        )
+
+    # --- splitRegContainer override. --------------------------------------
+
+    def splitRegContainer(self) -> Tuple["HolderContainer", "HolderContainer"]:
+        """Split into two HolderContainer halves.
+
+        Differs from the parent in how the right half is shifted:
+
+        * type 1 (named): push ``1`` onto ``r2.regName.offsets``.
+        * type 0 (numeric): bump ``r2.holderIdx`` by 1 (the holder index
+          shifts, not the resolved ``regIdx`` -- so subsequent
+          ``setRegNum`` on r2 produces a shifted result).
+        """
+        r1 = self._shallow_clone()
+        r2 = self._shallow_clone()
+        new_reg_num = math.ceil(self.regNum / 2)
+        if self.holderName:
+            # Named: parent regName is already set so r2.regName is safe
+            # to mutate.
+            r2.regName.addOffset(1)  # type: ignore[union-attr]
+        else:
+            r2.holderIdx += 1
+        r1.regNum = new_reg_num
+        r2.regNum = self.regNum - new_reg_num
+        return (r1, r2)
+
+    # --- Copy semantics. --------------------------------------------------
+
+    def _shallow_clone(self) -> "HolderContainer":  # type: ignore[override]
+        c = HolderContainer.__new__(HolderContainer)
+        # Parent fields.
+        c.regType = self.regType
+        c.regName = (
+            RegName(self.regName.name, list(self.regName.offsets))
+            if self.regName is not None
+            else None
+        )
+        c.regIdx = self.regIdx
+        c.regNum = self.regNum
+        c.msb = self.msb
+        c.isInlineAsm = self.isInlineAsm
+        c.isMinus = self.isMinus
+        c.isAbs = self.isAbs
+        c.isMacro = self.isMacro
+        c.isOff = self.isOff
+        # Subclass fields.
+        c.holderName = self.holderName
+        c.holderIdx = self.holderIdx
+        c.holderType = self.holderType
+        c.holderOffsets = list(self.holderOffsets)
+        return c
+
+    def __copy__(self) -> "HolderContainer":  # type: ignore[override]
+        return self._shallow_clone()
+
+    def __deepcopy__(self, memo: dict) -> "HolderContainer":  # type: ignore[override]
+        return self._shallow_clone()
+
+    # --- Pickle. ----------------------------------------------------------
+
+    def __getstate__(  # type: ignore[override]
+        self,
+    ) -> Tuple[str, int, int, str, Optional[RegName], int, int]:
+        return (
+            self.holderName,
+            self.holderIdx,
+            self.holderType,
+            self.regType,
+            deepcopy(self.regName),
+            self.regIdx,
+            self.regNum,
+        )
+
+    def __setstate__(  # type: ignore[override]
+        self,
+        state: Tuple[str, int, int, str, Optional[RegName], int, int],
+    ) -> None:
+        (
+            holder_name,
+            holder_idx,
+            holder_type,
+            reg_type,
+            reg_name,
+            reg_idx,
+            reg_num,
+        ) = state
+        # Restore the snapshot verbatim, skipping ctor's holderType-derived
+        # state setup. RC flags default to False (not preserved in state).
+        self.regType = reg_type
+        self.regName = reg_name
+        self.regIdx = reg_idx
+        self.regNum = reg_num
+        self.msb = 0
+        self.isInlineAsm = False
+        self.isMinus = False
+        self.isAbs = False
+        self.isMacro = False
+        self.isOff = False
+        self.holderName = holder_name
+        self.holderIdx = holder_idx
+        self.holderType = holder_type
+        # holderOffsets is not in the state tuple; re-derive from regName.
+        self.holderOffsets = (
+            list(reg_name.offsets) if reg_name is not None and reg_name.offsets else []
+        )
+
+
+# ---------------------------------------------------------------------------
+# replaceHolder -- in-place holder resolution walker.
+# ---------------------------------------------------------------------------
+#
+# Walks an instruction / module tree; when a HolderContainer is found in
+# an Instruction's parameter list, calls its setRegNum(dst) and replaces
+# the slot with the resolved RegisterContainer snapshot.
+#
+# TODO(T6): Module / Instruction are still dummies at T2; this duck-types
+# on .items() / .getParams() so it lights up automatically once T6 lands.
+def replaceHolder(inst, dst: int):
+    """Resolve all ``HolderContainer``s in ``inst`` using ``dst``.
+
+    Walks Module-like (``.items()``) and Instruction-like
+    (``.getParams()``) objects. For each ``HolderContainer`` found in an
+    Instruction's parameter list, calls ``setRegNum(dst)`` then replaces
+    the slot with the holder's ``getCopiedRC()`` (a plain
+    ``RegisterContainer`` snapshot). Returns ``inst`` unchanged
+    structurally; the resolution is in-place on the param lists.
+
+    Args:
+        inst: A Module-like, Instruction-like, or arbitrary object.
+            Unknown types are passed through unchanged.
+        dst (int): The base value to feed into each holder's
+            ``setRegNum``.
+
+    Returns:
+        The same ``inst`` (mutated in place for Module/Instruction; left
+        untouched otherwise).
+
+    Raises:
+        RuntimeError: if ``inst`` is an ``SWaitCnt`` (intentional gap).
+    """
+    # Detect by class name to avoid importing the dummy SWaitCnt class.
+    if type(inst).__name__ == "SWaitCnt":
+        raise RuntimeError("SWaitCnt is not supported yet")
+
+    items_method = getattr(inst, "items", None)
+    if callable(items_method):
+        # Module-like: recurse into each child.
+        for item in items_method():
+            replaceHolder(item, dst)
+        return inst
+
+    get_params = getattr(inst, "getParams", None)
+    if callable(get_params):
+        # Instruction-like: walk parameter list, mutate any
+        # HolderContainer slot in place.
+        params = get_params()
+        try:
+            indices = range(len(params))
+        except TypeError:
+            # Non-indexable iterable (e.g. generator): can't mutate in place.
+            return inst
+        for i in indices:
+            param = params[i]
+            if isinstance(param, HolderContainer):
+                param.setRegNum(dst)
+                params[i] = param.getCopiedRC()
+        return inst
+
+    # Unknown / leaf object: return as-is.
+    return inst
+
+
+# ---------------------------------------------------------------------------
+# Remaining surface kept as dummies (covered by later tasks).
+# ---------------------------------------------------------------------------
+
 vgpr = make_dummy_func(f"{_P}.vgpr")
 sgpr = make_dummy_func(f"{_P}.sgpr")
 accvgpr = make_dummy_func(f"{_P}.accvgpr")
 mgpr = make_dummy_func(f"{_P}.mgpr")
 
-Holder = make_dummy_class(f"{_P}.Holder")
 Container = make_dummy_class(f"{_P}.Container")
 DSModifiers = make_dummy_class(f"{_P}.DSModifiers")
 FLATModifiers = make_dummy_class(f"{_P}.FLATModifiers")
@@ -81,8 +1012,5 @@ EXECLO = make_dummy_class(f"{_P}.EXECLO")
 EXECHI = make_dummy_class(f"{_P}.EXECHI")
 VCC = make_dummy_class(f"{_P}.VCC")
 HWRegContainer = make_dummy_class(f"{_P}.HWRegContainer")
-RegName = make_dummy_class(f"{_P}.RegName")
-RegisterContainer = make_dummy_class(f"{_P}.RegisterContainer")
-HolderContainer = make_dummy_class(f"{_P}.HolderContainer")
 MemTokenData = make_dummy_class(f"{_P}.MemTokenData")
 ContinuousRegister = make_dummy_class(f"{_P}.ContinuousRegister")
