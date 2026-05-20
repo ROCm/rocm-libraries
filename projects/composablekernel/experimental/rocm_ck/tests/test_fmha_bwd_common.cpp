@@ -6,7 +6,6 @@
 
 #include <gtest/gtest.h>
 
-using ::rocm_ck::FmhaArch;
 using ::rocm_ck::FmhaBiasType;
 using ::rocm_ck::FmhaMode;
 using ::rocm_ck::GridDim;
@@ -29,20 +28,6 @@ TEST(FmhaBwdCommon, FmhaBiasType_ThreeDistinctVariants)
     EXPECT_NE(static_cast<int>(FmhaBiasType::NONE), static_cast<int>(FmhaBiasType::ELEMENTWISE));
     EXPECT_NE(static_cast<int>(FmhaBiasType::NONE), static_cast<int>(FmhaBiasType::ALIBI));
     EXPECT_NE(static_cast<int>(FmhaBiasType::ELEMENTWISE), static_cast<int>(FmhaBiasType::ALIBI));
-}
-
-// ============================================================================
-// FmhaArch
-// ============================================================================
-
-TEST(FmhaBwdCommon, FmhaArch_FourDistinctVariants)
-{
-    EXPECT_NE(static_cast<int>(FmhaArch::GFX9), static_cast<int>(FmhaArch::GFX950));
-    EXPECT_NE(static_cast<int>(FmhaArch::GFX9), static_cast<int>(FmhaArch::GFX11));
-    EXPECT_NE(static_cast<int>(FmhaArch::GFX9), static_cast<int>(FmhaArch::GFX12));
-    EXPECT_NE(static_cast<int>(FmhaArch::GFX950), static_cast<int>(FmhaArch::GFX11));
-    EXPECT_NE(static_cast<int>(FmhaArch::GFX950), static_cast<int>(FmhaArch::GFX12));
-    EXPECT_NE(static_cast<int>(FmhaArch::GFX11), static_cast<int>(FmhaArch::GFX12));
 }
 
 // ============================================================================
