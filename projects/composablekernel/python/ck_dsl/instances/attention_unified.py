@@ -10,9 +10,7 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from ..core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
@@ -267,68 +265,31 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     The kernel's own gate (``supports_tiled_2d``) re-validates the
     choice against the per-wave-tokens / LDS-budget constraints.
 
-    Per-shape champion overrides (``attention_champion_routes.json``)
-    take precedence: round-based optimization may record a different
-    ``tile_size`` for a specific shape.
+    **FP8 sliding-window long-prefill exception** (round-2 cluster-B
+    sweep, ``/workspace/rounds/_summaries/prod_nw_sweep.log``): when the
+    sliding window prunes the kv-loop to a handful of iters per CTA,
+    bigger T over-allocates LDS without amortising any per-iter cost.
+    For ``use_fp8 + sliding_window > 0 + max_seqlen_q > 256``, drop to
+    ``T = block_size`` (single block per iter, 32 tokens) — measured
+    1.15-1.30× win on every FP8 SW long-prefill shape.
     """
-    override = _champion_override(problem, "tile_size")
-    if override is not None:
-        return int(override)
+    # Sliding-window long-prefill: when SW prunes the kv-loop to a few
+    # iters/CTA, bigger T over-allocates LDS without amortising any
+    # per-iter cost. Drop T to ``block_size`` (single block per iter).
+    # Empirically wins on both fp8 (round-2 cluster-B sweep: 1.15-1.30×)
+    # AND bf16 (``/tmp/sweep_long_prefill.py``: 310us → 291us, ~6%)
+    # for SW long-prefill, so the gate doesn't need ``use_fp8``.
+    if problem.sliding_window > 0 and problem.max_seqlen_q > 256:
+        return problem.block_size
+    # T = 4 * block_size = 128 was tested on bf16 long-prefill (the
+    # ``n=402 q=1000 k=1050`` regression bucket) and got WORSE, not
+    # better: 333us → 953us. The reason is the async DMA loader uses
+    # ``kv_calls_per_tile = (T * HD) // KV_HALVES_PER_CALL`` issuing
+    # one ``raw.ptr.buffer.load.lds`` per call. Doubling T doubles the
+    # call count which saturates the VMEM issue queue (16→32 calls per
+    # tile per warp). The pipeline back-pressure cost outweighs the
+    # halved iter count. T=2*bs remains the sweet spot for non-SW.
     return 2 * problem.block_size
-
-
-_CHAMPION_ROUTES_PATH = (
-    Path(__file__).parent / "attention_champion_routes.json" if False else None
-)
-_CHAMPION_ROUTES_CACHE: Optional[Dict[str, Dict[str, int]]] = None
-
-
-def _shape_signature(problem: UnifiedAttentionProblem) -> str:
-    """Stable signature string mapping a problem to a champion-routes entry.
-
-    Format mirrors the bench harness `_shape_id` function so the bench
-    JSONs and runtime overrides can share keys verbatim.
-    """
-    sw = "_sw" if problem.sliding_window > 0 else ""
-    fp8 = "_fp8kv" if problem.use_fp8 else "_bf16kv"
-    return (
-        f"n{problem.num_seqs}q{problem.max_seqlen_q}k{problem.max_seqlen_k}"
-        f"_d{problem.head_size}b{problem.block_size}"
-        f"_h{problem.num_query_heads}kv{problem.num_kv_heads}"
-        f"{fp8}{sw}"
-    )
-
-
-def _load_champion_routes() -> Dict[str, Dict[str, int]]:
-    """Lazy-load the per-shape champion routing table.
-
-    Returns a dict mapping shape_signature -> {num_warps, block_m_per_warp,
-    tile_size, waves_per_eu}. Missing keys fall back to the heuristic
-    selectors. The file lives next to this module so any in-tree edit is
-    picked up at import without setup changes.
-    """
-    global _CHAMPION_ROUTES_CACHE
-    if _CHAMPION_ROUTES_CACHE is not None:
-        return _CHAMPION_ROUTES_CACHE
-    path = Path(__file__).parent / "attention_champion_routes.json"
-    if not path.exists():
-        _CHAMPION_ROUTES_CACHE = {}
-        return _CHAMPION_ROUTES_CACHE
-    try:
-        doc = json.loads(path.read_text())
-        _CHAMPION_ROUTES_CACHE = doc.get("routes", {}) if isinstance(doc, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        _CHAMPION_ROUTES_CACHE = {}
-    return _CHAMPION_ROUTES_CACHE
-
-
-def _champion_override(problem: UnifiedAttentionProblem, key: str):
-    """Return the per-shape champion override for a knob, or None."""
-    routes = _load_champion_routes()
-    entry = routes.get(_shape_signature(problem))
-    if not entry:
-        return None
-    return entry.get(key)
 
 
 def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
@@ -369,19 +330,23 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
       - an LDS-budget check (``<= 96 KiB`` so we keep >= 1 CTA/CU on
         MI355X comfortably).
     """
-    override = _champion_override(problem, "num_warps")
-    if override is not None:
-        return int(override)
-
     if problem.max_seqlen_q <= 64:
         target = 1
     elif problem.max_seqlen_q <= 128:
         target = 2
     elif problem.max_seqlen_q <= 256:
         target = 4
+    elif problem.num_seqs <= 1:
+        # Long prefill with num_seqs <= 1: the production-shape sweep
+        # (``/workspace/rounds/_summaries/prefill_n_sweep.log``) shows
+        # nw=2 beats nw=4 by 3-5% at n=1 (fewer CTAs hurt under-saturated
+        # GPU at single-seq). The crossover happens at n=2 where nw=4
+        # takes over (4-16% faster than nw=2 from n=2 up to bench-cap n=16).
+        # Single-seq prefill is the only production regime where nw=2 wins.
+        target = 2
     else:
-        # Long prefill (q > 256): the prior choice of NW=2 was conservative
-        # against LDS/VGPR pressure. Round-1 cluster-A sweep
+        # Long prefill (q > 256) with num_seqs >= 2: nw=4 wins.
+        # Round-1 cluster-A sweep
         # (``/workspace/rounds/round_01_bf16_q1000_v1/cluster_a_sweep.md``)
         # showed ``nw=4 mw=16 T=2*BS`` beats ``nw=2`` on 14 of 17 long-prefill
         # bf16 targets by 1.04-1.87× (no regressions). Resource analysis
@@ -434,44 +399,39 @@ def _kv_storage_dtype(problem: UnifiedAttentionProblem) -> Optional[str]:
     return "fp8e4m3" if problem.use_fp8 else None
 
 
-def _tiled_cache_key_from_spec(
-    problem: UnifiedAttentionProblem, spec: "UnifiedAttention2DTiledSpec"
-) -> Tuple:
-    """Compute the tiled-2D cache key from a pre-built spec.
+def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
+    """Compute the tiled-2D cache key WITHOUT building the spec dataclass.
 
-    Use this when the caller already has the spec (avoids rebuilding it
-    twice per launch). See ``_tiled_cache_key`` for the legacy single-arg
-    form that builds the spec internally.
+    On the hot path (every launch) we just need a hashable tuple to
+    look up the cached launcher. Building a full ``UnifiedAttention2DTiledSpec``
+    dataclass (17 fields, frozen=True validation) adds ~3µs per launch
+    which is material on decode kernels (~20µs). The spec is only built
+    on cache miss (first launch per shape) inside ``_get_2d_launcher``.
+
+    Note: this MUST match the spec-derived key — every selector knob
+    that affects the kernel build is included. If a selector changes
+    behaviour, update both this function and ``_tiled_spec_from_problem``.
     """
     return (
         "tiled",
         problem.num_seqs,
         problem.num_query_heads,
         problem.num_kv_heads,
-        spec.head_size,
-        spec.block_size,
-        spec.dtype,
-        spec.sliding_window,
-        bool(spec.use_sinks),
-        bool(spec.has_softcap),
-        bool(spec.use_alibi),
-        bool(spec.use_qq_bias),
-        spec.num_warps,
-        spec.kv_storage_dtype,
-        spec.tile_size_eff,
-        spec.waves_per_eu,
-        spec.block_m_per_warp,
+        problem.head_size,
+        problem.block_size,
+        problem.dtype,
+        problem.sliding_window,
+        bool(problem.use_sinks),
+        bool(problem.softcap > 0),
+        bool(problem.use_alibi),
+        bool(problem.use_qq_bias),
+        _select_2d_num_warps(problem),
+        _kv_storage_dtype(problem),
+        _select_2d_tile_size(problem),
+        _select_2d_waves_per_eu(problem),
+        _select_2d_block_m_per_warp(problem),
         _select_2d_compile_backend(problem),
     )
-
-
-def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
-    """Compute the tiled-2D cache key (legacy single-arg form).
-
-    Prefer ``_tiled_cache_key_from_spec`` when the spec is already in hand
-    to avoid the second ``_tiled_spec_from_problem`` call.
-    """
-    return _tiled_cache_key_from_spec(problem, _tiled_spec_from_problem(problem))
 
 
 def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
@@ -491,16 +451,61 @@ def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
     """
     if problem.waves_per_eu is not None:
         return problem.waves_per_eu
+    # FP8 long-prefill specialisation. The sync FP8 dequant path runs
+    # extra VALU per iter (cvt_pk_f32_fp8 + scale + cvt_to_bf16 per K/V
+    # tile element) which makes the inner loop more VALU-bound than the
+    # bf16 path. ``waves_per_eu=3`` reduces the VGPR-per-wave budget so
+    # the compiler can schedule more concurrent waves on the same SIMD
+    # to hide the extra VALU. Sweep on ``n=16 q=1024 k=4096 fp8 no-sw``
+    # (the dominant trace bucket): wpe=2 → 4383us, wpe=3 → 3531us = 1.24×
+    # win, measured via /tmp/sweep_long_prefill.py. For SHORT prefill /
+    # decode the VALU pressure is already low so wpe=2 stays better.
+    if problem.use_fp8 and problem.max_seqlen_q > 256 and problem.num_seqs >= 2:
+        return 3
     return 2
+
+
+def _fp8_qk_loader_fits(problem: UnifiedAttentionProblem) -> bool:
+    """True iff the async-fp8 K loader can tile the per-iter K bytes.
+
+    ``raw.ptr.buffer.load.lds`` accepts dwords ∈ {1, 3, 4} = {4, 12, 16}
+    bytes per lane (a hardware quirk -- dwords=2 is rejected). We need
+    one of those per-call payloads to evenly tile ``T*HD`` bytes given
+    ``num_warps * 64`` lanes per CTA.
+    """
+    tile_bytes = _select_2d_tile_size(problem) * problem.head_size
+    threads = _select_2d_num_warps(problem) * 64
+    for bpl in (16, 12, 4):
+        payload = threads * bpl
+        if tile_bytes >= payload and tile_bytes % payload == 0:
+            return True
+    return False
+
+
+def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
+    """Heuristic: enable the ULP-correct fp8-K-LDS path when it helps.
+
+    The path is bit-identical to the sync-dequant default. The win
+    pattern from the production trace:
+      - decode / short prefill: wins 10-55% (loader LDS writes are the
+        bottleneck; we save them by storing K as fp8 in LDS).
+      - long prefill no-SW (many KV iters * many MFMAs): loses ~10%
+        (per-MFMA in-register dequant accumulates faster than the
+        loader LDS writes we replaced).
+    Gate on (sliding-window OR ``max_seqlen_k <= 16 * T``) plus the
+    loader fitness check.
+    """
+    if not problem.use_fp8:
+        return False
+    if not _fp8_qk_loader_fits(problem):
+        return False
+    T_eff = _select_2d_tile_size(problem)
+    return problem.sliding_window > 0 or problem.max_seqlen_k <= 16 * T_eff
 
 
 def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ) -> UnifiedAttention2DTiledSpec:
-    # Per-shape champion overrides take precedence over heuristic selectors;
-    # they're loaded from attention_champion_routes.json and tracked by the
-    # round-based optimization loop at /workspace/rounds/.
-    mw_override = _champion_override(problem, "block_m_per_warp")
     return UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -517,8 +522,55 @@ def _tiled_spec_from_problem(
         waves_per_eu=_select_2d_waves_per_eu(problem),
         kv_storage_dtype=_kv_storage_dtype(problem),
         tile_size=_select_2d_tile_size(problem),
-        block_m_per_warp=int(mw_override) if mw_override is not None else 16,
+        block_m_per_warp=_select_2d_block_m_per_warp(problem),
+        use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
     )
+
+
+def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
+    """Choose ``block_m_per_warp`` for the tiled 2D kernel.
+
+    ``block_m_per_warp=32`` stacks two MFMA-M=16 atoms per warp so each
+    warp processes 32 query rows instead of 16. This doubles per-CTA
+    work and halves the CTA count.
+
+    Empirical sweep on the bench-harness slowest shapes (see
+    ``/tmp/sweep_long_prefill.py`` results):
+
+      - **fp8 long-prefill**, ``n=16 q=1024 k=4096 no-sw``: ``mw=32 T=64``
+        beats ``mw=16 T=64`` by 6% (4669us → 4383us). The sync FP8
+        dequant cost per CTA stays roughly constant when M doubles
+        because the dequant cost is per-K-byte not per-M-row, so
+        halving the CTA count cleanly halves the total dequant cost.
+        Production sweep on n=4: 1.08-1.32× wins.
+
+      - **bf16 long-prefill no-sw**, ``n=16 q=1000 k=1050``: ``mw=32 T=64``
+        beats ``mw=16 T=64`` by 6% (712us → 668us). The per-CTA
+        prelude amortisation (binary search for seq_idx, Q gather,
+        Acc zero, sinks load) cleanly halves with the CTA count, and
+        the per-iter MFMA + LDS-staging overhead doubles but stays
+        below the per-CTA prelude savings.
+
+      - **bf16 long-prefill SW**, ``n=16 q=1000 k=1050 sw=128``: ``mw=32
+        T=32`` beats ``mw=16 T=64`` by 6% (310us → 291us). SW prunes
+        the kv-loop to a handful of iters/CTA so per-CTA prelude
+        dominates more, and the smaller T avoids over-allocating LDS.
+        (T selection is handled separately in ``_select_2d_tile_size``.)
+
+    Cost: VGPR pressure rises (each warp tracks 32 rows × QK_N_TILES +
+    32 rows × PV_N_TILES of f32 accumulators), pushing occupancy from
+    4 → 2 CTAs/CU. For long-prefill the per-CTA throughput gain wins
+    the trade. For SHORT prefill / decode shapes the per-CTA prelude
+    is already negligible (short kv-loop hides it inside the very few
+    iters), and the 4→2 CTAs/CU occupancy loss costs more than the
+    per-CTA throughput gain — so keep mw=16 there.
+
+    Gate: ``max_seqlen_q > 256 and num_seqs >= 2``. Below this, mw=16
+    is consistently within noise of mw=32 in the per-shape sweep.
+    """
+    if problem.max_seqlen_q > 256 and problem.num_seqs >= 2:
+        return 32
+    return 16
 
 
 def _num_segments(problem: UnifiedAttentionProblem) -> int:
@@ -1060,11 +1112,31 @@ def run_unified_attention_torch(
         else int(block_table.shape[1])
     )
 
-    # Prefer 3D split-KV whenever supported. CK's split-KV produces a much
-    # larger grid (multi-segment per (qblock, kv_head)) than AITER's 2D path
-    # and beats Triton on MI355X by 2-6x. Sliding-window is supported via the
-    # per-cell mask inside the segment kernel.
-    if backend in ("3d", "auto"):
+    # Auto path selection. Historically we *always* preferred 3D when
+    # supported because split-KV produces a huge grid that beats Triton
+    # 2-6× on decode-shape workloads (small total Q, few sequences).
+    # That assumption breaks badly on production traces:
+    #
+    #   - chunked-prefill (large total Q across many seqs) -- 2D already
+    #     saturates the device, so the extra split-KV segments add launch
+    #     overhead with no parallelism gain. Triton picks 2D and we used
+    #     to pick 3D, losing 30-150×.
+    #   - sliding-window with long context -- 2D's per-iter window mask
+    #     is much cheaper than 3D's per-segment scan over the full kv.
+    #   - short context (k <= 512) -- the split-KV reduce kernel's launch
+    #     overhead dominates the few real KV iterations.
+    #
+    # ``problem.select_path()`` (see UnifiedAttentionProblem.select_path)
+    # wraps Triton's ``use_2d_kernel`` selector, which decides exactly
+    # the above three cases. Honour it in auto mode unless the user
+    # explicitly forces ``backend == "3d"``. This matches Triton's
+    # production-tested selector on every shape and recovers the trace
+    # buckets (where our old auto picked 3D for chunked prefill at 30-
+    # 150× the right path's cost) while keeping the decode-shape 3D
+    # wins on the parity harness (those shapes still satisfy the "3D
+    # is fine" branch of ``use_2d_kernel``).
+    prefer_2d = backend == "auto" and problem.select_path() == "2d"
+    if backend == "3d" or (backend == "auto" and not prefer_2d):
         ok_3d, reason_3d = supports_native_unified_attention_3d_tiled(problem)
         if ok_3d:
             return _run_3d_tiled(
@@ -1095,12 +1167,11 @@ def run_unified_attention_torch(
     if backend in ("tiled", "auto"):
         ok_t, reason_t = supports_native_unified_attention_tiled(problem)
         if ok_t:
-            # Build the spec ONCE and reuse for the cache key + grid math.
-            # Two spec builds per launch was a measurable per-call overhead
-            # on the bf16 decode path (round-1 baseline noted ~4µs/call
-            # regression on q=1 shapes); this folds them into one.
-            spec_for_launch = _tiled_spec_from_problem(problem)
-            key = _tiled_cache_key_from_spec(problem, spec_for_launch)
+            # Hot path: compute the cache key directly from the problem +
+            # selectors (skip the 17-field dataclass build). Spec is only
+            # built on cache miss inside _get_2d_launcher and for grid
+            # math below.
+            key = _tiled_cache_key(problem)
             launcher = _get_2d_launcher(problem, key)
             vals = _attn_values(
                 problem=problem,
@@ -1128,18 +1199,18 @@ def run_unified_attention_torch(
             # the kernel uses (which depends on `block_m`); a mismatch
             # would launch the wrong number of CTAs and the kernel's
             # q_block_local_idx -> qb_start_pos math would touch the
-            # wrong query positions.
-            # Derive directly from the spec the kernel was built from so
-            # any monkey-patched override (e.g. round-1 sweep probes) is
-            # honored consistently.
-            block_m = spec_for_launch.block_m
+            # wrong query positions. Compute directly from the selectors
+            # (avoiding the full spec construction on the hot path).
+            num_warps = _select_2d_num_warps(problem)
+            block_m_per_warp = _select_2d_block_m_per_warp(problem)
+            block_m = num_warps * block_m_per_warp
             block_q = (
                 block_m // problem.num_queries_per_kv
                 if problem.num_queries_per_kv <= block_m
                 else 1
             )
             total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
-            threads_per_block = 64 * spec_for_launch.num_warps
+            threads_per_block = 64 * num_warps
             return launcher(
                 vals,
                 config=LaunchConfig(

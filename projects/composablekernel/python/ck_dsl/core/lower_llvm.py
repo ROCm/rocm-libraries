@@ -220,6 +220,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "amdgcn.cvt.pk.bf8.f32": (
         "declare i32 @llvm.amdgcn.cvt.pk.bf8.f32(float, float, i32, i1)"
     ),
+    # Dequant direction (packed: i32 holding 4 fp8/bf8 bytes -> <2 x float>
+    # with a 1-bit word selector picking bytes 0,1 or 2,3). Two calls
+    # cover the full 4-byte input — twice the throughput of the
+    # per-byte ``llvm.amdgcn.cvt.f32.fp8`` for FP8 dequant loops.
+    "amdgcn.cvt.pk.f32.fp8": (
+        "declare <2 x float> @llvm.amdgcn.cvt.pk.f32.fp8(i32, i1)"
+    ),
+    "amdgcn.cvt.pk.f32.bf8": (
+        "declare <2 x float> @llvm.amdgcn.cvt.pk.f32.bf8(i32, i1)"
+    ),
     # f32 -> i8 saturating quant: RNE round followed by trunc + clamp.
     # ``llvm.rint.f32`` honours the current rounding mode (RNE by
     # default); the explicit clamp guarantees the trunc-to-i8 stays in
@@ -227,6 +237,57 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "rint.f32": "declare float @llvm.rint.f32(float)",
     "smax.i32": "declare i32 @llvm.smax.i32(i32, i32)",
     "smin.i32": "declare i32 @llvm.smin.i32(i32, i32)",
+    # gfx950 fused FP8/BF8 dequant + scale. SINGLE instruction
+    # ``v_cvt_scalef32_pk_f32_fp8`` does ``<2 x f32> = scale * fp8x2``
+    # — the same operation our current path takes 3 separate instructions
+    # to do (cvt_pk_f32_fp8 + v_pk_mul + v_pk_mul). Triton's long-prefill
+    # kernel emits exactly this instruction for its FP8 KV dequant. The
+    # i1 immediate selects which 2 of the 4 packed fp8 bytes to convert
+    # (0 → bytes 0,1; 1 → bytes 2,3).
+    "amdgcn.cvt.scalef32.pk.f32.fp8": (
+        "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8(i32, float, i1)"
+    ),
+    "amdgcn.cvt.scalef32.pk.f32.bf8": (
+        "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.bf8(i32, float, i1)"
+    ),
+    # Reverse direction: <2 x f32> + scale -> 2 fp8 bytes packed into i32.
+    # First call (i1=false) fills bytes 0,1; second call (i1=true with
+    # the first call's i32 result as the accumulator) fills bytes 2,3.
+    # Saves the host-side rescale + cvt_pk_fp8 + bitshift dance for
+    # output FP8 quantisation paths.
+    "amdgcn.cvt.scalef32.pk.fp8.f32": (
+        "declare i32 @llvm.amdgcn.cvt.scalef32.pk.fp8.f32(i32, <2 x float>, float, i1)"
+    ),
+    "amdgcn.cvt.scalef32.pk.bf8.f32": (
+        "declare i32 @llvm.amdgcn.cvt.scalef32.pk.bf8.f32(i32, <2 x float>, float, i1)"
+    ),
+    # gfx950 ``ds_swizzle_b32`` — single-instruction intra-32-lane
+    # permute. We use it for the softmax XOR-butterfly reduction; the
+    # FFT-mode offset is encoded as an immediate and the LDS unit
+    # delivers the permuted value in 1 LDS op (vs ds_bpermute's
+    # VGPR-addr-compute + LDS round-trip = 2 ops).
+    "amdgcn.ds.swizzle": ("declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)"),
+    # gfx950 ``v_permlane32_swap_b32`` — wave64 swap-across-32-lane-halves
+    # primitive. Single VALU instruction; replaces the FINAL stage of a
+    # wave64 softmax reduction (combining the lo-32 and hi-32 lane half
+    # partial reductions). Returns a struct holding both swapped values
+    # so a single call covers BOTH register exchanges.
+    "amdgcn.permlane32.swap": (
+        "declare { i32, i32 } @llvm.amdgcn.permlane32.swap(i32, i32, i1, i1)"
+    ),
+    # gfx950 ``v_mfma_f32_32x32x16_bf16`` — wider MFMA shape (32x32
+    # output × 16-K) than the 16x16x32 we use elsewhere. Same FLOPs
+    # per cycle (1024 cycles per inst either way at the per-CTA level)
+    # but HALF the instruction count, which (a) halves the SIMD issue
+    # overhead, (b) keeps each lane's accumulator at 16 floats (vs
+    # 4 for 16x16x32 — letting in-lane v_max3 chains do most of the
+    # row-reduce work before any cross-lane traffic, matching Triton's
+    # long-prefill softmax pattern), and (c) reduces the per-iter LDS
+    # K-load coalescing cost.
+    "mfma.f32.32x32x16.bf16": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf16("
+        "<8 x bfloat>, <8 x bfloat>, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"
+    ),
 }
 
 
@@ -629,6 +690,124 @@ class _Lowerer:
             f"  {op.result.name} = call float @llvm.amdgcn.cvt.f32.bf8(i32 {tmp}, i32 0)"
         )
 
+    def _op_arith_cvt_pk_f32_fp8x4(self, op: Op) -> None:
+        """Lower <4 x fp8e4m3> -> <4 x f32> via 2x packed
+        ``llvm.amdgcn.cvt.pk.f32.fp8`` calls (lowering to two
+        ``v_cvt_pk_f32_fp8`` instructions).
+
+        The input is bitcast from <4 x i8> to a single i32. The
+        intrinsic takes that i32 and an i1 word-select (false = bytes
+        0,1 → <2 x f32>; true = bytes 2,3 → <2 x f32>). We assemble
+        the two <2 x f32> halves into a single <4 x f32> result via
+        a shuffle.
+
+        This is the FP8 K/V dequant primitive AITER uses
+        (`to_float_fp8x4` in `csrc/include/attention_common.cuh`).
+        Cuts the cvt instruction count in HALF compared to 4x
+        scalar `cvt.f32.fp8`.
+        """
+        (v,) = op.operands
+        self._need("amdgcn.cvt.pk.f32.fp8")
+        packed_i32 = f"{op.result.name}p"
+        lo = f"{op.result.name}lo"
+        hi = f"{op.result.name}hi"
+        # <4 x fp8e4m3> is laid out as <4 x i8> in LLVM. Bitcast to i32.
+        self._current().emit(
+            f"  {packed_i32} = bitcast <4 x i8> {self._operand(v)} to i32"
+        )
+        self._current().emit(
+            f"  {lo} = call <2 x float> @llvm.amdgcn.cvt.pk.f32.fp8(i32 {packed_i32}, i1 false)"
+        )
+        self._current().emit(
+            f"  {hi} = call <2 x float> @llvm.amdgcn.cvt.pk.f32.fp8(i32 {packed_i32}, i1 true)"
+        )
+        # Concat the two <2 x f32> into <4 x f32> via shufflevector.
+        self._current().emit(
+            f"  {op.result.name} = shufflevector <2 x float> {lo}, <2 x float> {hi}, "
+            f"<4 x i32> <i32 0, i32 1, i32 2, i32 3>"
+        )
+
+    def _op_arith_cvt_pk_f32_bf8x4(self, op: Op) -> None:
+        """e5m2 sibling of :meth:`_op_arith_cvt_pk_f32_fp8x4`. Same
+        scheme via ``llvm.amdgcn.cvt.pk.f32.bf8``.
+        """
+        (v,) = op.operands
+        self._need("amdgcn.cvt.pk.f32.bf8")
+        packed_i32 = f"{op.result.name}p"
+        lo = f"{op.result.name}lo"
+        hi = f"{op.result.name}hi"
+        self._current().emit(
+            f"  {packed_i32} = bitcast <4 x i8> {self._operand(v)} to i32"
+        )
+        self._current().emit(
+            f"  {lo} = call <2 x float> @llvm.amdgcn.cvt.pk.f32.bf8(i32 {packed_i32}, i1 false)"
+        )
+        self._current().emit(
+            f"  {hi} = call <2 x float> @llvm.amdgcn.cvt.pk.f32.bf8(i32 {packed_i32}, i1 true)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = shufflevector <2 x float> {lo}, <2 x float> {hi}, "
+            f"<4 x i32> <i32 0, i32 1, i32 2, i32 3>"
+        )
+
+    def _op_arith_cvt_scalef32_pk_f32_fp8(self, op: Op) -> None:
+        """Lower fused scale+dequant <4 x fp8e4m3> + f32 -> <4 x f32>.
+
+        Emits two gfx950 ``v_cvt_scalef32_pk_f32_fp8`` instructions
+        (each does 2 fp8 → 2 f32 with embedded scale multiply), and
+        shuffles into a single <4 x f32>. The scale is broadcast to
+        all lanes (the intrinsic accepts a single f32 operand which
+        the AMDGPU backend places in SGPR by default).
+
+        Saves an entire ``v_pk_mul_f32`` per pack vs the non-fused
+        ``cvt_pk_f32_fp8 + mul`` sequence. Production trace bench
+        showed FP8 long-prefill inner loop drop ``v_pk_mul`` count
+        from 64 → 16.
+        """
+        v, scale = op.operands
+        self._need("amdgcn.cvt.scalef32.pk.f32.fp8")
+        packed_i32 = f"{op.result.name}p"
+        lo = f"{op.result.name}lo"
+        hi = f"{op.result.name}hi"
+        self._current().emit(
+            f"  {packed_i32} = bitcast <4 x i8> {self._operand(v)} to i32"
+        )
+        self._current().emit(
+            f"  {lo} = call <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8("
+            f"i32 {packed_i32}, float {self._operand(scale)}, i1 false)"
+        )
+        self._current().emit(
+            f"  {hi} = call <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8("
+            f"i32 {packed_i32}, float {self._operand(scale)}, i1 true)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = shufflevector <2 x float> {lo}, <2 x float> {hi}, "
+            f"<4 x i32> <i32 0, i32 1, i32 2, i32 3>"
+        )
+
+    def _op_arith_cvt_scalef32_pk_f32_bf8(self, op: Op) -> None:
+        """e5m2 sibling of :meth:`_op_arith_cvt_scalef32_pk_f32_fp8`."""
+        v, scale = op.operands
+        self._need("amdgcn.cvt.scalef32.pk.f32.bf8")
+        packed_i32 = f"{op.result.name}p"
+        lo = f"{op.result.name}lo"
+        hi = f"{op.result.name}hi"
+        self._current().emit(
+            f"  {packed_i32} = bitcast <4 x i8> {self._operand(v)} to i32"
+        )
+        self._current().emit(
+            f"  {lo} = call <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.bf8("
+            f"i32 {packed_i32}, float {self._operand(scale)}, i1 false)"
+        )
+        self._current().emit(
+            f"  {hi} = call <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.bf8("
+            f"i32 {packed_i32}, float {self._operand(scale)}, i1 true)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = shufflevector <2 x float> {lo}, <2 x float> {hi}, "
+            f"<4 x i32> <i32 0, i32 1, i32 2, i32 3>"
+        )
+
     def _op_arith_cvt_f32_to_fp8(self, op: Op) -> None:
         """Lower f32->fp8e4m3 quantisation via ``llvm.amdgcn.cvt.pk.fp8.f32``.
 
@@ -648,6 +827,33 @@ class _Lowerer:
         )
         self._current().emit(f"  {op.result.name} = trunc i32 {packed} to i8")
 
+    def _op_arith_cvt_pk_fp8_f32x4(self, op: Op) -> None:
+        """Lower <4 x f32> -> <4 x fp8e4m3> via two packed
+        ``llvm.amdgcn.cvt.pk.fp8.f32`` calls.
+
+        The first call fills bytes 0,1 of an i32; the second call takes
+        that i32 as the accumulator and fills bytes 2,3. Bitcast the final
+        i32 to <4 x i8> so the IR type remains <4 x fp8e4m3>.
+        """
+        (v,) = op.operands
+        self._need("amdgcn.cvt.pk.fp8.f32")
+        elems = [f"{op.result.name}e{i}" for i in range(4)]
+        for i, name in enumerate(elems):
+            self._current().emit(
+                f"  {name} = extractelement <4 x float> {self._operand(v)}, i32 {i}"
+            )
+        lo = f"{op.result.name}lo"
+        packed = f"{op.result.name}p"
+        self._current().emit(
+            f"  {lo} = call i32 @llvm.amdgcn.cvt.pk.fp8.f32("
+            f"float {elems[0]}, float {elems[1]}, i32 0, i1 false)"
+        )
+        self._current().emit(
+            f"  {packed} = call i32 @llvm.amdgcn.cvt.pk.fp8.f32("
+            f"float {elems[2]}, float {elems[3]}, i32 {lo}, i1 true)"
+        )
+        self._current().emit(f"  {op.result.name} = bitcast i32 {packed} to <4 x i8>")
+
     def _op_arith_cvt_f32_to_bf8(self, op: Op) -> None:
         """Lower f32->bf8e5m2 quantisation via ``llvm.amdgcn.cvt.pk.bf8.f32``.
 
@@ -663,6 +869,27 @@ class _Lowerer:
             f"float {self._operand(v)}, float 0.000000e+00, i32 0, i1 false)"
         )
         self._current().emit(f"  {op.result.name} = trunc i32 {packed} to i8")
+
+    def _op_arith_cvt_pk_bf8_f32x4(self, op: Op) -> None:
+        """e5m2 sibling of :meth:`_op_arith_cvt_pk_fp8_f32x4`."""
+        (v,) = op.operands
+        self._need("amdgcn.cvt.pk.bf8.f32")
+        elems = [f"{op.result.name}e{i}" for i in range(4)]
+        for i, name in enumerate(elems):
+            self._current().emit(
+                f"  {name} = extractelement <4 x float> {self._operand(v)}, i32 {i}"
+            )
+        lo = f"{op.result.name}lo"
+        packed = f"{op.result.name}p"
+        self._current().emit(
+            f"  {lo} = call i32 @llvm.amdgcn.cvt.pk.bf8.f32("
+            f"float {elems[0]}, float {elems[1]}, i32 0, i1 false)"
+        )
+        self._current().emit(
+            f"  {packed} = call i32 @llvm.amdgcn.cvt.pk.bf8.f32("
+            f"float {elems[2]}, float {elems[3]}, i32 {lo}, i1 true)"
+        )
+        self._current().emit(f"  {op.result.name} = bitcast i32 {packed} to <4 x i8>")
 
     def _op_arith_cvt_f32_to_i8_sat(self, op: Op) -> None:
         """Lower saturating f32->i8 (round-to-nearest-even).
@@ -904,9 +1131,16 @@ class _Lowerer:
         # Alignment is the element byte size: 1 for i8, 2 for f16/bf16,
         # 4 for f32/i32, 8 for i64. The AMDGPU backend rejects loads /
         # stores with under-aligned addresses on ``addrspace(3)``.
-        align = {"i8": 1, "f16": 2, "bf16": 2, "i32": 4, "f32": 4, "i64": 8}.get(
-            value.type.name, 2
-        )
+        align = {
+            "i8": 1,
+            "fp8e4m3": 1,
+            "bf8e5m2": 1,
+            "f16": 2,
+            "bf16": 2,
+            "i32": 4,
+            "f32": 4,
+            "i64": 8,
+        }.get(value.type.name, 2)
         self._current().emit(
             f"  store {_llvm_type(value.type)} {self._operand(value)}, ptr addrspace(3) {gep}, align {align}"
         )
@@ -1099,6 +1333,28 @@ class _Lowerer:
             f"i32 0, i32 0, i32 0)"
         )
 
+    def _op_tile_mfma_f32_32x32x16_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.32x32x16.bf16")
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf16("
+            f"<8 x bfloat> {self._operand(a)}, "
+            f"<8 x bfloat> {self._operand(b)}, "
+            f"<16 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.32x32x16.f16")
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.f16("
+            f"<8 x half> {self._operand(a)}, "
+            f"<8 x half> {self._operand(b)}, "
+            f"<16 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
     def _op_tile_mfma_f32_16x16x32_fp8(self, op: Op) -> None:
         self._lower_mfma_fp8_bf8(
             op, dtype="fp8", out_vec=4, intrinsic="16x16x32.fp8.fp8"
@@ -1268,6 +1524,48 @@ class _Lowerer:
             f"i32 {self._operand(addr)}, i32 {self._operand(data)})"
         )
 
+    def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
+        """``ds_swizzle_b32`` with XOR butterfly via SWAP-mode encoding.
+
+        Encoding (verified empirically with /tmp/test_swap.cpp on gfx950):
+            offset = (xor_mask << 10) | 0x1F
+
+        This corresponds to LLVM's pretty-printed
+        ``swizzle(SWAP, xor_mask)`` mode (bits 14-10 hold the XOR mask,
+        low bits force "within 32-lane half" scope). Verified:
+          - 0x041F → XOR with 1 (swap adjacent pairs: 0↔1, 2↔3, ...)
+          - 0x081F → XOR with 2 (swap pairs of 2: 0↔2, 1↔3, 4↔6, ...)
+          - 0x101F → XOR with 4 (0↔4, 1↔5, 4↔0, ...)
+          - 0x201F → XOR with 8 (0↔8, 1↔9, ...)
+
+        The naive AND_OR_XOR encoding ``0xFC00 | xor_mask`` is actually
+        a different mode (LLVM disasm names it ``swizzle(FFT, N)``, a
+        bit-reversal pattern, NOT XOR butterfly). We discovered this by
+        running ds_swizzle with both encodings on lane-id data and
+        diffing the output.
+        """
+        xor_mask = int(op.attrs["xor_mask"])
+        offset = (xor_mask << 10) | 0x1F
+        (data,) = op.operands
+        self._need("ds.swizzle")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.ds.swizzle("
+            f"i32 {self._operand(data)}, i32 {offset})"
+        )
+
+    def _op_tile_permlane32_swap(self, op: Op) -> None:
+        """``v_permlane32_swap_b32`` — wave64 half-swap in 1 VALU op."""
+        lo, hi = op.operands
+        self._need("permlane32.swap")
+        tmp = self._fresh("psw.tmp")
+        self._current().emit(
+            f"  {tmp} = call {{ i32, i32 }} @llvm.amdgcn.permlane32.swap("
+            f"i32 {self._operand(lo)}, i32 {self._operand(hi)}, i1 false, i1 false)"
+        )
+        r0, r1 = op.results
+        self._current().emit(f"  {r0.name} = extractvalue {{ i32, i32 }} {tmp}, 0")
+        self._current().emit(f"  {r1.name} = extractvalue {{ i32, i32 }} {tmp}, 1")
+
     def _op_tile_ds_read_tr16_b64(self, op: Op) -> None:
         """`ds_read_b64_tr_b16` -- gfx950 transpose-read of a 16x16 fp16 tile.
 
@@ -1293,6 +1591,40 @@ class _Lowerer:
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         self._current().emit(
             f"  {op.result.name} = bitcast <4 x i16> {raw} to <4 x {elem_ty}>"
+        )
+
+    def _op_tile_ds_read_tr_b8(self, op: Op) -> None:
+        """`ds_read_b64_tr_b8` -- gfx950 transpose-read of an 8-bit tile.
+
+        ROCm 7.0 exposes only the b16 transpose-read as an LLVM intrinsic.
+        The gfx950 ISA supports the b8 sibling, so lower it through inline
+        asm:
+
+            ds_read_b64_tr_b8 v[dst:dst+1], vaddr
+
+        The address operand is the byte offset of the LDS pointer. The
+        instruction returns 64 bits as two VGPRs, modeled as ``<2 x i32>``
+        then bitcast to ``<8 x i8>`` (fp8/bf8/i8 logical element type).
+        """
+        smem = op.operands[0]
+        indices = list(op.operands[1:])
+        gname, stype = self._smem_global_name(smem)
+        agg_ty = _smem_storage_type(stype)
+        base = self._fresh("tr8.base")
+        idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
+        self._current().emit(
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"{', '.join(idx_strs)}"
+        )
+        addr = self._fresh("tr8.addr")
+        raw = self._fresh("tr8.raw")
+        self._current().emit(f"  {addr} = ptrtoint ptr addrspace(3) {base} to i32")
+        self._current().emit(
+            f"  {raw} = call <2 x i32> asm sideeffect "
+            f'"ds_read_b64_tr_b8 $0, $1", "=v,v"(i32 {addr})'
+        )
+        self._current().emit(
+            f"  {op.result.name} = bitcast <2 x i32> {raw} to <8 x i8>"
         )
 
     def _op_tile_lane_id(self, op: Op) -> None:
@@ -2228,10 +2560,25 @@ class _Lowerer:
         out.append("")
 
         # smem globals.
+        # ``align 4`` matches the natural alignment of f16/bf16/f32/i32
+        # LDS storage and is what every 16 B ``ds_read_b128`` /
+        # ``ds_write_b128`` issued against them needs (the runtime
+        # offset math handles the per-row 16 B stride). The exception
+        # is fp8/bf8/i8 storage paired with ``ds_read_b64_tr_b8``: that
+        # intrinsic packs 8 bytes per lane and the AMDGPU backend
+        # requires the load address to be 8 B aligned; landing the i8
+        # global on a 4 B boundary silently corrupts the b64
+        # transpose-read output. Bump only the i8/fp8 globals to 16 B
+        # so the b64 transpose-read is always safe; leave fp16/f32
+        # globals at align 4 (raising them would inflate occupancy
+        # pressure on long-prefill 3D kernels).
         for gname, stype in self._smem_globals:
             agg = _smem_storage_type(stype)
+            elem_name = stype.elem.name
+            elem_is_byte = elem_name in ("i8", "fp8e4m3", "bf8e5m2")
+            align = 16 if elem_is_byte else 4
             out.append(
-                f"{gname} = internal unnamed_addr addrspace(3) global {agg} poison, align 4"
+                f"{gname} = internal unnamed_addr addrspace(3) global {agg} poison, align {align}"
             )
         if self._smem_globals:
             out.append("")

@@ -389,6 +389,39 @@ def mfma_16x16x32_for_dtype(
     raise ValueError(f"unsupported MFMA 16x16x32 dtype {dtype.name}")
 
 
+def mfma_32x32x16_for_dtype(
+    b: IRBuilder, dtype: Type, a: Value, bv: Value, c: Value
+) -> Value:
+    """Dispatch ``mfma_f32_32x32x16_<dtype>`` for fp16 / bf16.
+
+    Per-lane operand types:
+      - A: ``<8 x bfloat>`` or ``<8 x half>`` (M=32 × K=16 / 64 lanes)
+      - B: ``<8 x bfloat>`` or ``<8 x half>`` (K=16 × N=32 / 64 lanes)
+      - C/D: ``<16 x float>`` (M=32 × N=32 / 64 lanes)
+
+    Output lane layout (per CK Tile
+    ``WarpGemmAttributeMfmaImplBf16Bf16F32M32N32K16`` traits):
+      - col = L % 32                                   (one column per lane)
+      - mlane = L / 32                                 (which 32-lane half)
+      - per-thread element ``t`` (0..15):
+          row = (t // 4) * 8 + mlane * 4 + (t % 4)
+        i.e. 4 outer "quad-row blocks" × 4 inner rows per block
+      - Lanes [0..31] own rows {0-3, 8-11, 16-19, 24-27}
+      - Lanes [32..63] own rows {4-7, 12-15, 20-23, 28-31}
+
+    Critical for softmax: **no row is shared across the two 32-lane
+    halves**, so per-row reduction only needs intra-half reduce — NO
+    ``permlane32_swap`` required for max/sum over N=32. (For N>32 we
+    combine multiple MFMA N-tiles' values in-lane via ``v_max3``
+    before the cross-lane reduce.)
+    """
+    if dtype.name == "f16":
+        return b.mfma_f32_32x32x16_f16(a, bv, c)
+    if dtype.name == "bf16":
+        return b.mfma_f32_32x32x16_bf16(a, bv, c)
+    raise ValueError(f"unsupported MFMA 32x32x16 dtype {dtype.name}")
+
+
 # ---------------------------------------------------------------------------
 # Binary search on ``cu_q``
 # ---------------------------------------------------------------------------
