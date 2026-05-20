@@ -11,26 +11,13 @@ set(STINKYTOFU_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(STINKYTOFU_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 
 find_package(ROCmCMakeBuildTools QUIET CONFIG)
-if(NOT ROCmCMakeBuildTools_FOUND)
-    message(STATUS "ROCmCMakeBuildTools not found. Fetching from source...")
-    include(FetchContent)
-    FetchContent_Declare(
-        rocm-cmake
-        GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-        GIT_TAG c01b4f1fd36a94d26c76e7f617b57577b3b84275
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_GetProperties(rocm-cmake)
-    if(NOT rocm-cmake_POPULATED)
-        FetchContent_Populate(rocm-cmake)
-        list(APPEND CMAKE_MODULE_PATH
-            ${rocm-cmake_SOURCE_DIR}/share/rocmcmakebuildtools/cmake)
-    endif()
-endif()
-include(ROCMInstallTargets)
-include(ROCMSetupVersion)
 set(STINKYTOFU_VERSION_TWEAK "")
-rocm_get_git_commit_tag(STINKYTOFU_VERSION_TWEAK)
+if(ROCmCMakeBuildTools_FOUND)
+    include(ROCMSetupVersion)
+    rocm_get_git_commit_tag(STINKYTOFU_VERSION_TWEAK)
+else()
+    message(WARNING "ROCmCMakeBuildTools not found — version TWEAK (git hash) will be empty.")
+endif()
 message(STATUS "StinkyTofu version: ${STINKYTOFU_VERSION} (${STINKYTOFU_VERSION_TWEAK})")
 
 configure_file(
@@ -220,23 +207,33 @@ add_subdirectory(tools)
 # Install targets
 ##===----------------------------------------------------------------------===##
 
-rocm_install(
-    TARGETS stinkytofu stinkytofu-warnings
+install(TARGETS stinkytofu stinkytofu-warnings
     EXPORT stinkytofu-targets
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    RUNTIME DESTINATION bin
 )
-rocm_export_targets(
-    TARGETS stinkytofu::stinkytofu stinkytofu::stinkytofu-warnings
+install(EXPORT stinkytofu-targets
+    FILE stinkytofu-targets.cmake
     NAMESPACE stinkytofu::
-    EXPORT stinkytofu-targets
+    DESTINATION lib/cmake/stinkytofu
 )
 
-# Install public headers (rocm_install INCLUDE doesn't support EXCLUDE patterns,
-# so install the directory manually to skip ir/python/).
-# cmake-lint: disable=E1122
-rocm_install(DIRECTORY include/
-    DESTINATION include/stinkytofu
-    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
-    PATTERN "ir/python" EXCLUDE
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    cmake/stinkytofuConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfig.cmake
+    INSTALL_DESTINATION lib/cmake/stinkytofu
+)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
+    VERSION "${STINKYTOFU_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
+    DESTINATION lib/cmake/stinkytofu
 )
 
 # --------------------------------------------------------------------------- #
@@ -250,18 +247,26 @@ add_clang_tidy_custom_target()
 # Build-tree export so find_package() works without installing.
 export(TARGETS stinkytofu stinkytofu-warnings NAMESPACE stinkytofu:: FILE stinkytofuConfig.cmake)
 
+# Install public header files with stinkytofu/ namespace
+# Exclude ir/python/ (Python-specific, internal headers)
+# cmake-lint: disable=E1122
+install(DIRECTORY include/
+    DESTINATION include/stinkytofu
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+    PATTERN "ir/python" EXCLUDE
+)
 # Install generated header files
-rocm_install(FILES
+install(FILES
     ${PROJECT_BINARY_DIR}/stinkytofu/ir/logical/LogicalInstructions_generated.hpp
     DESTINATION include/stinkytofu/ir/logical
 )
-rocm_install(FILES
+install(FILES
     ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h
     DESTINATION include/stinkytofu
 )
 # Tablegen-generated file needed by the Python module when built standalone
 # against an installed stinkytofu.
-rocm_install(FILES
+install(FILES
     ${TABLEGEN_OUTPUT_DIR}/PythonBindings_generated.inc
     DESTINATION include/stinkytofu/bindings/python
 )
