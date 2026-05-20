@@ -27,50 +27,16 @@ class alignas(4) tfloat32_t
     CK_TILE_HOST_DEVICE
     explicit constexpr tfloat32_t(const float& x) : data(to_raw_type(x)) {}
 
-    // construct from double
-    CK_TILE_HOST_DEVICE
-    explicit constexpr tfloat32_t(const double& x) : data(to_raw_type(x)) {}
-
-    // construct from int
-    CK_TILE_HOST_DEVICE
-    explicit constexpr tfloat32_t(const int& x) : data(to_raw_type(x)) {}
-
-    // construct from unsigned int
-    CK_TILE_HOST_DEVICE
-    explicit constexpr tfloat32_t(const unsigned int& x) : data(to_raw_type(x)) {}
-
     // cast to float
     CK_TILE_HOST_DEVICE constexpr operator float() const { return bit_cast<float>(data); }
 
-    // cast to double
-    CK_TILE_HOST_DEVICE
-    explicit constexpr operator double() const
-    {
-        return static_cast<double>(bit_cast<float>(data));
-    }
-
-    // cast to int
-    CK_TILE_HOST_DEVICE
-    explicit constexpr operator int() const { return static_cast<int>(bit_cast<float>(data)); }
-
     private:
-    template <typename T>
-    static CK_TILE_HOST_DEVICE constexpr raw_type to_raw_type(T x)
+    static CK_TILE_HOST_DEVICE constexpr raw_type to_raw_type(float x)
     {
-        constexpr raw_type f32_exp_mask = 0x7F800000u;
-        constexpr raw_type bit_mask     = 0xFFFFE000u;
+        constexpr raw_type bit_mask = 0xFFFFE000u;
 
-        raw_type i = bit_cast<raw_type>(static_cast<float>(x));
-        // RNE rounding.
-        if((i & f32_exp_mask) != f32_exp_mask)
-        {
-            // Add rounding bias for round-to-nearest-even (RNE) before truncating:
-            //  - 0xFFFu is the rounding bias corresponding to the 13 fraction bits that
-            //    will be discarded.
-            //  - (i >> 13) & 1u extracts the least significant of those discarded bits and
-            //    adding it implements "ties to even" (round half-way cases to even).
-            i += 0xFFFu + ((i >> 13) & 1u);
-        }
+        raw_type i = bit_cast<raw_type>(x);
+
         // Zero out the lowest 13 fraction bits to form the TF32-like value.
         i &= bit_mask;
         return i;

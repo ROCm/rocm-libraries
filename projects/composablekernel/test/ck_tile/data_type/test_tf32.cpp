@@ -11,11 +11,6 @@ static ck_tile::uint32_t to_bits(T x)
     return ck_tile::bit_cast<ck_tile::uint32_t>(x);
 }
 
-static ck_tile::tf32_t from_bits(ck_tile::uint32_t i)
-{
-    return ck_tile::type_convert<ck_tile::tf32_t>(ck_tile::bit_cast<float>(i));
-}
-
 TEST(ConvertTest, NumericTraits)
 {
     using ck_tile::numeric_traits;
@@ -27,7 +22,7 @@ TEST(ConvertTest, NumericTraits)
     EXPECT_EQ(numeric_traits<tf32_t>::PackedSize, 1);
 }
 
-TEST(ConvertTest, ToTf32Rne)
+TEST(ConvertTest, ToTf32Trunc)
 {
     using ck_tile::isnan;
     using ck_tile::numeric;
@@ -48,11 +43,8 @@ TEST(ConvertTest, ToTf32Rne)
     EXPECT_EQ(to_bits(type_convert<tf32_t>(3.14159265358979323846f)),
               0x40490000u); // pi (0x40490FDB)
     EXPECT_EQ(to_bits(type_convert<tf32_t>(123.456f)),
-              0x42F6E000u); // 123.456f (0x42F6E979)
-
-    // past midpoint (bit12 + bit11 set) -> rounds up
-    EXPECT_EQ(to_bits(from_bits(0x3F801800u)), 0x3F802000u);
-    EXPECT_EQ(to_bits(type_convert<tf32_t>(-3.14f)), 0xC0490000u); // -3.14f (0xC048F5C3)
+              0x42F6E000u);                                        // 123.456f (0x42F6E979)
+    EXPECT_EQ(to_bits(type_convert<tf32_t>(-3.14f)), 0xC048E000u); // -3.14f (0xC048F5C3)
 
     // special values
     EXPECT_EQ(to_bits(numeric<tf32_t>::infinity()), 0x7F800000u);
