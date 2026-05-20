@@ -21,7 +21,7 @@ from Tensile.Components.Subtile.SubtileScaleEmit import (
 )
 from rocisa.code import Module
 from rocisa.instruction import (
-    SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32, SCmpLtU32, SCmpGeU32,
+    SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32,
     SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VMovB32, VSubI32,
 )
@@ -92,8 +92,6 @@ class InstructionEmitter:
             'sync':         lambda em, ui: self.emit_sync(),
             'lr_inc':           lambda em, ui: self.emit_lr_inc(em.source),
             'gr_inc':           lambda em, ui: self.emit_gr_inc(em.source),
-            'tail_srd_advance': lambda em, ui: self.emit_tail_srd_advance(em.source),
-            'tail_lr_inc':      lambda em, ui: self.emit_tail_lr_inc(em.source),
             'skip':             lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
         }
@@ -234,60 +232,6 @@ class InstructionEmitter:
         else:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
-        return list(module.flatitems())
-
-    def emit_tail_srd_advance(self, source):
-        """SRD-only advance for tail entry, gated by `K >= pgr * DepthU`.
-
-        PRELOOP issues `pgr` GR's without intervening SRD advances, so the
-        SRD is `pgr-1` DU's behind the next unread block when the tail starts.
-        We need exactly one DU advance to land on the tail data:
-          - PGR=1: NLL drains the single PRELOOP load, SRD stays at 0.
-                   Fires when K >= DU (PRELOOP ran).
-          - PGR=2 NGLL path: PRELOOP's MT1 GR loaded without an SRD advance.
-                   Fires when K >= 2*DU (NGLL ran).
-        Body skipped when K < pgr*DU (PRELOOP didn't fully load).
-        """
-        tensor = source.tensor
-        tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
-        threshold = self.config.pgr * self.kernel["DepthU"]
-        skipLabel = Label(self.writer.labels.getNameInc(f"TailSkipSrdAdv_{tc}"), "")
-        module = Module()
-        module.add(SCmpLtU32(src0=sgpr("SizesSum+0"), src1=threshold,
-                             comment=f"K < {self.config.pgr}*DepthU? skip tail SRD advance for {tc}"))
-        module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
-                                comment="PRELOOP not fully run: SRD already in place"))
-        if tensor in ('SA', 'SB'):
-            module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
-        else:
-            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
-        module.add(skipLabel)
-        return list(module.flatitems())
-
-    def emit_tail_lr_inc(self, source):
-        """LR LDS buffer swap for tail entry, gated by `DU <= K < 2*DepthU`.
-
-        Runs only on the NLL-only path where PRELOOP swapped LW but not LR.
-        Skipped on:
-          - NGLL path (K >= 2*DU): NGLL already swapped LR.
-          - K < DU path: PRELOOP was skipped entirely, LW never swapped.
-        """
-        tensor = source.tensor
-        tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
-        du = self.kernel["DepthU"]
-        two_du = 2 * du
-        skipLabel = Label(self.writer.labels.getNameInc(f"TailSkipLrInc_{tc}"), "")
-        module = Module()
-        module.add(SCmpGeU32(src0=sgpr("SizesSum+0"), src1=two_du,
-                             comment=f"K >= 2*DepthU? skip tail LR swap for {tc}"))
-        module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
-                                comment="NGLL path: LR already aligned with LW"))
-        module.add(SCmpLtU32(src0=sgpr("SizesSum+0"), src1=du,
-                             comment=f"K < DepthU? skip tail LR swap for {tc}"))
-        module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
-                                comment="preloop-skipped path: LW never swapped"))
-        module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
-        module.add(skipLabel)
         return list(module.flatitems())
 
     def emit_skip(self, source):
