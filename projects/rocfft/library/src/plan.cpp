@@ -2575,6 +2575,21 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
     {
         // grouped send/recv path (general case)
 
+        // every brick must live on a device known to the RCCL communicator,
+        // otherwise rccl.get_rank() called inside CommRCCLGrouped at execute
+        // time would throw.  validate up front so any mismatch is a clear
+        // plan-creation-time error rather than a deferred crash.
+        auto validate_brick_device = [&](const rocfft_brick_t& brick, const char* which) {
+            if(rccl_devices.count(brick.location.device) == 0)
+                throw std::runtime_error(std::string("GlobalTransposeRCCL grouped: ") + which
+                                         + " brick device " + std::to_string(brick.location.device)
+                                         + " is not in the RCCL communicator");
+        };
+        for(const auto& brick : inField.bricks)
+            validate_brick_device(brick, "input");
+        for(const auto& brick : outField.bricks)
+            validate_brick_device(brick, "output");
+
         auto rcclGrouped   = std::make_unique<CommRCCLGrouped>(rccl, precision, desc.inArrayType);
         rcclGrouped->group = itemGroup;
         rcclGrouped->description = "RCCL grouped send/recv";
@@ -2586,6 +2601,11 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         // BufferPtr::temp shared_ptrs co-own the underlying buffers.
         std::vector<TempBufferLease> packBufs;
         std::vector<size_t>          packItems;
+        // unpack items that need to wait for the grouped send/recv to
+        // complete, tracked separately from outputItems so we don't
+        // wrongly add the RCCL antecedent to the same-device transposes
+        // that were already pushed to outputItems before the dispatch.
+        std::vector<size_t> groupedUnpackItems;
         packBufs.reserve(2 * cross_device_count);
 
         for(const auto& info : intersections)
@@ -2618,27 +2638,22 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
             multiPlan[packIdx]->group = itemGroup;
             packItems.push_back(packIdx);
 
-            // send pack -> peer that owns outBrick
-            if(outBrick.location.device >= 0)
-            {
-                rcclGrouped->AddTransfer<rccl_op::send>(outBrick.location,
-                                                        inBrick.location,
-                                                        BufferPtr::temp(pack.data()),
-                                                        0,
-                                                        count,
-                                                        local_comm_rank);
-            }
-
-            // recv into recv buffer from peer that owns inBrick
-            if(inBrick.location.device >= 0)
-            {
-                rcclGrouped->AddTransfer<rccl_op::recv>(inBrick.location,
-                                                        outBrick.location,
-                                                        BufferPtr::temp(recv.data()),
-                                                        0,
-                                                        count,
-                                                        local_comm_rank);
-            }
+            // send pack -> peer that owns outBrick; recv into recv buffer
+            // from peer that owns inBrick.  brick devices have already been
+            // validated against the RCCL communicator above, so we don't
+            // need to guard against invalid device ids here.
+            rcclGrouped->AddTransfer<rccl_op::send>(outBrick.location,
+                                                    inBrick.location,
+                                                    BufferPtr::temp(pack.data()),
+                                                    0,
+                                                    count,
+                                                    local_comm_rank);
+            rcclGrouped->AddTransfer<rccl_op::recv>(inBrick.location,
+                                                    outBrick.location,
+                                                    BufferPtr::temp(recv.data()),
+                                                    0,
+                                                    count,
+                                                    local_comm_rank);
 
             auto unpackIdx
                 = AddMultiPlanItem(transpose_brick(local_comm_rank,
@@ -2653,9 +2668,10 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
                                                    info.intersection.offset_in(outBrick.layout),
                                                    outBrick.layout.strides_and_distances(),
                                                    "unpack brick for RCCL transpose"),
-                                   {}); // antecedents set below
+                                   {}); // rcclIdx added as antecedent below
             multiPlan[unpackIdx]->group = itemGroup;
             outputItems.push_back(unpackIdx);
+            groupedUnpackItems.push_back(unpackIdx);
         }
 
         if(rcclGrouped->HasTransfers())
@@ -2663,13 +2679,10 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
             auto rcclIdx              = AddMultiPlanItem(std::move(rcclGrouped), packItems);
             multiPlan[rcclIdx]->group = itemGroup;
 
-            for(auto unpackIdx : outputItems)
-            {
-                if(multiPlanAntecedents[unpackIdx].empty())
-                {
-                    AddAntecedent(unpackIdx, rcclIdx);
-                }
-            }
+            // every grouped unpack must wait for the corresponding
+            // ncclSend/ncclRecv to complete; the dependency is unconditional.
+            for(auto unpackIdx : groupedUnpackItems)
+                AddAntecedent(unpackIdx, rcclIdx);
         }
     }
 }
@@ -3281,19 +3294,30 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     // RCCL path is single-process multi-GPU today: one comm spans the
     // local devices and the grouped send/recv path uses device ids as
     // NCCL peer ranks. GlobalTransposeA2A handles multi-rank plans.
+
+    // in single-process mode (get_local_comm_size() == 1),
+    // every brick must live on local_comm_rank; a brick claiming a
+    // different comm_rank is a malformed plan and we report it rather
+    // than silently dropping it
     if(desc.get_local_comm_size() == 1)
     {
+        auto collect_devices
+            = [&](const rocfft_field_t& field, const char* which, std::set<int>& device_set) {
+                  for(const auto& brick : field.bricks)
+                  {
+                      if(brick.location.comm_rank != local_comm_rank)
+                          throw std::runtime_error(
+                              std::string("rocfft_plan: ") + which + " brick on comm_rank "
+                              + std::to_string(brick.location.comm_rank)
+                              + " is invalid in single-process mode (local_comm_rank="
+                              + std::to_string(local_comm_rank) + ")");
+                      device_set.insert(brick.location.device);
+                  }
+              };
+
         std::set<int> device_set;
-        for(const auto& brick : desc.inFields.front().bricks)
-        {
-            if(brick.location.comm_rank == local_comm_rank)
-                device_set.insert(brick.location.device);
-        }
-        for(const auto& brick : desc.outFields.front().bricks)
-        {
-            if(brick.location.comm_rank == local_comm_rank)
-                device_set.insert(brick.location.device);
-        }
+        collect_devices(desc.inFields.front(), "input", device_set);
+        collect_devices(desc.outFields.front(), "output", device_set);
         if(device_set.size() > 1)
             rccl = rocfft_rccl_comm_t::create(device_set);
     }
