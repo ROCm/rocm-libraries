@@ -720,7 +720,7 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
         elif dtype.isBFloat16() or dtype.isHalf():
-          if state.get("WavefrontSize", 64) == 32:
+          if state["WavefrontSize"] == 32:
             state[f"_ABTilePair{tc}"] = "AB_B16_W32"
           else:
             state[f"_ABTilePair{tc}"] = "AB_B16"
