@@ -40,7 +40,7 @@ There are two ways to build the Python bindings:
 
 ### Subdirectory build (via parent hipDNN CMake)
 
-When building hipDNN from the project root, enable the `HIPDNN_BUILD_PYTHON_BINDINGS` option (off by default):
+Set `HIPDNN_BUILD_PYTHON_BINDINGS=ON` to compile the nanobind extension module alongside hipDNN and stage it for packaging. It is off by default because it requires Python development headers and fetches nanobind/tsl-robin-map as additional dependencies.
 
 ```bash
 cmake -S projects/hipdnn -B build -GNinja -DHIPDNN_BUILD_PYTHON_BINDINGS=ON
