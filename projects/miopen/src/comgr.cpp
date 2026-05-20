@@ -927,15 +927,6 @@ void BuildHip(const std::string& name,
            }))
             opts.push_back("-std=c++17");
 
-        auto rocm_path = env::value(ROCM_PATH);
-
-        if(!rocm_path.empty())
-        {
-            auto rocm_include_arg = "-I" + rocm_path + "/include";
-            opts.push_back(rocm_include_arg);
-            MIOPEN_LOG_T("HIPRTC compile ROCm include path argument: " << rocm_include_arg);
-        }
-
         HiprtcProgram prog(name, text);
         prog.Compile(opts);
         prog.GetCode(binary);
