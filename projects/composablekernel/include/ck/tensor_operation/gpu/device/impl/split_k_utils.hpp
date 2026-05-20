@@ -61,7 +61,7 @@ inline ck::index_t get_best_occupancy_k_batch_value(int max_occupancy, ck::index
     return k_batch;
 }
 
-template <ck::index_t NDimSpatial, typename IndexType>
+template <ck::index_t NDimSpatial, typename IndexType = index_t>
 inline auto
 get_bwd_weight_gemm_sizes(const std::array<IndexType, NDimSpatial + 3>& a_g_n_k_wos_lengths,
                           const std::array<IndexType, NDimSpatial + 3>& e_g_k_c_xs_lengths)
