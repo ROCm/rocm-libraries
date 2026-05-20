@@ -1167,6 +1167,11 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
+            // Byte value used to fill MX scale padding regions when m_mxScaleFormat > 0.
+            // Default 0 (E8M0 zero) preserves legacy behaviour; non-zero seeds the padded
+            // bytes with a poison value so kernel-side A/B/MXSA/MXSB mask leaks become
+            // visible at validation instead of multiplying by 0 silently.
+            uint8_t m_mxScalePadByte = 0x00;
             // True when the current GPU uses preswizzled MX scale layout (gfx950 subtile).
             // False for architectures that use K-swizzle layout (e.g. gfx1250).
             bool m_isMXPreswizzleArch = false;

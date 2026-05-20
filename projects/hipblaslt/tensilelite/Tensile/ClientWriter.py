@@ -217,6 +217,8 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
   # Add MX scale format if set
   if globalParameters["MXScaleFormat"]:
     args.extend(["--mx-scale-format", str(globalParameters["MXScaleFormat"])])
+  if globalParameters.get("MXScalePadByte", 0):
+    args.extend(["--mx-scale-pad-byte", str(globalParameters["MXScalePadByte"])])
 
   try:
     subprocess.run(args, check=True)
@@ -334,8 +336,9 @@ def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cC
     clientExe = getClientExecutablePath()
     timingFlag = " --timing-instrumentation" if globalParameters["TimingInstrumentation"] else ""
     mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
+    mxScalePadByteFlag = " --mx-scale-pad-byte {}".format(globalParameters["MXScalePadByte"]) if globalParameters.get("MXScalePadByte", 0) else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {}{}{}\n".format(clientExe, configFile, timingFlag, mxScaleFormatFlag))
+      runScriptFile.write("{} --config-file {}{}{}{}\n".format(clientExe, configFile, timingFlag, mxScaleFormatFlag, mxScalePadByteFlag))
     runScriptFile.write("ERR2=$?\n\n")
 
     runScriptFile.write("""
@@ -358,8 +361,9 @@ fi
         runScriptFile.write("%s -d 0 --setfan 50\n" % globalParameters["ROCmSMIPath"])
   else:
     mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
+    mxScalePadByteFlag = " --mx-scale-pad-byte {}".format(globalParameters["MXScalePadByte"]) if globalParameters.get("MXScalePadByte", 0) else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution 1{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
+      runScriptFile.write("{} --config-file {} --best-solution 1{}{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag, mxScalePadByteFlag))
 
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")

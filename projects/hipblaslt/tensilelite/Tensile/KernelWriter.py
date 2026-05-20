@@ -4390,12 +4390,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, -1))
 
       # PGR>0 tail-entry gating. Three paths keyed off origCounter:
-      #   origCounter == 0:  reset and re-issue. NLL drained MT0 from
-      #     LDS positions whose OOB lanes were not written by DTL on
-      #     gfx950 (buffer_load_*_lds with oob=1 suppresses the LDS
-      #     write), so accD has garbage. Zero accD, undo preLoop's
-      #     GR_INC (PGR>=2 only), then fall through to the lane-masked
-      #     tail body.
+      #   origCounter == 0:  the SkipPreLoopGR gate in _kernelBody
+      #     skipped the entire prefetch block, so SRDs/LWAs are at
+      #     setupNewTile's defaults. NLL still ran and drained
+      #     undefined LDS into accD, so zero accD and fall through to
+      #     the lane-masked tail body.
       #   origCounter < PGR (PGR=2 c=1 only): NGLL didn't run, so LR
       #     stayed at buf 0 while preLoop's GR_INC flipped LWA to
       #     buf 1. Re-XOR LWA back. SRD already at K_aligned.
@@ -4476,27 +4475,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
             comment="XOR LWA%s back to match LR buffer" % tc))
         module.add(SBranch(labelName=tailEntryLabel.getLabelName()))
 
-        # c=0 reset: zero accD, undo preLoop GR_INC (PGR>=2 only),
-        # then fall through to the lane-masked tail body.
+        # c=0 reset: zero accD and fall through to the lane-masked
+        # tail body. The SkipPreLoopGR gate in _kernelBody ensured no
+        # SRD advance or LWA swap fired upstream, so nothing to undo.
         module.add(c0ResetLabel)
         if self.states.d.tileInfo is not None:
           module.add(initVgprTilesToZero(self, kernel, self.states.d.tileInfo))
-        if pgr >= 2:
-          for ti in tailAdvanceTiles:
-            tc = ti.tc
-            inc = _tailSrdAdvanceBytes(ti)
-            module.add(SSubU32(
-              dst=sgpr("Srd%s" % tc), src0=sgpr("Srd%s" % tc), src1=inc,
-              comment="undo preLoop GR_INC: Srd%s -= %dB" % (tc, inc)))
-            module.add(SSubBU32(
-              dst=sgpr("Srd%s+1" % tc), src0=sgpr("Srd%s+1" % tc), src1=0,
-              comment="%s: borrow" % tc))
-          for tc in realignTcs:
-            module.add(SXorB32(
-              dst=sgpr("LocalWriteBaseAddr%s" % tc),
-              src0=sgpr("LocalWriteBaseAddr%s" % tc),
-              src1=sgpr("Swap%s" % tc),
-              comment="undo preLoop GR_INC: XOR LWA%s back" % tc))
 
         module.add(tailEntryLabel)
 
@@ -5063,6 +5047,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
     packPre = [ Module() for i in range (self.states.numPackBuffer ) ]
     self.preLoopLocalWriteCode = None
 
+    # Subtile + PGR>0: skip the entire preLoop prefetch block when
+    # K // DU == 0. Without the gate the prefetch GR_INC advances SRDs
+    # and the LWA swaps toggle the LDS buffer; the tail scaffold's
+    # c=0 reset then has to undo both. Gating here keeps SRD/LWA at
+    # setupNewTile's defaults so the tail body's re-issued GR + LR
+    # runs from a known state and the c=0 reset only needs to zero accD.
+    skipPreLoopGRLabel = None
+    if kernel["UseSubtileImpl"] and kernel["PrefetchGlobalRead"] > 0:
+      skipLoopChar = self.states.indexChars[
+        kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
+      skipPreLoopGRLabel = Label("SkipPreLoopGR%s" % skipLoopChar, "")
+      module.add(SCmpEQU32(
+        src0=sgpr("OrigLoopCounter"), src1=0,
+        comment="K//DU == 0: skip preLoop GR block"))
+      module.add(SCBranchSCC1(
+        labelName=skipPreLoopGRLabel.getLabelName(),
+        comment="tail body re-issues GR+LR; nothing to prefetch"))
+
     if kernel["PrefetchGlobalRead"]:
       if self.states.doShadowInit:
         module.add(self.openShadowInit())
@@ -5363,6 +5365,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       module.add(self.closeSumAtLeastUnroll(kernel, tensorParametersA, tensorParametersB, prefetch=True, isOptNLL=False, isNGLL=False))
 
+    if skipPreLoopGRLabel is not None:
+      module.add(skipPreLoopGRLabel)
 
     loopCopies = 2 if expand else 1
     isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])

@@ -154,6 +154,7 @@ globalParameters["CMakeBuildType"] = (
 globalParameters["LogicFormat"] = "yaml"  # set library backend (yaml, or json)
 globalParameters["LibraryFormat"] = "yaml"  # set library backend (yaml, or msgpack)
 globalParameters["MXScaleFormat"] = 0  # MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout). Only the gfx950 subtile MX kernels need the pre-swizzle; gfx1250 reads canonical scales. The two gfx950 yamls that need it set MXScaleFormat: 1 explicitly.
+globalParameters["MXScalePadByte"] = 0  # Byte value (0..255) used to fill MX scale padding regions in the host pre-swizzle layout. Default 0 (E8M0 zero) matches legacy behaviour; non-zero (e.g. 255 -> E8M0 NaN/Inf) seeds padding with a poison value so any A/B lane-mask leak in the GPU kernel shows up as inf/NaN at validation instead of silently multiplying by zero. Only consumed when MXScaleFormat == 1.
 
 # True/False: CSV will/won't export WinnerGFlops, WinnerTimeUS, WinnerIdx, WinnerName.
 # TODO - if no side-effect, we can set default to True. This can make analyzing "LibraryLogic" (AddFromCSV) faster

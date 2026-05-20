@@ -221,6 +221,7 @@ namespace TensileLite
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
+                ("mx-scale-pad-byte",        po::value<int>()->default_value(0), "Byte (0..255) used to fill MX scale padding regions. Non-zero (e.g. 255 = E8M0 NaN/Inf) seeds padding with a poison value so kernel mask leaks surface as inf/NaN at validation. Only consumed when mx-scale-format != 0.")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
                 ("sparse",                   po::value<int>()->default_value(0), "A or B matrix is sparse matrix.")
