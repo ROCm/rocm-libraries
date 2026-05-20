@@ -258,9 +258,9 @@ __device__ __forceinline__ void apply_d_tensor_elementwise_op(OutDataType& resul
                                                               float computed_value,
                                                               const DDataType* const* p_ds,
                                                               const index_t* const* p_d_strides,
-                                                              index_t g,
-                                                              index_t n,
-                                                              index_t c_or_k,
+                                                              long_index_t g,
+                                                              long_index_t n,
+                                                              long_index_t c_or_k,
                                                               long_index_t spatial_linear_index)
 {
     if constexpr(NumDTensors == 0)

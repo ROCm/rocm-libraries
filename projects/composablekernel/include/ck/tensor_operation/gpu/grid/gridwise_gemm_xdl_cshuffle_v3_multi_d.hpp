@@ -154,7 +154,8 @@ template <typename ALayout,
           typename LDSTypeA                           = ADataType,
           typename LDSTypeB                           = BDataType,
           bool DoElementwiseBeforeCShuffle            = false,
-          bool DirectLoad                             = false>
+          bool DirectLoad                             = false,
+          bool LargeTensors                           = false>
 struct GridwiseGemmMultiD_xdl_cshuffle_v3
     : public GridwiseGemm_xdl_cshuffle_base<
           ALayout,
@@ -201,7 +202,9 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
           ComputeTypeA,
           ComputeTypeB,
           BlkGemmPipelineVer == BlockGemmPipelineVersion::v4,
-          DirectLoad>
+          DirectLoad,
+          false, // IsMxGemm (base default)
+          LargeTensors>
 {
     static_assert((is_same_v<AElementwiseOperation, tensor_operation::element_wise::PassThrough> &&
                    is_same_v<BElementwiseOperation, tensor_operation::element_wise::PassThrough>) ||
@@ -252,7 +255,9 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
         ComputeTypeA,
         ComputeTypeB,
         BlkGemmPipelineVer == BlockGemmPipelineVersion::v4,
-        DirectLoad>;
+        DirectLoad,
+        false, // IsMxGemm (base default)
+        LargeTensors>;
 
     using Base::AK0Number;
     using Base::AK1Number;
@@ -1150,12 +1155,15 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             }
         }
 
-        constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-        if(!(karg.M * karg.K * sizeof(ADataType) <= TwoGB &&
-             karg.N * karg.K * sizeof(BDataType) <= TwoGB &&
-             karg.M * karg.N * sizeof(CDataType) <= TwoGB))
+        if constexpr(!LargeTensors)
         {
-            return false;
+            constexpr long_index_t TwoGB = (long_index_t{1} << 31);
+            if(!(karg.M * karg.K * sizeof(ADataType) <= TwoGB &&
+                 karg.N * karg.K * sizeof(BDataType) <= TwoGB &&
+                 karg.M * karg.N * sizeof(CDataType) <= TwoGB))
+            {
+                return false;
+            }
         }
 
         // TODO: also check validity of all components (blockwise-copy, threadwise-copy, etc)
@@ -1373,7 +1381,8 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                     1,
                     AThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    conditional_t<LargeTensors, long_index_t, index_t>>(
                     a_grid_desc_ak0_m_ak1,
                     make_multi_index(0, m_block_data_idx_on_grid, 0),
                     a_element_op,
@@ -1429,7 +1438,8 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                     1,
                     BThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    conditional_t<LargeTensors, long_index_t, index_t>>(
                     b_grid_desc_bk0_n_bk1,
                     make_multi_index(0, n_block_data_idx_on_grid, 0),
                     b_element_op,
@@ -1685,7 +1695,8 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                     1,
                     AThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    conditional_t<LargeTensors, long_index_t, index_t>>(
                     a_grid_desc_ak0_m_ak1,
                     make_multi_index(0, m_block_data_idx_on_grid, 0),
                     a_element_op,
@@ -1741,7 +1752,8 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                     1,
                     BThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    conditional_t<LargeTensors, long_index_t, index_t>>(
                     b_grid_desc_bk0_n_bk1,
                     make_multi_index(0, n_block_data_idx_on_grid, 0),
                     b_element_op,

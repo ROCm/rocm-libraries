@@ -68,7 +68,8 @@ template <typename ALayout,
           typename ComputeTypeB                       = ComputeTypeA,
           bool DirectLoad                             = false,
           bool ALdsScalarLoadToVgpr                   = false,
-          bool BLdsScalarLoadToVgpr                   = false>
+          bool BLdsScalarLoadToVgpr                   = false,
+          bool LargeTensors                           = false>
 struct GridwiseGemm_xdl_cshuffle_conv_v3
     : public GridwiseGemm_xdl_cshuffle_base<
           ALayout,
@@ -114,7 +115,10 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
           Sequence<CShuffleBlockTransferScalarPerVector_NPerBlock>,
           ComputeTypeA,
           ComputeTypeB,
-          false> // ForceNaiveLayout
+          false, // ForceNaiveLayout
+          false, // DirectLoad (base default)
+          false, // IsMxGemm  (base default)
+          LargeTensors>
 {
     static_assert((is_same_v<AElementwiseOperation, tensor_operation::element_wise::PassThrough> &&
                    is_same_v<BElementwiseOperation, tensor_operation::element_wise::PassThrough>) ||
@@ -164,7 +168,10 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
         Sequence<CShuffleBlockTransferScalarPerVector_NPerBlock>,
         ComputeTypeA,
         ComputeTypeB,
-        false>; // ForceNaiveLayout
+        false, // ForceNaiveLayout
+        false, // DirectLoad (base default)
+        false, // IsMxGemm  (base default)
+        LargeTensors>;
 
     using Base::AK0Number;
     using Base::AK1Number;
@@ -709,7 +716,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     1,
                     AThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    conditional_t<LargeTensors, long_index_t, index_t>>(
                     a_grid_desc_ak0_m_ak1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, m_block_data_idx_on_grid, 0),
                     a_element_op,
@@ -761,7 +769,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     1,
                     BThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    conditional_t<LargeTensors, long_index_t, index_t>>(
                     b_grid_desc_bk0_n_bk1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, n_block_data_idx_on_grid, 0),
                     b_element_op,
@@ -937,7 +946,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     1,
                     AThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    conditional_t<LargeTensors, long_index_t, index_t>>(
                     a_grid_desc_ak0_m_ak1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, m_block_data_idx_on_grid, 0),
                     a_element_op,
@@ -989,7 +999,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     1,
                     BThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    conditional_t<LargeTensors, long_index_t, index_t>>(
                     b_grid_desc_bk0_n_bk1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, n_block_data_idx_on_grid, 0),
                     b_element_op,

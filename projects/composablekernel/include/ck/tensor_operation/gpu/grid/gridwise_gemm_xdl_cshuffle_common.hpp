@@ -77,8 +77,9 @@ template <typename ALayout,
           typename ComputeTypeA,
           typename ComputeTypeB,
           bool ForceNaiveLdsLayout,
-          bool DirectLoad = false,
-          bool IsMxGemm   = false>
+          bool DirectLoad   = false,
+          bool IsMxGemm     = false,
+          bool LargeTensors = false>
 struct GridwiseGemm_xdl_cshuffle_base
 {
     static constexpr auto I0 = Number<0>{};
@@ -1299,7 +1300,8 @@ struct GridwiseGemm_xdl_cshuffle_base
             3,                                              // index_t VectorDim,
             CShuffleBlockTransferScalarPerVector_NPerBlock, // index_t ScalarPerVector,
             true,  // bool ThreadTransferSrcResetCoordinateAfterRun,
-            false> // bool ThreadTransferDstResetCoordinateAfterRun>
+            false, // bool ThreadTransferDstResetCoordinateAfterRun,
+            conditional_t<LargeTensors, long_index_t, index_t>> // IndexType
             {c_shuffle_block_desc_mblock_mperblock_nblock_nperblock,
              make_multi_index(0, 0, 0, 0),
              c_grid_desc_mblock_mperblock_nblock_nperblock,
