@@ -249,6 +249,7 @@ class StateValues:
   useAtomicAdd: bool                     = False
   serializedStore: bool                  = False
   storeAlign8: bool                      = False
+  subtileTotalMOffsetSgpr: Optional[int] = None
 
   a: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
   b: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
