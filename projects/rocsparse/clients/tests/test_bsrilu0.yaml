@@ -59,6 +59,22 @@ Tests:
   direction: [rocsparse_direction_row, rocsparse_direction_column]
   matrix: [rocsparse_matrix_zero]
 
+- name : bsrilu0_math
+  category: quick
+  function: bsrilu0
+  precision: *double_only_precisions_complex_real
+  M: [1]
+  N: [1]
+  block_dim: [3, 4, 5, 8, 9, 16, 27, 33, 65]
+  numericboost: [0]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_bsr]
+
 - name: bsrilu0
   category: quick
   function: bsrilu0

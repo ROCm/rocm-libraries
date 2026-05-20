@@ -26,7 +26,8 @@ import pytest
 import numpy as np
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     WAVESIZE, NUM_THREADS, NUM_WAVES,
     AB_B8,
@@ -270,7 +271,7 @@ def compare_tiles_fp8(actual_bytes, expected_tiles, tileInfoA, tileInfoB, wave_i
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestGrLrRoundtripFP8:
 
     @pytest.fixture(params=TILE_CONFIGS_FP8, ids=lambda c: c.label)
@@ -319,8 +320,8 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=int, default=None, help="Config index (default: all)")
     args = parser.parse_args()
 
-    if not HAS_HIP:
-        print("HIP not available - cannot run GPU test")
+    if not HAS_GFX950:
+        print(f"GPU tests require gfx950, found {GFX_TARGET} — cannot run GPU test")
         sys.exit(1)
 
     wave_list   = list(range(NUM_WAVES)) if args.wave == "all" else [int(args.wave)]

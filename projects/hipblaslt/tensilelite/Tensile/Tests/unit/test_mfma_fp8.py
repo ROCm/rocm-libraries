@@ -34,7 +34,8 @@ import math
 from types import SimpleNamespace
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     WAVESIZE, NUM_WAVES, NUM_THREADS,
     AB_B8,
@@ -85,6 +86,7 @@ CONFIGS = [
 # ---------------------------------------------------------------------------
 # MX scale constants (for 128×128×256 FP8 config with MXBlock=32)
 # ---------------------------------------------------------------------------
+
 _MXBLOCK        = 32
 _LR_SUBTILE_SZ  = 256   # bytes per LR subtile (2×2 MMA tiles × 64 bytes)
 _SCALE_GROUPS   = 2     # lrLocalSubtileGrid[0] × [1] = 2 × 1
@@ -834,16 +836,24 @@ def compute_expected_mfma_fp8_with_scale(cfg, tileInfoA, tileInfoB,
                                           flat_a, flat_b, wave_id):
     """Compute expected float32 MFMA values with MX scale byte selection.
 
-    Each lane carries its own 4-byte scale VGPR loaded via ds_read_b32. The
-    hardware picks one byte per MFMA via op_sel/op_sel_hi (sAsel/sBsel).
+    The 16×16×128 MFMA with mxBlock=32 uses 4 K-sub-groups of 32 elements
+    each.  For output lane l = m + ng*16 (M-row m, N-group ng):
 
-    LDS layout (from lraTileAssignmentScaleSwizzled):
-      scale_byte[lane, group, byte] =
-          flat_buf[partition * partition_size + lane*4 + group*lrSubtileSize + byte_sel]
+      D[l, acc] = sum_{q=0}^{3}
+                    scale_a(m, q) * scale_b(n_col, q)
+                    * dot(A[row_a+m, k_start+q*32 : +32],
+                          B[row_b+n_col, k_start+q*32 : +32])
+
+    where n_col = ng*4 + acc, and the scale for K-sub-group q comes from
+    the lane encoding that sub-group:
+      scale_a(m, q) = flat_a[partition_a*psSzA + (m + q*16)*4 + gA*lrSzA + sAsel]
+      scale_b(n, q) = flat_b[partition_b*psSzB + (n + q*16)*4 + gB*lrSzB + sBsel]
+
+    This matches the pre_swizzle_scales_gfx950 layout, where lane l = M + q*16
+    carries scale for (M-row=l%16, K-sub-group=l//16).
 
     partition_a = wave_id % 2   (M-wave index for MXSA)
     partition_b = wave_id // 2  (N-wave index for MXSB)
-    partition_size = lrLocalSubtileGrid[0] * lrSubtileSize
 
     Returns list of np.ndarray (float32, shape WAVESIZE*ACC_SIZE), one per pair
     in (mma1, mma0) enumeration order.
@@ -876,6 +886,9 @@ def compute_expected_mfma_fp8_with_scale(cfg, tileInfoA, tileInfoB,
     partition_a = wave_id % 2    # M-wave index
     partition_b = wave_id // 2   # N-wave index
 
+    # Number of mxBlock-sized K-sub-groups per MFMA invocation
+    n_sub = MATRIX_INST_K // _MXBLOCK   # 128 // 32 = 4
+
     results = []
     for mma1 in range(tileInfoB.localMMATileGrid[0]):
         for mma0 in range(tileInfoA.localMMATileGrid[0]):
@@ -887,25 +900,34 @@ def compute_expected_mfma_fp8_with_scale(cfg, tileInfoA, tileInfoB,
                 sAsel = (mma0 % scaleMShapeA) + scaleMShapeA * (mmak % scaleKShapeA)
                 sBsel = (mma1 % scaleMShapeB) + scaleMShapeB * (mmak % scaleKShapeB)
 
+                row_a   = wave_a_off + mma0 * 16
+                row_b   = wave_b_off + mma1 * 16
                 k_start = mmak * MATRIX_INST_K
-                A_blk = A_f32[wave_a_off + mma0 * 16 : wave_a_off + mma0 * 16 + 16,
-                               k_start : k_start + MATRIX_INST_K]
-                B_blk = B_f32[wave_b_off + mma1 * 16 : wave_b_off + mma1 * 16 + 16,
-                               k_start : k_start + MATRIX_INST_K]
-                C_blk = (A_blk @ B_blk.T).astype(np.float32)  # 16×16
 
-                for lane in range(WAVESIZE):
-                    m  = lane % 16
-                    ng = lane // 16
+                # Each output lane l = m + ng*16; accumulate over 4 K-sub-groups.
+                # For K-sub-group q: A-scale comes from lane (m + q*16),
+                # B-scale from lane (n_col + q*16).
+                for m in range(16):
+                    for q in range(n_sub):
+                        a_lane = m + q * 16
+                        sa_off = partition_a * psSzA + a_lane * 4 + scaleGroupA * lrSzA + sAsel
+                        scale_a = e8m0_to_float(flat_a[sa_off])
 
-                    sa_off = partition_a * psSzA + lane * 4 + scaleGroupA * lrSzA + sAsel
-                    sb_off = partition_b * psSzB + lane * 4 + scaleGroupB * lrSzB + sBsel
-                    scale_a = e8m0_to_float(flat_a[sa_off])
-                    scale_b = e8m0_to_float(flat_b[sb_off])
+                        k_sub = k_start + q * _MXBLOCK
+                        A_vec = A_f32[row_a + m, k_sub : k_sub + _MXBLOCK].astype(np.float64)
 
-                    lane_data[lane * ACC_SIZE:(lane + 1) * ACC_SIZE] += (
-                        scale_a * scale_b * C_blk[m, ng * ACC_SIZE:(ng + 1) * ACC_SIZE]
-                    )
+                        for ng in range(ACC_SIZE):   # ng = lane // 16 in {0,1,2,3}
+                            lane = m + ng * 16
+                            for acc_idx in range(ACC_SIZE):
+                                n_col  = ng * ACC_SIZE + acc_idx
+                                b_lane = n_col + q * 16
+                                sb_off = (partition_b * psSzB + b_lane * 4
+                                          + scaleGroupB * lrSzB + sBsel)
+                                scale_b = e8m0_to_float(flat_b[sb_off])
+
+                                B_vec = B_f32[row_b + n_col, k_sub : k_sub + _MXBLOCK].astype(np.float64)
+                                dp = float(np.dot(A_vec, B_vec))
+                                lane_data[lane * ACC_SIZE + acc_idx] += float(scale_a * scale_b) * dp
 
             results.append(lane_data)
 
@@ -965,7 +987,7 @@ def compare_mfma_output(actual_bytes, expected_pairs, debug=False):
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestMfmaFP8:
     """GPU tests for FP8 GR->LDS->LR->MFMA roundtrip."""
 
@@ -1007,7 +1029,7 @@ class TestMfmaFP8:
 # FP8 MFMA + scale GR/LR combined test (128×128×256 only)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestMfmaFP8WithScale:
     """GPU test: FP8 MFMA + scale GR→LDS→LR verification for MT=128×128, DU=256."""
 
@@ -1077,8 +1099,8 @@ if __name__ == "__main__":
                         help="Config index to test (default: all)")
     args = parser.parse_args()
 
-    if not HAS_HIP:
-        print("HIP not available — cannot run GPU test")
+    if not HAS_GFX950:
+        print(f"GPU tests require gfx950, found {GFX_TARGET} — cannot run GPU test")
         sys.exit(1)
 
     config_list  = CONFIGS if args.config is None else [CONFIGS[args.config]]

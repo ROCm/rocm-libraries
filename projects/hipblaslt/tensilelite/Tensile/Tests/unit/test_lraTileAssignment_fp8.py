@@ -26,7 +26,8 @@ import pytest
 from types import SimpleNamespace
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     LOAD_WIDTH, WAVESIZE, NUM_THREADS, NUM_WAVES,
     AB_B8,
@@ -100,7 +101,7 @@ TILE_CONFIGS_FP8 = [
 
 # ---- Pytest tests ----
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestLraTileAssignmentFP8GPU:
 
     @pytest.fixture(params=TILE_CONFIGS_FP8, ids=lambda c: c.label)
@@ -164,7 +165,7 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = type('P', (), {'__truediv__': lambda s, n: os.path.join(tmp_dir, n)})()
 
-            if HAS_HIP:
+            if HAS_GFX950:
                 for tc, tileInfo in [("A", tileInfoA), ("B", tileInfoB)]:
                     for idx, reg in enumerate(tileInfo.sharedVgprLROffset):
                         results = export_register(writer, lra_asm, reg, False, cfg,
@@ -194,4 +195,4 @@ if __name__ == "__main__":
                                      if results[tid] != expected_all[tid][idx])
                         print(f"  {tc} LR offset[{idx}] v{reg}: {errors} errors / {NUM_THREADS}")
             else:
-                print("HIP not available — assembly only")
+                print(f"GPU tests require gfx950, found {GFX_TARGET} — assembly only")

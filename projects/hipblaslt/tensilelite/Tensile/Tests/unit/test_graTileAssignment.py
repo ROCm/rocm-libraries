@@ -278,22 +278,20 @@ if __name__ == "__main__":
 
                     print(f"  Matrix {tc} offset[{idx}] v{reg}: {NUM_THREADS} threads, {errors} errors")
 
-                # Subtile registers
-                for tc, tileInfo, stride in [("A", tileInfoA, cfg.stride_a),
-                                              ("B", tileInfoB, cfg.stride_b)]:
-                    seen = set()
-                    for st in tileInfo.localSubtiles:
-                        regId = st.regListId
-                        if regId in seen:
-                            continue
-                        seen.add(regId)
-                        for reg in tileInfo.localSubtilesRegister[regId]:
-                            print("Regl",reg)
-                            results = export_register(writer, gra_asm, reg, st.useSgpr, cfg,
-                                                      tmp_path, f"subtile{tc}_s{reg}_{cfg.label}")
-                            expected = compute_expected_subtile(regId, stride, tileInfo, BPE)
-                            actual = results[0]
-                            status = "OK" if actual == expected else "FAIL"
-                            print(f"  Subtile {tc} s{reg} (regId={regId}): {actual} (expected {expected}) {status}")
-            else:
-                print("HIP not available - assembly generated but not executed")
+            # Subtile registers
+            for tc, tileInfo, stride in [("A", tileInfoA, cfg.stride_a),
+                                          ("B", tileInfoB, cfg.stride_b)]:
+                seen = set()
+                for st in tileInfo.localSubtiles:
+                    regId = st.regListId
+                    if regId in seen:
+                        continue
+                    seen.add(regId)
+                    for reg in tileInfo.localSubtilesRegister[regId]:
+                        print("Regl",reg)
+                        results = export_register(writer, gra_asm, reg, st.useSgpr, cfg,
+                                                  tmp_path, f"subtile{tc}_s{reg}_{cfg.label}")
+                        expected = compute_expected_subtile(regId, stride, tileInfo, BPE)
+                        actual = results[0]
+                        status = "OK" if actual == expected else "FAIL"
+                        print(f"  Subtile {tc} s{reg} (regId={regId}): {actual} (expected {expected}) {status}")

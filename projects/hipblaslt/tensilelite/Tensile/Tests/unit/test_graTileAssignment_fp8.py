@@ -55,7 +55,8 @@ import tempfile
 import pytest
 from types import SimpleNamespace
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     LOAD_WIDTH, WAVESIZE, NUM_THREADS, NUM_WAVES,
     AB_B8,
@@ -157,7 +158,7 @@ TILE_CONFIGS_FP8 = [
 
 # ---- Pytest tests ----
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestGraTileAssignmentFP8GPU:
 
     @pytest.fixture(params=TILE_CONFIGS_FP8, ids=lambda c: c.label)
@@ -259,7 +260,7 @@ if __name__ == "__main__":
                     print(line)
             print("--- end ---\n")
 
-            if HAS_HIP:
+            if HAS_GFX950:
                 for tc, tileInfo, stride in [("A", tileInfoA, cfg.stride_a),
                                               ("B", tileInfoB, cfg.stride_b)]:
                     for idx, reg in enumerate(tileInfo.sharedVgprGROffset):
@@ -305,4 +306,4 @@ if __name__ == "__main__":
                             print(f"  {tc} subtile s{reg} (regId={regId}): "
                                   f"{results[0]} (expected {expected}) {status}")
             else:
-                print("HIP not available — assembly only")
+                print(f"GPU tests require gfx950, found {GFX_TARGET} — assembly only")
