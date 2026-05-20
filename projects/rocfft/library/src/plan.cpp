@@ -2313,7 +2313,7 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
                                         const std::string&         itemGroup)
 {
     const auto   local_comm_rank = desc.get_local_comm_rank();
-    const size_t ndevices        = inField.bricks.size();
+    const size_t nbricks_in      = inField.bricks.size();
 
     // compute all intersections and check alltoall eligibility
     struct IntersectionInfo
@@ -2326,7 +2326,7 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
     };
     std::vector<IntersectionInfo> intersections;
 
-    bool   alltoall_eligible  = (ndevices == outField.bricks.size()) && (ndevices >= 2);
+    bool   alltoall_eligible  = (nbricks_in == outField.bricks.size()) && (nbricks_in >= 2);
     size_t uniform_count      = 0;
     size_t cross_device_count = 0;
 
@@ -2361,9 +2361,9 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
 
     // alltoall requires a complete NxN cross-device pattern and all
     // ranks in the communicator to participate
-    if(cross_device_count != ndevices * (ndevices - 1))
+    if(cross_device_count != nbricks_in * (nbricks_in - 1))
         alltoall_eligible = false;
-    if(alltoall_eligible && rccl && static_cast<size_t>(rccl.num_ranks()) != ndevices)
+    if(alltoall_eligible && rccl && static_cast<size_t>(rccl.num_ranks()) != nbricks_in)
         alltoall_eligible = false;
 
     // two RCCL collective strategies are supported:
@@ -2397,7 +2397,7 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         if(use_alltoall)
             log_plan("RCCL backend: using ncclAllToAll (disjoint buffers, "
                      "uniform count_per_rank="
-                     + std::to_string(uniform_count) + ", ndevices=" + std::to_string(ndevices)
+                     + std::to_string(uniform_count) + ", nbricks_in=" + std::to_string(nbricks_in)
                      + ")\n");
         else
         {
@@ -2407,7 +2407,7 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
                       : ", pattern not alltoall-eligible";
             log_plan(std::string("RCCL backend: using grouped ncclSend/ncclRecv (")
                      + std::to_string(cross_device_count) + " cross-device transfers, "
-                     + std::to_string(ndevices) + " devices" + reason + ")\n");
+                     + std::to_string(nbricks_in) + " input bricks" + reason + ")\n");
         }
     }
 
@@ -2451,23 +2451,23 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         //                 (written by ncclAllToAll, read by unpack kernels)
         std::vector<TempBufferLease> a2aSendBufs;
         std::vector<TempBufferLease> a2aRecvBufs;
-        a2aSendBufs.reserve(ndevices);
-        a2aRecvBufs.reserve(ndevices);
-        for(size_t d = 0; d < ndevices; ++d)
+        a2aSendBufs.reserve(nbricks_in);
+        a2aRecvBufs.reserve(nbricks_in);
+        for(size_t d = 0; d < nbricks_in; ++d)
         {
             a2aSendBufs.emplace_back(tempBuffers,
                                      local_comm_rank,
                                      inField.bricks[d].location,
-                                     ndevices * uniform_count * elem_size);
+                                     nbricks_in * uniform_count * elem_size);
             a2aRecvBufs.emplace_back(tempBuffers,
                                      local_comm_rank,
                                      inField.bricks[d].location,
-                                     ndevices * uniform_count * elem_size);
+                                     nbricks_in * uniform_count * elem_size);
         }
 
         // build device_id -> brick index mapping for offset calculation
         std::map<int, size_t> device_to_brick;
-        for(size_t d = 0; d < ndevices; ++d)
+        for(size_t d = 0; d < nbricks_in; ++d)
             device_to_brick[inField.bricks[d].location.device] = d;
 
         std::vector<size_t> packItems;
@@ -2508,7 +2508,7 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
         // device-id order, so we collect per-device entries in a map
         // (sorted by device id) and then flatten to a vector.
         std::map<int /*device*/, CommRCCLAllToAll::agent_t> deviceAgents;
-        for(size_t d = 0; d < ndevices; ++d)
+        for(size_t d = 0; d < nbricks_in; ++d)
         {
             auto& a      = deviceAgents[inField.bricks[d].location.device];
             a.sendBuffer = BufferPtr::temp(a2aSendBufs[d].data());
@@ -2516,7 +2516,7 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
             // a.stream left default-constructed; allocated by CommRCCLAllToAll ctor
         }
         std::vector<CommRCCLAllToAll::agent_t> agents;
-        agents.reserve(ndevices);
+        agents.reserve(nbricks_in);
         for(auto& [dev, a] : deviceAgents)
             agents.push_back(std::move(a));
 
