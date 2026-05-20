@@ -658,15 +658,16 @@ struct MXDataTypeTrait<pk_fp4_t>
 };
 
 // pk_fp6x16_t (legacy): 16 fp6 e2m3 values packed into 3 int32 (96 bits).
-// At 16x16x128 each lane holds 64 fp6 elements = 4 packs = 12 int32 (int32x12_tt),
+// At 16x16x128 each lane holds 64 fp6 elements = 4 packs = 12 int32
+// (f6x16xN_tt<4, f6_kind::fp6>, whose storage is int32_t data[12]),
 // padded with 4 zero lanes to fit the 16-wide f8f6f4 wmma input.
 template <>
 struct MXDataTypeTrait<pk_fp6x16_t>
 {
     static constexpr F8F6F4OpDataTypeEnum OpDataType = F8F6F4OpDataTypeEnum::E2M3;
-    using VecType                                    = int32x12_tt;
+    using VecType                                    = f6x16xN_tt<4, f6_kind::fp6>;
 
-    CK_TILE_DEVICE static int32x16_t to_wmma_vec(const int32x12_tt& vec)
+    CK_TILE_DEVICE static int32x16_t to_wmma_vec(const f6x16xN_tt<4, f6_kind::fp6>& vec)
     {
         return int32x16_t{vec.data[0],
                           vec.data[1],

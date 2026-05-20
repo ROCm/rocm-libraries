@@ -92,19 +92,6 @@ struct int32x3_tt
     int32_t data[3];
 };
 
-struct int32x6_tt
-{
-    int32_t data[6];
-};
-
-// Storage for ext_vector<pk_fp6x16_t, 4>: 4 packs * 12 bytes/pack = 48 bytes = 12 int32.
-// clang's ext_vector_type does not allow non-power-of-two widths, so we use a plain
-// struct instead (mirroring int32x3_tt / int32x6_tt for pk_fp6x16_t at N=1 / N=2).
-struct int32x12_tt
-{
-    int32_t data[12];
-};
-
 template <>
 struct impl::ext_vector<int8_t, 12>
 {

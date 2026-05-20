@@ -53,7 +53,7 @@ class DeadCodeEliminationPassTest : public ::testing::Test {
     Function* parseIR(const std::string& irString, StinkyIRConverter& converter) {
         Function* func = converter.convertToFunction(irString);
         if (!func) {
-            std::cerr << "Failed to parse IR" << std::endl;
+            std::cerr << "Failed to parse IR\n";
             return nullptr;
         }
         return func;
