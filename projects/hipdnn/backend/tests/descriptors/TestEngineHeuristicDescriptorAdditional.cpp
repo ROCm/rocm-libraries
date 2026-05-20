@@ -1,5 +1,5 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier:  MIT
 
 /**
  * @file TestEngineHeuristicDescriptorAdditional.cpp
@@ -83,8 +83,10 @@ public:
         const int64_t staticOrderingPolicyId
             = hipdnn_data_sdk::utilities::engineNameToId("SelectionHeuristic::StaticOrdering");
 
-        auto mockHandle = reinterpret_cast<hipdnnHeuristicHandle_t>(0x1234);
-        auto mockDescriptor = reinterpret_cast<hipdnnHeuristicPolicyDescriptor_t>(0x5678);
+        // Sentinel pointer values — the mocks only compare them by identity, never deref.
+        auto mockHandle = reinterpret_cast<hipdnnHeuristicHandle_t>(static_cast<uintptr_t>(0x1234));
+        auto mockDescriptor
+            = reinterpret_cast<hipdnnHeuristicPolicyDescriptor_t>(static_cast<uintptr_t>(0x5678));
 
         // For custom/unknown policy IDs, return nullptr (set up general expectations first)
         EXPECT_CALL(*_mockHeuristicPluginResourceManager, getPluginForPolicyId(_))

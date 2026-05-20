@@ -47,6 +47,9 @@ struct HeuristicPolicyInfo
     /// Canonical policy name (e.g., "SelectionHeuristic::Config")
     std::string policyName;
 
+    /// Plugin name reported by the heuristic plugin
+    std::string pluginName;
+
     /// Plugin implementation version string
     std::string pluginVersion;
 
@@ -89,14 +92,28 @@ inline std::pair<std::vector<HeuristicPolicyInfo>, Error>
         return {{}, {ErrorCode::INVALID_VALUE, "Cannot query policies from null handle"}};
     }
 
+    auto backend = detail::hipdnnBackend();
+
+    // Strips a trailing NUL from a length-delimited C string so the resulting
+    // std::string matches what the user printed regardless of whether the
+    // backend reports the NUL in its length.
+    const auto bufferToString = [](const std::vector<char>& buf, size_t len) {
+        if(len > 0 && buf[len - 1] == '\0')
+        {
+            --len;
+        }
+        return std::string(buf.data(), len);
+    };
+
     // Get policy count
     size_t numPolicies = 0;
-    auto status = detail::hipdnnBackend()->getHeuristicPolicyCount(handle, &numPolicies);
+    auto status = backend->getHeuristicPolicyCount(handle, &numPolicies);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         return {{},
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
-                 "Failed to get heuristic policy count: " + std::to_string(status)}};
+                 std::string{"Failed to get heuristic policy count: "}
+                     + backend->getErrorString(status)}};
     }
 
     std::vector<HeuristicPolicyInfo> infos;
@@ -109,54 +126,61 @@ inline std::pair<std::vector<HeuristicPolicyInfo>, Error>
 
         // First call: query required buffer sizes
         size_t policyNameLen = 0;
+        size_t pluginNameLen = 0;
         size_t pluginVersionLen = 0;
         size_t apiVersionLen = 0;
 
-        status = detail::hipdnnBackend()->getHeuristicPolicyInfo(handle,
-                                                                 i,
-                                                                 &info.policyId,
-                                                                 nullptr,
-                                                                 &policyNameLen,
-                                                                 nullptr,
-                                                                 &pluginVersionLen,
-                                                                 nullptr,
-                                                                 &apiVersionLen);
+        status = backend->getHeuristicPolicyInfo(handle,
+                                                 i,
+                                                 &info.policyId,
+                                                 nullptr,
+                                                 &policyNameLen,
+                                                 nullptr,
+                                                 &pluginNameLen,
+                                                 nullptr,
+                                                 &pluginVersionLen,
+                                                 nullptr,
+                                                 &apiVersionLen);
 
         if(status != HIPDNN_STATUS_SUCCESS)
         {
             return {{},
                     {ErrorCode::HIPDNN_BACKEND_ERROR,
                      "Failed to query policy info sizes for index " + std::to_string(i) + ": "
-                         + std::to_string(status)}};
+                         + backend->getErrorString(status)}};
         }
 
         // Allocate buffers
         std::vector<char> policyNameBuf(policyNameLen);
+        std::vector<char> pluginNameBuf(pluginNameLen);
         std::vector<char> pluginVersionBuf(pluginVersionLen);
         std::vector<char> apiVersionBuf(apiVersionLen);
 
         // Second call: retrieve actual strings
-        status = detail::hipdnnBackend()->getHeuristicPolicyInfo(handle,
-                                                                 i,
-                                                                 &info.policyId,
-                                                                 policyNameBuf.data(),
-                                                                 &policyNameLen,
-                                                                 pluginVersionBuf.data(),
-                                                                 &pluginVersionLen,
-                                                                 apiVersionBuf.data(),
-                                                                 &apiVersionLen);
+        status = backend->getHeuristicPolicyInfo(handle,
+                                                 i,
+                                                 &info.policyId,
+                                                 policyNameBuf.data(),
+                                                 &policyNameLen,
+                                                 pluginNameBuf.data(),
+                                                 &pluginNameLen,
+                                                 pluginVersionBuf.data(),
+                                                 &pluginVersionLen,
+                                                 apiVersionBuf.data(),
+                                                 &apiVersionLen);
 
         if(status != HIPDNN_STATUS_SUCCESS)
         {
             return {{},
                     {ErrorCode::HIPDNN_BACKEND_ERROR,
                      "Failed to retrieve policy info for index " + std::to_string(i) + ": "
-                         + std::to_string(status)}};
+                         + backend->getErrorString(status)}};
         }
 
-        info.policyName = std::string(policyNameBuf.data());
-        info.pluginVersion = std::string(pluginVersionBuf.data());
-        info.apiVersion = std::string(apiVersionBuf.data());
+        info.policyName = bufferToString(policyNameBuf, policyNameLen);
+        info.pluginName = bufferToString(pluginNameBuf, pluginNameLen);
+        info.pluginVersion = bufferToString(pluginVersionBuf, pluginVersionLen);
+        info.apiVersion = bufferToString(apiVersionBuf, apiVersionLen);
 
         infos.push_back(info);
     }

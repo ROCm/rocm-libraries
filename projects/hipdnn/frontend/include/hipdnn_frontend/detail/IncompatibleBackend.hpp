@@ -167,6 +167,8 @@ public:
                                           int64_t* /*policyId*/,
                                           char* /*policyName*/,
                                           size_t* /*policyNameLen*/,
+                                          char* /*pluginName*/,
+                                          size_t* /*pluginNameLen*/,
                                           char* /*pluginVersion*/,
                                           size_t* /*pluginVersionLen*/,
                                           char* /*apiVersion*/,
@@ -175,4 +177,5 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 };
-}
+
+} // namespace hipdnn_frontend::detail

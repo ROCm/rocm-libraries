@@ -97,6 +97,8 @@ public:
                                                   int64_t* policyId,
                                                   char* policyName,
                                                   size_t* policyNameLen,
+                                                  char* pluginName,
+                                                  size_t* pluginNameLen,
                                                   char* pluginVersion,
                                                   size_t* pluginVersionLen,
                                                   char* apiVersion,

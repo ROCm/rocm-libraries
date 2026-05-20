@@ -29,15 +29,18 @@ hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties();
  * @brief Serialize DevicePropertiesT to FlatBuffer format.
  *
  * Builds a FlatBuffer-serialized representation of the device properties
- * using the Pack method.
+ * using the Pack method and returns the bytes in a freshly owned vector
+ * (the caller owns the storage; the internal FlatBufferBuilder is released
+ * before return).
  *
- * The returned buffer must remain valid while any hipdnnPluginConstData_t
- * wrappers pointing to it are in use.
+ * The returned vector must remain alive while any hipdnnPluginConstData_t
+ * wrapper produced by wrapSerializedDeviceProperties is in use, because the
+ * wrapper aliases the vector's buffer.
  *
  * RFC 0007 Reference: Section 13.2
  *
  * @param props Device properties to serialize.
- * @return Vector containing the serialized FlatBuffer bytes.
+ * @return Vector owning the serialized FlatBuffer bytes.
  */
 std::vector<uint8_t>
     serializeDeviceProperties(const hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT& props);

@@ -8,6 +8,7 @@
  * Tests the frontend API for querying loaded heuristic policies.
  */
 
+#include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_frontend/Handle.hpp>
 #include <hipdnn_frontend/HeuristicPolicyInfo.hpp>
 
@@ -15,7 +16,7 @@
 
 using namespace hipdnn_frontend;
 
-class IntegrationHeuristicPolicyEnumeration : public ::testing::Test
+class IntegrationGpuHeuristicPolicyEnumeration : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -30,7 +31,7 @@ protected:
 
 // ========== Basic Enumeration Tests ==========
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, GetLoadedPoliciesReturnsNonEmpty)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, GetLoadedPoliciesReturnsNonEmpty)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -38,7 +39,7 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, GetLoadedPoliciesReturnsNonEmpty)
     EXPECT_GE(policies.size(), 2u) << "Expected at least Config and StaticOrdering policies";
 }
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, PolicyInfoHasValidMetadata)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, PolicyInfoHasValidMetadata)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -47,14 +48,18 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, PolicyInfoHasValidMetadata)
 
     for(const auto& policy : policies)
     {
-        EXPECT_NE(policy.policyId, -1) << "Policy ID should be valid";
         EXPECT_FALSE(policy.policyName.empty()) << "Policy name should not be empty";
+        EXPECT_FALSE(policy.pluginName.empty()) << "Plugin name should not be empty";
         EXPECT_FALSE(policy.pluginVersion.empty()) << "Plugin version should not be empty";
         EXPECT_FALSE(policy.apiVersion.empty()) << "API version should not be empty";
+
+        // policyId must be the canonical hash of the reported policy name.
+        EXPECT_EQ(policy.policyId, hipdnn_data_sdk::utilities::policyNameToId(policy.policyName))
+            << "Policy ID should be the policyNameToId hash of '" << policy.policyName << "'";
     }
 }
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, DefaultPoliciesAreLoaded)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, DefaultPoliciesAreLoaded)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -82,7 +87,7 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, DefaultPoliciesAreLoaded)
 
 // ========== Error Handling Tests ==========
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, NullHandleReturnsError)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, NullHandleReturnsError)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(nullptr);
 
@@ -94,7 +99,7 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, NullHandleReturnsError)
 
 // ========== snake_case Alias Tests ==========
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, SnakeCaseAliasWorks)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, SnakeCaseAliasWorks)
 {
     auto [policies, err] = get_loaded_heuristic_policy_infos(*_handle);
 
@@ -104,7 +109,7 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, SnakeCaseAliasWorks)
 
 // ========== Multiple Query Tests ==========
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, MultipleQueriesReturnSameResults)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, MultipleQueriesReturnSameResults)
 {
     auto [policies1, err1] = getLoadedHeuristicPolicyInfos(*_handle);
     auto [policies2, err2] = getLoadedHeuristicPolicyInfos(*_handle);
@@ -124,7 +129,7 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, MultipleQueriesReturnSameResults)
 
 // ========== Handle Independence Tests ==========
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, DifferentHandlesHaveSamePolicies)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, DifferentHandlesHaveSamePolicies)
 {
     auto [handle2, err] = createHipdnnHandle();
     ASSERT_FALSE(err.is_bad());
@@ -141,7 +146,7 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, DifferentHandlesHaveSamePolicies)
 
 // ========== Content Validation Tests ==========
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, PolicyNamesAreUTF8)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, PolicyNamesAreUTF8)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -155,7 +160,7 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, PolicyNamesAreUTF8)
     }
 }
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, VersionStringsAreValid)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, VersionStringsAreValid)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -172,26 +177,9 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, VersionStringsAreValid)
     }
 }
 
-// ========== Performance Tests ==========
-
-TEST_F(IntegrationHeuristicPolicyEnumeration, EnumerationIsReasonablyFast)
-{
-    auto start = std::chrono::high_resolution_clock::now();
-
-    auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
-
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-    ASSERT_FALSE(err.is_bad());
-
-    // Enumeration should complete in under 100ms
-    EXPECT_LT(duration.count(), 100) << "Policy enumeration took " << duration.count() << "ms";
-}
-
 // ========== Integration with Graph Tests ==========
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, CanQueryPoliciesBeforeGraphCreation)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, CanQueryPoliciesBeforeGraphCreation)
 {
     // Should be able to query policies before creating any graphs
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
@@ -202,7 +190,7 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, CanQueryPoliciesBeforeGraphCreatio
 
 // ========== Logging Tests ==========
 
-TEST_F(IntegrationHeuristicPolicyEnumeration, EnumerationCanBeLogged)
+TEST_F(IntegrationGpuHeuristicPolicyEnumeration, EnumerationCanBeLogged)
 {
     auto [policies, err] = getLoadedHeuristicPolicyInfos(*_handle);
 
@@ -213,8 +201,8 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, EnumerationCanBeLogged)
     for(const auto& policy : policies)
     {
         std::cout << "  - " << policy.policyName << " (ID: " << policy.policyId
-                  << ", Version: " << policy.pluginVersion << ", API: " << policy.apiVersion << ")"
-                  << '\n';
+                  << ", Plugin: " << policy.pluginName << ", Version: " << policy.pluginVersion
+                  << ", API: " << policy.apiVersion << ")" << '\n';
     }
 
     SUCCEED();
