@@ -50,12 +50,16 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
 
     const auto conv_param = args.to_ck_tile_conv_param();
 
-    // Get max possible value in the output
-    const std::size_t input_bytes_num = conv_param.template GetInputByte<DataType>();
-    std::vector<DataType> ref(input_bytes_num / sizeof(DataType));
-    HIP_CHECK_ERROR(
-        hipMemcpy(&ref.data()[0], reference.get().input, input_bytes_num, hipMemcpyDeviceToHost));
-    const float max_accumulated_value = *std::max_element(ref.begin(), ref.end());
+    float max_accumulated_value = 0.f;
+    if(do_verification)
+    {
+        // Get max possible value in the output
+        const std::size_t input_bytes_num = conv_param.template GetInputByte<DataType>();
+        std::vector<DataType> ref(input_bytes_num / sizeof(DataType));
+        HIP_CHECK_ERROR(hipMemcpy(
+            &ref.data()[0], reference.get().input, input_bytes_num, hipMemcpyDeviceToHost));
+        max_accumulated_value = *std::max_element(ref.begin(), ref.end());
+    }
 
     const index_t num_accums = conv_param.K_;
 
@@ -120,36 +124,32 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                 continue;
             }
 
-            auto&& [rtol, atol] =
-                get_rtol_atol<SIGNATURE>(num_accums, k_batch, max_accumulated_value);
-
-            if (do_verification)
+            bool valid = true;
+            if(do_verification)
             {
-                if(validate_and_report<SIGNATURE, ConvBuffer::Input>(
-                   args, outputs, reference.get(), rtol, atol))
-                {
-                    if(avg_time < best_avg_time)
-                    {
-                        best_instance_index = num_kernel - 1;
-                    }
-                    best_avg_time = std::min(best_avg_time, avg_time);
-                    best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
-                    best_split_k  = best_avg_time < avg_time ? best_split_k : k_batch;
-                    std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms," << " "
-                            << op_name << " (instance " << num_kernel - 1 << "), SplitK "
-                            << k_batch << std::endl;
-                }
-                else
+                auto&& [rtol, atol] =
+                    get_rtol_atol<SIGNATURE>(num_accums, k_batch, max_accumulated_value);
+                valid = validate_and_report<SIGNATURE, ConvBuffer::Input>(
+                    args, outputs, reference.get(), rtol, atol);
+                if(!valid)
                 {
                     std::cout << "[Error] " << op_name << ", SplitK " << k_batch << std::endl;
                     all_instances_valid = false;
                 }
             }
-            else 
+            if(valid)
             {
-                std::cout << "[Not Validated] Perf: " << std::setw(10) << avg_time << " ms," << " "
-                            << op_name << " (instance " << num_kernel - 1 << "), SplitK "
-                            << k_batch << std::endl;
+                if(avg_time < best_avg_time)
+                {
+                    best_avg_time       = avg_time;
+                    best_op_name        = op_name;
+                    best_split_k        = k_batch;
+                    best_instance_index = num_kernel - 1;
+                }
+                const char* prefix = do_verification ? "[Valid]" : "[Not Validated]";
+                std::cout << prefix << " Perf: " << std::setw(10) << avg_time << " ms," << " "
+                        << op_name << " (instance " << num_kernel - 1 << "), SplitK "
+                        << k_batch << std::endl;
             }
             
         }

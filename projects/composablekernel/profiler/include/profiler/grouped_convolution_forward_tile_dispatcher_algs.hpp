@@ -88,8 +88,11 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
             continue;
         }
 
-        best_avg_time = std::min(best_avg_time, avg_time);
-        best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
+        if(avg_time < best_avg_time)
+        {
+            best_avg_time = avg_time;
+            best_op_name  = op_name;
+        }
         std::cout << "Perf: " << std::setw(10) << avg_time << " ms," << " " << op_name << std::endl;
 
         if(do_verification && !validate_and_report<SIGNATURE, ConvBuffer::Output>(
