@@ -17254,15 +17254,8 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
-  def initTDMDescriptorSubtile(self, kernel: Mapping, tP: Mapping, setLds: bool = True) -> Module:
-    """Init TDM descriptor for the subtile kernel path.
-
-    Parallel to initTDMDescriptor() but simplified for subtile:
-    - Uses ldsStartOffset{A,B} from writer state (not kernel["LdsOffset{tc}"])
-    - Tracks LDS address in a dedicated SGPR for double-buffer XOR swap
-    - No sparse/metadata/TDMSplit handling (subtile doesn't use those)
-    - setLds=False path reads from tracking SGPR for main-loop reprogram
-    """
+ def initTDMDescriptorSubtile(self, kernel: Mapping, tP: Mapping, setLds: bool = True) -> Module:
+    """Subtile variant of initTDMDescriptor(). setLds=False reprograms from tracking SGPR."""
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
     ti: int = tP["idx"]
