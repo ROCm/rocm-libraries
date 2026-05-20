@@ -67,14 +67,62 @@ class TestPmcRendering:
         Reporter(output=out)._print_profiling_block(_make_pe(extra))
         assert "PMC (basic, gfx942):  skipped — no counters defined" in out.getvalue()
 
+    def test_db_path_renders_with_analyze_hint(self):
+        """The rocpd db is the source of truth — both the aggregates we
+        derived AND the additional speed-of-light blocks rocprof-compute
+        can render. Surface the db path + the analyze command so the
+        user has a copy-paste path into the full dashboard."""
+        extra = {
+            "pmc": {
+                "set": "basic",
+                "arch": "gfx942",
+                "counters": {"GRBM_GUI_ACTIVE": {"sum": 1, "mean_per_kernel": 1.0}},
+                "db_path": "/tmp/prof/sample/MIOPEN_ENGINE/pmc_basic/results.db",
+            }
+        }
+        out = io.StringIO()
+        Reporter(output=out)._print_profiling_block(_make_pe(extra))
+        rendered = out.getvalue()
+        assert "PMC db:" in rendered
+        assert "/tmp/prof/sample/MIOPEN_ENGINE/pmc_basic/results.db" in rendered
+        # analyze takes the db's parent dir, not the db itself.
+        assert (
+            "rocprof-compute analyze --path " "/tmp/prof/sample/MIOPEN_ENGINE/pmc_basic"
+        ) in rendered
+
 
 class TestTraceRendering:
-    def test_pftrace_path_renders(self):
+    def test_pftrace_path_renders_with_perfetto_hint(self):
         extra = {"trace": {"format": "pftrace", "path": "/tmp/out/results.pftrace"}}
         out = io.StringIO()
         Reporter(output=out)._print_profiling_block(_make_pe(extra))
-        assert "Trace (pftrace)" in out.getvalue()
-        assert "/tmp/out/results.pftrace" in out.getvalue()
+        text = out.getvalue()
+        assert "Trace (pftrace)" in text
+        assert "/tmp/out/results.pftrace" in text
+        assert "ui.perfetto.dev" in text
+
+    def test_kineto_db_only_path_renders_convert_hint(self):
+        """When rocpd convert failed (no `path`, only `db_path`), the
+        user has the source db but no viewable trace. Surface the
+        manual convert command so they don't have to dig it out of
+        the source."""
+        extra = {
+            "trace": {
+                "format": "kineto",
+                "db_path": "/tmp/out/results.db",
+                "kineto_unavailable": "rocpd convert failed",
+            }
+        }
+        out = io.StringIO()
+        Reporter(output=out)._print_profiling_block(_make_pe(extra))
+        text = out.getvalue()
+        assert "Trace DB:" in text
+        assert "/tmp/out/results.db" in text
+        assert "python -m rocpd convert" in text
+        # The Perfetto hint must NOT fire here — the db is not directly
+        # openable in Perfetto, and surfacing the pftrace hint next to
+        # a sqlite path would mislead.
+        assert "ui.perfetto.dev" not in text
 
 
 class TestPerfRendering:
@@ -104,8 +152,8 @@ class TestPerfRendering:
 class TestRooflineRendering:
     def test_csv_and_analyze_hint_render(self):
         """``profile --roof-only`` produces CSVs; we surface roofline.csv
-        and an analyze-command hint that the user can copy-paste to
-        render PDFs in any datatype."""
+        and analyze-command hints (ASCII + GUI) the user can copy-paste
+        to render the roofline in any datatype."""
         extra = {
             "roofline": {
                 "roofline_csv": "/tmp/r/workload/gfx90a/roofline.csv",
@@ -118,4 +166,9 @@ class TestRooflineRendering:
         rendered = out.getvalue()
         assert "Roofline CSV:" in rendered
         assert "/tmp/r/workload/gfx90a/roofline.csv" in rendered
+        # ASCII hint includes --block 4 (avoids the warning-flooded
+        # full speed-of-light output) and --gui hint includes the doc
+        # pointer for the analyze venv setup gotcha.
         assert "rocprof-compute analyze --path /tmp/r/workload/gfx90a" in rendered
+        assert "--block 4" in rendered
+        assert "--gui" in rendered

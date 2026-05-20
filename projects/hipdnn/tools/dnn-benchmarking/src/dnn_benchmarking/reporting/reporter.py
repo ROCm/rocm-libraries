@@ -768,8 +768,17 @@ class Reporter:
             db_path = trace.get("db_path")
             if trace_path:
                 self._print(f"  Trace ({fmt}):         {trace_path}")
+                # Both .pftrace and chrome JSON open in Perfetto.
+                self._print("    → drag onto https://ui.perfetto.dev/")
             if db_path:
                 self._print(f"  Trace DB:              {db_path}")
+                # When the kineto convert failed, the db is all we have;
+                # surface the convert command so the user can rerun.
+                if not trace_path:
+                    self._print(
+                        "    → python -m rocpd convert -i <db> "
+                        "--output-format chrome -o trace.json"
+                    )
             if not trace_path and not db_path and "skipped" in trace:
                 self._print(f"  Trace ({fmt}):         skipped — {trace['skipped']}")
 
@@ -778,6 +787,7 @@ class Reporter:
             arch = pmc.get("arch", "?")
             pmc_set = pmc.get("set", "?")
             counters = pmc.get("counters") or {}
+            db_path = pmc.get("db_path")
             if counters:
                 head = list(counters.items())[:3]
                 rendered = "  ".join(
@@ -792,6 +802,17 @@ class Reporter:
                 self._print(
                     f"  PMC ({pmc_set}, {arch}):  rocprofv3 errored "
                     f"(rc={pmc.get('returncode', '?')})"
+                )
+            # Surface the rocpd db path + analyze hint whenever we
+            # captured one, regardless of whether parsing succeeded.
+            # The db itself is the full source of truth; aggregates are
+            # the convenience layer.
+            if db_path:
+                self._print(f"  PMC db:               {db_path}")
+                self._print(
+                    "    → rocprof-compute analyze --path "
+                    f"{Path(db_path).parent} "
+                    "(see docs/troubleshooting.md for venv setup)"
                 )
 
         perf = extra.get("perf")
@@ -817,17 +838,25 @@ class Reporter:
 
         roofline = extra.get("roofline")
         if isinstance(roofline, dict):
-            # rocprof-compute profile mode emits CSVs (no PDF); the PDF
-            # comes from a separate `rocprof-compute analyze` pass that
-            # the user runs against `workload_path`.
+            # rocprof-compute profile mode emits CSVs (no PDF); the
+            # rendered roofline (ASCII / GUI / TUI) comes from a
+            # separate `rocprof-compute analyze` pass against
+            # `workload_path`. analyze has its own Python deps that
+            # would downgrade torch's numpy if installed into the
+            # dnn-benchmarking venv — see docs/troubleshooting.md for
+            # the separate-venv recipe.
             workload = roofline.get("workload_path")
             csv = roofline.get("roofline_csv")
             if csv:
                 self._print(f"  Roofline CSV:         {csv}")
             if workload:
                 self._print(
-                    f"  Roofline analyze:     rocprof-compute analyze "
-                    f"--path {workload}"
+                    f"    → rocprof-compute analyze --path {workload} "
+                    "--block 4  (ASCII roofline)"
+                )
+                self._print(
+                    "    → add --gui for interactive web UI "
+                    "(see docs/troubleshooting.md for analyze venv setup)"
                 )
             if "skipped" in roofline:
                 self._print(f"  Roofline:             skipped — {roofline['skipped']}")
