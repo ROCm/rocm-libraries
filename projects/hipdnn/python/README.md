@@ -20,22 +20,22 @@ python
 │   ├── attributes_bindings.cpp  # Bindings for attribute classes
 │   └── types_bindings.cpp       # Bindings for custom types and enums
 ├── hipdnn_frontend
-│   ├── __init__.py          # Initializes the hipdnn_frontend package
+│   ├── __init__.py              # Initializes the hipdnn_frontend package
 │   └── samples
-│       ├── bn_inference.py    # Batch normalization inference sample(DISABLED)
-│       ├── conv_fprop.py      # Convolution forward propagation sample
-│       ├── conv_dgrad.py      # Convolution backward data gradient sample
-│       └── conv_wgrad.py      # Convolution backward weight gradient sample
-├── CMakeLists.txt               # CMake configuration file
-├── pyproject.toml               # Python project configuration
+│       ├── bn_inference.py      # Batch normalization inference sample (DISABLED)
+│       ├── conv_fprop.py        # Convolution forward propagation sample
+│       ├── conv_dgrad.py        # Convolution backward data gradient sample
+│       └── conv_wgrad.py        # Convolution backward weight gradient sample
+├── CMakeLists.txt               # CMake configuration (scikit-build-core + subdirectory dual-mode)
+├── pyproject.toml               # Python project configuration (scikit-build-core backend)
 └── README.md                    # Project documentation
 ```
 
 ## Prerequisites
 
-- CMake 3.15 or higher
+- CMake 3.18 or higher
 - A C++ compiler with C++17 support (e.g. clang++)
-- Python 3.8 or higher
+- Python 3.9 or higher
 - ROCm/HIP runtime and libraries
 - hipDNN frontend library (built and installed)
 
@@ -61,35 +61,28 @@ pip install --upgrade pip
 
 ### 2. Building and Installing the Python Bindings
 
-The Python bindings use setuptools to handle the build process automatically through pip:
+The Python bindings use [scikit-build-core](https://scikit-build-core.readthedocs.io/) as the build backend, which drives CMake automatically through pip.
+
+hipDNN must be installed (e.g. at `/opt/rocm`) before building the bindings:
 
 ```bash
 # Navigate to the hipdnn python directory
 cd python
 
-export CMAKE_PREFIX_PATH=/path/to/hipdnn/install:$CMAKE_PREFIX_PATH
 pip install -v .
+```
 
-or
+If hipDNN is installed somewhere other than `/opt/rocm`, pass the prefix:
 
-pip install -v . --config-settings=cmake.define.CMAKE_PREFIX_PATH=/path/to/hipdnn/install
+```bash
+pip install -v . -Ccmake.define.CMAKE_PREFIX_PATH=/path/to/hipdnn/install
 ```
 
 ### 3. Development Installation
 
-For development work where you want to rebuild and apply the changes you have two options:
-
-#### Editable Installation
-```bash
-# from within the hipdnn python directory
-pip install -e .
-```
-
-#### Uninstall and Reinstall Flow
-Instead of doing an editable install, if you prefer a full reinstall after C++ changes:
+After C++ changes, uninstall and reinstall:
 
 ```bash
-# from within the hipdnn python directory
 pip uninstall hipdnn-frontend -y
 pip install -v .
 ```
