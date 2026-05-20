@@ -2566,7 +2566,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if tdmA:
         if not tdmInited:
           module.add(self.tdmGlobalOffset(kernel, tensorParametersA))
-          module.add(self.initTDMDescriptor(kernel, tensorParametersA))
+          module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersA))
       else:
         module.addComment1("global read addresses: tile offset assignment a")
         module.add(self.graTileAssignment(kernel, tensorParametersA))
@@ -2597,7 +2597,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if tdmB:
         if not tdmInited:
           module.add(self.tdmGlobalOffset(kernel, tensorParametersB))
-          module.add(self.initTDMDescriptor(kernel, tensorParametersB))
+          module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersB))
       else:
         module.addComment1("global read addresses: tile offset assignment b")
         module.add(self.graTileAssignment(kernel, tensorParametersB))
@@ -4300,6 +4300,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # Kernel Body - Subtiled version
   ##############################################################################
   def kernelBodySubtile(self, kernel, tensorParametersA, tensorParametersB):
+    # Store tensor params so emitter can access them for TDM descriptor reprogramming
+    self.tPA = tensorParametersA
+    self.tPB = tensorParametersB
+    self._subtileDtileBaseVgpr = None  # set later by D-tile allocation
     #expand = kernel["ExpandPointerSwap"]
     self.dontAppendCode = False
 
@@ -4354,10 +4358,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # TODOBS: need to add init c code, and also init sum unroll code.
     #
 
-    module.add(globalReadDTLInitCommonSgpr(self, kernel))
+    if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
+      module.add(globalReadDTLInitCommonSgpr(self, kernel))
 
     if mxsatileInfo != None and mxsbtileInfo != None:
-      module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
+      if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
+        module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
 
     # TODOBS: globalWriteWorkGroupInit can be emitted here or later on, check..
     if self.states.doShadowInit:
@@ -4374,16 +4380,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #module.add(self.closeShadowInit(kernel))
 
 
+    hasTDM = kernel["enableTDMA"] and kernel["enableTDMB"]
     module.addComment1("global read addresses: addresses a")
-    module.add(self.graAddresses(kernel, tensorParametersA))
-    if kernel["ProblemType"]["MXBlockA"]:
-      module.addComment1("global read addresses: addresses mxsa")
-      module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
-    module.addComment1("global read addresses: addresses b")
-    module.add(self.graAddresses(kernel, tensorParametersB))
-    if kernel["ProblemType"]["MXBlockB"]:
-      module.addComment1("global read addresses: addresses mxsb")
-      module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
+    if not hasTDM:
+      module.add(self.graAddresses(kernel, tensorParametersA))
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.addComment1("global read addresses: addresses mxsa")
+        module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
+      module.addComment1("global read addresses: addresses b")
+      module.add(self.graAddresses(kernel, tensorParametersB))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.addComment1("global read addresses: addresses mxsb")
+        module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
 
 
 
@@ -4393,7 +4401,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Printout tile info
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo, dtileInfo]:
       if tileInfo != None:
-        module.addComment0(str(tileInfo))
+        # Use per-line comments to avoid multi-line /* */ blocks (gfx12 assembler rejects them)
+        for line in str(tileInfo).split('\n'):
+          module.addComment1(line)
 
     # Allocate registers for GR/LR
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
@@ -4404,10 +4414,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment("Allocating v%s for %s LR"%(str(tileInfo.sharedVgprLROffset), tileInfo.tc))
       module.addComment("Allocating v%s for %s LR Swap"%(str(tileInfo.sharedVgprLROffsetSwap), tileInfo.tc))
 
-    module.add(graTileAssignment(self, kernel))
+    # TDM descriptor init for gfx1250 subtile
+    if hasTDM:
+      if prod(kernel["MIWaveGroup"]) > 1:
+        module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+        module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+      else:
+        # 1-wave separate descriptors: init all tensors
+        module.add(self.tdmGlobalOffset(kernel, tensorParametersA))
+        module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersA))
+        module.add(self.tdmGlobalOffset(kernel, tensorParametersB))
+        module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersB))
+    if not hasTDM:
+      module.add(graTileAssignment(self, kernel))
     module.add(lraTileAssignment(self, kernel))
+    # LR swap VGPRs are needed for LDS double-buffering regardless of TDM
     module.add(localReadDTLInitCommonSwapVgpr(self, kernel))
-    module.add(graTileAssignmentScaleSwizzled(self, kernel))
+
+    if not hasTDM:
+      module.add(graTileAssignmentScaleSwizzled(self, kernel))
+    # Scale LR tile assignment needed even with TDM (initializes scale LR offset VGPRs)
     module.add(lraTileAssignmentScaleSwizzled(self, kernel))
 
     module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
@@ -4417,6 +4443,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     
 
     dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
+
+    # Save D-tile base for gfx1250 subtile ValuC aliasing
+    if dtileInfo.vgprTiles:
+      self._subtileDtileBaseVgpr = dtileInfo.vgprTiles[0].regList.indices[0]
 
     module.add(initVgprTilesToZero(self, kernel, dtileInfo))
 
@@ -4462,7 +4492,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment0(" =================== Start of post-loop code =================== ")
       module.addComment0(" =============================================================== ")
 
-      self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4)
+      # On gfx1250 subtile, WMMA accumulators are in regular VGPRs (D-tile allocation).
+      # Point ValuC directly at the D-tile base instead of allocating a new range,
+      # since there are no accVGPRs and the mapping phase is empty.
+      if kernel.get("UseSubtileImpl") and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None:
+        self.states.c.startVgprValu = self._subtileDtileBaseVgpr
+      else:
+        self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4)
 
       module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
                              "serializedStore enabled" if self.states.serializedStore else ""))
@@ -4496,7 +4532,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
       module.add(storeModule)
 
-      self.vgprPool.checkIn(self.states.c.startVgprValu)
+      # When ValuC aliases D-tile VGPRs (gfx1250 subtile), the D-tile dealloc handles cleanup
+      if not (kernel.get("UseSubtileImpl") and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
+        self.vgprPool.checkIn(self.states.c.startVgprValu)
 
     # Deallocate registers used for C/D tiles after store code instructions are emitted
     dtileInfo.deallocVgprTileRegisters_legacy(self, kernel)
@@ -5289,7 +5327,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif tc2 == 'B':
           globalReadMode2nd = 2
 
-      if (kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False)) and not kernel["1LDSBuffer"]:
+      if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["1LDSBuffer"]:
         module.add(self._syncThreads(kernel, "Barrier before tail TDM loads (WAR hazard with NLL LDS reads)"))
 
       if kernel["enableTDMA"] and kernel["enableTDMB"]:
@@ -8013,15 +8051,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #self.states.c.startVgprValu = vgprIdx;
 
       #vgprIdx += self.states.c.numVgprValu
+      # StreamK constant VGPRs
+      if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
+        numSKConsts = 5
+        if kernel["StreamK"] >= 2:
+          numSKConsts += 2
+        self.states.startVgprSKConsts = vgprIdx
+        self.states.numVgprSKConsts = numSKConsts
+        vgprIdx += numSKConsts
+
       self.states.totalVgprs = vgprIdx
-
-
-
-      #self.states.totalVgprs += self.states.a.tileInfo.numGRPerSubtile
-      #self.states.totalVgprs += self.states.b.tileInfo.numGRPerSubtile
-
-      #self.states.totalVgprs += self.states.a.tileInfo.numLRPerSubtile
-      #self.states.totalVgprs += self.states.b.tileInfo.numLRPerSubtile
 
       return
 
@@ -8364,18 +8403,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
         requiredAligned4SgprVar.append("SrdWS")
 
     if kernel["UseSubtileImpl"]:
-      requiredUnalignedSgprVar.append("LocalWriteBaseAddrA")
-      requiredUnalignedSgprVar.append("LocalWriteBaseAddrB")
-      if kernel["ProblemType"]["MXBlockA"]:
-        requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSA")
-      if kernel["ProblemType"]["MXBlockB"]:
-        requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSB")
-      requiredUnalignedSgprVar.append("SwapA")
-      requiredUnalignedSgprVar.append("SwapB")
-      if kernel["ProblemType"]["MXBlockA"]:
-        requiredUnalignedSgprVar.append("SwapMXSA")
-      if kernel["ProblemType"]["MXBlockB"]:
-        requiredUnalignedSgprVar.append("SwapMXSB")
+      # DTL addressing SGPRs not needed when TDM handles global-to-LDS
+      if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
+        requiredUnalignedSgprVar.append("LocalWriteBaseAddrA")
+        requiredUnalignedSgprVar.append("LocalWriteBaseAddrB")
+        if kernel["ProblemType"]["MXBlockA"]:
+          requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSA")
+        if kernel["ProblemType"]["MXBlockB"]:
+          requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSB")
+        requiredUnalignedSgprVar.append("SwapA")
+        requiredUnalignedSgprVar.append("SwapB")
+        if kernel["ProblemType"]["MXBlockA"]:
+          requiredUnalignedSgprVar.append("SwapMXSA")
+        if kernel["ProblemType"]["MXBlockB"]:
+          requiredUnalignedSgprVar.append("SwapMXSB")
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         requiredUnalignedSgprVar.append("SwapMetadata")
 
