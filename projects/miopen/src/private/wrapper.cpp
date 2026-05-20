@@ -4642,8 +4642,8 @@ extern "C" miopenStatus_t miopenKthvalueForward(miopenHandle_t handle,
                                                    miopenTensorDescriptor_t indicesDesc,
                                                    size_t* indices,
                                                    size_t k,
-                                                   int32_t dim  = -1,
-                                                   bool keepDim = false)
+                                                   int32_t dim,
+                                                   bool keepDim)
 {
     return miopenKthvalueForward_impl(handle, inputDesc, input, outputDesc, output, indicesDesc, indices, k, dim, false);
 }
@@ -4691,8 +4691,8 @@ extern "C" miopenStatus_t miopenSoftMarginLossForward(miopenHandle_t handle,
                                                          miopenTensorDescriptor_t outputDesc,
                                                          void* output,
                                                          miopenLossReductionMode_t reduction,
-                                                         void* workspace             = nullptr,
-                                                         size_t workspaceSizeInBytes = 0)
+                                                         void* workspace,
+                                                         size_t workspaceSizeInBytes)
 {
     return miopenSoftMarginLossForward_impl(handle, inputDesc, input, targetDesc, target, outputDesc, output, reduction, nullptr, workspaceSizeInBytes);
 }
