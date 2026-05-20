@@ -148,11 +148,11 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::GROUP},
          .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
-        {"fmha_bwd_dqdkdv_bf16_d128_group", makeSpec(FmhaBwdDQDKDVConfig{
-            .signature = {.dtype = DataType::BF16,
-                       .hdim_q = 128, .hdim_v = 128,
-                       .mode = FmhaMode::GROUP},
-            .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_bf16_d128_group", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::BF16,
+                    .hdim_q = 128, .hdim_v = 128,
+                    .mode = FmhaMode::GROUP},
+         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_fp16_d128_batch_ebias", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
