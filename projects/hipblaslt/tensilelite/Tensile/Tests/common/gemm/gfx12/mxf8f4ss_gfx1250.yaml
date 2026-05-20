@@ -74,7 +74,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - LDSTrInst: [True, False]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
