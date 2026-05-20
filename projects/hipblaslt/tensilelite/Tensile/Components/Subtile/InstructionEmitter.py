@@ -165,6 +165,12 @@ class InstructionEmitter:
         tensor = placement.tensor
         if tensor in ('A', 'B'):
             ti = self.tileInfoMap[tensor]
+            # TDM aliased: reprogram descriptor before loading this tensor
+            if self.kernel["enableTDMA"] and self.kernel["enableTDMB"]:
+                from rocisa.instruction import SWaitTensorcnt
+                module.add(SWaitTensorcnt(tensorcnt=0, comment="drain TDM before aliased descriptor reprogram"))
+                tensorParams = self.writer.tPA if tensor == 'A' else self.writer.tPB
+                module.add(self.writer.initTDMDescriptorSubtile(self.kernel, tensorParams, setLds=False))
             grGran = self.config.grA if tensor == 'A' else self.config.grB
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
@@ -181,6 +187,13 @@ class InstructionEmitter:
         if counts is None:
             return []
         
+        hasTDM = self.kernel["enableTDMA"] and self.kernel["enableTDMB"]
+        if hasTDM:
+            from rocisa.instruction import SWaitTensorcnt
+            tdmCnt = counts.A + counts.B + counts.SA + counts.SB
+            return [SWaitTensorcnt(tensorcnt=tdmCnt,
+                                   comment=f"Wait TDM (tensor_load_to_lds): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
+
         # TODO. Hardcoded for now, but we should just get this from atomic emit codes (emitSingleBufferLoad, ...)
         grMap = {'A': max(1,int(1.0/self.tileInfoA.loadRatioGR)),
                  'B':  max(1,int(1.0/self.tileInfoB.loadRatioGR)),
