@@ -53,7 +53,6 @@ project_map = {
             "rocblas",
             "hipblas",
             "rocroller",
-            "tensilelite",
         ],
     },
     "miopen": {
