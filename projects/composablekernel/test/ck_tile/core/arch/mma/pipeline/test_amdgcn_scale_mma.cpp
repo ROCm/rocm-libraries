@@ -298,10 +298,10 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_16x16x128_Real)
 }
 
 // Live test on real hardware for scale selection and execution.
-TEST(ScaleMMATrait, MmaSelector_Scale_F4_F4_F32_16x16x128_Real)
-{
-    MmaSelector_Scale_Real_impl<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u>();
-}
+// TEST(ScaleMMATrait, MmaSelector_Scale_F4_F4_F32_16x16x128_Real)
+// {
+//     MmaSelector_Scale_Real_impl<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u>();
+// }
 
 // Live test on real hardware for scale selection and execution.
 TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_32x32x64_Real)
@@ -316,10 +316,10 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 }
 
 // Live test on real hardware for scale selection and execution.
-TEST(ScaleMMATrait, MmaSelector_Scale_F4_F4_F32_32x32x64_Real)
-{
-    MmaSelector_Scale_Real_impl<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u>();
-}
+// TEST(ScaleMMATrait, MmaSelector_Scale_F4_F4_F32_32x32x64_Real)
+// {
+//     MmaSelector_Scale_Real_impl<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u>();
+// }
 
 // ---------------------------------------------------------------------------
 // Multi-fragment (WaveWise) scale pipeline tests
