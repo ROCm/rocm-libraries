@@ -13,7 +13,7 @@
 | GEMM | gemm_multi_abd<br>example: 22_gemm_multi_abd/ | ❌ | | | | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | GEMM | gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | GEMM | grouped_gemm<br>example: 17_grouped_gemm/ | ❌ | ❌ | ❌ | | | | | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| GEMM | grouped_gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
+| GEMM | grouped_gemm_quant | | ✅ | | ✅ | | | | ✅ | | | | | ✅ | ✅ | ✅ |
 | Reduce | multi_reduce2d [8]<br>engine: reduce/<br>example: 05_reduce/ | ✅ | | ❌ | | | | | | | | | ❌ | ✅ | ✅ | ❌ |
 | Reduce | reduce2d<br>example: 05_reduce/ | ❌ | | ❌ | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
 | Attention | fmha<br>engine: fmha/<br>example: 01_fmha/ | ✅ | ✅ | ✅ | ❌ | | | | | | | | ✅ | ✅ | ✅ | ❌ |
