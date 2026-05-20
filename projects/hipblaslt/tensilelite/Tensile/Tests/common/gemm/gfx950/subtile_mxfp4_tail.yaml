@@ -14,10 +14,15 @@ TestParameters:
 # Both MX scale tensors (MXSA, MXSB) get the same per-K-block (32)
 # lane mask.
 #
+# Note: subtile requires StreamK != 0 (Solution.py rejects SK=0); all
+# sections use StreamK=3. Section 1's `[0, 3]` matches the convention
+# in aligned-K subtile_mxfp4.yaml; the SK=0 half is silently filtered
+# at SolutionStructs.
+#
 # Coverage (~14 kernels, ~80 problem runs):
-#   - Section 1: full K_rem × PGR × StreamK matrix on MT 128x128
+#   - Section 1: K_rem × PGR matrix on MT 128x128
 #                (single scale group, smoke epicenter).
-#   - Section 2: full K_rem × PGR matrix on MT 256x256
+#   - Section 2: K_rem × PGR matrix on MT 256x256
 #                (multi scale-group surface).
 #   - Section 3: DU=512 proof-of-life.
 #   - Sections 4-6: bias / F16 dest / F32 dest one-PGR=0 cell each.
@@ -54,11 +59,13 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # Section 1: FP4 TN — MT 128x128, full PGR × StreamK matrix
+  # Section 1: FP4 TN — MT 128x128, PGR matrix (SK=3 only after the
+  # SolutionStructs filter)
   #
-  # Six kernels (3 PGR × 2 SK). Drives the canonical single-scale-group
-  # tail surface. K-tail values cover partial-first-MFMA, full-last-MFMA,
-  # partial-second-MFMA, and main-loop+tail combos.
+  # Three kernels (3 PGR × 1 effective SK). Drives the canonical
+  # single-scale-group tail surface. K-tail values cover
+  # partial-first-MFMA, full-last-MFMA, partial-second-MFMA, and
+  # main-loop+tail combos.
   ########################################
   -
     - # ProblemType
@@ -110,7 +117,8 @@ BenchmarkProblems:
           - Exact: [ 63,  63, 1,  32]
 
   ########################################
-  # Section 2: FP4 TN — MT 256x256, full PGR × SK=0 matrix
+  # Section 2: FP4 TN — MT 256x256, full PGR matrix (SK=3, subtile
+  # requires StreamK != 0)
   #
   # Three kernels (3 PGR × 1 SK). Multi-scale-group MT — the surface
   # where the `lrLocalSubtileGrid` fix landed (was emitting 1 ds_read
@@ -142,7 +150,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -162,7 +170,7 @@ BenchmarkProblems:
   ########################################
   # Section 3: FP4 TN — DU=512 proof-of-life
   #
-  # Two kernels (PGR ∈ {0, 2}, SK=0). Same tail logic as DU=256, just a
+  # Two kernels (PGR ∈ {0, 2}, SK=3). Same tail logic as DU=256, just a
   # bigger main loop. PGR=0 covers the baseline path; PGR=2 covers the
   # small-counter realign path with K = 1*DU + tail.
   ########################################
@@ -192,7 +200,7 @@ BenchmarkProblems:
         - DepthU: [512]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -238,7 +246,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -281,7 +289,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -324,7 +332,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
