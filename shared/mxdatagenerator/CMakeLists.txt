@@ -27,6 +27,12 @@ target_include_directories(mxDataGenerator
 #   * compile their TU with hipcc / amdclang++ in HIP mode (so `__HIPCC__`
 #     is defined and `<hip/hip_runtime.h>` is in the include path), and
 #   * `target_link_libraries(<their_tgt> PRIVATE hip::device)` themselves.
+#
+# The default is ON because the option is a no-op for non-test builds: the
+# header gate above makes pure-host TUs see nothing, and the `if(... AND
+# MXDATAGENERATOR_BUILD_TESTING)` block below only pulls in the HIP language
+# when we're also building our own test executable. Downstream consumers that
+# want to disable the backend entirely can still pass `-DMXDATAGENERATOR_ENABLE_GPU=OFF`.
 option(MXDATAGENERATOR_ENABLE_GPU
        "Enable header-only HIP/GPU backend in mxDataGenerator" ON)
 if(MXDATAGENERATOR_ENABLE_GPU AND MXDATAGENERATOR_BUILD_TESTING)

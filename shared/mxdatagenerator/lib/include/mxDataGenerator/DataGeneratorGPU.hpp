@@ -96,9 +96,16 @@ namespace DGen
          * @brief Generate MX data into caller-owned device buffers.
          *
          * `devData` must point to at least `getDataBufferBytes(sizes,
-         * options)` bytes of device memory; `devScale` must point to at least
-         * `getScaleBufferBytes(sizes, options)` bytes of device memory (or
-         * may be `nullptr` for unscaled DTYPEs).
+         * strides, options)` bytes of device memory; `devScale` must point
+         * to at least `getScaleBufferBytes(sizes, strides, options)` bytes
+         * of device memory.
+         *
+         * Note: pass the same `strides` to both the sizers and `generateInto`
+         * -- the kernel launch arithmetic is stride-aware, so a padded
+         * layout (e.g. `sizes={64,2}, strides={1,80}`) needs the larger
+         * stride-aware allocation; the no-strides sizer overloads below
+         * assume contiguous column-major and will under-allocate for
+         * padded layouts.
          */
         void generateInto(void*                       devData,
                           void*                       devScale,
@@ -158,11 +165,35 @@ namespace DGen
                                            size_t      mxBlock,
                                            hipStream_t stream = nullptr);
 
-        /// Compute the byte size of the packed data buffer for given sizes/options.
+        /// Stride-aware byte size of the packed data buffer.
+        ///
+        /// Mirrors the kernel-launch arithmetic used by `generateInto`
+        /// (`computeArraySize` = `strides[N-1] * sizes[N-1]` after sorting
+        /// dims by stride), so the allocation covers every element the
+        /// kernel will touch -- including any padding the strides imply.
+        /// Always prefer this overload when you have the strides; the
+        /// no-strides overload below assumes contiguous column-major.
+        static size_t getDataBufferBytes(std::vector<index_t> const& sizes,
+                                         std::vector<index_t> const& strides,
+                                         DataGeneratorOptions const& options);
+
+        /// Stride-aware byte size of the packed scale buffer.
+        /// See `getDataBufferBytes` (stride-aware) for the rationale.
+        static size_t getScaleBufferBytes(std::vector<index_t> const& sizes,
+                                          std::vector<index_t> const& strides,
+                                          DataGeneratorOptions const& options);
+
+        /// Contiguous column-major byte size of the packed data buffer.
+        ///
+        /// Under-allocates for padded layouts (e.g. `sizes={64,2},
+        /// strides={1,80}` allocates dense `64*2` while the kernel writes
+        /// `80*2`); use the stride-aware overload above if your layout
+        /// may be padded.
         static size_t getDataBufferBytes(std::vector<index_t> const& sizes,
                                          DataGeneratorOptions const& options);
 
-        /// Compute the byte size of the packed scale buffer for given sizes/options.
+        /// Contiguous column-major byte size of the packed scale buffer.
+        /// See the no-strides `getDataBufferBytes` overload for the caveat.
         static size_t getScaleBufferBytes(std::vector<index_t> const& sizes,
                                           DataGeneratorOptions const& options);
 
@@ -171,6 +202,10 @@ namespace DGen
 
         DataGeneratorOptions m_options;
         std::vector<index_t> m_sizes;
+        // Cached so getReferenceFloat() reproduces the exact array the
+        // kernel actually wrote (rather than the contiguous-column-major
+        // assumption it used to make).
+        std::vector<index_t> m_strides;
 
         size_t m_dataBufferBytes  = 0;
         size_t m_scaleBufferBytes = 0;

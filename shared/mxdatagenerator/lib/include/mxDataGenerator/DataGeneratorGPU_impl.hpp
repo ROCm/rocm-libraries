@@ -607,38 +607,29 @@ namespace DGen
         // convert path passes the same clamped value to the hardware MX
         // convert (keeping the kernel-visible scale and the scale used for
         // data quantisation in lockstep).
+        //
+        // Both clamp and encoder source their bounds from `ScaleInfo<ST>`
+        // (the same `ScaleFmt` used by the rest of the codebase) so the two
+        // can't drift, and so a new scale format added to `ScaleInfoFor<>`
+        // is picked up automatically. `ScaleInfo<ST>::unBiasedE{Min,Max}`
+        // are already biased-corrected for the NaN/Inf reserved slots:
+        //   * E8M0 (HasInf=true, HasNan=true): emin/emax = [-127, 127]
+        //   * E4M3 (HasInf=false, HasNan=true, HasZero=true): [-6, 8]
+        //   * E5M3 (HasInf=false, HasNan=true, HasZero=true): [-14, 16]
+        // For E4M3 / E5M3 the all-ones biased exponent is a valid finite
+        // normal (only the (biased=all-ones, mantissa=all-ones) byte is
+        // reserved for NaN), so unBiasedEMax is the largest exponent we can
+        // legitimately encode with mantissa = 0.
         template <ScaleType ST>
-        __device__ __forceinline__ int clampScaleExp(int unbiasedExp);
-
-        template <>
-        __device__ __forceinline__ int clampScaleExp<ScaleType::E8M0>(int unbiasedExp)
+        __device__ __forceinline__ int clampScaleExp(int unbiasedExp)
         {
-            // Byte range [0, 254] -> unbiased [-127, 127]. 255 is reserved
-            // for NaN; we never produce it from numeric data.
-            if(unbiasedExp < -127)
-                return -127;
-            if(unbiasedExp > 127)
-                return 127;
-            return unbiasedExp;
-        }
-
-        template <>
-        __device__ __forceinline__ int clampScaleExp<ScaleType::E4M3>(int unbiasedExp)
-        {
-            if(unbiasedExp < -6)
-                return -6;
-            if(unbiasedExp > 7)
-                return 7;
-            return unbiasedExp;
-        }
-
-        template <>
-        __device__ __forceinline__ int clampScaleExp<ScaleType::E5M3>(int unbiasedExp)
-        {
-            if(unbiasedExp < -14)
-                return -14;
-            if(unbiasedExp > 15)
-                return 15;
+            using SI                 = ScaleInfo<ST>;
+            constexpr int kMinExp    = SI::unBiasedEMin;
+            constexpr int kMaxExp    = SI::unBiasedEMax;
+            if(unbiasedExp < kMinExp)
+                return kMinExp;
+            if(unbiasedExp > kMaxExp)
+                return kMaxExp;
             return unbiasedExp;
         }
 
@@ -648,11 +639,15 @@ namespace DGen
         template <>
         __device__ __forceinline__ uint8_t encodeScale<ScaleType::E8M0>(int unbiasedExp)
         {
-            int v = unbiasedExp + 127;
-            if(v < 0)
-                v = 0;
-            if(v > 254)
-                v = 254;
+            using SI               = ScaleInfo<ScaleType::E8M0>;
+            constexpr int kMinExp  = SI::unBiasedEMin;
+            constexpr int kMaxExp  = SI::unBiasedEMax;
+            constexpr int kBias    = SI::bias;
+            int           v = unbiasedExp + kBias;
+            if(unbiasedExp < kMinExp)
+                v = kMinExp + kBias;
+            if(unbiasedExp > kMaxExp)
+                v = kMaxExp + kBias;
             return static_cast<uint8_t>(v);
         }
 
@@ -661,30 +656,32 @@ namespace DGen
         {
             // Byte layout S=1 EEEE MMM. Mantissa = 0 (normalised 1.0), so the
             // encoded scale value is exactly 1.0 * 2^unbiasedExp.
-            constexpr int bias   = 7;
-            constexpr int maxExp = 7;
-            constexpr int minExp = -6;
-            int           biased = unbiasedExp + bias;
-            if(unbiasedExp > maxExp)
-                biased = maxExp + bias;
-            if(unbiasedExp < minExp)
+            using SI               = ScaleInfo<ScaleType::E4M3>;
+            constexpr int kMinExp  = SI::unBiasedEMin;
+            constexpr int kMaxExp  = SI::unBiasedEMax;
+            constexpr int kBias    = SI::bias;
+            int           biased   = unbiasedExp + kBias;
+            if(unbiasedExp > kMaxExp)
+                biased = kMaxExp + kBias;
+            if(unbiasedExp < kMinExp)
                 biased = 1;
-            return static_cast<uint8_t>(biased << 3);
+            return static_cast<uint8_t>(biased << SI::mantissaBits);
         }
 
         template <>
         __device__ __forceinline__ uint8_t encodeScale<ScaleType::E5M3>(int unbiasedExp)
         {
             // Byte layout S? EEEEE MMM. Mantissa = 0; encoded scale = 2^unbiasedExp.
-            constexpr int bias   = 15;
-            constexpr int maxExp = 15;
-            constexpr int minExp = -14;
-            int           biased = unbiasedExp + bias;
-            if(unbiasedExp > maxExp)
-                biased = maxExp + bias;
-            if(unbiasedExp < minExp)
+            using SI               = ScaleInfo<ScaleType::E5M3>;
+            constexpr int kMinExp  = SI::unBiasedEMin;
+            constexpr int kMaxExp  = SI::unBiasedEMax;
+            constexpr int kBias    = SI::bias;
+            int           biased   = unbiasedExp + kBias;
+            if(unbiasedExp > kMaxExp)
+                biased = kMaxExp + kBias;
+            if(unbiasedExp < kMinExp)
                 biased = 1;
-            return static_cast<uint8_t>(biased << 3);
+            return static_cast<uint8_t>(biased << SI::mantissaBits);
         }
 
         template <ScaleType ST>
@@ -1070,29 +1067,55 @@ namespace DGen
 
     template <typename DTYPE>
     size_t DataGeneratorGPU<DTYPE>::getDataBufferBytes(std::vector<index_t> const& sizes,
+                                                       std::vector<index_t> const& strides,
                                                        DataGeneratorOptions const& options)
     {
-        // We assume contiguous column-major (strides = {1, sizes[0], ...}).
-        std::vector<index_t> strides(sizes.size(), 1);
-        for(size_t i = 1; i < sizes.size(); ++i)
-            strides[i] = strides[i - 1] * sizes[i - 1];
-        size_t arraySize = gpu_detail::computeArraySize<DTYPE>(sizes, strides);
         (void)options;
+        // computeArraySize is the same arithmetic the kernel-launch path
+        // uses (`strides[N-1] * sizes[N-1]` after sorting dims by stride),
+        // so the byte count below covers every element the kernel will
+        // touch -- including any padding the strides imply.
+        size_t arraySize = gpu_detail::computeArraySize<DTYPE>(sizes, strides);
         constexpr int bitsPerElem = gpu_detail::GpuTraits<DTYPE>::bitsPerElem;
         return (arraySize * bitsPerElem + 7) / 8;
     }
 
     template <typename DTYPE>
     size_t DataGeneratorGPU<DTYPE>::getScaleBufferBytes(std::vector<index_t> const& sizes,
+                                                        std::vector<index_t> const& strides,
                                                         DataGeneratorOptions const& options)
     {
-        std::vector<index_t> strides(sizes.size(), 1);
-        for(size_t i = 1; i < sizes.size(); ++i)
-            strides[i] = strides[i - 1] * sizes[i - 1];
         size_t arraySize = gpu_detail::computeArraySize<DTYPE>(sizes, strides);
         if(options.blockScaling <= 0)
             return 0;
         return arraySize / static_cast<size_t>(options.blockScaling);
+    }
+
+    namespace gpu_detail
+    {
+        // Contiguous column-major strides for the no-strides sizer overloads.
+        // Pulled into a helper so the two overloads can't drift.
+        inline std::vector<index_t> defaultColumnMajorStrides(std::vector<index_t> const& sizes)
+        {
+            std::vector<index_t> strides(sizes.size(), 1);
+            for(size_t i = 1; i < sizes.size(); ++i)
+                strides[i] = strides[i - 1] * sizes[i - 1];
+            return strides;
+        }
+    } // namespace gpu_detail
+
+    template <typename DTYPE>
+    size_t DataGeneratorGPU<DTYPE>::getDataBufferBytes(std::vector<index_t> const& sizes,
+                                                       DataGeneratorOptions const& options)
+    {
+        return getDataBufferBytes(sizes, gpu_detail::defaultColumnMajorStrides(sizes), options);
+    }
+
+    template <typename DTYPE>
+    size_t DataGeneratorGPU<DTYPE>::getScaleBufferBytes(std::vector<index_t> const& sizes,
+                                                        DataGeneratorOptions const& options)
+    {
+        return getScaleBufferBytes(sizes, gpu_detail::defaultColumnMajorStrides(sizes), options);
     }
 
     template <typename DTYPE>
@@ -1103,9 +1126,15 @@ namespace DGen
     {
         m_options = options;
         m_sizes   = sizes;
+        m_strides = strides;
 
-        m_dataBufferBytes  = getDataBufferBytes(sizes, options);
-        m_scaleBufferBytes = getScaleBufferBytes(sizes, options);
+        // Stride-aware sizing -- the kernel launch uses computeArraySize
+        // which is stride-aware, so a padded layout (e.g. strides imply
+        // 80*2 elements while sizes={64,2} would only need 64*2 dense)
+        // needs the larger allocation. Using the no-strides overload here
+        // would under-allocate and the kernel would write OOB.
+        m_dataBufferBytes  = getDataBufferBytes(sizes, strides, options);
+        m_scaleBufferBytes = getScaleBufferBytes(sizes, strides, options);
 
         // Free any prior allocation (size could change between calls).
         if(m_ownsBuffers)
@@ -1141,15 +1170,32 @@ namespace DGen
         if(sizes.empty())
             throw std::invalid_argument(
                 "DataGeneratorGPU::generateInto: size vector must not be empty");
-        if(options.blockScaling <= 0)
+        // The OCP MX spec defines only three valid block sizes; the kernel's
+        // per-block `float values[32]` stack buffer is sized for the largest.
+        // Reject anything else up front so we don't quietly mis-encode (e.g.
+        // a caller that passed `blockScaling = 8` would get a kernel that
+        // reads 8 elements but a scale layout the dequantiser expects to be
+        // 16-aligned).
+        switch(options.blockScaling)
+        {
+        case 1:
+        case 16:
+        case 32:
+            break;
+        default:
             throw std::invalid_argument(
-                "DataGeneratorGPU::generateInto: blockScaling must be > 0 for MX types");
-        // The kernel allocates `float values[32]` on the stack per block.
-        // Anything larger reads/writes past the buffer.
-        if(options.blockScaling > 32)
+                "DataGeneratorGPU::generateInto: blockScaling must be one of "
+                "{1, 16, 32} (OCP MX block sizes)");
+        }
+        // Every DTYPE the GPU backend supports is an MX type, so we always
+        // emit a per-block scale byte (either from the device kernel or the
+        // host-fallback memcpy below). Refuse to launch without somewhere to
+        // put them; otherwise the host-fallback branch silently drops the
+        // scale bytes and dequant downstream sees garbage.
+        if(devScale == nullptr)
             throw std::invalid_argument(
-                "DataGeneratorGPU::generateInto: blockScaling must be <= 32 "
-                "(kernel stack buffer is sized for the OCP MX max block size)");
+                "DataGeneratorGPU::generateInto: devScale must not be null "
+                "for MX DTYPEs (one scale byte per block is required)");
 
         size_t arraySize = gpu_detail::computeArraySize<DTYPE>(sizes, strides);
         if(arraySize % static_cast<size_t>(options.blockScaling) != 0)
@@ -1192,10 +1238,6 @@ namespace DGen
         size_t gridDimX = (numBlocks + gpu_detail::kThreadsPerBlock - 1)
                           / gpu_detail::kThreadsPerBlock;
         gpu_detail::checkGridDimX(gridDimX, "generateInto");
-
-        if(devScale == nullptr && m_scaleBufferBytes == 0)
-            throw std::invalid_argument(
-                "DataGeneratorGPU::generateInto: this DTYPE requires a scale buffer");
 
         hipLaunchKernelGGL(gpu_detail::generateMXBlocksKernel<DTYPE>,
                            dim3(static_cast<unsigned>(gridDimX)),
@@ -1242,10 +1284,15 @@ namespace DGen
         auto dataHost  = getDataBytes();
         auto scaleHost = getScaleBytes();
 
-        // Recover unpacked array_size from the buffer dimensions.
-        std::vector<index_t> strides(m_sizes.size(), 1);
-        for(size_t i = 1; i < m_sizes.size(); ++i)
-            strides[i] = strides[i - 1] * m_sizes[i - 1];
+        // Use the strides the caller actually passed to `generate` (cached
+        // in m_strides) so getReferenceFloat reflects what the kernel really
+        // wrote, including padded layouts. Fall back to a contiguous
+        // column-major assumption only if m_strides is empty (a defensive
+        // path -- in practice m_strides is populated by `generate` before
+        // m_dataDevice has anything readable in it).
+        std::vector<index_t> const strides
+            = !m_strides.empty() ? m_strides
+                                 : gpu_detail::defaultColumnMajorStrides(m_sizes);
         size_t arraySize = gpu_detail::computeArraySize<DTYPE>(m_sizes, strides);
 
         std::vector<float> ret(arraySize);
@@ -1326,6 +1373,14 @@ namespace DGen
                            paddedCols);
         DGEN_DETAIL_CHECK_HIP_(hipGetLastError());
 
+        // Sync before any hipFree (the one below for the old m_scaleDevice
+        // and the implicit one in srcBuf's destructor on scope exit). The
+        // kernel still has both as live source pointers; freeing either
+        // before completion is a use-after-free even if the in-order stream
+        // would eventually serialise it. Past this sync we own dstBuf
+        // exclusively.
+        DGEN_DETAIL_CHECK_HIP_(hipStreamSynchronize(stream));
+
         // Past the throw points: take ownership of the new buffer.
         if(m_ownsBuffers && m_scaleDevice)
             (void)hipFree(m_scaleDevice);
@@ -1379,6 +1434,11 @@ namespace DGen
                            dimk,
                            numTiles);
         DGEN_DETAIL_CHECK_HIP_(hipGetLastError());
+
+        // Sync before freeing the old m_scaleDevice -- the kernel above
+        // reads from it as the swizzle source. See the matching note in
+        // preSwizzleScalesGFX950Device.
+        DGEN_DETAIL_CHECK_HIP_(hipStreamSynchronize(stream));
 
         if(m_ownsBuffers && m_scaleDevice)
             (void)hipFree(m_scaleDevice);
