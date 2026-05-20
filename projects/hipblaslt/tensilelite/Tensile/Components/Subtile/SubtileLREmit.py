@@ -73,13 +73,24 @@ _emitLRLDSBufferSwap.register(LRTag_TLU1)(_stub)
 # Helpers
 ################################################################################
 
-def _setExecMask(module, writer, maskLo, maskHi):
-  """Set EXEC mask to a 64-bit immediate value."""
-  tmpSgpr = writer.sgprPool.checkOutAligned(2, 2, "setExecMask tmpSgpr", False)
-  module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(maskLo), comment="exec mask lo"))
-  module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=hex(maskHi), comment="exec mask hi"))
-  module.add(SMovB64(dst=EXEC(), src=sgpr(tmpSgpr, 2), comment="Set exec mask"))
-  writer.sgprPool.checkIn(tmpSgpr)
+def _setExecMask(module, writer, maskLo, maskHi, kernel=None):
+  """Set EXEC mask to an immediate value (32- or 64-bit depending on wavelen)."""
+  if kernel is not None:
+    wavelen = kernel["WavefrontSize"]
+  else:
+    wavelen = 64
+
+  if wavelen == 32:
+    tmpSgpr = writer.sgprPool.checkOut(1, "setExecMask tmpSgpr", False)
+    module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(maskLo & 0xFFFFFFFF), comment="exec mask"))
+    module.add(SMovB32(dst=EXEC(), src=sgpr(tmpSgpr), comment="Set exec mask"))
+    writer.sgprPool.checkIn(tmpSgpr)
+  else:
+    tmpSgpr = writer.sgprPool.checkOutAligned(2, 2, "setExecMask tmpSgpr", False)
+    module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(maskLo), comment="exec mask lo"))
+    module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=hex(maskHi), comment="exec mask hi"))
+    module.add(SMovB64(dst=EXEC(), src=sgpr(tmpSgpr, 2), comment="Set exec mask"))
+    writer.sgprPool.checkIn(tmpSgpr)
 
 setExecMask = _setExecMask
 
@@ -415,6 +426,10 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
   """
   tc = tileInfo.tc
 
+  # TDM handles wave partitioning via descriptors
+  if kernel["enableTDM%s" % tc]:
+    return
+
   if tileInfo.loadRatioGR >= 2.0:
     return
 
@@ -483,14 +498,22 @@ def _lraTileAssignment_legacy(writer, kernel):
   module.add(VAndB32(dst=vgpr(lane16Group), src0=vgpr("Serial"), src1=wavesize-1, comment="laneId"))
   module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId %% 16"))
-  module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
-  module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
-  module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
-  module.add(VAddU32(dst=vgpr(colOffset), src0=vgpr(rotation), src1=vgpr(lane16Group), comment="colOffset = rotation + lane16Group"))
+  needsRotation = tileInfoA.mmaLayout.needsLdsRotation if tileInfoA.mmaLayout else True
+  if not needsRotation:
+    # Skip rotation when kGroups < 4 (e.g. wave32 WMMA with 2 kGroups).
+    # colOffset = lane16Group directly selects the kGroup's K-column.
+    module.add(VMovB32(dst=vgpr(colOffset), src=vgpr(lane16Group), comment="colOffset = lane16Group (wave32, no rotation)"))
+  else:
+    module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
+    module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
+    module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
+    module.add(VAddU32(dst=vgpr(colOffset), src0=vgpr(rotation), src1=vgpr(lane16Group), comment="colOffset = rotation + lane16Group"))
   module.add(VAndB32(dst=vgpr(colOffset), src0=vgpr(colOffset), src1=hex(blockSize-1), comment="colOffset = colOffset %% blockSize"))
-  setExecMask(module, writer, 0x33333333, 0x33333333)
-  module.add(VPermlane16SwapB32(dst=vgpr(colOffset), src=vgpr(colOffset), comment="apply swizzling"))
-  setExecMask(module, writer, -1, -1)
+  swizzling = needsRotation  # swizzle pairs with rotation (both need kGroups >= 4)
+  if swizzling:
+    setExecMask(module, writer, 0x33333333, 0x33333333, kernel=kernel)
+    module.add(VPermlane16SwapB32(dst=vgpr(colOffset), src=vgpr(colOffset), comment="apply swizzling"))
+    setExecMask(module, writer, -1, -1, kernel=kernel)
   module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(subIterKBytes.bit_length()-1), src=vgpr(lane16), comment="offsetRow = subIterKBytes*lane16"))
   _computeLROffset(module, kernel, tileInfoA, colOffset, rowOffset)
   _computeLROffset(module, kernel, tileInfoB, colOffset, rowOffset)
@@ -511,7 +534,10 @@ def localReadResetOffsetsSubtile(writer, kernel):
 
 
 def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile):
-  """Emit a single DSLoadB128 for one MMA tile within a subtile.
+  """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile.
+
+  For wave32 tiles with 8 VGPRs, emits two DSLoadB128 instructions
+  (each loading 4 VGPRs) since ds_load_b256 is not available.
 
   Args:
       tileInfo:  TileInfo (for subtileSize, loadRatioGR, sharedVgprLROffset, tc)
@@ -530,11 +556,31 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile):
 
   dstVgpr = dstTile.regList.indices[0]
   numRegs = len(dstTile.regList.indices)
-  return DSLoadB128(
-      dst=vgpr(dstVgpr, numRegs),
+
+  if numRegs <= 4:
+    return DSLoadB128(
+      dst=vgpr(dstVgpr, 4),
       src=vgpr(addrVgpr),
       ds=DSModifiers(offset=offset),
       comment="Subtile%s[%u, %u] subIterK=%u" % (tileInfo.tc, sId0, sId1, subIterK))
+
+  # K-split tiles (e.g. WMMA V3 wave32): v0-v3 hold K=0..instK/2-1,
+  # v4-v7 hold K=instK/2..instK-1.  The two halves are separated
+  # by instK*bpe/2 bytes in the K-contiguous LDS layout.
+  instK = tileInfo.mmaTileShape[1]
+  hiDelta = int(instK * tileInfo.bpe / 2)
+  module = Module()
+  module.add(DSLoadB128(
+      dst=vgpr(dstVgpr, 4),
+      src=vgpr(addrVgpr),
+      ds=DSModifiers(offset=offset),
+      comment="Subtile%s[%u, %u] subIterK=%u (lo)" % (tileInfo.tc, sId0, sId1, subIterK)))
+  module.add(DSLoadB128(
+      dst=vgpr(dstVgpr + 4, 4),
+      src=vgpr(addrVgpr),
+      ds=DSModifiers(offset=offset + hiDelta),
+      comment="Subtile%s[%u, %u] subIterK=%u (hi)" % (tileInfo.tc, sId0, sId1, subIterK)))
+  return module
 
 
 def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):

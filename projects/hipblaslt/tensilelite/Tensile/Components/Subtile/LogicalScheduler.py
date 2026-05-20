@@ -2334,11 +2334,18 @@ class LogicalScheduler:
             tiles = []
             for _ in range(count):
                 tile = RegisterTileInfo(writer.vgprPool)
-                for j in range(0, numRegs, 4):
-                    blockSize = min(4, numRegs - j)
-                    vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize)
-                    for k in range(blockSize):
+                if numRegs > 4:
+                    # K-split tiles (wave32 WMMA V3): emitSingleDsRead assumes
+                    # dstVgpr+4 for the hi half, so must be contiguous.
+                    vstart = writer.vgprPool.checkOutAligned(numRegs, numRegs)
+                    for k in range(numRegs):
                         tile.append(vstart + k)
+                else:
+                    for j in range(0, numRegs, 4):
+                        blockSize = min(4, numRegs - j)
+                        vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize)
+                        for k in range(blockSize):
+                            tile.append(vstart + k)
                 tiles.append(tile)
             return tiles
 

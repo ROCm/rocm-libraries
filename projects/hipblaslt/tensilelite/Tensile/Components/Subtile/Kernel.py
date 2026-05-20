@@ -284,6 +284,14 @@ AB_B16 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x2(), **_B16, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)),   # 128-bit GR: 8 bf16 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B16, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)), # 128-bit LR: 8 bf16 along K
 )
+
+# Wave32 bf16: 8 VGPRs per operand (WMMA V3 gfx1250)
+_B16_W32 = dict(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), instK=32, bpe=2, supportedTypes=('bf16', 'fp16'))
+AB_B16_W32 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_1x2(), **_B16_W32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)),
+    lr=ABLRGeometry(tag=LRTag_1x2(), **_B16_W32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)),
+)
+
 AB_B4 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),   # 128-bit GR: 32 fp4 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)), # 128-bit LR: 32 fp4 along K
@@ -325,6 +333,8 @@ MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXSc
 
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
+# Wave32 f32 output: 8 VGPRs per lane (WMMA V3 gfx1250)
+CD_F32_W32 = CDTile_1x1(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=8))
 
 def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   """Return the MXScaleTilePair for scale tensor tc ('MXSA' or 'MXSB')."""
@@ -345,6 +355,7 @@ AB_GEOMETRY_MAP = {
   "AB_B8":       AB_B8,
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
+  "AB_B16_W32":  AB_B16_W32,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
@@ -355,6 +366,8 @@ def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
 
 def selectDGeometry(kernel: dict) -> CDTileGeometry:
   """Return the CDTileGeometry for the D (output/accumulator) tile."""
+  if kernel.get("WavefrontSize", 64) == 32:
+    return CD_F32_W32
   return CD_F32
 
 
@@ -513,6 +526,15 @@ class TileInfo:
     self.mmaTileShape = list(geometry.mmaTileShape)
     self.mmaTileSize = geometry.mmaTileSize
     self.mmaTileRegCount = geometry.mmaTileRegCount
+    # MMA layout for A/B input geometry (used by LR emit for K-split / rotation decisions)
+    if isinstance(geometry, ABTilePair):
+      self.mmaLayout = geometry.gr.mmaLayout
+    elif isinstance(geometry, CDTileGeometry):
+      self.mmaLayout = geometry.mmaLayout
+    elif isinstance(geometry, MXScaleTilePair):
+      self.mmaLayout = geometry.gr.scaleLayout  # not an MMALayout, but has waveSize
+    else:
+      self.mmaLayout = None
     if isinstance(geometry, ABTilePair):
       self.loadWidthGR = geometry.gr.loadWidth
       self.loadWidthLR = geometry.lr.loadWidth
@@ -682,10 +704,13 @@ class TileInfo:
     numDword = int(math.ceil(self.mmaTileRegCount))
 
     isDTile = isinstance(self.geometry, CDTileGeometry)
-    maxAgpr = writer.states.regCaps["PhysicalMaxVgpr"] - writer.states.regCaps["MaxVgpr"] if isDTile else 0
+    # On gfx1250 (MIArchVgpr), accVGPR indices alias regular VGPRs.
+    # D tiles must use vgprPool to avoid overlapping with A/B data tiles.
+    useAgpr = isDTile and not kernel.get("MIArchVgpr", False)
+    maxAgpr = writer.states.regCaps["PhysicalMaxVgpr"] - writer.states.regCaps["MaxVgpr"] if useAgpr else 0
 
     for i in range(numMMATiles):
-      if isDTile and writer.agprPool.size() < maxAgpr:
+      if useAgpr and writer.agprPool.size() < maxAgpr:
         pool = writer.agprPool
         regType = RegisterType.Accvgpr
       else:
@@ -890,6 +915,11 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   tileCopyInst = VAccvgprWrite if isAgpr else VMovB32
   regsPerMfma = 16
   numMfma = totalRegs // regsPerMfma
+  # MFMA zeroing uses v_mfma_i32_32x32x16_i8 which only exists on MFMA-capable archs.
+  # Fall back to scalar v_mov_b32 when MFMA is not available (e.g. WMMA-only gfx12).
+  hasMfma = hasattr(writer, 'states') and writer.states.asmCaps.get("HasMFMA", False)
+  if not hasMfma:
+    numMfma = 0
 
   if numMfma > 0:
     tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
