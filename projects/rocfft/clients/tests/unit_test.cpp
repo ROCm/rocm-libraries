@@ -22,6 +22,7 @@
 
 #include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
+#include "function_pool.h"
 #include "../../shared/environment.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/params_gen.h"
@@ -1328,6 +1329,40 @@ static void run_plan_capacity_test(size_t M)
 TEST(rocfft_UnitTest, plan_capacity_100k)
 {
     run_plan_capacity_test(100'000);
+}
+
+// Cover function_pool's runtime-extension paths.  The plan_capacity
+// tests above stress the hot read path via rocfft_plan_create; this
+// exercises the rarer write/miss paths (add_new_kernel emplace,
+// missing-key throws, partial-pass overload) so the thread-safety
+// changes are fully covered.
+TEST(rocfft_UnitTest, function_pool_runtime_paths)
+{
+    function_pool pool(get_curr_device_prop());
+
+    // FMKey miss + runtime add.  Use a large prime length that AOT is
+    // not expected to pre-populate.  If something already populated it,
+    // the test is meaningless -- skip cleanly.
+    FMKey runtime_key(99991, rocfft_precision_single, CS_KERNEL_STOCKHAM);
+    if(pool.has_function(runtime_key))
+        GTEST_SKIP() << "runtime_key unexpectedly pre-populated";
+
+    EXPECT_THROW(pool.get_kernel(runtime_key), std::out_of_range);
+    pool.add_new_kernel(runtime_key);
+    EXPECT_TRUE(pool.has_function(runtime_key));
+    EXPECT_NO_THROW(pool.get_kernel(runtime_key));
+
+    // PPFMKey overloads -- partial-pass is not used by the plan_capacity
+    // tests, so its has_function / get_kernel paths (and the new
+    // shared_lock acquisitions therein) only get coverage here.
+    PPFMKey pp_key(99991,
+                   1,
+                   1,
+                   rocfft_precision_single,
+                   rocfft_transform_type_complex_forward,
+                   CS_3D_PP);
+    EXPECT_FALSE(pool.has_function(pp_key));
+    EXPECT_THROW(pool.get_kernel(pp_key, CS_3D_PP), std::out_of_range);
 }
 
 // Capacity test documenting support for 1M concurrent identical plans.

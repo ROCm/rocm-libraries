@@ -295,6 +295,7 @@ target_link_libraries( rocfft-test
   PRIVATE
   hip::device
   roc::rocfft
+  rocfft-function-pool
   ${ROCFFT_SQLITE_LIB}
   ${rocfft-test_link_libs}
   )
