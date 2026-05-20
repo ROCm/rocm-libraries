@@ -131,6 +131,25 @@ struct CKArgs
         }
     }
 
+    // CK WRW interface accepts int32 arrays only; narrow at the boundary.
+    // Safe because RequiresLargeTensorCKInstance blocks overflow shapes
+    // from selecting any WRW instance (no WRW large-tensor registrations).
+    NarrowedCKArrays3D NarrowedArrays() const
+    {
+        return NarrowedCKArrays3D{
+            .in_l             = ToCKIndexArray(in_lengths),
+            .in_s             = ToCKIndexArray(in_strides),
+            .out_l            = ToCKIndexArray(out_lengths),
+            .out_s            = ToCKIndexArray(out_strides),
+            .wei_l            = ToCKIndexArray(wei_lengths),
+            .wei_s            = ToCKIndexArray(wei_strides),
+            .filter_strides   = ToCKIndexArray(filter_strides),
+            .filter_dilations = ToCKIndexArray(filter_dilations),
+            .lPadding         = ToCKIndexArray(lPadding),
+            .rPadding         = ToCKIndexArray(rPadding),
+        };
+    }
+
     template <typename ConvPtr>
     auto MakeBilinearArgPtr(const ConvPtr& conv_ptr,
                             ConstData_t x,
@@ -140,22 +159,23 @@ struct CKArgs
                             float beta,
                             int split_k) const
     {
+        const auto a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(x,
                                              dw,
                                              dy,
                                              {dw},
-                                             in_lengths,
-                                             in_strides,
-                                             wei_lengths,
-                                             wei_strides,
-                                             out_lengths,
-                                             out_strides,
-                                             {wei_lengths},
-                                             {wei_strides},
-                                             filter_strides,
-                                             filter_dilations,
-                                             lPadding,
-                                             rPadding,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.wei_l,
+                                             a.wei_s,
+                                             a.out_l,
+                                             a.out_s,
+                                             {a.wei_l},
+                                             {a.wei_s},
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              PassThrough{},
                                              Bilinear{alpha, beta},
                                              PassThrough{},
@@ -170,22 +190,23 @@ struct CKArgs
                          float alpha,
                          int split_k) const
     {
+        const auto a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(x,
                                              dw,
                                              dy,
                                              {},
-                                             in_lengths,
-                                             in_strides,
-                                             wei_lengths,
-                                             wei_strides,
-                                             out_lengths,
-                                             out_strides,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.wei_l,
+                                             a.wei_s,
+                                             a.out_l,
+                                             a.out_s,
                                              {},
                                              {},
-                                             filter_strides,
-                                             filter_dilations,
-                                             lPadding,
-                                             rPadding,
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              PassThrough{},
                                              Scale{alpha},
                                              PassThrough{},
@@ -196,19 +217,20 @@ struct CKArgs
     auto MakeDefaultArgPtr(
         const ConvPtr& conv_ptr, ConstData_t x, Data_t dw, ConstData_t dy, int split_k) const
     {
+        const auto a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(x,
                                              dw,
                                              dy,
-                                             in_lengths,
-                                             in_strides,
-                                             wei_lengths,
-                                             wei_strides,
-                                             out_lengths,
-                                             out_strides,
-                                             filter_strides,
-                                             filter_dilations,
-                                             lPadding,
-                                             rPadding,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.wei_l,
+                                             a.wei_s,
+                                             a.out_l,
+                                             a.out_s,
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              PassThrough{},
                                              PassThrough{},
                                              PassThrough{},
@@ -252,33 +274,39 @@ struct CKArgs
         return conv_ptr->GetWorkSpaceSize(arg_ptr.get());
     }
 
-    int G;
-    int N;
-    int K;
-    int C;
-    int C1;
-    int K1;
-    int Hi;
-    int Wi;
-    int Di;
-    int Ho;
-    int Wo;
-    int Do;
-    int Y;
-    int X;
-    int Z;
+    // Dim members are int64 (and length/stride arrays use ck::long_index_t)
+    // so the NCHW stride builder above (e.g. Di*Hi*Wi*G*C) does not silently
+    // overflow on tensors whose contiguous stride exceeds INT_MAX. Argument
+    // construction then binds to CK's long_index_t MakeArgumentPointer
+    // overload, which is safe only when paired with a large-tensor instance
+    // (see implicitgemm_ck_util.hpp::RequiresLargeTensorCKInstance).
+    int64_t G;
+    int64_t N;
+    int64_t K;
+    int64_t C;
+    int64_t C1;
+    int64_t K1;
+    int64_t Hi;
+    int64_t Wi;
+    int64_t Di;
+    int64_t Ho;
+    int64_t Wo;
+    int64_t Do;
+    int64_t Y;
+    int64_t X;
+    int64_t Z;
     miopenAlphaBetaCase_t alpha_beta_case;
     miopenDataType_t data_type;
-    std::array<ck::index_t, 6> in_lengths;
-    std::array<ck::index_t, 6> in_strides;
-    std::array<ck::index_t, 6> out_lengths;
-    std::array<ck::index_t, 6> out_strides;
-    std::array<ck::index_t, 6> wei_lengths;
-    std::array<ck::index_t, 6> wei_strides;
-    std::array<ck::index_t, 3> filter_strides;
-    std::array<ck::index_t, 3> filter_dilations;
-    std::array<ck::index_t, 3> lPadding;
-    std::array<ck::index_t, 3> rPadding;
+    std::array<ck::long_index_t, 6> in_lengths;
+    std::array<ck::long_index_t, 6> in_strides;
+    std::array<ck::long_index_t, 6> out_lengths;
+    std::array<ck::long_index_t, 6> out_strides;
+    std::array<ck::long_index_t, 6> wei_lengths;
+    std::array<ck::long_index_t, 6> wei_strides;
+    std::array<ck::long_index_t, 3> filter_strides;
+    std::array<ck::long_index_t, 3> filter_dilations;
+    std::array<ck::long_index_t, 3> lPadding;
+    std::array<ck::long_index_t, 3> rPadding;
 };
 
 template <typename DataType, typename ComputeType>

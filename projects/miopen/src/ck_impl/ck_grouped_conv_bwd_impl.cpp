@@ -48,22 +48,35 @@ struct CKArgs : CKArgsSplitK<CKArgs>
     {
         (void)alpha;
         (void)beta;
+        // CK BWD interface accepts int32 arrays only; narrow at the boundary.
+        // Safe because RequiresLargeTensorCKInstance blocks overflow shapes
+        // from selecting any BWD instance (no BWD large-tensor registrations).
+        const auto out_l_i32   = ToCKIndexArray(output);
+        const auto out_s_i32   = ToCKIndexArray(out_strides);
+        const auto wei_l_i32   = ToCKIndexArray(weight);
+        const auto wei_s_i32   = ToCKIndexArray(wei_strides);
+        const auto in_l_i32    = ToCKIndexArray(input);
+        const auto in_s_i32    = ToCKIndexArray(in_strides);
+        const auto strides_i32 = ToCKIndexArray(strides);
+        const auto dil_i32     = ToCKIndexArray(dilation);
+        const auto lpad_i32    = ToCKIndexArray(lPadding);
+        const auto rpad_i32    = ToCKIndexArray(rPadding);
         return conv_ptr->MakeArgumentPointer(out,
                                              w,
                                              {},
                                              in,
-                                             output,
-                                             out_strides,
-                                             weight,
-                                             wei_strides,
+                                             out_l_i32,
+                                             out_s_i32,
+                                             wei_l_i32,
+                                             wei_s_i32,
                                              {},
                                              {},
-                                             input,
-                                             in_strides,
-                                             strides,
-                                             dilation,
-                                             lPadding,
-                                             rPadding,
+                                             in_l_i32,
+                                             in_s_i32,
+                                             strides_i32,
+                                             dil_i32,
+                                             lpad_i32,
+                                             rpad_i32,
                                              {},
                                              {},
                                              {},

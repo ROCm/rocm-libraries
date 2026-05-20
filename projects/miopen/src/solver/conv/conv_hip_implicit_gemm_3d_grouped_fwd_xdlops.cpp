@@ -514,8 +514,6 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(const ExecutionContext& c
         return false;
     if(problem.GetConv().attribute.deterministic)
         return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
-        return false;
     if(problem.HasMixedDataTypes())
         return false;
     if(!problem.IsDirectionForward())

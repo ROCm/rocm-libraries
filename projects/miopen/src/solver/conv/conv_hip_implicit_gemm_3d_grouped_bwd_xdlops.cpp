@@ -308,8 +308,6 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::IsApplicable(const ExecutionContext& c
 {
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS))
         return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
-        return false;
     if(problem.HasMixedDataTypes())
         return false;
     if(problem.IsTensorsCasted())

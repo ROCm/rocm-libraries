@@ -376,8 +376,6 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
 {
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS))
         return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
-        return false;
     if(problem.HasMixedDataTypes())
         return false;
     if(!problem.IsDirectionBackwardWrW())
