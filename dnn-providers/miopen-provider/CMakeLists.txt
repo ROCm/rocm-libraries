@@ -255,22 +255,43 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         # arrive via miopenprovider_lib so the ctest entry registered above
         # can find it as `../hipdnn_integration_tests` from miopen_plugin/.
         #
-        # Use install(IMPORTED_RUNTIME_ARTIFACTS) for the imported-target case
-        # (TheRock per-subproject build, where hipdnn_integration_tests comes
-        # in via find_package and TARGET_FILE → IMPORTED_LOCATION). The earlier
-        # install(PROGRAMS $<TARGET_FILE:imported>) form was silently a no-op
-        # in CI: the Linux miopenprovider_lib artifact was 222K with the
-        # binary apparently never copied, leaving the cross-provider ctest
-        # entry registered but unable to find ../hipdnn_integration_tests.
-        # For the superbuild case (target is non-imported, owned by the
-        # hipdnn_integration_tests subproject), skip — its own install rule
-        # already places the binary in bin/ and IMPORTED_RUNTIME_ARTIFACTS
-        # only handles imported targets.
+        # Both install(PROGRAMS $<TARGET_FILE:imported>) and
+        # install(IMPORTED_RUNTIME_ARTIFACTS) silently produced no copied
+        # file on Linux in TheRock CI — bin/hipdnn_integration_tests never
+        # appeared in the miopenprovider_lib artifact, while bin/-adjacent
+        # sibling files (the test config TOML, a debug cmake script) did.
+        # Use install(PROGRAMS <abs path>) with the source path derived
+        # from hipdnn_integration_tests_DIR (set by find_package to the
+        # config dir under <prefix>/lib/cmake/hipdnn_integration_tests/).
+        # An absolute literal source path forces CMake to emit a normal
+        # file install rule, bypassing whatever IMPORTED-target machinery
+        # was no-op'ing.
         get_target_property(_hit_imported hipdnn_integration_tests IMPORTED)
-        if(_hit_imported)
-            install(IMPORTED_RUNTIME_ARTIFACTS hipdnn_integration_tests
-                    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        message(STATUS "miopen-provider workaround: hipdnn_integration_tests "
+                       "IMPORTED=${_hit_imported} _DIR=${hipdnn_integration_tests_DIR}")
+        if(hipdnn_integration_tests_DIR)
+            cmake_path(GET hipdnn_integration_tests_DIR PARENT_PATH _hit_lib_cmake)
+            cmake_path(GET _hit_lib_cmake PARENT_PATH _hit_lib)
+            cmake_path(GET _hit_lib PARENT_PATH _hit_prefix)
+            set(_hit_binary_src
+                "${_hit_prefix}/${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests${CMAKE_EXECUTABLE_SUFFIX}"
             )
+            if(EXISTS "${_hit_binary_src}")
+                message(STATUS "miopen-provider workaround: bundling "
+                               "${_hit_binary_src} -> ${CMAKE_INSTALL_BINDIR}/")
+                install(PROGRAMS "${_hit_binary_src}"
+                        DESTINATION ${CMAKE_INSTALL_BINDIR}
+                )
+            else()
+                message(WARNING "miopen-provider workaround: expected "
+                                "hipdnn_integration_tests binary at "
+                                "${_hit_binary_src} but it does not exist; "
+                                "cross-provider ctest entry will fail to run")
+            endif()
+        else()
+            message(STATUS "miopen-provider workaround: hipdnn_integration_tests"
+                           "_DIR not set (superbuild path); relying on the "
+                           "integration-tests subproject's own install rule")
         endif()
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
