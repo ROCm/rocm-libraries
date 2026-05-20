@@ -49,7 +49,7 @@ extern bool genInstructions(const std::string& arch, const std::string& inputDir
 using namespace stinkytofu;
 
 // Helper: Check if file exists and contains expected string
-bool fileContains(const std::string& filepath, const std::string& expected) {
+static bool fileContains(const std::string& filepath, const std::string& expected) {
     std::ifstream ifs(filepath);
     if (!ifs) {
         std::cerr << "Error: Cannot open " << filepath << "\n";

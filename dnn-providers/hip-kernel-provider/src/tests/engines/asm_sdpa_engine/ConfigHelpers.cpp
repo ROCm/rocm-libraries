@@ -15,13 +15,14 @@ namespace asm_sdpa_engine
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hip_kernel_provider_common;
 
-DataType toDataType(const std::string& configDataType)
+static DataType toDataType(const std::string& configDataType)
 {
-    std::unordered_map<std::string, DataType> typeMap = {{config::BFLOAT16, DataType::BFLOAT16},
-                                                         {config::HALF, DataType::HALF},
-                                                         {config::FLOAT, DataType::FLOAT}};
+    const std::unordered_map<std::string, DataType> typeMap
+        = {{config::BFLOAT16, DataType::BFLOAT16},
+           {config::HALF, DataType::HALF},
+           {config::FLOAT, DataType::FLOAT}};
 
-    auto it = typeMap.find(configDataType);
+    const auto it = typeMap.find(configDataType);
     if(it == typeMap.end())
     {
         throw std::runtime_error("Unsupported datatype name in config: " + configDataType);
@@ -35,7 +36,7 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
 
     // Map dtype string to DataType enum
-    DataType dataType = toDataType(config.dtype);
+    const DataType dataType = toDataType(config.dtype);
 
     // Use arbitrary values for batch, num_heads, and sequence lengths
     const int64_t batch = 2;
@@ -159,60 +160,61 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     }
 
     // Create SDPA attributes with all the configured options
-    auto sdpaAttributes = CreateSdpaAttributes(builder,
-                                               qUid,
-                                               kUid,
-                                               vUid,
-                                               oUid,
-                                               flatbuffers::nullopt, // attn_mask_tensor_uid
-                                               scaleUid,
-                                               seqLenQUid,
-                                               seqLenKvUid,
-                                               flatbuffers::nullopt, // seed_tensor_uid
-                                               flatbuffers::nullopt, // offset_tensor_uid
-                                               flatbuffers::nullopt, // dropout_mask_tensor_uid
-                                               flatbuffers::nullopt, // dropout_scale_tensor_uid
-                                               flatbuffers::nullopt, // page_table_k_tensor_uid
-                                               flatbuffers::nullopt, // page_table_v_tensor_uid
-                                               flatbuffers::nullopt, // block_mask_tensor_uid
-                                               flatbuffers::nullopt, // sink_token_tensor_uid
-                                               flatbuffers::nullopt, // descale_q_tensor_uid
-                                               flatbuffers::nullopt, // descale_k_tensor_uid
-                                               flatbuffers::nullopt, // descale_v_tensor_uid
-                                               flatbuffers::nullopt, // descale_s_tensor_uid
-                                               flatbuffers::nullopt, // scale_s_tensor_uid
-                                               flatbuffers::nullopt, // scale_o_tensor_uid
-                                               flatbuffers::nullopt, // stats_tensor_uid
-                                               flatbuffers::nullopt, // max_tensor_uid
-                                               flatbuffers::nullopt, // sum_exp_tensor_uid
-                                               flatbuffers::nullopt, // rng_dump_tensor_uid
-                                               flatbuffers::nullopt, // amax_s_tensor_uid
-                                               flatbuffers::nullopt, // amax_o_tensor_uid
-                                               flatbuffers::nullopt, // generate_stats
-                                               false, // alibi_mask
-                                               false, // padding_mask
-                                               causalMask,
-                                               causalMaskBottomRight,
-                                               flatbuffers::nullopt, // dropout_probability
-                                               flatbuffers::nullopt, // attn_scale_value
-                                               leftBound,
-                                               rightBound,
-                                               flatbuffers::nullopt, // max_seq_len_kv
-                                               diagAlignment,
-                                               DataType::FLOAT, // mma_core_mode
-                                               AttentionImplementation::AUTO);
+    const auto sdpaAttributes
+        = CreateSdpaAttributes(builder,
+                               qUid,
+                               kUid,
+                               vUid,
+                               oUid,
+                               flatbuffers::nullopt, // attn_mask_tensor_uid
+                               scaleUid,
+                               seqLenQUid,
+                               seqLenKvUid,
+                               flatbuffers::nullopt, // seed_tensor_uid
+                               flatbuffers::nullopt, // offset_tensor_uid
+                               flatbuffers::nullopt, // dropout_mask_tensor_uid
+                               flatbuffers::nullopt, // dropout_scale_tensor_uid
+                               flatbuffers::nullopt, // page_table_k_tensor_uid
+                               flatbuffers::nullopt, // page_table_v_tensor_uid
+                               flatbuffers::nullopt, // block_mask_tensor_uid
+                               flatbuffers::nullopt, // sink_token_tensor_uid
+                               flatbuffers::nullopt, // descale_q_tensor_uid
+                               flatbuffers::nullopt, // descale_k_tensor_uid
+                               flatbuffers::nullopt, // descale_v_tensor_uid
+                               flatbuffers::nullopt, // descale_s_tensor_uid
+                               flatbuffers::nullopt, // scale_s_tensor_uid
+                               flatbuffers::nullopt, // scale_o_tensor_uid
+                               flatbuffers::nullopt, // stats_tensor_uid
+                               flatbuffers::nullopt, // max_tensor_uid
+                               flatbuffers::nullopt, // sum_exp_tensor_uid
+                               flatbuffers::nullopt, // rng_dump_tensor_uid
+                               flatbuffers::nullopt, // amax_s_tensor_uid
+                               flatbuffers::nullopt, // amax_o_tensor_uid
+                               flatbuffers::nullopt, // generate_stats
+                               false, // alibi_mask
+                               false, // padding_mask
+                               causalMask,
+                               causalMaskBottomRight,
+                               flatbuffers::nullopt, // dropout_probability
+                               flatbuffers::nullopt, // attn_scale_value
+                               leftBound,
+                               rightBound,
+                               flatbuffers::nullopt, // max_seq_len_kv
+                               diagAlignment,
+                               DataType::FLOAT, // mma_core_mode
+                               AttentionImplementation::AUTO);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
         builder, "sdpa_fwd", dataType, NodeAttributes::SdpaAttributes, sdpaAttributes.Union()));
 
-    auto graphOffset = CreateGraphDirect(builder,
-                                         "test",
-                                         DataType::FLOAT,
-                                         DataType::HALF,
-                                         DataType::BFLOAT16,
-                                         &tensorAttributes,
-                                         &nodes);
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
     builder.Finish(graphOffset);
     return builder;
 }

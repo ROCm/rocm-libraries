@@ -81,6 +81,7 @@ DEF_BATCH(.format = SOPP_WAIT16,
     SWaitKmcntInst, "s_wait_kmcnt", .flags = {WaitCnt},
     SWaitLoadcntInst, "s_wait_loadcnt", .flags = {WaitCnt},
     SWaitStorecntInst, "s_wait_storecnt", .flags = {WaitCnt},
+    SWaitXcntInst, "s_wait_xcnt", .flags = {WaitCnt}, .logical = "SWaitXCnt",
     SWaitTensorcntInst, "s_wait_tensorcnt", .flags = {WaitTensorCnt}, .logical = "SWaitTensorcnt",
     SWaitAluInst, "s_wait_alu", .flags = {HasSideEffect},
         .operand_fields = { {S0, .type=wait_alu} },
@@ -399,6 +400,15 @@ DEF_T(SSleepInst, "s_sleep", .format = SOPP, .flags = {HasSideEffect}, .logical 
 // uninterruptible clause; instruction-stream side effect, no operand reads.
 DEF_T(SClauseInst, "s_clause", .format = SOPP, .flags = {HasSideEffect}, .logical = "SClause",
     .operand_fields = { {S0, simm16, simm16, 16} })
+
+// Global memory fences — used by the StreamK partial-tile handshake on
+// gfx1250 where L2 is partitioned across CUs/XCDs and SMEM is not
+// coherent with the VMEM flag store. They have no register operands;
+// the only encoded modifier is the cache scope (typically SCOPE_DEV),
+// carried through stinkytofu as a MUBUFModifiers with scope set and all
+// other flags clear so the emitter only prints " scope:SCOPE_DEV".
+DEF_T(GlobalWbInst, "global_wb", .format = SOPP, .flags = {HasSideEffect}, .logical = "GlobalWb")
+DEF_T(GlobalInvInst, "global_inv", .format = SOPP, .flags = {HasSideEffect}, .logical = "GlobalInv")
 
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",

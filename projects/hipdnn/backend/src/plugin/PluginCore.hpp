@@ -134,6 +134,11 @@ protected:
     // This function is called after the plugin is added to the plugin list.
     virtual void actionAfterAdding([[maybe_unused]] const Plugin& plugin) {}
 
+    // This function is called after the plugin list is cleared. Derived classes
+    // must override this to reset any auxiliary state kept in sync with _plugins
+    // (e.g. derived-class indexes populated from actionAfterAdding).
+    virtual void actionAfterClearing() {}
+
     // For cases where tests need to override the default plugin search paths
     static std::set<std::filesystem::path>
         getPluginSearchPaths(const char* envVarName,
@@ -208,9 +213,30 @@ public:
             }
         }
 
+        // Track failed plugin loads for summary reporting
+        size_t failedCount = 0;
+
         for(const auto& filePath : filesToLoad)
         {
-            loadPluginFromFile(filePath);
+            if(!loadPluginFromFile(filePath))
+            {
+                failedCount++;
+                // Error already logged in loadPluginFromFile
+            }
+        }
+
+        // Emit summary if any plugins failed to load
+        if(failedCount > 0)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "⚠️  Plugin loading summary: {} plugin(s) failed to load out of {} attempted. "
+                "Check error messages above for details.",
+                failedCount,
+                filesToLoad.size());
+        }
+        else if(!filesToLoad.empty())
+        {
+            HIPDNN_BACKEND_LOG_INFO("✓ Successfully loaded all {} plugin(s)", filesToLoad.size());
         }
     }
 
@@ -224,11 +250,31 @@ public:
         return _loadedPluginFiles;
     }
 
+protected:
+    // Register a backend-internal plugin (e.g. a built-in heuristic) without going
+    // through dlopen. Runs the same setLoggingCallback/setLogLevel/validateBeforeAdding
+    // path as loadPluginFromFile so built-ins and dlopen-loaded plugins are
+    // indistinguishable downstream. Throws on validation failure — built-in
+    // failures are build bugs, not silent skips.
+    void registerPlugin(std::shared_ptr<Plugin> plugin)
+    {
+        plugin->setLoggingCallback(logging::backendLoggingCallback);
+        hipdnnSeverity_t currentLogLevel{};
+        logging::getGlobalLogLevel(currentLogLevel);
+        plugin->setLogLevel(currentLogLevel);
+
+        validateBeforeAdding(*plugin);
+
+        _plugins.emplace_back(std::move(plugin));
+        actionAfterAdding(*_plugins.back());
+    }
+
 private:
     void clearPlugins()
     {
         _plugins.clear();
         _loadedPluginFiles.clear();
+        actionAfterClearing();
     }
 
     void scanDirectoryForPlugins(const std::filesystem::path& dirPath,
@@ -253,19 +299,23 @@ private:
         }
     }
 
-    void loadPluginFromFile(const std::filesystem::path& filePath)
+protected:
+    bool loadPluginFromFile(const std::filesystem::path& filePath)
     {
-
         HIPDNN_BACKEND_LOG_INFO("Attempting to load plugin from [{}]", filePath.string());
 
+        bool success = false;
         hipdnn_backend::tryCatch(
             [&]() {
                 SharedLibrary lib(filePath);
                 const auto libraryPath = lib.libraryPath();
 
-                // Shared library ensures an injective, weakly canonical mapping to a path
+                // Shared library ensures an injective, weakly canonical mapping to a path.
+                // Treat an already-loaded library as a successful no-op so the caller's
+                // failedCount reflects real load failures only.
                 if(_loadedPluginFiles.find(libraryPath) != _loadedPluginFiles.end())
                 {
+                    success = true;
                     return;
                 }
 
@@ -305,10 +355,15 @@ private:
                                         static_cast<int>(type));
 
                 actionAfterAdding(*_plugins.back());
+
+                success = true;
             },
-            fmt::format("Error loading plugin from [{}]: ", filePath.string()));
+            fmt::format("❌ Error loading plugin from [{}]: ", filePath.string()));
+
+        return success;
     }
 
+private:
     std::vector<std::shared_ptr<Plugin>> _plugins;
     std::set<std::filesystem::path> _loadedPluginFiles;
     std::set<std::filesystem::path> _defaultPluginPaths;

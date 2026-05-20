@@ -71,6 +71,11 @@ include(src/CMakeLists.txt)
 add_library(rocsparse ${rocsparse_source} ${rocsparse_headers_public})
 add_library(roc::rocsparse ALIAS rocsparse)
 
+# Add Windows version resource to library
+if(WIN32 AND BUILD_SHARED_LIBS)
+    target_sources(rocsparse PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
+
 # Target compile options
 target_compile_options(rocsparse PRIVATE -Wno-unused-command-line-argument -Wall)
 
