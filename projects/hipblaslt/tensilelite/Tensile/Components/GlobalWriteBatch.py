@@ -55,11 +55,16 @@ from math import ceil, log2
 
 
 def _scmpGtU32(writer, src, imm, comment=""):
-    """ISA-aware scalar compare: s_cmpk_gt_u32 on gfx9, s_cmp_gt_u32 on gfx12+."""
-    if writer.states.asmCaps.get("HasSCMPK", False):
+    """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR."""
+    if writer.states.asmCaps["HasSCMPK"]:
         return SCmpKGtU32(src=src, simm16=imm, comment=comment)
     else:
-        return SCmpGtU32(src0=src, src1=imm, comment=comment)
+        module = Module("scmpGtU32")
+        tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+        module.add(SMovB32(dst=sgpr(tmpSgpr), src=imm))
+        module.add(SCmpGtU32(src0=src, src1=sgpr(tmpSgpr), comment=comment))
+        writer.sgprPool.checkIn(tmpSgpr)
+        return module
 
 class GlobalWriteBatchComponent(GlobalWriteComponents):
   kernel = {"ProblemType": {"OperationType": "GEMM" }}
