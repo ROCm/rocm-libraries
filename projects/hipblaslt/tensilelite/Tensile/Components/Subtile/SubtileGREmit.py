@@ -929,8 +929,7 @@ def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
 def globalReadLDSBufferSwap(tc, writer, kernel):
   if tc in ['A', 'B']:
     ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-    enableKey = "enableTDM%s" % (tc.replace("MXS", "") if tc.startswith("MXS") else tc)
-    if kernel.get(enableKey, False):
+    if kernel["enableTDM%s" % tc]:
         ldsAddrSgpr = "tdmLdsAddr%s" % tc
         swapSgpr = "tdmLdsSwapMask%s" % tc
         module = Module()
