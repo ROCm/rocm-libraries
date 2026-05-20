@@ -31,6 +31,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 struct Input
 {

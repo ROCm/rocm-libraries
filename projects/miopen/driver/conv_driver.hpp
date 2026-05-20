@@ -9,40 +9,29 @@
 #include "conv_common.hpp"
 #include "driver.hpp"
 #include "mloConvHost.hpp"
-#include "random.hpp"
 #include "rocrand_wrapper.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
+#include <miopen/tensor.hpp>
 #include <miopen/algorithm.hpp>
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/env.hpp>
+#include <miopen/logger.hpp>
+#include <miopen/random.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/find_controls.hpp>
-#include <miopen/logger.hpp>
-#include <miopen/miopen.h>
 #include <miopen/conv/solvers.hpp>
-#include <miopen/tensor.hpp>
+#include <miopen/cpu_bias.hpp>
+#include <miopen/cpu_conv.hpp>
+#include <miopen/verify.hpp>
 
-#include <../test/cpu_bias.hpp>
-#include <../test/cpu_conv.hpp>
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
-
-#include <algorithm>
-#include <cstdlib>
-#include <cstring>
-#include <fstream>
-#include <memory>
-#include <optional>
+#include <set>
 #include <ranges>
-#include <sstream>
-#include <type_traits>
-#include <vector>
 
 // Declare hidden function for MIGraphX to smoke test it.
 extern "C" MIOPEN_EXPORT miopenStatus_t

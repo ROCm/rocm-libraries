@@ -26,21 +26,18 @@
 #ifndef GUARD_MIOPEN_LAYERNORM_DRIVER_HPP
 #define GUARD_MIOPEN_LAYERNORM_DRIVER_HPP
 
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
-#include <../test/cpu_layernorm.hpp>
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "miopen/miopen.h"
-#include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
-#include <cfloat>
-#include <cstdlib>
-#include <memory>
-#include <miopen/errors.hpp>
+
 #include <miopen/tensor.hpp>
-#include <vector>
+#include <miopen/errors.hpp>
+#include <miopen/random.hpp>
+#include <miopen/verify.hpp>
+#include <miopen/cpu_layernorm.hpp>
+
 
 template <typename T>
 class LayerNormDriver : public Driver

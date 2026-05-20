@@ -23,18 +23,17 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-// #include <miopen/bfloat16.hpp>
-// #include <half.hpp>
 
 #include "miopen_cstdint.hpp"
 #include "miopen_type_traits.hpp"
 
-namespace miopen_hip_f8_impl {
+#include <half/half.hpp>
+using half = half_float::half;
 
-#ifndef __HIP_PLATFORM_AMD__
+#include <miopen/bfloat16.hpp>
 using hip_bfloat16 = bfloat16;
-using half         = half_float::half;
-#endif
+
+namespace miopen_hip_f8_impl {
 
 enum class BitOp
 {
@@ -46,7 +45,7 @@ enum class BitOp
 template <class To, class From, BitOp Op>
 MIOPEN_HIP_HOST_DEVICE To bit_copy(const From& src)
 {
-    static_assert(std::is_trivially_copyable_v<From> && std::is_trivially_copyable_v<To>,
+    static_assert(::std::is_trivially_copyable_v<From> && ::std::is_trivially_copyable_v<To>,
                   "Requires trivially copyable types");
 
     if constexpr(Op == BitOp::Equal)
@@ -372,7 +371,8 @@ MIOPEN_HIP_HOST_DEVICE T cast_from_f8(uint8_t x)
         if(exponent == ((1 << we) - 1))
             return (mantissa == 0) ? (sign ? fNegInf : fInf) : fNaN;
     }
-    typename std::conditional<sizeof(T) == 2, uint16_t, uint32_t>::type retval;
+
+    typename ::std::conditional<sizeof(T) == 2, uint16_t, uint32_t>::type retval;
     if(we == 5 && is_half && !negative_zero_nan)
     {
         retval = x << 8;

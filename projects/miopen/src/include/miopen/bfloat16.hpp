@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-
 #ifndef BFLOAT16_H_
 #define BFLOAT16_H_
 
-#include <iostream>
+#include <cstdint>
+#include <functional>
 #include <miopen/config.h>
 
 class bfloat16
@@ -16,7 +16,7 @@ public:
         union
         {
             float float_st;
-            std::uint32_t bf16_st;
+            uint32_t bf16_st;
         } bits_st = {rhs};
 
         // BF16 round and NaN preservation code matches
@@ -67,7 +67,7 @@ public:
     {
         union
         {
-            std::uint32_t bf16_st;
+            uint32_t bf16_st;
             float float_st;
         } bits_st = {data_};
 
@@ -120,14 +120,14 @@ public:
     {
         return static_cast<float>(*this) < static_cast<float>(rhs);
     }
-    bool operator==(bfloat16 rhs) const { return std::equal_to<float>()(*this, rhs); }
+    bool operator==(bfloat16 rhs) const { return ::std::equal_to<float>()(*this, rhs); }
 
     static constexpr bfloat16 generate(uint16_t val) { return bfloat16{val, true}; }
 
 private:
-    constexpr bfloat16(std::uint16_t val, bool) : data_{val} {}
+    constexpr bfloat16(uint16_t val, bool) : data_{val} {}
 
-    std::uint16_t data_;
+    uint16_t data_;
 };
 
 inline bfloat16 operator+(bfloat16 a, const bfloat16& b)
@@ -176,4 +176,5 @@ public:
     }
 };
 } // namespace std
+
 #endif

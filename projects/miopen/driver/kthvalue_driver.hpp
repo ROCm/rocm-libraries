@@ -28,16 +28,11 @@
 #include "driver.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
-#include "random.hpp"
 
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
-
-#include <miopen/tensor_view_utils.hpp>
-#include <miopen/miopen.h>
 #include <miopen/errors.hpp>
-
-#include <vector>
+#include <miopen/random.hpp>
+#include <miopen/tensor_view_utils.hpp>
+#include <miopen/verify.hpp>
 
 template <typename TIO>
 void mloKthvalueFwdRunHost(TIO* input,

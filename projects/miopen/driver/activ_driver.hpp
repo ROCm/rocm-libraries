@@ -29,20 +29,12 @@
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "mloNeuronHost.hpp"
-#include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 
-#include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
-
-#include <algorithm>
-#include <cfloat>
-#include <cstdlib>
-#include <memory>
-#include <numeric>
-#include <vector>
+#include <miopen/random.hpp>
 
 template <typename Tgpu, typename Tref>
 class ActivationDriver : public Driver

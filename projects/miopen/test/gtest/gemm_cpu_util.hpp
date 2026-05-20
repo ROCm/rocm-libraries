@@ -27,8 +27,10 @@
 
 #include <miopen/gemm_v2.hpp>
 #include "../rnn_util.hpp"
+
 namespace miopen {
 namespace gemm_cpu_util {
+
 template <typename T>
 void CallGemm(miopen::GemmDescriptor gemm_desc,
               Data_t A,
@@ -80,5 +82,6 @@ void CallGemm(miopen::GemmDescriptor gemm_desc,
                           gemm_desc.alpha,
                           gemm_desc.beta);
 }
+
 } // namespace gemm_cpu_util
 } // namespace miopen

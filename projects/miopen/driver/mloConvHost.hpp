@@ -27,12 +27,9 @@
 #ifndef MLO_CONVHOST_H_
 #define MLO_CONVHOST_H_
 
-#include <miopen/tensor.hpp>
-
-#include <cmath>
-#include <iostream>
-
 #include "calcerr.hpp"
+
+#include <miopen/tensor.hpp>
 
 // #if 0 // disable functions
 #if 1

@@ -6,20 +6,14 @@
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "mloSoftmaxHost.hpp"
-#include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 
-#include <../test/verify.hpp>
-
-#include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
+#include <miopen/random.hpp>
+#include <miopen/verify.hpp>
 
-#include <cfloat>
-#include <cstdlib>
-#include <memory>
-#include <vector>
 
 template <typename Tgpu, typename Tref>
 class SoftmaxDriver : public Driver

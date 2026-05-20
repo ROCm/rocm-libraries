@@ -25,15 +25,9 @@
  *******************************************************************************/
 #pragma once
 
-#include <cmath>
-#include <cassert>
-#include <algorithm>
-#include <cstdlib>
-#include <cstring>
-#include <cfloat>
-#include <vector>
-
 #include <miopen/par_for.hpp>
+
+#include <algorithm>
 
 #define NEGATIVE_CUTOFF_VAL (-1e20)
 

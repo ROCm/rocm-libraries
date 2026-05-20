@@ -28,25 +28,13 @@
 #include "InputFlags.hpp"
 #include "ctc_verify.hpp"
 #include "driver.hpp"
-#include "random.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include <miopen/miopen.h>
+#include <miopen/random.hpp>
+#include <miopen/verify.hpp>
 
-#include <../test/verify.hpp>
-
-#include <algorithm>
-#include <array>
-#include <cfloat>
-#include <cstdlib>
-#include <cstring>
-#include <fstream>
-#include <memory>
-#include <numeric>
-#include <sstream>
-#include <vector>
 
 template <typename Tgpu, typename Tref = Tgpu>
 class CTCDriver : public Driver

@@ -26,19 +26,18 @@
 #ifndef GUARD_CPU_BIAS_HPP
 #define GUARD_CPU_BIAS_HPP
 
-#include "test.hpp"
+#include <miopen/tensor_holder.hpp>
+//#include "test.hpp"
+#if 0
 #include <array>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
 #include <utility>
-
-#include "tensor_holder.hpp"
-#include <miopen/stringutils.hpp>
-#include <miopen/functional.hpp>
+#endif
+//#include <miopen/stringutils.hpp>
+//#include <miopen/functional.hpp>
 
 template <std::size_t NSpatialDim, typename Tout, typename Tbias>
 void cpu_bias_forward_impl(tensor<Tout>& out, const tensor<Tbias>& bias)

@@ -31,20 +31,12 @@
 #if MIOPEN_USE_GEMM
 #include "InputFlags.hpp"
 #include "driver.hpp"
-#include "random.hpp"
 #include "util_driver.hpp"
 
-#include <../test/verify.hpp>
-
 #include <miopen/gemm_v2.hpp>
-#include <miopen/miopen.h>
+#include <miopen/random.hpp>
 #include <miopen/ford.hpp>
-
-#include <algorithm>
-#include <cstdlib>
-#include <float.h>
-#include <memory>
-#include <vector>
+#include <miopen/verify.hpp>
 
 #define GEMM_DRIVER_DEBUG 0
 

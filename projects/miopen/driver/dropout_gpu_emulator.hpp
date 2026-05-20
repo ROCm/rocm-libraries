@@ -29,18 +29,15 @@
 #include <miopen/dropout.hpp>
 #include <miopen/float_equal.hpp>
 #include <miopen/par_for.hpp>
-
-#include <algorithm>
-#include <cassert>
-#include <cmath>
-#include <vector>
+#include <miopen/gemm_cpu.hpp>
+#include <miopen/rnn_util.hpp>
 
 // disable __device__ qualifiers
 #ifdef FQUALIFIERS
 #error rocrand FQUALIFIERS defined externally, probably one of rocrand device header included prior to this
 #endif
 #define FQUALIFIERS inline
-#include "../src/kernels/miopen_rocrand.hpp"
+#include <miopen_rocrand.hpp>
 
 static void InitKernelStateEmulator(std::vector<rocrand_state_xorwow>& states,
                                     const miopenDropoutDescriptor_t dropoutDesc)

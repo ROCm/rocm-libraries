@@ -26,54 +26,57 @@
 #ifndef GUARD_TENSOR_HOLDER_HPP
 #define GUARD_TENSOR_HOLDER_HPP
 
-#include "network_data.hpp"
 #include <miopen/ford.hpp>
 #include <miopen/tensor.hpp>
-#include <miopen/functional.hpp>
+#include <miopen/random.hpp>
 #include <miopen/type_name.hpp>
-#include <miopen/each_args.hpp>
-#include <miopen/bfloat16.hpp>
-#include "../driver/random.hpp"
-
-#include "serialize.hpp"
 
 #include <half/half.hpp>
-using half         = half_float::half;
+using half = half_float::half;
+using float16 = half_float::half;
+
+#include <miopen/bfloat16.hpp>
 using hip_bfloat16 = bfloat16;
-#include "../../src/kernels/hip_float8.hpp"
+
+#include <hip_float8.hpp>
 using float8_fnuz  = miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>;
 using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 
+#include <type_traits>
+#include <numeric>
+#include <utility>
+#include <array>
+#include <ostream>
+#include <iostream>
 #include <iomanip>
-#include <fstream>
 
 template <class F>
-void visit_tensor_size(std::size_t n, F f)
+void visit_tensor_size(size_t n, F f)
 {
     switch(n)
     {
     case 0: {
-        f(std::integral_constant<std::size_t, 0>{});
+        f(std::integral_constant<size_t, 0>{});
         break;
     }
     case 1: {
-        f(std::integral_constant<std::size_t, 1>{});
+        f(std::integral_constant<size_t, 1>{});
         break;
     }
     case 2: {
-        f(std::integral_constant<std::size_t, 2>{});
+        f(std::integral_constant<size_t, 2>{});
         break;
     }
     case 3: {
-        f(std::integral_constant<std::size_t, 3>{});
+        f(std::integral_constant<size_t, 3>{});
         break;
     }
     case 4: {
-        f(std::integral_constant<std::size_t, 4>{});
+        f(std::integral_constant<size_t, 4>{});
         break;
     }
     case 5: {
-        f(std::integral_constant<std::size_t, 5>{});
+        f(std::integral_constant<size_t, 5>{});
         break;
     }
     default: throw std::runtime_error("Unknown tensor size");
@@ -97,6 +100,7 @@ template <>
 struct miopen_type<half_float::half> : std::integral_constant<miopenDataType_t, miopenHalf>
 {
 };
+
 template <>
 struct miopen_type<bfloat16> : std::integral_constant<miopenDataType_t, miopenBFloat16>
 {
@@ -185,22 +189,22 @@ struct tensor
         assert(dims.size() == strides.size());
     }
 
-    tensor(std::size_t n, std::size_t c, std::size_t h, std::size_t w)
+    tensor(size_t n, size_t c, size_t h, size_t w)
         : desc(miopen_type<T>{}, {n, c, h, w}), data(n * c * h * w)
     {
     }
 
-    tensor(miopenTensorLayout_t layout, std::size_t n, std::size_t c, std::size_t h, std::size_t w)
+    tensor(miopenTensorLayout_t layout, size_t n, size_t c, size_t h, size_t w)
         : desc(miopen_type<T>{}, layout, {n, c, h, w}), data(desc.GetElementSpace())
     {
     }
 
-    tensor(std::size_t n, std::size_t c, std::size_t d, std::size_t h, std::size_t w)
+    tensor(size_t n, size_t c, size_t d, size_t h, size_t w)
         : desc(miopen_type<T>{}, {n, c, d, h, w}), data(n * c * d * h * w)
     {
     }
 
-    tensor(std::size_t n) : desc(miopen_type<T>{}, {n}), data(n) {}
+    tensor(size_t n) : desc(miopen_type<T>{}, {n}), data(n) {}
 
     tensor(miopen::TensorDescriptor rhs) : desc(std::move(rhs))
     {
@@ -242,7 +246,7 @@ struct tensor
     {
         auto seed = std::accumulate(desc.GetLengths().begin(),
                                     desc.GetLengths().end(),
-                                    std::size_t{521288629},
+                                    size_t{521288629},
                                     [](auto x, auto y) {
                                         x ^= x << 1U;
                                         return x ^ y;
@@ -264,7 +268,7 @@ struct tensor
     {
         auto seed = std::accumulate(desc.GetLengths().begin(),
                                     desc.GetLengths().end(),
-                                    std::size_t{521288629},
+                                    size_t{521288629},
                                     [](auto x, auto y) {
                                         x ^= x << 1U;
                                         return x ^ y;
@@ -372,9 +376,9 @@ struct tensor
         return this->data[miopen::unpack(f, multi_id)];
     }
 
-    T& operator[](std::size_t i) { return data.at(i); }
+    T& operator[](size_t i) { return data.at(i); }
 
-    const T& operator[](std::size_t i) const { return data.at(i); }
+    const T& operator[](size_t i) const { return data.at(i); }
 
     typename std::vector<T>::iterator begin() { return data.begin(); }
 
@@ -457,9 +461,9 @@ struct tensor
 template <class T>
 void serialize(std::istream& s, tensor<T>& x)
 {
-    std::vector<std::size_t> lens;
+    std::vector<size_t> lens;
     serialize(s, lens);
-    std::vector<std::size_t> strides;
+    std::vector<size_t> strides;
     serialize(s, strides);
     x.desc = miopen::TensorDescriptor{miopen_type<T>{}, lens, strides};
     serialize(s, x.data);

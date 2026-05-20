@@ -32,10 +32,6 @@
 #pragma clang diagnostic ignored "-Wfloat-equal"
 #endif
 
-#include <cmath>
-#include <iostream>
-#include <iomanip>
-
 #include <miopen/float_equal.hpp>
 
 ////////////////////////////////////////////////////////////

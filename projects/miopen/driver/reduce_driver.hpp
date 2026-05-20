@@ -29,28 +29,16 @@
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "miopen_Reduction.hpp"
-#include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include "../test/verify.hpp"
-
-#include <miopen/miopen.h>
-#include <memory>
-#include <miopen/reduce_common.hpp>
 #include <miopen/tensor.hpp>
+#include <miopen/random.hpp>
+#include <miopen/cpu_reduce_util.hpp>
+#include <miopen/verify.hpp>
 
-#include <half/half.hpp>
-
-#include <algorithm>
-#include <cassert>
-#include <cstdlib>
-#include <float.h>
-#include <string>
-#include <type_traits>
-#include <vector>
 
 template <typename Tgpu, typename Tref>
 class ReduceDriver : public Driver

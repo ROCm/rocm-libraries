@@ -26,14 +26,10 @@
 #ifndef GUARD_MIOPEN_REDUCTION_HOST_HPP_
 #define GUARD_MIOPEN_REDUCTION_HOST_HPP_
 
-#include <vector>
-#include <type_traits>
-#include <cassert>
-#include <cmath>
-
-#include "../test/cpu_reduce_util.hpp"
-
+//#include "../test/cpu_reduce_util.hpp"
 #include "tensor_driver.hpp"
+
+#include <utility>
 
 using float16 = half_float::half;
 

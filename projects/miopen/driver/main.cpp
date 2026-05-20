@@ -23,20 +23,15 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "driver.hpp"
-#include "registry_driver_maker.hpp"
 
+#include "registry_driver_maker.hpp"
 #include "sys_info.hpp"
-#include <miopen/config.h>
-#include <miopen/errors.hpp>
 #include <miopen/stringutils.hpp>
 
-#include <cstdio>
 #include <iostream>
 
 int main(int argc, char* argv[])
 {
-
     std::string base_arg = ParseBaseArg(argc, argv);
 
     if(base_arg == "--version")

@@ -30,19 +30,11 @@
 #include "driver.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
-#include "random.hpp"
-#include <algorithm>
-#include <cfloat>
-#include <cmath>
-#include <cstdlib>
-#include <memory>
-#include <miopen/miopen.h>
+
 #include <miopen/tensor.hpp>
-#include <numeric>
-#include <vector>
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
-#include "../src/kernels/MIOpenReduceCalculation.hpp"
+#include <miopen/random.hpp>
+#include <miopen/verify.hpp>
+#include <MIOpenReduceCalculation.hpp>
 
 #ifndef MLO_REDUCE_CALCULATIONMHOST_H_
 #define MLO_REDUCE_CALCULATIONMHOST_H_

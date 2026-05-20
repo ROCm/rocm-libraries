@@ -28,14 +28,10 @@
 
 #define UNPACK_VEC4(v) (v[0]), (v[1]), (v[2]), (v[3])
 
-#include <algorithm>
-#include <iterator>
-#include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_extra.hpp>
 #include <miopen/tensor_layout.hpp>
-#include <numeric>
-#include <vector>
+
 
 inline miopenTensorLayout_t StringToLayoutType(std::string layout_str)
 {

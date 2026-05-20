@@ -25,8 +25,6 @@
  *******************************************************************************/
 #include "driver.hpp"
 
-#include <miopen/errors.hpp>
-
 void Driver::AddGpuBufferCheckFlag(InputFlags& inflags)
 {
     inflags.AddInputFlag("gpubuffer_check",

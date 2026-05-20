@@ -30,18 +30,10 @@
 #include "driver.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
-#include "random.hpp"
-
-#include <cstdint>
-#include <cstdlib>
-#include <limits>
-#include <memory>
-#include <vector>
-
-#include <../test/verify.hpp>
 
 #include <miopen/errors.hpp>
-#include <miopen/miopen.h>
+#include <miopen/random.hpp>
+#include <miopen/verify.hpp>
 
 template <typename T>
 T sigmoid(T x)

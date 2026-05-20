@@ -30,28 +30,15 @@
 #include "driver.hpp"
 #include "gru_verify_gemm.hpp"
 #include "lstm_verify_gemm.hpp"
-#include "random.hpp"
 #include "rnn_verify_gemm.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include <../test/verify.hpp>
-
-#include <miopen/errors.hpp>
-#include <miopen/miopen.h>
-#include <miopen/rnn.hpp>
 #include <miopen/tensor.hpp>
-
-#include <algorithm>
-#include <array>
-#include <cfloat>
-#include <cstdlib>
-#include <cstring>
-#include <memory>
-#include <numeric>
-#include <sstream>
-#include <vector>
+#include <miopen/errors.hpp>
+#include <miopen/random.hpp>
+#include <miopen/verify.hpp>
 
 template <typename Tgpu, typename Tref>
 class RNNDriver : public Driver
@@ -982,7 +969,8 @@ int RNNDriver<Tgpu, Tref>::RunForwardCPU()
     if(paddingMode == miopenRNNIOWithPadding)
     {
         size_t packedXInSize, packedYOutSize;
-        std::tie(packedXInSize, packedYOutSize) = GetTempPackedBuffersSize(in_n, in_h, out_h);
+        std::tie(packedXInSize, packedYOutSize) =
+            miopen::GetTempPackedBuffersSize(in_n, in_h, out_h);
 
         converted_in.resize(packedXInSize);
         converted_out.resize(packedYOutSize);
@@ -1246,7 +1234,8 @@ int RNNDriver<Tgpu, Tref>::RunBackwardWeightsCPU()
     if(paddingMode == miopenRNNIOWithPadding)
     {
         size_t packedXInSize, packedYOutSize;
-        std::tie(packedXInSize, packedYOutSize) = GetTempPackedBuffersSize(in_n, in_h, out_h);
+        std::tie(packedXInSize, packedYOutSize) =
+            miopen::GetTempPackedBuffersSize(in_n, in_h, out_h);
 
         converted_in.resize(packedXInSize);
         converted_dout.resize(packedYOutSize);
@@ -1397,7 +1386,8 @@ int RNNDriver<Tgpu, Tref>::RunBackwardDataCPU()
     if(paddingMode == miopenRNNIOWithPadding)
     {
         size_t packedXInSize, packedYOutSize;
-        std::tie(packedXInSize, packedYOutSize) = GetTempPackedBuffersSize(in_n, in_h, out_h);
+        std::tie(packedXInSize, packedYOutSize) =
+            miopen::GetTempPackedBuffersSize(in_n, in_h, out_h);
 
         converted_din.resize(packedXInSize);
         converted_dout.resize(packedYOutSize);

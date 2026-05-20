@@ -4,8 +4,6 @@
 #ifndef MLO_NORMHOST_H_
 #define MLO_NORMHOST_H_
 
-#include <cmath>
-
 #include <miopen/ford.hpp>
 
 ////////////////////////////////////////////////////////////

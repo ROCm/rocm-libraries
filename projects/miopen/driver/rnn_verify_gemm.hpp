@@ -28,12 +28,6 @@
 
 #include "dropout_gpu_emulator.hpp"
 
-#include <../test/rnn_util.hpp>
-
-#include <algorithm>
-#include <cassert>
-#include <cmath>
-
 template <typename Tgpu, typename Tref>
 void RunRNNForwardGEMMCPUVerify(miopenHandle_t handle,
                                 std::vector<Tgpu>& in,
@@ -69,7 +63,7 @@ void RunRNNForwardGEMMCPUVerify(miopenHandle_t handle,
     //    1, hx.size(), hy_host.size(), rsvspace_host.size());
     //    printf("input size: %d\n", in.size());
     //    printf("output size: %d\n", out_host.size());
-    int batch_n = sumvc(in_n);
+    int batch_n = miopen::sumvc(in_n);
     std::vector<Tref> hid_state(hy_d * batch_n * hy_h, static_cast<Tref>(0));
     std::vector<Tref> wk_state(hy_d * batch_n * hy_h, static_cast<Tref>(0));
     std::vector<Tref> out_state(batch_n * out_h, static_cast<Tref>(0));
@@ -493,8 +487,9 @@ void RunRNNForwardGEMMCPUVerify(miopenHandle_t handle,
                 for(int h = 0; h < hy_h; h++)
                 {
                     wk_state.at(hid_shift + bacc * hy_stride + bs * hy_stride + h) =
-                        activfunc(hid_state.at(hid_shift + bacc * hy_stride + bs * hy_stride + h),
-                                  squash); // squash_func
+                        miopen::activfunc(
+                            hid_state.at(hid_shift + bacc * hy_stride + bs * hy_stride + h),
+                            squash); // squash_func
                     hy_state.at(hx_shift + bs * uni_stride + h) =
                         wk_state.at(hid_shift + bacc * hy_stride + bs * hy_stride + h);
 
@@ -503,8 +498,8 @@ void RunRNNForwardGEMMCPUVerify(miopenHandle_t handle,
 
                     rsvspace_host.at(hid_shift + bacc * hy_stride + bs * hy_stride + h +
                                      numlayer * batch_n * hy_h * bi) =
-                        activfunc(hid_state[hid_shift + bacc * hy_stride + bs * hy_stride + h],
-                                  squash);
+                        miopen::activfunc(
+                            hid_state[hid_shift + bacc * hy_stride + bs * hy_stride + h], squash);
 
                     hy_host.at(hx_shift + bs * uni_stride + h) =
                         hy_state.at(hx_shift + bs * uni_stride + h);
@@ -518,9 +513,9 @@ void RunRNNForwardGEMMCPUVerify(miopenHandle_t handle,
                     for(int h = 0; h < hy_h; h++)
                     {
                         wk_state.at(hid_shift + baccbi * hy_stride + hy_h + bs * hy_stride + h) =
-                            activfunc(hid_state[hid_shift + baccbi * hy_stride + hy_h +
-                                                bs * hy_stride + h],
-                                      squash); // squash_func
+                            miopen::activfunc(hid_state[hid_shift + baccbi * hy_stride + hy_h +
+                                                        bs * hy_stride + h],
+                                              squash); // squash_func
 
                         hy_state.at(hx_shift + hy_n * hy_h + bs * uni_stride + h) =
                             wk_state.at(hid_shift + baccbi * hy_stride + hy_h + bs * hy_stride + h);
@@ -531,9 +526,9 @@ void RunRNNForwardGEMMCPUVerify(miopenHandle_t handle,
 
                         rsvspace_host.at(hid_shift + baccbi * hy_stride + hy_h + bs * hy_stride +
                                          h + numlayer * batch_n * hy_h * bi) =
-                            activfunc(hid_state[hid_shift + baccbi * hy_stride + hy_h +
-                                                bs * hy_stride + h],
-                                      squash);
+                            miopen::activfunc(hid_state[hid_shift + baccbi * hy_stride + hy_h +
+                                                        bs * hy_stride + h],
+                                              squash);
 
                         hy_host.at(hx_shift + hy_n * hy_h + bs * uni_stride + h) =
                             hy_state.at(hx_shift + hy_n * hy_h + bs * uni_stride + h);
@@ -610,7 +605,7 @@ void RunRNNBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
        hx.size(), dhx_host.size(), dhy.size(), rsvspace_host.size(),wkspace_host.size());
         printf("dinput size: %d\n", din_host.size());
     */
-    int batch_n = sumvc(in_n);
+    int batch_n = miopen::sumvc(in_n);
     std::vector<Tref> dh_state(hy_d * batch_n * hy_h, static_cast<Tref>(0));
 
     std::vector<Tref> din_state(batch_n * in_h, static_cast<Tref>(0));
@@ -798,9 +793,10 @@ void RunRNNBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
             {
                 for(int h = 0; h < hy_h; h++)
                 {
-                    dh_state.at(hid_shift + bacc * hy_stride + bs * hy_stride + h) *= dervactivfunc(
-                        rsvspace_host.at(hid_shift + bacc * hy_stride + bs * hy_stride + h),
-                        squash);
+                    dh_state.at(hid_shift + bacc * hy_stride + bs * hy_stride + h) *=
+                        miopen::dervactivfunc(
+                            rsvspace_host.at(hid_shift + bacc * hy_stride + bs * hy_stride + h),
+                            squash);
                     wkspace_host.at(hid_shift + bacc * hy_stride + bs * hy_stride + h) =
                         dh_state.at(hid_shift + bacc * hy_stride + bs * hy_stride + h);
                 }
@@ -860,9 +856,9 @@ void RunRNNBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
                         }
 
                         dh_state.at(hid_shift + baccbi * hy_stride + hy_h + bs * hy_stride + h) *=
-                            dervactivfunc(rsvspace_host.at(hid_shift + baccbi * hy_stride + hy_h +
-                                                           bs * hy_stride + h),
-                                          squash);
+                            miopen::dervactivfunc(rsvspace_host.at(hid_shift + baccbi * hy_stride +
+                                                                   hy_h + bs * hy_stride + h),
+                                                  squash);
                         wkspace_host.at(hid_shift + baccbi * hy_stride + hy_h + bs * hy_stride +
                                         h) =
                             dh_state.at(hid_shift + baccbi * hy_stride + hy_h + bs * hy_stride + h);
@@ -986,7 +982,7 @@ void RunRNNBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
     //    printf("dirmode: %d, hx size: %d, dout size: %d, reserveSpace: %d, workSpace: %d\n",
     //    bidirection ? 2 : 1, hx.size(), dout.size(), rsvspace_host.size(),wkspace_host.size());
     //    printf("input size: %d\n", in.size());
-    int batch_n  = sumvc(in_n);
+    int batch_n  = miopen::sumvc(in_n);
     int numlayer = bidirection ? hy_d / 2 : hy_d;
     int bacc; // accumulation of batch
     int bi = bidirection ? 2 : 1;
@@ -1023,7 +1019,7 @@ void RunRNNBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
     std::vector<Tref> rsvspace_state(rsvspace_host.size(), static_cast<Tref>(0));
     for(int h = 0; h < hy_d * batch_n * hy_h; h++)
     {
-        rsvspace_state.at(h) = activfunc(rsvspace_host.at(h), squash);
+        rsvspace_state.at(h) = miopen::activfunc(rsvspace_host.at(h), squash);
         wkspace_state.at(h)  = wkspace_host.at(h);
     }
     if(use_dropout)

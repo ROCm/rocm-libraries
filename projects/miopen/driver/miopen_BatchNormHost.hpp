@@ -27,9 +27,6 @@
 #ifndef MIO_BATCHNORMHOST_H_
 #define MIO_BATCHNORMHOST_H_
 
-#include <cmath>
-#include <iomanip>
-
 #define MIO_HEIRARCH_SEL 0
 
 #if(MIO_HEIRARCH_SEL == 1)

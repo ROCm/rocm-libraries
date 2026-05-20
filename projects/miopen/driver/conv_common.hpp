@@ -34,17 +34,17 @@
 /// >>> defined at conv3.cpp
 /// >>>            CMakeFiles/MIOpenDriver.dir/conv3.cpp.o:(.text+0x10)
 
-#include "../driver/random.hpp"
+#include <miopen/random.hpp>
+#include <cstdint>
+
+#include <half/half.hpp>
+using half    = half_float::half;
+using float16 = half_float::half;
 
 #include <miopen/bfloat16.hpp>
-
-#include <cstdint>
-#include <half/half.hpp>
-using half         = half_float::half;
 using hip_bfloat16 = bfloat16;
-#include <hip_float8.hpp>
 
-using float16      = half_float::half;
+#include <hip_float8.hpp>
 using float8_fnuz  = miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>;
 using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 

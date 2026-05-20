@@ -32,15 +32,18 @@
 #pragma clang diagnostic ignored "-Wfloat-equal"
 #endif
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <iomanip>
-#include <limits>
-#include <type_traits>
-
 #include "calcerr.hpp"
 #include <miopen/bfloat16.hpp>
+
+#include <tuple>
+#include <array>
+#include <mutex>
+#include <limits>
+#include <atomic>
+#include <optional>
+#include <algorithm>
+#include <type_traits>
+#include <iostream>
 
 #if 0
 template<typename _T>

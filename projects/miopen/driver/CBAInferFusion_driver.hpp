@@ -30,30 +30,20 @@
 #include "driver.hpp"
 #include "miopen_ConvBatchNormActivHost.hpp"
 #include "mloNeuronHost.hpp"
-#include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "conv_common.hpp"
 
-#include "../test/verify.hpp"
-#include "../test/cpu_conv.hpp"
-#include "../test/cpu_bias.hpp"
+#include <miopen/cpu_conv.hpp>
+#include <miopen/cpu_bias.hpp>
 
 #include <miopen/env.hpp>
+#include <miopen/tensor.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
-
-#include <algorithm>
-#include <cassert>
-#include <cmath>
-#include <cstdlib>
-#include <float.h>
-#include <memory>
-#include <numeric>
-#include <vector>
+#include <miopen/random.hpp>
+#include <miopen/verify.hpp>
 
 #define MIO_BN_DEBUG 0
 #define MIO_BN_MAX_DEBUGLOOP 65536

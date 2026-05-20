@@ -29,32 +29,20 @@
 #include "driver.hpp"
 #include "gru_verify_gemm.hpp"
 #include "lstm_verify_gemm.hpp"
-#include "random.hpp"
 #include "rnn_verify_gemm.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include <../test/verify.hpp>
-
 #include <miopen/errors.hpp>
 #include <miopen/logger.hpp>
-#include <miopen/miopen.h>
+#include <miopen/random.hpp>
 #include <miopen/rnn.hpp>
+#include <miopen/verify.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_ops.hpp>
 
-#include <algorithm>
-#include <array>
-#include <cfloat>
-#include <cstdlib>
-#include <cstring>
-#include <initializer_list>
-#include <memory>
-#include <numeric>
-#include <sstream>
-#include <vector>
 
 std::vector<size_t> get_default_time_strides(int vec_size, const std::vector<int>& seq_array)
 {

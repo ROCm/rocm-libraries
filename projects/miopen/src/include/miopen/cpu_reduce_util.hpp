@@ -26,18 +26,18 @@
 #ifndef GUARD_CPU_REDUCE_UTIL_HPP
 #define GUARD_CPU_REDUCE_UTIL_HPP
 
-#include "miopen/reducetensor.hpp"
-#include "tensor_holder.hpp"
-#include <cstddef>
-#include <half/half.hpp>
-#include <limits>
-#include <cmath>
-#include <cassert>
-#include <ratio>
-#include <stdexcept>
-#include <string>
-#include <miopen/miopen.h>
+#include <miopen/reducetensor.hpp>
 #include <miopen/reduce_common.hpp>
+
+//#include "tensor_holder.hpp"
+//#include <cstddef>
+//#include <limits>
+//#include <cmath>
+//#include <cassert>
+//#include <ratio>
+//#include <stdexcept>
+//#include <string>
+
 
 namespace reduce {
 

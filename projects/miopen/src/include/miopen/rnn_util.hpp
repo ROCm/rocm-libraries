@@ -27,8 +27,8 @@
 #ifndef GUARD_MIOPEN_RNN_UTIL_HPP_
 #define GUARD_MIOPEN_RNN_UTIL_HPP_
 
-#include <miopen/rnn.hpp>
 #include <miopen/miopen.h>
+#include <miopen/rnn.hpp>
 #include <miopen/common.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/seq_tensor.hpp>
@@ -367,6 +367,48 @@ inline size_t ReductionWorkspaceSize(const Handle& handle,
         }
     }
     return reduction_ws;
+}
+
+inline int sumvc(const std::vector<int>& x) { return std::accumulate(x.begin(), x.end(), 0); }
+
+template <typename T>
+inline T activfunc(T x, int actvf)
+{
+    T alpha = static_cast<T>(1), beta0 = static_cast<T>(0), beta1 = static_cast<T>(1);
+    if(actvf == 0)
+    {
+        return (x > 0) ? x : x * beta0;
+    }
+    else if(actvf == 2)
+    {
+        return static_cast<T>(1 / (1 + std::exp(-x)));
+    }
+    return static_cast<T>(alpha * std::tanh(beta1 * x));
+}
+
+template <typename T>
+inline T dervactivfunc(T x, int actvf)
+{
+    if(actvf == 0)
+    {
+        return static_cast<T>(x > 0 ? 1 : 0);
+    }
+    else if(actvf == 2)
+    {
+        return static_cast<T>(std::exp(-x) / (1 + std::exp(-x)) / (1 + std::exp(-x)));
+    }
+
+    return static_cast<T>(1 / std::cosh(x) / std::cosh(x));
+}
+
+inline std::tuple<size_t, size_t>
+GetTempPackedBuffersSize(std::vector<int> batchs, int in_vec, int out_vec)
+{
+    size_t total_batch = std::accumulate(batchs.begin(), batchs.end(), 0ULL);
+
+    size_t in_buff_size  = total_batch * in_vec;
+    size_t out_buff_size = total_batch * out_vec;
+    return {in_buff_size, out_buff_size};
 }
 
 } // namespace miopen

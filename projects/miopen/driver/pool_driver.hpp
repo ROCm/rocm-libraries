@@ -30,24 +30,16 @@
 #include "driver.hpp"
 #include "mloConvHost.hpp"
 #include "mloPoolingHost.hpp"
-#include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include <miopen/errors.hpp>
-#include <miopen/miopen.h>
-#include <miopen/pooling.hpp>
 #include <miopen/tensor.hpp>
+#include <miopen/errors.hpp>
+#include <miopen/random.hpp>
+#include <miopen/pooling.hpp>
 
-#include <algorithm>
-#include <cstdlib>
-#include <float.h>
-#include <memory>
-#include <numeric>
-#include <type_traits>
-#include <vector>
 
 template <typename T>
 void dumpBufferToFile(const char* fileName, T* data, size_t dataNumItems);

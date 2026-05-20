@@ -26,18 +26,16 @@
 #ifndef GUARD_MIOPEN_T5LAYERNORM_DRIVER_HPP
 #define GUARD_MIOPEN_T5LAYERNORM_DRIVER_HPP
 
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
 #include "InputFlags.hpp"
 #include "driver.hpp"
-#include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
-#include <cfloat>
-#include <cstdlib>
-#include <memory>
+
 #include <miopen/tensor.hpp>
-#include <vector>
+#include <miopen/random.hpp>
+#include <miopen/verify.hpp>
+//#include <../test/tensor_holder.hpp>
+
 
 template <typename Tgpu, typename Tcheck>
 int32_t mloT5LayerNormForwardRunHost(miopenTensorDescriptor_t xDesc,

@@ -29,8 +29,8 @@
 #include <miopen/config.h>
 #include <miopen/miopen.h>
 
-#include <cstring>
 #include <vector>
+#include <algorithm>
 
 #if MIOPEN_BACKEND_OPENCL
 #define STATUS_SUCCESS CL_SUCCESS

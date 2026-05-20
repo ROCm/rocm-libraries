@@ -31,9 +31,7 @@
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 
-#include <../test/verify.hpp>
-
-#include <miopen/miopen.h>
+#include <miopen/verify.hpp>
 
 template <typename Tgpu, typename Tref>
 class PReLUDriver : public Driver

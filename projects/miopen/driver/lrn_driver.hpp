@@ -7,23 +7,15 @@
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "mloNormHost.hpp"
-#include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 
-#include "../test/verify.hpp"
-
-#include <miopen/errors.hpp>
-#include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
+#include <miopen/errors.hpp>
+#include <miopen/random.hpp>
+#include <miopen/verify.hpp>
 
-#include <algorithm>
-#include <cstdlib>
-#include <float.h>
-#include <memory>
-#include <numeric>
-#include <vector>
 
 template <typename Tgpu, typename Tref>
 class LRNDriver : public Driver

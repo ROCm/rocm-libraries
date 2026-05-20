@@ -26,18 +26,19 @@
 #ifndef GUARD_VERIFY_HPP
 #define GUARD_VERIFY_HPP
 
-#include <algorithm>
-#include <cmath>
-#include <functional>
-#include <iostream>
-#include <miopen/float_equal.hpp>
 #include <miopen/returns.hpp>
-#include <numeric>
+#include <miopen/float_equal.hpp>
+
+#include <half/half.hpp>
 #include <miopen/bfloat16.hpp>
-using half         = half_float::half;
-using hip_bfloat16 = bfloat16;
-#include <hip_float8.hpp>
-#include "tensor_holder.hpp"
+
+#include <cmath>
+#include <limits>
+#include <utility>
+#include <numeric>
+#include <algorithm>
+#include <functional>
+#include <type_traits>
 
 namespace miopen {
 
@@ -66,11 +67,10 @@ struct max_fn
 static constexpr max_fn max{};
 
 namespace abs_diff_detail {
-using std::fabs;
 struct fn
 {
     template <class T, class U>
-    auto operator()(T x, U y) const MIOPEN_RETURNS(fabs(x - y));
+    auto operator()(T x, U y) const MIOPEN_RETURNS(std::fabs(x - y));
 };
 
 } // namespace abs_diff_detail
@@ -122,8 +122,7 @@ struct compare_mag_fn
     template <class T, class U>
     bool operator()(T x, U y) const
     {
-        using std::fabs;
-        return fabs(x) < fabs(y);
+        return std::fabs(x) < std::fabs(y);
     }
 };
 static constexpr compare_mag_fn compare_mag{};

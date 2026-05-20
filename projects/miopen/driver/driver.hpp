@@ -26,30 +26,11 @@
 #ifndef GUARD_MIOPEN_DRIVER_HPP
 #define GUARD_MIOPEN_DRIVER_HPP
 
-#include <half/half.hpp>
-#include "../driver/random.hpp"
+#include <miopen/tensor_holder.hpp>
 
-#include "InputFlags.hpp"
-#include <algorithm>
-#include <cstdio>
-#include <cstdlib>
-#include <cfloat>
-#include <memory>
-#include <miopen/logger.hpp>
-#include <miopen/miopen.h>
-#include <miopen/bfloat16.hpp>
-#include <miopen/handle.hpp>
-#include <../test/tensor_holder.hpp>
 #include "util_driver.hpp"
 #include "rocrand_wrapper.hpp"
-using half         = half_float::half;
-using hip_bfloat16 = bfloat16;
-#include <hip_float8.hpp>
-using float16      = half_float::half;
-using float8_fnuz  = miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>;
-using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
-#include <numeric>
-#include <vector>
+#include "InputFlags.hpp"
 
 #if MIOPEN_BACKEND_OPENCL
 #if defined(__APPLE__) || defined(__MACOSX)
@@ -59,7 +40,6 @@ using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 #endif
 #elif MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime_api.h>
-#include <functional>
 #endif
 
 #define UNPACK_VEC4(v) (v[0]), (v[1]), (v[2]), (v[3])

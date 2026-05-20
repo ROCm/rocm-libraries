@@ -34,8 +34,12 @@
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_extra.hpp>
 
+#include <functional>
 #include <cmath>
-#include <iomanip>
+#include <limits>
+#include <algorithm>
+#include <iostream>
+#include <stdexcept>
 
 template <typename Tgpu, typename Tref>
 int miopenBNSpatialFwdInferHost(miopenTensorDescriptor_t& inputTensor,

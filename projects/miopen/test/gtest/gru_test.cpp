@@ -13,7 +13,6 @@
 #include "../rnn_util.hpp"
 #include "../workspace.hpp"
 
-#include <math.h>
 namespace {
 /// Specific version for compating CPU and GPU results, because this test is order-dependent
 template <class VerifyT>

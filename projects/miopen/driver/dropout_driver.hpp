@@ -34,19 +34,8 @@
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include <../test/verify.hpp>
+#include <miopen/verify.hpp>
 
-#include <miopen/dropout.hpp>
-#include <miopen/miopen.h>
-
-#include <algorithm>
-#include <array>
-#include <cfloat>
-#include <cstring>
-#include <memory>
-#include <numeric>
-#include <sstream>
-#include <vector>
 
 template <typename Tgpu, typename Tref = Tgpu>
 class DropoutDriver : public Driver

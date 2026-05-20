@@ -29,29 +29,18 @@
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "miopen_BatchNormHost.hpp"
-#include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "rocrand_wrapper.hpp"
 
-#include "../test/verify.hpp"
-#include "../test/random.hpp"
-#include "../test/fusionHost.hpp"
-
-#include <miopen/errors.hpp>
-#include <miopen/handle.hpp>
-#include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
-#include "miopen/batch_norm.hpp"
-
-#include <algorithm>
-#include <cmath>
-#include <cstdlib>
-#include <float.h>
-#include <memory>
-#include <numeric>
-#include <vector>
+#include <miopen/handle.hpp>
+#include <miopen/errors.hpp>
+#include <miopen/batch_norm.hpp>
+#include <miopen/cpu_conv.hpp>
+#include <miopen/fusionHost.hpp>
+#include <miopen/verify.hpp>
 
 #define MIO_BN_DEBUG 0
 #define MIO_BN_MAX_DEBUGLOOP 65536

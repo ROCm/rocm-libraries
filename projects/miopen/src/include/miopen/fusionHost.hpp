@@ -24,21 +24,25 @@
  *
  *******************************************************************************/
 #pragma once
+
+#include <miopen/convolution.hpp>
+#include <miopen/tensor_holder.hpp>
+
+#if 0
 #include <array>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <utility>
-#include <miopen/miopen.h>
-#include <miopen/convolution.hpp>
+
 #include <miopen/batch_norm.hpp>
 #include <miopen/activ.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/fusion_plan.hpp>
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
 #include "verify.hpp"
+#endif
 
 template <class T>
 void convHostForward(const tensor<T>& input,
