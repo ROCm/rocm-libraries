@@ -684,9 +684,10 @@ class Solution(collections.abc.Mapping):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
 
     state["MfmaInitCVgprs"] = False
-    # Only enable UseSubtileImpl on gfx950; ignore user request on other ISAs.
+    # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
     isgfx950 = state["ISA"] == IsaVersion(9,5,0)
-    state["UseSubtileImpl"] = state["UseSubtileImpl"] and isgfx950
+    isgfx1250 = state["ISA"] == IsaVersion(12,5,0)
+    state["UseSubtileImpl"] = state["UseSubtileImpl"] and (isgfx950 or isgfx1250)
 
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
@@ -719,7 +720,10 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
         elif dtype.isBFloat16() or dtype.isHalf():
-          state[f"_ABTilePair{tc}"] = "AB_B16"
+          if state.get("WavefrontSize", 64) == 32:
+            state[f"_ABTilePair{tc}"] = "AB_B16_W32"
+          else:
+            state[f"_ABTilePair{tc}"] = "AB_B16"
         elif dtype.is8bitFloat():
           state[f"_ABTilePair{tc}"] = "AB_B8"
         elif dtype.is6bitFloat() or dtype.isFloat4():
@@ -2003,6 +2007,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Complex datatype kernel does not support StreamK with MIArchVgpr yet.")
         return
 
+
+    # Force TDM for subtile+gfx1250 (replaces DTL which doesn't exist on gfx12)
+    if state["UseSubtileImpl"] and state["ISA"] == IsaVersion(12,5,0):
+      state["TDMInst"] = 3
 
     if state["TDMInst"]:
       if not isaInfoMap[isa].asmCaps["HasTDM"]:
