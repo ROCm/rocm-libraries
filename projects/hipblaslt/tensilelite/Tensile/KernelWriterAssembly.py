@@ -2144,6 +2144,9 @@ class KernelWriterAssembly(KernelWriter):
         if not isPackedIndex(kernel,idx):
           module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
           module.add(SLoadB64(dst=sgpr("AddressD", 2), base=sgpr("AddressD",2), soffset=sgpr(tmpSgpr), comment="load global buffer D address"))
+          # Apply batch offset to AddressD for general batched mode
+          if not kernel["ProblemType"]["StridedBatched"] and not kernel["ProblemType"]["GroupedGemm"]:
+            module.add(SAddU64(dst=sgpr("AddressD", 2), src0=sgpr("AddressD", 2), src1=sgpr("BatchOffsetD", 2), comment="add batch offset to D address"))
 
       # Only load C buffer address if Beta is used and potentially non-zero
       if kernel["ProblemType"]["UseBeta"]:
@@ -2155,6 +2158,9 @@ class KernelWriterAssembly(KernelWriter):
           if not isPackedIndex(kernel,idx):
             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
             module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr("AddressC",2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
+            # Apply batch offset to AddressC for general batched mode
+            if not kernel["ProblemType"]["StridedBatched"] and not kernel["ProblemType"]["GroupedGemm"]:
+              module.add(SAddU64(dst=sgpr("AddressC", 2), src0=sgpr("AddressC", 2), src1=sgpr("BatchOffsetC", 2), comment="add batch offset to C address"))
 
         module.add(endCheckLabel)
 
@@ -2173,6 +2179,10 @@ class KernelWriterAssembly(KernelWriter):
       if not isPackedIndex(kernel,idx):
         module.add(SLoadB64(dst=sgpr("AddressA", 2), base=sgpr("AddressA",2), soffset=sgpr(tmpSgpr), comment="load global buffer A address"))
         module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr("AddressB",2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))
+        # Apply batch offset to AddressA and AddressB for general batched mode
+        if not kernel["ProblemType"]["StridedBatched"] and not kernel["ProblemType"]["GroupedGemm"]:
+          module.add(SAddU64(dst=sgpr("AddressA", 2), src0=sgpr("AddressA", 2), src1=sgpr("BatchOffsetA", 2), comment="add batch offset to A address"))
+          module.add(SAddU64(dst=sgpr("AddressB", 2), src0=sgpr("AddressB", 2), src1=sgpr("BatchOffsetB", 2), comment="add batch offset to B address"))
 
     module.add(endCheckLabel)
 
@@ -2198,6 +2208,19 @@ class KernelWriterAssembly(KernelWriter):
         kernelArgs.add(self.argLoader.loadKernArg(self.states.esmRuntimeFlagSgpr, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=1))
         sgprOffset += 4
         self.argLoader.setOffset(sgprOffset)
+
+    # Load batch offset arguments for general batched mode
+    if not kernel["ProblemType"]["StridedBatched"] and not kernel["ProblemType"]["GroupedGemm"]:
+      sgprOffset = self.argLoader.getOffset()
+      kernelArgs.add(self.argLoader.loadKernArg("BatchOffsetD", "KernArgAddress", sgprOffset=hex(sgprOffset), dword=2))
+      sgprOffset += 8   # 64-bit = 8 bytes
+      kernelArgs.add(self.argLoader.loadKernArg("BatchOffsetC", "KernArgAddress", sgprOffset=hex(sgprOffset), dword=2))
+      sgprOffset += 8
+      kernelArgs.add(self.argLoader.loadKernArg("BatchOffsetA", "KernArgAddress", sgprOffset=hex(sgprOffset), dword=2))
+      sgprOffset += 8
+      kernelArgs.add(self.argLoader.loadKernArg("BatchOffsetB", "KernArgAddress", sgprOffset=hex(sgprOffset), dword=2))
+      sgprOffset += 8
+
     return kernelArgs
 
   def localReadAddresses(self, kernel, tPA, tPB, tPM):
