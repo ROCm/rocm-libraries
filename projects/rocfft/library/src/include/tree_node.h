@@ -1285,7 +1285,7 @@ struct CommRCCLAllToAll : public MultiPlanItem
     }
 
 private:
-    rocfft_rccl_comm_t& rccl;
+    const rocfft_rccl_comm_t& rccl;
 
     const rocfft_precision  precision;
     const rocfft_array_type arrayType;
@@ -1384,10 +1384,10 @@ private:
         hipStream_wrapper_t stream; // each transfer has its own stream
     };
 
-    rocfft_rccl_comm_t&     rccl;
-    const rocfft_precision  precision;
-    const rocfft_array_type arrayType;
-    std::vector<Transfer>   transfers;
+    const rocfft_rccl_comm_t& rccl;
+    const rocfft_precision    precision;
+    const rocfft_array_type   arrayType;
+    std::vector<Transfer>     transfers;
 };
 #endif // ROCFFT_RCCL_ENABLE
 

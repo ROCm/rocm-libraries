@@ -222,7 +222,7 @@ void rocfft_rccl_comm_t::alltoall(const void*       sendbuf,
                                   int               device_id,
                                   hipStream_t       stream,
                                   rocfft_precision  precision,
-                                  rocfft_array_type array_type)
+                                  rocfft_array_type array_type) const
 {
     ncclComm_t comm          = static_cast<ncclComm_t>(get_comm(device_id));
     auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
@@ -243,7 +243,7 @@ void rocfft_rccl_comm_t::send(const void*       sendbuf,
                               int               device_id,
                               hipStream_t       stream,
                               rocfft_precision  precision,
-                              rocfft_array_type array_type)
+                              rocfft_array_type array_type) const
 {
     ncclComm_t comm          = static_cast<ncclComm_t>(get_comm(device_id));
     auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
@@ -265,7 +265,7 @@ void rocfft_rccl_comm_t::recv(void*             recvbuf,
                               int               device_id,
                               hipStream_t       stream,
                               rocfft_precision  precision,
-                              rocfft_array_type array_type)
+                              rocfft_array_type array_type) const
 {
     ncclComm_t comm          = static_cast<ncclComm_t>(get_comm(device_id));
     auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);

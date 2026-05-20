@@ -101,7 +101,7 @@ public:
                   int               device_id,
                   hipStream_t       stream,
                   rocfft_precision  precision,
-                  rocfft_array_type array_type);
+                  rocfft_array_type array_type) const;
 
     // point-to-point send.  throws rocfft_rccl_exception_t on RCCL failure.
     void send(const void*       sendbuf,
@@ -110,7 +110,7 @@ public:
               int               device_id,
               hipStream_t       stream,
               rocfft_precision  precision,
-              rocfft_array_type array_type);
+              rocfft_array_type array_type) const;
 
     // point-to-point receive.  throws rocfft_rccl_exception_t on RCCL failure.
     void recv(void*             recvbuf,
@@ -119,7 +119,7 @@ public:
               int               device_id,
               hipStream_t       stream,
               rocfft_precision  precision,
-              rocfft_array_type array_type);
+              rocfft_array_type array_type) const;
 
 private:
     struct Impl;
