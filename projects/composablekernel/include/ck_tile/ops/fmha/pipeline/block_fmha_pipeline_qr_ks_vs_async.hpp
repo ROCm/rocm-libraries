@@ -667,8 +667,12 @@ struct BlockFmhaPipelineQRKSVSAsync
             // Conditional rescaling (FA4): skip when correction is negligible.
             // For skip rows we stabilize P with m_old so P is computed directly in
             // the m_{j-1} frame, eliminating the post-correction sweep.
+            // FP8 quant modes cast P to FP8 after softmax. In the skip
+            // branch P can exceed the FP8 representable range and saturate,
+            // corrupting the P*V GEMM. Disable skip for all FP8 paths.
             static constexpr SMPLComputeDataType kRescaleThreshold =
-                type_convert<SMPLComputeDataType>(8.0f);
+                type_convert<SMPLComputeDataType>(
+                    QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ? 8.0f : 0.0f);
 
             auto m_stab =
                 make_static_distributed_tensor<SMPLComputeDataType>(m.get_tile_distribution());

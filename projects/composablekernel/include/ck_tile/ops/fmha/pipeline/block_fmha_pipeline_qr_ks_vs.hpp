@@ -857,8 +857,13 @@ struct BlockFmhaPipelineQRKSVS
             // For skip rows we stabilize P with m_old (the previous max) instead of
             // the new max m_j, so P is computed directly in the m_{j-1} frame and no
             // post-correction sweep is needed. For rescale rows we use m_j as usual.
+            // FP8 quant modes (PERTENSOR/BLOCKSCALE/etc.) cast P to FP8 after
+            // softmax. In the skip branch P is computed with m_old, so P can
+            // exceed the FP8 representable range and saturate, corrupting the
+            // P*V GEMM. Disable skip for all FP8 paths (threshold 0).
             static constexpr SMPLComputeDataType kRescaleThreshold =
-                type_convert<SMPLComputeDataType>(8.0f);
+                type_convert<SMPLComputeDataType>(
+                    QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ? 8.0f : 0.0f);
 
             // Per-row stabilizer: m_old for skip rows, m_j for rescale rows.
             auto m_stab =
