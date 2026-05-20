@@ -89,6 +89,11 @@ struct GroupedConvKernelKey
     // Convolution specialization (e.g., "default", "filter1x1_stride1_pad0")
     std::string specialization = "default";
 
+    // Stream-K configuration
+    bool streamk_enabled = false;
+    std::string streamk_reduction = "none"; // "none", "tree", "linear"
+    bool streamk_persistent = false;
+
     // GPU architecture (for filter_by_arch)
     std::string arch = "gfx942";
 
@@ -105,7 +110,10 @@ struct GroupedConvKernelKey
                vector_size_c == other.vector_size_c && block_per_cu == other.block_per_cu &&
                num_wave_groups == other.num_wave_groups &&
                num_groups_to_merge == other.num_groups_to_merge &&
-               specialization == other.specialization && arch == other.arch;
+               specialization == other.specialization &&
+               streamk_enabled == other.streamk_enabled &&
+               streamk_reduction == other.streamk_reduction &&
+               streamk_persistent == other.streamk_persistent && arch == other.arch;
     }
 
     std::string to_string() const
@@ -145,6 +153,9 @@ struct GroupedConvKernelKeyHash
         h ^= std::hash<std::string>{}(key.pipeline) << 11;
         h ^= std::hash<std::string>{}(key.arch) << 12;
         h ^= std::hash<std::string>{}(key.specialization) << 13;
+        h ^= std::hash<bool>{}(key.streamk_enabled) << 14;
+        h ^= std::hash<std::string>{}(key.streamk_reduction) << 15;
+        h ^= std::hash<bool>{}(key.streamk_persistent) << 16;
         return h;
     }
 };

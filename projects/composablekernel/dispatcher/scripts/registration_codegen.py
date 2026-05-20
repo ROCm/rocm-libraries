@@ -145,6 +145,18 @@ def parse_kernel_metadata(kname):
     elif "filter3x3" in kname:
         specialization = "filter3x3"
 
+    # Stream-K detection
+    streamk_enabled = False
+    streamk_reduction = "none"
+    streamk_persistent = False
+    if "_streamk_" in kname:
+        streamk_enabled = True
+        if "_streamk_tree" in kname:
+            streamk_reduction = "tree"
+        elif "_streamk_linear" in kname:
+            streamk_reduction = "linear"
+        streamk_persistent = kname.endswith("_persistent")
+
     return {
         "ndim": ndim,
         "dtype": dtype,
@@ -157,6 +169,9 @@ def parse_kernel_metadata(kname):
         "block_per_cu": block_per_cu, "num_wave_groups": num_wave_groups,
         "num_groups_to_merge": num_groups_to_merge,
         "specialization": specialization,
+        "streamk_enabled": streamk_enabled,
+        "streamk_reduction": streamk_reduction,
+        "streamk_persistent": streamk_persistent,
     }
 
 
@@ -222,6 +237,9 @@ def _make_implicit_gemm_conv_key(meta):
         f"        key.num_wave_groups    = {meta['num_wave_groups']};",
         f"        key.num_groups_to_merge = {meta['num_groups_to_merge']};",
         f'        key.specialization = "{meta["specialization"]}";',
+        f'        key.streamk_enabled   = {str(meta["streamk_enabled"]).lower()};',
+        f'        key.streamk_reduction = "{meta["streamk_reduction"]}";',
+        f'        key.streamk_persistent = {str(meta["streamk_persistent"]).lower()};',
     ]
 
 
