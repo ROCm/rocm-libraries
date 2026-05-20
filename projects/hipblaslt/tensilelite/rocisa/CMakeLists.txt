@@ -5,11 +5,18 @@
 # (hipblaslt CMake) builds.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.25)
+
+    include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/modules/default_amdclang.cmake)
+
     project(rocisa LANGUAGES CXX)
     set(ROCISA_STANDALONE ON)
 else()
     set(ROCISA_STANDALONE OFF)
 endif()
+
+option(ROCISA_USE_STABLE_ABI
+       "Build rocisa as a Python stable ABI extension (requires Python >= 3.12 and CMake >= 3.26)."
+       OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,7 +40,11 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         # scikit-build-core pre-installs nanobind (from build-system.requires)
         # and injects its CMake path, so find_package works without FetchContent.
         # nanobind requires Python to be found first.
-        find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
+        if(ROCISA_USE_STABLE_ABI)
+            find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
+        else()
+            find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
+        endif()
         find_package(nanobind REQUIRED CONFIG)
     else()
         include(FetchContent)
@@ -43,11 +54,17 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
           GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
         )
         FetchContent_MakeAvailable(nanobind)
+        if(ROCISA_USE_STABLE_ABI)
+            find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
+        endif()
     endif()
 
     # HIP is required to build _rocisa (via hip::host).  Set the search prefix
     # so find_package works both in developer environments and in the temporary
     # build sandbox created by scikit-build-core / uv.
+    if(ROCM_PATH)
+        list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+    endif()
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
     find_package(hip REQUIRED)
 
@@ -79,9 +96,15 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/composite.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/cycle.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/remove.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/insert_delay_alu.cpp")
+                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/insert_delay_alu.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/macro_inline.cpp")
 
-    nanobind_add_module(_rocisa NOMINSIZE NB_SUPPRESS_WARNINGS
+    set(_rocisa_nb_flags NOMINSIZE NB_SUPPRESS_WARNINGS)
+    if(ROCISA_USE_STABLE_ABI)
+        list(APPEND _rocisa_nb_flags STABLE_ABI)
+    endif()
+
+    nanobind_add_module(_rocisa ${_rocisa_nb_flags}
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/main.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/base.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/code.cpp"
@@ -146,6 +169,11 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     )
     # _build_info.py is intentionally NOT in install() rules so it is absent
     # from wheels and pre-built packages, acting as the source-build sentinel.
+    # For editable/dev installs, pass -DROCISA_INCLUDE_BUILD_INFO=ON to include it.
+    option(ROCISA_INCLUDE_BUILD_INFO "Install _build_info.py for staleness detection" OFF)
+    if(ROCISA_INCLUDE_BUILD_INFO)
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py" DESTINATION rocisa)
+    endif()
 
     if(ROCISA_STANDALONE)
         # Install rules for scikit-build-core: place _rocisa.so, libstinkytofu.so,

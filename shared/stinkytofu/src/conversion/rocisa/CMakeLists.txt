@@ -5,7 +5,7 @@
 target_sources(_rocisa PRIVATE AllHwMappings.cpp ToStinkyTofuUtils.cpp)
 
 target_include_directories(_rocisa PRIVATE
-    "${STINKYTOFU_TOP_DIR}/include"
+    "${STINKYTOFU_ROOT_DIR}/include"
     "${CMAKE_BINARY_DIR}/tensilelite/rocisa/stinkytofu"
 )
 

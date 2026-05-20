@@ -7,6 +7,7 @@
 #include <string>
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
@@ -111,7 +112,8 @@ struct EnvVar
         is_unset = false;
         value    = val;
     }
-
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     explicit EnvVar(const char* const name, const T& def_val)
     {
         // NOLINTNEXTLINE (concurrency-mt-unsafe)
@@ -126,6 +128,7 @@ struct EnvVar
             value = def_val;
         }
     }
+#pragma clang diagnostic pop
 };
 } // end namespace internal
 
