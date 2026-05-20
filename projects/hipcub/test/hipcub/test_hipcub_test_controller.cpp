@@ -49,7 +49,8 @@ public:
     {
         std::stringstream ss;
         for (const LineInfo& line : lines)
-            ss << "/" << line.test << "/ : /" << line.arch << "/ : " << line.size << " : " << line.build_type << " : \"" << line.skip_msg << "\"" << std::endl;
+            ss << "/" << line.test << "/ : /" << line.arch << "/ : " << line.size << " : "
+			   << line.build_type << " : \"" << line.skip_msg << "\"" << std::endl;
         return ss.str();
     };
 

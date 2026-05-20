@@ -218,12 +218,6 @@ add_custom_target(copy_control_file_changes
 )
 add_dependencies(hipcub copy_control_file_changes)
 
-configure_file(
-  "${CMAKE_CURRENT_SOURCE_DIR}/hipcub/test_utils_controller.hpp.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/hipcub/test_utils_controller.hpp"
-  @ONLY
-)
-
 rocm_install(
   FILES "${TEST_CONTROL_FILE_BUILD_PATH}/control.txt"
   DESTINATION "${TEST_CONTROL_FILE_INSTALL_PATH}"
