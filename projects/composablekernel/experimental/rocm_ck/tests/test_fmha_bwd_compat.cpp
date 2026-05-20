@@ -459,6 +459,15 @@ TEST(FmhaBwdCompat, Registry_OGradDotO_FallsToPaddedWhenNoPadMissing)
     EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_bf16_d128_batch");
 }
 
+TEST(FmhaBwdCompat, Registry_OGradDotO_FindsBF16Group)
+{
+    const auto* v = findVariant(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_bf16_d128_group");
+}
+
 TEST(FmhaBwdCompat, Registry_OGradDotO_ReturnsNullForUnregistered)
 {
     const auto* v = findVariant(FmhaBwdOGradDotOConfig{
@@ -469,7 +478,7 @@ TEST(FmhaBwdCompat, Registry_OGradDotO_ReturnsNullForUnregistered)
 
 TEST(FmhaBwdCompat, Registry_OGradDotO_VariantCount)
 {
-    EXPECT_EQ(ALL_OGRAD_DOT_O_VARIANTS_COUNT, 5);
+    EXPECT_EQ(ALL_OGRAD_DOT_O_VARIANTS_COUNT, 6);
 }
 
 // ============================================================================
@@ -498,6 +507,18 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16Batch)
                                         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_bf16_d128_batch");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16Group)
+{
+    const auto* v =
+        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
+                                                      .hdim_q = 128,
+                                                      .hdim_v = 128,
+                                                      .mode   = FmhaMode::GROUP},
+                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_bf16_d128_group");
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsMask)
@@ -620,7 +641,7 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
     EXPECT_EQ(v, nullptr);
 }
 
-TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 15); }
+TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 16); }
 
 // _cmask_br and _swa share the compiled spec with _cmask. findVariant() matches
 // by spec features alone, so it returns _cmask first for any has_mask=true
