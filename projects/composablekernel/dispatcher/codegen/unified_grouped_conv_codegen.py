@@ -42,7 +42,8 @@ except ImportError:
     ArchFilter = None
     OperatorType = None
 
-# Import tile configurations from grouped_config_rules (single source of truth)
+# Import tile configurations and shared validation rules from grouped_config_rules
+# (single source of truth)
 try:
     from grouped_config_rules import (
         COMMON_TILES,
@@ -51,6 +52,12 @@ try:
         VARIANT_PIPELINES,
         BWD_WEIGHT_TILES,
         COMPV4_COMPATIBLE_TILES,
+        # Shared validation functions
+        check_vectors,
+        check_warp_coverage,
+        check_bwd_data_vec_coverage,
+        is_valid_pipeline_for_variant,
+        is_streamk_valid_for_variant,
     )
     HAS_TILE_CONFIGS = True
 except ImportError:
@@ -313,6 +320,8 @@ class GroupedConvKernelConfig:
 
     def is_valid_for_arch(self, arch: Optional[str] = None) -> bool:
         """Check if configuration is valid for target architecture.
+
+        Uses shared validation rules from grouped_config_rules.py.
         """
         target_arch = arch if arch is not None else self.arch
 
@@ -320,76 +329,51 @@ class GroupedConvKernelConfig:
         if not self.trait.is_valid():
             return False
 
-        # Stream-K is only supported for backward_weight
         tr = self.trait
-        if tr.streamk_config.streamk_enabled and self.variant != GroupedConvVariant.BACKWARD_WEIGHT:
+        variant_str = self.variant.value  # e.g. "forward", "bwd_data", "bwd_weight"
+
+        # Stream-K is only supported for backward_weight
+        if tr.streamk_config.streamk_enabled and not is_streamk_valid_for_variant(variant_str):
             return False
 
-        # Backward operations have stricter pipeline requirements:
-        # - Backward weight: compv5 has transpose_tile2d issues
-        # - Backward data: compv4 has get_length issues in bwd_data kernel
-        # Both backward operations support compv1/compv2/compv3/compv4/compv6/mem pipelines
-        if self.variant in (
-            GroupedConvVariant.BACKWARD_WEIGHT,
-            GroupedConvVariant.BACKWARD_DATA,
-        ):
-            if self.trait.pipeline not in (
-                "basic_async_v1",
-                "compv1", "compv2", "compv3", "compv4", "compv6",
-                "basic_v1", "basic_v2", "mem",
-            ):
-                return False
+        # Backward operations reject compv5
+        if not is_valid_pipeline_for_variant(tr.pipeline, variant_str):
+            return False
 
-        # Reject irregular vector sizes.
-        # AMD GPUs only have vector load instructions for widths 1, 2, 4, 8, 16.
-        for vec in (self.vector_size_a, self.vector_size_b, self.vector_size_c):
-            if vec != 1 and vec % 2 != 0:
-                log.warning(
-                    f"Rejecting config: irregular vector size {vec} "
-                    f"(must be 1 or even)"
-                )
-                return False
+        # Reject irregular vector sizes (AMD GPUs: 1, 2, 4, 8, 16 only)
+        if not check_vectors(self.vector_size_a, self.vector_size_b, self.vector_size_c):
+            log.warning(
+                f"Rejecting config: irregular vector size "
+                f"(vec_a={self.vector_size_a}, vec_b={self.vector_size_b}, "
+                f"vec_c={self.vector_size_c})"
+            )
+            return False
 
-        # Reject configurations where a tile dimension exceeds what a
-        # single warp can cover with its vector loads.  The check is direction-
-        # aware because the bwd_data implicit GEMM is transposed:
-        #   Forward / bwd_weight:  tile_m > warp_size * vec_a  (M is the A-tile dim)
-        #   Backward data:         tile_k > warp_size * vec_a  (K is the A-tile dim)
-        warp_size = 64
+        # Reject tile dims that exceed single-warp vector load coverage
         t = self.tile
-        a_tile_dim = (
-            t.tile_k
-            if self.variant == GroupedConvVariant.BACKWARD_DATA
-            else t.tile_m
-        )
-        if a_tile_dim > warp_size * self.vector_size_a:
+        if not check_warp_coverage(
+            t.tile_m, t.tile_n, t.tile_k,
+            self.vector_size_a, self.vector_size_b,
+            variant=variant_str,
+        ):
             log.warning(
-                f"Rejecting config: A-tile dim {a_tile_dim} > "
-                f"warp_size({warp_size}) * vec_a({self.vector_size_a})"
-            )
-            return False
-        if t.tile_n > warp_size * self.vector_size_b:
-            log.warning(
-                f"Rejecting config: tile_n {t.tile_n} > "
-                f"warp_size({warp_size}) * vec_b({self.vector_size_b})"
+                f"Rejecting config: tile exceeds warp coverage "
+                f"(tile={t.tile_m}x{t.tile_n}x{t.tile_k}, "
+                f"vec_a={self.vector_size_a}, vec_b={self.vector_size_b})"
             )
             return False
 
-        # Bwd_data only: vector width must not exceed the number of
-        # elements each thread handles per tile slice.
-        # block_size = warp_size * warp_m * warp_n * warp_k
+        # Bwd_data only: vector width must not exceed elements per thread
         if self.variant == GroupedConvVariant.BACKWARD_DATA:
-            block_size = warp_size * t.warp_m * t.warp_n * t.warp_k
-            if self.vector_size_a > (t.tile_m * t.tile_k) // block_size:
+            if not check_bwd_data_vec_coverage(
+                t.tile_m, t.tile_n, t.tile_k,
+                t.warp_m, t.warp_n, t.warp_k,
+                self.vector_size_a, self.vector_size_b,
+            ):
                 log.warning(
-                    f"Rejecting bwd_data config: vec_a({self.vector_size_a}) > "
-                    f"(tile_m({t.tile_m}) * tile_k({t.tile_k})) // block_size({block_size})"
-                )
-                return False
-            if self.vector_size_b > (t.tile_n * t.tile_k) // block_size:
-                log.warning(
-                    f"Rejecting bwd_data config: vec_b({self.vector_size_b}) > "
-                    f"(tile_n({t.tile_n}) * tile_k({t.tile_k})) // block_size({block_size})"
+                    f"Rejecting bwd_data config: vec exceeds tile coverage "
+                    f"(tile={t.tile_m}x{t.tile_n}x{t.tile_k}, "
+                    f"vec_a={self.vector_size_a}, vec_b={self.vector_size_b})"
                 )
                 return False
 
