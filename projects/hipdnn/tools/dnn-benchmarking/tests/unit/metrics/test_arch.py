@@ -33,14 +33,17 @@ class TestDetectArchRocminfoPath:
     def test_rocminfo_returns_gfx_target(self):
         sample = "  Name:  gfx942\n  Marketing Name: AMD Instinct MI300X\n"
         proc = MagicMock(returncode=0, stdout=sample, stderr="")
-        with patch.object(_arch, "_detect_via_torch", return_value=None), patch(
-            "shutil.which", return_value="/opt/rocm/bin/rocminfo"
+        # Patch resolve_rocm_tool (not bare shutil.which) so the test
+        # mirrors production resolution: rocminfo is found under
+        # $ROCM_PATH/bin even when /opt/rocm/bin isn't on PATH.
+        with patch.object(_arch, "_detect_via_torch", return_value=None), patch.object(
+            _arch, "resolve_rocm_tool", return_value="/opt/rocm/bin/rocminfo"
         ), patch("subprocess.run", return_value=proc):
             assert detect_arch() == "gfx942"
 
     def test_rocminfo_missing_returns_fallback(self):
-        with patch.object(_arch, "_detect_via_torch", return_value=None), patch(
-            "shutil.which", return_value=None
+        with patch.object(_arch, "_detect_via_torch", return_value=None), patch.object(
+            _arch, "resolve_rocm_tool", return_value=None
         ):
             assert detect_arch() == "fallback"
 

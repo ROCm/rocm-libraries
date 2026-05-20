@@ -324,7 +324,7 @@ Tarball Input:
         metavar="DIR",
         help=(
             "Root directory for profiling artefacts (rocpd dbs, "
-            "pftraces, perf CSVs, roofline PDFs). Default: "
+            "pftraces, perf CSVs, roofline CSVs). Default: "
             "./profiling-output/<utc-timestamp>/."
         ),
     )

@@ -23,6 +23,7 @@ slice with a ``skipped`` / ``error_tail`` / ``warnings`` key, and a
 single ``warn_once`` line goes to stderr.
 """
 
+import hashlib
 import re
 import sys
 from datetime import datetime, timezone
@@ -71,6 +72,30 @@ def _safe_segment(name: str) -> str:
     return _PATH_SAFE_RE.sub("_", name) or "unnamed"
 
 
+def _graph_segment(graph_path: Path) -> str:
+    """``<stem>-<6 hex>`` disambiguator for the per-graph subdir.
+
+    Suite mode accepts directories and globs, so two graphs with the same
+    file stem (``models/a/conv.json`` and ``models/b/conv.json``) would
+    otherwise collide on ``<root>/conv/<engine>/<source>/results.db`` and
+    silently overwrite each other. The hash is derived from the resolved
+    absolute path so it's stable across runs from the same CWD and
+    distinguishes two graphs that share a stem.
+
+    Hash length is 6 hex chars (24 bits) — collision probability across a
+    realistic suite (<10⁴ graphs) is negligible, and 6 chars keeps the
+    segment short enough to type when chasing an artifact path.
+    """
+    try:
+        anchor = str(graph_path.resolve())
+    except OSError:
+        # Graph file might not exist on disk (test paths). Fall back to
+        # the string form — still stable per (CWD, input).
+        anchor = str(graph_path)
+    digest = hashlib.sha1(anchor.encode("utf-8")).hexdigest()[:6]
+    return f"{_safe_segment(graph_path.stem)}-{digest}"
+
+
 def build_inner_argv(
     graph_path: Path,
     engine_id: int,
@@ -113,21 +138,21 @@ def build_inner_argv(
 
 def _subdir(out_dir: Path, graph_path: Path, engine_name: str, source: str) -> Path:
     """Per-source output directory:
-    ``<out_dir>/<graph_stem>/<engine_name>/<source>/``.
+    ``<out_dir>/<graph_stem>-<hash6>/<engine_name>/<source>/``.
 
     Three semantic levels under the user-controlled root: graph, then
     engine, then profiling source. Replaces the legacy flat scheme
     ``<graph>_<engine_id>_<source>/`` whose engine_id segment was a
     19-digit hash that no one could read or type.
 
-    Both the graph stem and engine name are sanitised before joining:
-    today's engines (MIOPEN_ENGINE, etc.) are alphanumeric and safe,
-    but a future plugin returning an awkward name (with slashes,
-    spaces, colons) would otherwise break the artifact tree.
+    The graph segment carries a 6-hex disambiguator (see
+    ``_graph_segment``) so same-stem graphs from different directories
+    don't collide; engine name is sanitised because a future plugin
+    could return slashes/spaces.
     """
     sub = (
         out_dir
-        / _safe_segment(graph_path.stem)
+        / _graph_segment(graph_path)
         / _safe_segment(engine_name)
         / _safe_segment(source)
     )

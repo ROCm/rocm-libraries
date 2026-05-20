@@ -4,9 +4,16 @@
 """rocprof-compute roofline collection.
 
 Wraps the workload in ``rocprof-compute profile --roof-only --`` to
-produce a roofline plot. The PDF is the user-facing artifact;
-``extra_metrics["roofline"]`` records file paths only (no parsing of
-the underlying SQLite).
+capture HBM/compute ceilings. The profile pass emits CSVs
+(``roofline.csv``, ``sysinfo.csv``, per-IP results CSVs) and the
+workload directory; no PDF or HTML is produced at profile time.
+``extra_metrics["roofline"]`` records those file paths.
+
+Rendering the actual roofline (ASCII / web GUI / TUI) is a post-hoc
+``rocprof-compute analyze --path <workload>`` invocation against the
+recorded ``workload_path``. See ``docs/troubleshooting.md`` for the
+separate-venv setup ``analyze`` needs (its deps would downgrade torch's
+numpy if installed into the dnn-benchmarking venv).
 
 Datatype selection is intentionally absent here: in current
 rocprof-compute (and upstream rocm-systems develop) the

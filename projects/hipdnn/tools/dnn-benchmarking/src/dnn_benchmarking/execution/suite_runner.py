@@ -49,6 +49,12 @@ def _resolve_engine_name(engine_id: int) -> str:
     isn't registered (returns empty string), falls back to a hex display
     string so callers always have something printable.
 
+    Unexpected exceptions (plugin import error, registry corruption)
+    emit a one-shot warning to stderr so a silent fallback doesn't hide
+    a real plugin-init bug — the hex fallback only changes the artifact
+    path and reporting label, but the underlying error usually indicates
+    a broader registry problem worth surfacing.
+
     Args:
         engine_id: int engine ID.
 
@@ -61,8 +67,14 @@ def _resolve_engine_name(engine_id: int) -> str:
         name = hipdnn.engine_id_to_name(engine_id)
         if name:
             return name
-    except Exception:
-        pass
+    except Exception as e:
+        from ..metrics._diagnostic import warn_once
+
+        warn_once(
+            "suite_runner",
+            f"engine_id_to_name failed for {engine_id:#x}: {e}; "
+            "falling back to hex display string",
+        )
     return f"engine_{engine_id:#x}"
 
 

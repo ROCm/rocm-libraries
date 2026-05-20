@@ -53,8 +53,12 @@ pytest -m "rocprof_compute and not rocprofv3 and not perf" tests/integration/tes
 pytest -m "rocprofv3 and perf and rocprof_compute" tests/integration/test_profiling.py
 ```
 
-`perf` needs `apt install linux-tools-generic` plus
-`sudo sysctl kernel.perf_event_paranoid=1` for user-event collection.
+`perf` needs `apt install linux-tools-generic`. User-space counters
+(``cycles_user``, ``instructions_user``, ``ipc_user``) collect on a
+default host without privileges. Kernel-space counters
+(``cycles_kernel``, ``instructions_kernel``) additionally require
+``sudo sysctl kernel.perf_event_paranoid=1``; without it they record
+as ``None`` and the slice carries ``kernel_events_skipped_reason``.
 
 ### CI
 

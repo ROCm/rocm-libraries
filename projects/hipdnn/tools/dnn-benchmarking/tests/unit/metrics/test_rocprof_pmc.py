@@ -48,7 +48,7 @@ class TestResolveCounterList:
 class TestArgvBuild:
     def test_passes_pmc_set_and_inner_argv(self, tmp_path):
         argv = rocprof_pmc._build_argv(
-            counters=["GRBM_GUI_ACTIVE", "SQ_WAVES"],
+            counter_groups=[["GRBM_GUI_ACTIVE", "SQ_WAVES"]],
             out_dir=tmp_path,
             inner_argv=["python", "-m", "dnn_benchmarking", "--internal-profiling-run"],
             rocprofv3_binary="/opt/rocm/bin/rocprofv3",
@@ -59,7 +59,9 @@ class TestArgvBuild:
         # venv shim from torch's rocm_sdk_core wheel (broken on torch
         # workloads).
         assert argv[0] == "/opt/rocm/bin/rocprofv3"
-        assert "--pmc" in argv
+        # Single group → exactly one --pmc flag, identical wire format
+        # to the historical single-flag emit.
+        assert argv.count("--pmc") == 1
         # `-o results` strips the `<pid>_` prefix from rocprofv3's
         # default `<hostname>/<pid>_results.<ext>` filename so the
         # artifact path is stable and copy-pasteable.
@@ -69,6 +71,72 @@ class TestArgvBuild:
         sep = argv.index("--")
         assert "GRBM_GUI_ACTIVE" in argv[:sep]
         assert "python" in argv[sep + 1 :]
+
+    def test_multi_group_emits_one_pmc_flag_per_group(self, tmp_path):
+        """rocprofv3 expresses multipass as ``--pmc G1 --pmc G2 …`` — one
+        flag per pass. A single flattened ``--pmc <every counter>`` is a
+        single-pass request regardless of count, and silently overflows
+        the hardware budget on arches with >hw-limit unioned counters.
+        This guards against regressing to the historical flat emit.
+        """
+        argv = rocprof_pmc._build_argv(
+            counter_groups=[
+                ["GRBM_GUI_ACTIVE", "SQ_WAVES"],
+                ["TCC_HIT_sum", "TCC_MISS_sum"],
+                ["SQ_INSTS_VALU_MFMA_F16"],
+            ],
+            out_dir=tmp_path,
+            inner_argv=["python"],
+            rocprofv3_binary="/opt/rocm/bin/rocprofv3",
+        )
+        assert argv.count("--pmc") == 3
+        # Each group's counters follow its --pmc and don't cross into
+        # the next group.
+        sep = argv.index("--")
+        pmc_indices = [i for i, tok in enumerate(argv[:sep]) if tok == "--pmc"]
+        # Group 1: GRBM_GUI_ACTIVE, SQ_WAVES sit between pmc[0]+1 and pmc[1].
+        assert argv[pmc_indices[0] + 1 : pmc_indices[1]] == [
+            "GRBM_GUI_ACTIVE",
+            "SQ_WAVES",
+        ]
+        assert argv[pmc_indices[1] + 1 : pmc_indices[2]] == [
+            "TCC_HIT_sum",
+            "TCC_MISS_sum",
+        ]
+        # Group 3 runs from pmc[2]+1 to the first non-counter (-d).
+        d_idx = argv.index("-d")
+        assert argv[pmc_indices[2] + 1 : d_idx] == ["SQ_INSTS_VALU_MFMA_F16"]
+
+
+class TestResolveCounterGroups:
+    def test_named_set_returns_single_group(self):
+        groups = rocprof_pmc._resolve_counter_groups("gfx942", "basic")
+        assert len(groups) == 1
+        assert "GRBM_GUI_ACTIVE" in groups[0]
+
+    def test_all_returns_one_group_per_source_group(self):
+        """``all`` on a known arch must preserve pass boundaries —
+        otherwise ``--pmc-allow-multipass`` is a lie. gfx942 defines
+        basic + memory + flops, so we expect three groups."""
+        groups = rocprof_pmc._resolve_counter_groups("gfx942", "all")
+        assert len(groups) == 3
+        # Each group is non-empty and stays distinct (no flattening).
+        assert all(g for g in groups)
+        # Counters from different source groups land in different output
+        # groups — sanity check that we're not collapsing.
+        basic_g = next(g for g in groups if "GRBM_GUI_ACTIVE" in g)
+        memory_g = next(g for g in groups if "TCC_HIT_sum" in g)
+        assert basic_g is not memory_g
+
+    def test_all_on_unknown_arch_returns_fallback_single_group(self):
+        groups = rocprof_pmc._resolve_counter_groups("gfx-mystery", "all")
+        assert groups == [["GRBM_GUI_ACTIVE", "SQ_WAVES"]]
+
+    def test_unknown_set_returns_empty_outer_list(self):
+        # Empty outer list signals "nothing to collect" to the caller —
+        # not a single empty group, which would emit ``--pmc`` with no
+        # counters and confuse rocprofv3.
+        assert rocprof_pmc._resolve_counter_groups("gfx942", "bogus") == []
 
 
 class TestRunHappyPath:

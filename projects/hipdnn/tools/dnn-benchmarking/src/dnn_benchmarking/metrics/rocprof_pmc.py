@@ -81,37 +81,73 @@ PMC_SETS: Dict[str, Dict[str, List[str]]] = {
 }
 
 
-def _resolve_counter_list(arch: str, pmc_set: str) -> List[str]:
-    """Return the counter list for (arch, set), unioning everything for 'all'.
+def _resolve_counter_groups(arch: str, pmc_set: str) -> List[List[str]]:
+    """Return one counter group per intended rocprofv3 pass.
 
-    Falls back to the 'fallback' arch table when the arch isn't in
-    PMC_SETS, and returns whatever sets do exist. An empty list signals
-    "nothing to collect" — the caller should skip the run.
+    rocprofv3 expresses multipass via repeated ``--pmc`` flags — one
+    flag per group, each group collected in a separate pass. The
+    historical flat-list emit ``--pmc <every counter from every group>``
+    was a single-pass request regardless of group count; on arches where
+    the union exceeded the hardware single-pass counter budget,
+    rocprofv3 would either fail or silently drop counters.
+
+    Named sets (``basic``/``memory``/``flops``) always return exactly
+    one group. ``all`` returns one group per source group from the arch
+    table, preserving pass boundaries. The fallback arch table only
+    defines ``basic``, so ``all`` on an unknown arch returns that single
+    group.
+
+    Empty outer list signals "nothing to collect" — the caller should
+    skip the run.
     """
     arch_table = PMC_SETS.get(arch) or PMC_SETS["fallback"]
     if pmc_set == "all":
-        seen: Dict[str, None] = {}
-        for group in arch_table.values():
-            for name in group:
-                seen.setdefault(name, None)
-        return list(seen)
-    return list(arch_table.get(pmc_set, []))
+        return [list(group) for group in arch_table.values() if group]
+    group = arch_table.get(pmc_set)
+    if not group:
+        return []
+    return [list(group)]
+
+
+def _resolve_counter_list(arch: str, pmc_set: str) -> List[str]:
+    """Flat, dedup-preserved view of every counter across every group.
+
+    Kept for diagnostic logging and ``counters_requested`` in the JSON
+    payload — the argv builder consumes groups directly via
+    ``_resolve_counter_groups``. Order matches first-occurrence across
+    groups so the JSON view is stable across rocprofv3 invocations.
+    """
+    seen: Dict[str, None] = {}
+    for group in _resolve_counter_groups(arch, pmc_set):
+        for name in group:
+            seen.setdefault(name, None)
+    return list(seen)
 
 
 def _build_argv(
-    counters: List[str],
+    counter_groups: List[List[str]],
     out_dir: Path,
     inner_argv: List[str],
     rocprofv3_binary: str,
 ) -> List[str]:
-    # `-o results` drops the `<pid>_` prefix from rocprofv3's default
-    # `<hostname>/<pid>_results.<ext>` filename. The hostname segment is
-    # still added by rocprofv3 itself and is hoisted out post-run by
-    # ``profiling_orchestrator.flatten_hostname_dir``.
-    return [
-        rocprofv3_binary,
-        "--pmc",
-        *counters,
+    """Emit one ``--pmc`` per group.
+
+    Single-group invocations (named sets, fallback arches) collapse to
+    one ``--pmc <counters...>`` — identical wire format to the historical
+    single-flag emit. Multi-group invocations (``--pmc all`` on a known
+    arch) emit one flag per group, which rocprofv3 reads as a multipass
+    request — replay budget is per-pass rather than per-aggregate-union.
+
+    `-o results` drops the `<pid>_` prefix from rocprofv3's default
+    `<hostname>/<pid>_results.<ext>` filename. The hostname segment is
+    still added by rocprofv3 itself and is hoisted out post-run by
+    ``profiling_orchestrator.flatten_hostname_dir``.
+    """
+    argv: List[str] = [rocprofv3_binary]
+    for group in counter_groups:
+        argv.append("--pmc")
+        argv.extend(group)
+    argv += [
         "-d",
         str(out_dir),
         "-o",
@@ -119,6 +155,7 @@ def _build_argv(
         "--",
         *inner_argv,
     ]
+    return argv
 
 
 def _find_rocpd_db(search_dir: Path) -> Optional[Path]:
@@ -237,7 +274,16 @@ def run(
     ``error_tail`` / ``warnings`` keys plus a ``warn_once`` to stderr.
     """
     arch = detect_arch()
-    counters = _resolve_counter_list(arch, pmc_set)
+    counter_groups = _resolve_counter_groups(arch, pmc_set)
+    # Flat, dedup-preserved view for diagnostics + JSON `counters_requested`.
+    # Argv emission keeps the per-group lists intact — a counter that
+    # legitimately appears in two groups gets two readings (one per
+    # pass), which we don't want to silently collapse there.
+    seen: Dict[str, None] = {}
+    for group in counter_groups:
+        for name in group:
+            seen.setdefault(name, None)
+    counters = list(seen)
     if not counters:
         warn_once("rocprof_pmc", f"no counters defined for arch={arch} set={pmc_set}")
         return {
@@ -276,7 +322,7 @@ def run(
     # user sees in the JSON / console doesn't carry the hostname
     # segment for single-host runs.
     out_dir.mkdir(parents=True, exist_ok=True)
-    argv = _build_argv(counters, out_dir, inner_argv, rocprofv3_binary)
+    argv = _build_argv(counter_groups, out_dir, inner_argv, rocprofv3_binary)
 
     timeout_s = profiling_subprocess_timeout_seconds() or None
     try:

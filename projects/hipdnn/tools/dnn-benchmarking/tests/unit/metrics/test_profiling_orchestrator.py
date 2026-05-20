@@ -118,9 +118,10 @@ class TestResolveOutputDir:
             assert cfg.profiling_output_dir == first_root
 
         assert len(captured_pmc_dirs) == 2
-        # Per-source subdirs land under <root>/<graph>/<engine>/<source>.
-        assert captured_pmc_dirs[0] == first_root / "g" / "ENGINE_A" / "pmc_basic"
-        assert captured_pmc_dirs[1] == first_root / "g" / "ENGINE_B" / "pmc_basic"
+        # Per-source subdirs land under <root>/<graph-<hash>>/<engine>/<source>.
+        graph_seg = orch._graph_segment(Path("graphs/g.json"))
+        assert captured_pmc_dirs[0] == first_root / graph_seg / "ENGINE_A" / "pmc_basic"
+        assert captured_pmc_dirs[1] == first_root / graph_seg / "ENGINE_B" / "pmc_basic"
 
 
 class TestPathSanitization:
@@ -151,6 +152,35 @@ class TestPathSanitization:
         assert orch._safe_segment("") == "unnamed"
         assert orch._safe_segment("///") == "___"
 
+    def test_subdir_disambiguates_same_stem_graphs(self, tmp_path):
+        """Suite mode globs directories — two graphs named ``conv.json``
+        in different parents must not share an artifact directory, or
+        stable filenames (``results.db``, ``perf.csv``, etc.) would
+        silently overwrite each other across graphs."""
+        # Create both graphs so resolve() returns canonical absolute paths
+        # (which is what the hash anchors on).
+        a = tmp_path / "a" / "conv.json"
+        b = tmp_path / "b" / "conv.json"
+        a.parent.mkdir(parents=True)
+        b.parent.mkdir(parents=True)
+        a.write_text("{}")
+        b.write_text("{}")
+
+        sub_a = orch._subdir(tmp_path / "out", a, "ENGINE", "pmc_basic")
+        sub_b = orch._subdir(tmp_path / "out", b, "ENGINE", "pmc_basic")
+        assert sub_a != sub_b
+        # Both segments still carry the readable stem.
+        assert "conv-" in sub_a.parts[-3]
+        assert "conv-" in sub_b.parts[-3]
+
+    def test_graph_segment_stable_for_same_path(self, tmp_path):
+        """Determinism guard: two calls with the same resolved path must
+        produce the same segment — otherwise re-running a suite would
+        scatter artifacts into fresh directories every time."""
+        g = tmp_path / "x.json"
+        g.write_text("{}")
+        assert orch._graph_segment(g) == orch._graph_segment(g)
+
     def test_subdir_sanitizes_engine_name(self, tmp_path):
         sub = orch._subdir(
             tmp_path,
@@ -159,7 +189,7 @@ class TestPathSanitization:
             source="pmc_basic",
         )
         # No literal '/' or ' ' anywhere except path separators between
-        # graph_stem / engine_name / source.
+        # graph_segment / engine_name / source.
         assert "weird_engine_name" in sub.parts
         assert sub.exists()
 
@@ -249,14 +279,15 @@ class TestDispatch:
                 plugin_path=None,
                 out_dir=tmp_path,
             )
-        # New layout: <root>/<graph>/<engine_name>/<source>/. Engine name
-        # (human-readable) replaces engine_id (19-digit hash) so artifact
-        # paths are typeable.
+        # New layout: <root>/<graph-<hash>>/<engine_name>/<source>/.
+        # Engine name (human-readable) replaces engine_id (19-digit hash)
+        # so artifact paths are typeable; graph segment carries a 6-hex
+        # disambiguator so same-stem graphs don't collide.
+        graph_seg = orch._graph_segment(Path("graphs/sample_conv.json"))
         assert (
-            captured["pmc_dir"]
-            == tmp_path / "sample_conv" / "MIOPEN_ENGINE" / "pmc_basic"
+            captured["pmc_dir"] == tmp_path / graph_seg / "MIOPEN_ENGINE" / "pmc_basic"
         )
         assert (
             captured["trace_dir"]
-            == tmp_path / "sample_conv" / "MIOPEN_ENGINE" / "trace_pftrace"
+            == tmp_path / graph_seg / "MIOPEN_ENGINE" / "trace_pftrace"
         )

@@ -13,11 +13,11 @@ counter set rather than raising so the orchestrator can still produce
 """
 
 import re
-import shutil
 import subprocess
 from typing import Optional
 
 from ._diagnostic import warn_once
+from ._tool_resolver import resolve_rocm_tool
 
 _GFX_PATTERN = re.compile(r"\b(gfx[0-9a-f]+)\b", re.IGNORECASE)
 
@@ -44,7 +44,11 @@ def _detect_via_torch() -> Optional[str]:
 
 
 def _detect_via_rocminfo() -> Optional[str]:
-    binary = shutil.which("rocminfo")
+    # Use resolve_rocm_tool so hosts where /opt/rocm/bin isn't on PATH
+    # (Alola login nodes, sandboxed containers) still find rocminfo. A
+    # bare shutil.which silently misses it and downgrades the user to
+    # the fallback counter set.
+    binary = resolve_rocm_tool("rocminfo")
     if binary is None:
         return None
     try:

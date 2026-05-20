@@ -626,6 +626,11 @@ class Reporter:
             if pe.status == "success":
                 self._print_pe_stats(pe)
                 self._print_pe_metrics(pe)
+                # Profiling artefacts render independently of the always-on
+                # metrics block — opt-in profiling is valid under
+                # --metrics-tier off, and the user should still see where
+                # their artefacts landed plus any tool-failure detail.
+                self._print_profiling_block(pe)
                 if pe.correctness is not None:
                     self._print_pe_correctness(pe.correctness, suite_config)
             elif pe.status == "skipped":
@@ -735,7 +740,6 @@ class Reporter:
         if pe.vram_used_mb is not None:
             self._print(f"  VRAM used:            {self._fmt_mib(pe.vram_used_mb)}")
         self._print("")
-        self._print_profiling_block(pe)
 
     def _print_profiling_block(self, pe: ProviderEngineResult) -> None:
         """Render the opt-in profiling artefacts when extra_metrics is set.
@@ -781,6 +785,11 @@ class Reporter:
                     )
             if not trace_path and not db_path and "skipped" in trace:
                 self._print(f"  Trace ({fmt}):         skipped — {trace['skipped']}")
+            if "error_tail" in trace:
+                self._print(
+                    f"  Trace ({fmt}):         rocprofv3 errored "
+                    f"(rc={trace.get('returncode', '?')})"
+                )
 
         pmc = extra.get("pmc")
         if isinstance(pmc, dict):
@@ -819,6 +828,11 @@ class Reporter:
         if isinstance(perf, dict):
             if "skipped" in perf:
                 self._print(f"  CPU (perf):           skipped — {perf['skipped']}")
+            elif "error_tail" in perf:
+                self._print(
+                    f"  CPU (perf):           errored "
+                    f"(rc={perf.get('returncode', '?')})"
+                )
             else:
                 bits = []
                 ipc = perf.get("ipc_user")
@@ -860,6 +874,11 @@ class Reporter:
                 )
             if "skipped" in roofline:
                 self._print(f"  Roofline:             skipped — {roofline['skipped']}")
+            if "error_tail" in roofline:
+                self._print(
+                    f"  Roofline:             rocprof-compute errored "
+                    f"(rc={roofline.get('returncode', '?')})"
+                )
         self._print("")
 
     def _print_pe_correctness(
