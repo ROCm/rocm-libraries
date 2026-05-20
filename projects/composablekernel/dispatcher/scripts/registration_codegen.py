@@ -15,8 +15,87 @@ from pathlib import Path
 CHUNK_SIZE = 25
 
 
+def parse_depthwise_kernel_metadata(kname):
+    """Extract metadata from a depthwise kernel header filename stem.
+
+    Depthwise kernels have names like:
+    grouped_conv_fwd_depthwise_fp16_ngchw_2d_8x8_f3_s1x1_p1x1_nb8_sub2x2_vec2_2
+
+    Returns a dict with "is_depthwise": True and the actual depthwise parameters.
+    """
+    ndim = 3 if "_3d_" in kname else 2
+
+    dtype = "fp16"
+    for dt in ["fp16", "bf16", "fp32"]:
+        if f"_{dt}_" in kname:
+            dtype = dt
+            break
+
+    # Detect layout from kernel name
+    layout = "ngchw"
+    for lay in ["ngchw", "ngcdhw", "nhwgc", "ndhwgc"]:
+        if f"_{lay}_" in kname:
+            layout = lay
+            break
+
+    # Extract vec sizes from _vec{in}_{out} at the end
+    in_vec, out_vec = 1, 1
+    vec_match = re.search(r"_vec(\d+)_(\d+)$", kname)
+    if vec_match:
+        in_vec = int(vec_match.group(1))
+        out_vec = int(vec_match.group(2))
+
+    tile_h, tile_w = 0, 0
+    tile_match = re.search(r"_(\d+)x(\d+)_f", kname)
+    if tile_match:
+        tile_h, tile_w = int(tile_match.group(1)), int(tile_match.group(2))
+
+    filt = 0
+    filt_match = re.search(r"_f(\d+)_", kname)
+    if filt_match:
+        filt = int(filt_match.group(1))
+
+    str_h, str_w = 0, 0
+    stride_match = re.search(r"_s(\d+)x(\d+)_", kname)
+    if stride_match:
+        str_h, str_w = int(stride_match.group(1)), int(stride_match.group(2))
+
+    pad_h, pad_w = 0, 0
+    pad_match = re.search(r"_p(\d+)x(\d+)_", kname)
+    if pad_match:
+        pad_h, pad_w = int(pad_match.group(1)), int(pad_match.group(2))
+
+    nbatch = 0
+    nb_match = re.search(r"_nb(\d+)_", kname)
+    if nb_match:
+        nbatch = int(nb_match.group(1))
+
+    sub_h, sub_w = 0, 0
+    sub_match = re.search(r"_sub(\d+)x(\d+)_", kname)
+    if sub_match:
+        sub_h, sub_w = int(sub_match.group(1)), int(sub_match.group(2))
+
+    return {
+        "is_depthwise": True,
+        "ndim": ndim,
+        "dtype": dtype,
+        "layout": layout,
+        "tile_h": tile_h, "tile_w": tile_w,
+        "filt": filt,
+        "str_h": str_h, "str_w": str_w,
+        "pad_h": pad_h, "pad_w": pad_w,
+        "nbatch": nbatch,
+        "sub_h": sub_h, "sub_w": sub_w,
+        "in_vec": in_vec, "out_vec": out_vec,
+    }
+
+
 def parse_kernel_metadata(kname):
     """Extract metadata from a kernel header filename stem."""
+    # Route depthwise kernels to specialized parser
+    if "_depthwise_" in kname:
+        return parse_depthwise_kernel_metadata(kname)
+
     ndim = 3 if "_3d_" in kname else 2
 
     dtype = "fp16"
@@ -69,6 +148,7 @@ def parse_kernel_metadata(kname):
     return {
         "ndim": ndim,
         "dtype": dtype,
+        "layout": "nhwgc",
         "tile_m": tile_m, "tile_n": tile_n, "tile_k": tile_k,
         "wave_m": wave_m, "wave_n": wave_n, "wave_k": wave_k,
         "warp_m": warp_m, "warp_n": warp_n, "warp_k": warp_k,
@@ -80,42 +160,90 @@ def parse_kernel_metadata(kname):
     }
 
 
+def _make_depthwise_conv_key(meta):
+    """Generate C++ key assignment lines for a depthwise conv kernel."""
+    # Map depthwise parameters into the GEMM key fields to ensure each
+    # depthwise kernel gets a unique registry key.
+    return [
+        f'        key.dtype_in     = "{meta["dtype"]}";',
+        f'        key.dtype_wei    = "{meta["dtype"]}";',
+        f'        key.dtype_out    = "{meta["dtype"]}";',
+        f'        key.layout       = "{meta["layout"]}";',
+        f"        key.ndim_spatial = {meta['ndim']};",
+        f"        // Depthwise params encoded: tile_h/w -> tile_m/n, filt -> tile_k",
+        f"        key.tile_m       = {meta['tile_h']};",
+        f"        key.tile_n       = {meta['tile_w']};",
+        f"        key.tile_k       = {meta['filt']};",
+        f"        // stride_h/w -> wave_m/n, nbatch -> warp_k",
+        f"        key.wave_m       = {meta['str_h']};",
+        f"        key.wave_n       = {meta['str_w']};",
+        f"        key.wave_k       = 0;",
+        f"        // pad_h/w -> warp_m/n",
+        f"        key.warp_m       = {meta['pad_h']};",
+        f"        key.warp_n       = {meta['pad_w']};",
+        f"        key.warp_k       = {meta['nbatch']};",
+        f'        key.pipeline     = "depthwise";',
+        f'        key.scheduler    = "none";',
+        f'        key.epilogue     = "none";',
+        f"        key.vector_size_a      = {meta['in_vec']};",
+        f"        key.vector_size_b      = {meta['in_vec']};",
+        f"        key.vector_size_c      = {meta['out_vec']};",
+        f"        key.block_per_cu       = 2;",
+        f"        key.num_wave_groups    = 1;",
+        f"        key.num_groups_to_merge = 1;",
+        f'        key.specialization = "sub{meta["sub_h"]}x{meta["sub_w"]}";',
+    ]
+
+
+def _make_implicit_gemm_conv_key(meta):
+    """Generate C++ key assignment lines for an implicit GEMM-based conv kernel."""
+    return [
+        f'        key.dtype_in     = "{meta["dtype"]}";',
+        f'        key.dtype_wei    = "{meta["dtype"]}";',
+        f'        key.dtype_out    = "{meta["dtype"]}";',
+        f'        key.layout       = "{meta.get("layout", "nhwgc")}";',
+        f"        key.ndim_spatial = {meta['ndim']};",
+        f"        key.tile_m       = {meta['tile_m']};",
+        f"        key.tile_n       = {meta['tile_n']};",
+        f"        key.tile_k       = {meta['tile_k']};",
+        f"        key.wave_m       = {meta['wave_m']};",
+        f"        key.wave_n       = {meta['wave_n']};",
+        f"        key.wave_k       = {meta['wave_k']};",
+        f"        key.warp_m       = {meta['warp_m']};",
+        f"        key.warp_n       = {meta['warp_n']};",
+        f"        key.warp_k       = {meta['warp_k']};",
+        f'        key.pipeline     = "{meta["pipeline"]}";',
+        f'        key.scheduler    = "{meta["scheduler"]}";',
+        f'        key.epilogue     = "{meta["epilogue"]}";',
+        f"        key.vector_size_a      = {meta['vec_a']};",
+        f"        key.vector_size_b      = {meta['vec_b']};",
+        f"        key.vector_size_c      = {meta['vec_c']};",
+        f"        key.block_per_cu       = {meta['block_per_cu']};",
+        f"        key.num_wave_groups    = {meta['num_wave_groups']};",
+        f"        key.num_groups_to_merge = {meta['num_groups_to_merge']};",
+        f'        key.specialization = "{meta["specialization"]}";',
+    ]
+
+
 def make_registration_block(kname, global_idx, op_enum, run_fn_maker, is_supported_fn_maker):
     """Generate C++ registration code for a single kernel."""
     meta = parse_kernel_metadata(kname)
     ns = f"ns_{kname}"
     launcher = f"{ns}::{kname}_Launcher"
     ndim = meta["ndim"]
+    is_depthwise = meta.get("is_depthwise", False)
 
     lines = []
     lines.append(f"    // Kernel {global_idx}: {kname}")
     lines.append("    {")
     lines.append(f"        GroupedConvKernelKey key;")
-    lines.append(f'        key.dtype_in     = "{meta["dtype"]}";')
-    lines.append(f'        key.dtype_wei    = "{meta["dtype"]}";')
-    lines.append(f'        key.dtype_out    = "{meta["dtype"]}";')
-    lines.append(f'        key.layout       = "nhwgc";')
-    lines.append(f"        key.ndim_spatial = {ndim};")
     lines.append(f"        key.op           = {op_enum};")
-    lines.append(f"        key.tile_m       = {meta['tile_m']};")
-    lines.append(f"        key.tile_n       = {meta['tile_n']};")
-    lines.append(f"        key.tile_k       = {meta['tile_k']};")
-    lines.append(f"        key.wave_m       = {meta['wave_m']};")
-    lines.append(f"        key.wave_n       = {meta['wave_n']};")
-    lines.append(f"        key.wave_k       = {meta['wave_k']};")
-    lines.append(f"        key.warp_m       = {meta['warp_m']};")
-    lines.append(f"        key.warp_n       = {meta['warp_n']};")
-    lines.append(f"        key.warp_k       = {meta['warp_k']};")
-    lines.append(f'        key.pipeline     = "{meta["pipeline"]}";')
-    lines.append(f'        key.scheduler    = "{meta["scheduler"]}";')
-    lines.append(f'        key.epilogue     = "{meta["epilogue"]}";')
-    lines.append(f"        key.vector_size_a      = {meta['vec_a']};")
-    lines.append(f"        key.vector_size_b      = {meta['vec_b']};")
-    lines.append(f"        key.vector_size_c      = {meta['vec_c']};")
-    lines.append(f"        key.block_per_cu       = {meta['block_per_cu']};")
-    lines.append(f"        key.num_wave_groups    = {meta['num_wave_groups']};")
-    lines.append(f"        key.num_groups_to_merge = {meta['num_groups_to_merge']};")
-    lines.append(f'        key.specialization = "{meta["specialization"]}";')
+
+    if is_depthwise:
+        lines.extend(_make_depthwise_conv_key(meta))
+    else:
+        lines.extend(_make_implicit_gemm_conv_key(meta))
+
     lines.append(f"        key.arch         = arch;")
     lines.append(f"        auto run_fn = {run_fn_maker}<{launcher}, {ndim}>();")
     lines.append(f"        auto is_supported_fn = {is_supported_fn_maker}<{launcher}, {ndim}>();")

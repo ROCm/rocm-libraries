@@ -409,6 +409,50 @@ class GroupedConvKernelConfig:
         return True
 
 
+@dataclass
+class DepthwiseConvKernelConfig:
+    """Complete depthwise convolution kernel configuration.
+    """
+
+    # Depthwise tile parameters
+    tile_h: int = 8
+    tile_w: int = 8
+    filt: int = 3       # filter_h == filter_w (square filters)
+    str_h: int = 1
+    str_w: int = 1
+    pad_h: int = 1
+    pad_w: int = 1
+    nbatch: int = 1
+    sub_h: int = 1
+    sub_w: int = 1
+    in_vec: int = 1
+    out_vec: int = 1
+
+    # Fixed parameters (depthwise always uses these)
+    block_size: int = 64
+    dil_h: int = 1
+    dil_w: int = 1
+    ndim_spatial: int = 2
+
+    # Metadata
+    arch: str = "gfx942"
+    layout: str = "ngchw"
+    datatype: str = "fp16"
+
+    def name(self, datatype: str) -> str:
+        """Generate unique kernel name for depthwise convolution."""
+        return (
+            f"grouped_conv_fwd_depthwise_{datatype}_{self.layout}_{self.ndim_spatial}d"
+            f"_{self.tile_h}x{self.tile_w}"
+            f"_f{self.filt}"
+            f"_s{self.str_h}x{self.str_w}"
+            f"_p{self.pad_h}x{self.pad_w}"
+            f"_nb{self.nbatch}"
+            f"_sub{self.sub_h}x{self.sub_w}"
+            f"_vec{self.in_vec}_{self.out_vec}"
+        )
+
+
 # ============================================================================
 # Type Mappings
 # ============================================================================
@@ -1451,6 +1495,171 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
 
 
 # ============================================================================
+# CK Tile Depthwise Conv Kernel Generator
+# ============================================================================
+
+
+class CKTileDepthwiseConvKernelGenerator:
+    """Generates CK Tile depthwise convolution kernel instance code.
+    """
+
+    DTYPE_TO_CK = {
+        "fp16": "half_t",
+        "bf16": "bf16_t",
+        "fp32": "float",
+    }
+
+    def __init__(self, datatype: str):
+        self.datatype = datatype
+
+    def generate(self, config: DepthwiseConvKernelConfig) -> str:
+        """Generate complete depthwise convolution kernel header."""
+        kernel_name = config.name(self.datatype)
+        return f"""{self._header(kernel_name)}
+{self._config_and_types(config, kernel_name)}
+{self._launcher(config, kernel_name)}
+"""
+
+    def _header(self, kernel_name: str) -> str:
+        return f"""// SPDX-License-Identifier: MIT
+// Auto-generated CK Tile Depthwise Convolution kernel: {kernel_name}
+// Variant: forward_depthwise
+#pragma once
+
+#include <cstdint>
+#include <numeric>
+#include <functional>
+#include "ck_tile/core.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/ops/grouped_convolution.hpp"
+#include "ck_tile/ops/grouped_convolution/pipeline/grouped_convolution_forward_depthwise_pipeline.hpp"
+#include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
+
+using namespace ck_tile;
+"""
+
+    def _config_and_types(self, config: DepthwiseConvKernelConfig, kernel_name: str) -> str:
+        ck_dtype = self.DTYPE_TO_CK[self.datatype]
+        c = config
+        return f"""
+// Kernel configuration and type definitions
+namespace ns_{kernel_name} {{
+
+using InDataType  = {ck_dtype};
+using WeiDataType = {ck_dtype};
+using AccDataType = float;
+using OutDataType = {ck_dtype};
+
+// Depthwise convolution traits
+using DwTraits = DepthwiseConvFwdTraits<
+    InDataType, WeiDataType, AccDataType, OutDataType,
+    {c.block_size},   // BlockSize
+    {c.tile_h},       // TileH
+    {c.tile_w},       // TileW
+    {c.filt},         // FilterH
+    {c.filt},         // FilterW
+    {c.str_h},        // StrideH
+    {c.str_w},        // StrideW
+    {c.dil_h},        // DilationH
+    {c.dil_w},        // DilationW
+    {c.pad_h},        // PadH
+    {c.pad_w},        // PadW
+    {c.nbatch},       // NBatch
+    {c.sub_h},        // SubTileH
+    {c.sub_w},        // SubTileW
+    {c.in_vec},       // InVec
+    {c.out_vec}>;     // OutVec
+
+// Depthwise pipeline
+using DwPipeline = DepthwiseConvFwdPipeline<DwTraits>;
+
+// Grouped convolution traits (depthwise specialization)
+using ConvTraitsType = GroupedConvTraits<
+    {c.ndim_spatial},                           // NDimSpatial
+    ConvolutionSpecialization::Default,         // ConvSpec
+    void,                                       // InLayout  (unused for depthwise)
+    void,                                       // WeiLayout (unused for depthwise)
+    tuple<>,                                    // DsLayout
+    void,                                       // OutLayout (unused for depthwise)
+    {c.in_vec},                                 // VectorSizeA
+    {c.in_vec},                                 // VectorSizeB
+    {c.out_vec},                                // VectorSizeC
+    1,                                          // NumGroupsToMerge
+    false,                                      // EnableSplitImage
+    false,                                      // ExplicitGemm
+    DwTraits>;                                  // DepthwiseTraits
+
+// Null epilogue for depthwise (no shuffle needed)
+struct DepthwiseNullEpilogue {{
+    using DsLayout      = tuple<>;
+    using DsDataType    = tuple<>;
+    using ODataType     = OutDataType;
+    using AccDataType   = float;
+    using CDElementwise = element_wise::PassThrough;
+}};
+
+// Complete kernel type
+using Kernel = GroupedConvolutionForwardKernel<
+    ConvTraitsType, void, DwPipeline, DepthwiseNullEpilogue>;
+"""
+
+    def _launcher(self, config: DepthwiseConvKernelConfig, kernel_name: str) -> str:
+        ns_name = f"ns_{kernel_name}"
+        return f"""
+constexpr const char* CONV_FWD_KERNEL_NAME = "{kernel_name}";
+
+struct {kernel_name}_Launcher {{
+    using KernelConfig = DwTraits;
+    using InDataType  = {ns_name}::InDataType;
+    using WeiDataType = {ns_name}::WeiDataType;
+    using OutDataType = {ns_name}::OutDataType;
+    using AccDataType = {ns_name}::AccDataType;
+
+    static constexpr index_t NDimSpatial = {config.ndim_spatial};
+
+    static float launch(const GroupedConvFwdHostArgs<>& args, const stream_config& s) {{
+        auto kargs = Kernel::MakeKernelArgs(args);
+
+        if (!Kernel::IsSupportedArgument(kargs)) {{
+            throw std::runtime_error("Arguments not supported for depthwise conv kernel");
+        }}
+
+        const dim3 grids  = Kernel::GridSize(kargs);
+        const dim3 blocks = Kernel::BlockSize();
+
+        float ave_time = launch_kernel(s, make_kernel(Kernel{{}}, grids, blocks, 0, kargs));
+        return ave_time;
+    }}
+
+    static bool is_supported(const ck_tile::conv::ConvParam& conv_param, int k_batch) {{
+        GroupedConvFwdHostArgs<> args(conv_param,
+            nullptr, nullptr, {{}}, nullptr, k_batch);
+
+        auto kargs = Kernel::MakeKernelArgs(args);
+        return Kernel::IsSupportedArgument(kargs);
+    }}
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+    static std::string get_instance_string() {{
+        return Kernel{{}}.GetInstanceString();
+    }}
+#endif
+}};
+
+using SelectedConvKernelLauncher = {kernel_name}_Launcher;
+
+}} // namespace {ns_name}
+
+using {kernel_name}_Launcher = {ns_name}::{kernel_name}_Launcher;
+
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+using SelectedConvKernelLauncher = {ns_name}::SelectedConvKernelLauncher;
+constexpr const char* CONV_FWD_KERNEL_NAME = {ns_name}::CONV_FWD_KERNEL_NAME;
+#endif
+"""
+
+
+# ============================================================================
 # Dispatcher Wrapper Generator
 # ============================================================================
 
@@ -1499,18 +1708,28 @@ class GroupedConvDispatcherWrapperGenerator:
             scheduler.lower(), f"Scheduler::{scheduler.capitalize()}"
         )
 
+    # Map datatype string to dispatcher DataType enum
+    DTYPE_TO_DISPATCHER = {
+        "fp16": "DataType::FP16",
+        "bf16": "DataType::BF16",
+        "fp32": "DataType::FP32",
+    }
+
     def generate(
         self,
-        config: GroupedConvKernelConfig,
+        config: Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig],
         kernel_path: Path,
         output_dir: Path,
     ) -> str:
-        """Generate dispatcher wrapper with factory function for registry"""
+        """Generate dispatcher wrapper with factory function for registry."""
         kernel_name = config.name(self.datatype)
         rel_path = kernel_path.relative_to(output_dir)
+        is_depthwise = isinstance(config, DepthwiseConvKernelConfig)
 
-        # Determine launcher type based on variant
-        if self.variant == GroupedConvVariant.FORWARD:
+        dtype_enum = self.DTYPE_TO_DISPATCHER.get(self.datatype, "DataType::FP16")
+
+        # Determine variant-specific fields
+        if is_depthwise or self.variant == GroupedConvVariant.FORWARD:
             launcher_alias = "SelectedConvKernelLauncher"
             host_args_type = "GroupedConvFwdHostArgs<>"
             conv_type_str = "forward"
@@ -1522,6 +1741,23 @@ class GroupedConvDispatcherWrapperGenerator:
             launcher_alias = "SelectedConvBwdWeightLauncher"
             host_args_type = "GroupedConvBwdWeightHostArgs"
             conv_type_str = "bwd_weight"
+
+        layout = config.layout if is_depthwise else "nhwgc"
+
+        # Algorithm key fields differ between implicit GEMM and depthwise algorithms
+        if is_depthwise:
+            algorithm_spec = """    // Depthwise kernels have no GEMM tile parameters
+    key.algorithm.tile_shape = {0, 0, 0};
+    key.algorithm.wave_shape = {0, 0, 0};
+    key.algorithm.warp_tile_shape = {0, 0, 0};
+    key.algorithm.epilogue = Epilogue::None;"""
+        else:
+            algorithm_spec = f"""    key.algorithm.tile_shape = {{{config.tile.tile_m}, {config.tile.tile_n}, {config.tile.tile_k}}};
+    key.algorithm.wave_shape = {{{config.tile.warp_m}, {config.tile.warp_n}, 1}};
+    key.algorithm.warp_tile_shape = {{{config.tile.warp_tile_m}, {config.tile.warp_tile_n}, {config.tile.warp_tile_k}}};
+    key.algorithm.pipeline = {self._pipeline_to_dispatcher(config.trait.pipeline)};
+    key.algorithm.scheduler = {self._scheduler_to_dispatcher(config.trait.scheduler)};
+    key.algorithm.epilogue = Epilogue::CShuffle;"""
 
         return f"""// SPDX-License-Identifier: MIT
 // Auto-generated dispatcher wrapper for: {kernel_name}
@@ -1547,23 +1783,18 @@ using Priority = ::ck_tile::dispatcher::GroupedConvRegistry::Priority;
 // Factory function to create kernel instance for registry
 inline GroupedConvKernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx942") {{
     GroupedConvKernelKey key;
-    key.signature.dtype_in = DataType::FP16;
-    key.signature.dtype_wei = DataType::FP16;
-    key.signature.dtype_out = DataType::FP16;
+    key.signature.dtype_in = {dtype_enum};
+    key.signature.dtype_wei = {dtype_enum};
+    key.signature.dtype_out = {dtype_enum};
     key.signature.dtype_acc = DataType::FP32;
-    key.signature.layout = "nhwgc";
+    key.signature.layout = "{layout}";
     key.signature.conv_type = "{conv_type_str}";
     key.signature.num_dims = {config.ndim_spatial};
     key.signature.groups = 1;
-    
-    key.algorithm.tile_shape = {{{config.tile.tile_m}, {config.tile.tile_n}, {config.tile.tile_k}}};
-    key.algorithm.wave_shape = {{{config.tile.warp_m}, {config.tile.warp_n}, 1}};
-    key.algorithm.warp_tile_shape = {{{config.tile.warp_tile_m}, {config.tile.warp_tile_n}, {config.tile.warp_tile_k}}};
-    key.algorithm.pipeline = {self._pipeline_to_dispatcher(config.trait.pipeline)};
-    key.algorithm.scheduler = {self._scheduler_to_dispatcher(config.trait.scheduler)};
-    key.algorithm.epilogue = Epilogue::CShuffle;
+
+    {algorithm_spec}
     key.gfx_arch = gfx_arch;
-    
+
     // Create kernel instance that wraps the launcher
     return std::make_shared<GroupedConvKernelInstance>(
         key,
@@ -1588,11 +1819,65 @@ using {launcher_alias} = {kernel_name}_Launcher;
 # ============================================================================
 
 
+def load_depthwise_configs_from_json(
+    data: dict,
+    arch: str = "gfx942",
+    instance_id: Optional[int] = None,
+) -> List[DepthwiseConvKernelConfig]:
+    """Load depthwise convolution configs from parsed JSON data.
+
+    Args:
+        data: Parsed JSON config data
+        arch: Target GPU architecture
+        instance_id: If specified, load only the instance with this ID
+
+    Returns:
+        List of DepthwiseConvKernelConfig objects
+    """
+    ndim_spatial = data["ndim_spatial"]
+    layout = data["layout"]
+    datatype = data["datatype"]
+
+    instances = data["instances"]
+    if instance_id is not None:
+        instances = [inst for inst in instances if inst["id"] == instance_id]
+        if not instances:
+            raise ValueError(f"Instance ID {instance_id} not found in depthwise config")
+
+    configs = []
+    for inst in instances:
+        config = DepthwiseConvKernelConfig(
+            tile_h=inst["tile_h"],
+            tile_w=inst["tile_w"],
+            filt=inst["filt"],
+            str_h=inst["str_h"],
+            str_w=inst["str_w"],
+            pad_h=inst["pad_h"],
+            pad_w=inst["pad_w"],
+            nbatch=inst["nbatch"],
+            sub_h=inst["sub_h"],
+            sub_w=inst["sub_w"],
+            in_vec=inst["in_vec"],
+            out_vec=inst["out_vec"],
+            ndim_spatial=ndim_spatial,
+            arch=arch,
+            layout=layout,
+            datatype=datatype,
+        )
+        configs.append(config)
+
+    log.info(
+        f"Loaded {len(configs)} depthwise configs "
+        f"(layout={layout}, dtype={datatype})"
+    )
+    return configs
+
+
 def load_configs_from_json(
     config_path: Path,
     arch: str = "gfx942",
     instance_id: Optional[int] = None,
-) -> List[GroupedConvKernelConfig]:
+) -> List[Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig]]:
     """Load kernel configurations from a JSON config file.
 
     Args:
@@ -1618,12 +1903,7 @@ def load_configs_from_json(
         raise ValueError(f"Unknown variant: {data['variant']}")
 
     if variant == GroupedConvVariant.FORWARD_DEPTHWISE:
-        log.info(
-            f"Skipping depthwise config {config_path.name} "
-            f"(layout={data['layout']}, dtype={data['datatype']}, "
-            f"{len(data['instances'])} instances) — codegen not yet implemented"
-        )
-        return []
+        return load_depthwise_configs_from_json(data, arch, instance_id)
 
     ndim_spatial = data["ndim_spatial"]
     layout = data["layout"]
@@ -1850,7 +2130,7 @@ class _GenItem:
         self,
         idx: int,
         total: int,
-        config: GroupedConvKernelConfig,
+        config: Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig],
         datatype: str,
         variant: GroupedConvVariant,
     ):
@@ -1953,13 +2233,18 @@ class UnifiedGroupedConvCodegen:
 
     def generate_kernel(
         self,
-        config: GroupedConvKernelConfig,
+        config: Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig],
         datatype: str,
         variant: GroupedConvVariant = GroupedConvVariant.FORWARD,
     ) -> Tuple[Path, Path]:
         """Generate a single kernel file and dispatcher wrapper. Returns (kernel_path, wrapper_path)."""
-        kernel_gen = CKTileGroupedConvKernelGenerator(datatype, variant)
-        wrapper_gen = GroupedConvDispatcherWrapperGenerator(datatype, variant)
+        if isinstance(config, DepthwiseConvKernelConfig):
+            kernel_gen = CKTileDepthwiseConvKernelGenerator(datatype)
+            # Depthwise kernels are forward-only, use the forward wrapper generator
+            wrapper_gen = GroupedConvDispatcherWrapperGenerator(datatype, GroupedConvVariant.FORWARD)
+        else:
+            kernel_gen = CKTileGroupedConvKernelGenerator(datatype, variant)
+            wrapper_gen = GroupedConvDispatcherWrapperGenerator(datatype, variant)
 
         kernel_name = config.name(datatype)
         filename = f"{kernel_name}.hpp"
@@ -1970,7 +2255,6 @@ class UnifiedGroupedConvCodegen:
         filepath.write_text(content)
         self.generated_files.append(filepath)
 
-        # Generate dispatcher wrapper
         wrapper_content = wrapper_gen.generate(config, filepath, self.output_dir)
         wrapper_path = self.wrapper_dir / f"dispatcher_wrapper_{kernel_name}.hpp"
         wrapper_path.write_text(wrapper_content)
@@ -2008,7 +2292,7 @@ namespace ck_tile {{ namespace generated {{
 
     def generate_all(
         self,
-        configs: Optional[List[GroupedConvKernelConfig]] = None,
+        configs: Optional[List[Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig]]] = None,
         datatypes: Optional[List[str]] = None,
         parallel: bool = True,
     ) -> dict:
@@ -2030,7 +2314,10 @@ namespace ck_tile {{ namespace generated {{
 
         for datatype in datatypes:
             for config in configs:
-                if self.is_config_valid(config, datatype):
+                if isinstance(config, DepthwiseConvKernelConfig):
+                    # Depthwise configs skip arch filter validation (not applicable)
+                    valid_tasks.append((config, datatype, GroupedConvVariant.FORWARD_DEPTHWISE))
+                elif self.is_config_valid(config, datatype):
                     valid_tasks.append((config, datatype, config.variant))
                 else:
                     rejected_count += 1
@@ -2504,17 +2791,23 @@ def main():
             # List configs for each requested datatype (fixes bf16 -> fp16 bug)
             for dt in args.datatype:
                 print(f"  - {cfg.name(dt)}")
-                print(f"      Tile: {cfg.tile.tile_m}x{cfg.tile.tile_n}x{cfg.tile.tile_k}")
-                print(f"      Warp: {cfg.tile.warp_m}x{cfg.tile.warp_n}x{cfg.tile.warp_k}")
-                print(
-                    f"      WarpTile: {cfg.tile.warp_tile_m}x{cfg.tile.warp_tile_n}x{cfg.tile.warp_tile_k}"
-                )
-                print(
-                    f"      Pipeline: {cfg.trait.pipeline}, Epilogue: {cfg.trait.epilogue}, Scheduler: {cfg.trait.scheduler}"
-                )
-                print(
-                    f"      Padding: M={cfg.trait.pad_m}, N={cfg.trait.pad_n}, K={cfg.trait.pad_k}"
-                )
+                if isinstance(cfg, DepthwiseConvKernelConfig):
+                    print(f"      Depthwise: tile={cfg.tile_h}x{cfg.tile_w}, filter={cfg.filt}")
+                    print(f"      Stride: {cfg.str_h}x{cfg.str_w}, Pad: {cfg.pad_h}x{cfg.pad_w}")
+                    print(f"      NBatch: {cfg.nbatch}, Sub: {cfg.sub_h}x{cfg.sub_w}")
+                    print(f"      Vec: in={cfg.in_vec}, out={cfg.out_vec}")
+                else:
+                    print(f"      Tile: {cfg.tile.tile_m}x{cfg.tile.tile_n}x{cfg.tile.tile_k}")
+                    print(f"      Warp: {cfg.tile.warp_m}x{cfg.tile.warp_n}x{cfg.tile.warp_k}")
+                    print(
+                        f"      WarpTile: {cfg.tile.warp_tile_m}x{cfg.tile.warp_tile_n}x{cfg.tile.warp_tile_k}"
+                    )
+                    print(
+                        f"      Pipeline: {cfg.trait.pipeline}, Epilogue: {cfg.trait.epilogue}, Scheduler: {cfg.trait.scheduler}"
+                    )
+                    print(
+                        f"      Padding: M={cfg.trait.pad_m}, N={cfg.trait.pad_n}, K={cfg.trait.pad_k}"
+                    )
         return
 
     # Generate (disable arch filter when using pre-validated JSON configs)
