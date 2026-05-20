@@ -112,10 +112,12 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     auto xDataType = _inferenceParams.x()->data_type();
     auto scaleDataType = _inferenceParams.scale()->data_type();
 
-    bool useFp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
-                       && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    bool useBfp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
-                        && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const bool useFp16Mix
+        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const bool useBfp16Mix
+        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
     // Extract dimensions from x tensor
     const auto* xDims = _inferenceParams.x()->dims();
@@ -164,7 +166,7 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     auto inCstride = static_cast<unsigned int>(h * w);
 
-    bool isLayoutNhwc = hip_kernel_utils::isChannelLastLayout(_inferenceParams.x());
+    const bool isLayoutNhwc = hip_kernel_utils::isChannelLastLayout(_inferenceParams.x());
 
     // Calculate vector size based on layout
     auto vectorsize = computeVectorSize(isLayoutNhwc, c, inCstride);
@@ -176,7 +178,7 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     size_t ygridsize = 0;
     size_t zlocalsize = 0;
     size_t zgridsize = 0;
-    size_t maxLocalsize = 256;
+    const size_t maxLocalsize = 256;
 
     if(isLayoutNhwc)
     {
@@ -197,7 +199,7 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     zlocalsize = 1;
-    size_t activeThreadsXy = xgridsize * ygridsize;
+    const size_t activeThreadsXy = xgridsize * ygridsize;
     auto maxActiveThreads = static_cast<size_t>(deviceProperties.multiProcessorCount) * 32
                             * static_cast<size_t>(deviceProperties.warpSize);
 
@@ -211,11 +213,11 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     // Detect GPU architecture
-    std::string archName(deviceProperties.gcnArchName);
-    bool isGfx103x = (archName.find("gfx103") == 0);
-    bool isGfx110x = (archName.find("gfx110") == 0);
-    bool isGfx120x = (archName.find("gfx120") == 0);
-    bool isGfx115x = (archName.find("gfx115") == 0);
+    const std::string archName(deviceProperties.gcnArchName);
+    const bool isGfx103x = (archName.find("gfx103") == 0);
+    const bool isGfx110x = (archName.find("gfx110") == 0);
+    const bool isGfx120x = (archName.find("gfx120") == 0);
+    const bool isGfx115x = (archName.find("gfx115") == 0);
 
     // Get activation mode
     auto activationMode = hip_kernel_utils::ActivationMode::PASTHRU;
