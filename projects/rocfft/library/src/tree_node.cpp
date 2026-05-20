@@ -679,29 +679,29 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
     }
 
     // collect send and recv pointers per device, indexed by RCCL rank.
-    // sendBuffers[r] and recvBuffers[r] are distinct allocations on
+    // agents[r].{sendBuffer,recvBuffer} are distinct allocations on
     // device devices[r], mirroring the MPI path.
-    std::vector<void*> send_ptrs(devices.size(), nullptr);
-    std::vector<void*> recv_ptrs(devices.size(), nullptr);
-    for(size_t r = 0; r < devices.size(); ++r)
+    std::vector<void*> send_ptrs(agents.size(), nullptr);
+    std::vector<void*> recv_ptrs(agents.size(), nullptr);
+    for(size_t r = 0; r < agents.size(); ++r)
     {
         rocfft_scoped_device dev(devices[r]);
-        send_ptrs[r] = sendBuffers[r].get(in_buffer, out_buffer, local_comm_rank);
-        recv_ptrs[r] = recvBuffers[r].get(in_buffer, out_buffer, local_comm_rank);
+        send_ptrs[r] = agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank);
+        recv_ptrs[r] = agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank);
     }
 
     // RCCL collectives must be called from ALL devices simultaneously;
     // use ncclGroupStart/End to batch all calls together.
     //
     // Buffer layout (disjoint send/recv):
-    //   sendBuffers[r]:  slot[dst_rank] at offset dst_rank * count_per_rank
-    //                    (populated by the pack step antecedents)
-    //   recvBuffers[r]:  slot[src_rank] at offset src_rank * count_per_rank
-    //                    (populated by the collective; read by unpack step)
+    //   sendBuffer:  slot[dst_rank] at offset dst_rank * count_per_rank
+    //                (populated by the pack step antecedents)
+    //   recvBuffer:  slot[src_rank] at offset src_rank * count_per_rank
+    //                (populated by the collective; read by unpack step)
     {
         rocfft_rccl_group_t group; // ncclGroupStart called in constructor
 
-        for(size_t r = 0; r < devices.size(); ++r)
+        for(size_t r = 0; r < agents.size(); ++r)
         {
             rocfft_scoped_device dev(devices[r]);
 
@@ -709,7 +709,7 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                           recv_ptrs[r],
                           count_per_rank,
                           devices[r],
-                          streams[r],
+                          agents[r].stream,
                           precision,
                           arrayType);
         }
@@ -721,10 +721,10 @@ void CommRCCLAllToAll::Wait()
 {
     // synchronize each stream on its corresponding device, in RCCL rank order
     const auto devices = rccl.get_devices();
-    for(size_t r = 0; r < devices.size(); ++r)
+    for(size_t r = 0; r < agents.size(); ++r)
     {
         rocfft_scoped_device dev(devices[r]);
-        if(streams[r] && hipStreamSynchronize(streams[r]) != hipSuccess)
+        if(agents[r].stream && hipStreamSynchronize(agents[r].stream) != hipSuccess)
             throw std::runtime_error("hipStreamSynchronize failed for RCCL AllToAll on device "
                                      + std::to_string(devices[r]));
     }
@@ -738,12 +738,12 @@ void CommRCCLAllToAll::Print(rocfft_ostream& os, const int indent) const
     os << indentStr << "CommRCCLAllToAll " << precision_name(precision) << " "
        << PrintArrayType(arrayType) << ":\n";
     os << indentStr << "  count_per_rank: " << count_per_rank << "\n";
-    os << indentStr << "  num_ranks: " << devices.size() << "\n";
-    for(size_t r = 0; r < devices.size(); ++r)
+    os << indentStr << "  num_ranks: " << agents.size() << "\n";
+    for(size_t r = 0; r < agents.size(); ++r)
     {
         os << indentStr << "  rank " << r << ": device=" << devices[r]
-           << " sendBuf=" << PrintBufferPtrOffset(sendBuffers[r], 0)
-           << " recvBuf=" << PrintBufferPtrOffset(recvBuffers[r], 0) << "\n";
+           << " sendBuf=" << PrintBufferPtrOffset(agents[r].sendBuffer, 0)
+           << " recvBuf=" << PrintBufferPtrOffset(agents[r].recvBuffer, 0) << "\n";
     }
     os << std::endl;
 }

@@ -2485,28 +2485,25 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
             packItems.push_back(packIdx);
         }
 
-        // build the CommRCCLAllToAll item with distinct send and recv
-        // buffer lists, indexed by RCCL rank.  RCCL ranks are assigned
-        // in sorted device-id order, so we first collect per-device
-        // buffers in a map and then flatten them to vectors.
-        std::map<int /*device*/, std::pair<BufferPtr, BufferPtr>> deviceBufs;
+        // build the CommRCCLAllToAll item with one agent per device,
+        // indexed by RCCL rank.  RCCL ranks are assigned in sorted
+        // device-id order, so we collect per-device entries in a map
+        // (sorted by device id) and then flatten to a vector.
+        std::map<int /*device*/, CommRCCLAllToAll::agent_t> deviceAgents;
         for(size_t d = 0; d < ndevices; ++d)
         {
-            deviceBufs[inField.bricks[d].location.device]
-                = {BufferPtr::temp(a2aSendBufs[d].data()), BufferPtr::temp(a2aRecvBufs[d].data())};
+            auto& a      = deviceAgents[inField.bricks[d].location.device];
+            a.sendBuffer = BufferPtr::temp(a2aSendBufs[d].data());
+            a.recvBuffer = BufferPtr::temp(a2aRecvBufs[d].data());
+            // a.stream left default-constructed; allocated by CommRCCLAllToAll ctor
         }
-        std::vector<BufferPtr> sendBuffers;
-        std::vector<BufferPtr> recvBuffers;
-        sendBuffers.reserve(ndevices);
-        recvBuffers.reserve(ndevices);
-        for(const auto& [dev, bufs] : deviceBufs)
-        {
-            sendBuffers.push_back(bufs.first);
-            recvBuffers.push_back(bufs.second);
-        }
+        std::vector<CommRCCLAllToAll::agent_t> agents;
+        agents.reserve(ndevices);
+        for(auto& [dev, a] : deviceAgents)
+            agents.push_back(std::move(a));
 
         auto rcclAllToAll = std::make_unique<CommRCCLAllToAll>(
-            rccl, precision, desc.inArrayType, uniform_count, sendBuffers, recvBuffers);
+            rccl, precision, desc.inArrayType, uniform_count, std::move(agents));
         rcclAllToAll->group       = itemGroup;
         rcclAllToAll->description = "RCCL ncclAllToAll";
 
