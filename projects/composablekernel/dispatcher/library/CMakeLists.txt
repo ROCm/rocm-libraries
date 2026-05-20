@@ -15,7 +15,7 @@
 
 set(DISPATCHER_DIR "${PROJECT_SOURCE_DIR}/dispatcher")
 set(DISPATCHER_CODEGEN "${DISPATCHER_DIR}/codegen/unified_grouped_conv_codegen.py")
-set(DISPATCHER_CONFIG_SET "profiler" CACHE STRING "Dispatcher config set: tests or profiler")
+set(DISPATCHER_CONFIG_SET "tests" CACHE STRING "Dispatcher config set: tests or profiler")
 
 # Extract first GPU target for codegen
 string(REPLACE ";" " " _GPU_TARGETS_SPACE "${GPU_TARGETS}")
@@ -58,26 +58,27 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   set(TARGET_NAME "ck_dispatcher_grouped_conv_${VARIANT}")
 
   # --- Step 1: Run Python codegen at configure time ---
-  if(NOT EXISTS ${KERNEL_DIR}/register_all_grouped_conv_kernels.cpp)
-    file(MAKE_DIRECTORY ${KERNEL_DIR})
-    execute_process(
-      COMMAND ${Python3_EXECUTABLE} ${SCRIPT_PATH}
-              --variant ${VARIANT}
-              --config-dir ${CONFIG_DIR}
-              --codegen ${DISPATCHER_CODEGEN}
-              --output-dir ${KERNEL_DIR}
-              --arch ${_GPU_TARGET}
-              --config-set ${DISPATCHER_CONFIG_SET}
-      RESULT_VARIABLE ret
-      OUTPUT_VARIABLE output
-      ERROR_VARIABLE error
-      WORKING_DIRECTORY ${DISPATCHER_DIR}/codegen
-    )
-    if(NOT ret EQUAL 0)
-      message(FATAL_ERROR "Dispatcher ${VARIANT} kernel generation failed.\nReturn: ${ret}\nOutput: ${output}\nError: ${error}")
-    endif()
-    message(STATUS "Dispatcher ${VARIANT} kernels generated: ${output}")
+  # Always regenerate: DISPATCHER_CONFIG_SET is a CACHE variable, so changing it
+  # triggers a full reconfigure. Wipe the kernel dir first to remove stale files.
+  file(REMOVE_RECURSE ${KERNEL_DIR})
+  file(MAKE_DIRECTORY ${KERNEL_DIR})
+  execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${SCRIPT_PATH}
+            --variant ${VARIANT}
+            --config-dir ${CONFIG_DIR}
+            --codegen ${DISPATCHER_CODEGEN}
+            --output-dir ${KERNEL_DIR}
+            --arch ${_GPU_TARGET}
+            --config-set ${DISPATCHER_CONFIG_SET}
+    RESULT_VARIABLE ret
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE error
+    WORKING_DIRECTORY ${DISPATCHER_DIR}/codegen
+  )
+  if(NOT ret EQUAL 0)
+    message(FATAL_ERROR "Dispatcher ${VARIANT} kernel generation failed.\nReturn: ${ret}\nOutput: ${output}\nError: ${error}")
   endif()
+  message(STATUS "Dispatcher ${VARIANT} kernels generated (config set: ${DISPATCHER_CONFIG_SET}): ${output}")
 
   # --- Step 2: Create .cpp wrappers for each generated kernel header ---
   file(GLOB _KERNEL_HEADERS "${KERNEL_DIR}/${HEADER_PREFIX}*.hpp")
