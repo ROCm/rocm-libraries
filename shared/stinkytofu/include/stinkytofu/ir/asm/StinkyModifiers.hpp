@@ -184,6 +184,7 @@ struct Modifier {
         FLAT,
         GLOBAL,
         MUBUF,
+        CACHE_SCOPE,
         SMEM,
         SDWA,
         DPP,
@@ -237,7 +238,8 @@ struct TypedModifier : public Modifier {
     }
 
    protected:
-    explicit TypedModifier() : Modifier(Derived::Type) {}
+    explicit TypedModifier()  // NOLINT(bugprone-crtp-constructor-accessibility)
+        : Modifier(Derived::Type) {}
 };
 
 struct DSModifiers : public TypedModifier<DSModifiers> {
@@ -319,6 +321,19 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     uint32_t hasMUBUFConst : 1;
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
+    MUBUFScope scope;
+};
+
+// Carries just the cache scope token for SOPP-format memory fences such as
+// global_wb / global_inv on gfx1250+. These instructions are not buffer ops
+// and do not need offen/glc/slc/lds/etc., so they cannot reuse MUBUFModifiers
+// without coupling to fields that may diverge in future MUBUF refactors.
+struct CacheScopeModifiers : public TypedModifier<CacheScopeModifiers> {
+    static constexpr Modifier::Type Type = Modifier::Type::CACHE_SCOPE;
+
+    CacheScopeModifiers(MUBUFScope scope = MUBUFScope::SCOPE_NONE)
+        : TypedModifier<CacheScopeModifiers>(), scope(scope) {}
+
     MUBUFScope scope;
 };
 
@@ -735,17 +750,7 @@ struct SWaitAluData : public TypedModifier<SWaitAluData> {
         uint16_t va_sdst : 3;   // Bits 11-9
         uint16_t va_vdst : 4;   // Bits 15-12
 
-        HwValue& operator=(HwValue const& other) {
-            sa_sdst = other.sa_sdst;
-            va_vcc = other.va_vcc;
-            vm_vsrc = other.vm_vsrc;
-            reserved = other.reserved;
-            hold_cnt = other.hold_cnt;
-            va_ssrc = other.va_ssrc;
-            va_sdst = other.va_sdst;
-            va_vdst = other.va_vdst;
-            return *this;
-        }
+        HwValue& operator=(HwValue const& other) = default;
     };
 
     // Field enumeration

@@ -464,6 +464,16 @@ inline std::map<std::string, int>
         rv["MaxLgkmcnt"] = getMaxCnt(isaVersion, assemblerPath, "s_waitcnt lgkmcnt(", ")", isDebug);
     }
 
+    // s_wait_xcnt drains XNACK-replay tracking before a subsequent volatile/atomic
+    // VMEM op. Probed independently because not every arch with separate vmem
+    // counters supports xcnt (e.g. it is gfx1250+). The immediate accepts 16 bits
+    // but hardware only consumes the lowest 6 bits, matching loadcnt/storecnt.
+    rv["HasXcnt"] = tryAssembler(isaVersion, assemblerPath, "s_wait_xcnt 0", isDebug);
+    if(rv["HasXcnt"])
+    {
+        rv["MaxXcnt"] = 63;
+    }
+
     rv["SupportedSource"] = true;
 
     return rv;

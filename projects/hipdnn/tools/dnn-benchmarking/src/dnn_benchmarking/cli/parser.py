@@ -235,4 +235,77 @@ Tarball Input:
         help="Path to directory containing hipDNN engine plugin .so files",
     )
 
+    # Metrics options
+    metrics_group = parser.add_argument_group("Metrics")
+    metrics_group.add_argument(
+        "--metrics-tier",
+        type=str,
+        choices=["basic", "off"],
+        default="basic",
+        metavar="TIER",
+        help=(
+            "Always-on metric tier (default: basic). 'basic' adds "
+            "analytical FLOPs/IO, workspace size, host CPU rusage + RAM, "
+            "amdsmi GPU snapshot, and machine metadata at zero extra "
+            "runtime cost. 'off' disables all extra metric collection."
+        ),
+    )
+    metrics_group.add_argument(
+        "--emit-trace",
+        type=str,
+        choices=["pftrace", "kineto"],
+        default=None,
+        metavar="FORMAT",
+        help=(
+            "Re-run benchmark under rocprofv3 and export a kernel + "
+            "memory-copy trace in the given format. 'kineto' falls back "
+            "to pftrace when the rocpd Python module is not importable. "
+            "Adds ~1 extra workload run (~5%% kernel-time overhead)."
+        ),
+    )
+    metrics_group.add_argument(
+        "--perf",
+        action="store_true",
+        default=False,
+        help=(
+            "Wrap re-run in 'perf stat -x,' to collect CPU cycles, "
+            "instructions, IPC, and task-clock. Kernel-space events drop "
+            "silently when /proc/sys/kernel/perf_event_paranoid > 1. "
+            "Adds ~1 extra workload run."
+        ),
+    )
+    metrics_group.add_argument(
+        "--profiling-output-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Root directory for profiling artefacts (pftraces, perf "
+            "CSVs). Default: ./profiling-output/<utc-timestamp>/."
+        ),
+    )
+
+    # Hidden re-exec sub-mode: when an opt-in profiling source is
+    # requested, the parent process shells out to a fresh CLI invocation
+    # under the profiler. The child process picks up these flags to
+    # short-circuit setup and run a single (graph, engine) workload.
+    parser.add_argument(
+        "--internal-profiling-run",
+        action="store_true",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--internal-profiling-engine",
+        type=int,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--internal-profiling-graph",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+
     return parser

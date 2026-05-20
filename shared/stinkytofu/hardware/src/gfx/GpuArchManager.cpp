@@ -45,10 +45,11 @@ namespace stinkytofu {
 #define STINKYTOFU_ARCH(archName) void set##archName##ConversionMap(GpuArch& registry);
 #include "Config/Archs.def"
 
-void GpuArchManager::addArch(const std::string& arch, std::function<void(GpuArch&)> defineInsts,
-                             std::function<void(GpuArch&)> setLogicalToArchMap,
-                             std::function<void(GpuArch&)> setRocisaToArchMap,
-                             std::function<void(GpuArch&)> setRocisaConversionMap) {
+void GpuArchManager::addArch(const std::string& arch,
+                             const std::function<void(GpuArch&)>& defineInsts,
+                             const std::function<void(GpuArch&)>& setLogicalToArchMap,
+                             const std::function<void(GpuArch&)>& setRocisaToArchMap,
+                             const std::function<void(GpuArch&)>& setRocisaConversionMap) {
     instructionsByArch.push_back(std::make_unique<GpuArch>(arch));
     defineInsts(*instructionsByArch.back());
     setLogicalToArchMap(*instructionsByArch.back());

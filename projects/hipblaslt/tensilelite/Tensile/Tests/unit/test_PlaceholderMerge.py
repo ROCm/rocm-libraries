@@ -46,7 +46,7 @@ _LOGIC_ROOT = (
     / "Tensile" / "Logic" / "asm_full"
 )
 
-pytestmark = pytest.mark.skipif(
+pytestmark = pytest.mark.xfail(
     not _LOGIC_ROOT.is_dir(),
     reason="Logic files not found: https://github.com/ROCm/rocm-libraries/issues/7481",
 )

@@ -13,6 +13,10 @@ on:
       # - 'dnn-providers/miopen-provider/**/*.[ch]p?p?'
       # - 'dnn-providers/miopen-provider/cmake/ClangTidy.cmake'
       # - 'dnn-providers/miopen-provider/.clang-tidy'
+      - 'shared/stinkytofu/**/*.[ch]p?p?'
+      - 'shared/stinkytofu/.clang-tidy'
+      - 'cmake/modules/ClangTidy.cmake'
+      - 'cmake/modules/CheckToolVersion.cmake'
       - '.github/workflows/clang-tidy.yml'
   pull_request:
     paths:
@@ -23,6 +27,10 @@ on:
       # - 'dnn-providers/miopen-provider/**/*.[ch]p?p?'
       # - 'dnn-providers/miopen-provider/cmake/ClangTidy.cmake'
       # - 'dnn-providers/miopen-provider/.clang-tidy'
+      - 'shared/stinkytofu/**/*.[ch]p?p?'
+      - 'shared/stinkytofu/.clang-tidy'
+      - 'cmake/modules/ClangTidy.cmake'
+      - 'cmake/modules/CheckToolVersion.cmake'
       - '.github/workflows/clang-tidy.yml'
   workflow_dispatch:
 
@@ -48,6 +56,10 @@ jobs:
           filters: |
             hipdnn:
               - 'projects/hipdnn/**'
+            stinkytofu:
+              - 'shared/stinkytofu/**'
+              - 'cmake/modules/ClangTidy.cmake'
+              - 'cmake/modules/CheckToolVersion.cmake'
             # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
             # miopen-provider:
             #   - 'dnn-providers/miopen-provider/**'
@@ -115,3 +127,13 @@ jobs:
       #       -DENABLE_CLANG_FORMAT=OFF \
       #       -DHIP_PLATFORM=amd
       #     ninja -C build-miopen-provider tidy
+
+      - name: Run clang-tidy (stinkytofu)
+        if: steps.changes.outputs.stinkytofu == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          . .venv/bin/activate
+          sudo apt-get install -y libgtest-dev python3-dev
+          cd shared/stinkytofu
+          pip install -r requirements.txt
+          invoke build
+          invoke tidy
