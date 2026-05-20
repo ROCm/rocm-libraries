@@ -333,6 +333,7 @@ class GroupedConvKernelConfig:
             GroupedConvVariant.BACKWARD_DATA,
         ):
             if self.trait.pipeline not in (
+                "basic_async_v1",
                 "compv1", "compv2", "compv3", "compv4", "compv6",
                 "basic_v1", "basic_v2", "mem",
             ):
@@ -1285,7 +1286,6 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
         ns_name = "ns_" + kernel_name.replace("-", "_")
         direction_prefix = "BWD_WEIGHT"
         launcher_alias = "SelectedConvBwdWeightLauncher"
-
         strategy_cpp = f"StreamKReductionStrategy::{sk.strategy.value.capitalize()}"
         persistent_cpp = "true" if sk.streamk_persistent else "false"
 
@@ -1344,45 +1344,47 @@ struct {kernel_name}_Launcher {{
         Config::NumWaveGroups>;
 
     using UniversalGemmProblem = UniversalGemmPipelineProblem<
-            OutDataType, 
-            InDataType, 
-            AccDataType, 
-            GemmShape, 
+            OutDataType,
+            InDataType,
+            AccDataType,
+            GemmShape,
             GemmUniversalTraits,
-            scheduler,
-            element_wise::PassThrough, 
+            Config::Scheduler,
             element_wise::PassThrough,
-            OutDataType, 
+            element_wise::PassThrough,
+            OutDataType,
             InDataType,
             GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
-            GroupedConvTraitsType::VectorSizeA, 
+            GroupedConvTraitsType::VectorSizeA,
             GroupedConvTraitsType::VectorSizeB>;
-        
-    constexpr int BlockedXDLN_PerWarp = 1
-            
-    using ConvEpilogue = CShuffleEpilogue<
-            CShuffleEpilogueProblem<OutDataType, 
-            InDataType, 
-            tuple<>, 
-            AccDataType, 
-            WeiDataType,
-            typename GroupedConvTraitsType::ImplicitGemmDsLayout,
-            typename GroupedConvTraitsType::FixedGemmParams::ELayout,
-            element_wise::PassThrough,
-            TilePartitioner::MPerBlock, 
-            TilePartitioner::NPerBlock,
-            Config::M_Warp, 
-            Config::N_Warp, 
-            Config::M_Warp_Tile,
-            Config::N_Warp_Tile, 
-            Config::K_Warp_Tile,
-            GroupedConvTraitsType::FixedGemmParams::TransposeC,
-            Config::NumWaveGroups,
-            GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
-            Config::VectorSizeC, 
-            BlockedXDLN_PerWarp,
-            Config::DoubleSmemBuffer>>;
 
+    using EpilogueProblem = CShuffleEpilogueProblem<
+                OutDataType, 
+                InDataType, 
+                tuple<>, 
+                AccDataType, 
+                WeiDataType,
+                typename GroupedConvTraitsType::ImplicitGemmDsLayout,
+                typename GroupedConvTraitsType::FixedGemmParams::ELayout,
+                element_wise::PassThrough,
+                TilePartitioner::MPerBlock, 
+                TilePartitioner::NPerBlock,
+                Config::M_Warp, 
+                Config::N_Warp, 
+                Config::M_Warp_Tile,
+                Config::N_Warp_Tile, 
+                Config::K_Warp_Tile,
+                GroupedConvTraitsType::FixedGemmParams::TransposeC,
+                Config::NumWaveGroups,
+                GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
+                Config::VectorSizeC>;
+
+    using ConvEpilogue =
+            std::conditional_t<Config::Pipeline == ck_tile::GemmPipeline::COMPUTE_TDM_V1 ||
+                               Config::Pipeline == ck_tile::GemmPipeline::COMPUTE_TDM_V2,
+                               ck_tile::TdmEpilogue<EpilogueProblem>,
+                               ck_tile::CShuffleEpilogue<EpilogueProblem>>;
+                
     using GemmPipeline = {self._get_pipeline_template_args(tr.pipeline, "UniversalGemmProblem")};
 
     using Kernel = GroupedConvolutionBackwardWeightKernel<
@@ -1390,8 +1392,6 @@ struct {kernel_name}_Launcher {{
             
     static float launch(const GroupedConvBwdWeightHostArgs& args, const stream_config& s) {{
         float ave_time{{0}};
-
-        constexpr auto scheduler = Config::Scheduler;        
 
         auto kargs = Kernel::MakeKernelArgs(args);
 
@@ -1425,16 +1425,12 @@ struct {kernel_name}_Launcher {{
     static bool is_supported(const ck_tile::conv::ConvParam& conv_param, int k_batch) {{
         GroupedConvBwdWeightHostArgs args(conv_param, nullptr, nullptr, {{}}, nullptr, k_batch);
 
-        constexpr auto scheduler = Config::Scheduler;
-
         auto kargs = Kernel::MakeKernelArgs(args);
         return Kernel::IsSupportedArgument(kargs);
     }}
 
 #ifdef CK_EXPERIMENTAL_BUILDER
     static std::string get_instance_string() {{
-        constexpr auto scheduler = Config::Scheduler;
-
         return Kernel{{}}.GetInstanceString();
     }}
 #endif
