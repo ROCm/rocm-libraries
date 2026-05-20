@@ -175,8 +175,7 @@ struct FmhaBwdWorkspaceManager
         }
         // alignas(16) FmhaBwdGroupPersistentCuState writes use x86 SIMD; fault on misalign.
         if(reinterpret_cast<uintptr_t>(cpu_ws) % 16 != 0)
-            throw std::runtime_error(
-                "PrepareWorkspaceHost: cpu_ws must be 16-byte aligned");
+            throw std::runtime_error("PrepareWorkspaceHost: cpu_ws must be 16-byte aligned");
         const auto nsplits = reinterpret_cast<index_t*>(cpu_ws);
         const auto offsets = reinterpret_cast<long_index_t*>(reinterpret_cast<char*>(cpu_ws) +
                                                              GetDqAccSplitsSize<false>(batch_size));
@@ -216,12 +215,12 @@ struct FmhaBwdWorkspaceManager
                 return sq == 0 ? kM0 : integer_least_multiple(sq, kM0);
             };
 
-            // No K work anywhere (all seqlen_k==0): no dQ accumulation, so no
-            // CU partition. Mark cu_states inactive (ibatch sentinel), neutral
-            // per-batch defaults, 0 dq_acc bytes. GPU early-returns on the
-            // sentinel and never reads batch_states / nsplits / offsets, so any
-            // consistent zero-ish fill is fine. dK/dV still zero-filled via
-            // NeedsZeroDqAcc path.
+            // No K work anywhere (all seqlen_k==0): no dQ accumulation, so 0
+            // dq_acc bytes and no CU partition. Mark cu_states inactive
+            // (ibatch sentinel) so GPU early-returns; batch_states / nsplits /
+            // offsets are never read past the sentinel, so any consistent
+            // zero-ish fill is fine. dK/dV have zero K rows in this case, so
+            // there is nothing to write into them.
             if(seqstart_ks[batch_size] == 0)
             {
                 std::fill_n(batch_states, batch_size, FmhaBwdBatchState{0, 0, 1});
@@ -242,9 +241,7 @@ struct FmhaBwdWorkspaceManager
             }
             const index_t target_w = integer_divide_ceil(prefix_batch[batch_size], num_cus);
 
-            // Step 2: fill batch_states[b].sq, .nc; nsplits is populated as  max(cs->isplit + 1)
-            // across CUs in step 3 so it tightly matches the actual sparse slot indices used by
-            // GPU.
+            // Step 2: fill batch_states.sq/.nc; nsplits is bumped in step 3 to max(isplit+1).
             for(index_t b = 0; b < batch_size; ++b)
             {
                 const index_t sq   = seqstart_qs[b + 1] - seqstart_qs[b];
@@ -256,10 +253,8 @@ struct FmhaBwdWorkspaceManager
             }
 
             // Step 3: fill cu_states via two-pointer scan.
-            // w_lo = global position of the first K-chunk: pb + head_start*hw + c_start*sq.
-            // This makes w_chunk track true global K-chunk positions on GPU, so w_chunk < w_hi
-            // correctly identifies boundaries without off-by-one overlap between adjacent CUs.
-            // w_hi is set in a post-pass to cu_states[c+1].w_lo.
+            // w_lo = global K-chunk start (pb + head_start*hw + c_start*sq); GPU compares
+            // w_chunk < w_hi for boundaries. w_hi is set in a post-pass to cu_states[c+1].w_lo.
             index_t cu_lo = 0;
             for(index_t b = 0; b < batch_size; ++b)
             {
@@ -282,12 +277,10 @@ struct FmhaBwdWorkspaceManager
                         const index_t wc_start = max(w_lo - w_head, index_t(0));
                         const index_t c_start =
                             wc_start > 0 ? integer_divide_ceil(wc_start, sq_w) : 0;
-                        // denom = max(sq_w, target_w) keeps isplit in [0, nc-1] (theupper bound
-                        // assumed by GetWorkspaceDeviceSizeUpperBound): when target_w >= sq_w it
-                        // preserves intra-CU atomic sharing; when target_w < sq_w (sub-K-row
-                        // sharding) it collapses to per-K-row indexing (= c_start). Clamp absorbs
-                        // empty CUs whose rounded-up wc_start lands past the last K-row; they don't
-                        // write dq_acc on GPU so the slot value is harmless.
+                        // denom = max(sq_w, target_w) keeps isplit in [0, nc-1] (the upper bound
+                        // assumed by GetWorkspaceDeviceSizeUpperBound). Clamp absorbs empty CUs
+                        // whose rounded-up wc_start lands past the last K-row; they don't write
+                        // dq_acc on GPU so the slot value is harmless.
                         const index_t denom = max(sq_w, target_w);
                         const index_t raw_isp =
                             wc_start > 0 ? integer_divide_ceil(wc_start, denom) : 0;
@@ -381,6 +374,11 @@ struct FmhaBwdWorkspaceManager
     CK_TILE_HOST static constexpr bool NeedsZeroDqAcc()
     {
         constexpr bool kUsePersistent = !kUseQrQtrDorPipeline && kIsDeterministic;
+        // Group + persistent + deterministic: kernel pre-zeroes its owned slots
+        // in-kernel (avoids host memset over the workspace upper bound, which can
+        // be ~20x larger than the actual region for large seqlen_k).
+        if constexpr(kUsePersistent && kIsGroupMode)
+            return false;
         // Persistent (batch and group): uses atomic_add → buffer must start at zero
         //   so that accumulated dq values are correct.
         // Non-deterministic: uses atomic_add → buffer must start at zero.
@@ -1263,12 +1261,12 @@ struct FmhaBwdDQDKDVKernel
                     index_t w_chunk    = amd_wave_read_first_lane(cs->w_lo);
                     if(ibatch >= kargs.batch)
                         return; // this CU has no work (sentinel: ibatch == batch_size)
+                    if(w_chunk >= w_hi)
+                        return; // empty CU (wl == wh): without this, pre-zero races with the
+                                // real CU that owns the same (ibatch, head_start, isplit) slot.
 
-                    // w_chunk tracks the global K-chunk position; the loop exits when w_chunk
-                    // reaches w_hi (this CU's exclusive upper bound). ibatch < batch is guaranteed
-                    // on entry; the check inside guards against the rare case where head_start
-                    // reaches nhead_q and ibatch is incremented past batch before w_chunk catches
-                    // up.
+                    // Loop exits when w_chunk reaches w_hi. Inner check guards the rare case
+                    // where head_start hits nhead_q and ibatch is bumped past batch before exit.
                     do
                     {
                         if(ibatch >= kargs.batch)
@@ -1279,6 +1277,31 @@ struct FmhaBwdDQDKDVKernel
 
                         while(head_start < kargs.nhead_q)
                         {
+                            // Pre-zero this CU's (ibatch, head_start, isplit) dq_acc slot before
+                            // any atomic_add (replaces host memset over the workspace upper bound,
+                            // ~20x actual for large sk). Slot ownership unique per CU: host pack
+                            // assigns distinct isplit on entry, ++head_start resets isplit to 0.
+                            // uint4 safe: slot_stride uses unpadded sq, batch_off is 16B-aligned.
+                            {
+                                const index_t sq_unpad = amd_wave_read_first_lane(
+                                    static_cast<index_t>(kargs.seqstart_q_ptr[ibatch + 1] -
+                                                         kargs.seqstart_q_ptr[ibatch]));
+                                const long_index_t slot_stride =
+                                    static_cast<long_index_t>(sq_unpad) *
+                                    amd_wave_read_first_lane(kargs.hdim_q);
+                                AccDataType* slot_ptr =
+                                    reinterpret_cast<AccDataType*>(kargs.dq_acc_ptr) +
+                                    kargs.dq_acc_batch_offset_ptr[ibatch] +
+                                    (static_cast<long_index_t>(head_start) *
+                                         amd_wave_read_first_lane(bs->nsplits) +
+                                     isplit) *
+                                        slot_stride;
+                                uint4* slot_v4        = reinterpret_cast<uint4*>(slot_ptr);
+                                const long_index_t n4 = slot_stride / 4;
+                                for(long_index_t off = threadIdx.x; off < n4; off += kBlockSize)
+                                    slot_v4[off] = uint4{0u, 0u, 0u, 0u};
+                                s_waitcnt_barrier<0>();
+                            }
                             while(c_start_0 < amd_wave_read_first_lane(bs->nc) && w_chunk < w_hi)
                             {
                                 run_(kargs,
