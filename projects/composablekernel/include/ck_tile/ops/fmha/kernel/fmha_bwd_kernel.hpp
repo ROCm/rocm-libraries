@@ -381,6 +381,11 @@ struct FmhaBwdWorkspaceManager
     CK_TILE_HOST static constexpr bool NeedsZeroDqAcc()
     {
         constexpr bool kUsePersistent = !kUseQrQtrDorPipeline && kIsDeterministic;
+        // Group + persistent + deterministic: kernel pre-zeroes its owned slots
+        // in-kernel (avoids host memset over the workspace upper bound, which can
+        // be ~20x larger than the actual region for large seqlen_k).
+        if constexpr(kUsePersistent && kIsGroupMode)
+            return false;
         // Persistent (batch and group): uses atomic_add → buffer must start at zero
         //   so that accumulated dq values are correct.
         // Non-deterministic: uses atomic_add → buffer must start at zero.
@@ -1263,6 +1268,11 @@ struct FmhaBwdDQDKDVKernel
                     index_t w_chunk    = amd_wave_read_first_lane(cs->w_lo);
                     if(ibatch >= kargs.batch)
                         return; // this CU has no work (sentinel: ibatch == batch_size)
+                    if(w_chunk >= w_hi)
+                        return; // empty CU (wl == wh): host pack assigned a concrete
+                                // (ibatch, head_start, isplit), but the work range is
+                                // empty. Without this early return, pre-zero would
+                                // race with the *real* CU that owns the same slot.
 
                     // w_chunk tracks the global K-chunk position; the loop exits when w_chunk
                     // reaches w_hi (this CU's exclusive upper bound). ibatch < batch is guaranteed
@@ -1279,6 +1289,36 @@ struct FmhaBwdDQDKDVKernel
 
                         while(head_start < kargs.nhead_q)
                         {
+                            // Pre-zero this CU's (ibatch, head_start, isplit) dq_acc slot
+                            // before any atomic_add into it. Group+persistent+det uses atomic
+                            // accumulation; avoiding host hipMemsetAsync over the workspace
+                            // upper bound (can be ~20x actual for large seqlen_k) saves
+                            // major HBM bandwidth. Slot ownership is unique per CU on entry
+                            // (host pack assigns distinct isplit) and after each ++head_start
+                            // (isplit resets to 0; extension + boundary-start can't coexist
+                            // on the same head boundary). slot_stride uses unpadded sq from
+                            // seqstart_q (matches dq_acc layout); hdim_q ∈ {32,64,128,256}
+                            // and batch_off is 16B-aligned, so uint4 writes are safe.
+                            {
+                                const index_t sq_unpad = amd_wave_read_first_lane(
+                                    static_cast<index_t>(kargs.seqstart_q_ptr[ibatch + 1] -
+                                                         kargs.seqstart_q_ptr[ibatch]));
+                                const long_index_t slot_stride =
+                                    static_cast<long_index_t>(sq_unpad) *
+                                    amd_wave_read_first_lane(kargs.hdim_q);
+                                AccDataType* slot_ptr =
+                                    reinterpret_cast<AccDataType*>(kargs.dq_acc_ptr) +
+                                    kargs.dq_acc_batch_offset_ptr[ibatch] +
+                                    (static_cast<long_index_t>(head_start) *
+                                         amd_wave_read_first_lane(bs->nsplits) +
+                                     isplit) *
+                                        slot_stride;
+                                uint4* slot_v4        = reinterpret_cast<uint4*>(slot_ptr);
+                                const long_index_t n4 = slot_stride / 4;
+                                for(long_index_t off = threadIdx.x; off < n4; off += kBlockSize)
+                                    slot_v4[off] = uint4{0u, 0u, 0u, 0u};
+                                __syncthreads();
+                            }
                             while(c_start_0 < amd_wave_read_first_lane(bs->nc) && w_chunk < w_hi)
                             {
                                 run_(kargs,
