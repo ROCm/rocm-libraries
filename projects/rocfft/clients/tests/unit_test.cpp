@@ -1319,8 +1319,8 @@ static void run_plan_capacity_test(size_t M)
                 EXPECT_EQ(rocfft_plan_destroy(p), rocfft_status_success);
 
         ASSERT_FALSE(any_failure.load())
-            << "rocfft_plan_create failed at i=" << first_failure_idx.load()
-            << " (M=" << M << ", status=" << last_status.load() << ")";
+            << "rocfft_plan_create failed at i=" << first_failure_idx.load() << " (M=" << M
+            << ", status=" << last_status.load() << ")";
     }
     catch(const std::bad_alloc&)
     {
@@ -1363,12 +1363,8 @@ TEST(rocfft_UnitTest, function_pool_runtime_paths)
     // PPFMKey overloads -- partial-pass is not used by the plan_capacity
     // tests, so its has_function / get_kernel paths (and the new
     // shared_lock acquisitions therein) only get coverage here.
-    PPFMKey pp_key(99991,
-                   1,
-                   1,
-                   rocfft_precision_single,
-                   rocfft_transform_type_complex_forward,
-                   CS_3D_PP);
+    PPFMKey pp_key(
+        99991, 1, 1, rocfft_precision_single, rocfft_transform_type_complex_forward, CS_3D_PP);
     EXPECT_FALSE(pool.has_function(pp_key));
     EXPECT_THROW(pool.get_kernel(pp_key, CS_3D_PP), std::out_of_range);
 }
@@ -1380,6 +1376,8 @@ TEST(rocfft_UnitTest, function_pool_runtime_paths)
 TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
 {
     run_plan_capacity_test(1'000'000);
+}
+
 // Verify that rocfft/rocfft.h can be compiled as plain C (not C++).
 TEST(rocfft, cApi)
 {

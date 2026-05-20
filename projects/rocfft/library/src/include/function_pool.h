@@ -298,8 +298,7 @@ public:
         // the emplace are atomic.  We can't call has_function() here:
         // std::shared_mutex is not recursive, so reacquiring as shared
         // while holding unique would be UB -- inline the lookup instead.
-        std::unique_lock<std::shared_mutex> lock(
-            function_pool_data::get_function_pool_mutex());
+        std::unique_lock<std::shared_mutex> lock(function_pool_data::get_function_pool_mutex());
 
         auto real_key = get_actual_key(new_key, def_key_pool);
         if(find_key_in_map(function_map, real_key) != function_map.end())
@@ -313,17 +312,15 @@ public:
 
     bool has_function(const FMKey& key) const
     {
-        std::shared_lock<std::shared_mutex> lock(
-            function_pool_data::get_function_pool_mutex());
-        auto real_key = get_actual_key(key, def_key_pool);
+        std::shared_lock<std::shared_mutex> lock(function_pool_data::get_function_pool_mutex());
+        auto                                real_key = get_actual_key(key, def_key_pool);
         return find_key_in_map(function_map, real_key) != function_map.end();
     }
 
     bool has_function(const PPFMKey& key) const
     {
-        std::shared_lock<std::shared_mutex> lock(
-            function_pool_data::get_function_pool_mutex());
-        auto real_key = get_actual_key(key, def_pp_key_pool);
+        std::shared_lock<std::shared_mutex> lock(function_pool_data::get_function_pool_mutex());
+        auto                                real_key = get_actual_key(key, def_pp_key_pool);
         return find_key_in_map(pp_function_map, real_key) != pp_function_map.end();
     }
 
@@ -342,9 +339,8 @@ public:
                                     ComputeScheme               scheme,
                                     std::function<bool(size_t)> filter = {}) const
     {
-        std::shared_lock<std::shared_mutex> lock(
-            function_pool_data::get_function_pool_mutex());
-        std::vector<size_t> lengths;
+        std::shared_lock<std::shared_mutex> lock(function_pool_data::get_function_pool_mutex());
+        std::vector<size_t>                 lengths;
         for(auto const& kv : function_map)
         {
             if(kv.first.lds_size_bytes > max_lds_bytes)
@@ -364,10 +360,9 @@ public:
 
     FFTKernel get_kernel(const FMKey& key) const
     {
-        std::shared_lock<std::shared_mutex> lock(
-            function_pool_data::get_function_pool_mutex());
-        auto real_key = get_actual_key(key, def_key_pool);
-        auto it       = find_key_in_map(function_map, real_key);
+        std::shared_lock<std::shared_mutex> lock(function_pool_data::get_function_pool_mutex());
+        auto                                real_key = get_actual_key(key, def_key_pool);
+        auto                                it       = find_key_in_map(function_map, real_key);
         if(it == function_map.end())
             throw std::out_of_range("kernel not found in map");
         return it->second;
@@ -375,10 +370,9 @@ public:
 
     FFTKernel get_kernel(const PPFMKey& key, ComputeScheme scheme) const
     {
-        std::shared_lock<std::shared_mutex> lock(
-            function_pool_data::get_function_pool_mutex());
-        auto real_key = get_actual_key(key, def_pp_key_pool);
-        auto it       = find_key_in_map(pp_function_map, real_key);
+        std::shared_lock<std::shared_mutex> lock(function_pool_data::get_function_pool_mutex());
+        auto                                real_key = get_actual_key(key, def_pp_key_pool);
+        auto                                it       = find_key_in_map(pp_function_map, real_key);
         if(it == pp_function_map.end())
             throw std::out_of_range("kernel not found in partial-pass map");
 
