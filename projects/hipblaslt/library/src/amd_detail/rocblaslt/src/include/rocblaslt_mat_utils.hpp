@@ -473,4 +473,58 @@ inline void setTo1(const rocblaslt_compute_type& compute_type, const void* onePt
         *dst              = onePtr;
     }
 }
+
+inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const void* ptr)
+{
+    if (!ptr) {
+        return {0.0, 0.0};
+    }
+
+    switch (type)
+    {
+        case HIP_R_32F:
+            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
+        case HIP_R_64F:
+            return {*(reinterpret_cast<const double*>(ptr)), 0.0};
+        case HIP_R_32I:
+            return {static_cast<double>(*(reinterpret_cast<const int32_t*>(ptr))), 0.0};
+        
+        case HIP_R_16F:
+        case HIP_R_16BF:
+            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
+
+        case HIP_C_32F:
+        {
+            auto val = *(reinterpret_cast<const hipblaslt_complex_float*>(ptr));
+            return {static_cast<double>(val.real()), static_cast<double>(val.imag())};
+        }
+        case HIP_C_64F:
+        {
+            return *(reinterpret_cast<const hipblaslt_complex_double*>(ptr));
+        }
+            
+        default:
+            return {0.0, 0.0};
+    }
+}
+
+inline hipDataType get_alpha_beta_target_type(hipblasComputeType_t typeCompute, hipDataType typeA)
+{
+    if (typeA == HIP_C_32F || typeA == HIP_C_64F)
+    {
+        if (typeCompute == HIPBLAS_COMPUTE_64F)
+            return HIP_C_64F; 
+        else
+            return HIP_C_32F; 
+    }
+    else
+    {
+        if (typeCompute == HIPBLAS_COMPUTE_64F)
+            return HIP_R_64F;
+        else if (typeCompute == HIPBLAS_COMPUTE_32I)
+            return HIP_R_32I;
+        else 
+            return HIP_R_32F; 
+    }
+}
 #endif

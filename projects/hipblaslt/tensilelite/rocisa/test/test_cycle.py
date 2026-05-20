@@ -33,6 +33,8 @@ from rocisa.container import DSModifiers, vgpr, sgpr, accvgpr, ContinuousRegiste
 from rocisa.instruction import VLShiftLeftB32, DSLoadB128, DSLoadB64, VMovB32, SBarrier, MFMAInstruction, SNop, SWaitCnt, SBarrier, SMovB32, VMulLOU32, VAddLShiftLeftU32, VAddCOU32
 from rocisa.functions import vectorStaticRemainder, vectorStaticMultiply, vectorStaticDivide, vectorStaticMultiplyAdd
 
+pytestmark = pytest.mark.gpu
+
 def gfx(version=(9,5,0), wavefront_size = 64):
     def decorator(func):
         def wrapper():

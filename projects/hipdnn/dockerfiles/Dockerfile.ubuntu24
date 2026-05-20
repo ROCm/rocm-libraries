@@ -4,10 +4,16 @@
 # Build type selection - must be declared before first use in FROM
 ARG BUILD_TYPE=prebuilt
 
+# Capture the ASAN mode the container is being created with, if provided.
+ARG ASAN_MODE=unknown
+
 # ============================================================================
 # Common base image with all dependencies
 # ============================================================================
 FROM ubuntu:24.04 AS base
+
+# hipDNN dev container version (version number set arbitrarily, update if/when needed)
+ENV HIPDNN_DEV_CONTAINER_VERSION=1
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HIP_PLATFORM=amd
@@ -52,6 +58,40 @@ RUN curl -fL https://dvc.org/download/linux-deb/dvc-3.67.0 -o /tmp/dvc.deb && \
     rm /tmp/dvc.deb
 
 # ============================================================================
+# TheRock build environment - system tools + Python venv ready
+#
+# A minimal container with everything needed to build TheRock from source.
+# Contains all build dependencies from base plus a Python venv ready for
+# TheRock's requirements.txt. No source code or build artifacts included.
+#
+# Usage: Mount your TheRock source and output directory when running.
+#
+# Example: Build this target
+#   docker build -f Dockerfile.ubuntu24 --target fullbuildshell -t hipdnn:fullbuildshell .
+#
+# Example: Run with mounts and build manually
+#   docker run -it \
+#       -v /path/to/TheRock:/TheRock \
+#       -v /path/to/rocm:/opt/rocm \
+#       hipdnn:fullbuildshell bash
+#
+# Inside the container, run:
+#   cd /TheRock
+#   pip install -r requirements.txt
+#   python ./build_tools/fetch_sources.py --depth 1
+#   mkdir -p build && cd build
+#   cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=/opt/rocm -DTHEROCK_AMDGPU_FAMILIES=gfx942 ...
+#   cmake --build .
+#   cmake --install .
+# ============================================================================
+FROM base AS fullbuildshell
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /workspace
+
+# ============================================================================
 # Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
 #
 # New path: uses install_rocm_from_artifacts.py for downloading ROCm artifacts.
@@ -90,7 +130,7 @@ ARG THEROCK_GIT_TAG=
 ARG THEROCK_PREBUILT_ID=
 ARG THEROCK_TARBALL=
 
-# Clone TheRock for build tools (shallow clone, only need scripts)
+# Clone TheRock for build tools
 RUN git clone --depth 1 https://github.com/ROCm/TheRock.git /TheRock
 
 WORKDIR /TheRock
@@ -173,43 +213,44 @@ ARG THEROCK_BUILD_PRESET=linux-release-package
 ARG BUILD_JOBS=0
 ARG ROCM_LIBRARIES_REF=default
 ARG ROCM_SYSTEMS_REF=default
+ARG VERBOSE_BUILD=0
 
 RUN git config --global user.email "docker@build.local" && \
     git config --global user.name "Docker Build"
 
-RUN git clone https://github.com/ROCm/TheRock.git
+RUN git clone --depth 1 https://github.com/ROCm/TheRock.git /TheRock
 
 WORKDIR /TheRock
 
 RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
-        echo "Checking out specific hash: $THEROCK_GIT_HASH"; \
-        git fetch; \
-        git checkout $THEROCK_GIT_HASH; \
+        echo "Checking out TheRock: $THEROCK_GIT_HASH"; \
+        git fetch --depth 1 origin "$THEROCK_GIT_HASH" && \
+        git checkout FETCH_HEAD; \
     else \
-        echo "Using default branch"; \
+        echo "Using default branch for TheRock"; \
     fi
 
-# Update rocm-libraries submodule to specific ref if provided
-# we need to commit the change so that fetch_sources.py does not overwrite the change
+# Update rocm-libraries submodule to specific ref if provided.
+# Commit the change so that fetch_sources.py does not overwrite it.
 RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
         echo "Updating rocm-libraries submodule to: $ROCM_LIBRARIES_REF"; \
-        git submodule update --init rocm-libraries && \
+        git submodule update --init --depth 1 rocm-libraries && \
         cd rocm-libraries && \
-        git fetch origin && \
-        git checkout $ROCM_LIBRARIES_REF && \
+        git fetch --depth 1 origin "$ROCM_LIBRARIES_REF" && \
+        git checkout FETCH_HEAD && \
         cd .. && \
         git add rocm-libraries && \
         git commit -m "Update rocm-libraries submodule to $ROCM_LIBRARIES_REF"; \
     fi
 
-# Update rocm-systems submodule to specific ref if provided
-# we need to commit the change so that fetch_sources.py does not overwrite the change
+# Update rocm-systems submodule to specific ref if provided.
+# Commit the change so that fetch_sources.py does not overwrite it.
 RUN if [ "$ROCM_SYSTEMS_REF" != "default" ]; then \
         echo "Updating rocm-systems submodule to: $ROCM_SYSTEMS_REF"; \
-        git submodule update --init rocm-systems && \
+        git submodule update --init --depth 1 rocm-systems && \
         cd rocm-systems && \
-        git fetch origin && \
-        git checkout $ROCM_SYSTEMS_REF && \
+        git fetch --depth 1 origin "$ROCM_SYSTEMS_REF" && \
+        git checkout FETCH_HEAD && \
         cd .. && \
         git add rocm-systems && \
         git commit -m "Update rocm-systems submodule to $ROCM_SYSTEMS_REF"; \
@@ -225,12 +266,13 @@ RUN pip install -r requirements.txt
 
 RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
     git config --global credential.helper "!f() { echo username=anonymous; echo password=; }; f" && \
-    python ./build_tools/fetch_sources.py
+    python ./build_tools/fetch_sources.py --depth 1
 
 RUN mkdir build
 WORKDIR /TheRock/build
 
-RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
+RUN if [ "$VERBOSE_BUILD" = "1" ]; then export THEROCK_INTERACTIVE=1; fi; \
+    if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
         echo "Building with TheRock preset: $THEROCK_BUILD_PRESET"; \
         cmake .. \
             --preset=$THEROCK_BUILD_PRESET \
@@ -251,7 +293,12 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     fi
 
-RUN if [ "$BUILD_JOBS" = "0" ]; then \
+RUN if [ "$VERBOSE_BUILD" = "1" ]; then \
+        export THEROCK_INTERACTIVE=1; \
+        export TEATIME_FORCE_INTERACTIVE=1; \
+        echo "Verbose build enabled: subproject output will stream to terminal."; \
+    fi; \
+    if [ "$BUILD_JOBS" = "0" ]; then \
         cmake --build .; \
     else \
         echo "Building with $BUILD_JOBS parallel jobs"; \
@@ -265,11 +312,21 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
 FROM install_therock_$BUILD_TYPE AS install_therock
 
 # ============================================================================
-# Common hipDNN development environment
+# hipDNN dev shell - development tools WITHOUT /opt/rocm baked in
+#
+# This lightweight image contains all hipDNN development tools but expects
+# /opt/rocm to be mounted at runtime. Useful for:
+# - Local development with shared ROCm installation
+# - Faster container builds (no TheRock build/download)
+# - Multiple ASIC targets using the same base image
+#
+# Example: Build dev shell only
+#   docker build -f Dockerfile.ubuntu24 --target devshell -t hipdnn:devshell .
+#
+# Example: Run with mounted ROCm
+#   docker run -v /path/to/rocm:/opt/rocm hipdnn:devshell bash
 # ============================================================================
-FROM base AS hipdnn
-
-COPY --from=install_therock /opt/rocm /opt/rocm
+FROM base AS devshell
 
 # Install explicit version of tools that are supported for hipDNN development
 # (clang-format, clang-tidy, llvm)
@@ -303,8 +360,35 @@ RUN for tool in /usr/bin/llvm*-20; do \
 
 RUN python3 -m pip install --break-system-packages pre-commit
 
+# Create mount point for /opt/rocm (will be empty unless mounted or built upon)
+RUN mkdir -p /opt/rocm
+
 ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
 ENV CMAKE_GENERATOR="Ninja"
 
 WORKDIR /workspace
+
+# ============================================================================
+# hipDNN full image - development tools WITH /opt/rocm baked in
+#
+# This is the default target, providing a complete self-contained image with
+# TheRock (ROCm) pre-installed. Use BUILD_TYPE to choose prebuilt vs fullbuild.
+#
+# Example: Build with prebuilt TheRock (default)
+#   docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
+#
+# Example: Build with source-built TheRock
+#   docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild -t hipdnn:fullbuild .
+# ============================================================================
+FROM devshell AS hipdnn
+
+# Import ARGs into this layer so they can be captured in env vars below.
+ARG BUILD_TYPE
+ARG ASAN_MODE
+
+# Record some container build settings in environment variables in the container
+ENV HIPDNN_DEV_CONTAINER_BUILD_TYPE=${BUILD_TYPE}
+ENV HIPDNN_DEV_CONTAINER_ASAN=${ASAN_MODE}
+
+COPY --from=install_therock /opt/rocm /opt/rocm

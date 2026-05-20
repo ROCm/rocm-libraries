@@ -53,6 +53,10 @@ inline hipdnn_flatbuffers_sdk::data_objects::DataType
         return hipdnn_flatbuffers_sdk::data_objects::DataType::INT64;
     case hipdnn_frontend::DataType::BOOLEAN:
         return hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN;
+    case hipdnn_frontend::DataType::FP8_E4M3_FNUZ:
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ;
+    case hipdnn_frontend::DataType::FP8_E5M2_FNUZ:
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ;
     default:
         return hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
     }
@@ -96,6 +100,10 @@ inline hipdnn_frontend::DataType
         return hipdnn_frontend::DataType::INT64;
     case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
         return hipdnn_frontend::DataType::BOOLEAN;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ:
+        return hipdnn_frontend::DataType::FP8_E4M3_FNUZ;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ:
+        return hipdnn_frontend::DataType::FP8_E5M2_FNUZ;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -357,6 +365,10 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
         return std::make_unique<Tensor<fp6_e3m2>>(dims, strides);
     case hipdnn_frontend::DataType::BOOLEAN:
         return std::make_unique<Tensor<bool>>(dims, strides);
+    case hipdnn_frontend::DataType::FP8_E4M3_FNUZ:
+        return std::make_unique<Tensor<hipdnn_data_sdk::types::fp8_e4m3_fnuz>>(dims, strides);
+    case hipdnn_frontend::DataType::FP8_E5M2_FNUZ:
+        return std::make_unique<Tensor<hipdnn_data_sdk::types::fp8_e5m2_fnuz>>(dims, strides);
     default:
         throw std::runtime_error("Unsupported data type for tensor");
     }
