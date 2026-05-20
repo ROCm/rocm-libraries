@@ -99,7 +99,8 @@ jobs:
             -DROCM_PATH=/opt/rocm \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DENABLE_CLANG_FORMAT=OFF \
-            -DHIP_PLATFORM=amd
+            -DHIP_PLATFORM=amd \
+            -DHIPDNN_BUILD_PYTHON_BINDINGS=ON
           ninja -C build-hipdnn tidy
 
       # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067

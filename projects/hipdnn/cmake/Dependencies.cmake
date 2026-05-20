@@ -273,6 +273,7 @@ function(_fetch_nanobind VERSION HASH)
         nanobind
         GIT_REPOSITORY https://github.com/wjakob/nanobind.git
         GIT_TAG v${VERSION}
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
 
     fetchcontent_makeavailable(nanobind)
