@@ -529,10 +529,28 @@ class InstructionEmitter:
                 #   else                           → mask = boundaryMask[i] (precomputed)
                 # Only 2 cmps per subIterK (shared across all i), vs 8 in the
                 # per-i version, because the boundary pattern is baked in.
-                module.add(VCmpGTI32(
-                    dst=sgpr(maskSgpr, laneSGPRCount),
-                    src0=vgpr(self._tail_vDiff), src1=kBaseConst + 7,
-                    comment=f"sFull: diff > {kBaseConst+7} (effective_diff_{subIterK} >= 8)"))
+                fullLit = kBaseConst + 7
+                zeroLit = kBaseConst
+                def _emit_cmp(cmpCls, literal, comment):
+                    # VOPC inline-constant range is -16..64; stage out-of-range
+                    # literals via a scratch sgpr (e.g. BF16 MI_K=32, subIterK>=2).
+                    if -16 <= literal <= 64:
+                        module.add(cmpCls(
+                            dst=sgpr(maskSgpr, laneSGPRCount),
+                            src0=vgpr(self._tail_vDiff), src1=literal,
+                            comment=comment))
+                    else:
+                        with writer.allocTmpSgpr(1) as litSgprInfo:
+                            litSgpr = litSgprInfo.idx
+                            module.add(SMovB32(
+                                dst=sgpr(litSgpr), src=hex(literal),
+                                comment=f"stage literal {literal} (non-inline)"))
+                            module.add(cmpCls(
+                                dst=sgpr(maskSgpr, laneSGPRCount),
+                                src0=vgpr(self._tail_vDiff), src1=sgpr(litSgpr),
+                                comment=comment))
+                _emit_cmp(VCmpGTI32, fullLit,
+                          f"sFull: diff > {fullLit} (effective_diff_{subIterK} >= 8)")
                 for i in range(vgprPerInUnroll):
                     module.add(VCndMaskB32(
                         dst=vgpr(maskVgprs[i]),
@@ -540,10 +558,8 @@ class InstructionEmitter:
                         src1=vgpr(self._tail_vNegOne),
                         src2=sgpr(maskSgpr, laneSGPRCount),
                         comment=f"mask[{i}] = sFull ? full : boundary[{i}]"))
-                module.add(VCmpLeI32(
-                    dst=sgpr(maskSgpr, laneSGPRCount),
-                    src0=vgpr(self._tail_vDiff), src1=kBaseConst,
-                    comment=f"sZero: diff <= {kBaseConst} (effective_diff_{subIterK} <= 0)"))
+                _emit_cmp(VCmpLeI32, zeroLit,
+                          f"sZero: diff <= {zeroLit} (effective_diff_{subIterK} <= 0)")
                 for i in range(vgprPerInUnroll):
                     module.add(VCndMaskB32(
                         dst=vgpr(maskVgprs[i]), src0=vgpr(maskVgprs[i]), src1=0,
