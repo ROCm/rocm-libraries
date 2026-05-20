@@ -10,6 +10,10 @@ Documentation for hipSPARSE is available at
 * Add `hipsparseCreateBsr` and `hipsparseCreateConstBsr` in order to enable BSR format support in generic routines.
 * Add BSR format support to `hipsparseSpMV`.
 
+### Resolved issues
+
+* Fixed an issue where calling `hipsparseSpMV` multiple times with different `hipsparseOperation_t` types, while using the same sparse matrix descriptor, resulted in errors.
+
 ## hipSPARSE 4.5.0 for ROCm 7.12.0
 
 ### Added
