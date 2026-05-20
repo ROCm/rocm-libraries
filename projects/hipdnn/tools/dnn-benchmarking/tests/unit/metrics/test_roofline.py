@@ -97,15 +97,40 @@ class TestFailureModes:
         assert extra["roofline"]["returncode"] == 1
         assert "failed" in extra["roofline"]["error_tail"]
 
-    def test_success_with_missing_artifacts_records_warning(
+    def test_success_with_no_csv_at_all_records_tool_diagnostic(
         self, monkeypatch, tmp_path
     ):
-        """rocprof-compute exited 0, created a workload directory, but
-        produced neither the ceilings CSV nor sysinfo. Distinct from the
-        broken-tool case (no workload directory at all): here the tool
-        ran far enough to set up its output tree but emitted no
-        artefacts. We must record the gap rather than silently emit an
-        empty `roofline` slice."""
+        """rocprof-compute exited 0 and produced no CSV anywhere under
+        out_dir — almost always a tool/version mismatch where
+        `profile --roof-only` is silently a no-op. The diagnostic must
+        point at the tool rather than the missing roofline.csv,
+        otherwise users chase a phantom output-format bug.
+
+        Note: rocprof-compute's exact output layout varies across
+        versions (some honour `-n workload -p out`, 3.6+ writes to `-p`
+        directly). Both shapes are handled by `_find_named`'s rglob —
+        the diagnostic anchor is "no CSV anywhere", not "no `workload`
+        subdir", which would false-positive on 3.6+."""
+        monkeypatch.setattr(
+            roofline_mod,
+            "resolve_rocm_tool",
+            lambda name: "/opt/rocm/bin/rocprof-compute",
+        )
+        # Critically: no side effect that creates any CSV.
+        proc = MagicMock(returncode=0, stdout="", stderr="")
+        with patch.object(roofline_mod.subprocess, "run", return_value=proc):
+            extra = roofline_mod.run(inner_argv=["python"], out_dir=tmp_path)
+        rl = extra["roofline"]
+        assert len(rl["warnings"]) == 1
+        assert "no CSV output" in rl["warnings"][0]
+
+    def test_success_with_other_csv_but_no_named_files_records_specific_warning(
+        self, monkeypatch, tmp_path
+    ):
+        """rocprof-compute ran far enough to drop per-IP CSVs but
+        didn't aggregate them into roofline.csv / sysinfo.csv. The
+        diagnostic is the named-file message, not the tool-broken
+        message — the tool clearly ran."""
         monkeypatch.setattr(
             roofline_mod,
             "resolve_rocm_tool",
@@ -113,37 +138,12 @@ class TestFailureModes:
         )
 
         def fake_run(argv, **kwargs):
-            # Mimic rocprof-compute creating the workload tree but no
-            # CSVs (which is the post-tool-init / pre-PMC-write window).
-            workload_dir = tmp_path / "workload"
-            workload_dir.mkdir(parents=True, exist_ok=True)
+            # Drop an unrelated CSV so the rglob *.csv match succeeds
+            # but neither named file is present.
+            (tmp_path / "results_pmc_perf_0.csv").write_text("counter,value\n")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch.object(roofline_mod.subprocess, "run", side_effect=fake_run):
             extra = roofline_mod.run(inner_argv=["python"], out_dir=tmp_path)
         rl = extra["roofline"]
         assert rl["warnings"] == ["no roofline.csv or sysinfo.csv produced"]
-        assert "roofline_csv" not in rl
-        assert "sysinfo_csv" not in rl
-        assert "workload_path" not in rl
-
-    def test_success_with_no_workload_dir_records_specific_warning(
-        self, monkeypatch, tmp_path
-    ):
-        """rocprof-compute exited 0 and wrote nothing — not even the
-        workload directory. Almost always a tool/version mismatch
-        (`profile --roof-only` is silently a no-op on some builds).
-        The diagnostic must point at the tool rather than the missing
-        CSVs, otherwise users chase a phantom output-format bug."""
-        monkeypatch.setattr(
-            roofline_mod,
-            "resolve_rocm_tool",
-            lambda name: "/opt/rocm/bin/rocprof-compute",
-        )
-        # Critically: no fake_run side effect that creates workload_dir.
-        proc = MagicMock(returncode=0, stdout="", stderr="")
-        with patch.object(roofline_mod.subprocess, "run", return_value=proc):
-            extra = roofline_mod.run(inner_argv=["python"], out_dir=tmp_path)
-        rl = extra["roofline"]
-        assert len(rl["warnings"]) == 1
-        assert "no workload directory" in rl["warnings"][0]

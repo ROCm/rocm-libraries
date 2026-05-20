@@ -114,27 +114,35 @@ def run(
 
     # roofline.csv carries the empirical HBM/compute ceilings — the
     # single most useful artifact and what users point `analyze` at.
+    # Layout varies across rocprof-compute versions:
     #
-    # If the workload dir doesn't exist at all, rocprof-compute exited 0
-    # without writing anything — usually a tool/version mismatch where
-    # --roof-only is silently a no-op. Tighten the diagnostic so users
-    # don't chase a phantom missing-CSV bug.
-    if not workload_dir.exists():
-        warn_once(
-            "roofline",
-            "rocprof-compute exited 0 but wrote no workload directory; "
-            "the installed build may not support `profile --roof-only`",
-        )
-        result["warnings"] = [
-            "rocprof-compute produced no workload directory "
-            f"(expected at {workload_dir})"
-        ]
-        return {"roofline": result}
+    #   * Older builds honoured `-n workload -p out_dir` and put output
+    #     under `out_dir/workload/<gpu>/`.
+    #   * rocprof-compute 3.6+ writes directly to `-p` (so `out_dir/`)
+    #     and ignores `-n`.
+    #
+    # `_find_named` rglobs from `out_dir` so it handles both shapes.
     roofline_csv = _find_named(out_dir, "roofline.csv")
     sysinfo_csv = _find_named(out_dir, "sysinfo.csv")
+    # If neither named artefact is anywhere under out_dir, distinguish
+    # "tool ran but produced no recognised output" (some CSVs present)
+    # from "tool produced nothing at all" (likely a version mismatch
+    # where --roof-only is silently a no-op).
     if roofline_csv is None and sysinfo_csv is None:
-        warn_once("roofline", "no roofline.csv or sysinfo.csv produced")
-        result["warnings"] = ["no roofline.csv or sysinfo.csv produced"]
+        any_csv = next(out_dir.rglob("*.csv"), None)
+        if any_csv is None:
+            warn_once(
+                "roofline",
+                "rocprof-compute exited 0 but produced no CSV output; "
+                "the installed build may not support `profile --roof-only`",
+            )
+            result["warnings"] = [
+                "rocprof-compute produced no CSV output "
+                "(tool/build may not support --roof-only)"
+            ]
+        else:
+            warn_once("roofline", "no roofline.csv or sysinfo.csv produced")
+            result["warnings"] = ["no roofline.csv or sysinfo.csv produced"]
         return {"roofline": result}
     if roofline_csv is not None:
         result["roofline_csv"] = str(roofline_csv)
