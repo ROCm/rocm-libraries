@@ -49,6 +49,7 @@ public:
         {
             return std::is_same<T, hipComplex>{} || std::is_same<T, hipDoubleComplex>{};
         }
+        case hipsparse_test_numeric_types_enum::gather:
         case hipsparse_test_numeric_types_enum::scatter:
         {
             return std::is_same<T, int8_t>{} || std::is_same<T, hipsparseFloat16>{}
