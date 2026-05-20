@@ -1,0 +1,196 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+
+#######################################################################
+# Subtile BF16 K-tail: K_remain a multiple of 8 but not 32
+# (K_remain ∈ {8, 16, 24}, ASEM=8). Reuses the K32 emit path; the
+# per-lane mask granularity is already `numMIInUnroll=8` for bf16.
+#######################################################################
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  DataInitTypeBias: 1
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  #PrintSolutionRejectionReason: True
+  #GenerateSourcesAndExit: False
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  ########################################
+  # BF16 TN — no bias, DU = 2*MI_K = 64
+  #
+  # K-remain values: K % 8 == 0 and K % 32 != 0
+  #                  K_remain ∈ {8, 16, 24}  for DU=64
+  # K total values: K_remain (tail-only) plus K_remain + DU and
+  # K_remain + 2*DU (one and two main iters + tail).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # 1x1 wave group
+          - [16, 16, 32, 1,  1, 4, 4,  1, 1]  # MT 64x64
+          # 2x2 wave group
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          # 4x1 wave group
+          - [16, 16, 32, 1,  1, 2, 2,  4, 1]  # MT 128x32
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]                  # 2*MI_K = 2*32
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+        - AssertSummationElementMultiple: [8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # K_remain ∈ {8}: K = 8 (single tail iter, no main iters)
+          - Exact: [128, 128, 1,   8]
+          - Exact: [256, 256, 1,   8]
+          # K_remain ∈ {16}
+          - Exact: [128, 128, 1,  16]
+          - Exact: [256, 256, 1,  16]
+          # K_remain ∈ {24}
+          - Exact: [128, 128, 1,  24]
+          - Exact: [256, 256, 1,  24]
+          # K_remain ∈ {8} via K = 1*DU + 8 = 72  (one main + tail)
+          - Exact: [128, 128, 1,  72]
+          # K_remain ∈ {16} via K = 1*DU + 16 = 80
+          - Exact: [128, 128, 1,  80]
+          # K_remain ∈ {24} via K = 1*DU + 24 = 88
+          - Exact: [128, 128, 1,  88]
+          # K_remain ∈ {8} via K = 2*DU + 8 = 136 (two main + tail)
+          - Exact: [128, 128, 1, 136]
+          # K_remain ∈ {24} via K = 2*DU + 24 = 152
+          - Exact: [128, 128, 1, 152]
+          # Asymmetric M/N with K-tail
+          - Exact: [128,  32, 1,  72]
+          - Exact: [ 32, 128, 1,  72]
+          # Batched
+          - Exact: [128, 128, 2,  72]
+          - Exact: [128, 128, 3,  16]
+
+  ########################################
+  # BSS TN — BF16 input, F32 output, DU = 2*MI_K = 64
+  #
+  # Smaller wavetile coverage. K-remain values from the BF16 group.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 32, 1,  1, 3, 4,  2, 2]  # MT 96x128 (odd M wavetile)
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+        - AssertSummationElementMultiple: [8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1,   8]   # K = tail-only
+          - Exact: [128, 128, 1,  24]
+          - Exact: [128, 128, 1,  72]   # K = 1*DU + 8
+          - Exact: [128, 128, 1, 152]   # K = 2*DU + 24
+          - Exact: [128, 128, 2,  72]
+
+  ########################################
+  # BBS TN — BF16 bias epilogue + activation, DU = 2*MI_K = 64
+  #
+  # Minimal wavetile + activation coverage to confirm K%8 tail
+  # composes cleanly with bias / activation epilogues.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 1
+      BiasDataTypeList: [s]
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [1]
+        - AssertSummationElementMultiple: [8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1,  72]   # K = 1*DU + 8, with bias
+          - Exact: [128, 128, 1,  88]   # K = 1*DU + 24, with bias
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+          - [Enum: gelu]
