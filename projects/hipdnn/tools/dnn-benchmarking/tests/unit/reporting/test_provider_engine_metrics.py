@@ -168,9 +168,9 @@ class TestProviderEngineResultFullShape:
                 "csv_path": "/tmp/profiling-output/x/perf.csv",
             },
             "roofline": {
-                "pdf_path": "/tmp/profiling-output/x/roofline.pdf",
-                "db_path": "/tmp/profiling-output/x/workload.db",
-                "data_type": "FP32",
+                "roofline_csv": "/tmp/profiling-output/x/roofline.csv",
+                "sysinfo_csv": "/tmp/profiling-output/x/sysinfo.csv",
+                "workload_path": "/tmp/profiling-output/x",
             },
             "trace": {
                 "format": "pftrace",

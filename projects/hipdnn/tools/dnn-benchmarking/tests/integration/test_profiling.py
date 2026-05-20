@@ -107,10 +107,10 @@ def test_pmc_basic_populates_counters(tmp_path):
     extra = _first_pe_extra(data)
     assert "pmc" in extra
     pmc = extra["pmc"]
-    # Either we got real counters back, or rocprofv3 failed and recorded
-    # the tail — in both cases the slice exists; the rest of the test
-    # ensures at least one of the success keys is present.
-    assert any(k in pmc for k in ("counters", "error_tail", "skipped"))
+    # Real counters, recorded failure tail, or an rc==0 warning (e.g.
+    # the rocpd parser found no .db) — any of these means the slice
+    # made the round trip; only a wholly-empty pmc dict is a regression.
+    assert any(k in pmc for k in ("counters", "error_tail", "skipped", "warnings"))
 
 
 @pytest.mark.rocprofv3
@@ -141,15 +141,16 @@ def test_perf_records_user_cycles(tmp_path):
 
 
 @pytest.mark.rocprof_compute
-def test_roofline_records_pdf_path(tmp_path):
+def test_roofline_records_csv_artifacts(tmp_path):
     _require_gpu()
     _require_binary("rocprof-compute")
     data = _run_dnn_bench(["--roofline"], tmp_path)
     extra = _first_pe_extra(data)
     assert "roofline" in extra
     roof = extra["roofline"]
-    if "pdf_path" in roof:
-        assert Path(roof["pdf_path"]).exists()
+    if "roofline_csv" in roof:
+        assert Path(roof["roofline_csv"]).exists()
+        assert Path(roof["workload_path"]).is_dir()
 
 
 @pytest.mark.rocprofv3
@@ -181,6 +182,11 @@ def test_combined_pmc_perf_roofline_merge_into_one_extra_metrics(tmp_path):
     # At least one of (real-payload | tool-error) must be populated for
     # each slice — a slice that's wholly empty would indicate the
     # orchestrator skipped it without warning.
-    assert any(k in extra["pmc"] for k in ("counters", "error_tail", "skipped"))
+    assert any(
+        k in extra["pmc"] for k in ("counters", "error_tail", "skipped", "warnings")
+    )
     assert any(k in extra["perf"] for k in ("cycles_user", "error_tail", "skipped"))
-    assert any(k in extra["roofline"] for k in ("pdf_path", "error_tail", "skipped"))
+    assert any(
+        k in extra["roofline"]
+        for k in ("roofline_csv", "error_tail", "skipped", "warnings")
+    )

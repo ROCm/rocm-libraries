@@ -150,14 +150,16 @@ class MetricsConfig:
             and instructions. Kernel-space events are dropped silently
             when ``/proc/sys/kernel/perf_event_paranoid > 1``.
         roofline: Re-run under ``rocprof-compute profile --roof-only``
-            to generate a roofline PDF at rocprof-compute's default
-            datatype (FP32). Path-only recording — the plot itself is
-            the user-facing artifact. Non-default datatypes (FP16, BF16,
-            etc.) are rendered post-hoc by the user via
-            ``rocprof-compute analyze --path <db_path>/..
-            --roofline-data-type FP16``; we don't expose a profile-time
-            knob because rocprof-compute's ``profile`` mode doesn't
-            accept one.
+            to capture empirical HBM/compute ceilings at rocprof-
+            compute's default datatype (FP32). The CSV outputs
+            (``roofline.csv``, ``sysinfo.csv``) and the workload
+            directory land in ``extra_metrics["roofline"]`` as
+            ``roofline_csv`` / ``sysinfo_csv`` / ``workload_path``. The
+            PDF/HTML plot is rendered post-hoc by the user via
+            ``rocprof-compute analyze --path <workload_path>
+            [--roofline-data-type FP16]``; we don't expose a profile-
+            time datatype knob because rocprof-compute's ``profile``
+            mode doesn't accept one.
         pmc_allow_multipass: Required for ``--pmc all``. Without it,
             ``all`` is rejected at config-build time because the rocprofv3
             multi-pass replay budget is easy to exceed and the resulting

@@ -15,11 +15,11 @@ rocprof-compute (and upstream rocm-systems develop) the
 the HBM/compute ceilings using rocprof-compute's default datatype
 (FP32). Users who need FP16/BF16/etc. plots run::
 
-    rocprof-compute analyze --path <recorded db_path>/.. \\
+    rocprof-compute analyze --path <workload_path> \\
         --roofline-data-type FP16
 
 against the workload directory we record in
-``extra_metrics["roofline"]["db_path"]``.
+``extra_metrics["roofline"]["workload_path"]``.
 """
 
 import subprocess

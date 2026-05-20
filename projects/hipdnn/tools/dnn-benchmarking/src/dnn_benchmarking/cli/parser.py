@@ -303,17 +303,20 @@ Tarball Input:
         action="store_true",
         default=False,
         help=(
-            "Re-run under 'rocprof-compute profile --roof-only' for a "
-            "roofline plot. PDF + db paths land in "
-            "extra_metrics['roofline']. Adds ~3 extra workload runs."
+            "Re-run under 'rocprof-compute profile --roof-only' to "
+            "capture HBM/compute ceilings. The CSV artefacts "
+            "(roofline.csv, sysinfo.csv) and the workload directory "
+            "path land in extra_metrics['roofline'] — render the PDF "
+            "post-hoc via 'rocprof-compute analyze --path <workload>'. "
+            "Adds ~3 extra workload runs."
         ),
     )
     # --roofline-data-type intentionally absent: rocprof-compute only
     # accepts it under `analyze`, not `profile`. The profile run captures
     # ceilings at the tool's default datatype (FP32); rendering FP16/
     # BF16/etc. PDFs is a post-processing step the user runs themselves
-    # against extra_metrics["roofline"]["db_path"]:
-    #   rocprof-compute analyze --path <db_path>/.. --roofline-data-type FP16
+    # against extra_metrics["roofline"]["workload_path"]:
+    #   rocprof-compute analyze --path <workload_path> --roofline-data-type FP16
     metrics_group.add_argument(
         "--profiling-output-dir",
         type=Path,
