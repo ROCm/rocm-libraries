@@ -831,17 +831,6 @@ class KernelWriterAssembly(KernelWriter):
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
                % (self.sgprPool.size(), self.states.regCaps["MaxSgpr"]))
 
-    # Grow pool to MaxSgpr so remaining SGPRs are available for temp allocations.
-    # Without this, the pool may be smaller than MaxSgpr after defineSgpr() calls,
-    # causing temp checkOut requests to fail even though physical SGPRs are available.
-    # If defineSgpr already exceeded MaxSgpr, the while loop is a no-op (the warning
-    # above already flagged the overflow).
-    padRegs = []
-    while self.sgprPool.size() < self.states.regCaps["MaxSgpr"]:
-      padRegs.append(self.sgprPool.checkOut(1, "pool_pad", preventOverflow=False))
-    for r in padRegs:
-      self.sgprPool.checkIn(r)
-
     # End of define sgprs
     #------------------------
 
@@ -17254,7 +17243,7 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
- def initTDMDescriptorSubtile(self, kernel: Mapping, tP: Mapping, setLds: bool = True) -> Module:
+  def initTDMDescriptorSubtile(self, kernel: Mapping, tP: Mapping, setLds: bool = True) -> Module:
     """Subtile variant of initTDMDescriptor(). setLds=False reprograms from tracking SGPR."""
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
