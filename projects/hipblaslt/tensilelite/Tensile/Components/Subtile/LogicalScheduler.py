@@ -2349,6 +2349,18 @@ class LogicalScheduler:
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
 
+        # ── Skip preloop/mainloop/NGLL/NLL when K < DepthU ──
+        # PRELOOP's first GR + GRIncOp would otherwise read OOB and bump the
+        # SRD past valid data, leaving the tail loop reading from offset DU
+        # instead of 0. Jump straight to the post-mainloop label so the
+        # caller's tail-loop setup runs on a pristine SRD/LDS state.
+        endLabel = Label("SkipToEnd", "")
+        if not kernel["NoTailLoop"]:
+            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                 comment="K < DepthU? skip to tail loop"))
+            module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
+                                    comment="K < DepthU: only tail loop runs"))
+
         # ── Preloop ──
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
                                   self._preloop_emitted, schedule=False))
@@ -2380,7 +2392,6 @@ class LogicalScheduler:
 
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2
-        endLabel = Label("SkipToEnd", "")
         module.add(Label("SkipMainloop", ""))
         if hasNGLL:
             module.add(Label("SkipToNGLL", ""))

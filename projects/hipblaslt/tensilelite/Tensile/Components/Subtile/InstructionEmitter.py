@@ -261,20 +261,27 @@ class InstructionEmitter:
         return list(module.flatitems())
 
     def emit_tail_lr_inc(self, source):
-        """LR LDS buffer swap for tail entry, gated by `K < 2*DepthU`.
+        """LR LDS buffer swap for tail entry, gated by `DU <= K < 2*DepthU`.
 
         Runs only on the NLL-only path where PRELOOP swapped LW but not LR.
-        NGLL path (K >= 2*DU) skips the body — NGLL already swapped LR.
+        Skipped on:
+          - NGLL path (K >= 2*DU): NGLL already swapped LR.
+          - K < DU path: PRELOOP was skipped entirely, LW never swapped.
         """
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
-        two_du = 2 * self.kernel["DepthU"]
+        du = self.kernel["DepthU"]
+        two_du = 2 * du
         skipLabel = Label(self.writer.labels.getNameInc(f"TailSkipLrInc_{tc}"), "")
         module = Module()
         module.add(SCmpGeU32(src0=sgpr("SizesSum+0"), src1=two_du,
                              comment=f"K >= 2*DepthU? skip tail LR swap for {tc}"))
         module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
                                 comment="NGLL path: LR already aligned with LW"))
+        module.add(SCmpLtU32(src0=sgpr("SizesSum+0"), src1=du,
+                             comment=f"K < DepthU? skip tail LR swap for {tc}"))
+        module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
+                                comment="preloop-skipped path: LW never swapped"))
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
         module.add(skipLabel)
         return list(module.flatitems())
