@@ -4438,6 +4438,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
+    # Apply StreamK K-offset to TDM global addresses.
+    # calculateLoopNumIter sets StreamKLocalStart; offset Address{A,B} so
+    # TDM reads from the correct K-slice when StreamK splits K across WGs.
+    if hasTDM and kernel["StreamK"]:
+      module.add(self.tdmApplyStreamKOffsetSubtile(kernel, tensorParametersA))
+      module.add(self.tdmApplyStreamKOffsetSubtile(kernel, tensorParametersB))
+
     # Allocate registers for VGPR tiles (PGR=2 delegates to SubtileBasedScheduler)
     pgr = kernel["PrefetchGlobalRead"]
     
@@ -9536,6 +9543,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     assert False, "Should be overrided"
 
   def tdmApplyStreamKOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def tdmApplyStreamKOffsetSubtile(self, kernel, tP) -> Module:
     assert False, "Should be overrided"
 
   def tdmIncrementAB(self, kernel, tP) -> Module:

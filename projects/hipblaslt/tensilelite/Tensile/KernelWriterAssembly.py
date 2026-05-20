@@ -17518,6 +17518,35 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def tdmApplyStreamKOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    pass
+
+  def tdmApplyStreamKOffsetSubtile(self, kernel: Mapping, tP: Mapping) -> Module:
+    """Apply StreamK K-offset to Address{tc} for subtile TDM path.
+
+    When StreamK splits K across workgroups, each WG starts at a different
+    K-slice.  Offset Address{tc} by StreamKLocalStart * DepthU * bpe * stride
+    so tensor_load_to_lds reads from the correct position.
+    """
+    tc = tP["tensorChar"]
+    bpe = tP["bpeGR"]
+    depthU = kernel["DepthU"]
+    mod = Module(f"TDM StreamK K-offset subtile {tc}")
+
+    with self.allocTmpSgpr(2) as tmpSgprRes:
+      tmp = tmpSgprRes.idx
+      # offset = StreamKLocalStart * DepthU * bpe
+      mod.add(SMulI32(dst=sgpr(tmp), src0=sgpr("StreamKLocalStart"), src1=int(depthU * bpe),
+                       comment=f"SK K-offset = localStart * DU({depthU}) * bpe({bpe})"))
+      # offset *= stride along K dimension
+      strideK = self.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
+      mod.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmp), sgpr(tmp+1), sgpr(tmp), strideK,
+                                                   comment=f"SK K-offset *= stride{tc}"))
+      mod.add(SAddU32(dst=sgpr(f"Address{tc}"), src0=sgpr(f"Address{tc}"), src1=sgpr(tmp),
+                       comment=f"Apply SK K-offset to Address{tc} (lo)"))
+      mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(f"Address{tc}+1"), src1=sgpr(tmp+1),
+                        comment=f"Apply SK K-offset to Address{tc} (hi)"))
+    return mod
+
     mod = Module("TDM StreamK K-offset Wave Separated")
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
