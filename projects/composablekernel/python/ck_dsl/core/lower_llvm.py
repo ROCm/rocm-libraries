@@ -32,8 +32,9 @@ What's hard, and how we handle it:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .ir import (
     KernelDef,
@@ -58,7 +59,54 @@ _DATALAYOUT = (
 )
 _TRIPLE = "amdgcn-amd-amdhsa"
 
+
+# A small set of AMDGPU intrinsic signatures changed between LLVM 20
+# (ROCm 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22):
+#
+#   * ``make.buffer.rsrc.p1`` -> ``make.buffer.rsrc.p8.p1`` and the
+#     ``num_records`` arg widened from ``i32`` to ``i64`` (LLVM PR
+#     #126828).
+#   * fp8 / bf8 MFMA A/B operands collapsed from ``<2 x i32>`` to a
+#     scalar ``i64`` (same 64 bits, different LLVM type).
+#
+# comgr verifies the toplevel ``declare`` lines BEFORE running the
+# auto-upgrade pass, so we have to emit the right signature up front.
+# Pick a flavor once at module import; ``lower_kernel_to_llvm`` takes
+# an ``llvm_flavor=`` override for tests.
+LLVM_FLAVOR_LLVM20 = "llvm20"
+LLVM_FLAVOR_LLVM22 = "llvm22"
+
+
+def _detect_llvm_flavor() -> str:
+    """Read ``CK_DSL_LLVM_FLAVOR`` (env) then ``/opt/rocm/.info/version``.
+
+    Falls back to :data:`LLVM_FLAVOR_LLVM22` (the modern default) when
+    nothing is found. Unknown env values fall through to the file
+    probe rather than raising on a typo at import time.
+    """
+    env = os.environ.get("CK_DSL_LLVM_FLAVOR", "").strip().lower()
+    if env in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
+        return env
+    try:
+        with open("/opt/rocm/.info/version") as fh:
+            major, minor = (
+                int(p) for p in fh.read().strip().split("-", 1)[0].split(".")[:2]
+            )
+        return LLVM_FLAVOR_LLVM22 if (major, minor) >= (7, 2) else LLVM_FLAVOR_LLVM20
+    except (OSError, ValueError):
+        return LLVM_FLAVOR_LLVM22
+
+
+_LLVM_FLAVOR: str = _detect_llvm_flavor()
+
+
 # Intrinsic declarations we may emit.
+#
+# Entries below are the LLVM 20 / ROCm 7.0--7.1 signatures. The
+# affected fp8/bf8 MFMA + ``make.buffer.rsrc`` declares are overridden
+# in :data:`_INTRINSIC_DECLS_LLVM22_OVERRIDES` for LLVM 21+ hosts
+# (ROCm 7.2+). The dict KEY stays the same across flavors so the
+# lowerer's ``_need(...)`` call sites are flavor-agnostic.
 _INTRINSIC_DECLS: Dict[str, str] = {
     "workitem.x": "declare i32 @llvm.amdgcn.workitem.id.x()",
     "workitem.y": "declare i32 @llvm.amdgcn.workitem.id.y()",
@@ -291,6 +339,33 @@ _INTRINSIC_DECLS: Dict[str, str] = {
 }
 
 
+# Declares that change shape on LLVM 21+ hosts (ROCm 7.2+). Keys MUST
+# already exist in :data:`_INTRINSIC_DECLS`; only the declaration TEXT
+# differs, so call-site ``_need(...)`` lookups stay flavor-agnostic.
+_INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
+    "mfma.f32.16x16x32.fp8.fp8": (
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
+        "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.16x16x32.bf8.bf8": (
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8("
+        "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.32x32x16.fp8.fp8": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.fp8.fp8("
+        "i64, i64, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.32x32x16.bf8.bf8": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf8.bf8("
+        "i64, i64, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "make.buffer.rsrc.p1": (
+        "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+        "ptr addrspace(1) nocapture readnone, i16, i64, i32)"
+    ),
+}
+
+
 def _llvm_type(t: Type) -> str:
     """Map an IR Type to its LLVM IR textual form."""
     if isinstance(t, PtrType):
@@ -356,8 +431,22 @@ class _Block:
 
 
 class _Lowerer:
-    def __init__(self, kernel: KernelDef) -> None:
+    def __init__(
+        self,
+        kernel: KernelDef,
+        *,
+        llvm_flavor: Optional[str] = None,
+    ) -> None:
         self.kernel = kernel
+        flavor = llvm_flavor if llvm_flavor is not None else _LLVM_FLAVOR
+        if flavor not in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
+            raise ValueError(f"unknown LLVM flavor {flavor!r}")
+        self._flavor: str = flavor
+        # Preserve insertion order of ``_INTRINSIC_DECLS`` -- it drives
+        # the emit order in ``finalize``.
+        self._decls: Dict[str, str] = dict(_INTRINSIC_DECLS)
+        if flavor == LLVM_FLAVOR_LLVM22:
+            self._decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
         self._needs_intrin: Dict[str, bool] = {}
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
@@ -1380,35 +1469,31 @@ class _Lowerer:
     ) -> None:
         """Shared lowering body for FP8 / BF8 MFMA.
 
-        The IR operand types are ``<8 x fp8e4m3>`` / ``<8 x bf8e5m2>``;
-        the LLVM intrinsic wants ``<2 x i32>``. Both are 64-bit per lane,
-        so a single ``bitcast`` is enough.
+        The IR operand types are ``<8 x fp8e4m3>`` / ``<8 x bf8e5m2>``,
+        which both lower to ``<8 x i8>``. The LLVM intrinsic takes a
+        packed 64-bit-per-lane A/B operand whose type changed across
+        LLVM versions: ``<2 x i32>`` on LLVM 20, scalar ``i64`` on
+        LLVM 21+. Same bits, different lane packing; we bitcast
+        ``<8 x i8>`` to whichever shape the active flavor expects.
         """
         a, b, c = op.operands
-        elem_ty = "fp8e4m3" if dtype == "fp8" else "bf8e5m2"
         self._need(f"mfma.f32.{intrinsic}")
-        a_cast = self._fresh(f"mfma_a_{dtype}_i32")
-        b_cast = self._fresh(f"mfma_b_{dtype}_i32")
-        # ``<8 x fp8e4m3>`` / ``<8 x bf8e5m2>`` -> ``<2 x i32>`` (same 64
-        # bits, different vector partitioning). Note that both fp8e4m3
-        # and bf8e5m2 lower to ``<8 x i8>`` in our LLVM type map, so the
-        # bitcast source is ``<8 x i8>`` regardless of which fp8 family.
+        ab_ty = "i64" if self._flavor == LLVM_FLAVOR_LLVM22 else "<2 x i32>"
+        a_cast = self._fresh(f"mfma_a_{dtype}")
+        b_cast = self._fresh(f"mfma_b_{dtype}")
         self._current().emit(
-            f"  {a_cast} = bitcast <8 x i8> {self._operand(a)} to <2 x i32>"
+            f"  {a_cast} = bitcast <8 x i8> {self._operand(a)} to {ab_ty}"
         )
         self._current().emit(
-            f"  {b_cast} = bitcast <8 x i8> {self._operand(b)} to <2 x i32>"
+            f"  {b_cast} = bitcast <8 x i8> {self._operand(b)} to {ab_ty}"
         )
         self._current().emit(
             f"  {op.result.name} = call <{out_vec} x float> "
             f"@llvm.amdgcn.mfma.f32.{intrinsic}("
-            f"<2 x i32> {a_cast}, "
-            f"<2 x i32> {b_cast}, "
+            f"{ab_ty} {a_cast}, {ab_ty} {b_cast}, "
             f"<{out_vec} x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
-        # ``elem_ty`` carried for IR-dump readability via a comment.
-        _ = elem_ty
 
     def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
         a, b, c = op.operands
@@ -1818,33 +1903,46 @@ class _Lowerer:
     def _op_tile_buffer_rsrc(self, op: Op) -> None:
         """Build a buffer resource descriptor for a global pointer.
 
-        Modern LLVM exposes `@llvm.amdgcn.make.buffer.rsrc.p1` which
-        returns a `ptr addrspace(8)`. We keep our IR-level type as
-        `<4 x i32>` for self-documenting printing, but the underlying
-        LLVM value is the addrspace(8) ptr; the buffer_load lowerings
-        below consume it as the addrspace(8) pointer directly via an
-        inttoptr-free path.
+        Lowers to ``@llvm.amdgcn.make.buffer.rsrc.*`` which returns a
+        ``ptr addrspace(8)``. The intrinsic mangling and the
+        ``num_records`` arg type are flavor-dependent:
 
-        Flags = 0x00027000 (matches CK Tile's
-        `__builtin_amdgcn_make_buffer_rsrc(p, 0, bytes, 0x00027000)`
-        in `cktile_fixed_lean_kernel.hpp`). The flag word encodes the
-        rsrc DWORD3 -- TYPE=2 (BUFFER_RESOURCE), DATA_FORMAT=4
-        (32-bit dword), NUM_FORMAT=4 (UINT). Without these flags the
-        AMDGPU compiler can lower buffer loads to "unbounded" loads
-        (a single load_dword without bounds check) which then
-        misreads padded boundary positions as the next row of A.
+        - LLVM 20: ``make.buffer.rsrc.p1`` with ``i32 num_records``.
+        - LLVM 21+: ``make.buffer.rsrc.p8.p1`` with ``i64 num_records``.
+
+        On the LLVM 22 path we accept either an ``i32`` or an ``i64``
+        ``num_bytes`` operand and ``zext`` ``i32`` callers up; ``i64``
+        callers reach the full 64-bit range needed for >4 GiB KV
+        caches that would otherwise OOB-zero at the tail.
+
+        Flags = 0x00027000 -- the rsrc DWORD3 word that gives
+        "32-bit-uint, structured buffer, bounds-checked"; matches CK
+        Tile's hardcoded value.
         """
         self._need("make.buffer.rsrc.p1")
         ptr, num_bytes = op.operands
-        # CK Tile uses 0x00027000 — the buffer rsrc DWORD3 flag word
-        # that gives "32-bit-uint, structured buffer, bounds-checked".
+        if self._flavor == LLVM_FLAVOR_LLVM22:
+            intrinsic = "llvm.amdgcn.make.buffer.rsrc.p8.p1"
+            nb_ty = _llvm_type(num_bytes.type)
+            if nb_ty == "i64":
+                nb_arg = self._operand(num_bytes)
+            elif nb_ty == "i32":
+                nb_arg = self._fresh("nb64")
+                self._current().emit(
+                    f"  {nb_arg} = zext i32 {self._operand(num_bytes)} to i64"
+                )
+            else:
+                raise ValueError(
+                    f"tile.buffer_rsrc num_bytes must be i32 or i64, got {nb_ty}"
+                )
+            nb_text = f"i64 {nb_arg}"
+        else:
+            intrinsic = "llvm.amdgcn.make.buffer.rsrc.p1"
+            nb_text = f"i32 {self._operand(num_bytes)}"
         self._current().emit(
-            f"  {op.result.name} = call ptr addrspace(8) "
-            f"@llvm.amdgcn.make.buffer.rsrc.p1("
+            f"  {op.result.name} = call ptr addrspace(8) @{intrinsic}("
             f"ptr addrspace(1) {self._operand(ptr)}, "
-            f"i16 0, "
-            f"i32 {self._operand(num_bytes)}, "
-            f"i32 159744)"  # 0x00027000
+            f"i16 0, {nb_text}, i32 159744)"  # 0x00027000
         )
 
     def _op_tile_buffer_load_vN_f16(self, op: Op) -> None:
@@ -2583,8 +2681,9 @@ class _Lowerer:
         if self._smem_globals:
             out.append("")
 
-        # Intrinsic declarations actually used.
-        for key, decl in _INTRINSIC_DECLS.items():
+        # Intrinsic declarations actually used. ``self._decls`` is
+        # the flavor-specific dict assembled in ``_Lowerer.__init__``.
+        for key, decl in self._decls.items():
             if self._needs_intrin.get(key):
                 out.append(decl)
         if self._needs_intrin:
@@ -2722,9 +2821,19 @@ def _fp16_hex(x: float) -> str:
     return f"0xH{bits:04X}"
 
 
-def lower_kernel_to_llvm(kernel: KernelDef) -> str:
-    """Return the AMDGPU LLVM IR text for the given kernel."""
-    lowerer = _Lowerer(kernel)
+def lower_kernel_to_llvm(
+    kernel: KernelDef,
+    *,
+    llvm_flavor: Optional[str] = None,
+) -> str:
+    """Return the AMDGPU LLVM IR text for the given kernel.
+
+    ``llvm_flavor`` overrides the autodetected default (one of
+    :data:`LLVM_FLAVOR_LLVM20` / :data:`LLVM_FLAVOR_LLVM22`). Useful
+    for tests that want to pin a specific flavor regardless of the
+    host ROCm install.
+    """
+    lowerer = _Lowerer(kernel, llvm_flavor=llvm_flavor)
     lowerer._collect_smem(kernel.body)
     lowerer.lower_region(kernel.body)
     return lowerer.finalize()

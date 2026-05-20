@@ -31,6 +31,23 @@ target datalayout = (clang-emitted gfx950 string; see _DATALAYOUT in core/lower_
 
 The default `compile_kernel` ISA is `amdgcn-amd-amdhsa--gfx950`. The README and validation pass run against gfx950 (MI355X). The DSL also runs on gfx940/gfx942 in places where the chosen MFMA atoms exist (16x16x16, 32x32x8, 4x4x4); the K-packed atoms (16x16x32, 32x32x16) are gfx950-only.
 
+## LLVM Intrinsic Flavor
+
+A small set of AMDGPU intrinsic signatures changed between LLVM 20 (ROCm 7.0 / 7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22). The DSL picks the right flavor at import time so the same source compiles on both toolchains:
+
+- `llvm.amdgcn.make.buffer.rsrc.p1` → `llvm.amdgcn.make.buffer.rsrc.p8.p1`, `num_records` widened from `i32` to `i64` (LLVM PR #126828).
+- `llvm.amdgcn.mfma.f32.{16x16x32,32x32x16}.{fp8,bf8}.{fp8,bf8}` A/B operands collapsed from `<2 x i32>` to scalar `i64`.
+
+Detection (`core/lower_llvm.py::_detect_llvm_flavor`):
+
+1. `CK_DSL_LLVM_FLAVOR` env var (`llvm20` or `llvm22`).
+2. `/opt/rocm/.info/version`: ROCm `major.minor >= 7.2` → `llvm22`, else `llvm20`.
+3. Default: `llvm22`.
+
+To pin a flavor in a test or one-off build, pass `lower_kernel_to_llvm(kernel, llvm_flavor=LLVM_FLAVOR_LLVM20)` (or `LLVM_FLAVOR_LLVM22`). Both constants live in `core/lower_llvm.py`. Adding a new intrinsic that changes shape across versions: add the LLVM 20 signature to `_INTRINSIC_DECLS`, the LLVM 21+ override to `_INTRINSIC_DECLS_LLVM22_OVERRIDES`, and branch on `self._flavor` inside the `_op_*` handler (see `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` for working examples).
+
+Why a static flavor pick rather than a runtime probe: comgr verifies toplevel `declare`s BEFORE running the auto-upgrade pass, so a mismatched declare fails the verifier even when LLVM would otherwise auto-upgrade the call site.
+
 ## Wave Size Assumption
 
 Wave size is 64. `MfmaAtom.lane_to_output`, `lane_id`, `ds_bpermute` addressing, and the loader/epilogue helpers all assume wave64. There is no wave32 path today.
@@ -61,7 +78,9 @@ If you add a new dtype, check:
 ```text
 global  -> addrspace(1)
 lds     -> addrspace(3)
-buffer  -> addrspace(8)   (from llvm.amdgcn.make.buffer.rsrc.p1)
+buffer  -> addrspace(8)   (from llvm.amdgcn.make.buffer.rsrc; see
+                           "LLVM Intrinsic Flavor" above for the LLVM
+                           20 vs 21+ signature split)
 ```
 
 Buffer-resource operations are modeled as AMDGPU buffer descriptors rather than normal pointer GEPs. They are essential for OOB-safe access in conv, attention, tails, and epilogues.
