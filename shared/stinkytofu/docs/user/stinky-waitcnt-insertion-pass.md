@@ -6,8 +6,8 @@
 
 - **Instruction-level tracking** via def-use chains (not register-level)
 - **Three counter types**: DS (`dlcnt`), buffer/load (`vlcnt`), tensor (`tlcnt`)
-- **Cross-block analysis** using pre-scanned exit states and predecessor lookup
-- **Tensor handling** via a separate barrier-token heuristic phase that always runs
+- **Cross-block analysis** using pre-scanned exit states and predecessor lookup; the tensor queue is additionally seeded into `localState` from every predecessor at block entry
+- **Tensor handling** integrated into Phase 2 via the `isTensorWaitAnchor` predicate (barriers + DS reads/writes/atomics) and `collectTensorLoadDependencies`; no separate heuristic phase
 - **Selective processing**: only basic blocks approved by `PassContext::shouldProcessBasicBlock` are analyzed and modified
 
 ## Pass Flow
@@ -28,21 +28,19 @@
                         v
             +-----------------------+
             |  buildBlockExitStates |   Pre-scan processed blocks to
-            |                       |   record in-flight memory ops
+            |                       |   record in-flight DS / buffer /
+            |                       |   tensor-load ops at exit
             +-----------+-----------+
                         |
                         v
             +-----------------------+
             | traverseCFGInRPO      |   For each processed block
             |                       |   (reverse post-order):
-            | 1. computeRequiredWaits  Determine (anchor, waitSpec) pairs
+            | 1. computeRequiredWaits  Seed predecessor tensor state
+            |                          into localState; determine
+            |                          (anchor, waitSpec) pairs across
+            |                          all three counters
             | 2. emitWaitInstructions  Insert s_wait_* before each anchor
-            +-----------+-----------+
-                        |
-                        v
-            +-----------------------+
-            | reinsertTensorWaits   |   Remove + reinsert tensor
-            | Heuristic             |   waits using token matching
             +-----------+-----------+
                         |
                         v
@@ -86,21 +84,27 @@ Tracks in-flight (not yet waited-on) memory operations as ordered queues. Each p
 +----------------------------------------------+
 |            PendingMemOpTracker               |
 +----------------------------------------------+
-| pendingDSOps:     deque<Instruction*>        |  DS reads/writes in issue order
-| activeDSTokens:   unordered_set<int>         |  MemTokenData tokens from DS ops
-| pendingBufferOps: deque<Instruction*>        |  Global loads/stores in issue order
+| pendingDSOps:         deque<Instruction*>    |  DS reads/writes in issue order
+| activeDSTokens:       unordered_set<int>     |  MemTokenData tokens from DS ops
+| pendingBufferOps:     deque<Instruction*>    |  Global loads/stores in issue order
+| pendingTensorLoadOps: deque<Instruction*>    |  tensor_load_to_lds in issue order (tlcnt)
 +----------------------------------------------+
-| pendingDSCount()            -> int           |  Total pending DS ops
-| pendingBufferCount()        -> int           |  Total pending buffer ops
-| pendingDSCountFrom(inst)    -> int           |  Ops from inst to end of DS queue
-| pendingBufferCountFrom(inst) -> int          |  Ops from inst to end of buffer queue
-| recordDSOperation(inst)     -> bool          |  Append DS op + collect tokens
-| recordBufferOperation(inst) -> bool          |  Append buffer op
+| pendingDSCount() / pendingBufferCount() / pendingTensorLoadCount() -> int  |  Queue sizes
+| pendingDSCountFrom(inst)         -> int      |  Ops from inst to end of DS queue
+| pendingBufferCountFrom(inst)     -> int      |  Ops from inst to end of buffer queue
+| pendingTensorLoadCountFrom(inst) -> int      |  Ops from inst to end of tensor queue
+| hasUntaggedDSOp() / hasUntaggedTensorLoadOp() -> bool                       |  Conservative fallback hooks
+| recordDSOperation(inst)          -> bool     |  Append DS op + collect tokens
+| recordBufferOperation(inst)      -> bool     |  Append buffer op
+| recordTensorLoadOperation(inst)  -> bool     |  Append tensor load
+| mergeTensorFrom(other)           -> void     |  Tensor-only union (predecessor seeding)
 | trimQueueToLastWait(queue, lastWait)         |  Remove completed ops from front
 +----------------------------------------------+
 ```
 
-The `pendingDSCountFrom(inst)` / `pendingBufferCountFrom(inst)` methods return how many ops remain from `inst` to the end of the queue. This value directly maps to the hardware wait count immediate: it represents the number of outstanding ops that must still complete (including `inst` itself). Returns 0 if `inst` is not found in the queue.
+The `pendingDSCountFrom(inst)` / `pendingBufferCountFrom(inst)` / `pendingTensorLoadCountFrom(inst)` methods return how many ops remain from `inst` to the end of the queue. This value directly maps to the hardware wait count immediate: it represents the number of outstanding ops that must still complete (including `inst` itself). Returns 0 if `inst` is not found in the queue.
+
+There is no `activeTensorTokens` companion to `activeDSTokens`. Tensor token-overlap is computed on demand by walking `pendingTensorLoadOps` and reading each load's `MemTokenData` modifier (see `collectTensorLoadDependencies`); seeding the deque alone via `mergeTensorFrom` is therefore sufficient to give a successor block full cross-block visibility into in-flight tensor loads.
 
 ### WaitCountSpec
 
@@ -137,11 +141,11 @@ Per-counter bookkeeping during a single block walk. Tracks the last emitted wait
 
 Several instructions in the IR carry `MemTokenData` modifiers -- integer token IDs that represent logical LDS memory regions. These tokens are attached upstream by `StinkyBuildImplicitDependencyPass`, which assigns them to tensor loads, DS writes, DS reads, and barriers to express implicit ordering dependencies that are not visible in the register def-use chain.
 
-This pass uses `MemTokenData` in three ways:
+This pass uses `MemTokenData` in three ways, all driven from inside `computeRequiredWaits`:
 
-1. **DS barrier conflict** (in `computeRequiredWaits`): if a barrier's tokens overlap with the `activeDSTokens` accumulated from pending DS ops, force a `s_wait_dscnt 0`.
-2. **LDS write-after-read (WAR)** (in `computeRequiredWaits`): if an LDS writer (`tensor_load_to_lds` / `ds_write`) has tokens that overlap with prior pending DS reads, synthesize WAR dependencies and emit an `s_wait_dscnt` that drains them. `collectLdsWarDependencies` applies a per-pair same-pipeline filter (via `isOnSameDSPipeline`), so a `ds_write` writer skips candidate readers it already shares a hardware pipeline (and therefore FIFO ordering) with.
-3. **Tensor barrier matching** (in `reinsertTensorWaitsHeuristic`): if the oldest pending tensor load's tokens overlap with a barrier's tokens, emit a `s_wait_tensorcnt`.
+1. **DS barrier conflict**: if a barrier's tokens overlap with the `activeDSTokens` accumulated from pending DS ops, force a `s_wait_dscnt 0`.
+2. **LDS write-after-read (WAR)**: if an LDS writer (`tensor_load_to_lds` / `ds_write`) has tokens that overlap with prior pending DS reads, synthesize WAR dependencies and emit an `s_wait_dscnt` that drains them. `collectLdsWarDependencies` applies a per-pair same-pipeline filter (via `isOnSameDSPipeline`), so a `ds_write` writer skips candidate readers it already shares a hardware pipeline (and therefore FIFO ordering) with.
+3. **Tensor-wait anchor**: any instruction matching `isTensorWaitAnchor` (barriers, DS reads, DS writes, DS atomics) is checked against `localState.pendingTensorLoadOps` for token overlap. The deque is seeded from every predecessor's exit state at block entry via `PendingMemOpTracker::mergeTensorFrom`, so the local view already covers cross-block in-flight tensor loads. `collectTensorLoadDependencies` returns a `TensorWaitDepResult { deps, forceTensorDrain }` and the caller emits an `s_wait_tensorcnt` whose value is computed by the same `computeWaitValueForCounter` machinery that drives DS / buffer.
 
 ### Conservative Fallback for Missing `MemTokenData`
 
@@ -151,7 +155,7 @@ This pass uses `MemTokenData` in three ways:
 |------|------------------------------------------|----------------------------------------------------------------------|
 | DS barrier conflict | Barrier without `MemTokenData` triggers `s_wait_dscnt 0` whenever pending DS ops exist; queue cleared. | An untagged pending DS op (`hasUntaggedDSOp()`) triggers `s_wait_dscnt 0` on the next barrier, regardless of whether the barrier itself is tagged. |
 | WAR-on-LDS | Writer without `MemTokenData` triggers `s_wait_dscnt 0` if any non-same-pipeline DS read/atomic is pending (current block or any predecessor exit state). Same-pipeline filter still applies. | A reader/atomic without `MemTokenData` is widened into the WAR dep set; the normal `min(count - 1)` algorithm then picks the wait value. |
-| Tensor barrier matching | Barrier without `MemTokenData` emits `s_wait_tensorcnt 0` and clears the cross-block `tensorLoads` deque. | A tensor load in the deque without `MemTokenData` is treated as the youngest conflicting entry; all loads up to and including it are drained. |
+| Tensor-wait anchor | Anchor without `MemTokenData` (`collectTensorLoadDependencies` returns `forceTensorDrain == true`) emits `s_wait_tensorcnt 0` and clears `pendingTensorLoadOps`. | A pending tensor load without `MemTokenData` (`hasUntaggedTensorLoadOp()`) is conservatively treated as conflicting and added to `deps`; `min(count - 1)` over that widened set picks the wait value. |
 
 The "anchor missing" branch always reduces to a wait-0 on the appropriate counter, subject to the standard `CounterWaitState::needsNewWait` redundancy elision (so back-to-back drains do not double-emit). The "candidate missing" branch never inflates the value beyond what the normal `min(count - 1)` path would compute for an overlapping op at the same position. Every conservative branch logs a `PASS_DEBUG` line so investigations into perf regressions in `unrollMovableBarrier=false` mode can identify which sites fired.
 
@@ -166,7 +170,7 @@ flowchart TD
     Widen --> Elide
 ```
 
-`isLdsWriterAnchor` (formerly `isLdsWriterWithTokens`) now identifies LDS writers structurally so the WAR scan runs unconditionally; the actual choice of conservative vs. per-token path lives in `collectLdsWarDependencies`, which returns an `LdsWarResult { deps, forceDsDrain }`. `PendingMemOpTracker::hasUntaggedDSOp()` is the helper used by the barrier path to detect candidate-side missing tokens.
+`isLdsWriterAnchor` (formerly `isLdsWriterWithTokens`) now identifies LDS writers structurally so the WAR scan runs unconditionally; the actual choice of conservative vs. per-token path lives in `collectLdsWarDependencies`, which returns an `LdsWarResult { deps, forceDsDrain }`. `PendingMemOpTracker::hasUntaggedDSOp()` is the helper used by the barrier path to detect candidate-side missing tokens. The tensor-wait anchor path is symmetric: `isTensorWaitAnchor` triggers the scan unconditionally, `collectTensorLoadDependencies` returns a `TensorWaitDepResult { deps, forceTensorDrain }`, and `hasUntaggedTensorLoadOp()` is available for callers that need to detect candidate-side missing tokens directly.
 
 ## Core Algorithm: computeRequiredWaits
 
@@ -175,9 +179,34 @@ This method walks a single basic block in program order and determines which ins
 ### Per-instruction logic
 
 ```
+Block entry (run once before the per-instruction loop):
+
+  0. Seed the tensor queue:
+     For each predecessor of bb whose exit state is in blockExitMemState,
+     call localState.mergeTensorFrom(pred.exitState). This appends every
+     pending tensor load (deduped by pointer) so the local view alone
+     covers cross-block in-flight tensor loads. DS / buffer queues are
+     intentionally NOT seeded here -- their helpers walk predecessors
+     explicitly (see computeWaitValueForCounter and collectLdsWarDependencies).
+
 For each non-PHI instruction in the block:
 
-  1. If it is a barrier and pendingDSOps is non-empty:
+  1. If it is a tensor-wait anchor (isTensorWaitAnchor: barrier / DS read /
+     DS write / DS atomic):
+     -> collectTensorLoadDependencies returns { deps, forceTensorDrain }:
+          Anchor has MemTokenData: walk localState.pendingTensorLoadOps;
+          add token-overlapping loads (and any candidate missing
+          MemTokenData) to deps.
+          Anchor lacks MemTokenData: forceTensorDrain == true if any
+          tensor load is pending; deps is left empty.
+     -> If forceTensorDrain: emit s_wait_tensorcnt 0 (subject to
+          redundancy elision); clear pendingTensorLoadOps.
+     -> Else if !deps.empty(): run computeWaitValueForCounter against the
+          tensor queue and emit s_wait_tensorcnt min(count - 1).
+     This branch is independent of the barrier-vs-DS branch below; a
+     barrier exercises both, possibly emitting a wait on each counter.
+
+  2. If it is a barrier and pendingDSOps is non-empty:
        Drain when any of the following holds:
          a. Barrier tokens overlap with activeDSTokens (tagged-barrier path)
          b. Barrier lacks MemTokenData (anchor-missing-tokens fallback)
@@ -185,10 +214,10 @@ For each non-PHI instruction in the block:
      -> Emit DS wait-0 (all pending DS ops must complete)
      -> Clear DS state and continue to next instruction
 
-  2. Collect its memory-op dependencies via collectSources
+  3. Collect its memory-op dependencies via collectSources
      (flatten through PHIs, filter to DS/buffer ops only)
 
-  3. If it is an LDS writer anchor (tensor_load_to_lds / ds_write):
+  4. If it is an LDS writer anchor (tensor_load_to_lds / ds_write):
      -> collectLdsWarDependencies returns { deps, forceDsDrain }:
           Writer has MemTokenData: scan pending DS reads/atomics in current
           block + each CFG predecessor's exit state; add token-overlapping
@@ -204,24 +233,27 @@ For each non-PHI instruction in the block:
           deps is left empty. The caller emits s_wait_dscnt 0 instead of
           running the per-pair min(count - 1) computation.
 
-  4. If forceDsDrain (only set by the conservative branch):
+  5. If forceDsDrain (only set by the conservative branch):
      -> Emit DS wait-0 (subject to redundancy elision)
      -> Clear DS state; the buffer counter still runs via memOpDependencies
 
-  5. If memOpDependencies is not empty, for each counter (DS, buffer):
+  6. If memOpDependencies is not empty, for each counter (DS, buffer):
      a. Compute the required wait value (current block + predecessors)
         Skip the DS branch when forceDsDrain already emitted the drain.
      b. Check if a new wait is actually needed (redundancy elision)
      c. If needed, record the (anchor, waitSpec) pair
 
-  6. Tail recording: only AFTER any wait has been emitted, record inst as a
-     DS or buffer op (if applicable) so it appears as in-flight for subsequent
-     iterations. This matches hardware semantics: the wait executes before the
-     consumer issues, so its queue snapshot must exclude the consumer itself.
+  7. Tail recording: only AFTER any wait has been emitted, record inst as a
+     DS / buffer / tensor-load op (if applicable) so it appears as in-flight
+     for subsequent iterations. This matches hardware semantics: the wait
+     executes before the consumer issues, so its queue snapshot must exclude
+     the consumer itself.
 
 After the loop:
-  7. Trim exit state queues based on last emitted waits
-  8. Store the trimmed state into blockExitMemState for successor blocks
+  8. Trim exit-state queues (DS, buffer, tensor) based on last emitted waits
+  9. Store the trimmed state into blockExitMemState for successor blocks.
+     The tensor queue stored here naturally propagates through successor
+     blocks via Step 0 of their own computeRequiredWaits invocations.
 ```
 
 ### Barrier token conflict handling
@@ -440,40 +472,60 @@ The trimmed state is stored back into `blockExitMemState[&bb]`, overwriting the 
 
 When looking up a dependency in a predecessor's exit state, the pass skips the lookup if `counterState.lastEmittedWait == 0`. A wait-0 means all outstanding ops for that counter have completed, so no predecessor ops can still be in-flight -- the lookup would be wasted work and could produce incorrect (non-zero) contributions.
 
-## Tensor Wait Insertion: reinsertTensorWaitsHeuristic
+## Tensor Wait Anchors and Cross-Block Seeding
 
-Tensor waits are handled in a separate heuristic phase that runs after the main DS/buffer wait insertion. This phase operates in two steps:
+Tensor waits no longer live in a separate post-pass heuristic. They are emitted from inside `computeRequiredWaits` on the same `(anchor, WaitCountSpec)` machinery that drives the DS and buffer counters.
 
-### Phase 1: Remove existing tensor waits from loop blocks
+### Anchor set
 
-The pass removes all `IF_WaitTensorCnt` instructions from blocks labeled `label_LoopBeginL` and `label_LoopEndL`. This clears any tensor waits that were inserted by earlier passes and may no longer be optimal.
+`isTensorWaitAnchor(inst)` matches every instruction that may consume the result of a `tensor_load_to_lds` via LDS and therefore needs an `s_wait_tensorcnt` before it issues:
 
-### Phase 2: Reinsert tensor waits based on barrier token matching
+- `s_barrier`
+- `ds_read` (any width)
+- `ds_write` (any width)
+- `ds_atomic`
 
-Walking all processed blocks in RPO, the pass maintains a **cross-block** deque of *every* tensor load instruction (with or without `MemTokenData`). At each barrier, it walks the deque from the youngest end looking for the youngest conflicting load:
+Tensor loads themselves are deliberately excluded: the hardware FIFO already orders them on the shared `tlcnt` counter, so a synthetic wait between two tensor loads would be redundant. The set mirrors the modifier sites tagged by `StinkyBuildImplicitDependencyPass`.
 
+### Cross-block seeding
+
+`buildBlockExitStates` walks every processed block once and calls `recordTensorLoadOperation` for each `tensor_load_to_lds` it sees, leaving the resulting `pendingTensorLoadOps` in `blockExitMemState[bb]` (alongside `pendingDSOps` and `pendingBufferOps`). At the top of `computeRequiredWaits(bb)`, before the per-instruction loop:
+
+```cpp
+for (BasicBlock* pred : bb.getPredecessors()) {
+    auto it = blockExitMemState.find(pred);
+    if (it == blockExitMemState.end()) continue;
+    localState.mergeTensorFrom(it->second);
+}
 ```
-tensorLoads: [T0, T1, T2]   (oldest first, accumulated across blocks)
 
-Barrier @tokens=[5, 6]:
-  Walk from youngest: T2, T1, T0
-    T2 @tokens=[7]   -> no overlap
-    T1 @tokens=[5]   -> overlap with [5, 6] -> match (lastDependentIndex = 1)
+`mergeTensorFrom` appends every pending tensor load from `pred` while skipping pointers already present, so multiple converging CFG paths do not duplicate the same op. The result: by the time the per-instruction loop starts, `localState.pendingTensorLoadOps` already contains every still-in-flight tensor load on every path reaching `bb`.
 
-  Pop loads up to and including T1, emit s_wait_tensorcnt with remaining count:
-    tensorLoads after pop: [T2]
-    -> Emit s_wait_tensorcnt 1 before barrier
+```mermaid
+flowchart LR
+    P1[Pred1.exitState] -->|"mergeTensorFrom"| L[localState]
+    P2[Pred2.exitState] -->|"mergeTensorFrom"| L
+    L --> A{"isTensorWaitAnchor(inst)?"}
+    A -->|Yes| H["collectTensorLoadDependencies<br/>(localState only)"]
+    A -->|No| Skip[Skip tensor branch]
+    H -->|forceTensorDrain| D["s_wait_tensorcnt 0<br/>+ clear queue"]
+    H -->|deps non-empty| W["s_wait_tensorcnt min(count - 1)"]
 ```
 
-The wait count equals the number of tensor loads still pending *after* removing the matched range. This ensures the youngest conflicting load completes before the barrier while allowing newer non-conflicting loads to remain in flight.
+DS and buffer queues are intentionally NOT seeded this way; their per-counter wait computation walks predecessors explicitly inside `computeWaitValueForCounter` / `collectLdsWarDependencies`. Seeding only the tensor queue keeps DS / buffer behaviour byte-identical to the pre-tensor implementation.
 
-**Conservative fallback** (hybrid policy):
+### Per-anchor wait emission
 
-- A tensor load without `MemTokenData` is still pushed into the deque -- it cannot be proven disjoint from any future barrier and must stay visible.
-- A barrier without `MemTokenData` is treated as conflicting with everything in the deque: emit `s_wait_tensorcnt 0` and clear the deque.
-- A tagged barrier walking the deque treats any untagged entry as the youngest conflicting load (sets `lastDependentIndex` to that index and breaks), draining all entries up to and including it.
+`collectTensorLoadDependencies(anchor, bb, localState)` walks `localState.pendingTensorLoadOps`:
 
-Note: tensor waits collected per block are emitted at the end of each block's scan via `emitWaitInstructions`, while the `tensorLoads` deque persists across blocks.
+- Anchor with `MemTokenData`: include each load whose `MemTokenData` overlaps the anchor's tokens (or that lacks `MemTokenData`, conservative widening) into `deps`. The caller then runs `computeWaitValueForCounter` against the tensor queue, picking `min(pendingTensorLoadCountFrom(dep) - 1)` -- the position of the youngest conflicting load.
+- Anchor without `MemTokenData`: any pending load forces `forceTensorDrain == true`, and the caller emits `s_wait_tensorcnt 0` then clears `localState.pendingTensorLoadOps`.
+
+Both paths are subject to the standard `CounterWaitState::needsNewWait` redundancy elision so back-to-back anchors do not double-emit.
+
+### Exit-state preservation
+
+After the per-instruction loop, `localState.trimQueueToLastWait(localState.pendingTensorLoadOps, tensorState.lastEmittedWait)` trims completed loads off the front of the queue, then `blockExitMemState[&bb] = localState` stores the trimmed view for successor blocks to consume. Because the tensor queue was seeded from predecessors at the top, this exit state correctly carries cross-block tensor visibility through the entire CFG.
 
 ## Emit Phase: emitWaitInstructions
 
@@ -545,25 +597,29 @@ anonymous namespace {
     isBufferMemoryOp(...)          // Global load or store predicate
     hasTokenOverlap(A, B)          // Template: any shared token between containers
     isLdsWriterAnchor(...)         // tensor_load_to_lds / ds_write (token-agnostic)
+    isTensorWaitAnchor(...)        // barrier / ds_read / ds_write / ds_atomic
     isOnSameDSPipeline(a, b)       // Same hardware FIFO (DS dlcnt) pair?
 
     // --- Data structures ---
-    struct PendingMemOpTracker     // In-flight memory op queues + token tracking
-                                   //   .hasUntaggedDSOp() helper for conservative path
+    struct PendingMemOpTracker     // In-flight DS / buffer / tensor-load queues
+                                   //   .hasUntaggedDSOp() / .hasUntaggedTensorLoadOp()
+                                   //   .mergeTensorFrom(other) for predecessor seeding
     struct LdsWarResult            // { deps, forceDsDrain } from WAR analysis
-    struct WaitCountSpec           // Wait counter immediate triplet
+    struct TensorWaitDepResult     // { deps, forceTensorDrain } from tensor anchor analysis
+    struct WaitCountSpec           // Wait counter immediate triplet (ds, buffer, tensor)
 
     // --- Pass class ---
     class StinkyWaitCntInsertionPass : public StinkyInstPass {
         struct CounterWaitState    // Per-counter state during block walk
 
-        buildBlockExitStates()           // Phase 1: pre-scan all blocks
-        scanBlockMemOps()                //    helper: record DS/buffer ops in one block
-        computeWaitValueForCounter()     //    Per-counter wait value computation
-        computeRequiredWaits()           // Phase 2: determine waits for one block
-        emitWaitInstructions()           // Phase 3: insert wait IR nodes
-        reinsertTensorWaitsHeuristic()   // Phase 4: tensor wait heuristic
-        removePHIs()                     // Phase 5: cleanup
+        buildBlockExitStates()             // Phase 1: pre-scan all blocks (DS / buffer / tensor)
+        scanBlockMemOps()                  //    helper: record ops in one block
+        computeWaitValueForCounter()       //    Per-counter wait value computation
+        collectLdsWarDependencies()        //    WAR-on-LDS scan for ds_write / tensor_load_to_lds
+        collectTensorLoadDependencies()    //    Tensor-anchor scan against pendingTensorLoadOps
+        computeRequiredWaits()             // Phase 2: seed tensor queue, determine waits per block
+        emitWaitInstructions()             // Phase 3: insert wait IR nodes
+        removePHIs()                       // Phase 4: cleanup
     };
 }
 
@@ -572,5 +628,19 @@ namespace stinkytofu {
 }
 ```
 
-## See Also
-- [WaitCnt Insertion Tests](../tests/unit/waitcnt-insertion-tests.md) -- unit test documentation
+## Companion: StinkyRemoveWaitCntPass
+
+`StinkyRemoveWaitCntPass` is the precondition pass that strips stale wait-counter instructions before `StinkyWaitCntInsertionPass` issues fresh ones. The gfx1250 backend ([shared/stinkytofu/src/pipeline/backend/Gfx1250Backend.cpp](../../src/pipeline/backend/Gfx1250Backend.cpp)) calls it (with the default) right after the CFG builder; the insertion pass then runs later in the pipeline against a clean slate.
+
+The pass walks every basic block approved by `PassContext::shouldProcessBasicBlock` and removes instructions matching either of two disjoint flag bits:
+
+| Flag bit          | Always removed?               | Opcodes (gfx1250)                                                                                                            |
+|-------------------|-------------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| `IF_WaitCnt`      | Yes (`isWaitCnt(inst)`)       | `s_wait_dscnt`, `s_wait_loadcnt`, `s_wait_storecnt`, `s_wait_asynccnt`, `s_wait_kmcnt`, `s_wait_xcnt`, `s_wait_loadcnt_dscnt`, `s_wait_storecnt_dscnt`, `s_waitcnt` |
+| `IF_WaitTensorCnt`| Only when `removeTensorWaitCnt` is true (the new default) -- `isTensorWaitCnt(inst)` | `s_wait_tensorcnt` |
+
+The two flags are mutually exclusive on any given opcode, so the predicate is the simple OR `isWaitCnt(inst) || (removeTensorWaitCnt && isTensorWaitCnt(inst))`.
+
+### Default policy
+
+`createStinkyRemoveWaitCntPass(bool removeTensorWaitCnt = true)` defaults to `true`. Earlier revisions defaulted to `false`, leaving `s_wait_tensorcnt` instructions in place; the new default ensures a fully clean slate so the insertion pass owns every wait.

@@ -21,6 +21,32 @@
  *
  * ************************************************************************ */
 
+// ----------------------------------------------------------------------------
+// StinkyRemoveWaitCntPass
+//
+// Precondition pass that strips stale wait-counter instructions so that
+// StinkyWaitCntInsertionPass can run later in the pipeline against a clean
+// slate and own every emitted wait. The gfx1250 backend invokes this pass
+// (with the default removeTensorWaitCnt = true) right after the CFG builder;
+// see docs/user/stinky-waitcnt-insertion-pass.md, section
+// "Companion: StinkyRemoveWaitCntPass".
+//
+// Removal is driven by two *disjoint* instruction flag bits:
+//
+//   - IF_WaitCnt        Always removed via isWaitCnt(). Covers the standard
+//                       wait-counter opcodes: s_wait_dscnt, s_wait_loadcnt,
+//                       s_wait_storecnt, s_wait_asynccnt, s_wait_kmcnt,
+//                       s_wait_xcnt, s_wait_loadcnt_dscnt,
+//                       s_wait_storecnt_dscnt, s_waitcnt.
+//   - IF_WaitTensorCnt  Removed via isTensorWaitCnt() iff removeTensorWaitCnt
+//                       is true (the default). The only opcode carrying this
+//                       flag is s_wait_tensorcnt.
+//
+// Because the two flag bits never coexist on the same opcode, the per-
+// instruction predicate is the simple OR:
+//   isWaitCnt(inst) || (removeTensorWaitCnt && isTensorWaitCnt(inst))
+// ----------------------------------------------------------------------------
+
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -30,20 +56,23 @@
 namespace {
 using namespace stinkytofu;
 
-/// True iff @p stinkyInst is @c s_wait_tensorcnt (the only opcode carrying
-/// @c IF_WaitTensorCnt). The standard wait-counter opcodes carry @c IF_WaitCnt
-/// instead and are matched by @c isWaitCnt().
+/// True iff @p stinkyInst is @c s_wait_tensorcnt, the only opcode carrying
+/// @c IF_WaitTensorCnt. This flag is disjoint from @c IF_WaitCnt, so
+/// @c isWaitCnt() does not match @c s_wait_tensorcnt and a dedicated check is
+/// required when tensor-wait removal is enabled.
 bool isTensorWaitCnt(StinkyInstruction* stinkyInst) {
     return stinkyInst != nullptr && stinkyInst->is(InstFlag::IF_WaitTensorCnt);
 }
 
-/// Remove every wait-counter instruction in @p bb.
+/// Erase every wait-counter instruction in @p bb that matches the disjoint
+/// flag-bit predicate described in the file-level comment.
 ///
-/// @param bb The basic block to process.
-/// @param removeTensorWaitCnt When true (default) also strip
-///                            @c s_wait_tensorcnt; when false leave tensor
-///                            waits in place so a subsequent insertion pass
-///                            can reuse them.
+/// @param bb                   Basic block to mutate in place.
+/// @param removeTensorWaitCnt  When true (the default policy), also strip
+///                             @c s_wait_tensorcnt so the downstream insertion
+///                             pass starts from a fully clean slate. When
+///                             false, leave tensor waits in place so a
+///                             subsequent insertion pass can reuse them.
 void removeWaitCntsInBlock(BasicBlock& bb, bool removeTensorWaitCnt) {
     for (auto it = bb.begin(); it != bb.end();) {
         auto* stinkyInst = dyn_cast<StinkyInstruction>(it.getNodePtr());
