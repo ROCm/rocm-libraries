@@ -170,6 +170,8 @@ class GemmKernelBuilder:
             default_pipeline = "preshufflev2"
         elif self.kernel_name_prefix == "grouped_gemm":
             default_pipeline = "compv4"
+        elif self.kernel_name_prefix == "grouped_gemm_rowcolquant":
+            default_pipeline = "compv3"
 
         configs = []
         for tile_m in tile_m_values:
@@ -269,6 +271,7 @@ class GemmKernelBuilder:
             pipeline,
             layout,
             self.gpu_target,
+            self.kernel_name_prefix,
         )
 
     def _generate_trait_combinations(self):
@@ -300,7 +303,9 @@ class GemmKernelBuilder:
         combinations = []
         for combo in all_combinations:
             pipeline, epilogue, scheduler = combo[:3]
-            if is_trait_combination_valid(pipeline, epilogue, scheduler):
+            if is_trait_combination_valid(
+                pipeline, epilogue, scheduler, self.kernel_name_prefix
+            ):
                 combinations.append(combo)
             else:
                 logging.debug(
