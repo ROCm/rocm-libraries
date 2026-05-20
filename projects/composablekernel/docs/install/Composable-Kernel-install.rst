@@ -4,9 +4,9 @@
 
 .. _installation:
 
-*************************
+**************************
 Install Composable Kernel
-*************************
+**************************
 
 Before you begin, verify that your system is supported. For more information,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.
@@ -19,12 +19,10 @@ For advanced workflows, source builds, or custom configurations, see
 Install the ROCm Core SDK
 =========================
 
-Composable Kernel (CK) is included with the ROCm Core SDK on Linux and Windows.
-For the most complete installation, we recommend that developers use the
+Composable Kernel (CK) is included with the ROCm Core SDK on Linux and Windows. For the most complete installation, we recommend that developers use the
 ``amdrocm-core-sdk`` meta package on Linux.
 
-For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
-selector panel on that page to view instructions appropriate for your system
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the selector panel on that page to view instructions appropriate for your system
 environment.
 
 .. _install-base:
@@ -32,8 +30,7 @@ environment.
 Install the ROCm CK package on Linux
 ====================================
 
-Alternatively, if you want to install Composable Kernel as part of the ROCm
-without additional ROCm libraries and tools, install the ``amdrocm-ck``
+Alternatively, if you want to install Composable Kernel as part of the ROCm without additional ROCm libraries and tools, install the ``amdrocm-ck``
 package.
 
 1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
@@ -83,8 +80,8 @@ package.
 Install a nightly build
 =======================
 
-The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
-nightly builds for the ROCm Core SDK and its components, including Composable
-Kernel. See `Nightly release status
-<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
+The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes nightly builds for the ROCm Core SDK and its components, including Composable Kernel. See `Nightly release statup <https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
 
+.. note::
+
+   If you choose to install from a nightly build artifact, you'll need to set ``HIP_PLATFORM=amd`` and ``LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib`` after installation.
