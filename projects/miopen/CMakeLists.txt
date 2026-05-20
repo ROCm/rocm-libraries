@@ -105,6 +105,25 @@ option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIO
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
 
+# MIOpen -> hipDNN forwarding wrapper (RFC 0001).
+# When OFF (default), MIOpen builds bit-identically to a build without this flag:
+# no new sources are compiled, no new targets are created, no new dependencies
+# are pulled in. When ON, MIOpen is split into a public wrapper (libMIOpen.so)
+# and a private implementation (libMIOpen_private.so); see
+# docs/rfcs/0001_HipdnnForwardingWrapper.md and
+# docs/rfcs/0001_HipdnnForwardingWrapper_phase1_investigation.md.
+option(MIOPEN_ENABLE_HIPDNN_WRAPPER "Build MIOpen as a public wrapper over a private implementation, with optional forwarding to hipDNN." OFF)
+message(STATUS "MIOPEN_ENABLE_HIPDNN_WRAPPER: ${MIOPEN_ENABLE_HIPDNN_WRAPPER}")
+
+# Phase 1 wrapper validation (RFC 0001, docs/rfcs/0001_HipdnnForwardingWrapper_phase1_investigation.md).
+# Strictly gated by the wrapper flag so the OFF build remains byte-equivalent
+# to today's MIOpen. The actual public/private split (renaming header, wrapper
+# target, MIOpen_private library) is wired in src/CMakeLists.txt; this module
+# only registers the CTest checks (drift parity and consumer-smoke).
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/InvestigationHipdnnWrapper.cmake)
+endif()
+
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
 if(MIOPEN_INCBIN)
     enable_language(ASM)

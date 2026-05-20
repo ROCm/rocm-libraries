@@ -861,34 +861,93 @@ if(MIOPEN_USE_MLIR)
         )
 endif()
 
+# RFC 0001: when MIOPEN_ENABLE_HIPDNN_WRAPPER is ON, the existing target setup
+# below binds to a private implementation library named MIOpen_private. The
+# public-facing MIOpen library is then rebuilt as a thin wrapper that forwards
+# each public C entry point to its renamed _impl counterpart in MIOpen_private.
+# When OFF (the default), _MIOPEN_IMPL_TARGET expands to MIOpen and the
+# configure result is identical to a build without the flag.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    set(_MIOPEN_IMPL_TARGET MIOpen_private)
+    set(_MIOPEN_INSTALL_TARGETS MIOpen MIOpen_private)
+else()
+    set(_MIOPEN_IMPL_TARGET MIOpen)
+    set(_MIOPEN_INSTALL_TARGETS MIOpen)
+endif()
+
 # build library
 if(MIOPEN_ENABLE_SQLITE)
-    add_library( MIOpen
+    add_library( ${_MIOPEN_IMPL_TARGET}
         ${MIOpen_Source}
         $<TARGET_OBJECTS:sqlite_memvfs>
         )
 else()
-    add_library( MIOpen
+    add_library( ${_MIOPEN_IMPL_TARGET}
         ${MIOpen_Source}
         )
 endif()
 
-# Add dependency on inlined rocrand header if it was created
-if(TARGET inline_rocrand_header)
-    add_dependencies(MIOpen inline_rocrand_header)
+# RFC 0001: build the public wrapper library. wrapper.cpp defines extern "C"
+# pass-through stubs for every MIOPEN_EXPORT entry point in
+# include/miopen/miopen.h, each forwarding to its renamed _impl symbol in
+# MIOpen_private. PUBLIC linkage propagates impl include directories and link
+# interface to consumers of the wrapper.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    add_library(MIOpen ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp)
+    target_link_libraries(MIOpen PUBLIC MIOpen_private)
+    rocm_set_soversion(MIOpen ${MIOpen_SOVERSION})
+    if(NOT WIN32 AND NOT APPLE)
+        set_target_properties(MIOpen PROPERTIES
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN 1)
+        target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
+    endif()
+
+    # Apply the rename header to MIOpen_private sources only, via -include.
+    # MIOPEN_BUILDING_PRIVATE gates the header's hard #error guard.
+    target_compile_definitions(MIOpen_private PRIVATE MIOPEN_BUILDING_PRIVATE)
+    target_compile_options(MIOpen_private PRIVATE
+        "SHELL:-include ${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h")
+
+    # The generated export.h checks <TARGET>_EXPORTS to switch between export
+    # and import. Since miopen_generate_export_header below targets MIOpen
+    # (the wrapper), the check is MIOpen_EXPORTS — auto-defined for wrapper
+    # sources, but NOT for private sources. Define it explicitly so
+    # MIOPEN_EXPORT means "default visibility" on the renamed _impl symbols.
+    target_compile_definitions(MIOpen_private PRIVATE MIOpen_EXPORTS)
+
+    # The wrapper inherits PUBLIC includes from the impl via target_link_libraries;
+    # the impl needs the binary include dir too (export.h, config.h, version.h).
+    # miopen_generate_export_header below only adds it to MIOpen.
+    target_include_directories(MIOpen_private PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+
+    # Bypass proxy for in-tree consumers that need to short-circuit the wrapper
+    # (Phase 4 hipDNN provider, in-tree benchmarks). Mirrors MIOpen_with_plugins
+    # but points at the private library so calls land directly on _impl.
+    add_library(MIOpen_private_with_plugins INTERFACE)
+    target_link_libraries(MIOpen_private_with_plugins INTERFACE MIOpen_private)
+    if(CK_PLUGIN_TARGETS)
+        add_dependencies(MIOpen_private_with_plugins ${CK_PLUGIN_TARGETS})
+    endif()
 endif()
 
-rocm_set_soversion(MIOpen ${MIOpen_SOVERSION})
+# Add dependency on inlined rocrand header if it was created
+if(TARGET inline_rocrand_header)
+    add_dependencies(${_MIOPEN_IMPL_TARGET} inline_rocrand_header)
+endif()
 
-clang_tidy_check(MIOpen)
+rocm_set_soversion(${_MIOPEN_IMPL_TARGET} ${MIOpen_SOVERSION})
+
+clang_tidy_check(${_MIOPEN_IMPL_TARGET})
 
 if(HAS_LIB_STD_FILESYSTEM)
-    target_link_libraries(MIOpen PRIVATE stdc++fs)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE stdc++fs)
 endif()
 
 find_package(zstd QUIET)
 if(zstd_FOUND)
-    target_link_libraries(MIOpen PRIVATE $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>)
 endif()
 
 function(target_internal_library TARGET)
@@ -896,7 +955,7 @@ function(target_internal_library TARGET)
     target_link_libraries(${TARGET} INTERFACE $<BUILD_INTERFACE:${ARGN}>)
 endfunction()
 
-target_include_directories(MIOpen PUBLIC
+target_include_directories(${_MIOPEN_IMPL_TARGET} PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/include>
 )
 
@@ -925,32 +984,37 @@ endif()
 
 if(WIN32)
     # Refer to https://en.cppreference.com/w/cpp/language/types for details.
-    target_compile_options(MIOpen PRIVATE $<BUILD_INTERFACE:$<$<CXX_COMPILER_ID:Clang>:-U__LP64__>>)
+    target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE $<BUILD_INTERFACE:$<$<CXX_COMPILER_ID:Clang>:-U__LP64__>>)
 endif()
 
-target_include_directories(MIOpen SYSTEM PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE_DIR}>)
+target_include_directories(${_MIOPEN_IMPL_TARGET} SYSTEM PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE_DIR}>)
 # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
 #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
-target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2)
+target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2)
+# Generate the public export header (MIOPEN_EXPORT) against the consumer-facing
+# target name. Flag-off: MIOpen is the only target. Flag-on: MIOpen is the
+# wrapper. The macro check inside the generated file resolves via
+# MIOpen_EXPORTS, which is auto-defined for the wrapper sources and forced
+# manually onto MIOpen_private (see RFC wrapper block above).
 miopen_generate_export_header(MIOpen)
 
 if(WIN32)
     # Temporary workaround on rocMLIR not exporting correctly libraries it depends on.
-    target_link_libraries(MIOpen PRIVATE ntdll)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE ntdll)
 endif()
 
-generate_export_header(MIOpen BASE_NAME MIOPEN_INTERNALS EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/include/miopen/export_internals.h)
+generate_export_header(${_MIOPEN_IMPL_TARGET} BASE_NAME MIOPEN_INTERNALS EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/include/miopen/export_internals.h)
 
 if(BUILD_TESTING)
-    target_compile_definitions(MIOpen PUBLIC $<BUILD_INTERFACE:MIOPEN_BUILD_TESTING>)
+    target_compile_definitions(${_MIOPEN_IMPL_TARGET} PUBLIC $<BUILD_INTERFACE:MIOPEN_BUILD_TESTING>)
 endif()
 
 if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
-    target_compile_definitions(MIOpen PRIVATE CK_EXPERIMENTAL_BUILDER)
+    target_compile_definitions(${_MIOPEN_IMPL_TARGET} PRIVATE CK_EXPERIMENTAL_BUILDER)
 endif()
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
-    target_link_libraries(MIOpen PRIVATE frugally-deep::fdeep Eigen3::Eigen)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE frugally-deep::fdeep Eigen3::Eigen)
     if(NOT TARGET nlohmann_json)
         # frugally-deep has broken linking to nlohmann_json
         add_library(nlohmann_json INTERFACE IMPORTED GLOBAL)
@@ -969,83 +1033,83 @@ endif()
 ############################################################
 # MIOpen depends on OpenCL
 if(MIOPEN_BACKEND STREQUAL "OpenCL")
-    message(STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
-    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
-    target_link_libraries( MIOpen PUBLIC ${OPENCL_LIBRARIES} )
+    message(STATUS "${_MIOPEN_IMPL_TARGET} linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
+    target_include_directories(${_MIOPEN_IMPL_TARGET} SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
+    target_link_libraries( ${_MIOPEN_IMPL_TARGET} PUBLIC ${OPENCL_LIBRARIES} )
     list(APPEND PACKAGE_DEPENDS PACKAGE OpenCL)
 elseif(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
-    target_link_libraries( MIOpen PRIVATE hip::device )
-    target_link_libraries( MIOpen INTERFACE hip::host )
+    target_link_libraries( ${_MIOPEN_IMPL_TARGET} PRIVATE hip::device )
+    target_link_libraries( ${_MIOPEN_IMPL_TARGET} INTERFACE hip::host )
     if(MIOPEN_USE_HIPRTC)
         if(WIN32)
-            target_link_libraries( MIOpen PRIVATE hiprtc::hiprtc )
+            target_link_libraries( ${_MIOPEN_IMPL_TARGET} PRIVATE hiprtc::hiprtc )
         else()
-            target_link_libraries( MIOpen PRIVATE hiprtc)
+            target_link_libraries( ${_MIOPEN_IMPL_TARGET} PRIVATE hiprtc)
         endif()
     endif()
     if(ENABLE_HIP_WORKAROUNDS)
         # Workaround hip not setting its usage requirements correctly
-        target_compile_definitions( MIOpen PRIVATE -D__HIP_PLATFORM_AMD__=1 )
+        target_compile_definitions( ${_MIOPEN_IMPL_TARGET} PRIVATE -D__HIP_PLATFORM_AMD__=1 )
     endif()
     # This is helpful for the tests
-    target_link_libraries( MIOpen INTERFACE $<BUILD_INTERFACE:hip::device> )
+    target_link_libraries( ${_MIOPEN_IMPL_TARGET} INTERFACE $<BUILD_INTERFACE:hip::device> )
     list(APPEND PACKAGE_DEPENDS PACKAGE hip)
 endif()
 
 if(MIOPEN_USE_COMGR)
     list(APPEND PACKAGE_DEPENDS PACKAGE amd_comgr)
-    target_internal_library(MIOpen amd_comgr)
+    target_internal_library(${_MIOPEN_IMPL_TARGET} amd_comgr)
 endif()
 
 if(MIOPEN_OFFLINE_COMPILER_PATHS_V2)
     # Adding rocm-core library dependency for API getROCmInstallPath()
-    target_link_libraries(MIOpen PRIVATE rocm-core)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE rocm-core)
 endif()
 
 if(rocblas_FOUND)
-    target_link_libraries( MIOpen INTERFACE $<BUILD_INTERFACE:roc::rocblas> )
-    target_link_libraries( MIOpen PRIVATE roc::rocblas )
+    target_link_libraries( ${_MIOPEN_IMPL_TARGET} INTERFACE $<BUILD_INTERFACE:roc::rocblas> )
+    target_link_libraries( ${_MIOPEN_IMPL_TARGET} PRIVATE roc::rocblas )
     list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE rocblas)
 endif()
 
 if(hipblaslt_FOUND)
-    target_link_libraries( MIOpen PRIVATE roc::hipblaslt )
-    target_include_directories( MIOpen INTERFACE $<BUILD_INTERFACE:${HIPBLAS-COMMON_INCLUDE_DIR}> )
+    target_link_libraries( ${_MIOPEN_IMPL_TARGET} PRIVATE roc::hipblaslt )
+    target_include_directories( ${_MIOPEN_IMPL_TARGET} INTERFACE $<BUILD_INTERFACE:${HIPBLAS-COMMON_INCLUDE_DIR}> )
 endif()
 
-target_include_directories( MIOpen PRIVATE ${ROCRAND_INCLUDE_DIR} )
+target_include_directories( ${_MIOPEN_IMPL_TARGET} PRIVATE ${ROCRAND_INCLUDE_DIR} )
 
 # For backward compatibility with ROCm 5.3
 # Build with library libMLIRMIOpen
 if(LIBMLIRMIOPEN)
-    target_link_libraries(MIOpen PRIVATE ${LIBMLIRMIOPEN})
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE ${LIBMLIRMIOPEN})
 endif()
 
 # Build with package rocMLIR
 if(rocMLIR_FOUND)
-    target_link_libraries(MIOpen PRIVATE rocMLIR::rockCompiler)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE rocMLIR::rockCompiler)
 endif()
 
-target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
-target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
+target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(${_MIOPEN_IMPL_TARGET} INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
 if(NOT WIN32 AND NOT APPLE)
-    target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
-    set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)
-    set_target_properties(MIOpen PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE "-Wl,--exclude-libs,ALL")
+    set_target_properties(${_MIOPEN_IMPL_TARGET} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    set_target_properties(${_MIOPEN_IMPL_TARGET} PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
 endif()
 #######################################
 if(MIOPEN_ENABLE_SQLITE)
     # MIOpen depends on SQLite
-    target_link_libraries(MIOpen PRIVATE SQLite::SQLite3)
-    target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE SQLite::SQLite3)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
 endif()
 ############################################################
 
 if(MIOPEN_USE_ROCTRACER)
-    target_include_directories(MIOpen PRIVATE ${ROCTRACER_INCLUDE_DIR})
-    target_include_directories(MIOpen INTERFACE $<BUILD_INTERFACE:${ROCTRACER_INCLUDE_DIR}>)
-    target_link_libraries(MIOpen PRIVATE ${rocTracer})
+    target_include_directories(${_MIOPEN_IMPL_TARGET} PRIVATE ${ROCTRACER_INCLUDE_DIR})
+    target_include_directories(${_MIOPEN_IMPL_TARGET} INTERFACE $<BUILD_INTERFACE:${ROCTRACER_INCLUDE_DIR}>)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE ${rocTracer})
 endif()
 
 ############################################################
@@ -1056,7 +1120,7 @@ set(MIOPEN_CXX_HEADER_PATH ${PROJECT_SOURCE_DIR}/src/include)
 endif()
 
 rocm_install_targets(
-  TARGETS MIOpen
+  TARGETS ${_MIOPEN_INSTALL_TARGETS}
   INCLUDE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_BINARY_DIR}/include
@@ -1064,7 +1128,7 @@ rocm_install_targets(
 )
 
 rocm_export_targets(
-  TARGETS MIOpen
+  TARGETS ${_MIOPEN_INSTALL_TARGETS}
   DEPENDS
     ${PACKAGE_DEPENDS}
   STATIC_DEPENDS
@@ -1100,5 +1164,20 @@ if(NOT MIOPEN_EMBED_DB STREQUAL "")
         endforeach()
     endif()
     add_embed_library(miopen_data ${CODE_OBJECTS})
-    target_link_libraries(MIOpen PRIVATE $<BUILD_INTERFACE:miopen_data> )
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE $<BUILD_INTERFACE:miopen_data> )
+endif()
+
+# RFC 0001 §1 — public-API equivalence check (RemainingWork item 9). Asserts
+# that the built libMIOpen.so exports exactly the set of miopen* names that
+# include/miopen/miopen.h declares. Runs in BOTH flag states and is the
+# enforced form of "flag-off byte-/symbol-equivalence" called for in the
+# investigation plan. Linux only — the script uses nm/readelf/awk.
+if(BUILD_TESTING AND NOT WIN32 AND NOT APPLE)
+    add_test(
+        NAME    public_api_symbol_check
+        COMMAND bash "${PROJECT_SOURCE_DIR}/tools/wrapper/check_public_api.sh"
+            --header "${PROJECT_SOURCE_DIR}/include/miopen/miopen.h"
+            --lib    "$<TARGET_FILE:MIOpen>")
+    set_tests_properties(public_api_symbol_check PROPERTIES
+        LABELS "wrapper_validation")
 endif()
