@@ -328,11 +328,13 @@ class TestTailEmitContent_PGR0:
         per mmak (subIterK), not once per (mmak, mma1, mma0) MFMA.
 
         `_emitTailKPosCmpSubtile` hoists the per-mmak setup (kPosCur
-        add + cmp + mask SGPR alloc) out of the (mma1, mma0) inner loop,
-        leaving only `_emitTailLaneMaskApplySubtile`'s cndmask chain
-        inside. The assertion `cmp_count * 4 <= cndmask_count` is a
-        loose ceiling that catches a re-inlining regression without
-        coupling to the exact tile-grid shape.
+        add + cmp + mask SGPR alloc) out of the (mma1, mma0) inner
+        loop; the cndmask chain is inlined directly into the tail
+        scaffold's mmak loop with a `seenVgpr` set so each unique
+        ValuA/B/MXSA/MXSB vgpr is masked at most once per mmak. The
+        assertion `cmp_count * 4 <= cndmask_count` is a loose ceiling
+        that catches a re-inlining regression without coupling to the
+        exact tile-grid shape.
         """
         tail = _extract_tail_section(fp4_pgr0_asm)
         assert tail
@@ -545,11 +547,16 @@ class TestTailEmitContent_PGR2:
         )
 
     def test_emits_c0_reset_compare_and_branch(self, fp4_pgr2_asm):
-        """For origCounter==0, branch to `PGRTailC0Reset<L>` rather
-        than skip the tail. On gfx950 `buffer_load_*_lds` with oob=1
-        suppresses (not zeroes) the LDS write, so NLL MFMA'd MT0 with
-        garbage in OOB subIterK slots; the lane-masked tail re-issue
-        is what restores correctness.
+        """For origCounter==0, the tail scaffold's c=0 compare branches
+        directly into the tail body (PGRTailEntry<L>), skipping the
+        small-counter realign and large-counter SRD-advance paths.
+
+        Background: with the upstream SkipSubtileMainLoop<L> gate in
+        kernelBodySubtile (added per reviewer comment), origCounter==0
+        skips the entire preLoop / mainloop / NGLL / NLL block. SRDs
+        stay at K=0, LWA/LRA stay at buf 0, accD stays at zero — so the
+        tail body just needs to run as-is, no undo needed. The legacy
+        PGRTailC0Reset<L> block (which used to live here) is gone.
         """
         tail = _extract_tail_section(fp4_pgr2_asm)
         assert tail, (
@@ -558,19 +565,22 @@ class TestTailEmitContent_PGR2:
         )
         # Match on the literal `, 0` immediate of the c=0 cmp.
         assert re.search(r"s_cmp_eq_u32[^\n]*\b0\b[^\n]*origCounter == 0", tail), (
-            "Tail must emit `s_cmp_eq_u32 ..., 0` for the c=0 reset path"
+            "Tail must emit `s_cmp_eq_u32 ..., 0` for the c=0 gate"
         )
         assert re.search(
-            r"s_cbranch_scc1[^\n]*PGRTailC0Reset", tail
+            r"s_cbranch_scc1[^\n]*PGRTailEntry", tail
         ), (
-            "Tail must conditionally branch to PGRTailC0ResetL on the "
-            "c=0 compare hit (NOT SkipTailLoopL — the c=0 path must "
-            "fall through to the tail body after resetting accD)"
+            "Tail must conditionally branch to PGRTailEntry<L> on the "
+            "c=0 compare hit (the legacy PGRTailC0Reset<L> block has "
+            "been replaced by an upstream skip gate)"
         )
-        # The c=0 path must NOT branch to SkipTailLoopL: pin by checking
-        # the c=0 cmp's matching branch points at PGRTailC0Reset (above)
-        # and is not followed by a SkipTailLoop branch within the same
-        # gating block.
+        # The c=0 path must NOT branch to SkipTailLoopL or
+        # PGRTailC0Reset (legacy): pin by checking the c=0 cmp's
+        # matching branch points at PGRTailEntry.
+        assert "PGRTailC0Reset" not in tail, (
+            "Tail must no longer reference the legacy PGRTailC0Reset "
+            "block (handled upstream by SkipSubtileMainLoop<L>)"
+        )
         c0_cmp_pos = tail.find("origCounter == 0")
         if c0_cmp_pos >= 0:
             after_c0 = tail[c0_cmp_pos:c0_cmp_pos + 400]
@@ -578,91 +588,48 @@ class TestTailEmitContent_PGR2:
                 "c=0 path must not branch to SkipTailLoopL"
             )
 
-    def test_emits_c0_reset_label_and_accD_zero(self, fp4_pgr2_asm):
-        """The c=0 reset block must zero accD via `initVgprTilesToZero`
-        (same helper kernelBodySubtile uses at kernel start).
+    def test_omits_c0_reset_label(self, fp4_pgr2_asm):
+        """The tail must NOT define a PGRTailC0Reset<L> label any more.
+
+        The legacy c=0 reset block (which used to zero accD via
+        initVgprTilesToZero, subtract one DU from each SRD, and XOR LWA
+        back to buf 0) has been removed: those undos are now obviated
+        by the upstream SkipSubtileMainLoop<L> gate, which skips the
+        preLoop/mainloop/NGLL/NLL block entirely when origCounter==0.
         """
         tail = _extract_tail_section(fp4_pgr2_asm)
         assert tail
-        c0_label_pos = tail.find("PGRTailC0ResetL")
-        assert c0_label_pos >= 0, "tail must define PGRTailC0ResetL"
-        c0_block = tail[c0_label_pos:c0_label_pos + 4000]
-        assert "Init D vgprTiles to zero" in c0_block, (
-            "c=0 reset must invoke `initVgprTilesToZero(D)`.\n"
-            "c=0 block excerpt:\n" + c0_block[:1500]
+        assert "PGRTailC0ResetL:" not in tail, (
+            "Tail must not define a PGRTailC0ResetL label any more.\n"
+            "Tail head:\n" + tail[:1500]
         )
 
-    def _extract_c0_block(self, tail):
-        """Extract the entire `label_PGRTailC0ResetL:` block up through
-        (but not including) the `label_PGRTailEntryL:` label that
-        terminates it.
-
-        The c=0 reset block contains the accD-init MFMA sweep (which on
-        FP4 + MX scale fixture configurations can run to 16 `v_mfma_i32`
-        instructions for a 256-accVGPR D tile) plus the per-tensor
-        s_sub/s_subb chain and the LWA XOR chain — easily several KB
-        of asm. Extracting "from the label definition to the next label
-        definition" keeps the assertions robust to the variable-length
-        init sweep. (We anchor on the `:` suffix to find the actual
-        label *definition* rather than the upstream `s_cbranch ...
-        label_PGRTailC0ResetL` reference that points at it.)
-        """
-        label_def = "label_PGRTailC0ResetL:"
-        c0_label_pos = tail.find(label_def)
-        if c0_label_pos < 0:
-            return ""
-        # Skip past the label definition itself so we find the
-        # TERMINATING label (PGRTailEntryL), not the label that opens
-        # this block.
-        c0_body_start = c0_label_pos + len(label_def)
-        c0_end = tail.find("label_PGRTailEntryL:", c0_body_start)
-        if c0_end < 0:
-            return tail[c0_label_pos:]
-        return tail[c0_label_pos:c0_end]
-
-    def test_emits_c0_srd_subtract_with_borrow(self, fp4_pgr2_asm):
-        """For PGR>=2, the c=0 reset block must subtract 1 DU from
-        each Srd<tc> (with borrow) to undo preLoop's GR_INC advance.
+    def test_omits_c0_srd_subtract(self, fp4_pgr2_asm):
+        """The tail must NOT emit the legacy `s_sub_u32 Srd<tc>,
+        depthUBytes` "undo preLoop GR_INC" instructions anywhere
+        (they used to live in the c=0 reset block; now obviated).
         """
         tail = _extract_tail_section(fp4_pgr2_asm)
         assert tail
-        c0_block = self._extract_c0_block(tail)
-        assert c0_block, "PGRTailC0ResetL block not found in tail"
-        assert re.search(
-            r"s_sub_u32[^\n]*sgprSrdA[^\n]*undo preLoop GR_INC", c0_block
+        assert not re.search(
+            r"s_sub_u32[^\n]*sgprSrd[AB][^\n]*undo preLoop GR_INC", tail
         ), (
-            "c=0 reset must emit `s_sub_u32 SrdA, ..., depthUBytes` to "
-            "undo preLoop's GR_INC advance.\n"
-            "c=0 block excerpt:\n" + c0_block[:1500]
-        )
-        assert re.search(
-            r"s_subb_u32[^\n]*sgprSrdA\+1", c0_block
-        ), "c=0 reset must propagate borrow to SrdA+1"
-        assert re.search(
-            r"s_sub_u32[^\n]*sgprSrdB[^\n]*undo preLoop GR_INC", c0_block
-        )
-        assert re.search(
-            r"s_subb_u32[^\n]*sgprSrdB\+1", c0_block
+            "Tail must not emit the legacy `s_sub_u32 SrdA/B ... undo "
+            "preLoop GR_INC` (obviated by upstream skip gate)."
         )
 
-    def test_emits_c0_lwa_xor_realign(self, fp4_pgr2_asm):
-        """For PGR>=2, the c=0 reset block must XOR LWA back to buf 0
-        to undo preLoop's GR_INC LWA swap.
+    def test_omits_c0_lwa_xor_undo(self, fp4_pgr2_asm):
+        """The tail must NOT emit the legacy `s_xor_b32 LWA ... undo
+        preLoop GR_INC` instructions (legacy c=0 reset path).
         """
         tail = _extract_tail_section(fp4_pgr2_asm)
         assert tail
-        c0_block = self._extract_c0_block(tail)
-        assert c0_block, "PGRTailC0ResetL block not found in tail"
-        assert re.search(
-            r"s_xor_b32[^\n]*LocalWriteBaseAddrA[^\n]*SwapA[^\n]*undo preLoop GR_INC",
-            c0_block
+        assert not re.search(
+            r"s_xor_b32[^\n]*LocalWriteBaseAddr[AB][^\n]*undo preLoop GR_INC",
+            tail
         ), (
-            "c=0 reset must XOR LocalWriteBaseAddrA with SwapA.\n"
-            "c=0 block tail:\n" + c0_block[-1500:]
-        )
-        assert re.search(
-            r"s_xor_b32[^\n]*LocalWriteBaseAddrB[^\n]*SwapB[^\n]*undo preLoop GR_INC",
-            c0_block
+            "Tail must not emit the legacy `s_xor_b32 LWA ... undo "
+            "preLoop GR_INC` (obviated by upstream skip gate)."
         )
 
     def test_emits_srd_advance_A_with_carry(self, fp4_pgr2_asm):
@@ -782,15 +749,21 @@ class TestTailEmitContent_PGR1:
         )
 
     def test_emits_c0_reset_compare_and_branch(self, bf16_pgr1_asm):
-        """PGR=1 also routes c=0 through the reset path. SRD-sub /
-        LWA-XOR are no-ops (no preLoop GR_INC) but accD must still be
-        zeroed to undo NLL's garbage accumulation.
+        """PGR=1 also routes c=0 through the tail-entry gate. With the
+        upstream SkipSubtileMainLoop<L> gate, the preLoop/mainloop/NLL
+        block is skipped for origCounter==0; SRDs stay at K=0, LWA/LRA
+        at buf 0, accD at zero, so the c=0 path branches directly to
+        the tail body (PGRTailEntry<L>) — no in-tail reset needed.
         """
         tail = _extract_tail_section(bf16_pgr1_asm)
         assert tail
         assert re.search(r"s_cmp_eq_u32[^\n]*\b0\b[^\n]*origCounter == 0", tail)
         assert re.search(
-            r"s_cbranch_scc1[^\n]*PGRTailC0Reset", tail
+            r"s_cbranch_scc1[^\n]*PGRTailEntry", tail
+        )
+        assert "PGRTailC0Reset" not in tail, (
+            "PGR=1 tail must not reference the legacy PGRTailC0Reset "
+            "block (handled upstream by SkipSubtileMainLoop<L>)"
         )
 
     def test_emits_srd_advance_AB(self, bf16_pgr1_asm):
@@ -799,29 +772,27 @@ class TestTailEmitContent_PGR1:
         assert re.search(r"s_add_u32[^\n]*sgprSrdA[^\n]*advance SrdA by 1 DU", tail)
         assert re.search(r"s_add_u32[^\n]*sgprSrdB[^\n]*advance SrdB by 1 DU", tail)
 
-    def test_omits_c0_srd_subtract_pgr1(self, bf16_pgr1_asm):
-        """PGR=1 has no preLoop GR_INC, so the c=0 reset block must NOT
-        emit `s_sub_u32 Srd<tc>`.
+    def test_omits_c0_reset_label_pgr1(self, bf16_pgr1_asm):
+        """PGR=1 tail must not define a PGRTailC0Reset<L> label."""
+        tail = _extract_tail_section(bf16_pgr1_asm)
+        assert tail
+        assert "PGRTailC0ResetL:" not in tail, (
+            "PGR=1 tail must not define a PGRTailC0ResetL label "
+            "(obviated by upstream SkipSubtileMainLoop<L> gate)."
+        )
+
+    def test_omits_c0_undo_instructions_pgr1(self, bf16_pgr1_asm):
+        """PGR=1 tail must not emit the legacy `undo preLoop GR_INC`
+        SRD-sub or LWA-XOR instructions anywhere.
         """
         tail = _extract_tail_section(bf16_pgr1_asm)
         assert tail
-        c0_label_pos = tail.find("PGRTailC0Reset")
-        assert c0_label_pos >= 0
-        c0_block = tail[c0_label_pos:c0_label_pos + 4000]
         assert not re.search(
-            r"s_sub_u32[^\n]*sgprSrdA[^\n]*undo preLoop GR_INC", c0_block
-        ), "PGR=1 c=0 reset must NOT emit `s_sub_u32 SrdA`"
-
-    def test_emits_c0_accD_zero_pgr1(self, bf16_pgr1_asm):
-        """PGR=1 c=0 reset still zeroes accD via `initVgprTilesToZero`."""
-        tail = _extract_tail_section(bf16_pgr1_asm)
-        assert tail
-        c0_label_pos = tail.find("PGRTailC0Reset")
-        assert c0_label_pos >= 0
-        c0_block = tail[c0_label_pos:c0_label_pos + 4000]
-        assert "Init D vgprTiles to zero" in c0_block, (
-            "PGR=1 c=0 reset must invoke `initVgprTilesToZero(D)` to "
-            "undo NLL's garbage accumulation."
+            r"s_sub_u32[^\n]*sgprSrd[AB][^\n]*undo preLoop GR_INC", tail
+        )
+        assert not re.search(
+            r"s_xor_b32[^\n]*LocalWriteBaseAddr[AB][^\n]*undo preLoop GR_INC",
+            tail
         )
 
     def test_emits_small_counter_compare(self, bf16_pgr1_asm):
