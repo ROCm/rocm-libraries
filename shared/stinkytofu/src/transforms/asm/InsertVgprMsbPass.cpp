@@ -94,6 +94,22 @@ std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
     return {setVal, true};
 }
 
+// Set offset = -msb*256 on each VGPR operand so the emitter prints byte form
+// (`v[idx + offset]` evaluates to idx ≤ 255).
+void encodeVgprOperands(StinkyInstruction* inst) {
+    auto rewrite = [](StinkyRegister& reg) {
+        if (reg.dataType != StinkyRegister::Type::Register) return;
+        if (reg.reg.type != RegType::V) return;
+        int msb = static_cast<int>(reg.reg.idx) / 256;
+        if (msb == 0) return;  // already byte-form; nothing to do
+        int wantOffset = -msb * 256;
+        if (reg.reg.offset == wantOffset) return;  // already encoded (rocisa path)
+        reg.reg.offset = static_cast<int16_t>(wantOffset);
+    };
+    for (auto& src : const_cast<std::vector<StinkyRegister>&>(inst->getSrcRegs())) rewrite(src);
+    for (auto& dst : const_cast<std::vector<StinkyRegister>&>(inst->getDestRegs())) rewrite(dst);
+}
+
 void emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
                          GfxArchID archId, IRBase* insertBefore, VgprMsbMode msbMode) {
     if (!hasVgpr || requiredSetVal == currentMsb) {
@@ -164,6 +180,7 @@ class InsertVgprMsbPassImpl : public Pass {
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
                 emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst,
                                     msbMode);
+                encodeVgprOperands(inst);
             }
         }
         return preserveCFGAnalyses();
