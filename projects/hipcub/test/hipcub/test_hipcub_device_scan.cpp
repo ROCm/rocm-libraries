@@ -1408,6 +1408,54 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
+// Params for invalid data tests
+template<typename SegmentOffsetT>
+struct segment;
+
+template<class SegmentOffsetT = unsigned int,
+         class InputType      = segment<SegmentOffsetT>,
+         class CountT         = unsigned int>
+struct InvalidDeviceScanParams
+{
+    using segment_offset_type = SegmentOffsetT;
+    using input_type          = InputType;
+    using count_type          = CountT;
+
+    static_assert(std::is_same_v<input_type, segment<SegmentOffsetT>>
+                      || (sizeof(segment<SegmentOffsetT>) == sizeof(input_type)),
+                  "If input is a primitive type, it must be bit-casteable to segment");
+};
+
+// -----------------------------------------------------------------------
+// Test for scan ops using non-consecutive partial results for the scan op
+// -----------------------------------------------------------------------
+
+template<class Params>
+class HipcubInvalidDeviceScanTests : public ::testing::Test
+{
+public:
+    using segment_offset_type = typename Params::segment_offset_type;
+    using input_type          = typename Params::input_type;
+    using count_type          = typename Params::count_type;
+};
+
+using HipcubInvalidDeviceScanTestsParams
+    = ::testing::Types<InvalidDeviceScanParams<>,
+                       InvalidDeviceScanParams<unsigned int, unsigned long long>>;
+
+TYPED_TEST_SUITE(HipcubInvalidDeviceScanTests, HipcubInvalidDeviceScanTestsParams);
+
+template<typename Destination, typename Source>
+HIPCUB_HOST_DEVICE
+Destination bit_cast(const Source& source)
+{
+    static_assert(sizeof(Source) == sizeof(Destination),
+                  "Destination and Source types must have the same size");
+    Destination dest;
+    memcpy(static_cast<void*>(&dest), &source, sizeof(Destination));
+    return dest;
+}
+
 template<bool Inclusive,
          bool WithInitValue,
          class InputIterator,
@@ -1466,26 +1514,29 @@ struct segment
 {
     // Make sure that default constructed segments can not be merged
     SegmentOffsetT begin = _HIPCUB_STD::numeric_limits<SegmentOffsetT>::min();
-    SegmentOffsetT end = _HIPCUB_STD::numeric_limits<SegmentOffsetT>::max();
-
-    HIPCUB_HOST_DEVICE segment() = default;
-
-    HIPCUB_HOST_DEVICE segment(SegmentOffsetT b, SegmentOffsetT e) : begin{b}, end{e} {}
+    SegmentOffsetT end   = _HIPCUB_STD::numeric_limits<SegmentOffsetT>::max();
 
     HIPCUB_HOST_DEVICE
-    friend bool
-        operator==(segment left, segment right)
+    segment()
+        = default;
+
+    HIPCUB_HOST_DEVICE
+    constexpr segment(SegmentOffsetT b, SegmentOffsetT e)
+        : begin{b}, end{e}
+    {}
+
+    HIPCUB_HOST_DEVICE
+    friend bool operator==(segment left, segment right)
     {
         return left.begin == right.begin && left.end == right.end;
     }
 };
 
-template<typename SegmentOffsetT>
-struct tuple_to_segment_op
+template<typename SegmentOffsetT, typename WrapperT>
+struct tuple_to_wrapper_op
 {
     HIPCUB_HOST_DEVICE
-    segment<SegmentOffsetT>
-        operator()(test_utils::tuple<SegmentOffsetT, SegmentOffsetT> interval) const
+    auto operator()(test_utils::tuple<SegmentOffsetT, SegmentOffsetT> interval) const
     {
 #if defined(__HIP_PLATFORM_AMD__)
         SegmentOffsetT begin = rocprim::get<0>(interval);
@@ -1493,24 +1544,76 @@ struct tuple_to_segment_op
 #elif defined(__HIP_PLATFORM_NVIDIA__)
         const auto [begin, end] = interval;
 #endif
-        return segment{begin, end};
+        return bit_cast<WrapperT>(segment{begin, end});
     }
+};
+
+template<typename CountT>
+struct counts_t
+{
+    CountT default_init; // Partial results that were default-initialized
+    CountT zero_init; // Partial results that were zero-initialized
+    CountT other; // Duplicate elements or valid elements combined in an invalid order
+    CountT cascade; // Count down-the-line errors
 };
 
 template<typename CountT, typename SegmentOffsetT>
 struct segments_op
 {
-    using seg_t = segment<SegmentOffsetT>;
-    CountT* count;
+    using seg_t       = segment<SegmentOffsetT>;
+    using counts_type = counts_t<CountT>;
+
+    static constexpr auto minus_1  = static_cast<SegmentOffsetT>(-1);
+    static constexpr auto cascaded = seg_t{minus_1, minus_1};
+    counts_type*          counts;
+
+    HIPCUB_HOST_DEVICE
+    segments_op(counts_type* counts_)
+        : counts{counts_}
+    {}
+
+    HIPCUB_DEVICE
+    bool check_inputs(seg_t left, seg_t right) const
+    {
+        // left == right to detect zero-initialized segments
+        if(left.end != right.begin || left == right)
+        {
+            CountT* count_ptr = &counts->other;
+            if(left == cascaded || right == cascaded)
+            {
+                count_ptr = &counts->cascade;
+            }
+            else if(left == seg_t{} || right == seg_t{})
+            {
+                count_ptr = &counts->default_init;
+            }
+            else if(left == seg_t{0, 0} || right == seg_t{0, 0})
+            {
+                count_ptr = &counts->zero_init;
+            }
+            atomicAdd(count_ptr, 1);
+            return true;
+        }
+        return false;
+    }
 
     HIPCUB_DEVICE
     seg_t operator()(seg_t left, seg_t right) const
     {
-        if(left.end != right.begin)
+        if(check_inputs(left, right))
         {
-            atomicAdd(count, 1);
+            return cascaded;
         }
         return {left.begin, right.end};
+    }
+
+    template<typename PrimitiveT>
+    HIPCUB_DEVICE
+    PrimitiveT operator()(PrimitiveT p_left, PrimitiveT p_right) const
+    {
+        const auto left  = bit_cast<seg_t>(p_left);
+        const auto right = bit_cast<seg_t>(p_right);
+        return bit_cast<PrimitiveT>(this->operator()(left, right));
     }
 };
 
@@ -1518,36 +1621,44 @@ template<typename SegmentOffsetT>
 struct segments_host_op
 {
     using seg_t = segment<SegmentOffsetT>;
-
     HIPCUB_HOST
     seg_t operator()(seg_t left, seg_t right) const
     {
         return {left.begin, right.end};
     }
+
+    template<typename PrimitiveT>
+    HIPCUB_HOST
+    PrimitiveT operator()(PrimitiveT p_left, PrimitiveT p_right) const
+    {
+        const auto left  = bit_cast<seg_t>(p_left);
+        const auto right = bit_cast<seg_t>(p_right);
+        return bit_cast<PrimitiveT>(this->operator()(left, right));
+    }
 };
 
-template<bool Inclusive, bool WithInitValue>
+template<typename TestFixture, bool Inclusive, bool WithInitValue>
 void invalid_data_test()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using segment_offset_t = int32_t;
-    using segment_t        = segment<segment_offset_t>;
-    using T                = segment_t;
-    using U                = T;
-
-    using count_t           = unsigned int;
+    using T                 = typename TestFixture::input_type;
+    using U                 = T;
+    using count_t           = typename TestFixture::count_type;
+    using segment_offset_t  = typename TestFixture::segment_offset_type;
+    using counts_type       = counts_t<count_t>;
     using scan_op_type      = segments_op<count_t, segment_offset_t>;
     using scan_host_op_type = segments_host_op<segment_offset_t>;
+
+    using segment_t = segment<segment_offset_t>;
 
     using counting_it_t    = test_utils::counting_iterator<segment_offset_t>;
     using iterator_tuple_t = test_utils::tuple<counting_it_t, counting_it_t>;
     using zip_iterator_t   = test_utils::zip_iterator<iterator_tuple_t>;
-    using transform_op_t   = tuple_to_segment_op<segment_offset_t>;
-    using transform_it_t
-        = test_utils::transform_iterator<zip_iterator_t, transform_op_t, segment_t>;
+    using transform_op_t   = tuple_to_wrapper_op<segment_offset_t, T>;
+    using transform_it_t   = test_utils::transform_iterator<zip_iterator_t, transform_op_t, U>;
 
     hipStream_t stream = 0; // default
 
@@ -1562,21 +1673,20 @@ void invalid_data_test()
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
             // Generate data
-            const auto initial_value  = (Inclusive && !WithInitValue)
-                                            ? segment{segment_offset_t{0}, segment_offset_t{0}}
-                                            : segment{segment_offset_t{0}, segment_offset_t{1}};
+            const auto initial_value
+                = bit_cast<U>((Inclusive && !WithInitValue) ? segment_t{0, 0} : segment_t{0, 1});
             const auto input_iterator = transform_it_t(
                 zip_iterator_t(test_utils::make_tuple(counting_it_t{1}, counting_it_t{2})),
                 transform_op_t());
             U* d_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(U)));
 
-            count_t* d_count;
-            HIP_CHECK(hipMalloc(&d_count, sizeof(count_t)));
-            HIP_CHECK(hipMemset(d_count, 0, sizeof(count_t)));
+            counts_type* d_counts;
+            HIP_CHECK(hipMalloc(&d_counts, sizeof(counts_type)));
+            HIP_CHECK(hipMemset(d_counts, 0, sizeof(counts_type)));
 
             // scan function
-            scan_op_type scan_op{d_count};
+            scan_op_type scan_op{d_counts};
 
             const auto h_input_iterator = transform_it_t(
                 zip_iterator_t(test_utils::make_tuple(counting_it_t{1}, counting_it_t{2})),
@@ -1649,21 +1759,26 @@ void invalid_data_test()
 
             // Copy output to host
             std::vector<U> output(size);
-            count_t        count = 0;
-            HIP_CHECK(hipMemcpy(&count, d_count, sizeof(count_t), hipMemcpyDeviceToHost));
+            counts_type    counts{};
+            HIP_CHECK(hipMemcpy(&counts, d_counts, sizeof(counts_type), hipMemcpyDeviceToHost));
             HIP_CHECK(hipMemcpy(output.data(),
                                 d_output,
                                 output.size() * sizeof(U),
                                 hipMemcpyDeviceToHost));
             HIP_CHECK(hipDeviceSynchronize());
-            HIP_CHECK(hipFree(d_count));
+            HIP_CHECK(hipFree(d_counts));
             HIP_CHECK(hipFree(d_output));
 
             // Output values should still be as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
             // The actual core requirement expected to fail
-            if(count)
+            auto is_zero = [](counts_type c) -> bool
+            {
+                return c.default_init == count_t{0} && c.zero_init == count_t{0}
+                       && c.other == count_t{0} && c.cascade == count_t{0};
+            };
+            if(!is_zero(counts))
             {
                 printf("This test is allowed to fail (and it does), because device_*_scan calls "
                        "the scan operator on non-consecutive partial results\n");
@@ -1671,28 +1786,28 @@ void invalid_data_test()
             }
             else
             {
-                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(count, count_t{0}));
+                ASSERT_NO_FATAL_FAILURE(ASSERT_TRUE(is_zero(counts)));
             }
         }
     }
 }
 
-TEST(HipcubDeviceScanTests, InvalidDataInclusiveScan)
+TYPED_TEST(HipcubInvalidDeviceScanTests, InvalidDataInclusiveScan)
 {
-    invalid_data_test<true /*Inclusive*/, false /*WithInitValue*/>();
+    invalid_data_test<TestFixture, true /*Inclusive*/, false /*WithInitValue*/>();
 }
 
-TEST(HipcubDeviceScanTests, InvalidDataInclusiveScanInit)
+TYPED_TEST(HipcubInvalidDeviceScanTests, InvalidDataInclusiveScanInit)
 {
-    invalid_data_test<true /*Inclusive*/, true /*WithInitValue*/>();
+    invalid_data_test<TestFixture, true /*Inclusive*/, true /*WithInitValue*/>();
 }
 
-TEST(HipcubDeviceScanTests, InvalidDataExclusiveScan)
+TYPED_TEST(HipcubInvalidDeviceScanTests, InvalidDataExclusiveScan)
 {
-    invalid_data_test<false /*Inclusive*/, false /*WithInitValue*/>();
+    invalid_data_test<TestFixture, false /*Inclusive*/, false /*WithInitValue*/>();
 }
 
-TEST(HipcubDeviceScanTests, InvalidDataExclusiveScanInit)
+TYPED_TEST(HipcubInvalidDeviceScanTests, InvalidDataExclusiveScanInit)
 {
-    invalid_data_test<false /*Inclusive*/, true /*WithInitValue*/>();
+    invalid_data_test<TestFixture, false /*Inclusive*/, true /*WithInitValue*/>();
 }
