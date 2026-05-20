@@ -17291,7 +17291,7 @@ class KernelWriterAssembly(KernelWriter):
       # Main loop: read current LDS addr from tracking SGPR
       ldsTrackSgpr = f"tdmLdsAddr{tc}"
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(ldsTrackSgpr)))
-    elif setLds:
+    else:
       with self.allocTmpSgpr(1) as tmpSgprRes:
         waveOffsetSgprIdx: int = tmpSgprRes.idx
         mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))

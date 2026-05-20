@@ -366,7 +366,7 @@ def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
 
 def selectDGeometry(kernel: dict) -> CDTileGeometry:
   """Return the CDTileGeometry for the D (output/accumulator) tile."""
-  if kernel.get("WavefrontSize", 64) == 32:
+  if kernel["WavefrontSize"] == 32:
     return CD_F32_W32
   return CD_F32
 
@@ -929,7 +929,7 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
     return module
 
   # WMMA-only archs (gfx12): no MFMA available for fast zeroing, use scalar moves
-  if not writer.states.asmCaps.get("HasMFMA", False):
+  if not writer.states.asmCaps["HasMFMA"]:
     tileAlias = vgpr
     for tile in tileInfo.vgprTiles:
       for reg in tile.regList.indices:

@@ -21,6 +21,7 @@ from Tensile.Components.Subtile.SubtileScaleEmit import (
 )
 from rocisa.code import Module
 from rocisa.instruction import SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32, SCBranchSCC1
+from rocisa.instruction import SWaitTensorcnt
 from rocisa.container import vgpr, sgpr, DSModifiers
 from rocisa.code import Label
 
@@ -167,7 +168,6 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             # TDM aliased: reprogram descriptor before loading this tensor
             if self.kernel["enableTDMA"] and self.kernel["enableTDMB"]:
-                from rocisa.instruction import SWaitTensorcnt
                 module.add(SWaitTensorcnt(tensorcnt=0, comment="drain TDM before aliased descriptor reprogram"))
                 tensorParams = self.writer.tPA if tensor == 'A' else self.writer.tPB
                 module.add(self.writer.initTDMDescriptorSubtile(self.kernel, tensorParams, setLds=False))
@@ -187,9 +187,7 @@ class InstructionEmitter:
         if counts is None:
             return []
         
-        hasTDM = self.kernel["enableTDMA"] and self.kernel["enableTDMB"]
-        if hasTDM:
-            from rocisa.instruction import SWaitTensorcnt
+        if self.kernel["enableTDMA"] and self.kernel["enableTDMB"]:
             tdmCnt = counts.A + counts.B + counts.SA + counts.SB
             return [SWaitTensorcnt(tensorcnt=tdmCnt,
                                    comment=f"Wait TDM (tensor_load_to_lds): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
