@@ -888,10 +888,10 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             // and advance the DRAM windows
             if constexpr((!HasHotLoop && (TailNum == TailNumber::Three)) || HasHotLoop)
             {
-            async_load_tile_(a_copy_lds_window0, a_tile_windows[number<0>{}]);
-            move_tile_window(a_tile_windows[number<0>{}], a_dram_tile_window_step);
-            async_load_tile_(b_copy_lds_window0, b_tile_windows[number<0>{}]);
-            move_tile_window(b_tile_windows[number<0>{}], b_dram_tile_window_step);
+                async_load_tile_(a_copy_lds_window0, a_tile_windows[number<0>{}]);
+                move_tile_window(a_tile_windows[number<0>{}], a_dram_tile_window_step);
+                async_load_tile_(b_copy_lds_window0, b_tile_windows[number<0>{}]);
+                move_tile_window(b_tile_windows[number<0>{}], b_dram_tile_window_step);
             }
 
             if constexpr(HasHotLoop)

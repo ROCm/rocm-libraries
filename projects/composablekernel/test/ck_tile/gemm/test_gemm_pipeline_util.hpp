@@ -444,10 +444,10 @@ class TestCkTileGemmPipeline : public ::testing::Test
             {
                 for(auto kb : k_batches_)
                 {
-                if((K / K_Tile) % kb != 0)
-                {
-                    continue;
-                }
+                    if((K / K_Tile) % kb != 0)
+                    {
+                        continue;
+                    }
                     RunSingle<PadM, PadN, PadK, Preshuffle>(M, N, K, StrideA, StrideB, StrideC, kb);
                 }
             }

@@ -43,8 +43,8 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
 #else
         constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-        constexpr index_t ROWS      = is_a_load_tr<Problem> ? KPerBlock : MPerBlock;
-        constexpr index_t COLS      = is_a_load_tr<Problem> ? MPerBlock : KPerBlock;
+        constexpr index_t ROWS      = Base::template is_a_load_tr<Problem> ? KPerBlock : MPerBlock;
+        constexpr index_t COLS      = Base::template is_a_load_tr<Problem> ? MPerBlock : KPerBlock;
         return make_naive_tensor_descriptor(make_tuple(number<ROWS>{}, number<COLS>{}),
                                             make_tuple(number<COLS>{}, number<1>{}));
 #endif
@@ -58,8 +58,8 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
 #else
         constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-        constexpr index_t ROWS      = is_a_load_tr<Problem> ? KPerBlock : NPerBlock;
-        constexpr index_t COLS      = is_a_load_tr<Problem> ? NPerBlock : KPerBlock;
+        constexpr index_t ROWS      = Base::template is_a_load_tr<Problem> ? KPerBlock : NPerBlock;
+        constexpr index_t COLS      = Base::template is_a_load_tr<Problem> ? NPerBlock : KPerBlock;
         return make_naive_tensor_descriptor(make_tuple(number<ROWS>{}, number<COLS>{}),
                                             make_tuple(number<COLS>{}, number<1>{}));
 #endif
