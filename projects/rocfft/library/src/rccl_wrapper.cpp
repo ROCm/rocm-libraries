@@ -37,39 +37,26 @@
 static std::map<std::set<int>, rocfft_rccl_comm_t> comm_cache;
 static std::mutex                                  comm_cache_mutex;
 
-struct NcclTypeInfo
+// map a rocFFT precision to the corresponding NCCL datatype.
+// rocFFT half/float/double map to ncclFloat16/32/64.
+//
+// note: NCCL has no native complex datatype, so callers transferring
+// complex layouts must double the element count via
+// array_type_is_complex(array_type) ? 2 : 1.
+static ncclDataType_t get_nccl_dtype(rocfft_precision precision)
 {
-    ncclDataType_t dtype;
-    size_t         count_multiplier; // 1 for real, 2 for complex
-};
-
-// map a rocFFT (precision, array_type) pair to the NCCL datatype and
-// the count multiplier needed to express one logical rocFFT element
-// in NCCL terms.  rocFFT half/float/double map to ncclFloat16/32/64;
-// complex layouts double the element count since NCCL has no native
-// complex datatype.
-static NcclTypeInfo get_nccl_type_info(rocfft_precision precision, rocfft_array_type array_type)
-{
-    ncclDataType_t dtype;
     switch(real_type_size(precision))
     {
     case 2:
-        dtype = ncclFloat16;
-        break;
+        return ncclFloat16;
     case 4:
-        dtype = ncclFloat32;
-        break;
+        return ncclFloat32;
     case 8:
-        dtype = ncclFloat64;
-        break;
-    default:
-        // rocFFT only produces half (2), float (4), or double (8).
-        // any other size indicates a bug in the caller.  there is
-        // no safe fallback since the count_multiplier assumes a
-        // floating-point element width.
-        throw std::runtime_error("unsupported rocfft_precision in RCCL datatype mapping");
+        return ncclFloat64;
     }
-    return {dtype, array_type_is_complex(array_type) ? size_t{2} : size_t{1}};
+    // rocFFT only produces half (2), float (4), or double (8); any
+    // other size indicates a bug in the caller.
+    throw std::runtime_error("unsupported rocfft_precision in RCCL datatype mapping");
 }
 
 // implementation details shared by all copies of a handle via shared_ptr
@@ -224,10 +211,14 @@ void rocfft_rccl_comm_t::alltoall(const void*       sendbuf,
                                   rocfft_precision  precision,
                                   rocfft_array_type array_type) const
 {
-    ncclComm_t comm          = static_cast<ncclComm_t>(get_comm(device_id));
-    auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
+    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
 
-    ncclResult_t result = ncclAllToAll(sendbuf, recvbuf, count * multiplier, dtype, comm, stream);
+    ncclResult_t result = ncclAllToAll(sendbuf,
+                                       recvbuf,
+                                       count * (array_type_is_complex(array_type) ? 2 : 1),
+                                       get_nccl_dtype(precision),
+                                       comm,
+                                       stream);
 
     if(result != ncclSuccess)
     {
@@ -245,10 +236,14 @@ void rocfft_rccl_comm_t::send(const void*       sendbuf,
                               rocfft_precision  precision,
                               rocfft_array_type array_type) const
 {
-    ncclComm_t comm          = static_cast<ncclComm_t>(get_comm(device_id));
-    auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
+    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
 
-    ncclResult_t result = ncclSend(sendbuf, count * multiplier, dtype, peer_rank, comm, stream);
+    ncclResult_t result = ncclSend(sendbuf,
+                                   count * (array_type_is_complex(array_type) ? 2 : 1),
+                                   get_nccl_dtype(precision),
+                                   peer_rank,
+                                   comm,
+                                   stream);
 
     if(result != ncclSuccess)
     {
@@ -267,10 +262,14 @@ void rocfft_rccl_comm_t::recv(void*             recvbuf,
                               rocfft_precision  precision,
                               rocfft_array_type array_type) const
 {
-    ncclComm_t comm          = static_cast<ncclComm_t>(get_comm(device_id));
-    auto [dtype, multiplier] = get_nccl_type_info(precision, array_type);
+    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
 
-    ncclResult_t result = ncclRecv(recvbuf, count * multiplier, dtype, peer_rank, comm, stream);
+    ncclResult_t result = ncclRecv(recvbuf,
+                                   count * (array_type_is_complex(array_type) ? 2 : 1),
+                                   get_nccl_dtype(precision),
+                                   peer_rank,
+                                   comm,
+                                   stream);
 
     if(result != ncclSuccess)
     {
