@@ -18,8 +18,6 @@ struct GPU_Allocator_FP32 : public ::testing::TestWithParam<int>
     miopen::Allocator::ManageDataPtr buffer;
 };
 
-constexpr int GPU_Allocator_FP32::size;
-
 } // namespace
 
 TEST_P(GPU_Allocator_FP32, CustomAllocator)

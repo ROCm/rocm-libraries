@@ -24,11 +24,11 @@ from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister
-from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, SBarrier, \
+from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
     SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
-    SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
+    SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
     VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, \
     SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
@@ -149,7 +149,7 @@ class StreamKMemoryOrdering(Component):
         """
         module = Module("StreamK pre-volatile VMEM drain")
         if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
-            module.add(MacroInstruction(name="s_wait_xcnt 0", args=[], comment=comment))
+            module.add(SWaitXCnt(xcnt=0, comment=comment))
         return module
 
     @abc.abstractmethod
@@ -217,7 +217,7 @@ class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
         module.add(SWaitCnt(vlcnt=0,
             comment="release: drain in-flight loads before global_wb"))
         module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
-        module.add(MacroInstruction(name="global_wb scope:SCOPE_DEV", args=[],
+        module.add(GlobalWb(scope=CacheScope.SCOPE_DEV,
             comment="release: writeback partials to L2-coherent point"))
         module.add(SWaitCnt(vlcnt=0, vscnt=0,
             comment="release: wait for global_wb"))
@@ -225,7 +225,7 @@ class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
 
     def acquireFence(self, writer) -> Module:
         module = Module("StreamK acquire fence (dev-scope)")
-        module.add(MacroInstruction(name="global_inv scope:SCOPE_DEV", args=[],
+        module.add(GlobalInv(scope=CacheScope.SCOPE_DEV,
             comment="acquire: invalidate partials after flag"))
         module.add(SWaitCnt(vlcnt=0, comment="acquire: wait for global_inv"))
         return module

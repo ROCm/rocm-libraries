@@ -300,11 +300,11 @@ DEF_FORMAT(VOP3PX2,
     .encoding = {128},
 )
 
-// Vector 3-operand packed extended (192-bit encoding)
+// Vector 3-operand packed extended (128-bit encoding; ENC_VOP3PX3 — paired VOP3P / LD_SCALE class)
 DEF_FORMAT(VOP3PX3,
     .microcode = MC_VOP3PX3,
     .unit = VALU,
-    .encoding = {192},
+    .encoding = {128},
 )
 
 // Vector dual-issue (64-bit encoding)
@@ -386,7 +386,7 @@ DEF_FORMAT(SOPC,
 )
 
 // Scalar program flow (32-bit encoding)
-// Used for: s_branch, s_cbranch_*, s_waitcnt, s_barrier, etc.
+// Used for: s_branch, s_cbranch_*, s_waitcnt, s_barrier, s_set_vgpr_msb, etc.
 DEF_FORMAT(SOPP,
     .microcode = MC_SOPP,
     .unit = BranchUnit,
@@ -436,6 +436,7 @@ DEF_FORMAT(WMMA,
     .parent = VOP3P,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
+    .encoding = {64},
     .maxOperands = 4,
     .cost = {1, 8},
     .coissue = 0x00F0,
@@ -494,6 +495,7 @@ DEF_FORMAT(MXWMMA,
     .parent = VOP3P,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
+    .encoding = {128},
     .maxOperands = 4,
     .cost = {1, 8},
     .coissue = 0x00C0,
@@ -516,12 +518,12 @@ DEF_FORMAT(MXWMMA_SCALE,
     },
 )
 
-// v_wmma_scale16_* (VOP3PX3, 192-bit encoding, 6 operands)
+// v_wmma_scale16_* (VOP3PX3, 128-bit encoding, 6 operands)
 DEF_FORMAT(MXWMMA_SCALE16,
     .parent = MXWMMA,
     .microcode = MC_VOP3PX3,
     .maxOperands = 6,
-    .encoding = {192},
+    .encoding = {128},
     .fields = {
         {D0, vdst, vgpr, 256},
         {S0, src0, src_vgpr, 512},
@@ -648,7 +650,8 @@ DEF_FORMAT(FLAT_ATOMIC,
     },
 )
 
-// SMRD - Scalar Memory Read/Write (hardware encoding, gfx12 uses 64-bit)
+// SMRD - Scalar Memory Read/Write (hardware encoding, gfx12 uses 64-bit).
+// Tablegen exposes this as MicrocodeFormat::MC_SMEM (e.g. literal-size costing treats MC_SMEM as fixed SMRD).
 DEF_FORMAT(SMRD,
     .microcode = MC_SMEM,
     .unit = ScalarMemory,
@@ -672,8 +675,7 @@ DEF_FORMAT(SMRD_STORE,
     .flags = {SMemStore},
 )
 
-// VIMAGE - vector memory image (96-bit encoding)
-// Used for: image_load_*, image_store_*, image_sample_*, etc.
+// VIMAGE - ISA ENC_VIMAGE (96-bit encoding). Gfx1250: tensor memory instructions (e.g. TENSOR_LOAD_TO_LDS).
 DEF_FORMAT(VIMAGE,
     .microcode = MC_VIMAGE,
     .encoding = {96},
@@ -694,10 +696,10 @@ DEF_FORMAT(VSCRATCH,
     .encoding = {96},
 )
 
-// Tensor operations (GFX1250-specific; no shared parent in defs)
+// Tensor ops - VIMAGE-class encoding (96 b); inherit `.encoding` / `.microcode` from VIMAGE parent above.
 DEF_FORMAT(TENSOR,
+    .parent = VIMAGE,
     .unit = TensorUnit,
-    .encoding = {64},
     .maxOperands = 4,
     .flags = {TENSORLoadToLds},
     .fields = {

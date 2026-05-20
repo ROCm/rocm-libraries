@@ -22,7 +22,9 @@ add_executable(
     types/TestFp6E2M3.cpp
     types/TestFp6E3M2.cpp
     types/TestFp8E4M3.cpp
+    types/TestFp8E4M3Fnuz.cpp
     types/TestFp8E5M2.cpp
+    types/TestFp8E5M2Fnuz.cpp
     types/TestFp8E8M0.cpp
     types/TestHalf.cpp
     types/TestPortableTypes.cpp

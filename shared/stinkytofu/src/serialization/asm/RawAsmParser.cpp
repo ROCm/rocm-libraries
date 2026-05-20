@@ -570,38 +570,38 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
     auto& modFields = inst.modifiers[modKey];
 
     if (modKey == "mod.ds") {
-        if (fields.count("offset")) {
+        if (fields.contains("offset")) {
             modFields["na"] = "1";
             modFields["offset"] = fields["offset"];
-        } else if (fields.count("offset0") || fields.count("offset1")) {
+        } else if (fields.contains("offset0") || fields.contains("offset1")) {
             modFields["na"] = "2";
-            modFields["offset0"] = fields.count("offset0") ? fields["offset0"] : "0";
-            modFields["offset1"] = fields.count("offset1") ? fields["offset1"] : "0";
+            modFields["offset0"] = fields.contains("offset0") ? fields["offset0"] : "0";
+            modFields["offset1"] = fields.contains("offset1") ? fields["offset1"] : "0";
         }
-        if (fields.count("gds")) modFields["gds"] = "true";
+        if (fields.contains("gds")) modFields["gds"] = "true";
 
     } else if (modKey == "mod.mubuf") {
-        if (fields.count("offen")) modFields["offen"] = "true";
+        if (fields.contains("offen")) modFields["offen"] = "true";
         // "offen offset:N" emits both as a single unit; "offset" key carries the value.
-        if (fields.count("offset")) modFields["offset12"] = fields["offset"];
-        if (fields.count("glc") || fields.count("sc0")) modFields["glc"] = "true";
-        if (fields.count("slc") || fields.count("sc1")) modFields["slc"] = "true";
-        if (fields.count("nt")) modFields["nt"] = "true";
-        if (fields.count("lds")) modFields["lds"] = "true";
+        if (fields.contains("offset")) modFields["offset12"] = fields["offset"];
+        if (fields.contains("glc") || fields.contains("sc0")) modFields["glc"] = "true";
+        if (fields.contains("slc") || fields.contains("sc1")) modFields["slc"] = "true";
+        if (fields.contains("nt")) modFields["nt"] = "true";
+        if (fields.contains("lds")) modFields["lds"] = "true";
 
     } else if (modKey == "mod.flat") {
-        if (fields.count("offset")) modFields["offset12"] = fields["offset"];
-        if (fields.count("glc") || fields.count("sc0")) modFields["glc"] = "true";
-        if (fields.count("slc") || fields.count("sc1")) modFields["slc"] = "true";
-        if (fields.count("lds")) modFields["lds"] = "true";
+        if (fields.contains("offset")) modFields["offset12"] = fields["offset"];
+        if (fields.contains("glc") || fields.contains("sc0")) modFields["glc"] = "true";
+        if (fields.contains("slc") || fields.contains("sc1")) modFields["slc"] = "true";
+        if (fields.contains("lds")) modFields["lds"] = "true";
 
     } else if (modKey == "mod.global") {
-        if (fields.count("offset")) modFields["offset"] = fields["offset"];
+        if (fields.contains("offset")) modFields["offset"] = fields["offset"];
 
     } else if (modKey == "mod.smem") {
-        if (fields.count("offset")) modFields["offset"] = fields["offset"];
-        if (fields.count("glc")) modFields["glc"] = "true";
-        if (fields.count("nv")) modFields["nv"] = "true";
+        if (fields.contains("offset")) modFields["offset"] = fields["offset"];
+        if (fields.contains("glc")) modFields["glc"] = "true";
+        if (fields.contains("nv")) modFields["nv"] = "true";
     }
 
     return !sawUnrepresentable;
@@ -773,7 +773,7 @@ static std::optional<int> parseDirectiveInt(const std::string& line, const std::
     trimStr(rest);
     if (rest.empty()) return std::nullopt;
     auto v = safeAtoiStr(rest);
-    return v ? std::optional<int>(*v) : std::nullopt;
+    return v;
 }
 
 /// Determine the isaVersion array from the arch ID.
@@ -958,21 +958,21 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
                 trimStr(rhs);
                 out = (rhs == "True" || rhs == "true" || rhs == "1");
             };
-            if (body.rfind("ThreadTile=", 0) == 0)
+            if (body.starts_with("ThreadTile="))
                 parseTwoInts(body, threadTile);
-            else if (body.rfind("SubGroup=", 0) == 0)
+            else if (body.starts_with("SubGroup="))
                 parseTwoInts(body, subGroup);
-            else if (body.rfind("WaveGroup=", 0) == 0)
+            else if (body.starts_with("WaveGroup="))
                 parseTwoInts(body, waveGroup);
-            else if (body.rfind("VectorWidthA=", 0) == 0)
+            else if (body.starts_with("VectorWidthA="))
                 parseInt(body, vectorWidthA);
-            else if (body.rfind("VectorWidthB=", 0) == 0)
+            else if (body.starts_with("VectorWidthB="))
                 parseInt(body, vectorWidthB);
-            else if (body.rfind("DirectToLdsA=", 0) == 0)
+            else if (body.starts_with("DirectToLdsA="))
                 parseBool(body, directToLdsA);
-            else if (body.rfind("DirectToLdsB=", 0) == 0)
+            else if (body.starts_with("DirectToLdsB="))
                 parseBool(body, directToLdsB);
-            else if (body.rfind("UseSgprForGRO=", 0) == 0) {
+            else if (body.starts_with("UseSgprForGRO=")) {
                 bool ub = false;
                 parseBool(body, ub);
                 useSgprForGRO = ub ? 1 : 0;
@@ -983,7 +983,7 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
                     trimStr(rhs);
                     if (auto v = safeAtoiStr(rhs)) useSgprForGRO = *v;
                 }
-            } else if (body.rfind("GlobalReadVectorWidthA=", 0) == 0 ||
+            } else if (body.starts_with("GlobalReadVectorWidthA=") ||
                        body.find("GlobalReadVectorWidthA=") != std::string::npos) {
                 // The combined form is "GlobalReadVectorWidthA=N, GlobalReadVectorWidthB=M".
                 size_t pa = body.find("GlobalReadVectorWidthA=");
@@ -1288,7 +1288,10 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
         // (e.g. `.long X // hi`) and unparsable instructions still round-trip.
         auto textBlockWithComment = [&](const std::string& base) {
             if (lineComment.empty()) return makeTextBlock(base);
-            return makeTextBlock(base + "  // " + lineComment);
+            std::string withComment = base;
+            withComment += "  // ";
+            withComment += lineComment;
+            return makeTextBlock(withComment);
         };
 
         // Directives: lines starting with '.'

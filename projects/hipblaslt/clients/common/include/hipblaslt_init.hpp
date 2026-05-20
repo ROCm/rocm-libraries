@@ -64,6 +64,9 @@ enum class ABC_dims
     C
 };
 
+void set_host_side_fill_kernel_state(bool enable);
+bool host_side_fill_kernel();
+
 void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            hipblaslt_initialization init,
                            bool                     is_nan,
@@ -719,6 +722,87 @@ inline void hipblaslt_init_hpl(void*       A,
         break;
     default:
         hipblaslt_cerr << "Error type in hipblaslt_init_hpl" << std::endl;
+        break;
+    }
+}
+
+// Initialize vector with uniform random values in [-6, 6]
+template <typename T>
+inline void hipblaslt_init_low_precision(
+    std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
+{
+    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
+        for(size_t i = 0; i < M; ++i)
+            for(size_t j = 0; j < N; ++j)
+                A[i + j * lda + i_batch * stride] = random_low_precision_generator<T>();
+}
+
+template <typename T>
+inline void hipblaslt_init_low_precision(
+    T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
+{
+    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
+        for(size_t i = 0; i < M; ++i)
+            for(size_t j = 0; j < N; ++j)
+                A[i + j * lda + i_batch * stride] = random_low_precision_generator<T>();
+}
+
+inline void hipblaslt_init_low_precision(void*       A,
+                                         size_t      M,
+                                         size_t      N,
+                                         size_t      lda,
+                                         hipDataType type,
+                                         size_t      stride      = 0,
+                                         size_t      batch_count = 1)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        hipblaslt_init_low_precision<float>(
+            static_cast<float*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_64F:
+        hipblaslt_init_low_precision<double>(
+            static_cast<double*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_16F:
+        hipblaslt_init_low_precision<hipblasLtHalf>(
+            static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_16BF:
+        hipblaslt_init_low_precision<hip_bfloat16>(
+            static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count);
+        break;
+#if HIP_FP8_TYPE_FNUZ
+    case HIP_R_8F_E4M3_FNUZ:
+        hipblaslt_init_low_precision<hipblaslt_f8_fnuz>(
+            static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_8F_E5M2_FNUZ:
+        hipblaslt_init_low_precision<hipblaslt_bf8_fnuz>(
+            static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count);
+        break;
+#endif
+#if HIP_FP8_TYPE_OCP
+    case HIP_R_8F_E4M3:
+        hipblaslt_init_low_precision<hipblaslt_f8>(
+            static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_8F_E5M2:
+        hipblaslt_init_low_precision<hipblaslt_bf8>(
+            static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count);
+        break;
+#endif
+    case HIP_R_32I:
+        hipblaslt_init_low_precision<int32_t>(
+            static_cast<int32_t*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_8I:
+        hipblaslt_init_low_precision<hipblasLtInt8>(
+            static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count);
+        break;
+    default:
+        hipblaslt_cerr << "Error type in hipblaslt_init_low_precision" << std::endl;
         break;
     }
 }

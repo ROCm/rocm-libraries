@@ -24,7 +24,7 @@ constexpr uint32_t EXPECTED_ENGINES = 1u;
 
 TEST(TestHipKernelContainer, ConstructsSuccessfully)
 {
-    HipKernelContainer container;
+    const HipKernelContainer container;
 }
 
 TEST(TestHipKernelContainer, CopyEngineIdsReturnsExpectedEngineCount)
@@ -70,7 +70,7 @@ TEST(TestHipKernelContainer, GetApplicableEngineIdsSdpaGraph)
     HipKernelContainer container;
     auto& engineManager = container.getEngineManager();
 
-    std::vector<int64_t> dims{4, 8, 256, 128};
+    const std::vector<int64_t> dims{4, 8, 256, 128};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto graph = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         dims, strides, dims, strides, dims, strides, dims, strides, DataType::BFLOAT16);
