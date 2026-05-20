@@ -903,6 +903,18 @@ target_include_directories(MIOpen PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/include>
 )
 
+# Proxy target that bundles MIOpen linkage with build-order dependencies on the
+# CK plugin shared libraries (MIOpenCKGroupedConv_*.so).  Internal consumers
+# (tests, driver, speedtests) link this instead of MIOpen directly so that
+# building any single executable also builds the plugins it loads via dlopen.
+# When CK is disabled or plugins are not built, CK_PLUGIN_TARGETS is empty and
+# this is a plain pass-through to MIOpen.
+add_library(MIOpen_with_plugins INTERFACE)
+target_link_libraries(MIOpen_with_plugins INTERFACE MIOpen)
+if(CK_PLUGIN_TARGETS)
+    add_dependencies(MIOpen_with_plugins ${CK_PLUGIN_TARGETS})
+endif()
+
 if(MIOPEN_USE_COMPOSABLEKERNEL)
     if(MIOPEN_BUILD_CK )
         # the aliased target doesnt exist when we build CK inline as part of MIOPEN.  The aliased target only is not
