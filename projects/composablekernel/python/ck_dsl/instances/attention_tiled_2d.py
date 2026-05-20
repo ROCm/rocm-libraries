@@ -118,6 +118,41 @@ class UnifiedAttention2DTiledSpec:
     # still passed in the working dtype (``self.dtype``), and the rest
     # of the kernel (MFMA, softmax, epilogue) is unchanged.
     kv_storage_dtype: Optional[str] = None
+    # FP8 K-in-LDS path (ULP-identical to default, faster). When True
+    # (and ``kv_storage_dtype='fp8e4m3'``) the kernel stages K as raw
+    # fp8 in LDS instead of dequant-then-store-bf16. Specifically:
+    #   - K_lds is allocated as fp8 -> 8 KB instead of 16 KB at T=64/HD=64
+    #     (frees 8 KB LDS per CTA; HBM->LDS DMA bytes are halved too).
+    #   - The K loader uses async DMA fp8 bytes -> fp8 K_lds (skips the
+    #     sync per-thread global_load + fp8->f32 + fmul k_scale + cast
+    #     bf16 + smem_store chain we ran before).
+    #   - The QK MFMA reads <8 x fp8> from K_lds per lane and dequants
+    #     IN-REGISTER via ``cvt_pk_f32_fp8x4`` + ``fmul(k_scale)`` +
+    #     ``cvt_pk_bf16_f32`` to produce the same <8 x bf16> B operand
+    #     a bf16 K_lds load would have produced. The MFMA itself is still
+    #     ``mfma_f32_16x16x32_bf16`` -- Q stays bf16, no Q quantisation.
+    #
+    # Bit-identical to:
+    #   - Our current default path (it stores bf16 K_lds = bf16(fp8 *
+    #     k_scale) and then reads bf16; the new path reads fp8 and
+    #     applies the same dequant before MFMA -- the bf16 fed to MFMA
+    #     is the same).
+    #   - Triton's `unified_attention.py` fp8 path
+    #     (``K = (K_load.to(tl.float32) * tl.load(k_scale)).to(Q.dtype);
+    #     S = qk_scale * tl.dot(Q, K)``).
+    # ULP-identical wrt Triton 2D fp8 by construction.
+    #
+    # A previous incarnation of this flag also cast Q to fp8 and used the
+    # native fp8 MFMA. That was abandoned: fp8e4m3 has only 3 mantissa
+    # bits, so Q quantisation produced max_abs 0.5-2.7 vs Triton's <0.02
+    # baseline -- nowhere near ULP. The flag is retained for the LDS
+    # win and the bf16 math is preserved.
+    use_fp8_mfma_qk: bool = False
+    # Native fp8 PV MFMA. When True, V remains in raw fp8 LDS and
+    # softmax probabilities are quantised to fp8 (P*240) before PV.
+    # This avoids quantising Q/K for the QK softmax path, so it is the
+    # safer FlyDSL-inspired subset: exact bf16 QK logits, native fp8 PV.
+    use_fp8_mfma_pv: bool = False
     # ``T`` (per-CTA-iter KV-tile size in tokens). When ``None``, the
     # kernel uses ``T = block_size`` (one paged-KV cache block per
     # iter, matching the AITER decode path). Setting ``tile_size > block_size``
@@ -176,6 +211,10 @@ class UnifiedAttention2DTiledSpec:
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
             )
+        if self.use_fp8_mfma_qk and self.kv_storage_dtype != "fp8e4m3":
+            raise ValueError("use_fp8_mfma_qk requires kv_storage_dtype='fp8e4m3'")
+        if self.use_fp8_mfma_pv and self.kv_storage_dtype != "fp8e4m3":
+            raise ValueError("use_fp8_mfma_pv requires kv_storage_dtype='fp8e4m3'")
         if self.tile_size is not None:
             if self.tile_size <= 0 or self.tile_size % self.block_size != 0:
                 raise ValueError(
@@ -253,6 +292,8 @@ class UnifiedAttention2DTiledSpec:
             "qqb" if self.use_qq_bias else "",
             f"w{self.num_warps}" if self.num_warps != 1 else "",
             f"mw{self.block_m_per_warp}" if self.block_m_per_warp != 16 else "",
+            "fp8mfma" if self.use_fp8_mfma_qk else "",
+            "fp8pv" if self.use_fp8_mfma_pv else "",
         )
 
 
@@ -408,6 +449,8 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     # populates the same LDS slabs as the bf16 path. ``KV_BYTES`` flips
     # the byte-stride math for the paged-KV descriptor.
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
+    FP8_MFMA_QK = KV_FP8 and spec.use_fp8_mfma_qk
+    FP8_MFMA_PV = KV_FP8 and spec.use_fp8_mfma_pv
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
@@ -605,27 +648,67 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     # the tail end of QK[i]'s LDS reads through ``raw_ptr_buffer_load_lds``'s
     # lgkmcnt accounting, corrupting the working tile. K must stay
     # double-buffered.
+    # K_lds dtype: bf16 for the standard path (sync FP8 dequant or
+    # async bf16 DMA both target a bf16 working slab). When the FP8
+    # native-MFMA mode is on (`use_fp8_mfma_qk`), K_lds holds raw fp8
+    # bytes (no dequant); this halves the per-buffer footprint
+    # (T*HD instead of T*HD*2 bytes) so the double-buffer fits in
+    # 8 KB instead of 16 KB.
+    K_LDS_DTYPE = FP8E4M3 if FP8_MFMA_QK else dtype
+    V_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
+    P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     Q_BYTES = BLOCK_M * HD * 2
-    K_BUF_BYTES = T * HD * 2
+    # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
+    K_LDS_ELEM_BYTES = 1 if K_LDS_DTYPE == FP8E4M3 else 2
+    K_BUF_BYTES = T * HD * K_LDS_ELEM_BYTES
     K_TOTAL_BYTES = 2 * K_BUF_BYTES  # K_lds has 2 double-buffer slots
-    # Q can alias K_lds when it fits in the full K_lds region (both
-    # slots). When ``BLOCK_M <= T`` Q fits in one slot (rows 0..BLOCK_M
-    # of K_lds[0]); when ``BLOCK_M > T`` Q spills into K_lds[1] (rows
-    # T..2T map to K_lds[1, row-T, :]). The gather + store use
-    # ``(buf, row, col)`` indexing in both cases.
-    Q_ALIAS_K = Q_BYTES <= K_TOTAL_BYTES
+    # Q can alias K_lds when (a) the dtypes match and (b) it fits in the
+    # full K_lds region (both slots). When ``BLOCK_M <= T`` Q fits in one
+    # slot (rows 0..BLOCK_M of K_lds[0]); when ``BLOCK_M > T`` Q spills
+    # into K_lds[1] (rows T..2T map to K_lds[1, row-T, :]). The gather +
+    # store use ``(buf, row, col)`` indexing in both cases.
+    # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
+    # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
+    Q_ALIAS_K = (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
-    # K_lds double-buffered for bf16 path (race-free async DMA writes to
-    # one slot while QK reads the other). For FP8 path: single-buf is
-    # race-free because the dequant writes K_lds AFTER the async load of
-    # K_fp8_lds completes (the fp8 staging slab takes the double-buffer
-    # role); the dequant + barrier sequence ensures K_lds reads see the
-    # right tile.
-    K_lds_bufs = 1 if KV_FP8 else 2
-    K_lds = b.smem_alloc(dtype, [K_lds_bufs, T, HD], name_hint="Klds")
+    K_lds = b.smem_alloc(K_LDS_DTYPE, [2, T, HD], name_hint="Klds")
     V_BUFS = 1  # single-buffer V (race-free: see comment above)
-    V_lds = b.smem_alloc(dtype, [V_BUFS, T, HD], name_hint="Vlds")
-    P_lds = b.smem_alloc(dtype, [BLOCK_M, T], name_hint="Plds")
+    if FP8_MFMA_PV:
+        # Native-fp8 PV uses ds_read_b64_tr_b8. The validated lane mapping
+        # (HIP probe in /tmp/probe_tr_b8_stripe.hip) is:
+        #   for lane L in 16-lane group G = L/16, position l = L%16:
+        #     - K-row picked per slot S = G*8 + S    (S in 0..7)
+        #     - N-col picked            = l % 8       (lanes 8..15 of a group
+        #                                              redundantly select N=0..7)
+        #     - vaddr provided by lane L =
+        #         (G*8 + (l/2)) * row_stride_bytes
+        #   and the instruction requires LDS row_stride = 16 bytes.
+        # So each call gives K=32 x N=8 (half of an MFMA f32_16x16x32_fp8
+        # B operand). To get N=16, two calls + a per-lane select on
+        # (lane%16 < 8) are needed. The natural V LDS layout for this is
+        # [N_STRIPES = HD/16, T, 16] so each stripe is row-stride 16 and
+        # the second read just adds +8 to the base address.
+        N_STRIPES = HD // 16
+        V_lds = b.smem_alloc(
+            V_LDS_DTYPE, [V_BUFS, N_STRIPES, T, 16], name_hint="VldsStripe"
+        )
+    else:
+        V_lds = b.smem_alloc(V_LDS_DTYPE, [V_BUFS, T, HD], name_hint="Vlds")
+    # P_lds row stride padding (16 bytes = 8 halves) to eliminate 4-way
+    # LDS bank conflict on the softmax `ds_write_b16` stores. With row
+    # stride T*2 = 128 bytes = exactly 32 banks, lanes 0, 16, 32, 48
+    # (same lane_col but different lane_rg → different rows) all hit
+    # bank 0 because (row*128) % 128 == 0 for any row. Padding by
+    # 8 halves shifts row-N bank to bank-(N*16)%32, breaking the
+    # alias. Cost: +16 bytes per row × BLOCK_M rows = up to 2 KiB LDS
+    # at BLOCK_M=128. Profiling (rocprofv2 SQ_LDS_BANK_CONFLICT) showed
+    # ~12× LDS conflict cycles per LDS instruction on the FP8 mid-
+    # prefill kernel (25.7M conflicts vs 2.0M LDS ops) before the
+    # padding; the pad makes those writes single-cycle.
+    # In native fp8-MFMA mode P_lds holds quantised fp8 probabilities.
+    # Keep the same 16-byte row-padding distance by using 16 bytes / 1 byte.
+    P_LDS_PAD = 16 if FP8_MFMA_PV else 8
+    P_lds = b.smem_alloc(P_LDS_DTYPE, [BLOCK_M, T + P_LDS_PAD], name_hint="Plds")
     # ---- FP8 K/V staging (round-2 async-DMA path) ----
     # When KV_FP8, the loader is split into two phases:
     #   1. async-DMA raw fp8 bytes from HBM into the fp8 staging slab
@@ -641,8 +724,10 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     #
     # The bf16 K_lds and V_lds layouts are unchanged so the rest of the
     # kernel (Q gather, QK MFMA, P_lds publish, PV MFMA, epilogue) doesn't
-    # know about FP8.
-    if KV_FP8:
+    # know about FP8. Only allocate the fp8 staging slabs when actually
+    # using the async-FP8 path (round 2 v1) -- otherwise they'd waste LDS
+    # and starve occupancy on the round-1 sync FP8 path.
+    if KV_FP8 and spec.use_fp8_mfma_qk:
         K_fp8_lds = b.smem_alloc(FP8E4M3, [2, T, HD], name_hint="Kfp8lds")
         V_fp8_lds = b.smem_alloc(FP8E4M3, [1, T, HD], name_hint="Vfp8lds")
     if Q_ALIAS_K:
@@ -652,6 +737,14 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         Q_lds = K_lds
     else:
         Q_lds = b.smem_alloc(dtype, [BLOCK_M, HD], name_hint="Qlds")
+    # NOTE: Acc_lds bank-conflict padding was tested (8 bytes = 4 halves
+    # to break the 4-way conflict on the epilogue per-element stores)
+    # but the bench showed mostly noise (-49% to +95% on the same bucket
+    # depending on cu_seqlens variance, overall break-even on win count).
+    # Acc_lds is used only in the epilogue (one set of writes/reads per
+    # CTA, vs P_lds's per-iter writes), so the bank-conflict cost is a
+    # one-shot overhead and the pad's LDS budget cost doesn't pay back.
+    # Keep Acc_lds tight.
     Acc_lds = b.smem_alloc(dtype, [BLOCK_M, OUT_STRIPE_COLS], name_hint="Aclds")
 
     # ---- CK Tile `TransposeLDSLayout<M=16, K=*, B=1>` lane formulas ----
@@ -668,6 +761,12 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     one_f = b.const_f32(1.0)
     rcp_ln2 = b.const_f32(1.4426950408889634)
     qk_scale = b.fmul(scale_p, rcp_ln2)
+    # In the fp8-K-LDS path the QK MFMA dequants K -> bf16 in register
+    # using ``k_scale``; the MFMA accumulator is already in physical
+    # units (Q is bf16, K is bf16 = fp8 * k_scale). qk_scale therefore
+    # stays the same as the default bf16 path -- just softmax_scale /
+    # ln(2) -- and we do NOT fold k_scale into qk_scale here.
+    pv_fp8_scale = b.fdiv(v_scale_p, b.const_f32(240.0)) if FP8_MFMA_PV else None
     sw_const = b.const_i32(int(SLIDING_WINDOW))
     z8 = b.zero_vec(dtype, 8)
 
@@ -841,6 +940,39 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     assert (T * HD) % KV_HALVES_PER_CALL == 0
     kv_calls_per_tile = (T * HD) // KV_HALVES_PER_CALL
     bytes_per_call = KV_HALVES_PER_CALL * 2
+    # For fp8-MFMA mode K_lds is sized in fp8 (1 byte/element). The async
+    # DMA writes 16 bytes/lane regardless of dtype; that maps to 16 fp8
+    # elements per lane vs 8 bf16 halves per lane, so half the calls
+    # cover the same tile.
+    K_FP8_MFMA = FP8_MFMA_QK
+    PV_FP8_MFMA = FP8_MFMA_PV
+    if K_FP8_MFMA or PV_FP8_MFMA:
+        # Pick the largest dwords (and therefore widest per-lane payload)
+        # the tile bytes support. The AMDGPU async-DMA intrinsic
+        # ``raw.ptr.buffer.load.lds`` accepts dwords in {1, 3, 4} =
+        # {4, 12, 16} bytes/lane (a hardware quirk -- 2 is rejected).
+        # For T*HD smaller than the widest payload (e.g. T=32 HD=64 with
+        # nw=4 -> 2048 bytes/tile vs 4096 bytes/full-call), drop to a
+        # narrower per-lane payload so the loader still tiles cleanly.
+        tile_bytes = T * HD  # 1 byte per fp8 element
+        for dwords_try, bytes_per_lane in [(4, 16), (3, 12), (1, 4)]:
+            payload = THREADS * bytes_per_lane
+            if tile_bytes >= payload and tile_bytes % payload == 0:
+                K_FP8_DWORDS = dwords_try
+                K_BYTES_PER_LANE = bytes_per_lane
+                break
+        else:
+            raise AssertionError(
+                f"fp8-mfma K loader: T*HD={tile_bytes} cannot be covered by "
+                f"any supported async-DMA payload (THREADS={THREADS})"
+            )
+        K_ELEMS_PER_CALL = THREADS * K_BYTES_PER_LANE
+        K_BYTES_PER_CALL = K_ELEMS_PER_CALL  # 1 byte per fp8 element
+        k_fp8_calls_per_tile = tile_bytes // K_ELEMS_PER_CALL
+    else:
+        K_FP8_DWORDS = 4
+        K_BYTES_PER_LANE = 16
+        k_fp8_calls_per_tile = 0  # unused
     # Byte strides for the paged-KV cache. ``KV_BYTES`` is 2 for bf16, 1
     # for fp8e4m3. The async DMA reads bytes verbatim (no implicit cast),
     # so for the FP8 K/V path the loader switches to a sync per-thread
@@ -1037,17 +1169,22 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     # 9-17 kv-tiles per CTA, the sync stall was the dominant cost
     # (5000 µs vs Triton's 50 µs measured on
     # `n254q5880k10999_fp8kv` in round 1).
-    if KV_FP8:
-        FP8_DWORDS_PER_LANE = 4  # async DMA dwords-per-lane (16 bytes/lane)
-        FP8_BYTES_PER_LANE = FP8_DWORDS_PER_LANE * 4
+    if KV_FP8 and spec.use_fp8_mfma_qk:
+        # The async FP8 loader is gated on use_fp8_mfma_qk. We pick the
+        # largest dwords (and per-lane payload) that the tile bytes
+        # support, mirroring the K_FP8_DWORDS / K_BYTES_PER_LANE pick
+        # we did for `_issue_k_fp8_mfma_async` above. This lets the
+        # selector enable use_fp8_mfma_qk for small-T shapes (e.g. the
+        # FP8 SW long-prefill choice T=BS=32) without an assert trip.
+        FP8_DWORDS_PER_LANE = K_FP8_DWORDS
+        FP8_BYTES_PER_LANE = K_BYTES_PER_LANE
         FP8_ELEMS_PER_LANE = FP8_BYTES_PER_LANE  # 1 byte per fp8 element
-        # Per-call element count across all lanes in the WG.
         FP8_ELEMS_PER_CALL = THREADS * FP8_ELEMS_PER_LANE
-        assert (T * HD) % FP8_ELEMS_PER_CALL == 0, (
-            f"fp8 async loader: T*HD={T * HD} must be divisible by "
-            f"THREADS*16={FP8_ELEMS_PER_CALL} (T={T}, HD={HD}, THREADS={THREADS})"
-        )
         FP8_CALLS_PER_TILE = (T * HD) // FP8_ELEMS_PER_CALL
+        assert FP8_CALLS_PER_TILE >= 1 and (T * HD) % FP8_ELEMS_PER_CALL == 0, (
+            f"fp8 async loader: T*HD={T * HD} not coverable by THREADS*{FP8_BYTES_PER_LANE}"
+            f"={FP8_ELEMS_PER_CALL} (T={T}, HD={HD}, THREADS={THREADS})"
+        )
         # Wave-uniform LDS offset (same idea as the bf16 path); each
         # wave's lanes write a contiguous WAVE*16-byte slab in LDS.
         FP8_WAVE_BYTES = WAVE * FP8_BYTES_PER_LANE
@@ -1191,13 +1328,36 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
 
         ``lds_token`` is either ``"K"`` or ``"V"``; selects the LDS slab
         and the per-tensor scale parameter.
+
+        Per-chunk serial structure: each iteration issues one VMEM load,
+        does the dequant chain, then publishes to LDS. The AMDGPU
+        compiler's instruction scheduler interleaves the back-to-back
+        chunks' loads, dequant, and stores.
+
+        Cvt chain: uses ``cvt_pk_f32_fp8x4`` (lowers to two packed
+        ``v_cvt_pk_f32_fp8`` instructions per 4 fp8 inputs) instead of
+        the per-element ``cvt_fp8_to_f32`` (which the compiler does NOT
+        fuse into the packed variant on its own — ISA inspection of the
+        round-1 sync loader showed 48 separate ``v_cvt_f32_fp8_e32``
+        instructions instead of 24 ``v_cvt_pk_f32_fp8`` for the same
+        kernel). The packed primitive matches AITER's ``to_float_fp8x4``
+        helper in ``csrc/include/attention_common.cuh`` which is what
+        AITER's production paged-attention FP8 K/V path uses.
+
+        For each ``fp8_elems_per_chunk = 8``-fp8 chunk we issue two
+        packed cvts (4 fp8 each) — 4 ``v_cvt_pk_f32_fp8`` total per
+        chunk vs the previous 8 scalar ``v_cvt_f32_fp8`` (50% fewer
+        cvt-class instructions).
         """
         scale = k_scale_p if lds_token == "K" else v_scale_p
         lds = K_lds if lds_token == "K" else V_lds
         src = key if lds_token == "K" else value
+        assert fp8_elems_per_chunk == 8, (
+            f"FP8 dequant loader expects 8-elem chunks (got "
+            f"{fp8_elems_per_chunk}); the packed-cvt path needs the chunk "
+            f"to split cleanly into 2× <4 x fp8> sub-chunks."
+        )
         for call in range(fp8_chunks_per_thread):
-            # One thread, one 8-fp8 chunk per call. Across THREADS threads
-            # and ``fp8_chunks_per_thread`` calls, we cover all T*HD elements.
             chunk_id = b.add(
                 b.mul(b.const_i32(call), b.const_i32(THREADS)),
                 tid,
@@ -1207,9 +1367,6 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
                 b.const_i32(fp8_elems_per_chunk),
             )
-            # Compute the per-element byte offset for the first fp8 in this
-            # chunk via the paged-KV descriptor. The descriptor returns a
-            # byte offset (KV_BYTES=1 → identical to the element offset).
             linear_half_first = b.add(
                 b.mul(row, b.const_i32(HD)),
                 col,
@@ -1220,54 +1377,207 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 linear_half=linear_half_first,
                 kv_head=kv_head_idx,
             )
-            # Dequant 8 fp8 elements -> 8 bf16 elements. We do a buffer-rsrc
-            # OOB-safe scalar load per byte to keep the loader simple; the
-            # compiler folds the 8 calls into a single 8-byte VMEM load
-            # when the address pattern is contiguous.
-            # One vectorised fp8 load (8 bytes -> <8 x fp8e4m3>) replaces
-            # 8 scalar byte loads. AMDGPU coalesces this into a single
-            # 8-byte VMEM op; the dequant chain then unpacks per-lane.
             fp8_vec = b.global_load_vN(
                 src, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
             )
+            # Split <8 x fp8> into 2x <4 x fp8> via extract+pack so we
+            # can apply the packed cvt (the LLVM backend collapses the
+            # extract+pack chain back into a bitcast-equivalent shuffle
+            # once it sees the cvt.pk.f32.fp8 operand is whole-i32).
+            lo_quad = b.vec_pack(
+                [b.vec_extract(fp8_vec, i) for i in range(4)],
+                FP8E4M3,
+            )
+            hi_quad = b.vec_pack(
+                [b.vec_extract(fp8_vec, i) for i in range(4, 8)],
+                FP8E4M3,
+            )
+            # gfx950 FUSED dequant+scale via ``v_cvt_scalef32_pk_f32_fp8``.
+            # Combines what used to be 3 separate instructions (
+            # ``cvt_pk_f32_fp8x4`` + 4× ``v_pk_mul`` per byte-quad) into
+            # 2 packed cvts (one per byte-pair). Matches Triton's
+            # ``v_cvt_scalef32_pk_f32_fp8`` emission for the long-prefill
+            # FP8 KV dequant — verified op-by-op in the ISA diff
+            # (see ck_long_prefill ISA analysis): drops the inner-loop
+            # ``v_pk_mul`` count from 64 → 16 and the ``v_cvt_pk_bf16_f32``
+            # count from 88 → 48 per iter (the per-byte scale apply
+            # gets folded into the cvt).
+            lo_f32x4 = b.cvt_scalef32_pk_f32_fp8x4(lo_quad, scale)
+            hi_f32x4 = b.cvt_scalef32_pk_f32_fp8x4(hi_quad, scale)
             dequanted = []
-            for i in range(fp8_elems_per_chunk):
-                fp8_v = b.vec_extract(fp8_vec, i)
-                f32_v = b.fmul(b.cvt_fp8_to_f32(fp8_v), scale)
-                dequanted.append(b.cast_f32_to(f32_v, dtype))
+            for i in range(4):
+                dequanted.append(b.cast_f32_to(b.vec_extract(lo_f32x4, i), dtype))
+            for i in range(4):
+                dequanted.append(b.cast_f32_to(b.vec_extract(hi_f32x4, i), dtype))
             packed = b.vec_pack(dequanted, dtype)
             b.smem_store_vN(lds, [buf_idx, row, col], packed, fp8_elems_per_chunk)
         # Caller is expected to issue a `b.sync()` (LDS visibility) when
         # appropriate. The sync loader has no in-flight async work, so the
         # consumer side only needs the LDS barrier, not VMEM waitcnt.
 
+    def _issue_k_fp8_mfma_async(kv_tile_idx: Value, buf_idx: Value) -> None:
+        """fp8-K-LDS path: async DMA raw fp8 K bytes into fp8 K_lds.
+
+        K_lds is allocated as fp8 (8 KB for double-buf at T=64 HD=64 vs
+        16 KB bf16). The async DMA writes ``K_BYTES_PER_LANE`` bytes per
+        lane per call; the dwords selector is picked at build time from
+        {1, 2, 4} = {4, 8, 16} bytes/lane based on T*HD so the loader
+        works for both T=64 (16 B/lane) and T=32 (8 B/lane) tiles. QK
+        reads K_lds as fp8 and dequants in-register with k_scale to the
+        bf16 input the standard bf16 MFMA expects.
+        """
+        buf_off_i32 = b.mul(buf_idx, b.const_i32(T * HD))  # fp8: 1 byte/elem
+        buf_off_i64 = b.zext(buf_off_i32, I64)
+        K_buf_base = b.smem_ptr_add(K_lds_addr, buf_off_i64)
+        # Per-wave LDS offset in BYTES.
+        if NUM_WARPS == 1:
+            wave_fp8_off_i64 = b.const_i64(0)
+        else:
+            wave_fp8_off_i32 = b.to_sgpr_u32(
+                b.mul(wave_id, b.const_i32(WAVE * K_BYTES_PER_LANE))
+            )
+            wave_fp8_off_i64 = b.zext(wave_fp8_off_i32, I64)
+        K_wave_base = b.smem_ptr_add(K_buf_base, wave_fp8_off_i64)
+        # Lane base in fp8 ELEMENTS (== bytes for fp8).
+        lane_fp8_base = b.mul(tid, b.const_i32(K_BYTES_PER_LANE))
+        for call in range(k_fp8_calls_per_tile):
+            linear_elem = b.add(b.const_i32(call * K_ELEMS_PER_CALL), lane_fp8_base)
+            voff, _ = paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear_elem,
+                kv_head=kv_head_idx,
+            )
+            k_dst = b.smem_ptr_add(K_wave_base, b.const_i64(call * K_BYTES_PER_CALL))
+            b.async_buffer_load_lds_addr(
+                key_rsrc,
+                k_dst,
+                voff,
+                zero_soff,
+                K_FP8_DWORDS,
+                coherency=CACHE_STREAM,
+            )
+
+    def _issue_v_fp8_mfma_async(kv_tile_idx: Value) -> None:
+        """Native-fp8 PV path: async DMA raw fp8 V bytes into V_lds[0].
+
+        This mirrors `_issue_k_fp8_mfma_async` but V is single-buffered.
+        V is consumed once by PV after the softmax/P publish phase; the
+        loop's existing `s_waitcnt(vmcnt=0, lgkmcnt=0); sync` before PV
+        makes the raw fp8 bytes visible before the `ds_read_b64_tr_b8`
+        transpose reads.
+        """
+        V_buf_base = V_lds_addr
+        if NUM_WARPS == 1:
+            wave_fp8_off_i64 = b.const_i64(0)
+        else:
+            wave_fp8_off_i32 = b.to_sgpr_u32(
+                b.mul(wave_id, b.const_i32(WAVE * K_BYTES_PER_LANE))
+            )
+            wave_fp8_off_i64 = b.zext(wave_fp8_off_i32, I64)
+        V_wave_base = b.smem_ptr_add(V_buf_base, wave_fp8_off_i64)
+        lane_fp8_base = b.mul(tid, b.const_i32(K_BYTES_PER_LANE))
+        for call in range(k_fp8_calls_per_tile):
+            linear_elem = b.add(b.const_i32(call * K_ELEMS_PER_CALL), lane_fp8_base)
+            voff, _ = paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear_elem,
+                kv_head=kv_head_idx,
+            )
+            v_dst = b.smem_ptr_add(V_wave_base, b.const_i64(call * K_BYTES_PER_CALL))
+            b.async_buffer_load_lds_addr(
+                value_rsrc,
+                v_dst,
+                voff,
+                zero_soff,
+                K_FP8_DWORDS,
+                coherency=CACHE_STREAM,
+            )
+
+    def _issue_v_fp8_mfma_stripe(kv_tile_idx: Value) -> None:
+        """Load raw fp8 V and store it into V_lds as
+        [V_BUFS=1, N_STRIPES=HD/16, T, 16].
+
+        Each thread loads 8 contiguous fp8 values from V[token, col..col+7]
+        in HBM, then writes them as one 8-byte LDS vec store into the
+        owning stripe at V_lds[0, col/16, token, col%16].
+
+        Because our chunk size is exactly 8 fp8 (= half a 16-byte stripe
+        row), col%16 is always 0 or 8 — both 8-byte-aligned, so the LDS
+        vec store stays b64 and there is no scalar-byte regression.
+        """
+        for call in range(fp8_chunks_per_thread):
+            chunk_id = b.add(
+                b.mul(b.const_i32(call), b.const_i32(THREADS)),
+                tid,
+            )
+            token = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
+            col = b.mul(
+                b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
+                b.const_i32(fp8_elems_per_chunk),
+            )
+            linear_first = b.add(b.mul(token, b.const_i32(HD)), col)
+            voff, _ = paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear_first,
+                kv_head=kv_head_idx,
+            )
+            fp8_vec = b.global_load_vN(
+                value, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
+            )
+            stripe_idx = b.div(col, b.const_i32(16))
+            col_in_stripe = b.mod(col, b.const_i32(16))
+            b.smem_store_vN(
+                V_lds,
+                [b.const_i32(0), stripe_idx, token, col_in_stripe],
+                fp8_vec,
+                fp8_elems_per_chunk,
+            )
+
     def _issue_k(tile_idx: Value, buf_idx: Value) -> None:
         """Issue a K load into the appropriate LDS slab.
 
-        For bf16: async DMA to K_lds (bf16 working dtype).
-
-        For FP8: round-2 attempted an async DMA of raw fp8 bytes into
-        K_fp8_lds followed by an LDS->LDS dequant, mirroring the bf16
-        pipeline. The dequant works (correctness preserved) but the
-        explicit phase ordering (async-load → barrier → dequant → barrier
-        → MFMA) LOSES the chunk-level instruction pipelining that the
-        round-1 sync loader got implicitly from the compiler interleaving
-        load/dequant/store across chunks. Result: ~10% REGRESSION on
-        long-prefill no-SW FP8 (5494 µs vs 4967 µs round 1, measured on
-        `n254q5880k10999_fp8kv` Wed 2026-05-19). Reverted; the async
-        infrastructure (K_fp8_lds, V_fp8_lds, _issue_kv_fp8_async_load,
-        _dequant_fp8_lds_to_bf16) is kept in the source for future
-        iteration but the dispatch routes back to the sync loader.
+        Three paths:
+        - bf16: async DMA to bf16 K_lds.
+        - FP8 sync dequant (round 1): per-thread `global_load_vN(FP8)` +
+          dequant chain + LDS store to bf16 K_lds. Implicitly pipelined
+          across chunks by the AMDGPU backend.
+        - FP8 native MFMA (round 2 v2, `use_fp8_mfma_qk=True`): async DMA
+          of raw fp8 bytes to fp8 K_lds. No dequant; the MFMA op reads
+          fp8 directly and the k_scale is applied to the f32 accumulator
+          via the folded post-MFMA `qk_scale` constant.
         """
-        if KV_FP8:
+        if K_FP8_MFMA:
+            _issue_k_fp8_mfma_async(tile_idx, buf_idx)
+        elif KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, buf_idx, "K")
         else:
             _issue_k_load_runtime(tile_idx, buf_idx)
 
     def _issue_v(tile_idx: Value, buf_idx: Value) -> None:
-        """Issue a V load (single-buffered). See `_issue_k` for FP8 notes."""
-        if KV_FP8:
-            _issue_fp8_dequant_loads(tile_idx, buf_idx, "V")
+        """Issue a V load (single-buffered). See `_issue_k` for FP8 notes.
+
+        ``V_lds`` is allocated with ``V_BUFS=1`` so only slot 0 is valid.
+        The caller passes ``cur_buf`` (which alternates 0/1 across iters
+        for the K double-buffer), but for V we MUST pin it to slot 0 --
+        passing ``buf_idx=1`` into the FP8 sync loader produces an OOB
+        LDS store at ``V_lds[1, ...]`` which lands on top of the
+        subsequent LDS slabs (P_lds, Acc_lds). For BLOCK_M=64 T=64 the
+        clobber happens to land exactly on P_lds and is overwritten by
+        the softmax publish before PV reads it (so the bug is invisible).
+        For BLOCK_M in {16, 32} P_lds is smaller (2 KB or 4 KB), the OOB
+        write extends past P_lds into Acc_lds (and whatever follows),
+        and the kernel produces large output errors (max_abs ~9-11 vs
+        the FP8 noise floor of ~0.3). The bf16 path is unaffected
+        because ``_issue_v_load_runtime`` ignores ``buf_idx`` and uses
+        ``V_lds_addr`` directly. Fix: always pin slot 0 for V.
+        """
+        if PV_FP8_MFMA:
+            _issue_v_fp8_mfma_stripe(tile_idx)
+        elif KV_FP8:
+            _issue_fp8_dequant_loads(tile_idx, b.const_i32(0), "V")
         else:
             _issue_v_load_runtime(tile_idx, buf_idx)
 
@@ -1296,6 +1606,10 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 if Q_ALIAS_K
                 else (q_row_atom, q_col_off)
             )
+            # Always gather as bf16; the fp8 cast (if needed) happens
+            # AFTER the dynamic q_scale reduction so we have the right
+            # scale to use. For non-fp8-MFMA paths this is just the
+            # original Q register.
             Q_reg[atom][k] = b.smem_load_vN(Q_lds, *q_load_idx_args, dtype=dtype, n=8)
 
     if Q_ALIAS_K:
@@ -1305,6 +1619,24 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         # for the first QK iter. One-time cost at kernel start.
         b.s_waitcnt(lgkmcnt=0)
         b.sync()
+
+    # ULP-correct fp8-K LDS path -- NO Q quantisation, Q stays bf16.
+    # K_FP8_MFMA is True iff K_lds holds raw fp8 bytes (saving 8 KB of
+    # LDS at T=64/HD=64 and halving the K HBM->LDS DMA). The QK MFMA
+    # dequants K fp8 -> bf16 IN-REGISTER and runs the standard bf16
+    # ``mfma_f32_16x16x32_bf16``. The bf16 fed to MFMA is bit-identical
+    # to the bf16 the current default path stores in bf16 K_lds, so
+    # outputs are ULP-identical to default and to Triton's fp8 path
+    # (which also stays in bf16 for ``S = qk_scale * tl.dot(Q, K_bf16)``).
+    # An earlier variant of this flag also quantised Q to fp8 and used
+    # the native fp8 MFMA; that variant lost ULP correctness and was
+    # dropped. See the spec docstring for the history.
+    # NOTE: above re-cast also requires Q_lds to still hold the bf16
+    # Q. For Q_ALIAS_K the K[0] prefetch (issued below) would
+    # overwrite Q_lds, so we DELAY the K issue until after this cast.
+    # The Q_ALIAS_K drain barrier above already ran; the K issue is
+    # the next thing scheduled, so this ordering is naturally
+    # correct in the IR.
 
     # Prefetch tile_start's K into buffer 0 BEFORE the loop.
     _issue_k(tile_start, b.const_i32(0))
@@ -1399,22 +1731,13 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         b.s_waitcnt(vmcnt=0, lgkmcnt=0)
         b.sync()
 
-        # ---- FP8 path: dequant K_fp8_lds[cur_buf] -> K_lds[0] ----
-        # After the wait above, K_fp8_lds[cur_buf] holds the raw fp8 bytes
-        # for tile `kv_tile_iv`. Run the cooperative LDS->LDS dequant
-        # which populates K_lds[0] (single-buf for the FP8 path) with bf16
-        # in the layout the QK MFMA reads expect. A second barrier
-        # publishes the bf16 to all warps. The bf16 path skips this
-        # entirely. K_fp8_lds keeps double-buffer; K_lds is single-buf so
-        # FP8's LDS footprint matches bf16's (no occupancy regression).
-        if KV_FP8:
-            _dequant_fp8_lds_to_bf16(
-                cur_buf, k_scale_p, K_fp8_lds, K_lds, b.const_i32(0)
-            )
-            # ds_writes need lgkmcnt drain + barrier so QK's per-warp
-            # ds_reads see the dequanted bf16.
-            b.s_waitcnt(lgkmcnt=0)
-            b.sync()
+        # ---- FP8 path: dequant placeholder (reverted in round-2) ----
+        # Round-2 v1 attempted async DMA fp8 -> LDS dequant -> K_lds here
+        # but the extra barriers regressed perf by ~10%. The sync FP8
+        # loader (`_issue_fp8_dequant_loads`) is dispatched directly via
+        # `_issue_k`/`_issue_v` and handles its own VMEM + dequant + LDS
+        # in one chunk-pipelined sequence, so no extra work is needed at
+        # this point in the loop for FP8.
 
         # ---- S = Q @ K^T (per-warp MFMA) ----
         # Q is in LDS only; we re-read it per iter -- the compiler hoists the
@@ -1445,15 +1768,55 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
             for k in range(QK_K_ITERS):
                 kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                 k_row = b.add(b.const_i32(n * 16), lane_col)
-                # For FP8 path K_lds is single-buf; the dequant always
-                # populates slot 0. The bf16 path uses cur_buf as the
-                # double-buffer index.
-                k_lds_buf = b.const_i32(0) if KV_FP8 else cur_buf
-                B_v = b.smem_load_vN(K_lds, k_lds_buf, k_row, kc_off, dtype=dtype, n=8)
-                for atom in range(M_ATOMS_PER_WARP):
-                    acc_per_atom[atom] = _mfma_16x16x32(
-                        b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
+                if K_FP8_MFMA:
+                    # K_lds holds raw fp8 bytes. Dequant in register to
+                    # bf16 (bit-identical to what the bf16 K_lds path
+                    # would have written) then run the standard bf16
+                    # MFMA.
+                    #
+                    # Uses gfx950's fused ``v_cvt_scalef32_pk_f32_fp8``
+                    # which folds the per-element scale multiply into
+                    # the cvt: 2 fused scaled cvts + 2 packed bf16
+                    # cvts = 4 instructions per 8-element load (vs the
+                    # old 2 cvt_pk_f32_fp8 + 8 fmul + 2 cvt_pk_bf16_f32
+                    # = 12 instructions). Triton uses the same fused
+                    # intrinsic in its long-prefill FP8 kernel.
+                    B_fp8 = b.smem_load_vN(
+                        K_lds,
+                        cur_buf,
+                        k_row,
+                        kc_off,
+                        dtype=FP8E4M3,
+                        n=8,
                     )
+                    lo_fp8 = b.vec_pack(
+                        [b.vec_extract(B_fp8, i) for i in range(4)],
+                        FP8E4M3,
+                    )
+                    hi_fp8 = b.vec_pack(
+                        [b.vec_extract(B_fp8, i) for i in range(4, 8)],
+                        FP8E4M3,
+                    )
+                    lo_f32 = b.cvt_scalef32_pk_f32_fp8x4(lo_fp8, k_scale_p)
+                    hi_f32 = b.cvt_scalef32_pk_f32_fp8x4(hi_fp8, k_scale_p)
+                    deq = []
+                    for i in range(4):
+                        deq.append(b.cast_f32_to(b.vec_extract(lo_f32, i), dtype))
+                    for i in range(4):
+                        deq.append(b.cast_f32_to(b.vec_extract(hi_f32, i), dtype))
+                    B_v = b.vec_pack(deq, dtype)
+                    for atom in range(M_ATOMS_PER_WARP):
+                        acc_per_atom[atom] = _mfma_16x16x32(
+                            b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
+                        )
+                else:
+                    B_v = b.smem_load_vN(
+                        K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=8
+                    )
+                    for atom in range(M_ATOMS_PER_WARP):
+                        acc_per_atom[atom] = _mfma_16x16x32(
+                            b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
+                        )
             for atom in range(M_ATOMS_PER_WARP):
                 S_n[atom][n] = acc_per_atom[atom]
 
@@ -1561,7 +1924,14 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
             for n in range(QK_N_TILES):
                 p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
                 col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
-                b.smem_store_vN(P_lds, [row, col], b.cast_f32_to(p, dtype), 1)
+                if PV_FP8_MFMA:
+                    # FlyDSL pa_decode_fp8 pattern: quantise probabilities
+                    # into fp8 with a fixed 240x scale, then fold the
+                    # reciprocal plus v_scale into the PV result.
+                    p_q = b.cvt_f32_to_fp8(b.fmul(p, b.const_f32(240.0)))
+                    b.smem_store_vN(P_lds, [row, col], p_q, 1)
+                else:
+                    b.smem_store_vN(P_lds, [row, col], b.cast_f32_to(p, dtype), 1)
                 sum_p = b.fadd(sum_p, p)
             l_local.append(_warp_xor_reduce_sum(b, sum_p))
 
@@ -1572,18 +1942,10 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
             for r in range(REGS_PER_LANE)
         ]
         if KV_FP8:
-            # Round-2 async FP8 path: V was issued async before next-K, so
-            # `FP8_CALLS_PER_TILE` pending VMEM ops are exactly the next-K
-            # stream. Partial wait lets V's fp8 bytes retire while next-K
-            # stays in flight. lgkmcnt mirrored so we don't block on the
-            # next-K LDS write tracking either.
-            b.s_waitcnt(vmcnt=FP8_CALLS_PER_TILE, lgkmcnt=FP8_CALLS_PER_TILE)
-            b.sync()
-            # Dequant V_fp8_lds[0] -> V_lds[0] so PV reads the working dtype.
-            _dequant_fp8_lds_to_bf16(
-                b.const_i32(0), v_scale_p, V_fp8_lds, V_lds, b.const_i32(0)
-            )
-            b.s_waitcnt(lgkmcnt=0)
+            # FP8 sync loader has no in-flight async work (the sync loader
+            # completes before returning). The full LDS-visibility sync
+            # below ensures PV's V_lds reads see the just-loaded V bytes.
+            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
             b.sync()
         else:
             # Wait for current V while leaving next K pending. Current V was
@@ -1599,6 +1961,18 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         # (atom 0: rows wave_row_base..wave_row_base+15; atom 1: rows
         # wave_row_base+16..wave_row_base+31). Each atom has its own
         # accumulator + per-reg alpha.
+        #
+        # NOTE: an ``s_setprio(1)`` wrap around this cluster was tested
+        # (HipKittens-style, see `kernels/attn/gqa_causal/kernel_d64.cpp`),
+        # which raises this wave's instruction-issue priority so the SIMD
+        # scheduler favours us through the MFMA-dominated PV section. On
+        # multi-seq bf16 prefill (n>=100 q=1000) this caused CATASTROPHIC
+        # regressions (up to +1282% / 12.8x slower) — priority inversion
+        # starved the other waves competing for the same SIMD. HipKittens
+        # gets away with this on its hand-unrolled single-batch kernel
+        # because it tightly controls inter-wave interleaving via the
+        # cluster pattern + stagger barriers; our DSL-lowered loop has
+        # different scheduling pressure. Disabled.
         new_acc = [None] * (PV_N_TILES * M_ATOMS_PER_WARP)
         for n in range(PV_N_TILES):
             # Per-atom: scale the inherited acc by per-row alpha, then add P @ V.
@@ -1626,26 +2000,98 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                     p_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                     row_r0 = pv_tr_reader.row(b, k_offset=k * 32, read=0)
                     row_r1 = pv_tr_reader.row(b, k_offset=k * 32, read=1)
-                    B_r0 = b.ds_read_tr16_b64(
-                        V_lds, v_buf, row_r0, n_col_base, dtype=dtype
-                    )
-                    B_r1 = b.ds_read_tr16_b64(
-                        V_lds, v_buf, row_r1, n_col_base, dtype=dtype
-                    )
-                    B_v = b.vec_concat(B_r0, B_r1)
-                    for atom in range(M_ATOMS_PER_WARP):
-                        # P_lds row for this atom: each warp's atom_idx slice
-                        # of P_lds[BLOCK_M_PER_WARP, T] -- the in-warp row is
-                        # ``atom * 16 + lane_col``.
-                        p_row = b.add(
-                            wave_row_base, b.add(b.const_i32(atom * 16), lane_col)
+                    if PV_FP8_MFMA:
+                        # Native-fp8 PV path with stripe LDS layout.
+                        # Two ds_read_b64_tr_b8 calls compose the MFMA B
+                        # operand (each call gives K=32 x N=8 lane-tile;
+                        # second call targets cols 8..15 of the stripe).
+                        # The result is then a per-lane select on
+                        # lane_col < 8 to assemble the K=32 x N=16
+                        # operand. vaddr per lane has the (g, l/2) form
+                        # validated by the HIP probe.
+                        stripe_const = b.const_i32(n)
+                        # `lane_rg = lane/16` already exists; we re-use it
+                        # as the K-chunk group selector.
+                        # The b8 transpose-read takes a single (smem,
+                        # indices) tuple and emits the inline-asm op; per
+                        # lane the address is computed from the indices
+                        # the same way smem_load_vN does, so we point at
+                        # V_lds[buf=0, stripe=n, k_start=lane_rg*8 +
+                        # (lane_col/2), col=0] for read0, and col=8 for
+                        # read1.
+                        k_row_per_lane = b.add(
+                            b.mul(lane_rg, b.const_i32(8)),
+                            b.div(lane_col, b.const_i32(2)),
                         )
-                        A_p = b.smem_load_vN(P_lds, p_row, p_off, dtype=dtype, n=8)
-                        acc_per_atom[atom] = _mfma_16x16x32(
-                            b, dtype, A_p, B_v, acc_per_atom[atom]
+                        # The actual K row the lane references is
+                        # (k_outer * 32) + (lane_rg * 8 + lane_col/2).
+                        # We bake k_outer into the literal stride.
+                        k_row_for_iter = b.add(
+                            b.const_i32(k * 32),
+                            k_row_per_lane,
                         )
+                        B_v8_lo = b.ds_read_tr_b8(
+                            V_lds,
+                            v_buf,
+                            stripe_const,
+                            k_row_for_iter,
+                            b.const_i32(0),
+                            dtype=FP8E4M3,
+                        )
+                        B_v8_hi = b.ds_read_tr_b8(
+                            V_lds,
+                            v_buf,
+                            stripe_const,
+                            k_row_for_iter,
+                            b.const_i32(8),
+                            dtype=FP8E4M3,
+                        )
+                        # Per-lane select on (lane_col < 8): low-half
+                        # lanes keep B_v8_lo (N = 0..7), high-half lanes
+                        # keep B_v8_hi (N = 8..15).
+                        lo_mask = b.cmp_lt(lane_col, b.const_i32(8))
+                        B_v8 = b.vector_select(
+                            b.vector_splat(lo_mask, 8),
+                            B_v8_lo,
+                            B_v8_hi,
+                        )
+                        for atom in range(M_ATOMS_PER_WARP):
+                            p_row = b.add(
+                                wave_row_base, b.add(b.const_i32(atom * 16), lane_col)
+                            )
+                            A_p8 = b.smem_load_vN(
+                                P_lds, p_row, p_off, dtype=FP8E4M3, n=8
+                            )
+                            raw = b.mfma_f32_16x16x32_fp8(A_p8, B_v8, b.zero_vec_f32(4))
+                            comps = []
+                            for ii in range(4):
+                                old = b.vec_extract(acc_per_atom[atom], ii)
+                                add = b.fmul(b.vec_extract(raw, ii), pv_fp8_scale)
+                                comps.append(b.fadd(old, add))
+                            acc_per_atom[atom] = b.vec_pack(comps, F32)
+                    else:
+                        B_r0 = b.ds_read_tr16_b64(
+                            V_lds, v_buf, row_r0, n_col_base, dtype=dtype
+                        )
+                        B_r1 = b.ds_read_tr16_b64(
+                            V_lds, v_buf, row_r1, n_col_base, dtype=dtype
+                        )
+                        B_v = b.vec_concat(B_r0, B_r1)
+                        for atom in range(M_ATOMS_PER_WARP):
+                            # P_lds row for this atom: each warp's atom_idx slice
+                            # of P_lds[BLOCK_M_PER_WARP, T] -- the in-warp row is
+                            # ``atom * 16 + lane_col``.
+                            p_row = b.add(
+                                wave_row_base, b.add(b.const_i32(atom * 16), lane_col)
+                            )
+                            A_p = b.smem_load_vN(P_lds, p_row, p_off, dtype=dtype, n=8)
+                            acc_per_atom[atom] = _mfma_16x16x32(
+                                b, dtype, A_p, B_v, acc_per_atom[atom]
+                            )
                 else:
                     # K=16: single ds_read_b64_tr_b16 returns the full B operand.
+                    if PV_FP8_MFMA:
+                        raise NotImplementedError("native fp8 PV requires PV_K_STEP=32")
                     p_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
                     row_lane = pv_tr_reader.row(b, k_offset=k * 16, read=0)
                     B_v = b.ds_read_tr16_b64(

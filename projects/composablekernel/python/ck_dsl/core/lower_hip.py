@@ -1099,6 +1099,36 @@ class _Lowerer:
             f"__builtin_amdgcn_ds_bpermute({_name(addr)}, {_name(data)});"
         )
 
+    def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
+        """``ds_swizzle_b32`` XOR butterfly via SWAP-mode encoding.
+
+        See :meth:`_op_tile_ds_swizzle_xor` in ``lower_llvm.py`` for the
+        encoding derivation. ``offset = (xor_mask << 10) | 0x1F``.
+        """
+        xor_mask = int(op.attrs["xor_mask"])
+        offset = (xor_mask << 10) | 0x1F
+        (data,) = op.operands
+        self._emit(
+            f"int {_name(op.result)} = "
+            f"__builtin_amdgcn_ds_swizzle({_name(data)}, {offset});"
+        )
+
+    def _op_tile_permlane32_swap(self, op: Op) -> None:
+        """``v_permlane32_swap_b32`` via inline asm.
+
+        clang doesn't expose a direct builtin for the swap-style permlane;
+        use inline asm. The instruction takes two i32 register operands
+        and swaps their values across the wave64 32-lane halves.
+        """
+        lo_in, hi_in = op.operands
+        r0, r1 = op.results
+        self._emit(f"int {_name(r0)} = {_name(lo_in)};")
+        self._emit(f"int {_name(r1)} = {_name(hi_in)};")
+        self._emit(
+            f'asm volatile("v_permlane32_swap_b32 %0, %1" : '
+            f'"+v"({_name(r0)}), "+v"({_name(r1)}));'
+        )
+
     def _op_tile_lane_id(self, op: Op) -> None:
         # Wave64 lane index: ``mbcnt.hi(-1, mbcnt.lo(-1, 0))``. The result
         # is a per-lane i32 in [0, 64).

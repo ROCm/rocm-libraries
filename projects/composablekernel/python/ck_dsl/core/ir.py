@@ -474,6 +474,120 @@ class IRBuilder:
             "arith.cvt_bf8_to_f32", [v], [F32], result_name_hint="dqb8"
         ).result
 
+    def cvt_pk_f32_fp8x4(self, v: Value) -> Value:
+        """Convert <4 x fp8e4m3> to <4 x f32> using AMDGPU's packed
+        ``v_cvt_pk_f32_fp8`` (2 lowering intrinsic calls; 2x speedup vs
+        4 scalar ``cvt_fp8_to_f32``).
+
+        The hardware ``v_cvt_pk_f32_fp8`` reads an i32 containing 4 fp8
+        bytes plus an i1 word-select (0 → bytes 0,1 → <2 x f32>;
+        1 → bytes 2,3 → <2 x f32>). We bitcast the input <4 x fp8>
+        to i32 and call the intrinsic twice to cover all 4 bytes;
+        the result is a single <4 x f32>.
+
+        Use this for FP8 K/V dequant loops where the loader gathers
+        groups of 4-or-more contiguous fp8 elements per lane and then
+        dequants them to f32 for the post-load scale multiply.
+        Reference: AITER's ``to_float_fp8x4`` in
+        ``csrc/include/attention_common.cuh`` uses the same primitive
+        for its paged-attention FP8 K/V dequant chain.
+        """
+        if (
+            not isinstance(v.type, VectorType)
+            or v.type.elem.name != "fp8e4m3"
+            or v.type.count != 4
+        ):
+            raise ValueError(
+                f"cvt_pk_f32_fp8x4 expects vec<fp8e4m3x4> input, got {v.type.name}"
+            )
+        return self._op(
+            "arith.cvt_pk_f32_fp8x4",
+            [v],
+            [VectorType(F32, 4)],
+            result_name_hint="dq8x4",
+        ).result
+
+    def cvt_pk_f32_bf8x4(self, v: Value) -> Value:
+        """e5m2 sibling of :meth:`cvt_pk_f32_fp8x4`. Same packing
+        scheme but using ``llvm.amdgcn.cvt.pk.f32.bf8``.
+        """
+        if (
+            not isinstance(v.type, VectorType)
+            or v.type.elem.name != "bf8e5m2"
+            or v.type.count != 4
+        ):
+            raise ValueError(
+                f"cvt_pk_f32_bf8x4 expects vec<bf8e5m2x4> input, got {v.type.name}"
+            )
+        return self._op(
+            "arith.cvt_pk_f32_bf8x4",
+            [v],
+            [VectorType(F32, 4)],
+            result_name_hint="dqb8x4",
+        ).result
+
+    def cvt_scalef32_pk_f32_fp8x4(self, v: Value, scale_f32: Value) -> Value:
+        """Convert ``<4 x fp8e4m3> -> <4 x f32>`` with **fused scale** via
+        AMDGPU's gfx950 ``v_cvt_scalef32_pk_f32_fp8``.
+
+        This is the FUSED dequant+scale primitive: a single hardware
+        instruction does ``out[i] = scale * fp8_to_f32(in[i])`` for two
+        fp8 bytes at a time. We chain 2 calls (i1=false/true to select
+        bytes 0,1 vs 2,3) to cover all 4 input bytes.
+
+        Replaces the 3-instruction sequence ``cvt_pk_f32_fp8 + v_pk_mul
+        (× scale) + ...`` with a single fused instruction. Triton's
+        long-prefill FP8 kernel emits exactly this op for its FP8 KV
+        dequant. Measured on the production trace's worst bucket
+        (``n=16 q=1024 k=4096 fp8``): switching cvt_pk_f32_fp8x4 →
+        cvt_scalef32_pk_f32_fp8x4 cut the inner-loop ``v_pk_mul`` count
+        from 64 to ~16 per iter (those mul ops were the per-byte scale
+        application that's now fused into the cvt).
+
+        ``scale_f32`` is a single ``f32`` value broadcast to all packs.
+        Per AMDGPU spec, the hardware treats this as an "implicit scalar"
+        per-call so the scale must be lane-uniform; pass a value loaded
+        from a scalar tensor (k_scale / v_scale) which is naturally
+        SGPR-resident.
+        """
+        if (
+            not isinstance(v.type, VectorType)
+            or v.type.elem.name != "fp8e4m3"
+            or v.type.count != 4
+        ):
+            raise ValueError(
+                f"cvt_scalef32_pk_f32_fp8x4 expects vec<fp8e4m3x4>, got {v.type.name}"
+            )
+        if scale_f32.type.name != "f32":
+            raise ValueError(
+                f"cvt_scalef32_pk_f32_fp8x4 scale must be f32, got {scale_f32.type.name}"
+            )
+        return self._op(
+            "arith.cvt_scalef32_pk_f32_fp8",
+            [v, scale_f32],
+            [VectorType(F32, 4)],
+            result_name_hint="sdq8x4",
+        ).result
+
+    def cvt_scalef32_pk_f32_bf8x4(self, v: Value, scale_f32: Value) -> Value:
+        """e5m2 sibling of :meth:`cvt_scalef32_pk_f32_fp8x4`."""
+        if (
+            not isinstance(v.type, VectorType)
+            or v.type.elem.name != "bf8e5m2"
+            or v.type.count != 4
+        ):
+            raise ValueError(
+                f"cvt_scalef32_pk_f32_bf8x4 expects vec<bf8e5m2x4>, got {v.type.name}"
+            )
+        if scale_f32.type.name != "f32":
+            raise ValueError("cvt_scalef32_pk_f32_bf8x4 scale must be f32")
+        return self._op(
+            "arith.cvt_scalef32_pk_f32_bf8",
+            [v, scale_f32],
+            [VectorType(F32, 4)],
+            result_name_hint="sdqb8x4",
+        ).result
+
     def cvt_f32_to_fp8(self, v: Value) -> Value:
         """Round + saturate one f32 element to fp8e4m3 (round-to-nearest-even).
 
@@ -488,6 +602,32 @@ class IRBuilder:
             "arith.cvt_f32_to_fp8", [v], [FP8E4M3], result_name_hint="q8"
         ).result
 
+    def cvt_pk_fp8_f32x4(self, v: Value) -> Value:
+        """Round + saturate <4 x f32> to <4 x fp8e4m3> with AMDGPU's
+        packed ``v_cvt_pk_fp8_f32`` instruction.
+
+        The scalar :meth:`cvt_f32_to_fp8` wrapper intentionally exposes a
+        simple one-element API but wastes the second conversion lane of
+        the packed hardware instruction. Attention's native-fp8 path needs
+        to quantise Q/P register vectors in groups of four; using this
+        primitive turns four scalar cvts into two packed cvts, matching the
+        FlyDSL ``pa_decode_fp8`` pattern for P->fp8 quantisation.
+        """
+        if (
+            not isinstance(v.type, VectorType)
+            or v.type.elem.name != "f32"
+            or v.type.count != 4
+        ):
+            raise ValueError(
+                f"cvt_pk_fp8_f32x4 expects vec<f32x4> input, got {v.type.name}"
+            )
+        return self._op(
+            "arith.cvt_pk_fp8_f32x4",
+            [v],
+            [VectorType(FP8E4M3, 4)],
+            result_name_hint="q8x4",
+        ).result
+
     def cvt_f32_to_bf8(self, v: Value) -> Value:
         """Round + saturate one f32 element to bf8e5m2 (round-to-nearest-even).
 
@@ -499,6 +639,23 @@ class IRBuilder:
             raise ValueError(f"cvt_f32_to_bf8 expects f32 input, got {v.type.name}")
         return self._op(
             "arith.cvt_f32_to_bf8", [v], [BF8E5M2], result_name_hint="qb8"
+        ).result
+
+    def cvt_pk_bf8_f32x4(self, v: Value) -> Value:
+        """e5m2 sibling of :meth:`cvt_pk_fp8_f32x4`."""
+        if (
+            not isinstance(v.type, VectorType)
+            or v.type.elem.name != "f32"
+            or v.type.count != 4
+        ):
+            raise ValueError(
+                f"cvt_pk_bf8_f32x4 expects vec<f32x4> input, got {v.type.name}"
+            )
+        return self._op(
+            "arith.cvt_pk_bf8_f32x4",
+            [v],
+            [VectorType(BF8E5M2, 4)],
+            result_name_hint="qb8x4",
         ).result
 
     def cvt_f32_to_i8_sat(self, v: Value) -> Value:
@@ -1058,6 +1215,35 @@ class IRBuilder:
             result_name_hint="acc",
         ).result
 
+    def mfma_f32_32x32x16_bf16(self, a: Value, b: Value, c: Value) -> Value:
+        """gfx950 wider MFMA shape — 32x32 output × 16 K-step per atom.
+
+        Per-lane operand layout:
+          - A: ``<8 x bfloat>`` (32 rows × 16 K / 64 lanes = 8 cells)
+          - B: ``<8 x bfloat>``
+          - C/D: ``<16 x float>`` (32×32 / 64 lanes = 16 outputs per lane)
+
+        The 16-output-per-lane accumulator is what makes Triton's
+        long-prefill softmax pattern efficient: per-row max is reduced
+        across 4 lanes' worth of in-lane values using chained ``v_max3``
+        (15 of them fold 16 values down to 1 per row in 15 instructions),
+        and then ONE ``permlane32_swap`` + ``v_max3`` combines the two
+        32-lane halves. Total cross-lane traffic for a 64-lane row-reduce
+        with this layout: **2 VALU ops + 1 permlane swap**, vs 64
+        ``ds_swizzle``/``ds_bpermute`` ops with the 16x16x32 layout.
+
+        Same FLOPs/cycle (1024 cycles per call either way) but half the
+        instruction count vs 16x16x32, which (a) halves SIMD issue
+        pressure, (b) keeps each lane's accumulator dense for in-lane
+        reduce, (c) reduces total ds_read_b128 K-load count.
+        """
+        return self._op(
+            "tile.mfma_f32_32x32x16_bf16",
+            [a, b, c],
+            [VectorType(F32, 16)],
+            result_name_hint="acc32",
+        ).result
+
     def mfma_f32_32x32x8_f16(self, a: Value, b: Value, c: Value) -> Value:
         """The 32x32x8 f16 MFMA atom — the default warp-tile every CK
         Tile dispatcher config from `default_config.json` uses on wave64.
@@ -1259,6 +1445,16 @@ class IRBuilder:
 
         Both `addr` and `data` must be `i32`. For non-i32 payloads, callers
         should bitcast first.
+
+        **Performance note (gfx950).** For wave64 XOR butterflies within
+        each 16-lane row-group (the standard MFMA-16x16x32 softmax
+        reduction pattern), prefer :meth:`ds_swizzle_xor` which uses the
+        FFT-mode swizzle and is one LDS instruction vs ds_bpermute's
+        2 instructions (vgpr address compute + ds_bpermute). Measured on
+        the long-prefill ``bf16 n=16 q=1000 k=1050`` workload: ds_swizzle
+        cut the inner-loop ds-unit ops from 64 → 16 and shaved 30+ µs
+        per call. See the ISA op-by-op comparison in
+        ``ck/dsl/unified_attention_results.md``.
         """
         if addr.type.name != "i32" or data.type.name != "i32":
             raise ValueError("ds_bpermute requires i32 addr + i32 data")
@@ -1268,6 +1464,78 @@ class IRBuilder:
             [I32],
             result_name_hint="bp",
         ).result
+
+    def ds_swizzle_xor(self, data: Value, xor_mask: int) -> Value:
+        """`__builtin_amdgcn_ds_swizzle(data, offset)` — wave-internal lane
+        permutation in a single LDS instruction.
+
+        Performs the cross-lane XOR-mask permutation: lane ``L`` reads from
+        lane ``(L & 0x1F) ^ xor_mask`` within its 32-lane half (lanes 0-31
+        permute independently from lanes 32-63 — wave64 ds_swizzle is
+        "intra-32-lane" by design). For our attention kernel this is
+        always called inside a single MFMA row-group of 16 lanes which is
+        a subset of one 32-lane half, so the intra-half constraint is
+        always satisfied.
+
+        Compared to ``ds_bpermute``:
+          - **1 LDS instruction** (vs 2: vgpr-addr-compute + ds_bpermute)
+          - **No VGPR pressure** for an address vector
+          - **Encoded mask** in the immediate offset (vs runtime addr)
+
+        This is the gfx950-friendly equivalent of RDNA's ``v_permlanex16``
+        XMASK DPP mode (which is RDNA-only — gfx950 rejects the encoding,
+        verified in ``/tmp/probe_dpp.ll``). The data sheet calls the
+        encoding "FFT mode": ``offset = 0x8000 | (0x1F << 10) | xor_mask``
+        which selects ``and_mask=0x1F or_mask=0 xor_mask=k`` —
+        ``lane_dst = (lane_src & 0x1F) | 0 ^ k`` = ``lane_src ^ k`` modulo
+        32-lane half.
+
+        ``xor_mask`` must be in 1..31. For wider XOR masks that need to
+        cross the 32-lane boundary, use ``permlane32_swap`` (only valid
+        for full-half exchange, mask=32).
+        """
+        if data.type.name != "i32":
+            raise ValueError("ds_swizzle_xor requires i32 data")
+        if not (1 <= xor_mask <= 31):
+            raise ValueError(
+                f"ds_swizzle_xor xor_mask must be 1..31 (intra-32-lane), got {xor_mask}"
+            )
+        return self._op(
+            "tile.ds_swizzle_xor",
+            [data],
+            [I32],
+            attrs={"xor_mask": int(xor_mask)},
+            result_name_hint="sw",
+        ).result
+
+    def permlane32_swap(self, lo: Value, hi: Value):
+        """`__builtin_amdgcn_permlane32_swap(lo, hi)` — swap the values
+        of two registers across the 32-lane half boundary.
+
+        After the swap: lane ``L`` in [0..31] gets the input ``hi[L+32]``
+        in its ``lo`` register and ``lo[L]`` in its ``hi``; lane ``L`` in
+        [32..63] gets the symmetric swap. Used for the FINAL stage of a
+        wave64 softmax reduction after in-lane (or intra-32-lane) max
+        chains: combines the per-row max from lanes [0..31] with the
+        per-row max from lanes [32..63] in a SINGLE VALU instruction.
+
+        Triton's long-prefill kernel uses exactly this pattern (16
+        chained ``v_max3`` + 1 ``v_permlane32_swap_b32`` + 1 ``v_max3``
+        per row-reduction). We use it for the same purpose in our
+        rewritten 32x32x16 MFMA path.
+
+        Returns the two swapped values as a tuple ``(new_lo, new_hi)``;
+        both inputs must be ``i32`` (bitcast f32 → i32 first if needed).
+        """
+        if lo.type.name != "i32" or hi.type.name != "i32":
+            raise ValueError("permlane32_swap requires i32 operands")
+        op = self._op(
+            "tile.permlane32_swap",
+            [lo, hi],
+            [I32, I32],
+            result_name_hint="psw",
+        )
+        return op.results[0], op.results[1]
 
     def lane_id(self) -> Value:
         """`@llvm.amdgcn.mbcnt.hi(-1, @llvm.amdgcn.mbcnt.lo(-1, 0))` — the
@@ -1292,10 +1560,35 @@ class IRBuilder:
     def warp_shuffle_xor(self, v: Value, lane_xor: int) -> Value:
         """Cross-lane shuffle: lane `l` gets `v` from lane `l ^ lane_xor`.
 
-        Wraps `ds_bpermute` with the standard `(lane ^ xor) << 2` address.
-        Works for any 32-bit scalar `v` (f32, i32). For half/bfloat, bitcast
-        to i32 via a 2-element vector first.
+        For **intra-32-lane XOR** (``lane_xor in 1..31``), uses
+        :meth:`ds_swizzle_xor` — a single LDS instruction with the
+        permute pattern encoded in the immediate offset. No VGPR
+        address-computation pair (xor + shl) needed and the LDS unit
+        completes in fewer cycles.
+
+        For wave-wide swaps (``lane_xor in {32}``) — not used by the
+        16-lane row-group butterfly attention does, but listed for
+        completeness — falls back to ``ds_bpermute`` (the swizzle unit
+        only permutes within a 32-lane half; cross-half needs
+        permlane32_swap or ds_bpermute).
+
+        Works for any 32-bit scalar `v` (f32, i32). For half/bfloat,
+        bitcast to i32 via a 2-element vector first.
         """
+        if 1 <= lane_xor <= 31:
+            # ds_swizzle XOR butterfly: 1 LDS op, no addr-compute. Used
+            # for the standard 16-lane MFMA row-group butterfly that the
+            # attention softmax reduction needs.
+            if v.type.name == "f32":
+                v_i = self.bitcast(v, I32)
+                r = self.ds_swizzle_xor(v_i, int(lane_xor))
+                return self.bitcast(r, F32)
+            if v.type.name == "i32":
+                return self.ds_swizzle_xor(v, int(lane_xor))
+            raise ValueError(f"warp_shuffle_xor: unsupported type {v.type.name}")
+        # Wave-wide XOR (lane_xor >= 32): swizzle only does intra-32-lane,
+        # so fall back to ds_bpermute. Kept available so callers that
+        # need 64-lane XOR (e.g. cross-wave reductions) still work.
         lane = self.lane_id()
         xor_const = self.const_i32(int(lane_xor))
         addr = self._op(
@@ -1347,6 +1640,31 @@ class IRBuilder:
             [VectorType(dtype, 4)],
             attrs={"rank": len(indices), "elem_type": dtype.name},
             result_name_hint="tr16",
+        ).result
+
+    def ds_read_tr_b8(
+        self, smem: Value, *indices: Value, dtype: Type = FP8E4M3
+    ) -> Value:
+        """`ds_read_b64_tr_b8` — gfx950 transpose-read for 8-bit LDS tiles.
+
+        Returns ``<8 x fp8e4m3>`` (or ``<8 x bf8e5m2>``) per lane: the
+        operand shape needed by ``mfma_f32_16x16x32_fp8``. This is the
+        8-bit sibling of :meth:`ds_read_tr16_b64`, exposed through inline
+        asm in the LLVM lowering because ROCm 7.0's public intrinsic list
+        only exposes the b16 variant.
+        """
+        if dtype.name not in ("fp8e4m3", "bf8e5m2", "i8"):
+            raise ValueError(
+                f"ds_read_tr_b8 expects fp8/bf8/i8 dtype, got {dtype.name}"
+            )
+        if not indices:
+            raise ValueError("ds_read_tr_b8 needs at least one index")
+        return self._op(
+            "tile.ds_read_tr_b8",
+            [smem, *indices],
+            [VectorType(dtype, 8)],
+            attrs={"dtype": dtype.name},
+            result_name_hint="tr8",
         ).result
 
     # ----- LDS pointer arithmetic (for per-wave async-LDS bases) -----
@@ -1999,6 +2317,17 @@ PURE_OP_NAMES = {
     "arith.cvt_f32_to_fp8",
     "arith.cvt_f32_to_bf8",
     "arith.cvt_f32_to_i8_sat",
+    "arith.cvt_pk_f32_fp8x4",
+    "arith.cvt_pk_f32_bf8x4",
+    "arith.cvt_pk_fp8_f32x4",
+    "arith.cvt_pk_bf8_f32x4",
+    "arith.cvt_scalef32_pk_f32_fp8",
+    "arith.cvt_scalef32_pk_f32_bf8",
+    "arith.cvt_scalef32_pk_fp8_f32",
+    "arith.cvt_scalef32_pk_bf8_f32",
+    "tile.ds_read_tr_b8",
+    "tile.ds_swizzle_xor",
+    "tile.permlane32_swap",
 }
 
 
