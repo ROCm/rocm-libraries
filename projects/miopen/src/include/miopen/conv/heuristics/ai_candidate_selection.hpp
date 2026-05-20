@@ -48,8 +48,10 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
                              const std::string& arch,
                              const std::string& solver);
 
-/// Expands metadata-ordered raw features into the vector consumed by the input_encoder
-/// submodel. Implement derived features here (log transforms, GEMM shapes, ratios, etc.).
+/// Expands problem features into the vector consumed by the input_encoder submodel.
+/// Produces the same 2D engineered features as ExtractTunaNetND2dFeatures (ai_heuristics.cpp),
+/// except direction one-hot is omitted when direction is a CandidateSelection constant.
+/// Logic is duplicated so either path can evolve independently.
 MIOPEN_INTERNALS_EXPORT std::vector<float> EngineerCandidateSelectionInputFeatures(
     const std::vector<float>& raw_features,
     const std::map<std::string, float>& features_by_name);

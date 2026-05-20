@@ -799,6 +799,8 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 
 // MetadataND implementation moved to metadata_nd.cpp
 
+// Keep feature definitions in sync with EngineerCandidateSelectionInputFeatures
+// (ai_candidate_selection.cpp); implementations are intentionally separate.
 static std::vector<float> ExtractTunaNetND2dFeatures(const conv::ProblemDescription& problem,
                                                      bool isFwd,
                                                      const MetadataND& metadata)
