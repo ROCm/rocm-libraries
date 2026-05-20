@@ -13043,7 +13043,8 @@ class KernelWriterAssembly(KernelWriter):
                   strideC = "Size%s"%(INDEX_CHARS[x])
                   module.add(SMulI32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr(strideC)))
                 if(i == 2 and (mat == "C" or mat == "D")):                 
-                  if (kernel["StreamK"] == 0):
+                  #if (kernel["StreamK"] == 0):
+                  if(kernel["GlobalSplitU"] != 0):
                     module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
                     module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
                   if kernel["ProblemType"]["SupportUserArgs"]:
@@ -13421,7 +13422,7 @@ class KernelWriterAssembly(KernelWriter):
     # ArgType == 3 (General Batched GEMM) but GSU > 1, then SrdC/D will be initialized with workspace.
     # "MultipleBuffer" means both SrdC and SrdD are workspace pointers
     # "MultipleBufferSingleKernel" means only SrdD will be workspace pointer while SrdC will be initialized to right batch matrix address from pointer array (AddressC)      
-    if(((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) and kernel["StreamK"] == 0):
+    if(((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) and kernel["GlobalSplitU"] != 0): #kernel["StreamK"] == 0):
       with self.allocTmpSgpr(1) as tmpSgprGSU:
         module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
         module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
