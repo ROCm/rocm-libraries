@@ -153,7 +153,7 @@ void rocfft_rccl_comm_t::reset_all()
     comm_cache.clear();
 }
 
-void* rocfft_rccl_comm_t::get_comm(int device_id) const
+ncclComm_t rocfft_rccl_comm_t::get_comm(int device_id) const
 {
     auto it = pimpl->device_to_comm.find(device_id);
     if(it == pimpl->device_to_comm.end())
@@ -163,9 +163,9 @@ void* rocfft_rccl_comm_t::get_comm(int device_id) const
     return it->second;
 }
 
-int rocfft_rccl_comm_t::num_ranks() const
+size_t rocfft_rccl_comm_t::num_ranks() const
 {
-    return static_cast<int>(pimpl->device_to_comm.size());
+    return pimpl->device_to_comm.size();
 }
 
 int rocfft_rccl_comm_t::get_rank(int device_id) const
@@ -211,7 +211,7 @@ void rocfft_rccl_comm_t::alltoall(const void*       sendbuf,
                                   rocfft_precision  precision,
                                   rocfft_array_type array_type) const
 {
-    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
+    ncclComm_t comm = get_comm(device_id);
 
     ncclResult_t result = ncclAllToAll(sendbuf,
                                        recvbuf,
@@ -236,7 +236,7 @@ void rocfft_rccl_comm_t::send(const void*       sendbuf,
                               rocfft_precision  precision,
                               rocfft_array_type array_type) const
 {
-    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
+    ncclComm_t comm = get_comm(device_id);
 
     ncclResult_t result = ncclSend(sendbuf,
                                    count * (array_type_is_complex(array_type) ? 2 : 1),
@@ -262,7 +262,7 @@ void rocfft_rccl_comm_t::recv(void*             recvbuf,
                               rocfft_precision  precision,
                               rocfft_array_type array_type) const
 {
-    ncclComm_t comm = static_cast<ncclComm_t>(get_comm(device_id));
+    ncclComm_t comm = get_comm(device_id);
 
     ncclResult_t result = ncclRecv(recvbuf,
                                    count * (array_type_is_complex(array_type) ? 2 : 1),

@@ -1255,7 +1255,7 @@ struct CommRCCLAllToAll : public MultiPlanItem
         , agents(std::move(_agents))
     {
         // validate caller-supplied agent count against the communicator
-        const auto nranks = static_cast<size_t>(rccl.num_ranks());
+        const auto nranks = rccl.num_ranks();
         if(agents.size() != nranks)
             throw std::invalid_argument(
                 "CommRCCLAllToAll: agents.size() (" + std::to_string(agents.size())

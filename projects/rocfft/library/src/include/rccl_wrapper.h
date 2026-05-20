@@ -76,11 +76,13 @@ public:
     // release all cached communicators (called at rocfft_cleanup()).
     static void reset_all();
 
-    // get the RCCL communicator for a specific device
-    void* get_comm(int device_id) const;
+    // return the RCCL communicator for a specific device.  throws
+    // std::invalid_argument if device_id is not part of this
+    // communicator set.
+    ncclComm_t get_comm(int device_id) const;
 
     // total number of ranks in this communicator
-    int num_ranks() const;
+    size_t num_ranks() const;
 
     // NCCL rank assigned to the given device
     int get_rank(int device_id) const;
