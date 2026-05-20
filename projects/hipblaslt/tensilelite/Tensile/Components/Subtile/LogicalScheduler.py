@@ -2212,8 +2212,26 @@ class LogicalScheduler:
         # ── Mainloop ──
         module.addComment0("MAINLOOP")
         loopBegin = Label("LoopBeginL", "")
+        # Pre-declared so the K==0 underflow pre-guard below can branch
+        # to it; emitted further down after all per-ui body copies.
+        skipMainloop = Label("SkipMainloop", "")
 
         exitValue = self.config.pgr
+
+        # PGR=0 pre-guard against LoopCounterL underflow.
+        # The mainloop is a do-while: with initial counter==0 (now
+        # possible since ASEM=32 admits K < DepthU) the body runs once,
+        # decrements counter 0 -> 0xFFFFFFFF, and the last-ui
+        # `s_cmp_eq_u32 counter, 0` then keeps branching back forever
+        # while advancing SrdA/SrdB by depthUBytes per iter until the
+        # BufferLoad faults out-of-descriptor.
+        # PGR>0 has independent guards in build_preloop
+        # (`SkipOp(LE 1, NLL)`) and in the tail scaffold's c=0 reset.
+        if exitValue == 0:
+            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                 comment="counter == 0 underflow pre-guard"))
+            module.add(SCBranchSCC1(labelName=skipMainloop.getLabelName(),
+                                    comment="skip mainLoop if K < DepthU"))
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
@@ -2237,7 +2255,7 @@ class LogicalScheduler:
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2
         endLabel = Label("SkipToEnd", "")
-        module.add(Label("SkipMainloop", ""))
+        module.add(skipMainloop)
         if hasNGLL:
             module.add(Label("SkipToNGLL", ""))
 

@@ -7063,7 +7063,17 @@ class KernelWriterAssembly(KernelWriter):
           module.add(EndOfTailLoopInNLLLabel)
 
       if needTailEndCode:
-        if len(kernel["ProblemType"]["IndicesSummation"]) > 1 or kernel["StreamK"]:
+        # Subtile kernels don't damage LRO in their tail body: the per-iter
+        # LR address arithmetic is owned by `localReadDoSubtile`
+        # (`Components/Subtile/SubtileLREmit.py`) and is self-contained.
+        # The legacy LRO/LWA "damage" recovery below references
+        # `vgprLocalReadAddrA/B` and `LocalWriteAddrA/B` symbols that
+        # subtile kernels never define (they use TileInfo-driven addressing
+        # in `Components/Subtile/Kernel.py`), so the assembler rejects the
+        # emitted `v_sub_u32 v[vgprLocalReadAddrA], …, s<tmp>` with
+        # "expected absolute expression". Bypass cleanly for subtile.
+        if (len(kernel["ProblemType"]["IndicesSummation"]) > 1 or kernel["StreamK"]) \
+            and not kernel.get("UseSubtileImpl", 0):
           # recover the 'damage' done to LRO:
 
           # if LRA is backed-up before (wlr case), we simply restore the addr (sub inc*loop doesn't work)

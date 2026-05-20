@@ -358,6 +358,13 @@ def selectDGeometry(kernel: dict) -> CDTileGeometry:
   return CD_F32
 
 
+# One MX scale VGPR packs 4 E8M0 scale bytes (one per MFMA in a 2x2
+# M/K-adjacent subtile group), selected by op_sel / op_sel_hi at the MFMA
+# emit. Callers indexing `tileInfo.vgprTiles` for the underlying VGPR
+# stride by this constant.
+MX_SCALE_TILES_PER_VGPR = 4
+
+
 ################################################################################
 # TileInfo — runtime tile state
 ################################################################################
@@ -674,11 +681,10 @@ class TileInfo:
     self.vgprTiles = []
     numMMATiles = int(self.localMMATileGrid[0] * self.localMMATileGrid[1])
     numMMATilesPerReg = max(1, int(1 // self.mmaTileRegCount))
-    # Scale tiles: legacy MXSA/MXSB used bpe=1 (scale byte) which gives mmaTileRegCount=0.25
-    # and numMMATilesPerReg=4. TileInfo uses data bpe (0.5 for f4), halving mmaTileRegCount.
-    # The scale emit code (SubtileScaleEmit.py) uses stride 4 to index vgprTiles, so override.
+    # Scale tiles: TileInfo's bpe-driven default doesn't match the
+    # 4-bytes-per-VGPR scale packing, so pin to the shared constant.
     if isinstance(self.geometry, MXScaleTilePair):
-      numMMATilesPerReg = 4
+      numMMATilesPerReg = MX_SCALE_TILES_PER_VGPR
     numDword = int(math.ceil(self.mmaTileRegCount))
 
     isDTile = isinstance(self.geometry, CDTileGeometry)
@@ -845,7 +851,7 @@ class TileInfo:
     TODO: Remove after full migration — temporary port from legacy TileInfo."""
     numMMATilesPerReg = max(1, int(1 // self.mmaTileRegCount))
     if isinstance(self.geometry, MXScaleTilePair):
-      numMMATilesPerReg = 4  # mirror allocVgprTileRegisters_legacy override for scale tiles
+      numMMATilesPerReg = MX_SCALE_TILES_PER_VGPR
     for i, vtiles in enumerate(self.vgprTiles):
       if i % numMMATilesPerReg != 0:
         continue
@@ -1135,8 +1141,8 @@ def emitMfmaCode(writer, kernel):
           scaleGroupA = (mma0 // 2) * subtileKGrid + mmak // subtileKShape
           scaleGroupB = (mma1 // 2) * subtileKGrid + mmak // subtileKShape
 
-          scaleAVgpr = tiMXSA.vgprTiles[4 * scaleGroupA].regList.indices[0] if tiMXSA.mxBlock else -1
-          scaleBVgpr = tiMXSB.vgprTiles[4 * scaleGroupB].regList.indices[0] if tiMXSB.mxBlock else -1
+          scaleAVgpr = tiMXSA.vgprTiles[MX_SCALE_TILES_PER_VGPR * scaleGroupA].regList.indices[0] if tiMXSA.mxBlock else -1
+          scaleBVgpr = tiMXSB.vgprTiles[MX_SCALE_TILES_PER_VGPR * scaleGroupB].regList.indices[0] if tiMXSB.mxBlock else -1
 
           sAsel = (mma0 % 2) + 2 * (mmak % 2)
           sBsel = (mma1 % 2) + 2 * (mmak % 2)
@@ -1156,46 +1162,7 @@ def emitMfmaCode(writer, kernel):
 
 
 ##################################################
-# Subroutine entry point for preloop
-#
-# We will need to support different PGR values
-# We will need to support different PLR values
-#
-def preLoop(writer, kernel):
-  module = Module()
-  module.addComment("")
-  module.addComment("")
-  pgr = kernel["PrefetchGlobalRead"]
-  plr = kernel["PrefetchLocalRead"]
-  module.addComment0("REMOVE WHEN IMPLEMNTED: Placeholder for subtile based Preloop code with PGR=%u"%pgr)
-
-  # Just sample impl, we can also interleave A/B loads
-  for i in range(pgr):
-    module.addComment0("Emitting %u-th set of GRs"%i)
-    module.add(globalReadDoSubtile('A', writer, kernel))
-    module.add(globalReadDoSubtile('B', writer, kernel))
-    # Scale GR in preloop
-    module.add(globalReadDoScaleSubtile('A', writer, kernel))
-    module.add(globalReadDoScaleSubtile('B', writer, kernel))
-    module.addComment("Add appropriate GR offset swap logic")
-  module.addComment("")
-
-  for i in range(plr):
-    module.addComment("Add correct waits..")
-    module.addComment0("Emitting LR to read data loaded by %u-th set of GRs"%(i))
-    module.add(localReadDoSubtile('A', writer, kernel))
-    module.add(localReadDoSubtile('B', writer, kernel))
-    # Scale LR in preloop
-    module.add(localReadDoScaleSubtile('A', writer, kernel))
-    module.add(localReadDoScaleSubtile('B', writer, kernel))
-    module.addComment("Add appropriate LR offset swap logic")
-
-  module.addComment("")
-  return module
-
-##################################################
 # Subroutine entry point for main loop
-#
 #
 def mainLoop(writer, kernel):
   module = Module()
@@ -1257,6 +1224,15 @@ def mainLoop(writer, kernel):
       scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
 
   module.add(scheduler.emitAllLoops(writer, kernel))
+  # Free scheduler-allocated A/B/MXSA/MXSB VGPR tiles back to the pool
+  # BEFORE kernelBodySubtile continues into
+  # `KernelWriter._emitTailLoopScaffoldSubtile`, which re-allocates a
+  # tail-local set via `allocVgprTileRegisters_legacy` and clobbers
+  # `tileInfo.vgprTiles`. Reordering this dealloc after the tail
+  # scaffold would silently leak the scheduler's VGPR range with no
+  # test failure (the scaffold succeeds because it does not read the
+  # scheduler's pre-tail vgprTiles; the leak only shows up as a VGPR-
+  # budget regression).
   scheduler.deallocVgprTiles(writer)
 
   return module

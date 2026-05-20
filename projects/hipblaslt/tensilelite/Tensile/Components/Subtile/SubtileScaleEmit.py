@@ -469,8 +469,9 @@ def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
     groupStride = int(tileInfo.lrSubtileSize)
   else:
     groupStride = 2 * tileInfo.subtileSize
+  from Tensile.Components.Subtile.Kernel import MX_SCALE_TILES_PER_VGPR
   dsOffset = groupStride * scaleGroupIdx
-  vdst = tileInfo.vgprTiles[4 * scaleGroupIdx].regList.indices[0]
+  vdst = tileInfo.vgprTiles[MX_SCALE_TILES_PER_VGPR * scaleGroupIdx].regList.indices[0]
   module.add(DSLoadB32(dst=vgpr(vdst),
                        src=vgpr(tileInfo.sharedVgprLROffset[0]),
                        ds=DSModifiers(offset=dsOffset),
@@ -478,7 +479,13 @@ def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
   return module
 
 def localReadDoScaleSubtile(tc, writer, kernel):
-  """Emit scale ds_reads for all scale groups (PGR=0 path)."""
+  """Emit one ds_read_b32 per scale group (PGR=0 / tail-loop path).
+
+  Per-wave group count is `lrLocalSubtileGrid[0] *
+  lrLocalSubtileGrid[1]`. (`localSubtileGrid` is hard-wired to [1, 1]
+  for MXScaleTilePair regardless of MT, so using it here would leave
+  the higher scale-group VGPRs uninitialised on MT >= 128x128.)
+  """
   module = Module()
 
   if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
@@ -486,8 +493,7 @@ def localReadDoScaleSubtile(tc, writer, kernel):
 
   tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
 
-  # Iterate over scale groups: one ds_read per 2 M-adjacent subtiles
-  numScaleGroups = math.ceil(tileInfo.localSubtileGrid[0] / 2) * tileInfo.localSubtileGrid[1]
+  numScaleGroups = int(tileInfo.lrLocalSubtileGrid[0]) * int(tileInfo.lrLocalSubtileGrid[1])
   for gid in range(numScaleGroups):
     module.add(emitSubtileScaleDsRead(tc, writer, kernel, gid))
 
