@@ -4393,6 +4393,278 @@ class TestLauncherFenceContract(unittest.TestCase):
         self.assertEqual(recorded, [(0, False), (1, False)])
 
 
+class TestCkStyleLaunchKernel(unittest.TestCase):
+    """CK-Tile-style :func:`make_kernel` + :func:`launch_kernel` primitive.
+
+    Pure-Python contract checks of the new variadic launch primitive
+    that mirrors ``ck_tile::launch_kernel`` /
+    ``ck_tile::make_kernel`` from
+    ``include/ck_tile/host/kernel_launch.hpp``. A fake "launcher" is
+    used in place of :class:`KernelLauncher` so these tests exercise
+    only the closure/dispatch logic and avoid any HIP context.
+
+    The non-timing path (``time_kernel=False``) is fully covered
+    here. The timing path (``time_kernel=True``) requires a HIP
+    context for :func:`Runtime.wait_stream` and
+    :class:`Runtime.event`; that path is exercised by the GPU smoke
+    test in ``test_ck_dsl_examples.TestCkStyleLaunchKernelGpu``.
+    """
+
+    def _record_launcher(self):
+        """Return a (recorded, FakeLauncher-instance) pair.
+
+        The fake's ``__call__`` signature matches
+        :class:`KernelLauncher`'s production interface
+        (``(values, *, config)``) so :func:`make_kernel` does not
+        need a duck-typed shim to drive it.
+        """
+        from ck_dsl.runtime.launcher import LaunchSummary
+
+        recorded: list = []
+
+        class _FakeLauncher:
+            kernel_name = "fake"
+
+            def __call__(self, values, *, config):
+                recorded.append(
+                    {
+                        "values": dict(values),
+                        "fence": config.fence,
+                        "stream": config.stream,
+                        "grid": tuple(config.grid),
+                        "block": tuple(config.block),
+                        "shared_bytes": config.shared_bytes,
+                    }
+                )
+                return LaunchSummary(launches=1)
+
+        return recorded, _FakeLauncher()
+
+    def test_stream_config_defaults_match_cktile(self):
+        """``StreamConfig`` field defaults must mirror
+        ``ck_tile::stream_config`` field-for-field
+        (``include/ck_tile/host/stream_config.hpp`` lines 29-39) so a
+        Python benchmark driver can construct one config object that
+        is valid on both sides.
+        """
+        from ck_dsl.runtime.launcher import StreamConfig
+
+        s = StreamConfig()
+        self.assertEqual(s.stream_id, 0)
+        self.assertFalse(s.time_kernel)
+        self.assertEqual(s.log_level, 0)
+        self.assertEqual(s.cold_niters, 3)
+        self.assertEqual(s.nrepeat, 10)
+        self.assertTrue(s.is_gpu_timer)
+        self.assertFalse(s.flush_cache)
+        # Frozen so accidental mutation can't desync benchmark drivers.
+        with self.assertRaises(Exception):
+            s.stream_id = 7  # type: ignore[misc]
+
+    def test_launch_kernel_empty_raises(self):
+        """Parity with the C++
+        ``static_assert(sizeof...(callables) > 0)`` guard at
+        ``kernel_launch.hpp:268``. Catching this at the Python boundary
+        prevents a no-op timed loop from quietly returning 0.0 ms.
+        """
+        from ck_dsl.runtime.launcher import StreamConfig, launch_kernel
+
+        with self.assertRaises(ValueError):
+            launch_kernel(StreamConfig())
+
+    def test_launch_kernel_runs_callables_in_order(self):
+        """Same-stream FIFO ordering is the only correctness primitive
+        between callables, but :func:`launch_kernel`'s host-side
+        invocation order must also match declaration order so the
+        kernels are actually enqueued in the documented sequence.
+        Mirrors the C++ fold expression at ``kernel_launch.hpp:139``.
+        """
+        from ck_dsl.runtime.launcher import StreamConfig, launch_kernel
+
+        order: list = []
+
+        def _mk(idx):
+            def _c(s):
+                order.append((idx, s.stream_id))
+
+            return _c
+
+        s = StreamConfig(stream_id=42)
+        ms = launch_kernel(s, _mk(0), _mk(1), _mk(2))
+        self.assertEqual(ms, 0.0)
+        self.assertEqual(order, [(0, 42), (1, 42), (2, 42)])
+
+    def test_launch_kernel_returns_zero_when_not_timed(self):
+        """``time_kernel=False`` is fire-and-forget: no events, no
+        timing, no host-side ms. Matches the early-return path at
+        ``kernel_launch.hpp:270-274``.
+        """
+        from ck_dsl.runtime.launcher import StreamConfig, launch_kernel
+
+        ms = launch_kernel(StreamConfig(time_kernel=False), lambda s: None)
+        self.assertEqual(ms, 0.0)
+
+    def test_launch_kernel_short_circuits_on_error(self):
+        """Mirror of the short-circuit fold expression at
+        ``kernel_launch.hpp:139`` (``(... && ...)``). On the C++
+        side, ``hipPeekAtLastError() != hipSuccess`` skips the
+        remaining callables; on the Python side, an exception in any
+        callable propagates immediately and prevents subsequent
+        callables from running. Either way, the first failing launch
+        aborts the rest of the group.
+        """
+        from ck_dsl.runtime.launcher import StreamConfig, launch_kernel
+
+        order: list = []
+
+        def _ok(idx):
+            def _c(s):
+                order.append(idx)
+
+            return _c
+
+        def _boom(s):
+            order.append(1)
+            raise RuntimeError("simulated HIP failure")
+
+        with self.assertRaises(RuntimeError):
+            launch_kernel(StreamConfig(), _ok(0), _boom, _ok(2))
+        # Callables 0 and 1 ran (1 raised); callable 2 did not.
+        self.assertEqual(order, [0, 1])
+
+    def test_make_kernel_captures_args_grid_block_lds(self):
+        """Each closure must carry an independent capture of
+        ``(values, grid, block, lds_bytes)`` so dispatching N stages
+        through one launcher does not have stage K observing stage
+        K-1's values. Mirrors the C++ ``make_kernel`` capture
+        semantics at ``kernel_launch.hpp:118-133`` -- the returned
+        lambda takes everything by value.
+        """
+        from ck_dsl.runtime.launcher import StreamConfig, launch_kernel, make_kernel
+
+        recorded, launcher = self._record_launcher()
+
+        c0 = make_kernel(launcher, {"x": 1}, (1, 1, 1), (64, 1, 1), lds_bytes=0)
+        c1 = make_kernel(launcher, {"x": 2}, (2, 1, 1), (128, 1, 1), lds_bytes=512)
+        c2 = make_kernel(
+            launcher, {"x": 3, "y": 7}, (3, 1, 1), (32, 2, 1), lds_bytes=4096
+        )
+
+        launch_kernel(StreamConfig(stream_id=9), c0, c1, c2)
+
+        self.assertEqual(len(recorded), 3)
+        self.assertEqual(recorded[0]["values"], {"x": 1})
+        self.assertEqual(recorded[0]["grid"], (1, 1, 1))
+        self.assertEqual(recorded[0]["block"], (64, 1, 1))
+        self.assertEqual(recorded[0]["shared_bytes"], 0)
+        self.assertEqual(recorded[1]["values"], {"x": 2})
+        self.assertEqual(recorded[1]["grid"], (2, 1, 1))
+        self.assertEqual(recorded[1]["block"], (128, 1, 1))
+        self.assertEqual(recorded[1]["shared_bytes"], 512)
+        self.assertEqual(recorded[2]["values"], {"x": 3, "y": 7})
+        self.assertEqual(recorded[2]["grid"], (3, 1, 1))
+        self.assertEqual(recorded[2]["block"], (32, 2, 1))
+        self.assertEqual(recorded[2]["shared_bytes"], 4096)
+
+    def test_make_kernel_uses_fence_false(self):
+        """The CK-style closure must always launch with ``fence=False``
+        -- the only sync point is :func:`launch_kernel`'s timing-loop
+        boundary (or the caller's external drain). This is the
+        critical migration hazard for callers coming from
+        :class:`PipelineLauncher` (which honours the per-stage fence
+        on the last stage); see the docstring on :func:`launch_kernel`.
+        """
+        from ck_dsl.runtime.launcher import (
+            LaunchConfig,
+            StreamConfig,
+            launch_kernel,
+            make_kernel,
+            no_fence,
+        )
+
+        recorded, launcher = self._record_launcher()
+
+        # Default fence policy outside any context: per-config wins.
+        # The closure must still emit fence=False at the launcher.
+        self.assertTrue(LaunchConfig().fence)
+        c = make_kernel(launcher, {}, (1, 1, 1), (64, 1, 1))
+        launch_kernel(StreamConfig(), c)
+        self.assertEqual(len(recorded), 1)
+        self.assertFalse(recorded[0]["fence"])
+
+        # Inside an outer no_fence: also emits False (vacuously).
+        recorded.clear()
+        with no_fence():
+            launch_kernel(StreamConfig(), c)
+        self.assertEqual(len(recorded), 1)
+        self.assertFalse(recorded[0]["fence"])
+
+    def test_make_kernel_captures_dict_copy(self):
+        """:func:`make_kernel` snapshots ``values`` via
+        ``dict(values)``. Mutating the original after closure
+        construction must not affect the captured payload, otherwise
+        a caller that re-uses one dict to build successive closures
+        (the natural pattern for sweep harnesses) would silently
+        observe N copies of the most recent values.
+        """
+        from ck_dsl.runtime.launcher import StreamConfig, launch_kernel, make_kernel
+
+        recorded, launcher = self._record_launcher()
+
+        vals = {"k": 1}
+        c = make_kernel(launcher, vals, (1, 1, 1), (64, 1, 1))
+        vals["k"] = 999
+        vals["new"] = "intruder"
+        launch_kernel(StreamConfig(), c)
+        self.assertEqual(recorded[0]["values"], {"k": 1})
+
+    def test_make_kernel_forwards_stream_at_call_time(self):
+        """The closure reads ``stream_id`` from its
+        :class:`StreamConfig` argument at call time (not at closure
+        construction time), so the same closure can be replayed on
+        different streams. This matches CK Tile's ``make_kernel``
+        whose generated lambda references ``s.stream_id_`` (read at
+        invocation time, not capture time).
+        """
+        from ck_dsl.runtime.launcher import StreamConfig, launch_kernel, make_kernel
+
+        recorded, launcher = self._record_launcher()
+        c = make_kernel(launcher, {}, (1, 1, 1), (64, 1, 1))
+
+        launch_kernel(StreamConfig(stream_id=11), c)
+        launch_kernel(StreamConfig(stream_id=22), c)
+        launch_kernel(StreamConfig(stream_id=33), c)
+
+        self.assertEqual([r["stream"] for r in recorded], [11, 22, 33])
+
+    def test_launch_kernel_accepts_bare_lambdas(self):
+        """The C++ ``launch_kernel`` accepts any callable matching
+        ``operator()(const stream_config&)``, including bare lambdas
+        like ``[=](const stream_config& s){ hipMemset(...) }``. The
+        Python equivalent must accept any ``Callable[[StreamConfig],
+        None]``: this is what enables the
+        ``maybe_clear_workspace``-style sibling-callable pattern at
+        ``example/ck_tile/15_fused_moe/instances/fused_moesorting_api.cpp:481``
+        without forcing every callable through :func:`make_kernel`.
+        """
+        from ck_dsl.runtime.launcher import StreamConfig, launch_kernel, make_kernel
+
+        recorded, launcher = self._record_launcher()
+        marker: list = []
+
+        def _bare(s):
+            marker.append(("clear", s.stream_id))
+
+        c = make_kernel(launcher, {"x": 1}, (1, 1, 1), (64, 1, 1))
+        launch_kernel(StreamConfig(stream_id=5), _bare, c, _bare)
+
+        # Bare lambdas ran around the make_kernel closure, all with
+        # the same stream id forwarded.
+        self.assertEqual(marker, [("clear", 5), ("clear", 5)])
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual(recorded[0]["stream"], 5)
+
+
 class TestRuntimeEventLifecycle(unittest.TestCase):
     """:class:`Runtime` pending-args queue: events + FIFO drain.
 
