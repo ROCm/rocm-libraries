@@ -72,7 +72,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB']
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -284,6 +284,8 @@ class ProblemType:
         rv.mxBlockB = d.get('MXBlockB', 0)
         rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
         rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
+        # mxScaleFormat is a Solution-level parameter and is populated by
+        # Solution.FromOriginalState, which has access to the parent dict.
 
         rv.metadataLayout = 0
         if 'MetadataLayout' in d:
@@ -466,16 +468,6 @@ class ProblemPredicate(Properties.Predicate):
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
 
-        # Address-interleave restriction:
-        # Require tiles1 = Free1Size / MT1 to be a power-of-two (and divisible).
-        if key == "AssertFree1DivByMT1LowbitGT1":
-            return cls("Free1SizeDivByValueLowbitGT1", index=0, value=value) if value > 0 else None
-
-        # KRingShift wrap restriction (packed value; see Solution.py):
-        # Require that any (k + KRingShift) wrap occurs only in tail loop (no main-loop wrap).
-        if key == "AssertKRingShiftTailWrapOnly":
-            return cls("KRingShiftTailWrapOnly", index=-1, value=value) if value > 0 else None
-
         if key.endswith('Multiple'):
             if value == 1:
                 return None
@@ -657,7 +649,7 @@ class SizeMapping:
                  'VectorWidthB',
                  'LocalSplitU',
                  'DirectToLdsA',
-                 'DirectToLdsB'
+                 'DirectToLdsB',
                  ]
 
     @classmethod
@@ -842,6 +834,14 @@ class Solution:
             rv.kernelName = d['KernelNameMin']
 
         rv.problemType = ProblemType.FromOriginalState(d['ProblemType'])
+
+        # MXScaleFormat is a Solution-level knob (lives in d, not d['ProblemType']),
+        # but it describes the in-device MX scale layout the kernel expects, which
+        # the host (DataInitialization) needs to know to pick an upload layout.
+        # Plumb it onto problemType so the host can read it post-solution-pick.
+        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
+                                        "HostPreSwizzle": 1,
+                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)
