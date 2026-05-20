@@ -722,6 +722,8 @@ public:
 
     void** get_buffer_reference();
 
+    hipsparseStatus_t reset();
+
     hipsparseSpMVDescr_st() = default;
     ~hipsparseSpMVDescr_st();
 };

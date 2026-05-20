@@ -88,14 +88,22 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 
     hipsparseSpMVDescr_st* hip_spmv_descr = matA->get_hip_spmv_descr();
 
-    //
-    // If spmv_descr alreay exists, then destroy it.
-    //
+    // If a spmv_descr already exists from a previous hipsparseSpMV_bufferSize
+    // call on this sparse matrix descriptor, fully reset the wrapper state:
+    // destroy the previous rocsparse_spmv_descr, free the cached compute
+    // buffer, and clear the analysis / compute / buffer-size flags. This is
+    // required so that the next hipsparseSpMV call re-runs analysis and
+    // re-sizes its buffers for the (possibly new) operation / algorithm /
+    // datatypes rather than reusing stale state from the previous
+    // configuration.
     rocsparse_spmv_descr spmv_descr = hip_spmv_descr->get_spmv_descr();
     if(spmv_descr != nullptr)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_destroy_spmv_descr(spmv_descr));
-        hip_spmv_descr->set_spmv_descr(nullptr);
+        const hipsparseStatus_t status = hip_spmv_descr->reset();
+        if(status != HIPSPARSE_STATUS_SUCCESS)
+        {
+            return status;
+        }
     }
 
     //

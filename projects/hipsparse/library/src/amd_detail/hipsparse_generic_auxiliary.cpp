@@ -118,6 +118,30 @@ void hipsparseSpMVDescr_st::buffer_size_called()
     this->m_is_buffer_size_called = true;
 }
 
+hipsparseStatus_t hipsparseSpMVDescr_st::reset()
+{
+    if(this->m_spmv_descr != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_destroy_spmv_descr(this->m_spmv_descr));
+        this->m_spmv_descr = nullptr;
+    }
+
+    if(this->m_buffer != nullptr)
+    {
+        RETURN_IF_HIP_ERROR(hipFree(this->m_buffer));
+        this->m_buffer = nullptr;
+    }
+
+    this->m_is_stage_analysis_called          = false;
+    this->m_is_implicit_stage_analysis_called = false;
+    this->m_is_stage_compute_subsequent       = false;
+    this->m_is_buffer_size_called             = false;
+    this->m_buffer_size_stage_analysis        = 0;
+    this->m_buffer_size_stage_compute         = 0;
+
+    return HIPSPARSE_STATUS_SUCCESS;
+}
+
 hipsparseSpMVDescr_st::~hipsparseSpMVDescr_st()
 {
     (void)hipFree(this->get_buffer());
