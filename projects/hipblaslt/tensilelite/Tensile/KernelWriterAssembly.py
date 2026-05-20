@@ -17200,9 +17200,6 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe // dim1Divisor), "woffset = wId * (mt // numWaves * du * bpe // dim1Divisor)"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
-      # Save to tracking SGPR for runtime swap
-      ldsTrackSgpr = f"tdmLdsAddr{tc}"
-      mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx), comment=f"save LDS addr for {tc} buffer tracking"))
 
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter: int = 1 if dtype.isFloat4() else 0
