@@ -271,7 +271,7 @@ struct SignatureKernelDescriptor {
     int groupSegSize;
     std::array<int, 3> sgprWorkGroup;
     int vgprWorkItem;
-    bool enablePreloadKernArgs;
+    int numSgprPreload;
     std::array<int, 3> isaVersion;
     int wavefrontSize;
 
@@ -296,15 +296,20 @@ struct SignatureKernelDescriptor {
     // are unaffected.
     std::vector<std::string> extraKernelDirectives;
 
+    /// Total instruction encoding size in bytes. If >= 0, .amdhsa_inst_pref_size (value/128) is
+    /// emitted.
+    int64_t totalInstructionBytes = -1;
+
     SignatureKernelDescriptor(const std::string& name, const std::array<int, 3>& isaVersion,
                               int groupSegSize, const std::array<int, 3>& sgprWorkGroup,
                               int vgprWorkItem, int wavefrontSize = 64, int totalVgprs = 0,
-                              int totalAgprs = 0, int totalSgprs = 0, bool preloadKernArgs = false);
+                              int totalAgprs = 0, int totalSgprs = 0, int numSgprPreload = 0);
 
     void setGprs(int totalVgprs, int totalAgprs, int totalSgprs);
     void setOptimizationConfig(const std::array<int, 2>& tt, const std::array<int, 2>& sg,
                                const std::array<int, 2>& wg, int vwA, int vwB, int glvwA, int glvwB,
                                bool d2lA, bool d2lB, int useSgprForGRO);
+    void setTotalInstructionBytes(int64_t totalBytes);
     int getNextFreeVgpr() const {
         return totalVgprs;
     }
@@ -351,12 +356,13 @@ struct STINKYTOFU_EXPORT SignatureBase {
                   int kernArgsVersion, const std::string& codeObjectVersion, int groupSegmentSize,
                   const std::array<int, 3>& sgprWorkGroup, int vgprWorkItem, int flatWorkGroupSize,
                   int wavefrontSize = 64, int totalVgprs = 0, int totalAgprs = 0,
-                  int totalSgprs = 0, bool preloadKernArgs = false);
+                  int totalSgprs = 0, int numSgprPreload = 0);
 
     void setGprs(int totalVgprs, int totalAgprs, int totalSgprs);
     void setOptimizationConfig(const std::array<int, 2>& tt, const std::array<int, 2>& sg,
                                const std::array<int, 2>& wg, int vwA, int vwB, int glvwA, int glvwB,
                                bool d2lA, bool d2lB, int useSgprForGRO);
+    void setTotalInstructionBytes(int64_t totalBytes);
     void addArg(const std::string& name, SignatureValueKind kind, const std::string& type,
                 const std::string& addrSpaceQual = "");
 

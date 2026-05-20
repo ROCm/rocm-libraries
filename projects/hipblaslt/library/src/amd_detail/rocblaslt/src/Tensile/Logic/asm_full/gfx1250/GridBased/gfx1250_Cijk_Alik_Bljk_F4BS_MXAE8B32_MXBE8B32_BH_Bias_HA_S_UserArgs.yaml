@@ -104,13 +104,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 2
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 2
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 32
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HA_SWjqZ2qaV9ElCQV2JSaHrayJgkH_6SoaWta1Bd1YbJ6o=
     BufferLoad: true
     BufferStore: true
@@ -161,7 +158,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HA_S_UserArgs_MT128x128x256_MI16x16x1_SN_LDSB0_AFC1_AG0_AFEM2_AFEM2_ASEM32_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSUAMB_GLS0_ISA1250_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA64_LPB64_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT4_4_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SGROB0_SIA0_SS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TDMI3_TDMS0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG32_4_1
@@ -310,7 +306,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    PreloadKernArgs: false
+    PreloadKernArgs: true
     SFCWGM:
     - [1, 1]
     - [1, 1]
