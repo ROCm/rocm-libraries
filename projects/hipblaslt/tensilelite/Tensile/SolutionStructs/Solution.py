@@ -723,14 +723,16 @@ class Solution(collections.abc.Mapping):
     # (ShiftPtr is default and not set to state["EdgeType"] yet here)
     # MX case, force enable NonDTLTailLoopA/B
     if ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]) or state["ProblemType"]["MXBlockA"]:
-      if (not state["ProblemType"]["TLUA"]) and state["DirectToLdsA"] and not state["DirectToVgprA"]:
+      # Subtile is structurally DTL-only and masks its own tail at sub-dword granularity; do not flip to NonDTL for it.
+      if (not state["ProblemType"]["TLUA"]) and state["DirectToLdsA"] and not state["DirectToVgprA"] and not state["UseSubtileImpl"]:
         state["NonDTLTailLoopA"] = True
         state["tailLoopOptA"] = False
         if state["ProblemType"]["MXBlockA"]:
           state["NonDTLTailLoopMXSA"] = True
           state["tailLoopOptMXSA"] = False
     if ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]) or state["ProblemType"]["MXBlockB"]:
-      if (not state["ProblemType"]["TLUB"]) and state["DirectToLdsB"] and not state["DirectToVgprB"]:
+      # Subtile is structurally DTL-only and masks its own tail at sub-dword granularity; do not flip to NonDTL for it.
+      if (not state["ProblemType"]["TLUB"]) and state["DirectToLdsB"] and not state["DirectToVgprB"] and not state["UseSubtileImpl"]:
         state["NonDTLTailLoopB"] = True
         state["tailLoopOptB"] = False
         if state["ProblemType"]["MXBlockB"]:

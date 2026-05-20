@@ -40,14 +40,13 @@ def init_rocisa_for_gfx950():
     return ri
 
 
-def setdefault_tail_scaffold_kernel_keys(kernel, pgr):
+def setdefault_tail_scaffold_kernel_keys(kernel, pgr, *, asem=32):
     """Populate the kernel-dict keys the scaffold reaches into.
 
     Idempotent: uses `setdefault` so callers can override any key
-    upstream and this helper only fills the gaps. The keys are the
-    union of what `_emitTailLoopScaffoldSubtile` needs from the
-    kernel dict (entry header + kPosBase init + lane mask + PGR>0
-    entry gating).
+    upstream and this helper only fills the gaps. `asem` overrides
+    `AssertSummationElementMultiple` (default 32 preserves the
+    aligned-K test callers).
     """
     kernel["PrefetchGlobalRead"] = pgr
     kernel.setdefault("SuppressNoLoadLoop", False)
@@ -60,7 +59,10 @@ def setdefault_tail_scaffold_kernel_keys(kernel, pgr):
     kernel.setdefault("NumDotElements", 1)
     kernel.setdefault("NumWaveSplitK", 1)
     kernel.setdefault("ExpertSchedulingMode", 0)
-    kernel.setdefault("AssertSummationElementMultiple", 32)
+    # Must overwrite (not setdefault): `_create_kernel` pre-bakes
+    # `AssertSummationElementMultiple: 32`, which would otherwise mask
+    # a caller-supplied asem.
+    kernel["AssertSummationElementMultiple"] = asem
     kernel.setdefault("MatrixInstB", 1)
     miInputDefault = (kernel["MatrixInstK"] * kernel["MatrixInstM"]
                       // kernel["WavefrontSize"])
