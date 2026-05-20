@@ -1129,17 +1129,22 @@ def emitMfmaCode(writer, kernel):
         dtiles = dtileInfo.vgprTiles[mma0 + mma1 * dtileInfo.localMMATileGrid[0]]
 
         if hasScaleA:
-          # Scale group index: one VGPR per 2 M-adjacent subtiles (ds_read_b32 loads 4 bytes)
-          subtileKShape = lrSubtileShapeA[1]
-          subtileKGrid = tiA.localSubtileGrid[1]
-          scaleGroupA = (mma0 // 2) * subtileKGrid + mmak // subtileKShape
-          scaleGroupB = (mma1 // 2) * subtileKGrid + mmak // subtileKShape
+          # Scale group index: one VGPR per lrSubtileShape[0] M-tiles x lrSubtileShape[1] K-tiles
+          scaleMShapeA = tiMXSA.lrSubtileShape[0]
+          scaleMShapeB = tiMXSB.lrSubtileShape[0]
+          scaleKShapeA = tiMXSA.lrSubtileShape[1]
+          scaleKShapeB = tiMXSB.lrSubtileShape[1]
+          # Use the scale's own K LR subtile grid (not the data's K subtile grid).
+          scaleKGridA = tiMXSA.lrLocalSubtileGrid[1]
+          scaleKGridB = tiMXSB.lrLocalSubtileGrid[1]
+          scaleGroupA = (mma0 // scaleMShapeA) * scaleKGridA + mmak // scaleKShapeA
+          scaleGroupB = (mma1 // scaleMShapeB) * scaleKGridB + mmak // scaleKShapeB
 
           scaleAVgpr = tiMXSA.vgprTiles[4 * scaleGroupA].regList.indices[0] if tiMXSA.mxBlock else -1
           scaleBVgpr = tiMXSB.vgprTiles[4 * scaleGroupB].regList.indices[0] if tiMXSB.mxBlock else -1
 
-          sAsel = (mma0 % 2) + 2 * (mmak % 2)
-          sBsel = (mma1 % 2) + 2 * (mmak % 2)
+          sAsel = (mma0 % scaleMShapeA) + scaleMShapeA * (mmak % scaleKShapeA)
+          sBsel = (mma1 % scaleMShapeB) + scaleMShapeB * (mmak % scaleKShapeB)
         else:
           scaleAVgpr = -1
           scaleBVgpr = -1
@@ -1208,13 +1213,15 @@ def mainLoop(writer, kernel):
   scaleTiA = writer.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
   scaleTiB = writer.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
 
-  # Values to be ajusted once we support more tile shapes.  For now, we assume:
   lrAGran = ReadGranularity(mn=1, k=1)
   lrBGran = ReadGranularity(mn=1, k=1)
-  grAGran = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
-  grBGran = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
-  lrSAGran = ReadGranularity(mn=2, k=2) if scaleTiA else None
-  lrSBGran = ReadGranularity(mn=2, k=2) if scaleTiB else None
+  grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1]
+  grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1]
+  grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
+  grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
+  numSubIterK = tiA.localMMATileGrid[1]
+  lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=numSubIterK) if scaleTiA else None
+  lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=numSubIterK) if scaleTiB else None
   grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
   grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
 
