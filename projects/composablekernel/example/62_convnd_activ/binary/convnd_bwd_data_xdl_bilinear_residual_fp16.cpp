@@ -206,10 +206,8 @@ bool run_grouped_conv(bool do_verification,
 
     if(!conv.IsSupportedArgument(argument))
     {
-        std::cout << "The device op with the specified compilation parameters does "
-                     "not support this convolution problem — skipping."
-                  << std::endl;
-        return true;
+        throw std::runtime_error("The device op with the specified compilation parameters does "
+                                 "not support this convolution problem.");
     }
 
     float avg_time = invoker.Run(argument, StreamConfig{nullptr, time_kernel});

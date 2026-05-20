@@ -92,11 +92,11 @@ bool run_conv_bwd_data(const ExecutionConfig& config,
 
     if(!conv.IsSupportedArgument(argument))
     {
-        std::cout << "device_conv with the specified compilation parameters does "
-                     "not support this Conv problem — skipping."
+        std::cerr << "wrong! device_conv with the specified compilation parameters does "
+                     "not support this Conv problem"
                   << std::endl;
 
-        return true;
+        return false;
     }
 
     float ave_time = invoker.Run(argument, StreamConfig{nullptr, config.time_kernel});
