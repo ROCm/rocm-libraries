@@ -637,18 +637,19 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
 
     if kernel["enableTDMB"]:
-      if prod(kernel["MIWaveGroup"]) > 1:
-        module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
-        module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
-        if kernel["ProblemType"]["MXBlockB"]:
-          module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
-          module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
-      else:
-        module.add(self.defineSgpr("tdmBGroup0", 4, 4))
-        module.add(self.defineSgpr("tdmBGroup1", 8, 4))
-        if kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.defineSgpr("tdmMXSBGroup0", 4, 4))
-          module.add(self.defineSgpr("tdmMXSBGroup1", 8, 4))
+      # Always alias B→A descriptors for subtile (saves 24 SGPRs).
+      # The subtile main loop separates A and B TDM loads with SWaitTensorcnt(0)
+      # + full descriptor reprogram before each tensor_load_to_lds, so aliasing
+      # is safe despite the shared SGPR storage.
+      #
+      # TODO: The non-subtile path only aliases for multi-wave (MIWaveGroup > 1)
+      # and uses separate descriptors for single-wave to avoid ~40 scalar
+      # reprogram instructions per loop iteration. The subtile path currently
+      # can't do this because SGPR usage is already at 106 (the gfx1250 limit);
+      # separate descriptors would add 12 SGPRs. Reducing SGPR pressure
+      # elsewhere would allow restoring the non-subtile pattern.
+      module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
+      module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
 
     if kernel["enableTDMA"] and kernel["enableTDMB"] and prod(kernel["MIWaveGroup"]) > 1:
       module.add(self.defineSgpr("tdmABIncs", 1))
@@ -669,6 +670,13 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["enableTDMMetadata"]:
       module.add(self.defineSgpr("tdmMetadataGroup0", 4, 4))
       module.add(self.defineSgpr("tdmMetadataGroup1", 8, 4))
+
+    # TDM LDS address tracking for aliased descriptors with subtile double-buffering
+    if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel.get("UseSubtileImpl", False):
+      module.add(self.defineSgpr("tdmLdsAddrA", 1))
+      module.add(self.defineSgpr("tdmLdsAddrB", 1))
+      module.add(self.defineSgpr("tdmLdsSwapMaskA", 1))
+      module.add(self.defineSgpr("tdmLdsSwapMaskB", 1))
 
     if kernel["BufferLoad"]:
        # resource descriptor (SRD) A and B, must be aligned on 4-SGPR boundary
@@ -822,6 +830,17 @@ class KernelWriterAssembly(KernelWriter):
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
                % (self.sgprPool.size(), self.states.regCaps["MaxSgpr"]))
+
+    # Grow pool to MaxSgpr so remaining SGPRs are available for temp allocations.
+    # Without this, the pool may be smaller than MaxSgpr after defineSgpr() calls,
+    # causing temp checkOut requests to fail even though physical SGPRs are available.
+    # If defineSgpr already exceeded MaxSgpr, the while loop is a no-op (the warning
+    # above already flagged the overflow).
+    padRegs = []
+    while self.sgprPool.size() < self.states.regCaps["MaxSgpr"]:
+      padRegs.append(self.sgprPool.checkOut(1, "pool_pad", preventOverflow=False))
+    for r in padRegs:
+      self.sgprPool.checkIn(r)
 
     # End of define sgprs
     #------------------------
@@ -17192,6 +17211,9 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe // dim1Divisor), "woffset = wId * (mt // numWaves * du * bpe // dim1Divisor)"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+      # Save to tracking SGPR for runtime swap
+      ldsTrackSgpr = f"tdmLdsAddr{tc}"
+      mod.add(TextBlock(f"s_mov_b32 s[sgpr{ldsTrackSgpr}], s{waveOffsetSgprIdx} // save LDS addr for {tc} buffer tracking\n"))
 
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter: int = 1 if dtype.isFloat4() else 0
@@ -17230,6 +17252,101 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SMovB32(sgpr(f"tdm{tc}LdsSplitIncs"), round(mt * du * bpe // dim1Divisor) + extraPadSize, comment=f"tdm{tc} Lds Split Incs({mt * du * bpe // dim1Divisor})"))
       mod.add(SMulI32(sgpr(f"tdm{tc}GlobalSplitIncs"), sgpr(strideRefName()), round(mt * bpe) // dim1Divisor, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
 
+    return mod
+
+  def initTDMDescriptorSubtile(self, kernel: Mapping, tP: Mapping, setLds: bool = True) -> Module:
+    """Init TDM descriptor for the subtile kernel path.
+
+    Parallel to initTDMDescriptor() but simplified for subtile:
+    - Uses ldsStartOffset{A,B} from writer state (not kernel["LdsOffset{tc}"])
+    - Tracks LDS address in a dedicated SGPR for double-buffer XOR swap
+    - No sparse/metadata/TDMSplit handling (subtile doesn't use those)
+    - setLds=False path reads from tracking SGPR for main-loop reprogram
+    """
+    comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+    tc: str = tP['tensorChar']
+    ti: int = tP["idx"]
+    tileChar: str = tP["tileChar"]
+    mod = Module(f"Init TDM Descriptor Subtile {tc}")
+
+    def descSgprName(idx: int) -> str:
+      assert idx < 2
+      return f"tdm{tc}Group{idx}"
+
+    def strideRefName() -> str:
+      return f"Stride{tc}{tileChar}"
+
+    def sizeRefName(idx: int) -> str:
+      idxChar = INDEX_CHARS[idx]
+      return f"Size{idxChar}"
+
+    dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
+    mt: int = kernel[f"MacroTile{ti}"]
+    du: int = kernel["DepthU"]
+    bpe: float = tP["bpeGR"]
+    numWaves: int = prod(kernel["MIWaveGroup"])
+    wavelen: int = kernel["WavefrontSize"]
+
+    # Use subtile LDS offsets from writer state (not kernel["LdsOffset{tc}"])
+    ldsOffsetMap = {
+      'A': self.ldsStartOffsetA,
+      'B': self.ldsStartOffsetB,
+    }
+    ldsConstOffset: int = ldsOffsetMap.get(tc, 0)
+
+    sizeTile0, sizeTile1 = du, mt
+    ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
+    ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
+
+    mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
+    mod.add(comp.setDataType(dtype, descSgprName(1)))
+    mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+
+    # LDS address handling:
+    # setLds=True (prefetch): compute from constants, also init tracking SGPR
+    # setLds=False (main loop): read from tracking SGPR (maintained via XOR swap)
+    if not setLds:
+      # Main loop: read current LDS addr from tracking SGPR
+      ldsTrackSgpr = f"tdmLdsAddr{tc}"
+      mod.add(comp.setLdsAddr(descSgprName(0), sgpr(ldsTrackSgpr)))
+    elif setLds:
+      with self.allocTmpSgpr(1) as tmpSgprRes:
+        waveOffsetSgprIdx: int = tmpSgprRes.idx
+        mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
+        mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
+        if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
+          tileBytes = round(mt // numWaves * du * bpe)
+          padBytes = tileBytes // ldsBlockSizePerPad * ldsPadSize
+          mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,
+                  f"woffset = wId * ({tileBytes}+{padBytes})"))
+        else:
+          mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe),
+                  "woffset = wId * (mt // numWaves * du * bpe)"))
+        mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
+                f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
+        mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+        # Save LDS offset to tracking SGPR for runtime double-buffer swap
+        ldsTrackSgpr = f"tdmLdsAddr{tc}"
+        mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx), comment=f"init {ldsTrackSgpr} for buffer tracking"))
+        # Compute swap mask: swapMask = addr XOR (addr + ldsTotalSize)
+        # Used by globalReadLDSBufferSwap to toggle between buffer 0 and buffer 1.
+        swapMaskSgpr = f"tdmLdsSwapMask{tc}"
+        ldsTotalSize = self.ldsTotalSize
+        mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize, comment=f"addr + ldsTotalSize({ldsTotalSize})"))
+        mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr), comment=f"swapMask = addr XOR (addr + ldsTotalSize)"))
+
+    sizeShifter = 1 if dtype.isFloat4() else 0
+    sizeShifterDim = sizeShifter
+
+    mod.add(comp.setIterationEnabled(descSgprName(1), False))
+    mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
+    mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self, sizeShifterDim))
+    mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
+
+    sizeShifterTile = sizeShifter
+    mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifterTile))
+    mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves, self))
+    mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifterTile))
     return mod
 
   def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP) -> Module:
