@@ -6316,12 +6316,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Only assembly supports scheduling
     if kernel["KernelLanguage"] == "Assembly":
       self.states.scheduleGlobalRead = kernel["ScheduleGlobalRead"] \
-          and kernel["PrefetchGlobalRead"] \
-          and kernel["BufferLoad"] # flat updates lgkmcnt counts = hard to schedule flat loads
+          and kernel["PrefetchGlobalRead"]
       self.states.scheduleLocalWrite = kernel["ScheduleLocalWrite"] \
-          and kernel["PrefetchGlobalRead"] \
-          and kernel["BufferLoad"]  # flat updates lgkmcnt counts = hard to schedule writes and loads?
-      self.states.scheduleIterAlg = kernel["_ScheduleIterAlg"]
+          and kernel["PrefetchGlobalRead"]
+      self.states.scheduleIterAlg = kernel["ScheduleIterAlg"]
     else:
       self.states.scheduleGlobalRead = 0
       self.states.scheduleLocalWrite = 0
