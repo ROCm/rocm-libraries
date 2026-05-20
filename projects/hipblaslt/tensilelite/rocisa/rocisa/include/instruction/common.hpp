@@ -1490,6 +1490,110 @@ namespace rocisa
         }
     };
 
+    // global_wb scope:SCOPE_DEV emits a device-scope writeback fence on
+    // archs that have an L2 partitioned across CUs/XCDs (e.g. gfx1250). It
+    // has no register operands; the only encoded modifier is the cache
+    // scope. Used by the StreamK partial-tile release sequence.
+    struct GlobalWb : public Instruction
+    {
+        CacheScope scope;
+
+        GlobalWb(CacheScope scope = CacheScope::SCOPE_DEV, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , scope(scope)
+        {
+            setInst("global_wb");
+        }
+
+        GlobalWb(const GlobalWb& other)
+            : Instruction(other)
+            , scope(other.scope)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalWb>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr;
+            if(scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
+            }
+            return formatWithComment(kStr);
+        }
+    };
+
+    // global_inv scope:SCOPE_DEV emits a device-scope invalidate fence on
+    // archs whose L2 is partitioned across CUs/XCDs (e.g. gfx1250). It has
+    // no register operands; the only encoded modifier is the cache scope.
+    // Used by the StreamK partial-tile acquire sequence.
+    struct GlobalInv : public Instruction
+    {
+        CacheScope scope;
+
+        GlobalInv(CacheScope scope = CacheScope::SCOPE_DEV, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , scope(scope)
+        {
+            setInst("global_inv");
+        }
+
+        GlobalInv(const GlobalInv& other)
+            : Instruction(other)
+            , scope(other.scope)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalInv>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr;
+            if(scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
+            }
+            return formatWithComment(kStr);
+        }
+    };
+
     struct SNop : public Instruction
     {
         SNop(int waitState, const std::string& comment = "")
@@ -2125,6 +2229,66 @@ namespace rocisa
 
     private:
         int dscnt;
+    };
+
+    // s_wait_xcnt N drains in-flight VMEM ops to defeat XNACK-replay
+    // reordering before a subsequent volatile/atomic VMEM op. Required on
+    // archs whose `RequiresXCntForVolatileVMEM` arch capability is set
+    // (e.g. gfx1250). The default `xcnt = 0` ("wait for all in-flight
+    // XNACK-replay tracking to drain") differs from the `-1` sentinel used
+    // by sibling `_SWait*cnt` classes because those are only emitted as
+    // members of the `SWaitCnt` composite (which uses `-1` to mean "skip
+    // this counter"); `SWaitXCnt` is a standalone wait, so the most useful
+    // default is the actual drain-everything immediate.
+    struct SWaitXCnt : public Instruction
+    {
+        SWaitXCnt(int xcnt = 0, const std::string& comment = "")
+            : Instruction(InstType::INST_SWAIT, comment)
+            , xcnt(xcnt)
+        {
+        }
+
+        SWaitXCnt(const SWaitXCnt& other)
+            : Instruction(other)
+            , xcnt(other.xcnt)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SWaitXCnt>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {xcnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {xcnt};
+        }
+
+        int getXcnt() const
+        {
+            return xcnt;
+        }
+
+        std::string toString() const override
+        {
+            const auto caps    = getAsmCaps();
+            const auto it      = caps.find("MaxXcnt");
+            const int  maxXcnt = (it != caps.end()) ? it->second : 63;
+            return formatWithComment("s_wait_xcnt " + std::to_string(std::min(xcnt, maxXcnt)));
+        }
+
+    private:
+        int xcnt;
     };
 
     struct SWaitCnt : public CompositeInstruction

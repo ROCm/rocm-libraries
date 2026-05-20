@@ -429,6 +429,8 @@ template <typename T>
         case DataType::INT8:
         case DataType::FP8_E4M3:
         case DataType::FP8_E5M2:
+        case DataType::FP8_E4M3_FNUZ:
+        case DataType::FP8_E5M2_FNUZ:
         {
             const uint8_t val = valueBytes[0];
             tensor->set_value(val);
