@@ -2146,6 +2146,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SLoadB64(dst=sgpr("AddressD", 2), base=sgpr("AddressD",2), soffset=sgpr(tmpSgpr), comment="load global buffer D address"))
           # Apply batch offset to AddressD for general batched mode
           if not kernel["ProblemType"]["StridedBatched"] and not kernel["ProblemType"]["GroupedGemm"]:
+            module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array before updating offset"))
             module.add(SAddU64(dst=sgpr("AddressD", 2), src0=sgpr("AddressD", 2), src1=sgpr("BatchOffsetD", 2), comment="add batch offset to D address"))
 
       # Only load C buffer address if Beta is used and potentially non-zero
@@ -2160,6 +2161,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr("AddressC",2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
             # Apply batch offset to AddressC for general batched mode
             if not kernel["ProblemType"]["StridedBatched"] and not kernel["ProblemType"]["GroupedGemm"]:
+              module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array before updating offset"))
               module.add(SAddU64(dst=sgpr("AddressC", 2), src0=sgpr("AddressC", 2), src1=sgpr("BatchOffsetC", 2), comment="add batch offset to C address"))
 
         module.add(endCheckLabel)
@@ -2181,7 +2183,9 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr("AddressB",2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))
         # Apply batch offset to AddressA and AddressB for general batched mode
         if not kernel["ProblemType"]["StridedBatched"] and not kernel["ProblemType"]["GroupedGemm"]:
+          module.add(SWaitCnt(kmcnt=1, comment="Wait for the AddressA Load from the Pointer Array before updating offset"))
           module.add(SAddU64(dst=sgpr("AddressA", 2), src0=sgpr("AddressA", 2), src1=sgpr("BatchOffsetA", 2), comment="add batch offset to A address"))
+          module.add(SWaitCnt(kmcnt=0, comment="Wait for the AddressB Load from the Pointer Array before updating offset"))
           module.add(SAddU64(dst=sgpr("AddressB", 2), src0=sgpr("AddressB", 2), src1=sgpr("BatchOffsetB", 2), comment="add batch offset to B address"))
 
     module.add(endCheckLabel)
