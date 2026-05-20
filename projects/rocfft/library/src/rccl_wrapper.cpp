@@ -203,28 +203,51 @@ rocfft_rccl_group_t::~rocfft_rccl_group_t()
     ncclGroupEnd();
 }
 
-void rocfft_rccl_comm_t::alltoall(const void*       sendbuf,
-                                  void*             recvbuf,
-                                  size_t            count,
-                                  int               device_id,
-                                  hipStream_t       stream,
-                                  rocfft_precision  precision,
-                                  rocfft_array_type array_type) const
+void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
+                                  const std::vector<void*>&       recvbufs,
+                                  const std::vector<hipStream_t>& streams,
+                                  size_t                          count,
+                                  rocfft_precision                precision,
+                                  rocfft_array_type               array_type) const
 {
-    ncclComm_t comm = get_comm(device_id);
+    const auto nranks = num_ranks();
+    if(sendbufs.size() != nranks || recvbufs.size() != nranks || streams.size() != nranks)
+        throw std::invalid_argument(
+            "rocfft_rccl_comm_t::alltoall: sendbufs/recvbufs/streams must each have size "
+            "num_ranks() ("
+            + std::to_string(nranks) + "); got sendbufs=" + std::to_string(sendbufs.size())
+            + ", recvbufs=" + std::to_string(recvbufs.size())
+            + ", streams=" + std::to_string(streams.size()));
 
-    ncclResult_t result = ncclAllToAll(sendbuf,
-                                       recvbuf,
-                                       count * (array_type_is_complex(array_type) ? 2 : 1),
-                                       get_nccl_dtype(precision),
-                                       comm,
-                                       stream);
+    // resolve precision/complex/device mapping once outside the loop
+    const auto devices    = get_devices();
+    const auto nccl_count = count * (array_type_is_complex(array_type) ? 2 : 1);
+    const auto dtype      = get_nccl_dtype(precision);
 
-    if(result != ncclSuccess)
+    // batch all per-device calls in a single RCCL group so they
+    // actually launch together (NCCL requires per-device calls
+    // inside ncclGroupStart/End for single-process multi-GPU).
+    // the rocfft_rccl_group_t destructor calls ncclGroupEnd even
+    // on exception, so a throw mid-loop won't leave a dangling
+    // open group.
     {
-        log_trace(__func__, "ncclAllToAll failed", result);
-        throw rocfft_rccl_exception_t("ncclAllToAll failed on device " + std::to_string(device_id)
-                                      + ": " + ncclGetErrorString(result));
+        rocfft_rccl_group_t group;
+
+        for(size_t r = 0; r < nranks; ++r)
+        {
+            rocfft_scoped_device dev(devices[r]);
+
+            ncclResult_t result = ncclAllToAll(
+                sendbufs[r], recvbufs[r], nccl_count, dtype, get_comm(devices[r]), streams[r]);
+
+            if(result != ncclSuccess)
+            {
+                log_trace(__func__, "ncclAllToAll failed", result);
+                throw rocfft_rccl_exception_t("ncclAllToAll failed on device "
+                                              + std::to_string(devices[r]) + ": "
+                                              + ncclGetErrorString(result));
+            }
+        }
     }
 }
 

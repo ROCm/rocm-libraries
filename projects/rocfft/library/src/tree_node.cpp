@@ -677,48 +677,34 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                  + " " + PrintArrayType(arrayType) + "\n");
     }
 
-    // collect send and recv pointers per device, indexed by RCCL rank.
-    // agents[r].{sendBuffer,recvBuffer} are distinct allocations on
-    // device devices[r], mirroring the MPI path.
-    std::vector<void*> send_ptrs(agents.size(), nullptr);
-    std::vector<void*> recv_ptrs(agents.size(), nullptr);
-    for(size_t r = 0; r < agents.size(); ++r)
-    {
-        rocfft_scoped_device dev(devices[r]);
-        send_ptrs[r] = agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank);
-        recv_ptrs[r] = agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank);
-    }
-
-    // RCCL collectives must be called from ALL devices simultaneously;
-    // use ncclGroupStart/End to batch all calls together.
+    // collect per-rank send/recv pointers and streams.  the wrapper
+    // requires each vector to be sized num_ranks() and indexed by
+    // RCCL rank; agents[] is already in that order (see constructor).
     //
     // Buffer layout (disjoint send/recv):
     //   sendBuffer:  slot[dst_rank] at offset dst_rank * count_per_rank
     //                (populated by the pack step antecedents)
     //   recvBuffer:  slot[src_rank] at offset src_rank * count_per_rank
     //                (populated by the collective; read by unpack step)
+    std::vector<const void*> send_ptrs(agents.size(), nullptr);
+    std::vector<void*>       recv_ptrs(agents.size(), nullptr);
+    std::vector<hipStream_t> streams(agents.size(), nullptr);
+    for(size_t r = 0; r < agents.size(); ++r)
     {
-        rocfft_rccl_group_t group; // ncclGroupStart called in constructor
-
-        for(size_t r = 0; r < agents.size(); ++r)
-        {
-            rocfft_scoped_device dev(devices[r]);
-
-            rccl.alltoall(send_ptrs[r],
-                          recv_ptrs[r],
-                          count_per_rank,
-                          devices[r],
-                          agents[r].stream,
-                          precision,
-                          arrayType);
-        }
-        // ncclGroupEnd called in destructor - this will actually launch the collective
+        rocfft_scoped_device dev(devices[r]);
+        send_ptrs[r] = agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank);
+        recv_ptrs[r] = agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank);
+        streams[r]   = agents[r].stream;
     }
 
-    // collective work is now enqueued on each agent's stream by
-    // ncclGroupEnd above.  record a completion event per agent so
-    // Wait() can synchronize on events (matching every other
-    // MultiPlanItem) rather than on streams directly.
+    // wrapper owns the ncclGroupStart/End scope and per-call
+    // hipSetDevice, so a single call fires the whole collective.
+    rccl.alltoall(send_ptrs, recv_ptrs, streams, count_per_rank, precision, arrayType);
+
+    // collective work is now enqueued on each agent's stream.
+    // record a completion event per agent so Wait() can synchronize
+    // on events (matching every other MultiPlanItem) rather than on
+    // streams directly.
     for(size_t r = 0; r < agents.size(); ++r)
     {
         rocfft_scoped_device dev(devices[r]);

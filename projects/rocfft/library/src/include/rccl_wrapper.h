@@ -92,18 +92,26 @@ public:
     // in a well-defined order matching the NCCL rank numbering.
     std::vector<int> get_devices() const;
 
-    // all-to-all with uniform counts.  count is in elements of the
-    // logical rocFFT type described by (precision, array_type); the
-    // wrapper internally maps this to the matching ncclDataType_t and
-    // adjusts the element count for complex/planar layouts.
-    // throws rocfft_rccl_exception_t on RCCL failure.
-    void alltoall(const void*       sendbuf,
-                  void*             recvbuf,
-                  size_t            count,
-                  int               device_id,
-                  hipStream_t       stream,
-                  rocfft_precision  precision,
-                  rocfft_array_type array_type) const;
+    // all-to-all with uniform counts across every rank.  the three
+    // per-rank vectors (sendbufs / recvbufs / streams) must each
+    // have size num_ranks() and be indexed by RCCL rank; the
+    // wrapper owns the ncclGroupStart/End scope and sets the
+    // current device per call internally, so callers cannot
+    // accidentally launch a partial collective.
+    //
+    // count is in elements of the logical rocFFT type described by
+    // (precision, array_type); the wrapper internally maps this to
+    // the matching ncclDataType_t and adjusts the element count for
+    // complex/planar layouts.
+    //
+    // throws std::invalid_argument if any vector size mismatches
+    // num_ranks(); throws rocfft_rccl_exception_t on RCCL failure.
+    void alltoall(const std::vector<const void*>& sendbufs,
+                  const std::vector<void*>&       recvbufs,
+                  const std::vector<hipStream_t>& streams,
+                  size_t                          count,
+                  rocfft_precision                precision,
+                  rocfft_array_type               array_type) const;
 
     // point-to-point send.  throws rocfft_rccl_exception_t on RCCL failure.
     void send(const void*       sendbuf,
