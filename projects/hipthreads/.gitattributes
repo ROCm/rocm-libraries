@@ -1,3 +1,5 @@
 *.tgz filter=lfs diff=lfs merge=lfs -text
 *.tar.gz filter=lfs diff=lfs merge=lfs -text
 *.mtx filter=lfs diff=lfs merge=lfs -text
+
+*.hip linguist-language=cpp
