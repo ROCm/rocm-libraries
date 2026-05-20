@@ -562,8 +562,7 @@ namespace TensileLite
         TensorDescriptor const& compressed = problem.compressed();
         TensorDescriptor const& metadata   = problem.metadata();
 
-        auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
-            = calculateAutoWGM(problem, hardware, sk.grid);
+        auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, hardware, sk.grid);
         auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
             = calculateAutoStaggerU(problem, hardware, sk.grid, autoWGM);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
@@ -876,7 +875,6 @@ namespace TensileLite
                                           autoWGM,
                                           autoWGMXCC,
                                           autoWGMXCCCHUNK,
-                                          autoWGMXCCSPLITK,
                                           autoStaggerUMapping,
                                           autoStaggerU,
                                           autoStaggerUStrideShift,
@@ -1050,7 +1048,7 @@ namespace TensileLite
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
 
-    std::tuple<int32_t, size_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
+    std::tuple<int32_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
         Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
     {
         // Hardware
@@ -1058,20 +1056,19 @@ namespace TensileLite
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
 
         // Default WGM
-        int32_t  defaultWGM          = 1;
-        uint32_t defaultWGMXCC       = 1;
-        uint32_t defaultWGMXCCCHUNK  = 0;
-        uint32_t defaultWGMXCCSPLITK = 0;
+        int32_t  defaultWGM         = 1;
+        uint32_t defaultWGMXCC      = 1;
+        uint32_t defaultWGMXCCCHUNK = 0;
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
            && sizeMapping.workGroupMappingXCC == -1)
         {
             auto sizes = problem.problemSizes();
-            // Try to find cached WGM, WGMXCC, WGMXCCCHUNK, WGMXCCSPLITK
+            // Try to find cached WGM and WGMXCC and WGMXCCCHUNK
             auto cachedWGMParams = wgmParamsCache.find(problem);
 
-            if(cachedWGMParams == std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX))
+            if(cachedWGMParams == std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX))
             {
                 if(sizes.size() >= 4)
                 {
@@ -1093,26 +1090,22 @@ namespace TensileLite
                                                             origami_config,
                                                             skgrid);
 
-                    defaultWGM          = prediction_results.wgm;
-                    defaultWGMXCC       = prediction_results.wgmxcc;
-                    defaultWGMXCCCHUNK  = prediction_results.wgmxccchunk;
-                    defaultWGMXCCSPLITK = prediction_results.wgmxccsplitk;
+                    defaultWGM         = prediction_results.wgm;
+                    defaultWGMXCC      = prediction_results.wgmxcc;
+                    defaultWGMXCCCHUNK = prediction_results.wgmxccchunk;
 
                     // Add to cache only if dynamically calculated.
                     wgmParamsCache.add(
-                        std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK),
-                        problem);
+                        std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK), problem);
                     if(Debug::Instance().printPropertyEvaluation())
                         std::cout << "AutoWGM - WGM: " << defaultWGM
                                   << ", WGMXCC: " << defaultWGMXCC
-                                  << ", WGMXCCCHUNK: " << defaultWGMXCCCHUNK
-                                  << ", WGMXCCSPLITK: " << defaultWGMXCCSPLITK << std::endl;
+                                  << ", WGMXCCCHUNK: " << defaultWGMXCCCHUNK << std::endl;
                 }
             }
             else
             {
-                std::tie(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK)
-                    = cachedWGMParams;
+                std::tie(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK) = cachedWGMParams;
             }
         }
         else
@@ -1135,10 +1128,7 @@ namespace TensileLite
                 defaultWGMXCC = sizeMapping.workGroupMappingXCC;
 
             // Default WGMXCCCHUNK
-            defaultWGMXCCCHUNK  = 0;
-
-            // Default WGMXCCSPLITK
-            defaultWGMXCCSPLITK = 0;
+            defaultWGMXCCCHUNK = 0;
         }
 
         // If values are explicitly specified at runtime, they override predictions and default values
@@ -1148,32 +1138,21 @@ namespace TensileLite
             defaultWGMXCC = pAMDGPU->fixedWGMXCC;
         if(pAMDGPU->fixedWGMXCCCHUNK != std::numeric_limits<size_t>::max())
             defaultWGMXCCCHUNK = pAMDGPU->fixedWGMXCCCHUNK;
-        if(pAMDGPU->fixedWGMXCCSPLITK != std::numeric_limits<size_t>::max())
-            defaultWGMXCCSPLITK = pAMDGPU->fixedWGMXCCSPLITK;
 
         // These range assertions only apply when SpaceFillingCurve (SFC) is not used.
         // When SFC is enabled, workGroupMapping contains a packed 32-bit encoding of
         // grid dimensions (SFCWGM) which can exceed the normal WGM range.
         if(!internalArgsSupport.useSFC)
         {
-            if(sizeMapping.workGroupMappingXCC == -1)
-            {
-                // New bit layout: 10 K + 8 chunk + 4 XCC + 10 WGM
-                assert(std::fabs(defaultWGM) < 512);   // 10-bit signed
-                assert(defaultWGMXCC < 16);             // 4 bits
-                assert(defaultWGMXCCCHUNK < 256);       // 8 bits
-                assert(defaultWGMXCCSPLITK < 1024);     // 10 bits
-            }
-            else
-            {
-                // Old bit layout (used when WorkGroupMappingXCC != -1)
-                assert(std::fabs(defaultWGM) < 1024);
-                assert(defaultWGMXCC >= 0 && defaultWGMXCC < 64);
-                assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
-            }
+            // WGM should be in this range: [-1023, -1022, ..., -1, 0, 1, ..., 1023]
+            assert(std::fabs(defaultWGM) < 1024);
+            // WGMXCC should be in this range: [0, 1, 2, 3, ..., 63]
+            assert(defaultWGMXCC >= 0 && defaultWGMXCC < 64);
+            // WGMXCCCHUNK should be in this range: [0, 1, 2, 3, ..., 1023]
+            assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
         }
 
-        return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK);
+        return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK);
     }
 
     std::tuple<size_t, size_t, size_t> ContractionSolution::calculateAutoStaggerU(
@@ -1352,7 +1331,6 @@ namespace TensileLite
                                          int32_t                             autoWGM,
                                          size_t                              autoWGMXCC,
                                          size_t                              autoWGMXCCCHUNK,
-                                         size_t                              autoWGMXCCSPLITK,
                                          size_t                              autoStaggerUMapping,
                                          size_t                              autoStaggerU,
                                          size_t   autoStaggerUStrideShift,
@@ -1372,7 +1350,6 @@ namespace TensileLite
         int32_t        wgm                 = param.wgm() != 0 ? param.wgm() : autoWGM;
         size_t         wgmxcc              = param.wgmxcc() != 0 ? param.wgmxcc() : autoWGMXCC;
         size_t         wgmxccchunk         = autoWGMXCCCHUNK;
-        size_t         wgmxccsplitk        = autoWGMXCCSPLITK;
         int32_t        wgmxccg             = -1; // initialized -1
         size_t         staggerUMapping     = autoStaggerUMapping;
         size_t         staggerU            = autoStaggerU;
@@ -1415,18 +1392,9 @@ namespace TensileLite
                 // if using WGMXCCn1, wgmxccg is not used. Repurpose it for wgmxccchunk
                 if(sizeMapping.workGroupMappingXCC == -1)
                 {
-                    // New bit layout: K(31:22) | chunk(21:14) | xcc(13:10) | wgm(9:0)
-                    internalArg1 = internalArg1
-                                   | ((wgmxccsplitk & 0x3FF) << 22)
-                                   | ((wgmxccchunk & 0xFF) << 14)
-                                   | ((wgmxcc & 0xF) << 10)
-                                   | (wgm & 0x3FF);
+                    wgmxccg = wgmxccchunk;
                 }
-                else
-                {
-                    // Old bit layout: wgmxccg(31:22) | wgmxcc(21:16) | wgm(15:0)
-                    internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
-                }
+                internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
             }
             else if(internalArgsSupport.version == 2 && internalArgsSupport.useSFC)
             {
@@ -1564,15 +1532,14 @@ namespace TensileLite
 
         if(internalArgsSupport.useUniversalArgs)
         {
-            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK]
                 = calculateAutoWGM(problem, &hardware, sk.grid);
             auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
                 = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
             if(T_Debug)
             {
                 std::cout << "WGM: " << autoWGM << ", WGMXCC: " << autoWGMXCC
-                          << ", WGMXCCCHUNK: " << autoWGMXCCCHUNK
-                          << ", WGMXCCSPLITK: " << autoWGMXCCSPLITK << std::endl;
+                          << ", WGMXCCCHUNK: " << autoWGMXCCCHUNK << std::endl;
                 std::cout << "StaggerUMapping: " << autoStaggerUMapping
                           << ", StaggerU: " << autoStaggerU
                           << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
@@ -1588,7 +1555,6 @@ namespace TensileLite
                                             autoWGM,
                                             autoWGMXCC,
                                             autoWGMXCCCHUNK,
-                                            autoWGMXCCSPLITK,
                                             autoStaggerUMapping,
                                             autoStaggerU,
                                             autoStaggerUStrideShift,
@@ -1605,7 +1571,6 @@ namespace TensileLite
                                             autoWGM,
                                             autoWGMXCC,
                                             autoWGMXCCCHUNK,
-                                            autoWGMXCCSPLITK,
                                             autoStaggerUMapping,
                                             autoStaggerU,
                                             autoStaggerUStrideShift,
@@ -1782,7 +1747,7 @@ namespace TensileLite
 
         if constexpr(!std::is_same<KA, KernelArgumentsCounter>::value)
         {
-            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK]
                 = calculateAutoWGM(problems[0], &hardware, 0);
             auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
                 = calculateAutoStaggerU(problems[0], &hardware, 0, autoWGM);
@@ -1803,7 +1768,6 @@ namespace TensileLite
                                            autoWGM,
                                            autoWGMXCC,
                                            autoWGMXCCCHUNK,
-                                           autoWGMXCCSPLITK,
                                            autoStaggerUMapping,
                                            autoStaggerU,
                                            autoStaggerUStrideShift,
@@ -1836,7 +1800,6 @@ namespace TensileLite
                                           autoWGM,
                                           autoWGMXCC,
                                           autoWGMXCCCHUNK,
-                                          autoWGMXCCSPLITK,
                                           autoStaggerUMapping,
                                           autoStaggerU,
                                           autoStaggerUStrideShift,

@@ -63,7 +63,6 @@ namespace TensileLite
         , fixedWGM(getFixedWGM())
         , fixedWGMXCC(getFixedWGMXCC())
         , fixedWGMXCCCHUNK(getFixedWGMXCCCHUNK())
-        , fixedWGMXCCSPLITK(getFixedWGMXCCSPLITK())
         , fixedStaggerUMapping(getFixedStaggerUMapping())
         , fixedStaggerU(getFixedStaggerU())
         , fixedStaggerUStrideShift(getFixedStaggerUStrideShift())
