@@ -428,10 +428,11 @@ void init_containers(nb::module_ m)
             });
 
     nb::class_<rocisa::DPPModifiers, rocisa::Container>(m_con, "DPPModifiers")
-        .def(nb::init<int, int, int>(),
+        .def(nb::init<int, int, int, const std::vector<int>&>(),
              nb::arg("row_shr")    = -1,
              nb::arg("row_bcast")  = -1,
-             nb::arg("bound_ctrl") = -1)
+             nb::arg("bound_ctrl") = -1,
+             nb::arg("quad_perm")  = std::vector<int>{})
         .def("__str__", &rocisa::DPPModifiers::toString);
 
     nb::class_<rocisa::VOP3PModifiers, rocisa::Container>(m_con, "VOP3PModifiers")
@@ -475,6 +476,20 @@ void init_containers(nb::module_ m)
         .def("__setstate__", [](rocisa::EXEC& self, std::tuple<bool> t) {
             new(&self) rocisa::EXEC(std::get<0>(t));
         });
+
+    nb::class_<rocisa::EXECLO, rocisa::Container>(m_con, "EXECLO")
+        .def(nb::init<>())
+        .def("__str__", &rocisa::EXECLO::toString)
+        .def("__deepcopy__", [](const rocisa::EXECLO& self, nb::dict&) { return rocisa::EXECLO(self); })
+        .def("__getstate__", [](const rocisa::EXECLO&) { return std::make_tuple(); })
+        .def("__setstate__", [](rocisa::EXECLO& self, std::tuple<> t) { new(&self) rocisa::EXECLO(); });
+
+    nb::class_<rocisa::EXECHI, rocisa::Container>(m_con, "EXECHI")
+        .def(nb::init<>())
+        .def("__str__", &rocisa::EXECHI::toString)
+        .def("__deepcopy__", [](const rocisa::EXECHI& self, nb::dict&) { return rocisa::EXECHI(self); })
+        .def("__getstate__", [](const rocisa::EXECHI&) { return std::make_tuple(); })
+        .def("__setstate__", [](rocisa::EXECHI& self, std::tuple<> t) { new(&self) rocisa::EXECHI(); });
 
     nb::class_<rocisa::VCC, rocisa::Container>(m_con, "VCC")
         .def(nb::init<bool>(), nb::arg("setHi") = false)

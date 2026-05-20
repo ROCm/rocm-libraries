@@ -12,12 +12,14 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -26,12 +28,15 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
+#include "fusilli_serialized_plan_payload.h"
 #include "graph_import.h"
 #include "hipdnn_engine_plugin_execution_context.h"
 #include "utils.h"
@@ -42,6 +47,50 @@ std::vector<std::string> capturedLogMessages;
 std::vector<hipdnnSeverity_t> capturedLogSeverities;
 std::mutex logMutex;
 std::condition_variable logConditionVariable;
+
+class EnginePluginHandle {
+public:
+  static EnginePluginHandle create() {
+    hipdnnEnginePluginHandle_t handle = nullptr;
+    EXPECT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_NE(handle, nullptr);
+    return EnginePluginHandle(handle);
+  }
+
+  explicit EnginePluginHandle(hipdnnEnginePluginHandle_t handle = nullptr)
+      : handle_(handle) {}
+
+  EnginePluginHandle(const EnginePluginHandle &) = delete;
+  EnginePluginHandle &operator=(const EnginePluginHandle &) = delete;
+
+  EnginePluginHandle(EnginePluginHandle &&other) noexcept
+      : handle_(std::exchange(other.handle_, nullptr)) {}
+
+  EnginePluginHandle &operator=(EnginePluginHandle &&other) noexcept {
+    if (this != &other) {
+      reset();
+      handle_ = std::exchange(other.handle_, nullptr);
+    }
+    return *this;
+  }
+
+  ~EnginePluginHandle() { reset(); }
+
+  hipdnnEnginePluginHandle_t get() const { return handle_; }
+
+  operator hipdnnEnginePluginHandle_t() const { return get(); }
+
+  void reset(hipdnnEnginePluginHandle_t handle = nullptr) {
+    if (handle_ != nullptr) {
+      EXPECT_EQ(hipdnnEnginePluginDestroy(handle_),
+                HIPDNN_PLUGIN_STATUS_SUCCESS);
+    }
+    handle_ = handle;
+  }
+
+private:
+  hipdnnEnginePluginHandle_t handle_;
+};
 
 void testLoggingCallback(hipdnnSeverity_t severity, const char *msg) {
   // hipDNN sets spdlog up to log in a separate thread, so we need to put our
@@ -115,6 +164,14 @@ buildMatmulActivGraph(const std::vector<int64_t> &aDims,
                              serErr.get_message());
   }
   return serializedGraph;
+}
+
+flatbuffers::DetachedBuffer buildFusilliEngineConfig() {
+  flatbuffers::FlatBufferBuilder configBuilder;
+  auto engineConfig = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(
+      configBuilder, hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID);
+  configBuilder.Finish(engineConfig);
+  return configBuilder.Release();
 }
 
 // Build an inference-phase rmsnorm graph using the frontend API.
@@ -362,11 +419,47 @@ TEST(TestFusilliPluginApi, GetAllEngineIdsNullNumEngines) {
   EXPECT_GT(strlen(errorStr), 0u);
 }
 
+TEST(TestFusilliPluginApi, GetEngineDetailsIncludesBehaviorNotes) {
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
+
+  auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+  hipdnnPluginConstData_t opGraph;
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  hipdnnPluginConstData_t engineDetails{nullptr, 0};
+  ASSERT_EQ(hipdnnEnginePluginGetEngineDetails(
+                handle, hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID, &opGraph,
+                &engineDetails),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  auto destroyEngineDetails = [&handle](hipdnnPluginConstData_t *details) {
+    EXPECT_EQ(hipdnnEnginePluginDestroyEngineDetails(handle, details),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+  };
+  std::unique_ptr<hipdnnPluginConstData_t, decltype(destroyEngineDetails)>
+      engineDetailsGuard(&engineDetails, destroyEngineDetails);
+
+  const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper
+      wrapper(engineDetails.ptr, engineDetails.size);
+  ASSERT_TRUE(wrapper.isValid());
+  EXPECT_EQ(wrapper.engineId(), hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID);
+
+  const auto behaviorNotes = wrapper.behaviorNotes();
+  ASSERT_EQ(behaviorNotes.size(), 3u);
+  EXPECT_EQ(behaviorNotes[0],
+            static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION));
+  EXPECT_EQ(
+      behaviorNotes[1],
+      static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY));
+  EXPECT_EQ(behaviorNotes[2],
+            static_cast<int32_t>(
+                HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION));
+}
+
 TEST(TestFusilliPluginApi, GetApplicableEngineIds) {
-  // Create plugin handle.
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   // Create a serialized hipDNN batch norm graph.
   auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
@@ -420,10 +513,8 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIds) {
 }
 
 TEST(TestFusilliPluginApi, GetApplicableEngineIdsConvDGrad) {
-  // Create plugin handle.
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   std::array<int64_t, 5> engineIDs;
   uint32_t numEngines = 0;
@@ -462,15 +553,11 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsConvDGrad) {
                 /*num_engines=*/&numEngines),
             HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_EQ(numEngines, 0);
-
-  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 TEST(TestFusilliPluginApi, GetApplicableEngineIdsConvPointwise) {
-  // Create plugin handle.
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   std::array<int64_t, 5> engineIDs;
   uint32_t numEngines = 0;
@@ -506,15 +593,11 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsConvPointwise) {
     uint32_t expectedEngines = modeSupported ? 1 : 0;
     ASSERT_EQ(numEngines, expectedEngines);
   }
-
-  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 TEST(TestFusilliPluginApi, GetApplicableEngineIdsConvBiasActiv) {
-  // Create plugin handle.
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   std::array<int64_t, 5> engineIDs;
   uint32_t numEngines = 0;
@@ -545,13 +628,11 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsConvBiasActiv) {
     uint32_t expectedEngines = activSupported ? 1 : 0;
     ASSERT_EQ(numEngines, expectedEngines);
   }
-
-  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 TEST(TestFusilliPluginApi, GetApplicableEngineIdsMatmulPointwise) {
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   std::array<int64_t, 5> engineIDs;
   uint32_t numEngines = 0;
@@ -579,13 +660,11 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsMatmulPointwise) {
     uint32_t expectedEngines = modeSupported ? 1 : 0;
     ASSERT_EQ(numEngines, expectedEngines);
   }
-
-  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 TEST(TestFusilliPluginApi, GetApplicableEngineIdsInt4NonBatchedMatmul) {
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   // Non-batched (2D) mixed-precision int4 x fp16 matmul is not supported —
   // mixed element types require rank-3 tensors (torch.bmm). The plugin should
@@ -633,15 +712,11 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsInt4NonBatchedMatmul) {
                 handle, &opGraph, engineIDs.data(), 5, &numEngines),
             HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_EQ(numEngines, 0);
-
-  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 TEST(TestFusilliPluginApi, CreateExecutionContext) {
-  // Create plugin handle.
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   // UIDs.
   int64_t xUID = 1;
@@ -728,13 +803,130 @@ TEST(TestFusilliPluginApi, CreateExecutionContext) {
   // Clean up.
   EXPECT_EQ(hipdnnEnginePluginDestroyExecutionContext(handle, executionContext),
             HIPDNN_PLUGIN_STATUS_SUCCESS);
-  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestFusilliPluginApi, SerializeExecutionContextAddsPayloadHeader) {
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
+
+  auto serializedGraph = buildMatmulActivGraph(
+      {4, 8}, {8, 5}, {4, 5}, hipdnn_frontend::PointwiseMode::RELU_FWD);
+  hipdnnPluginConstData_t opGraph{serializedGraph.data(),
+                                  serializedGraph.size()};
+
+  auto engineConfigBuffer = buildFusilliEngineConfig();
+  hipdnnPluginConstData_t engineConfig{engineConfigBuffer.data(),
+                                       engineConfigBuffer.size()};
+
+  hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreateExecutionContext(
+                handle, &engineConfig, &opGraph, &executionContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(executionContext, nullptr);
+
+  hipdnnPluginConstData_t serializedContext{nullptr, 0};
+  ASSERT_EQ(hipdnnEnginePluginSerializeExecutionContext(
+                handle, executionContext, &serializedContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(serializedContext.ptr, nullptr);
+  ASSERT_GT(serializedContext.size,
+            fusilli_plugin::serialized_plan_payload::HEADER_SIZE);
+
+  const auto *bytes = static_cast<const uint8_t *>(serializedContext.ptr);
+  EXPECT_EQ(std::memcmp(bytes,
+                        fusilli_plugin::serialized_plan_payload::MAGIC.data(),
+                        fusilli_plugin::serialized_plan_payload::MAGIC.size()),
+            0);
+  EXPECT_EQ(bytes[8], static_cast<uint8_t>(1));
+  EXPECT_EQ(bytes[9], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[12], static_cast<uint8_t>(1));
+  EXPECT_EQ(bytes[13], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[14], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[15], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[16],
+            static_cast<uint8_t>(
+                fusilli_plugin::serialized_plan_payload::HEADER_SIZE));
+  EXPECT_EQ(bytes[17], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[18], static_cast<uint8_t>(0));
+  EXPECT_EQ(bytes[19], static_cast<uint8_t>(0));
+
+  EXPECT_EQ(hipdnnEnginePluginDestroySerializedExecutionContext(
+                handle, &serializedContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  EXPECT_EQ(hipdnnEnginePluginDestroyExecutionContext(handle, executionContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestFusilliPluginApi,
+     CreateExecutionContextFromSerializedRejectsUnsupportedPayloadVersion) {
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
+
+  auto serializedGraph = buildMatmulActivGraph(
+      {4, 8}, {8, 5}, {4, 5}, hipdnn_frontend::PointwiseMode::RELU_FWD);
+  hipdnnPluginConstData_t opGraph{serializedGraph.data(),
+                                  serializedGraph.size()};
+
+  auto engineConfigBuffer = buildFusilliEngineConfig();
+  hipdnnPluginConstData_t engineConfig{engineConfigBuffer.data(),
+                                       engineConfigBuffer.size()};
+
+  hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreateExecutionContext(
+                handle, &engineConfig, &opGraph, &executionContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(executionContext, nullptr);
+
+  hipdnnPluginConstData_t serializedContext{nullptr, 0};
+  ASSERT_EQ(hipdnnEnginePluginSerializeExecutionContext(
+                handle, executionContext, &serializedContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(serializedContext.ptr, nullptr);
+
+  std::vector<uint8_t> incompatiblePayload(
+      static_cast<const uint8_t *>(serializedContext.ptr),
+      static_cast<const uint8_t *>(serializedContext.ptr) +
+          serializedContext.size);
+  incompatiblePayload[8] = 2;
+  incompatiblePayload[9] = 0;
+
+  EXPECT_EQ(hipdnnEnginePluginDestroySerializedExecutionContext(
+                handle, &serializedContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  EXPECT_EQ(hipdnnEnginePluginDestroyExecutionContext(handle, executionContext),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+  hipdnnPluginConstData_t incompatibleSerializedContext{
+      incompatiblePayload.data(), incompatiblePayload.size()};
+  hipdnnEnginePluginExecutionContext_t restoredExecutionContext = nullptr;
+  EXPECT_EQ(
+      hipdnnEnginePluginCreateExecutionContextFromSerialized(
+          handle, &incompatibleSerializedContext, &restoredExecutionContext),
+      HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+  EXPECT_EQ(restoredExecutionContext, nullptr);
+}
+
+TEST(TestFusilliPluginApi,
+     CreateExecutionContextFromSerializedRejectsLegacyRawGraphPayload) {
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
+
+  auto serializedGraph = buildMatmulActivGraph(
+      {4, 8}, {8, 5}, {4, 5}, hipdnn_frontend::PointwiseMode::RELU_FWD);
+  hipdnnPluginConstData_t rawGraphPayload{serializedGraph.data(),
+                                          serializedGraph.size()};
+
+  hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
+  EXPECT_EQ(hipdnnEnginePluginCreateExecutionContextFromSerialized(
+                handle, &rawGraphPayload, &executionContext),
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+  EXPECT_EQ(executionContext, nullptr);
 }
 
 TEST(TestFusilliPluginApi, SetStreamSuccess) {
   // Create plugin handle.
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   // Create a HIP stream.
   hipStream_t stream;
@@ -746,7 +938,6 @@ TEST(TestFusilliPluginApi, SetStreamSuccess) {
 
   // Clean up.
   EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
-  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 TEST(TestFusilliPluginApi, SetStreamNullHandle) {
@@ -769,9 +960,8 @@ TEST(TestFusilliPluginApi, SetStreamNullHandle) {
 }
 
 TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   std::array<int64_t, 5> engineIDs;
   uint32_t numEngines = 0;
@@ -843,14 +1033,11 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
                 handle, &opGraph, engineIDs.data(), 5, &numEngines),
             HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_EQ(numEngines, 0);
-
-  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 TEST(TestFusilliPluginApi, GetApplicableEngineIdsRmsnorm) {
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   std::array<int64_t, 5> engineIDs;
   uint32_t numEngines = 0;
@@ -867,16 +1054,13 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsRmsnorm) {
             HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_EQ(numEngines, 1);
   ASSERT_EQ(engineIDs[0], hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID);
-
-  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 // Fusilli does not yet support TRAINING phase for rmsnorm. The plugin
 // should decline to claim such a graph.
 TEST(TestFusilliPluginApi, GetApplicableEngineIdsRmsnormTrainingUnsupported) {
-  hipdnnEnginePluginHandle_t handle = nullptr;
-  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
+  auto handle = EnginePluginHandle::create();
+  ASSERT_NE(handle.get(), nullptr);
 
   std::array<int64_t, 5> engineIDs;
   uint32_t numEngines = 0;
@@ -890,8 +1074,6 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsRmsnormTrainingUnsupported) {
                 handle, &opGraph, engineIDs.data(), 5, &numEngines),
             HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_EQ(numEngines, 0);
-
-  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 TEST(TestFusilliPluginApi, SetLogLevelSuccess) {

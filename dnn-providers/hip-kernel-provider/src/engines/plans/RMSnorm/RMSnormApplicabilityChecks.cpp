@@ -69,19 +69,22 @@ void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>&
                                                      const std::vector<int64_t>& affineTensorIds,
                                                      const std::vector<int64_t>& statTensorIds)
 {
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedIOTypes{
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedIOTypes{
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF};
 
-    validateConsistentDataTypes(ioTensorIds,
-                                allowedIOTypes,
-                                "RMSnorm implementation supports only FLOAT, HALF, and BFLOAT16 "
-                                "data types for x & y tensors.",
-                                "All IO tensors for RMSnorm must have the same data type.");
+    for(const auto ioTensorId : ioTensorIds)
+    {
+        const auto& tensorAttr = hip_kernel_utils::findTensorAttributes(_tensorMap, ioTensorId);
+        validateDataTypeIsSupported(tensorAttr.data_type(),
+                                    allowedIOTypes,
+                                    "RMSnorm implementation supports only FLOAT, HALF, and "
+                                    "BFLOAT16 data types for x and y tensors.");
+    }
 
     // Only fp32 compute type is supported for now
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedComputeTypes{
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedComputeTypes{
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
 
     };
@@ -90,8 +93,13 @@ void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>&
                                 "RMSnorm affine tensors use unsupported data type.",
                                 "All affine tensors for RMSnorm must have the same data type.");
 
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedStatTypes{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF};
+
     validateConsistentDataTypes(statTensorIds,
-                                allowedComputeTypes,
+                                allowedStatTypes,
                                 "RMSnorm stat tensors use unsupported data type.",
                                 "All stat tensors for RMSnorm must have the same data type.");
 }
@@ -113,25 +121,57 @@ void RMSnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& io
     validateConsistentShapes(
         ioTensorIds, ioDims, "All IO tensors for RMSnorm must have the same shape.");
 
-    const std::vector<int64_t> affineDims = hipdnn_data_sdk::utilities::getDerivedShape(ioDims);
+    const auto& affineTensorAttr
+        = hip_kernel_utils::findTensorAttributes(_tensorMap, affineTensorIds[0]);
+    const std::vector<int64_t> affineDims(affineTensorAttr.dims()->begin(),
+                                          affineTensorAttr.dims()->end());
     validateConsistentShapes(affineTensorIds,
                              affineDims,
-                             "Scale and bias tensors for RMSnorm must have channel-only shape "
-                             "derived from IO tensor shape.");
+                             "Scale and bias tensors for RMSnorm must have the same shape.");
 
-    // inv_rms should get norm stats shape [N, 1, H, W]
+    checkAffineNormalizedShape(affineDims, ioDims);
+
+    // inv_rms shapes is derived from scale and input:
+    // Where scale has a non-1 dim, inv_rms gets 1 (normalized dimension collapses).
+    // Where scale has dim 1, inv_rms keeps the input dim.
     std::vector<int64_t> invRMSDims = ioDims;
-    invRMSDims[1] = 1;
-    validateConsistentShapes(statTensorIds,
-                             invRMSDims,
-                             "RMS variance tensor for RMSnorm must have single channel shape "
-                             "derived from IO tensor shape.");
+    for(size_t i = 0; i < invRMSDims.size(); ++i)
+    {
+        if(affineDims[i] != 1)
+        {
+            invRMSDims[i] = 1;
+        }
+    }
+    validateConsistentShapes(
+        statTensorIds,
+        invRMSDims,
+        "RMS variance tensor for RMSnorm must be derived from scale and IO shape.");
+}
+
+void RMSnormValidator::checkAffineNormalizedShape(const std::vector<int64_t>& affineDims,
+                                                  const std::vector<int64_t>& ioDims)
+{
+    const auto [scaleMismatch, _]
+        = std::mismatch(affineDims.rbegin(), affineDims.rend(), ioDims.rbegin(), ioDims.rend());
+    const auto matchCount = static_cast<size_t>(std::distance(affineDims.rbegin(), scaleMismatch));
+    const size_t normalizeDim
+        = (matchCount == affineDims.size()) ? 1 : affineDims.size() - matchCount;
+
+    for(unsigned i = 0; i < normalizeDim; ++i)
+    {
+        if(affineDims[i] != 1)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "Affine tensors not correctly normalized");
+        }
+    }
 }
 
 void RMSnormValidator::checkTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& rmsNormAttr)
 {
-    std::vector<int64_t> ioTensorIds = {rmsNormAttr.x_tensor_uid(), rmsNormAttr.y_tensor_uid()};
+    const std::vector<int64_t> ioTensorIds
+        = {rmsNormAttr.x_tensor_uid(), rmsNormAttr.y_tensor_uid()};
     std::vector<int64_t> affineTensorIds = {rmsNormAttr.scale_tensor_uid()};
     if(rmsNormAttr.bias_tensor_uid().has_value())
     {
@@ -152,21 +192,18 @@ void RMSnormValidator::checkTensorConfigSupported(
 void RMSnormValidator::checkBwdTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr)
 {
-    std::vector<int64_t> ioTensorIds = {rmsNormBwdAttr.dy_tensor_uid(),
-                                        rmsNormBwdAttr.x_tensor_uid(),
-                                        rmsNormBwdAttr.dx_tensor_uid()};
+    const std::vector<int64_t> ioTensorIds = {
+        rmsNormBwdAttr.dy_tensor_uid(),
+        rmsNormBwdAttr.x_tensor_uid(),
+        rmsNormBwdAttr.dx_tensor_uid(),
+    };
+    const std::vector<int64_t> statTensorIds = {rmsNormBwdAttr.inv_rms_tensor_uid()};
 
     std::vector<int64_t> affineTensorIds
         = {rmsNormBwdAttr.scale_tensor_uid(), rmsNormBwdAttr.dscale_tensor_uid()};
     if(rmsNormBwdAttr.dbias_tensor_uid().has_value())
     {
         affineTensorIds.push_back(rmsNormBwdAttr.dbias_tensor_uid().value());
-    }
-
-    std::vector<int64_t> statTensorIds;
-    if(rmsNormBwdAttr.inv_rms_tensor_uid().has_value())
-    {
-        statTensorIds.push_back(rmsNormBwdAttr.inv_rms_tensor_uid().value());
     }
 
     checkTensorLayoutsAndDimsSupported();

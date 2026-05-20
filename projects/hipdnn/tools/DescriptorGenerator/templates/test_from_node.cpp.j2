@@ -66,13 +66,13 @@ protected:
 {% endfor %}
 {% for taf in op.tensor_array_fields %}
 {% for uid in taf.test_uids %}
-        TensorAttributesT {{ taf.name }}Attrs{{ loop.index0 }};
-        {{ taf.name }}Attrs{{ loop.index0 }}.uid = {{ uid }};
-        {{ taf.name }}Attrs{{ loop.index0 }}.data_type = DataType::FLOAT;
-        {{ taf.name }}Attrs{{ loop.index0 }}.dims = {1};
-        {{ taf.name }}Attrs{{ loop.index0 }}.strides = {1};
+        TensorAttributesT {{ taf.camel_name }}Attrs{{ loop.index0 }};
+        {{ taf.camel_name }}Attrs{{ loop.index0 }}.uid = {{ uid }};
+        {{ taf.camel_name }}Attrs{{ loop.index0 }}.data_type = DataType::FLOAT;
+        {{ taf.camel_name }}Attrs{{ loop.index0 }}.dims = {1};
+        {{ taf.camel_name }}Attrs{{ loop.index0 }}.strides = {1};
 
-        _tensorMap[{{ uid }}] = TensorDescriptor::fromFlatBuffer({{ taf.name }}Attrs{{ loop.index0 }});
+        _tensorMap[{{ uid }}] = TensorDescriptor::fromFlatBuffer({{ taf.camel_name }}Attrs{{ loop.index0 }});
 {% endfor %}
 {% endfor %}
     }

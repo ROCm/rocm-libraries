@@ -108,7 +108,7 @@ Tests:
 - name: sptrsm_coo
   category: pre_checkin
   function: sptrsm_coo
-  indextype: *i64i32
+  indextype: *i64
   precision: *single_double_precisions
   M_N: *M_N_range_checkin_1
   K: [7]
@@ -148,7 +148,7 @@ Tests:
 - name: sptrsm_coo_file
   category: pre_checkin
   function: sptrsm_coo
-  indextype: *i64i32
+  indextype: *i32
   precision: *single_double_precisions
   K: [141]
   ld_multiplier_B: [3]

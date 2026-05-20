@@ -519,13 +519,13 @@ bool genIRClasses(const std::string& outdir) {
 
         // Set modifiers
         if (inst.supportsDPP) {
-            out << "        inst->dpp = dpp;\n";
+            out << "        inst->dpp = std::move(dpp);\n";
         }
         if (inst.supportsSDWA) {
-            out << "        inst->sdwa = sdwa;\n";
+            out << "        inst->sdwa = std::move(sdwa);\n";
         }
         if (inst.hasDS) {
-            out << "        inst->ds = ds;\n";
+            out << "        inst->ds = std::move(ds);\n";
         }
 
         // Set comment
@@ -682,12 +682,11 @@ bool genPythonBindings(const std::string& outdir) {
         out << "        return makeLogicalInstructionShared(" << className << "(";
 
         // Pass parameters, converting optional sources to pointers
-        size_t srcIdx = 0;
         for (size_t i = 0; i < paramNames.size(); i++) {
             std::string paramName = paramNames[i];
 
             // Check if this is an optional source parameter
-            bool isOptionalSrc = paramName.find("src") == 0 &&
+            bool isOptionalSrc = paramName.starts_with("src") &&
                                  paramTypes[i].find("std::optional") != std::string::npos;
 
             if (isOptionalSrc) {
