@@ -1,5 +1,5 @@
 {
-  "variant": "forward",
+  "variant": "forward_depthwise",
   "ndim_spatial": 3,
   "layout": "ngchw",
   "datatype": "fp32",

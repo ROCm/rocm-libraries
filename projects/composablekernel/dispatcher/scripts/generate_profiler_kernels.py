@@ -67,12 +67,6 @@ def generate_kernels_from_config(codegen_script, config_file, output_dir, arch):
         "--output", str(output_dir),
     ]
 
-    # We cannot yet generate the depthwise variants.
-    # Hence, skip ngchw layout configs.
-    if "ngchw" in config_file.name:
-        print(f"Skipping {config_file.name} (depthwise variant not supported yet)")
-        return True
-
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"ERROR generating from {config_file}:", file=sys.stderr)

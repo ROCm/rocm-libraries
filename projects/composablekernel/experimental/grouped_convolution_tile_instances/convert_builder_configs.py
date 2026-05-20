@@ -176,8 +176,9 @@ def convert_config_file(input_path, variant, layout, datatype, ndim, specializat
               f"({len(instances) - len(unique_instances)} duplicates removed)")
     instances = unique_instances
 
+    output_variant = "forward_depthwise" if variant == "forward" and specialization == Specialization.Depthwise else variant
     output = {
-        "variant": variant,
+        "variant": output_variant,
         "ndim_spatial": ndim,
         "layout": layout,
         "datatype": datatype,

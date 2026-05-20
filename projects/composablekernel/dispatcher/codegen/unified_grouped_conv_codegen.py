@@ -72,6 +72,7 @@ class GroupedConvVariant(Enum):
     """Grouped convolution kernel variants"""
 
     FORWARD = "forward"
+    FORWARD_DEPTHWISE = "forward_depthwise"
     BACKWARD_DATA = "bwd_data"
     BACKWARD_WEIGHT = "bwd_weight"
 
@@ -1608,12 +1609,21 @@ def load_configs_from_json(
     variant_map = {
         "forward": GroupedConvVariant.FORWARD,
         "fwd": GroupedConvVariant.FORWARD,
+        "forward_depthwise": GroupedConvVariant.FORWARD_DEPTHWISE,
         "bwd_data": GroupedConvVariant.BACKWARD_DATA,
         "bwd_weight": GroupedConvVariant.BACKWARD_WEIGHT,
     }
     variant = variant_map.get(data["variant"])
     if variant is None:
         raise ValueError(f"Unknown variant: {data['variant']}")
+
+    if variant == GroupedConvVariant.FORWARD_DEPTHWISE:
+        log.info(
+            f"Skipping depthwise config {config_path.name} "
+            f"(layout={data['layout']}, dtype={data['datatype']}, "
+            f"{len(data['instances'])} instances) — codegen not yet implemented"
+        )
+        return []
 
     ndim_spatial = data["ndim_spatial"]
     layout = data["layout"]
