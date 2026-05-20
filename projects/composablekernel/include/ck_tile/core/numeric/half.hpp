@@ -168,7 +168,7 @@ struct numeric<half_t>
         return bit_cast<half_t>(static_cast<fp16_raw_t>(0x0400));
     }
 
-    // minumum finite value
+    // minimum finite value
     CK_TILE_HOST_DEVICE static constexpr half_t lowest()
     {
         return bit_cast<half_t>(static_cast<fp16_raw_t>(0xFBFF));

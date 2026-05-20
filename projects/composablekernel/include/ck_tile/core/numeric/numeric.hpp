@@ -22,7 +22,7 @@ struct numeric
     // minimum finite value, or minimum positive normalized value for float
     CK_TILE_HOST_DEVICE static constexpr T min() { return std::numeric_limits<T>::min(); }
 
-    // minumum finite value
+    // minimum finite value
     CK_TILE_HOST_DEVICE static constexpr T lowest() { return std::numeric_limits<T>::lowest(); }
 
     // maximum finite value

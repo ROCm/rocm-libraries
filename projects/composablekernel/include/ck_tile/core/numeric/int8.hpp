@@ -24,7 +24,7 @@ struct numeric<int8_t>
     // minimum finite value, or minimum positive normalized value for float
     CK_TILE_HOST_DEVICE static constexpr int8_t min() { return int8_t(-128); }
 
-    // minumum finite value
+    // minimum finite value
     CK_TILE_HOST_DEVICE static constexpr int8_t lowest() { return int8_t(-128); }
 
     // maximum finite value

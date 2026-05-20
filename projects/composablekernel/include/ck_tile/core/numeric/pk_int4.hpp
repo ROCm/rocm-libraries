@@ -44,7 +44,7 @@ struct numeric<pk_int4_t>
         return pk_int4_t(bit_cast<int8_t>(val));
     }
 
-    // minumum finite value
+    // minimum finite value
     CK_TILE_HOST_DEVICE static constexpr pk_int4_t lowest()
     {
         constexpr uint8_t val = 0b10001000;

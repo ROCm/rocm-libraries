@@ -387,7 +387,7 @@ struct numeric<bfloat16_t>
         return bit_cast<bfloat16_t>(static_cast<bf16_raw_t>(0x0080));
     }
 
-    // minumum finite value
+    // minimum finite value
     CK_TILE_HOST_DEVICE static constexpr bfloat16_t lowest()
     {
         return bit_cast<bfloat16_t>(static_cast<bf16_raw_t>(0xff7f));
