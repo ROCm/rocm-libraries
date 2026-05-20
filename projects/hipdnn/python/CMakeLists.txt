@@ -12,8 +12,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
-hipdnn_add_dependency(tsl-robin-map VERSION ${HIPDNN_TSL_ROBIN_MAP_VERSION})
-hipdnn_add_dependency(nanobind VERSION ${HIPDNN_NANOBIND_VERSION})
+if(DEFINED SKBUILD)
+    list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+    find_package(nanobind REQUIRED CONFIG)
+    find_package(hipdnn_frontend REQUIRED CONFIG)
+    find_package(hipdnn_backend REQUIRED CONFIG)
+else()
+    hipdnn_add_dependency(tsl-robin-map VERSION ${HIPDNN_TSL_ROBIN_MAP_VERSION})
+    hipdnn_add_dependency(nanobind VERSION ${HIPDNN_NANOBIND_VERSION})
+endif()
 
 nanobind_add_module(
     hipdnn_frontend_python
@@ -39,20 +46,13 @@ set_target_properties(
         INSTALL_RPATH_USE_LINK_PATH TRUE
 )
 
-install(CODE "
-    set(_wheel_dir \"\${CMAKE_INSTALL_PREFIX}/share/hipdnn/wheels\")
-    file(MAKE_DIRECTORY \"\${_wheel_dir}\")
-
-    message(STATUS \"Building hipdnn-frontend wheel\")
-    execute_process(
-        COMMAND \"${Python_EXECUTABLE}\"
-            \"${CMAKE_CURRENT_SOURCE_DIR}/build_python_wheel.py\"
-            --source-dir \"${CMAKE_CURRENT_SOURCE_DIR}\"
-            --ext-dir \"${CMAKE_CURRENT_BINARY_DIR}\"
-            --wheel-dir \"\${_wheel_dir}\"
-        RESULT_VARIABLE _result
-    )
-    if(_result)
-        message(FATAL_ERROR \"Failed to build hipdnn-frontend wheel\")
-    endif()
-")
+if(DEFINED SKBUILD)
+    install(TARGETS hipdnn_frontend_python DESTINATION hipdnn_frontend)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
+            DESTINATION hipdnn_frontend)
+else()
+    set(_staging "share/hipdnn/python/hipdnn_frontend")
+    install(TARGETS hipdnn_frontend_python DESTINATION "${_staging}")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
+            DESTINATION "${_staging}")
+endif()
