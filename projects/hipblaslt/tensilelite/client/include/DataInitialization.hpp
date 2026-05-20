@@ -916,6 +916,43 @@ namespace TensileLite
                                    m_groupedOffsets,
                                    *m_currentGemmProblem,
                                    hipMemcpyDeviceToDevice);
+
+                          // ---- CPU correctness assertion -----------------------------------
+                          // initializeMXData has just refreshed cpuInput.valid for the four
+                          // MX tensors. If cpuInput.current still matches cpuInput.valid
+                          // bytewise, we are good. If they differ, we throw so the
+                          // failing test surfaces the case.
+                          // The check is gated on BoundsCheckMode::Disable so the NaN/guard-
+                          // page sentinels that other modes intentionally place in current's
+                          // padding do not cause false positives.
+                          if(m_curBoundsCheck == BoundsCheckMode::Disable)
+                          {
+                              auto checkMxCpuSync = [&](char const* name, int ti) {
+                                  auto& desc = m_currentGemmProblem->tensors()[ti];
+                                  auto  it   = m_vdata[ti].pristine.find(desc.dataType());
+                                  if(it == m_vdata[ti].pristine.end()) return;
+                                  auto& p = it->second;
+                                  if(!p.cpuInput.valid || !p.cpuInput.current) return;
+                                  size_t bytes = multiplyElementSize(p.maxElements,
+                                                                     desc.elementBytes());
+                                  if(bytes != 0
+                                     && std::memcmp(p.cpuInput.current.get(),
+                                                    p.cpuInput.valid.get(),
+                                                    bytes) != 0)
+                                  {
+                                      throw std::runtime_error(std::string(
+                                          "DataInitialization::preSolution: cpuInput.current "
+                                          "is stale relative to cpuInput.valid for MX tensor ")
+                                          + name
+                                          + " - the CPU reference would diverge from the GPU "
+                                          + "kernel.");
+                                  }
+                              };
+                              checkMxCpuSync("A",    ContractionProblemGemm::TENSOR::A);
+                              checkMxCpuSync("B",    ContractionProblemGemm::TENSOR::B);
+                              checkMxCpuSync("MXSA", ContractionProblemGemm::TENSOR::MXSA);
+                              checkMxCpuSync("MXSB", ContractionProblemGemm::TENSOR::MXSB);
+                          }
                     }
                 }
             }
