@@ -36,6 +36,7 @@ GlobalParameters:
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
   MXScaleFormat: 1
+  MXScalePadByte: 255   # E8M0 0xFF = NaN/Inf; poisons scale padding so a kernel-side mask leak fails validation.
   BoundsCheck: 0
   KeepBuildTmp: True
   DeviceLDS: 163840

@@ -19,6 +19,7 @@ GlobalParameters:
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
   MXScaleFormat: 1
+  MXScalePadByte: 255   # E8M0 0xFF = NaN/Inf; poisons MX scale padding so any GPU lane reading a padded scale yields NaN and trips validation.
   BoundsCheck: 0
   KeepBuildTmp: True
   DeviceLDS: 163840

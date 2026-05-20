@@ -48,6 +48,7 @@ GlobalParameters:
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
   MXScaleFormat: 1
+  MXScalePadByte: 255   # E8M0 0xFF = NaN/Inf; any GPU lane that reads a padded scale produces NaN and trips validation. Keeps the subtile tail-loop mask under continuous test.
   BoundsCheck: 0
   KeepBuildTmp: True
   DeviceLDS: 163840
