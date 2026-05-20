@@ -144,7 +144,11 @@ hipsparseStatus_t hipsparseSpMVDescr_st::reset()
 
 hipsparseSpMVDescr_st::~hipsparseSpMVDescr_st()
 {
-    (void)hipFree(this->get_buffer());
+    // Reuse reset() so the inner rocsparse_spmv_descr is also released, not
+    // just the cached compute-stage buffer. Without this, any sparse matrix
+    // descriptor that had hipsparseSpMV_bufferSize() called on it would leak
+    // its rocsparse_spmv_descr at destruction time.
+    (void)this->reset();
 }
 
 //

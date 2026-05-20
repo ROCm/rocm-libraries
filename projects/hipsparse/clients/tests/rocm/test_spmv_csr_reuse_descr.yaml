@@ -39,9 +39,6 @@ Tests:
   beta: [1.0]
   betai: [0.5]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
-             HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
 
 - name: spmv_csr_reuse_descr_mixed
   category: quick
@@ -55,9 +52,6 @@ Tests:
   beta: [1.0]
   betai: [0.75]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT,
-             HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
 
 # Pre-checkin
 - name: spmv_csr_reuse_descr
@@ -72,13 +66,10 @@ Tests:
   beta: [1.0]
   betai: [-0.5]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
-             HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
   filename: [nos1,
              nos2,
              nos3,
-             nos4, 
+             nos4,
              nos5,
              nos6,
              nos7]
@@ -95,17 +86,28 @@ Tests:
   beta: [1.0]
   betai: [-0.2]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
-  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
-             HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
   filename: [Chebyshev4,
-             shipsec1,
-             bibd_22_8,
              scircuit,
              rma10,
              sme3Dc,
              bmwcra_1,
-             webbase-1M,
-             ASIC_320k,
              mac_econ_fwd500,
              mc2depi]
+
+# Nightly
+- name: spmv_csr_reuse_descr
+  category: nightly
+  function: spmv_csr_reuse_descr
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  alpha: [1.5]
+  alphai: [0.0]
+  beta: [1.3]
+  betai: [-0.5]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [shipsec1,
+             bibd_22_8,
+             webbase-1M,
+             ASIC_320k]

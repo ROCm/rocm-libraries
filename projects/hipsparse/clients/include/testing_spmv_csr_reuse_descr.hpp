@@ -161,7 +161,6 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     T                    h_alpha  = argus.get_alpha<T>();
     T                    h_beta   = argus.get_beta<T>();
     hipsparseIndexBase_t idx_base = argus.baseA;
-    hipsparseSpMVAlg_t   alg      = argus.spmv_alg;
     std::string          filename = argus.filename;
 
     // Index and data types
@@ -214,25 +213,35 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(
         hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType));
 
-    const hipsparseOperation_t ops[] = {HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                                        HIPSPARSE_OPERATION_TRANSPOSE,
-                                        HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
+    const hipsparseOperation_t ops[]  = {HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                                         HIPSPARSE_OPERATION_TRANSPOSE,
+                                         HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE};
+    const hipsparseSpMVAlg_t   algs[] = {HIPSPARSE_SPMV_ALG_DEFAULT,
+                                         HIPSPARSE_SPMV_CSR_ALG1,
+                                         HIPSPARSE_SPMV_CSR_ALG2};
 
-    for(hipsparseOperation_t op : ops)
+    constexpr int number_of_passes = 3;
+    for(int pass = 0; pass < number_of_passes; ++pass)
     {
-        call_spmv<I, J, A, X, Y, T>(handle,
-                                    matA,
-                                    m,
-                                    n,
-                                    nnz,
-                                    hcsr_row_ptr,
-                                    hcol_ind,
-                                    hval,
-                                    h_alpha,
-                                    h_beta,
-                                    idx_base,
-                                    op,
-                                    alg);
+        for(hipsparseOperation_t op : ops)
+        {
+            for(hipsparseSpMVAlg_t alg : algs)
+            {
+                call_spmv<I, J, A, X, Y, T>(handle,
+                                            matA,
+                                            m,
+                                            n,
+                                            nnz,
+                                            hcsr_row_ptr,
+                                            hcol_ind,
+                                            hval,
+                                            h_alpha,
+                                            h_beta,
+                                            idx_base,
+                                            op,
+                                            alg);
+            }
+        }
     }
 
     // Destroy matrix

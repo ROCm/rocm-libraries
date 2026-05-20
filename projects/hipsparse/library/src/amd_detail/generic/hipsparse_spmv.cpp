@@ -99,11 +99,7 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
     rocsparse_spmv_descr spmv_descr = hip_spmv_descr->get_spmv_descr();
     if(spmv_descr != nullptr)
     {
-        const hipsparseStatus_t status = hip_spmv_descr->reset();
-        if(status != HIPSPARSE_STATUS_SUCCESS)
-        {
-            return status;
-        }
+        RETURN_IF_HIPSPARSE_ERROR(hip_spmv_descr->reset());
     }
 
     //
