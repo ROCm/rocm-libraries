@@ -20,6 +20,10 @@
 
 #include "rocfft/rocfft.h"
 
+extern "C" {
+#include "rocfft_c.h"
+}
+
 #include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #ifdef ROCFFT_HAS_INTERNAL_FUNCTION_POOL
@@ -1376,4 +1380,8 @@ TEST(rocfft_UnitTest, function_pool_runtime_paths)
 TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
 {
     run_plan_capacity_test(1'000'000);
+// Verify that rocfft/rocfft.h can be compiled as plain C (not C++).
+TEST(rocfft, cApi)
+{
+    EXPECT_EQ(rocfft_c(), 0);
 }
