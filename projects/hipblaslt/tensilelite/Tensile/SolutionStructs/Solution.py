@@ -759,6 +759,10 @@ class Solution(collections.abc.Mapping):
         reject(state, "LdsBlockSizePerPadMXSA/LdsBlockSizePerPadMXSB support -1 and 0 for gfx1250")
         return
 
+    state["Multicast"] = False
+    if state["ClusterDim"] != [1, 1]:
+      state["Multicast"] = True
+
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 

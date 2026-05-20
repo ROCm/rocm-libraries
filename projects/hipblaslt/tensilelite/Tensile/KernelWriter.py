@@ -2553,12 +2553,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not kernel["UseSubtileImpl"]:
       #TODO: TDM wave separated
       if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
-        module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
         module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
         if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
           module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+        module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
         tdmInited = True
 
       # Tile offset assignment A(MXSA)
@@ -2677,6 +2677,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not tdmB:
         module.addComment1("global read addresses: unroll offsets b")
         module.add(self.graUnrollOffsets(kernel, tensorParametersB))
+
+      # Free sgpr that will not be used
+      if kernel["Multicast"] and kernel["TDMInst"] != 0:
+        tdmA: bool = kernel["enableTDMA"]
+        tdmB: bool = kernel["enableTDMB"]
+        if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
+          module.add(self.undefineSgpr("MulticastMask"))
+        else:
+          module.add(self.undefineSgpr("MulticastMaskA"))
+          module.add(self.undefineSgpr("MulticastMaskB"))
 
       # tile edges
       if kernel["EdgeType"] == "ShiftPtr" and not tdmA and not tdmB:
@@ -8155,6 +8165,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not isPackedIndex(kernel,idx):
         self.defineSgpr("WorkGroup%u"%wg, 1)
         wg+=1
+
+    if kernel["Multicast"]:
+      tdmA: bool = kernel["enableTDMA"]
+      tdmB: bool = kernel["enableTDMB"]
+      if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
+        self.defineSgpr("MulticastMask", 1)
+      else:
+        self.defineSgpr("MulticastMaskA", 1)
+        self.defineSgpr("MulticastMaskB", 1)
 
     # SGPR above are user SGPR which are set by GPU hardware when the kernel is launched
     self.states.firstInitSgpr = self.sgprPool.size()

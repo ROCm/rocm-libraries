@@ -158,8 +158,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
             if dstGroup0 is not None:
-                mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(f"{dstGroup0}+2"), sgpr(tmpSgprIdx), "+= tileOffset(lo)"))
-                mod.add(SAddCU32(sgpr(f"{dstGroup0}+3"), sgpr(f"{dstGroup0}+3"), sgpr(tmpSgprIdx+1), "+= tileOffset(hi)"))
+                mod.add(SAddU32(sgpr(sgprAddr), sgpr(sgprAddr), sgpr(tmpSgprIdx), "+= baseAddr(lo)"))
+                mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), "+= baseAddr(hi)"))
             else:
                 mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
                 mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
@@ -474,6 +474,11 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SMovB32(sgpr(f"{group1}+5"), sgpr(sgprMetadataStride0I))) # Currently use SizeL for metadata
         mod.add(SLShiftRightB32(sgpr(f"{group1}+5"), hex(3), sgpr(f"{group1}+5"), "stride = SizeL / 2 (sparse) / 4 (bpe = 0.25)"))
         mod.add(SMovB32(sgpr(f"{group1}+6"), 0))
+        return mod
+
+    def setMulticastMask(self, group1: int | str, mask: str, writer: "KernelWriterAssembly") -> Module:
+        mod = Module()
+        mod.add(SOrB32(sgpr(f"{group1}"), sgpr(f"{group1}"), sgpr(f"{mask}")))
         return mod
 
     def setIterationIncrements(self, group2: int | str, ldsInc: int, sgprGlobalInc: int | str) -> Module:

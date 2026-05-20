@@ -32,7 +32,7 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, True16M
                       DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister, \
                       HWRegContainer, GLOBALModifiers, MemTokenData
 from rocisa.instruction import SGetPositivePCOffset, SLongBranch, SLongBranchPositive, SLongBranchNegative, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
-                        SMulInt64to32, VCvtBF16toFP32
+                        SMulInt64to32, VCvtBF16toFP32, SBfeU32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
                         vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
                         scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
@@ -2300,10 +2300,117 @@ class KernelWriterAssembly(KernelWriter):
 
       # init workgroup id from ttmp
       if self.states.archCaps["WorkGroupIdFromTTM"]:
-        moduleRegInit.addComment1("Init workgroup id from ttmp")
-        moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9"))
-        moduleRegInit.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7"))
-        moduleRegInit.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
+        enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+        if not enableCluster:
+          moduleRegInit.addComment1("Init workgroup id from ttmp")
+          moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9"))
+          moduleRegInit.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7"))
+          moduleRegInit.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
+        else:
+          module.addComment1("Init workgroup id from ttmp with cluster remap")
+          with self.allocTmpSgpr(5) as tmpSgprInfo:
+            sTmp = tmpSgprInfo.idx
+            label_enable_cluster = Label(label="EnableCluster", comment="")
+            label_calculate_workgroup_done = Label(label="RemapWorkGroupDone", comment="")
+            moduleRegInit.add(SGetRegB32(dst=sgpr(sTmp+0), src=HWRegContainer(reg="HW_REG_IB_STS2", \
+                       value=[6, 4]), comment="cluster_id"))
+            moduleRegInit.add(SCmpEQU32(src0=sgpr(sTmp+0), src1=0, comment="cluster_id == 0x0 ?"))
+            moduleRegInit.add(SCBranchSCC0(label_enable_cluster.getLabelName()))
+            moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment=""))
+            moduleRegInit.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment=""))
+            moduleRegInit.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
+            moduleRegInit.add(SBranch(label_calculate_workgroup_done.getLabelName()))
+            moduleRegInit.add(label_enable_cluster)
+            moduleRegInit.add(SMovB32(dst=sgpr(sTmp+0), src="ttmp6", comment="Read TTMP6 register"))
+            moduleRegInit.add(SMovB32(dst=sgpr(sTmp+1), src="ttmp7", comment="Read TTMP7 register, \
+                                                                       cluster_z | cluster_y."))
+
+            moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+2), src0=sgpr(sTmp+0), src1=((4 << 16) | 4), \
+                       comment="Etract wg_y."))
+            moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+0), src1=((4 << 16) | 16), \
+                               comment="Etract nwg_y. Value is nwg_y - 1"))
+            moduleRegInit.add(SAddU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=1, comment=""))
+            moduleRegInit.add(SAndB32(dst=sgpr(sTmp+4), src0=sgpr(sTmp+1), src1=hex(0xFFFF), \
+                               comment="Etract cluster_y."))
+            moduleRegInit.add(SMulI32(dst=sgpr("WorkGroup1"), src0=sgpr(sTmp+4), src1=sgpr(sTmp+3),\
+                               comment="cluster_y * nwg_y"))
+            moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup1"), src0=sgpr("WorkGroup1"), \
+                               src1=sgpr(sTmp+2), \
+                               comment="WorkGroup1 = (cluster_y * nwg_y) + wg_y"))
+
+            moduleRegInit.add(SBfeU32(dst=sgpr("WorkGroup2"), src0=sgpr(sTmp+1), src1=((16 << 16) | 16), \
+                               comment="Etract cluster_z."))
+
+            moduleRegInit.add(SAndB32(dst=sgpr(sTmp+1), src0=sgpr(sTmp+0), src1=hex(0xF), \
+                               comment="Etract wg_x."))
+            moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+0), src1=((4 << 16) | 12), \
+                       comment="Etract nwg_x. Value is nwg_x - 1"))
+            moduleRegInit.add(SAddU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=1, comment=""))
+            moduleRegInit.add(SMulI32(dst=sgpr("WorkGroup0"), src0="ttmp9", src1=sgpr(sTmp+3),\
+                               comment="cluster_x * nwg_x"))
+            moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), \
+                               src1=sgpr(sTmp+1), \
+                               comment="WorkGroup0 = (cluster_x * nwg_x) + wg_x"))
+
+            moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+4), src0=sgpr(sTmp+0), src1=((4 << 16) | 8), \
+                       comment="Etract wg_z."))
+            moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+0), src0=sgpr(sTmp+0), src1=((4 << 16) | 20), \
+                               comment="Etract nwg_z. Value is nwg_z - 1"))
+            moduleRegInit.add(SAddU32(dst=sgpr(sTmp+0), src0=sgpr(sTmp+0), src1=1, comment=""))
+            moduleRegInit.add(SMulI32(dst=sgpr("WorkGroup2"), src0=sgpr("WorkGroup2"), src1=sgpr(sTmp+0),\
+                               comment="cluster_z * nwg_z"))
+            moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup2"), src0=sgpr("WorkGroup2"), \
+                               src1=sgpr(sTmp+4), \
+                               comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
+            moduleRegInit.add(label_calculate_workgroup_done)
+
+            if kernel["Multicast"]:
+              moduleRegInit.addComment0("Calculate multicast mask")
+              sgprWgX = sTmp+1
+              sgprWgY = sTmp+2
+              sgprNWgX = sTmp+3
+
+              maskA = 1
+              for idx in range(kernel["ClusterDim"][1]):
+                maskA |= (1 << (idx * kernel["ClusterDim"][0]))
+
+              maskB = (1 << kernel["ClusterDim"][0]) - 1
+
+              tdmA: bool = kernel["enableTDMA"]
+              tdmB: bool = kernel["enableTDMB"]
+
+              if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
+                setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
+                setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
+                setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
+
+                with self.allocTmpSgpr(1) as tmpSgprRes:
+                  wavelen: int = kernel["WavefrontSize"]
+                  waveIdSgprIdx: int = tmpSgprRes.idx
+                  moduleRegInit.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
+                  moduleRegInit.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
+                  moduleRegInit.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
+                  moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
+
+                moduleRegInit.add(setMulticastMaskLblEven)
+                moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
+                                                 comment="Setting maskA for even wave"))
+                moduleRegInit.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
+                moduleRegInit.add(setMulticastMaskLblOdd)
+                moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                          comment="Shift factor: wg_y * nwg_x"))
+                moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
+                                                 comment="Setting maskB for odd wave"))
+                moduleRegInit.add(setMulticastMaskLblEnd)
+
+              else:
+                moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskA"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
+                                                 comment="Setting maskA"))
+
+                moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                          comment="Shift factor: wg_y * nwg_x"))
+                moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
+                                                 comment="Setting maskB"))
 
       # set m0
       moduleRegInit.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]),
@@ -2429,6 +2536,9 @@ class KernelWriterAssembly(KernelWriter):
       module.add(ArgType3_Routed_To_ArgType0)      
       module.add(deepcopy(moduleWg))
       if kernel["StreamK"] == 0:
+        enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+        if enableCluster:
+          module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
         module.add(self.remapWgSerial(kernel, earlyStop=False))
 
       module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName()))
@@ -2633,6 +2743,9 @@ class KernelWriterAssembly(KernelWriter):
       earlyReturnModule.add(noEarlyReturnLabel)
       module.add(earlyReturnModule)
       if kernel["StreamK"] == 0:
+        enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+        if enableCluster:
+          module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
         module.add(self.remapWgSerial(kernel))
       module.addSpaceLine()
       module.add(labelMultiGemmEnd)
@@ -17165,6 +17278,7 @@ class KernelWriterAssembly(KernelWriter):
     unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
+    enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
     mod = Module(f"Init TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
@@ -17177,6 +17291,13 @@ class KernelWriterAssembly(KernelWriter):
     def sizeRefName(idx: int) -> str:
       idxChar= INDEX_CHARS[idx]
       return f"Size{idxChar}"
+
+    def maskSgprName(tc: str) -> str:
+      if tc.startswith("MXS"):
+        string = tc.removeprefix("MXS")
+      else:
+        string = tc
+      return f"MulticastMask{string}"
 
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
@@ -17201,6 +17322,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), isMetadata))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+    if kernel["Multicast"] and enableCluster:
+      mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
@@ -17282,6 +17405,7 @@ class KernelWriterAssembly(KernelWriter):
     unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
+    enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
     mod = Module(f"Init TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
@@ -17294,6 +17418,9 @@ class KernelWriterAssembly(KernelWriter):
     def sizeRefName(idx: int) -> str:
       idxChar= INDEX_CHARS[idx]
       return f"Size{idxChar}"
+
+    def maskSgprName(tc: str) -> str:
+      return f"MulticastMask"
 
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
@@ -17323,6 +17450,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), tc == "Metadata"))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+    if kernel["Multicast"] and enableCluster:
+      mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
