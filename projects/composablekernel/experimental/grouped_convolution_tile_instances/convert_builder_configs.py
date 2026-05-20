@@ -243,7 +243,7 @@ def parse_config_depthwise() -> list[tuple[str, str, str, str, str, int, Special
         if datatype not in ["fp32", "fp16", "bf16"]:
             raise ValueError(f"Invalid datatype: {datatype}")
         
-        ndim = 2 if layout == "nhwgc" else 3
+        ndim = 2 if layout in ("nhwgc", "ngchw") else 3
 
         source_cfg = config["conf"].replace(".conf", "")
         target_cfg = f"{layout}_{datatype}"

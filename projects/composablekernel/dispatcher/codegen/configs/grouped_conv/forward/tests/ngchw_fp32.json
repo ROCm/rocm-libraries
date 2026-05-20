@@ -1,6 +1,6 @@
 {
   "variant": "forward_depthwise",
-  "ndim_spatial": 3,
+  "ndim_spatial": 2,
   "layout": "ngchw",
   "datatype": "fp32",
   "instances": [
