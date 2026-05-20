@@ -149,16 +149,11 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
              "MXLoadInst=TDM currently always produces MXScaleFormat=InMemorySwizzle "
              "(got %s)" % state["MXScaleFormat"])
       return False
-    # gfx1250 MX layout requires TDMInst, except for the StreamK-only
-    # BufferLoad + NoSwizzle path which has been validated end-to-end.
-    # StreamK!=0 also implies GSU is forced to 0 (see assignDerivedParameters),
-    # so this also excludes the unvalidated GSU-only NoSwizzle path. This
-    # reject subsumes the prior standalone "NoSwizzle requires StreamK" check.
-    if state["ISA"] == (12, 5, 0) and not state["TDMInst"] and state["StreamK"] == 0:
+    # gfx1250 MX scales require a swizzled format (InMemorySwizzle via TDM).
+    # NoSwizzle is not supported on this arch.
+    if state["ISA"] == (12, 5, 0) and state["MXScaleFormat"] == "NoSwizzle":
       reject(state, printRejectionReason,
-             "MX layout requires TDMInst on gfx1250 (TDMInst=0 is only "
-             "permitted with StreamK; the non-StreamK NoSwizzle path is "
-             "not yet supported)")
+             "MXScaleFormat=NoSwizzle is not supported on gfx1250")
       return False
 
   return True
