@@ -28,21 +28,6 @@
 #include <miopen/convolution.hpp>
 #include <miopen/tensor_holder.hpp>
 
-#if 0
-#include <array>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <utility>
-
-#include <miopen/batch_norm.hpp>
-#include <miopen/activ.hpp>
-#include <miopen/tensor.hpp>
-#include <miopen/fusion_plan.hpp>
-#include "get_handle.hpp"
-#include "verify.hpp"
-#endif
 
 template <class T>
 void convHostForward(const tensor<T>& input,

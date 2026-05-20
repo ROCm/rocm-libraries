@@ -32,7 +32,7 @@
 #include <miopen/type_name.hpp>
 
 #include <half/half.hpp>
-using half = half_float::half;
+using half    = half_float::half;
 using float16 = half_float::half;
 
 #include <miopen/bfloat16.hpp>

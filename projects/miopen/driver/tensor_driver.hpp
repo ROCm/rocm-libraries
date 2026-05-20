@@ -32,7 +32,6 @@
 #include <miopen/tensor_extra.hpp>
 #include <miopen/tensor_layout.hpp>
 
-
 inline miopenTensorLayout_t StringToLayoutType(std::string layout_str)
 {
     miopenTensorLayout_t default_layout = miopenTensorNCHW;

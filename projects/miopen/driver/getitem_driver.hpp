@@ -36,7 +36,6 @@
 #include <miopen/tensor_view_utils.hpp>
 #include <miopen/verify.hpp>
 
-
 template <typename Tgpu, typename Tcheck>
 int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                   uint32_t indexCount,

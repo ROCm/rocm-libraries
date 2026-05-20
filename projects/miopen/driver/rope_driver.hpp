@@ -35,7 +35,6 @@
 #include <miopen/random.hpp>
 #include <miopen/verify.hpp>
 
-
 template <typename Tgpu, typename Tcheck>
 int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
                               miopenTensorDescriptor_t cosDesc,

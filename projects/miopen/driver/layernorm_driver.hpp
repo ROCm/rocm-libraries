@@ -38,7 +38,6 @@
 #include <miopen/verify.hpp>
 #include <miopen/cpu_layernorm.hpp>
 
-
 template <typename T>
 class LayerNormDriver : public Driver
 {

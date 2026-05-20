@@ -27,17 +27,7 @@
 #define GUARD_CPU_BIAS_HPP
 
 #include <miopen/tensor_holder.hpp>
-//#include "test.hpp"
-#if 0
-#include <array>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <utility>
-#endif
-//#include <miopen/stringutils.hpp>
-//#include <miopen/functional.hpp>
+
 
 template <std::size_t NSpatialDim, typename Tout, typename Tbias>
 void cpu_bias_forward_impl(tensor<Tout>& out, const tensor<Tbias>& bias)

@@ -36,7 +36,6 @@
 
 #include <miopen/verify.hpp>
 
-
 template <typename Tgpu, typename Tref = Tgpu>
 class DropoutDriver : public Driver
 {

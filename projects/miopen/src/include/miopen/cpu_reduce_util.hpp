@@ -29,16 +29,6 @@
 #include <miopen/reducetensor.hpp>
 #include <miopen/reduce_common.hpp>
 
-//#include "tensor_holder.hpp"
-//#include <cstddef>
-//#include <limits>
-//#include <cmath>
-//#include <cassert>
-//#include <ratio>
-//#include <stdexcept>
-//#include <string>
-
-
 namespace reduce {
 
 template <typename T>

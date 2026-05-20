@@ -35,7 +35,6 @@
 #include <miopen/random.hpp>
 #include <miopen/verify.hpp>
 
-
 template <typename Tgpu, typename Tref = Tgpu>
 class CTCDriver : public Driver
 {

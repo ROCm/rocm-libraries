@@ -35,7 +35,6 @@
 #include <miopen/verify.hpp>
 #include <miopen/tensor_view_utils.hpp>
 
-
 template <typename Tgpu, typename Tcheck>
 int32_t mloMultiMarginLossForwardRunHost(const miopenTensorDescriptor_t iDesc,
                                          const miopenTensorDescriptor_t tDesc,

@@ -36,7 +36,6 @@
 #include <miopen/verify.hpp>
 #include <MIOpenReduceExtreme.hpp>
 
-
 template <typename T>
 bool compare_equal(T r1, T r2)
 {

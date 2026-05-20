@@ -27,7 +27,6 @@
 #define GUARD_MIOPEN_CONV_VERIFY_HPP
 
 #include <cassert>
-//#include "../test/gemm.hpp"
 
 template <typename Tgpu_ /* the data type used in GPU computations (usually half) */,
           typename Tcheck_ /* the data type used in CPU checkings (usually double) */>

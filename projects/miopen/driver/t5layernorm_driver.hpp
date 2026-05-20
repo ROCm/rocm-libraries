@@ -34,8 +34,6 @@
 #include <miopen/tensor.hpp>
 #include <miopen/random.hpp>
 #include <miopen/verify.hpp>
-//#include <../test/tensor_holder.hpp>
-
 
 template <typename Tgpu, typename Tcheck>
 int32_t mloT5LayerNormForwardRunHost(miopenTensorDescriptor_t xDesc,

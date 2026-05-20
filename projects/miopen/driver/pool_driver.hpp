@@ -40,7 +40,6 @@
 #include <miopen/random.hpp>
 #include <miopen/pooling.hpp>
 
-
 template <typename T>
 void dumpBufferToFile(const char* fileName, T* data, size_t dataNumItems);
 

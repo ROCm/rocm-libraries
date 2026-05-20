@@ -72,7 +72,7 @@ struct PerformanceConfigPooling2d : PerfConfigBase<PerformanceConfigPooling2d<Op
 
     void HeuristicInit(const miopen::pooling::ProblemDescription&);
     bool SetNextValue(const miopen::pooling::ProblemDescription&);
-    virtual bool IsValidValue(const miopen::pooling::ProblemDescription&) const
+    [[noreturn]] virtual bool IsValidValue(const miopen::pooling::ProblemDescription&) const
     {
         throw std::runtime_error(
             "IsValidValue of PerformanceConfigPooling2d<OpType> is called, but it is not "
@@ -142,13 +142,13 @@ struct PerformanceConfigPoolingNd : PerfConfigBase<PerformanceConfigPoolingNd<Op
     PerformanceConfigPoolingNd(bool) : PerformanceConfigPoolingNd(1, 1, 1, 1) {}
 
     void HeuristicInit(const miopen::pooling::ProblemDescription&);
-    virtual bool SetNextValue(const miopen::pooling::ProblemDescription&)
+    [[noreturn]] virtual bool SetNextValue(const miopen::pooling::ProblemDescription&)
     {
         throw std::runtime_error(
             "SetNextValue of PerformanceConfigPoolingNd<OpType> is called, but it is not "
             "implemented.");
     }
-    virtual bool IsValidValue() const
+    [[noreturn]] virtual bool IsValidValue() const
     {
         throw std::runtime_error(
             "IsValidValue of PerformanceConfigPoolingNd<OpType> is called, but it is not "

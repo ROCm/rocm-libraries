@@ -43,7 +43,6 @@
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_ops.hpp>
 
-
 std::vector<size_t> get_default_time_strides(int vec_size, const std::vector<int>& seq_array)
 {
     std::vector<size_t> sum_v(seq_array.size());

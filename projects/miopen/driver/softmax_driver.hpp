@@ -14,7 +14,6 @@
 #include <miopen/random.hpp>
 #include <miopen/verify.hpp>
 
-
 template <typename Tgpu, typename Tref>
 class SoftmaxDriver : public Driver
 {

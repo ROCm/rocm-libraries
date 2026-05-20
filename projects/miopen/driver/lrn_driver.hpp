@@ -16,7 +16,6 @@
 #include <miopen/random.hpp>
 #include <miopen/verify.hpp>
 
-
 template <typename Tgpu, typename Tref>
 class LRNDriver : public Driver
 {

@@ -39,7 +39,6 @@
 #include <miopen/cpu_reduce_util.hpp>
 #include <miopen/verify.hpp>
 
-
 template <typename Tgpu, typename Tref>
 class ReduceDriver : public Driver
 {

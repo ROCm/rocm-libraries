@@ -26,7 +26,6 @@
 #ifndef GUARD_MIOPEN_REDUCTION_HOST_HPP_
 #define GUARD_MIOPEN_REDUCTION_HOST_HPP_
 
-//#include "../test/cpu_reduce_util.hpp"
 #include "tensor_driver.hpp"
 
 #include <utility>
