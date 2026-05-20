@@ -592,7 +592,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenConvBwdWrW_LxG_P53.cl
         kernels/MIOpenGroupConvBwdWrW_LxG_P53.cl
         kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
-        kernels/MIOpenConvFwd_LxL_11.cl
+        kernels/MIOpenConvFwd_LxL_11.cpp
         kernels/MIOpenConvFFT.cpp
         kernels/MIOpenRNNHiddenStateUpdate.cpp
         kernels/bugzilla_34765_detect.s
@@ -660,7 +660,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_dilation2.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride1.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride2.s
-        kernels/MIOpenConvBwdBias.cl
         kernels/MIOpenBatchNormActivInfer.cpp
         kernels/MIOpenCTCLoss.cpp
         kernels/MIOpenDropoutHIP.cpp
