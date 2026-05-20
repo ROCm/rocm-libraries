@@ -1920,6 +1920,53 @@ namespace TensileLite
             }
         }
 
+        // Re-scatter the canonical (unpadded) DGen scale layout into the
+        // padded TensorDescriptor strides. `generateMXInput` writes
+        // byte[mn * kBlocksRaw + k] (for transA=true / transB=false); on
+        // gfx950 the descriptor pads the bound (K-blocks) dim up to a
+        // multiple of 8 and the unbound dim up to a multiple of 32, with
+        // strides that no longer match the DGen layout. Without this
+        // re-scatter the CPU reference reads bytes DGen never wrote (zero
+        // from the prior memset) and disagrees with the GPU.
+        static void rearrangePaddedMXScaleLayout(TensorDescriptor const& mxScaleDesc,
+                                                 size_t                  mxBlock,
+                                                 size_t                  kElements,
+                                                 size_t                  mnElements,
+                                                 size_t                  batchCount,
+                                                 size_t                  batchStrideBytes,
+                                                 void*                   cpuValidBase)
+        {
+            auto const& sizes      = mxScaleDesc.sizes();
+            auto const& strides    = mxScaleDesc.strides();
+            size_t      kBlocksPad = sizes[0];
+            size_t      mnPad      = sizes[1];
+            size_t      kBlocksRaw = (kElements + mxBlock - 1) / mxBlock;
+            size_t      kStride    = strides[0];
+            size_t      mnStride   = strides[1];
+
+            bool needsRearrange = (kBlocksPad != kBlocksRaw) || (mnPad != mnElements)
+                                  || (kStride != 1) || (mnStride != kBlocksPad);
+            if(!needsRearrange)
+                return;
+
+            size_t               totalBytes = mxScaleDesc.totalAllocatedElements();
+            auto*                base       = static_cast<uint8_t*>(cpuValidBase);
+            std::vector<uint8_t> tmp(base, base + totalBytes);
+            std::memset(base, 0x00, totalBytes);
+            for(size_t b = 0; b < batchCount; ++b)
+            {
+                auto const* src = tmp.data() + b * batchStrideBytes;
+                auto*       dst = base + b * batchStrideBytes;
+                for(size_t i = 0; i < mnElements; ++i)
+                {
+                    for(size_t k = 0; k < kBlocksRaw; ++k)
+                    {
+                        dst[k * kStride + i * mnStride] = src[i * kBlocksRaw + k];
+                    }
+                }
+            }
+        }
+
         void DataInitialization::initializeMXData(ContractionProblemGemm const& problem)
         {
             // Initializes A, B, MXSA, MXSB so the default-init loop in initializeCPUInputs
@@ -2052,50 +2099,20 @@ namespace TensileLite
                                     -1.0f,
                                     1.0f);
                 }
-                // generateMXInput writes the canonical (unpadded) DGen layout:
-                //   - For Alik (transA=true, K is row dim of A and dim 0 of mxsa):
-                //     byte[m * K_blocks_RAW + k] for m in [0,M), k in [0,K_blocks_RAW)
-                //   - For Aijk (transA=false): different layout (not handled here).
-                // setMXScaleA on gfx950 pads the bound (K-blocks) dim up to a multiple of 8.
-                // When the padded stride exceeds the unpadded one the CPU reference reads bytes
-                // DGen never wrote (zero from memset).  Re-scatter the DGen output into the
-                // strided mxsa layout so the CPU reference observes the same scale values as
-                // the GPU.
+                // generateMXInput writes the canonical DGen layout
+                // (`byte[m * kBlocksRaw + k]`) only when transA=true (Alik).
+                // For transA=false the DGen layout differs and the
+                // descriptor strides happen to match, so no re-scatter is
+                // needed.
                 if(problem.transA())
                 {
-                    auto const& mxsaSz     = problem.mxsa().sizes();
-                    auto const& mxsaSt     = problem.mxsa().strides();
-                    size_t      kBlocksPad = mxsaSz[0];
-                    size_t      mPad       = mxsaSz[1];
-                    size_t      kBlocksRaw = (rows + problem.mxBlockA() - 1) / problem.mxBlockA();
-                    size_t      mRaw       = cols;
-                    size_t      kStride    = mxsaSt[0];
-                    size_t      mStride    = mxsaSt[1];
-
-                    bool needsRearrange = (kBlocksPad != kBlocksRaw) || (mPad != mRaw)
-                                          || (kStride != 1) || (mStride != kBlocksPad);
-                    if(needsRearrange)
-                    {
-                        size_t totalBytes = problem.mxsa().totalAllocatedElements();
-                        auto*  base = static_cast<uint8_t*>(pristineE8A.cpuInput.valid.get());
-                        std::vector<uint8_t> tmp(base, base + totalBytes);
-                        std::memset(base, 0x00, totalBytes);
-                        for(size_t b = 0; b < batchCount; ++b)
-                        {
-                            size_t batchOff = b * scaleBatchStrideBytes;
-                            auto const* src = tmp.data() + batchOff;
-                            auto*       dst = base + batchOff;
-                            for(size_t m = 0; m < mRaw; ++m)
-                            {
-                                for(size_t k = 0; k < kBlocksRaw; ++k)
-                                {
-                                    size_t srcOff = m * kBlocksRaw + k;
-                                    size_t dstOff = k * kStride + m * mStride;
-                                    dst[dstOff] = src[srcOff];
-                                }
-                            }
-                        }
-                    }
+                    rearrangePaddedMXScaleLayout(problem.mxsa(),
+                                                 problem.mxBlockA(),
+                                                 rows,
+                                                 cols,
+                                                 batchCount,
+                                                 scaleBatchStrideBytes,
+                                                 pristineE8A.cpuInput.valid.get());
                 }
 
                 // For preswizzle-arch (gfx950): when the preswizzle condition fires,
@@ -2203,46 +2220,18 @@ namespace TensileLite
                                     -1.0f,
                                     1.0f);
                 }
-                // For Bljk (transB=false, K is row dim of B and dim 0 of mxsb), generateMXInput
-                // writes the canonical (unpadded) layout byte[n * K_blocks_RAW + k] but the
-                // mxsb tensor descriptor is padded on gfx950 (K-blocks up to a multiple of 8,
-                // N up to a multiple of 32).  Re-scatter so the CPU reference sees the same
-                // values the GPU consumes.  Symmetric to the A-side fix above.
+                // Symmetric to the A-side re-scatter: only the Bljk
+                // (transB=false) DGen layout matches the kBlocksRaw-stride
+                // shape the helper assumes.
                 if(!problem.transB())
                 {
-                    auto const& mxsbSz     = problem.mxsb().sizes();
-                    auto const& mxsbSt     = problem.mxsb().strides();
-                    size_t      kBlocksPad = mxsbSz[0];
-                    size_t      nPad       = mxsbSz[1];
-                    size_t      kBlocksRaw = (rows + problem.mxBlockB() - 1) / problem.mxBlockB();
-                    size_t      nRaw       = cols;
-                    size_t      kStride    = mxsbSt[0];
-                    size_t      nStride    = mxsbSt[1];
-
-                    bool needsRearrange = (kBlocksPad != kBlocksRaw) || (nPad != nRaw)
-                                          || (kStride != 1) || (nStride != kBlocksPad);
-                    if(needsRearrange)
-                    {
-                        size_t totalBytes = problem.mxsb().totalAllocatedElements();
-                        auto*  base = static_cast<uint8_t*>(pristineE8B.cpuInput.valid.get());
-                        std::vector<uint8_t> tmp(base, base + totalBytes);
-                        std::memset(base, 0x00, totalBytes);
-                        for(size_t b = 0; b < batchCount; ++b)
-                        {
-                            size_t batchOff = b * scaleBatchStrideBytes;
-                            auto const* src = tmp.data() + batchOff;
-                            auto*       dst = base + batchOff;
-                            for(size_t n = 0; n < nRaw; ++n)
-                            {
-                                for(size_t k = 0; k < kBlocksRaw; ++k)
-                                {
-                                    size_t srcOff = n * kBlocksRaw + k;
-                                    size_t dstOff = k * kStride + n * nStride;
-                                    dst[dstOff] = src[srcOff];
-                                }
-                            }
-                        }
-                    }
+                    rearrangePaddedMXScaleLayout(problem.mxsb(),
+                                                 problem.mxBlockB(),
+                                                 rows,
+                                                 cols,
+                                                 batchCount,
+                                                 scaleBatchStrideBytes,
+                                                 pristineE8B.cpuInput.valid.get());
                 }
 
                 // For preswizzle-arch (gfx950): upload preswizzled scale directly to gpuInput.valid.
