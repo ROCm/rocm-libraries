@@ -486,6 +486,22 @@ class ProblemPredicate(Properties.Predicate):
 
             return cls(tag, index=index, value=value)
 
+        # Deprecated assertion keys: parser handlers were removed in
+        # PR #7443 (manual KRingShift revert) and the matching YAML
+        # cleanup landed in PR #7513. New library logic YAML files
+        # generated before either revert (or imported from a stale
+        # branch via a develop merge) may still carry these keys --
+        # silently ignore them rather than fail the whole library
+        # parse, matching the spirit of the revert + cleanup pair.
+        # See nakajee review thread on PR #7636 for the CI hit that
+        # motivated adding this forward-compat fallback.
+        _deprecatedAssertKeys = (
+            "AssertFree1DivByMT1LowbitGT1",
+            "AssertKRingShiftTailWrapOnly",
+        )
+        if key in _deprecatedAssertKeys:
+            return None
+
         if key.startswith('Assert'):
             raise RuntimeError("Unknown assertion key: {}".format(key))
 
