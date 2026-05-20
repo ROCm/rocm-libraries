@@ -237,6 +237,14 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
     DESTINATION lib/cmake/stinkytofu
 )
+# --------------------------------------------------------------------------- #
+# clang-tidy
+# --------------------------------------------------------------------------- #
+option(ENABLE_CLANG_TIDY "Enable clang-tidy targets" OFF)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
+include(ClangTidy)
+add_clang_tidy_custom_target()
+
 # Build-tree export so find_package() works without installing.
 export(TARGETS stinkytofu stinkytofu-warnings NAMESPACE stinkytofu:: FILE stinkytofuConfig.cmake)
 
