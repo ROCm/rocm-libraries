@@ -555,9 +555,8 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan                     plan,
 
     if(LOG_PLAN_ENABLED())
     {
-        log_plan("CommPointToPoint: " + std::to_string(numElems) + " elems, src device "
-                 + std::to_string(srcLocation.device) + " -> dst device "
-                 + std::to_string(destLocation.device) + "\n");
+        log_plan("CommPointToPoint: " + std::to_string(numElems) + " elems, src "
+                 + srcLocation.str() + " -> dst " + destLocation.str() + "\n");
     }
 
     auto srcWithOffset = ptr_offset(
@@ -715,18 +714,30 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
         }
         // ncclGroupEnd called in destructor - this will actually launch the collective
     }
+
+    // collective work is now enqueued on each agent's stream by
+    // ncclGroupEnd above.  record a completion event per agent so
+    // Wait() can synchronize on events (matching every other
+    // MultiPlanItem) rather than on streams directly.
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        if(agents[r].event && hipEventRecord(agents[r].event, agents[r].stream) != hipSuccess)
+            throw std::runtime_error("hipEventRecord failed for RCCL AllToAll on device "
+                                     + std::to_string(devices[r]));
+    }
 }
 
 void CommRCCLAllToAll::Wait()
 {
-    // synchronize each stream on its corresponding device, in RCCL rank order
-    const auto devices = rccl.get_devices();
-    for(size_t r = 0; r < agents.size(); ++r)
+    // synchronize each agent's completion event.  hipEventSynchronize
+    // does not require the current device to match the event's
+    // device, so no rocfft_scoped_device is needed here (mirrors
+    // CommGather / CommScatter / CommPointToPoint).
+    for(auto& agent : agents)
     {
-        rocfft_scoped_device dev(devices[r]);
-        if(agents[r].stream && hipStreamSynchronize(agents[r].stream) != hipSuccess)
-            throw std::runtime_error("hipStreamSynchronize failed for RCCL AllToAll on device "
-                                     + std::to_string(devices[r]));
+        if(agent.event && hipEventSynchronize(agent.event) != hipSuccess)
+            throw std::runtime_error("hipEventSynchronize failed for RCCL AllToAll");
     }
 }
 
@@ -773,63 +784,79 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
     if(transfers.empty())
         return;
 
-    // group all operations - ncclGroupStart called in constructor
-    rocfft_rccl_group_t group;
-
-    for(auto& t : transfers)
+    // group all send/recv operations into a single RCCL group.
+    // ncclGroupEnd (called by the group destructor at the closing
+    // brace) is what actually enqueues work on the streams, so any
+    // event recording has to happen after this inner scope ends.
     {
-        if(t.local_location.comm_rank == local_comm_rank)
+        rocfft_rccl_group_t group;
+
+        for(auto& t : transfers)
         {
-            rocfft_scoped_device dev(t.local_location.device);
-
-            void* data_ptr = ptr_offset(t.buffer.get(in_buffer, out_buffer, local_comm_rank),
-                                        t.offset,
-                                        precision,
-                                        arrayType);
-
-            // translate peer location to its RCCL rank (single-process RCCL:
-            // peer device belongs to the same local communicator)
-            const int peer_rank = rccl.get_rank(t.peer_location.device);
-
-            switch(t.op)
+            if(t.local_location.comm_rank == local_comm_rank)
             {
-            case rccl_op::send:
-                rccl.send(data_ptr,
-                          t.count,
-                          peer_rank,
-                          t.local_location.device,
-                          t.stream,
-                          precision,
-                          arrayType);
-                break;
-            case rccl_op::recv:
-                rccl.recv(data_ptr,
-                          t.count,
-                          peer_rank,
-                          t.local_location.device,
-                          t.stream,
-                          precision,
-                          arrayType);
-                break;
+                rocfft_scoped_device dev(t.local_location.device);
+
+                void* data_ptr = ptr_offset(t.buffer.get(in_buffer, out_buffer, local_comm_rank),
+                                            t.offset,
+                                            precision,
+                                            arrayType);
+
+                // translate peer location to its RCCL rank (single-process RCCL:
+                // peer device belongs to the same local communicator)
+                const int peer_rank = rccl.get_rank(t.peer_location.device);
+
+                switch(t.op)
+                {
+                case rccl_op::send:
+                    rccl.send(data_ptr,
+                              t.count,
+                              peer_rank,
+                              t.local_location.device,
+                              t.stream,
+                              precision,
+                              arrayType);
+                    break;
+                case rccl_op::recv:
+                    rccl.recv(data_ptr,
+                              t.count,
+                              peer_rank,
+                              t.local_location.device,
+                              t.stream,
+                              precision,
+                              arrayType);
+                    break;
+                }
             }
         }
+        // ncclGroupEnd called by group destructor - work is now enqueued
     }
 
-    // group destructor calls ncclGroupEnd - this launches all operations
+    // record a completion event per local transfer so Wait() can
+    // synchronize on events (matching every other MultiPlanItem)
+    // rather than on streams directly.
+    for(auto& t : transfers)
+    {
+        if(t.event)
+        {
+            rocfft_scoped_device dev(t.local_location.device);
+            if(hipEventRecord(t.event, t.stream) != hipSuccess)
+                throw std::runtime_error("hipEventRecord failed for RCCL Grouped on device "
+                                         + std::to_string(t.local_location.device));
+        }
+    }
 }
 
 void CommRCCLGrouped::Wait()
 {
-    // synchronize all streams for all transfers
+    // synchronize on each local transfer's completion event.
+    // hipEventSynchronize does not require the current device to
+    // match the event's device (mirrors CommGather / CommScatter /
+    // CommPointToPoint).
     for(auto& t : transfers)
     {
-        if(t.local_location.comm_rank == local_comm_rank && t.stream)
-        {
-            rocfft_scoped_device dev(t.local_location.device);
-            if(hipStreamSynchronize(t.stream) != hipSuccess)
-                throw std::runtime_error("hipStreamSynchronize failed for RCCL Grouped on device "
-                                         + std::to_string(t.local_location.device));
-        }
+        if(t.event && hipEventSynchronize(t.event) != hipSuccess)
+            throw std::runtime_error("hipEventSynchronize failed for RCCL Grouped");
     }
 }
 

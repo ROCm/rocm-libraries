@@ -1223,14 +1223,19 @@ private:
 struct CommRCCLAllToAll : public MultiPlanItem
 {
     // per-rank state for one participant in the all-to-all.  caller
-    // fills sendBuffer / recvBuffer; the stream is allocated in-place
-    // by the constructor.  bundling these together guarantees they
-    // can never go out of sync.
+    // fills sendBuffer / recvBuffer; the stream and completion event
+    // are allocated in-place by the constructor.  bundling these
+    // together guarantees they can never go out of sync.  the event
+    // is recorded on stream once ncclGroupEnd has enqueued the
+    // collective; Wait() synchronizes on the event to align with
+    // every other MultiPlanItem (see CommPointToPoint / CommScatter /
+    // CommGather), instead of on the stream directly.
     struct agent_t
     {
         BufferPtr           sendBuffer;
         BufferPtr           recvBuffer;
         hipStream_wrapper_t stream;
+        hipEvent_wrapper_t  event;
     };
 
     // _agents must be indexed by RCCL rank.  rocfft_rccl_comm_t assigns
@@ -1256,12 +1261,16 @@ struct CommRCCLAllToAll : public MultiPlanItem
                 "CommRCCLAllToAll: agents.size() (" + std::to_string(agents.size())
                 + ") must match rccl.num_ranks() (" + std::to_string(nranks) + ")");
 
-        // allocate one stream per participating device, in RCCL rank order
+        // allocate one stream and one completion event per
+        // participating device, in RCCL rank order.  event and
+        // stream are bound to the same device by the scoped_device
+        // so hipEventRecord(event, stream) at execute time is valid.
         const auto devices = rccl.get_devices();
         for(size_t r = 0; r < devices.size(); ++r)
         {
             rocfft_scoped_device scoped(devices[r]);
             agents[r].stream.alloc();
+            agents[r].event.alloc();
         }
     }
 
@@ -1342,11 +1351,15 @@ struct CommRCCLGrouped : public MultiPlanItem
         t.count          = count;
         t.op             = transfer_kind;
 
-        // allocate stream on the correct device
+        // allocate stream + completion event on the correct device
+        // when the local endpoint lives on this process.  event and
+        // stream are bound to the same device by scoped_device so
+        // hipEventRecord(event, stream) at execute time is valid.
         if(local_location.comm_rank == comm_rank)
         {
             rocfft_scoped_device dev(local_location.device);
             t.stream.alloc();
+            t.event.alloc();
         }
         transfers.push_back(std::move(t));
     }
@@ -1392,13 +1405,20 @@ private:
         // peer and local endpoints, both as (comm_rank, device) pairs;
         // the peer's RCCL rank is derived at execution time from
         // peer_location.device via rccl.get_rank().
-        rocfft_location_t   peer_location;
-        rocfft_location_t   local_location;
-        BufferPtr           buffer;
-        size_t              offset;
-        size_t              count;
-        rccl_op             op;
-        hipStream_wrapper_t stream; // each transfer has its own stream
+        rocfft_location_t peer_location;
+        rocfft_location_t local_location;
+        BufferPtr         buffer;
+        size_t            offset;
+        size_t            count;
+        rccl_op           op;
+        // each transfer has its own stream and completion event;
+        // both are only allocated for transfers whose local endpoint
+        // lives on this process.  the event is recorded after
+        // ncclGroupEnd has enqueued the send/recv on the stream so
+        // Wait() can synchronize on events (matching every other
+        // MultiPlanItem) instead of on streams directly.
+        hipStream_wrapper_t stream;
+        hipEvent_wrapper_t  event;
     };
 
     const rocfft_rccl_comm_t& rccl;
