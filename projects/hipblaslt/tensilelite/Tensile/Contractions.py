@@ -468,16 +468,6 @@ class ProblemPredicate(Properties.Predicate):
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
 
-        # Address-interleave restriction:
-        # Require tiles1 = Free1Size / MT1 to be a power-of-two (and divisible).
-        if key == "AssertFree1DivByMT1LowbitGT1":
-            return cls("Free1SizeDivByValueLowbitGT1", index=0, value=value) if value > 0 else None
-
-        # KRingShift wrap restriction (packed value; see Solution.py):
-        # Require that any (k + KRingShift) wrap occurs only in tail loop (no main-loop wrap).
-        if key == "AssertKRingShiftTailWrapOnly":
-            return cls("KRingShiftTailWrapOnly", index=-1, value=value) if value > 0 else None
-
         if key.endswith('Multiple'):
             if value == 1:
                 return None
@@ -596,6 +586,14 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
+        valuepredicates = []
+        valuepredicates.append(state["MacroTile0"])
+        valuepredicates.append(state["MacroTile1"])
+        valuepredicates.append(state["GlobalSplitU"])
+        valuepredicates.append(state["ClusterDim"][0])
+        valuepredicates.append(state["ClusterDim"][1])
+        rv += [cls('ClusterDimCheck', value=valuepredicates)]
+
         return rv
 
     @classmethod
@@ -660,6 +658,8 @@ class SizeMapping:
                  'LocalSplitU',
                  'DirectToLdsA',
                  'DirectToLdsB',
+                 'ExpertSchedulingMode',
+                 'clusterDim'
                  ]
 
     @classmethod
@@ -749,6 +749,8 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
+                   ExpertSchedulingMode     = d['ExpertSchedulingMode'],
+                   clusterDim               = d['ClusterDim']
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):

@@ -7861,24 +7861,30 @@ void host_sddmm_coo_aos(I                    C_m,
 
 /* ============================================================================================ */
 /*! \brief  Host axpby (y = alpha * x + beta * y for sparse vectors) */
-template <typename I, typename T>
+template <typename I, typename X, typename Y, typename T>
 void host_axpby(I                    size,
                 I                    nnz,
                 T                    alpha,
-                const T*             x_val,
+                const X*             x_val,
                 const I*             x_ind,
                 T                    beta,
-                T*                   y,
+                Y*                   y,
                 hipsparseIndexBase_t idx_base)
 {
     for(I i = 0; i < size; ++i)
     {
-        y[i] = testing_mult(beta, y[i]);
+        T yi = static_cast<T>(y[i]);
+        yi   = testing_mult(beta, yi);
+        y[i] = static_cast<Y>(yi);
     }
 
     for(I i = 0; i < nnz; ++i)
     {
-        y[x_ind[i] - idx_base] = testing_fma(alpha, x_val[i], y[x_ind[i] - idx_base]);
+        I       idx = x_ind[i] - idx_base;
+        T       yi  = static_cast<T>(y[idx]);
+        const T xi  = static_cast<T>(x_val[i]);
+        yi          = testing_fma(alpha, xi, yi);
+        y[idx]      = static_cast<Y>(yi);
     }
 }
 
