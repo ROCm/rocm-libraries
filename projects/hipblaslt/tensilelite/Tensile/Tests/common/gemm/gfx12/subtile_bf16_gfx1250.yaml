@@ -59,4 +59,4 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [64, 64, 1, 64]
-          - Exact: [128, 128, 1, 128]
+          - Exact: [128, 128, 1, 64]
