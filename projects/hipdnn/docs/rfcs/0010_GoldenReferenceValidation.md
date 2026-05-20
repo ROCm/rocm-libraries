@@ -1,7 +1,7 @@
 # RFC 0010: Golden Reference Validation
 
 > Owner: Integration Test Team
-> Last updated: 2026-05-12
+> Last updated: 2026-05-20
 
 ## Table of Contents
 1. [Summary](#summary)
@@ -52,7 +52,7 @@ A prior effort established a golden reference pattern -- golden data bundles (gr
 
 Golden reference validation has two pipelines -- [**generation**](#generation-pipeline) (produces bundles) and [**validation**](#generic-test-runner) (consumes them) -- sharing one data format: the **golden data bundle** (`{Name}.json` + `{Name}.tensor{uid}.bin`). The graph JSON defines the computation, the `.bin` files carry inputs and expected outputs. Bundles are engine-agnostic; the test fixture picks the engine.
 
-**Design principle -- test identity comes from the graph, not the filesystem.** The runner derives the test name from graph content (operation, layout, data type), so folders can be reorganized without breaking filters and customer-submitted bundles get meaningful test names regardless of where they're dropped.
+**Design principle -- test identity comes from the graph and the bundle name, not the folder hierarchy.** The runner derives the suite name (operation, layout, data type) from graph content and the test name (scenario) from the bundle directory name. Folder hierarchy is not encoded in the test name, so folders can be reorganized without breaking filters and customer-submitted bundles get meaningful test names regardless of where they're dropped.
 
 ---
 
@@ -279,11 +279,11 @@ Given these bundles:
 
 | File path | Graph content | Generated test name |
 |-----------|--------------|---------------------|
-| `quick/BatchnormFwdInference/nchw/fp32/typical/typical.json` | batchnorm fwd inference, nchw, fp32 | `TestCpuReferenceUsingGoldenValues/BatchnormFwdInference_nchw_fp32_typical` |
-| `quick/BatchnormFwdInference/nchw/fp16/typical/typical.json` | batchnorm fwd inference, nchw, fp16 | `TestCpuReferenceUsingGoldenValues/BatchnormFwdInference_nchw_fp16_typical` |
-| `quick/BatchnormFwdInference/nchw/fp32/odd_spatial/odd_spatial.json` | batchnorm fwd inference, nchw, fp32 | `TestCpuReferenceUsingGoldenValues/BatchnormFwdInference_nchw_fp32_odd_spatial` |
-| `standard/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json` | conv fwd, nhwc, fp16 | `Standard/TestCpuReferenceUsingGoldenValues/ConvFwd_nhwc_fp16_resnet50_layer3` |
-| `quick/customer_issues/CASE-12345/repro/repro.json` | conv fwd, nchw, fp32 | `TestCpuReferenceUsingGoldenValues/ConvFwd_nchw_fp32_repro` |
+| `quick/BatchnormFwdInference/nchw/fp32/typical/typical.json` | batchnorm fwd inference, nchw, fp32 | `BatchnormFwdInference_nchw_fp32.typical` |
+| `quick/BatchnormFwdInference/nchw/fp16/typical/typical.json` | batchnorm fwd inference, nchw, fp16 | `BatchnormFwdInference_nchw_fp16.typical` |
+| `quick/BatchnormFwdInference/nchw/fp32/odd_spatial/odd_spatial.json` | batchnorm fwd inference, nchw, fp32 | `BatchnormFwdInference_nchw_fp32.odd_spatial` |
+| `standard/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json` | conv fwd, nhwc, fp16 | `Standard/ConvFwd_nhwc_fp16.resnet50_layer3` |
+| `quick/customer_issues/CASE-12345/repro/repro.json` | conv fwd, nchw, fp32 | `ConvFwd_nchw_fp32.repro` |
 
 Note the last row: the customer dropped a bundle in an unusual folder path, but the test name comes from graph content -- the folder path doesn't matter.
 
@@ -311,7 +311,7 @@ Filters match the generated test name:
 --gtest_filter=Standard/*
 
 # One specific test
---gtest_filter=*BatchnormFwdInference_nchw_fp32_odd_spatial
+--gtest_filter=*BatchnormFwdInference_nchw_fp32.odd_spatial
 ```
 
 ---
@@ -376,7 +376,7 @@ Tolerance is looked up at runtime from the graph content: the runner reads the o
 When a golden test fails, the output should give the developer everything needed to diagnose the problem without re-running or adding instrumentation:
 
 ```
-FAIL: IntegrationGpuGoldenReferenceEngineValidation/ConvFwd_nhwc_fp16_resnet50_layer3
+FAIL: ConvFwd_nhwc_fp16.resnet50_layer3
   Bundle: quick/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json
   Tensor: y (UID 8, output)
   Shape:  [1, 64, 56, 56]  fp16
@@ -390,13 +390,42 @@ FAIL: IntegrationGpuGoldenReferenceEngineValidation/ConvFwd_nhwc_fp16_resnet50_l
 
 At GTest startup, `discoverGoldenBundles(tierDir)` recursively scans a tier directory for `.json` files and registers one test case per bundle. Discovery is shared — the same bundles are available to all runner subclasses. The [verification mode](#verification-modes) determines which runner executes each test (golden, GPU ref, CPU ref, or auto-fallback). Registration is per tier, not per operation — it never changes as new operations or bundles are added.
 
-Two GTest mechanisms can achieve this:
-- **`INSTANTIATE_TEST_SUITE_P`** -- parameterized tests, one call per tier. Simpler, well-understood.
-- **[Programmatic `RegisterTest`](https://google.github.io/googletest/advanced.html#registering-tests-programmatically)** -- registers each bundle as its own test at runtime. More flexible naming and grouping.
-
-Both are viable; the implementation will explore both and pick the better fit.
+**Decided: [`::testing::RegisterTest`](https://google.github.io/googletest/advanced.html#registering-tests-programmatically).** Each bundle is registered as its own test at static initialization time. This eliminates per-operation C++ registration code and gives direct control over test naming (see [Test naming scheme](#test-naming-scheme)). `RegisterTest` applies to golden reference tests only; GPU integration tests continue to use `INSTANTIATE_TEST_SUITE_P`.
 
 If the tier directory is empty or missing, `discoverGoldenBundles` returns an empty list (no tests, no failure). Unexpected top-level directories (e.g., `quik/` instead of `quick/`) trigger a warning to catch typos.
+
+##### Test naming scheme
+
+The test name is a hybrid of graph-derived and directory-derived components:
+
+**Pattern**: `[{Tier}/]{Operation}_{layout}_{datatype}.{BundleName}`
+
+| Component | Source | Example |
+|-----------|--------|---------|
+| Tier prefix | Filesystem (top-level folder) | `Standard/` for `standard/`, omitted for `quick/` |
+| Operation | Graph JSON (operation type + direction) | `BatchnormFwdInference` |
+| Layout | Graph JSON (tensor layout) | `nchw` |
+| DataType | Graph JSON (`data_type` field) | `fp32` |
+| BundleName | Bundle directory name (human-authored) | `typical`, `resnet50_layer3` |
+| Separator | GTest native | `.` between suite and test |
+
+**Why hybrid**: The graph JSON owns the computational identity (what the test does). The bundle directory name owns the scenario identity (why the test exists). These are different concerns -- the graph schema should not carry test infrastructure metadata, and the folder hierarchy should not determine computational identity.
+
+**GTest identifier validity**: All components use `[a-zA-Z0-9_]` only. The sanitizer replaces invalid characters with underscores.
+
+**Worked examples**:
+
+| Bundle path | Generated GTest name |
+|-------------|---------------------|
+| `quick/BatchnormFwdInference/nchw/fp32/typical/` | `BatchnormFwdInference_nchw_fp32.typical` |
+| `quick/BatchnormFwdInference/nchw/fp32/odd_spatial/` | `BatchnormFwdInference_nchw_fp32.odd_spatial` |
+| `quick/BatchnormFwdInference/nchw/fp16/typical/` | `BatchnormFwdInference_nchw_fp16.typical` |
+| `standard/ConvFwd/nhwc/fp16/resnet50_layer3/` | `Standard/ConvFwd_nhwc_fp16.resnet50_layer3` |
+| `quick/customer_issues/CASE-12345/repro/` | `ConvFwd_nchw_fp32.repro` |
+
+Note: the suite name (`BatchnormFwdInference_nchw_fp32`) is derived from graph content, not from the folder path. The test name (`typical`) is the bundle directory name. The `.` separator is GTest's native suite/test delimiter.
+
+**Collision handling**: see [Collision handling](#collision-handling) above -- two bundles with the same suite + scenario name produce a hard error at discovery time.
 
 ##### What changes from today
 
@@ -412,7 +441,7 @@ If the tier directory is empty or missing, `discoverGoldenBundles` returns an em
 - [ ] Single generic test class handles all operation types
 - [ ] Recursive scan discovers all bundles -- no per-operation C++ code
 - [ ] Adding a new test requires only dropping files in a tier folder
-- [ ] Test name derived from graph content, not folder path
+- [ ] Suite name derived from graph content (operation, layout, data type); test name from bundle directory name; folder hierarchy not encoded in test name
 - [ ] Unexpected top-level directories in golden data root produce a warning
 - [ ] Empty or missing tier directory produces zero tests, not a failure
 - [ ] Test name collision (two bundles producing the same name) is a hard error at discovery time
@@ -592,7 +621,7 @@ Golden data lives in two places -- **source tree** and **runtime**:
 
 - **Runtime**: The test binary reads golden data directly from the source tree -- no CMake copy step. The default path is resolved relative to the executable. The `--golden-data-dir` CLI flag or `HIPDNN_TEST_GOLDEN_DATA_DIR` env var overrides this location.
 
-**Open question**: How to ship golden data to ROCm CI. The data must be available at test time without bloating the build tree. Options include DVC pull at CI time, a pre-staged CI cache, or a separate data artifact. Input from the broader team is needed here.
+**Decided: DVC pull at CI time.** DVC is already in the repo for other large binary assets, content-addressing provides integrity guarantees, and selective fetch by path avoids pulling data for operations not under test. CI jobs run `dvc pull golden_reference_data/{tier}/` before test execution to fetch only the data needed for the tier under test. Fallback: `--verification-mode cpu` (or `gpu`) runs without golden data if DVC is unavailable, so CI is never fully blocked by a storage outage.
 
 ---
 
