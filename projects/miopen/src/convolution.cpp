@@ -454,9 +454,9 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
 }
 
 void ConvolutionDescriptor::GetWorkSpaceSizeRange(ExecutionContext ctx,
-                                                   const conv::ProblemDescription& problem,
-                                                   std::size_t* minWorkspaceSize,
-                                                   std::size_t* maxWorkspaceSize) const
+                                                  const conv::ProblemDescription& problem,
+                                                  std::size_t* minWorkspaceSize,
+                                                  std::size_t* maxWorkspaceSize) const
 {
     MIOPEN_LOG_I2("");
 

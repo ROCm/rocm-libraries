@@ -495,7 +495,8 @@ miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
         auto ctx               = ExecutionContext{};
         auto problem           = ProblemDescription{};
         std::tie(ctx, problem) = MakeFwdCtxAndProblem(handle, xDesc, wDesc, convDesc, yDesc);
-        miopen::deref(convDesc).GetWorkSpaceSizeRange(ctx, problem, minWorkspaceSize, maxWorkspaceSize);
+        miopen::deref(convDesc).GetWorkSpaceSizeRange(
+            ctx, problem, minWorkspaceSize, maxWorkspaceSize);
     });
 }
 
@@ -1354,7 +1355,8 @@ miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
         auto ctx               = ExecutionContext{};
         auto problem           = ProblemDescription{};
         std::tie(ctx, problem) = MakeBwdCtxAndProblem(handle, dyDesc, wDesc, convDesc, dxDesc);
-        miopen::deref(convDesc).GetWorkSpaceSizeRange(ctx, problem, minWorkspaceSize, maxWorkspaceSize);
+        miopen::deref(convDesc).GetWorkSpaceSizeRange(
+            ctx, problem, minWorkspaceSize, maxWorkspaceSize);
     });
 }
 
@@ -1389,7 +1391,8 @@ miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
         auto ctx               = ExecutionContext{};
         auto problem           = ProblemDescription{};
         std::tie(ctx, problem) = MakeWrWCtxAndProblem(handle, dyDesc, xDesc, convDesc, dwDesc);
-        miopen::deref(convDesc).GetWorkSpaceSizeRange(ctx, problem, minWorkspaceSize, maxWorkspaceSize);
+        miopen::deref(convDesc).GetWorkSpaceSizeRange(
+            ctx, problem, minWorkspaceSize, maxWorkspaceSize);
     });
 }
 
