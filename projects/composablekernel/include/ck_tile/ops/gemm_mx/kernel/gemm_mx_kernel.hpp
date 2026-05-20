@@ -99,9 +99,10 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
     static constexpr auto BPackedSize = numeric_traits<BDataType>::PackedSize;
 
     // XdlPack: desired packing of e8m0_t scale values into int32_t
-    static constexpr index_t MXdlPack = 2;
-    static constexpr index_t NXdlPack = 2;
-    static constexpr index_t KXdlPack = 2;
+    static constexpr index_t ScaleGranularityK = MXGemmPipeline::ScaleGranularityK;
+    static constexpr index_t MXdlPack          = MXGemmPipeline::MXdlPack;
+    static constexpr index_t NXdlPack          = MXGemmPipeline::NXdlPack;
+    static constexpr index_t KXdlPack          = MXGemmPipeline::KXdlPack;
 
     // Effective pack sizes: fall back to 1 when dimension is too small
     using BlockWarps_                      = typename BlockGemmShape::BlockWarps;
@@ -277,54 +278,140 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                                                       const index_t i_m)
     {
         auto scale_a = kargs.scale_m_ptr;
+        static_assert(ScaleM::GranularityK == ScaleGranularityK);
+        if constexpr(MXGemmPipeline::Preshuffle)
+        {
+            const auto scale_packs_m = integer_divide_ceil(kargs.M, (MXdlPackEff * MThreadPerXdl));
+            const auto scale_packs_k = kargs.K / ScaleGranularityK / (KXdlPackEff * KThreadPerXdl);
 
-        static constexpr int BlockScaleSize = ScaleM::GranularityK;
-        const auto scale_k_packed           = kargs.K / BlockScaleSize / KXdlPackEff;
-        const auto scale_m_packed           = kargs.M / MXdlPackEff;
+            const auto scale_a_naive_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(scale_packs_m, scale_packs_k, KThreadPerXdl, MThreadPerXdl));
+            const auto scale_a_desc = transform_tensor_descriptor(
+                scale_a_naive_desc,
+                make_tuple(make_merge_transform(make_tuple(scale_packs_m, MThreadPerXdl)),
+                           make_merge_transform(make_tuple(scale_packs_k, KThreadPerXdl))),
+                make_tuple(sequence<0, 3>{}, sequence<1, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
 
-        // A scale tensor view - layout [M/MXdlPackEff, K/32/KXdlPackEff] with int32_t elements
-        const auto scale_a_tensor_view = make_naive_tensor_view<address_space_enum::global>(
-            reinterpret_cast<const int32_t*>(scale_a.ptr),
-            make_tuple(scale_m_packed, scale_k_packed),
-            make_tuple(scale_k_packed, 1));
+            const auto scale_a_tensor_view = make_tensor_view<address_space_enum::global>(
+                reinterpret_cast<const int32_t*>(scale_a.ptr), scale_a_desc);
 
-        // Tile window shape: [MPerBlock/MXdlPackEff, KPerBlock/32/KXdlPackEff]
-        auto scale_a_block_window = make_tile_window(
-            scale_a_tensor_view,
-            make_tuple(number<TilePartitioner::MPerBlock / MXdlPackEff>{},
-                       number<TilePartitioner::KPerBlock / BlockScaleSize / KXdlPackEff>{}),
-            {i_m / MXdlPackEff, 0});
+            return make_tile_window(
+                scale_a_tensor_view,
+                make_tuple(
+                    number<TilePartitioner::MPerBlock / MXdlPackEff>{},
+                    number<TilePartitioner::KPerBlock / (ScaleGranularityK * KXdlPackEff)>{}),
+                {i_m / MXdlPackEff, 0});
+        }
+        else
+        {
+            const auto scale_k_packed = kargs.K / ScaleGranularityK / KXdlPackEff;
+            const auto scale_m_packed = kargs.M / MXdlPackEff;
 
-        return scale_a_block_window;
+            // A scale tensor view - layout [M/MXdlPackEff, K/32/KXdlPackEff] with int32_t elements
+            const auto scale_a_tensor_view = make_naive_tensor_view<address_space_enum::global>(
+                reinterpret_cast<const int32_t*>(scale_a.ptr),
+                make_tuple(scale_m_packed, scale_k_packed),
+                make_tuple(scale_k_packed, 1));
+
+            // Tile window shape: [MPerBlock/MXdlPackEff, KPerBlock/32/KXdlPackEff]
+            return make_tile_window(
+                scale_a_tensor_view,
+                make_tuple(number<TilePartitioner::MPerBlock / MXdlPackEff>{},
+                           number<TilePartitioner::KPerBlock / ScaleGranularityK / KXdlPackEff>{}),
+                {i_m / MXdlPackEff, 0});
+        }
     }
 
-    // Create scale B block windows with packed int32_t layout
-    // Host packs 2N x 2K e8m0_t values into one int32_t
-    // Tensor view: [N/NXdlPack, K/32/KXdlPack] of int32_t
+    template <typename ScaleM, typename ScaleN>
+    CK_TILE_DEVICE static auto
+    MakeBFlatBlockWindows(const std::array<const BDataType*, NumBTensor>& bs_ptr,
+                          const KernelArgs<ScaleM, ScaleN>& kargs,
+                          const index_t i_n)
+    {
+        static_assert(NumBTensor == 1, "MX GEMM preshuffle currently supports one B tensor");
+
+        constexpr index_t kKPerBlock    = MXGemmPipeline::kKPerBlock;
+        constexpr index_t kNWarpTile    = BlockGemmShape::WarpTile::at(I1);
+        constexpr index_t flatKPerBlock = kKPerBlock * kNWarpTile;
+        const index_t kFlatKBlocks      = kargs.K / kKPerBlock;
+        const index_t kFlatN            = kargs.N / kNWarpTile;
+
+        auto b_flat_tensor_view = [&]() {
+            static_assert(flatKPerBlock % MXGemmPipeline::GetVectorSizeB() == 0,
+                          "wrong! vector size for preshuffled B tensor");
+            auto naive_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(kFlatN, kFlatKBlocks, number<flatKPerBlock>{}));
+            auto desc = transform_tensor_descriptor(
+                naive_desc,
+                make_tuple(make_pass_through_transform(kFlatN),
+                           make_merge_transform_v3_division_mod(
+                               make_tuple(kFlatKBlocks, number<flatKPerBlock>{}))),
+                make_tuple(sequence<0>{}, sequence<1, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+            return make_tensor_view<address_space_enum::global>(bs_ptr[number<0>{}], desc);
+        }();
+
+        return generate_tuple(
+            [&](auto) {
+                return make_tile_window(
+                    b_flat_tensor_view,
+                    make_tuple(number<MXGemmPipeline::flatNPerWarp>{},
+                               number<MXGemmPipeline::flatKPerWarp>{}),
+                    {static_cast<int>(i_n / BlockGemmShape::WarpTile::at(I1)), 0});
+            },
+            number<NumBTensor>{});
+    }
+
     template <typename ScaleM, typename ScaleN>
     CK_TILE_DEVICE static auto MakeScaleBBlockWindows(const KernelArgs<ScaleM, ScaleN>& kargs,
                                                       const index_t i_n)
     {
         auto scale_b = kargs.scale_n_ptr;
+        static_assert(ScaleN::GranularityK == ScaleGranularityK);
 
-        static constexpr int BlockScaleSize = ScaleN::GranularityK;
-        const auto scale_k_packed           = kargs.K / BlockScaleSize / KXdlPackEff;
-        const auto scale_n_packed           = kargs.N / NXdlPackEff;
+        if constexpr(MXGemmPipeline::Preshuffle)
+        {
+            const auto scale_packs_n = integer_divide_ceil(kargs.N, (NXdlPackEff * NThreadPerXdl));
+            const auto scale_packs_k = kargs.K / ScaleGranularityK / (KXdlPackEff * KThreadPerXdl);
 
-        // B scale tensor view - [N/NXdlPackEff, K/32/KXdlPackEff] of int32_t
-        const auto scale_b_tensor_view = make_naive_tensor_view<address_space_enum::global>(
-            reinterpret_cast<const int32_t*>(scale_b.ptr),
-            make_tuple(scale_n_packed, scale_k_packed),
-            make_tuple(scale_k_packed, 1));
+            const auto scale_b_naive_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(scale_packs_n, scale_packs_k, KThreadPerXdl, NThreadPerXdl));
+            const auto scale_b_desc = transform_tensor_descriptor(
+                scale_b_naive_desc,
+                make_tuple(make_merge_transform(make_tuple(scale_packs_n, NThreadPerXdl)),
+                           make_merge_transform(make_tuple(scale_packs_k, KThreadPerXdl))),
+                make_tuple(sequence<0, 3>{}, sequence<1, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
 
-        // Tile window shape: [NPerBlock/NXdlPackEff, KPerBlock/32/KXdlPackEff]
-        auto scale_b_block_window = make_tile_window(
-            scale_b_tensor_view,
-            make_tuple(number<TilePartitioner::NPerBlock / NXdlPackEff>{},
-                       number<TilePartitioner::KPerBlock / BlockScaleSize / KXdlPackEff>{}),
-            {i_n / NXdlPackEff, 0});
+            const auto scale_b_tensor_view = make_tensor_view<address_space_enum::global>(
+                reinterpret_cast<const int32_t*>(scale_b.ptr), scale_b_desc);
 
-        return scale_b_block_window;
+            return make_tile_window(
+                scale_b_tensor_view,
+                make_tuple(
+                    number<TilePartitioner::NPerBlock / NXdlPackEff>{},
+                    number<TilePartitioner::KPerBlock / (ScaleGranularityK * KXdlPackEff)>{}),
+                {i_n / NXdlPackEff, 0});
+        }
+        else
+        {
+            const auto scale_k_packed = kargs.K / ScaleGranularityK / KXdlPackEff;
+            const auto scale_n_packed = kargs.N / NXdlPackEff;
+
+            // B scale tensor view - [N/NXdlPackEff, K/32/KXdlPackEff] of int32_t
+            const auto scale_b_tensor_view = make_naive_tensor_view<address_space_enum::global>(
+                reinterpret_cast<const int32_t*>(scale_b.ptr),
+                make_tuple(scale_n_packed, scale_k_packed),
+                make_tuple(scale_k_packed, 1));
+
+            // Tile window shape: [NPerBlock/NXdlPackEff, KPerBlock/32/KXdlPackEff]
+            return make_tile_window(
+                scale_b_tensor_view,
+                make_tuple(number<TilePartitioner::NPerBlock / NXdlPackEff>{},
+                           number<TilePartitioner::KPerBlock / ScaleGranularityK / KXdlPackEff>{}),
+                {i_n / NXdlPackEff, 0});
+        }
     }
 
     template <class ScaleM, class ScaleN>
@@ -342,8 +429,17 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
         // i_m and i_n are element offsets (iM * MPerBlock, iN * NPerBlock), not tile indices
         const auto& a_block_window =
             Underlying::MakeABlockWindows(as_ptr, kargs, splitk_batch_offset.splitted_k, i_m);
-        const auto& b_block_window =
-            Underlying::MakeBBlockWindows(bs_ptr, kargs, splitk_batch_offset.splitted_k, i_n);
+        const auto& b_block_window = [&]() {
+            if constexpr(MXGemmPipeline::Preshuffle)
+            {
+                return MakeBFlatBlockWindows(bs_ptr, kargs, i_n);
+            }
+            else
+            {
+                return Underlying::MakeBBlockWindows(
+                    bs_ptr, kargs, splitk_batch_offset.splitted_k, i_n);
+            }
+        }();
         const auto& d_block_window = Underlying::MakeDBlockWindows(ds_ptr, kargs, i_m, i_n);
 
         // Create scale block windows using our new functions
