@@ -24,9 +24,16 @@ inline constexpr float kExp2C3 = 0.077119089663028717041015625f;
 // for other work. Useful when MFMA is the bottleneck.
 inline __device__ float exp2_fma(float x)
 {
-    // Clamp to valid IEEE 754 exponent range
-    float xc = __builtin_fmaxf(x, -126.0f);
-    xc       = __builtin_fminf(xc, 127.0f);
+    // 2^x for x <= -126 is at most 2^(-126) ≈ 1.18e-38 (smallest normal
+    // float).  The polynomial + bit-trick below cannot produce zero, so
+    // return 0 explicitly to match hardware exp2 behaviour for -inf and
+    // extreme negatives.
+    if(x <= -126.0f)
+        return 0.0f;
+
+    // Clamp to valid IEEE 754 exponent range (lower bound already
+    // handled by the early return above).
+    float xc = __builtin_fminf(x, 127.0f);
 
     // Split into integer and fractional parts: x = n + f, f in [0, 1)
     int n    = static_cast<int>(xc);
