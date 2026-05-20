@@ -33,7 +33,7 @@ jobs:
     name: "Setup"
     runs-on: ubuntu-24.04
     outputs:
-      hipdnn: ${{ steps.changes.outputs.hipdnn }}
+      matrix: ${{ steps.build-matrix.outputs.matrix }}
     steps:
       - name: Checkout rocm-libraries
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -47,13 +47,37 @@ jobs:
         id: changes
         with:
           filters: |
-            # To opt in a new library, add a filter here and a corresponding
-            # step in the clang-tidy job below.
+            # To opt in a new library: add a filter here and one ENTRIES line
+            # in the build-matrix step below.
             hipdnn:
               - 'projects/hipdnn/**'
             # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
             # miopen-provider:
             #   - 'dnn-providers/miopen-provider/**'
+
+      - name: Build job matrix
+        id: build-matrix
+        run: |
+          ENTRIES=()
+          if [[ "${{ steps.changes.outputs.hipdnn }}" == "true" ]] \
+              || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENTRIES+=('{"name":"hipdnn","src":"projects/hipdnn","build":"build-hipdnn","cmake_flags":"-DENABLE_CLANG_TIDY=ON -DROCM_PATH=/opt/rocm -DCMAKE_PREFIX_PATH=/opt/rocm -DENABLE_CLANG_FORMAT=OFF -DHIP_PLATFORM=amd"}')
+          fi
+          # To opt in a new library: uncomment or add an ENTRIES line here, and
+          # add a filter above. Required fields: name, src, build, cmake_flags.
+          # Optional fields: target (default: "tidy").
+          # Add an "Install deps (<name>)" step in the clang-tidy job if needed.
+          # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
+          # if [[ "${{ steps.changes.outputs.miopen-provider }}" == "true" ]] \
+          #     || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          #   ENTRIES+=('{"name":"miopen-provider","src":"dnn-providers/miopen-provider","build":"build-miopen-provider","cmake_flags":"-DENABLE_CLANG_TIDY=ON -DROCM_PATH=/opt/rocm -DCMAKE_PREFIX_PATH=/opt/rocm -DENABLE_CLANG_FORMAT=OFF -DHIP_PLATFORM=amd"}')
+          # fi
+          if [[ ${#ENTRIES[@]} -gt 0 ]]; then
+            MATRIX=$(printf '%s\n' "${ENTRIES[@]}" | jq -sc '{"include": .}')
+          else
+            MATRIX='{"include":[]}'
+          fi
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
 
   clang-tidy:
     name: "clang-tidy"
