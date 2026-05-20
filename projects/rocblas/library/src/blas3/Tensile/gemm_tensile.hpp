@@ -179,11 +179,12 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
         auto       D_base = D_ptr + offset_d;
 
         // Calculate safe k_chunk_size to keep offsets within signed 32-bit
-        int64_t max_stride        = std::max(int64_t(ld_a), int64_t(ld_b));
-        int64_t bytes_per_element = sizeof(Ti);
-        int64_t safe_k
+        constexpr int64_t overflow_limit_2_to_31 = 2147483647; // 2^31 - 1
+        int64_t           max_stride             = std::max(int64_t(ld_a), int64_t(ld_b));
+        int64_t           bytes_per_element      = sizeof(Ti);
+        int64_t           safe_k
             = (max_stride > 0 && max_stride * bytes_per_element > 0)
-                  ? std::max(int64_t(1), int64_t(2147483647) / (max_stride * bytes_per_element))
+                  ? std::max(int64_t(1), overflow_limit_2_to_31 / (max_stride * bytes_per_element))
                   : int64_t(k);
         // Only chunk if needed (when k would overflow)
         // Ensure k_chunk >= 1 to avoid infinite loop when k=0
