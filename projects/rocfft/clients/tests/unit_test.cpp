@@ -22,7 +22,9 @@
 
 #include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
+#ifdef ROCFFT_HAS_INTERNAL_FUNCTION_POOL
 #include "function_pool.h"
+#endif
 #include "../../shared/environment.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/params_gen.h"
@@ -1331,11 +1333,13 @@ TEST(rocfft_UnitTest, plan_capacity_100k)
     run_plan_capacity_test(100'000);
 }
 
+#ifdef ROCFFT_HAS_INTERNAL_FUNCTION_POOL
 // Cover function_pool's runtime-extension paths.  The plan_capacity
 // tests above stress the hot read path via rocfft_plan_create; this
 // exercises the rarer write/miss paths (add_new_kernel emplace,
 // missing-key throws, partial-pass overload) so the thread-safety
-// changes are fully covered.
+// changes are fully covered.  Only built when rocfft-function-pool
+// is available as a CMake target (full-tree build, not clients-only).
 TEST(rocfft_UnitTest, function_pool_runtime_paths)
 {
     function_pool pool(get_curr_device_prop());
@@ -1364,6 +1368,7 @@ TEST(rocfft_UnitTest, function_pool_runtime_paths)
     EXPECT_FALSE(pool.has_function(pp_key));
     EXPECT_THROW(pool.get_kernel(pp_key, CS_3D_PP), std::out_of_range);
 }
+#endif // ROCFFT_HAS_INTERNAL_FUNCTION_POOL
 
 // Capacity test documenting support for 1M concurrent identical plans.
 // DISABLED_ by default so the long runtime stays out of routine CI;

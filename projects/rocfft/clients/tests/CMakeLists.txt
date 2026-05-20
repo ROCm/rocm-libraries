@@ -295,10 +295,14 @@ target_link_libraries( rocfft-test
   PRIVATE
   hip::device
   roc::rocfft
-  rocfft-function-pool
   ${ROCFFT_SQLITE_LIB}
   ${rocfft-test_link_libs}
   )
+
+if(TARGET rocfft-function-pool)
+  target_link_libraries( rocfft-test PRIVATE rocfft-function-pool )
+  target_compile_definitions( rocfft-test PRIVATE ROCFFT_HAS_INTERNAL_FUNCTION_POOL )
+endif()
 
 if ( USE_HIPRAND )
   target_link_libraries( rocfft-test
