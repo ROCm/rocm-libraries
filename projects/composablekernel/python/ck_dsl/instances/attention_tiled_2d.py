@@ -62,8 +62,13 @@ from ..helpers.attention import (
     binary_search_seq_idx,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
+    mfma_32x32x16_c_col,
+    mfma_32x32x16_c_row,
+    mfma_32x32x16_for_dtype,
     warp_xor_reduce_max,
+    warp_xor_reduce_max_32lane,
     warp_xor_reduce_sum,
+    warp_xor_reduce_sum_32lane,
 )
 from ..helpers.layouts import TransposeLdsReader
 from ..transforms import TensorDescriptor, embed, indirect, unmerge
@@ -80,8 +85,13 @@ _apply_softcap = apply_softcap_log2
 _binary_search_seq_idx = binary_search_seq_idx
 _mfma_16x16x16 = mfma_16x16x16_for_dtype
 _mfma_16x16x32 = mfma_16x16x32_for_dtype
+_mfma_32x32x16 = mfma_32x32x16_for_dtype
+_mfma_32x32_c_col = mfma_32x32x16_c_col
+_mfma_32x32_c_row = mfma_32x32x16_c_row
 _warp_xor_reduce_max = warp_xor_reduce_max
+_warp_xor_reduce_max_32lane = warp_xor_reduce_max_32lane
 _warp_xor_reduce_sum = warp_xor_reduce_sum
+_warp_xor_reduce_sum_32lane = warp_xor_reduce_sum_32lane
 
 
 @dataclass(frozen=True)
@@ -153,6 +163,14 @@ class UnifiedAttention2DTiledSpec:
     # This avoids quantising Q/K for the QK softmax path, so it is the
     # safer FlyDSL-inspired subset: exact bf16 QK logits, native fp8 PV.
     use_fp8_mfma_pv: bool = False
+    # Experimental in-place improvement for the existing 16x16x32 path:
+    # keep softmax P in registers and permute the MFMA-C distribution into
+    # the PV MFMA-A distribution, instead of publishing P to P_lds and
+    # reading it back. This targets the same fundamental hot-loop overhead
+    # as the 32x32 rewrite, but applies to the current production geometry.
+    # v1 is intentionally restricted to bf16/no-bias/no-window until parity
+    # is proven broadly.
+    use_register_pv: bool = False
     # ``T`` (per-CTA-iter KV-tile size in tokens). When ``None``, the
     # kernel uses ``T = block_size`` (one paged-KV cache block per
     # iter, matching the AITER decode path). Setting ``tile_size > block_size``
@@ -187,6 +205,28 @@ class UnifiedAttention2DTiledSpec:
     # budgets) where the trade-off might flip. See
     # ``/workspace/probe_blockm32_perf.py`` for the sweep.
     block_m_per_warp: int = 16
+    # Migrate the in-place tiled 2D kernel from the old 16x16x32 MFMA
+    # geometry to the CK Tile / Triton long-prefill geometry:
+    #
+    #   - per warp: M=32 rows, N=32 columns, K-step=16
+    #   - accumulator: <16 x f32> per lane
+    #   - row layout: rows are wholly contained within one 32-lane half
+    #
+    # This flag is deliberately in the main spec rather than a separate
+    # "fast path" module. It lets us replace the existing QK -> softmax
+    # -> PV pipeline in controlled stages while keeping the current
+    # production kernel available until the new layout is fully parity-
+    # clean. Once the migration is complete, this becomes the default for
+    # long-prefill and the old 16x16x32 body can be removed.
+    use_mfma_32x32: bool = False
+    # Experimental orientation for the 32x32 migration. The first 32x32
+    # prototype computed ``S = Q @ K^T`` and therefore still needed a
+    # cross-lane reduction over K columns. Triton/CK Tile's efficient
+    # shape is better understood as computing ``S^T = K @ Q^T``:
+    # one lane owns one query column and 16 key positions, so the softmax
+    # K-axis mostly lives in registers. This flag tracks that orientation
+    # independently while it is brought up.
+    use_transposed_qk_32x32: bool = False
 
     def __post_init__(self):
         if self.num_warps not in (1, 2, 4, 8):
@@ -207,6 +247,22 @@ class UnifiedAttention2DTiledSpec:
                 f"(got {self.num_warps}); the 8-warp variant would exceed "
                 f"the 1024-thread CTA cap with 32 rows per warp."
             )
+        if self.use_mfma_32x32:
+            if self.block_m_per_warp != 32:
+                raise ValueError(
+                    "use_mfma_32x32 requires block_m_per_warp=32: "
+                    "one 32-row MFMA atom per warp"
+                )
+            if self.tile_size_eff % 32 != 0:
+                raise ValueError(
+                    "use_mfma_32x32 requires tile_size to be a multiple of 32"
+                )
+            if self.head_size % 16 != 0:
+                raise ValueError(
+                    "use_mfma_32x32 requires head_size to be a multiple of 16"
+                )
+        if self.use_transposed_qk_32x32 and not self.use_mfma_32x32:
+            raise ValueError("use_transposed_qk_32x32 requires use_mfma_32x32")
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
@@ -215,6 +271,22 @@ class UnifiedAttention2DTiledSpec:
             raise ValueError("use_fp8_mfma_qk requires kv_storage_dtype='fp8e4m3'")
         if self.use_fp8_mfma_pv and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError("use_fp8_mfma_pv requires kv_storage_dtype='fp8e4m3'")
+        if self.use_register_pv:
+            if self.use_mfma_32x32:
+                raise ValueError(
+                    "use_register_pv currently targets the existing 16x16x32 path; "
+                    "the 32x32 path has a separate register-P migration"
+                )
+            if self.dtype != "bf16":
+                raise ValueError("use_register_pv v1 is restricted to dtype='bf16'")
+            if self.kv_storage_dtype is not None:
+                raise ValueError("use_register_pv v1 does not support fp8 K/V cache")
+            if self.use_sinks or self.sliding_window > 0 or self.has_softcap:
+                raise ValueError(
+                    "use_register_pv v1 requires no sinks, no sliding window, and no softcap"
+                )
+            if self.use_alibi or self.use_qq_bias:
+                raise ValueError("use_register_pv v1 does not support ALiBi or QQ bias")
         if self.tile_size is not None:
             if self.tile_size <= 0 or self.tile_size % self.block_size != 0:
                 raise ValueError(
@@ -238,7 +310,14 @@ class UnifiedAttention2DTiledSpec:
         4 row slots (rows ``lane_rg*4..lane_rg*4+3`` within a 16-row
         atom). With ``block_m_per_warp=32``, we stack two MFMA atoms
         per warp ⇒ 8 row slots per lane.
+
+        For the 32x32x16 migration, a single warp owns all 32 rows in
+        one MFMA atom and each lane carries 16 accumulator elements in
+        CK Tile's C distribution. Those 16 row slots are the state we
+        need for ``m``/``l``/``P`` while we remove the old P_lds roundtrip.
         """
+        if self.use_mfma_32x32:
+            return 16
         return self.block_m_per_warp // 4  # 4 for M=16, 8 for M=32
 
     @property
@@ -292,8 +371,11 @@ class UnifiedAttention2DTiledSpec:
             "qqb" if self.use_qq_bias else "",
             f"w{self.num_warps}" if self.num_warps != 1 else "",
             f"mw{self.block_m_per_warp}" if self.block_m_per_warp != 16 else "",
+            "mfma32" if self.use_mfma_32x32 else "",
+            "stqk" if self.use_transposed_qk_32x32 else "",
             "fp8mfma" if self.use_fp8_mfma_qk else "",
             "fp8pv" if self.use_fp8_mfma_pv else "",
+            "regpv" if self.use_register_pv else "",
         )
 
 
@@ -451,13 +533,30 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
     FP8_MFMA_QK = KV_FP8 and spec.use_fp8_mfma_qk
     FP8_MFMA_PV = KV_FP8 and spec.use_fp8_mfma_pv
+    REGISTER_PV = spec.use_register_pv
+    TRANSPOSED_QK_32X32 = spec.use_transposed_qk_32x32
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
-    QK_K_STEP = 32
+    USE_MFMA_32X32 = spec.use_mfma_32x32
+    # QK geometry. The existing kernel uses 16x16x32 atoms:
+    #   - per-lane C: <4 x f32>
+    #   - N tile: 16 columns
+    #   - K step: 32 head-dim elements
+    #
+    # The CK Tile/Triton long-prefill geometry uses 32x32x16 atoms:
+    #   - per-lane C: <16 x f32>
+    #   - N tile: 32 columns
+    #   - K step: 16 head-dim elements
+    #
+    # Keep this as explicit local geometry, rather than overloading the
+    # module-wide MFMA_M/MFMA_N constants, because PV and epilogue still
+    # use the old 16x16 geometry until the migration reaches those phases.
+    QK_MFMA_N = 32 if USE_MFMA_32X32 else MFMA_N
+    QK_K_STEP = 16 if USE_MFMA_32X32 else 32
     PV_K_STEP = 32 if T % 32 == 0 else 16
     QK_K_ITERS = HD // QK_K_STEP
-    QK_N_TILES = T // MFMA_N
+    QK_N_TILES = T // QK_MFMA_N
     PV_K_ITERS = T // PV_K_STEP
     PV_N_TILES = HD // MFMA_N
 
@@ -694,21 +793,22 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         )
     else:
         V_lds = b.smem_alloc(V_LDS_DTYPE, [V_BUFS, T, HD], name_hint="Vlds")
-    # P_lds row stride padding (16 bytes = 8 halves) to eliminate 4-way
-    # LDS bank conflict on the softmax `ds_write_b16` stores. With row
-    # stride T*2 = 128 bytes = exactly 32 banks, lanes 0, 16, 32, 48
-    # (same lane_col but different lane_rg → different rows) all hit
-    # bank 0 because (row*128) % 128 == 0 for any row. Padding by
-    # 8 halves shifts row-N bank to bank-(N*16)%32, breaking the
-    # alias. Cost: +16 bytes per row × BLOCK_M rows = up to 2 KiB LDS
-    # at BLOCK_M=128. Profiling (rocprofv2 SQ_LDS_BANK_CONFLICT) showed
-    # ~12× LDS conflict cycles per LDS instruction on the FP8 mid-
-    # prefill kernel (25.7M conflicts vs 2.0M LDS ops) before the
-    # padding; the pad makes those writes single-cycle.
-    # In native fp8-MFMA mode P_lds holds quantised fp8 probabilities.
-    # Keep the same 16-byte row-padding distance by using 16 bytes / 1 byte.
-    P_LDS_PAD = 16 if FP8_MFMA_PV else 8
-    P_lds = b.smem_alloc(P_LDS_DTYPE, [BLOCK_M, T + P_LDS_PAD], name_hint="Plds")
+    if not REGISTER_PV:
+        # P_lds row stride padding (16 bytes = 8 halves) to eliminate 4-way
+        # LDS bank conflict on the softmax `ds_write_b16` stores. With row
+        # stride T*2 = 128 bytes = exactly 32 banks, lanes 0, 16, 32, 48
+        # (same lane_col but different lane_rg → different rows) all hit
+        # bank 0 because (row*128) % 128 == 0 for any row. Padding by
+        # 8 halves shifts row-N bank to bank-(N*16)%32, breaking the
+        # alias. Cost: +16 bytes per row × BLOCK_M rows = up to 2 KiB LDS
+        # at BLOCK_M=128. Profiling (rocprofv2 SQ_LDS_BANK_CONFLICT) showed
+        # ~12× LDS conflict cycles per LDS instruction on the FP8 mid-
+        # prefill kernel (25.7M conflicts vs 2.0M LDS ops) before the
+        # padding; the pad makes those writes single-cycle.
+        # In native fp8-MFMA mode P_lds holds quantised fp8 probabilities.
+        # Keep the same 16-byte row-padding distance by using 16 bytes / 1 byte.
+        P_LDS_PAD = 16 if FP8_MFMA_PV else 8
+        P_lds = b.smem_alloc(P_LDS_DTYPE, [BLOCK_M, T + P_LDS_PAD], name_hint="Plds")
     # ---- FP8 K/V staging (round-2 async-DMA path) ----
     # When KV_FP8, the loader is split into two phases:
     #   1. async-DMA raw fp8 bytes from HBM into the fp8 staging slab
@@ -746,6 +846,14 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     # one-shot overhead and the pad's LDS budget cost doesn't pay back.
     # Keep Acc_lds tight.
     Acc_lds = b.smem_alloc(dtype, [BLOCK_M, OUT_STRIPE_COLS], name_hint="Aclds")
+    # NOTE: A staged Acc_lds epilogue for the transposed 32x32 path was
+    # tested (one 32-d stripe per MFMA tile, bank-padded to 17 dwords/row
+    # for HD>=128). It regressed on every tested shape (HD=64/128, single
+    # and multi-batch) by 15-100% vs the per-lane direct global-store
+    # epilogue, because the transposed accumulator already produces
+    # 32 adjacent-token vec16-per-lane stores per cycle that the memory
+    # subsystem coalesces well, and the LDS bounce + barrier added more
+    # cost than the gather it saved. Keep the direct scalar epilogue.
 
     # ---- CK Tile `TransposeLDSLayout<M=16, K=*, B=1>` lane formulas ----
     # ``TransposeLdsReader`` materializes the per-lane row / col SSA
@@ -872,6 +980,13 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     # (== tid%64), not `tid`.
     lane_rg = b.div(lane, b.const_i32(16))
     lane_col = b.mod(lane, b.const_i32(16))
+    lane_half32 = b.div(lane, b.const_i32(32))
+    lane_col32 = b.mod(lane, b.const_i32(32))
+    lane_col_div4 = b.div(lane_col, b.const_i32(4))
+    lane_col_mod4 = b.mod(lane_col, b.const_i32(4))
+    lane_rg_is0 = b.cmp_eq(lane_rg, b.const_i32(0))
+    lane_rg_is1 = b.cmp_eq(lane_rg, b.const_i32(1))
+    lane_rg_is2 = b.cmp_eq(lane_rg, b.const_i32(2))
 
     # ---- Per-lane row map ----
     # For ``block_m_per_warp=16`` the lane owns 4 row slots within one
@@ -888,10 +1003,84 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
             b.const_i32(atom_idx * 16 + in_atom),
         )
 
+    def _state_row(r: int) -> Value:
+        """Row represented by softmax state slot ``r`` in the active layout."""
+        if USE_MFMA_32X32 and not TRANSPOSED_QK_32X32:
+            return _mfma_32x32_c_row(b, lane, r)
+        return _in_warp_row(r)
+
+    def _bit2(v: Value, bit: int) -> Value:
+        return b.land(b.lshr(v, b.const_i32(bit)), b.const_i32(1))
+
+    def _select_lane_rg(v0: Value, v1: Value, v2: Value, v3: Value) -> Value:
+        return b.select(
+            lane_rg_is0, v0, b.select(lane_rg_is1, v1, b.select(lane_rg_is2, v2, v3))
+        )
+
+    def _permute_p_c_to_a16(p_regs_f32: list[Value]) -> list[Value]:
+        """Convert one 16-col P tile from 16x16 MFMA-C regs to PV-A regs.
+
+        Current production geometry (not the 32x32 migration) has QK C
+        indexed by lane fields ``(A=lane/16, B=(lane%16)/4, C=lane%4)``
+        and per-lane register ``R``:
+
+            P[row=A*4+R, col=B*4+C]
+
+        PV's A operand wants:
+
+            P[row=B*4+C, col=A*4+R]
+
+        so the transform is ``(A,B,C,R) -> (B,A,R,C)``. This is the same
+        register-P idea CK Tile uses to avoid an LDS bridge between two
+        GEMMs. Two bit-level transposes swap ``C`` with ``R`` inside a
+        lane quad; then lane-field swaps exchange ``A`` and ``B``.
+        """
+
+        vals = p_regs_f32
+        for bit in (0, 1):
+            lane_bit = _bit2(lane_col_mod4, bit)
+            reg_bit = 1 << bit
+            old = vals
+            vals = []
+            for reg in range(4):
+                partner = b.warp_shuffle_xor(old[reg ^ reg_bit], reg_bit)
+                same_bit = b.cmp_eq(lane_bit, b.const_i32((reg >> bit) & 1))
+                vals.append(b.select(same_bit, old[reg], partner))
+
+        for bit, lane_xor in ((0, 20), (1, 40)):
+            a_bit = _bit2(lane_rg, bit)
+            b_bit = _bit2(lane_col_div4, bit)
+            swap = b.cmp_ne(a_bit, b_bit)
+            vals = [b.select(swap, b.warp_shuffle_xor(v, lane_xor), v) for v in vals]
+        return vals
+
+    def _pack_p_a16(p_regs_f32: list[Value]) -> Value:
+        return b.vec_pack(
+            [b.cast_f32_to(v, dtype) for v in _permute_p_c_to_a16(p_regs_f32)], dtype
+        )
+
+    def _pack_p_a32(p_regs0_f32: list[Value], p_regs1_f32: list[Value]) -> Value:
+        vals0 = _permute_p_c_to_a16(p_regs0_f32)
+        vals1 = _permute_p_c_to_a16(p_regs1_f32)
+        lo: list[Value] = []
+        hi: list[Value] = []
+        for j in range(4):
+            v0 = vals0[j]
+            v1 = vals1[j]
+            v0_x16 = b.warp_shuffle_xor(v0, 16)
+            v0_x32 = b.warp_shuffle_xor(v0, 32)
+            v0_x48 = b.warp_shuffle_xor(v0, 48)
+            v1_x16 = b.warp_shuffle_xor(v1, 16)
+            v1_x32 = b.warp_shuffle_xor(v1, 32)
+            v1_x48 = b.warp_shuffle_xor(v1, 48)
+            lo.append(_select_lane_rg(v0, v0_x48, v1_x32, v1_x16))
+            hi.append(_select_lane_rg(v0_x16, v0_x32, v1_x48, v1))
+        return b.vec_pack([b.cast_f32_to(v, dtype) for v in (lo + hi)], dtype)
+
     if USE_SINKS:
         m_inits = []
         for r in range(REGS_PER_LANE):
-            row = b.add(wave_row_base, _in_warp_row(r))
+            row = b.add(wave_row_base, _state_row(r))
             qh = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
             )
@@ -903,24 +1092,27 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         m_inits = [neg_inf for _ in range(REGS_PER_LANE)]
     l_inits = [one_f for _ in range(REGS_PER_LANE)]
 
-    # Acc storage: one vec_f32(4) per (N-tile, M-atom). For
-    # ``block_m_per_warp=16`` (M_ATOMS_PER_WARP=1) this collapses to
-    # the original ``[vec_f32(4) for n in PV_N_TILES]`` layout.
-    acc_zero = b.zero_vec_f32(4)
-    acc_inits = [acc_zero for _ in range(PV_N_TILES * M_ATOMS_PER_WARP)]
+    # Acc storage. Old path: one vec_f32(4) per (N-tile, M-atom).
+    # 32x32 path: one vec_f32(16) per 32-column output N-tile; each warp
+    # owns exactly one M=32 atom, matching CK Tile's M32N32K16 C layout.
+    PV32_N_TILES = HD // 32
+    ACC_N_TILES = PV32_N_TILES if USE_MFMA_32X32 else PV_N_TILES
+    ACC_M_ATOMS = 1 if USE_MFMA_32X32 else M_ATOMS_PER_WARP
+    acc_zero = b.zero_vec_f32(16) if USE_MFMA_32X32 else b.zero_vec_f32(4)
+    acc_inits = [acc_zero for _ in range(ACC_N_TILES * ACC_M_ATOMS)]
 
     def _acc_idx(n: int, atom: int) -> int:
-        return n * M_ATOMS_PER_WARP + atom
+        return n * ACC_M_ATOMS + atom
 
     iter_args = []
     for r in range(REGS_PER_LANE):
         iter_args.append((f"m{r}", m_inits[r]))
         iter_args.append((f"l{r}", l_inits[r]))
-    for n in range(PV_N_TILES):
-        for atom in range(M_ATOMS_PER_WARP):
+    for n in range(ACC_N_TILES):
+        for atom in range(ACC_M_ATOMS):
             iter_args.append(
                 (
-                    f"acc{n}a{atom}" if M_ATOMS_PER_WARP > 1 else f"acc{n}",
+                    f"acc{n}a{atom}" if ACC_M_ATOMS > 1 else f"acc{n}",
                     acc_inits[_acc_idx(n, atom)],
                 )
             )
@@ -1048,6 +1240,19 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     # ``indirect()`` table lookup inside the paged-KV descriptor doesn't
     # re-materialise the base into a VGPR.
     seq_base = b.to_sgpr_u32(b.mul(seq_idx, bt_stride_p))
+    # Block-table bounds. The paged-KV descriptor over-fetches
+    # ``N_BLOCKS_PER_TILE`` entries per tile from ``block_tables`` (one
+    # ``tile_idx`` worth, regardless of how many of those entries the
+    # current seq actually owns). For short ``kv_len[i]`` (e.g.
+    # decode with ``kv_len = 1`` and ``T = 64``) the over-fetched
+    # indices land past the end of ``block_tables`` -- the values read
+    # are uninitialised memory that, with bad luck, are >= num_blocks
+    # and route the downstream ``buffer_load`` to an unmapped page,
+    # crashing with "Memory access fault by GPU". GUARD the indirect
+    # lookup with the total block-table footprint so OOB lookups
+    # return ``0`` (a guaranteed-valid block id). Downstream causal /
+    # in_prefix masks already discard the bogus tokens.
+    block_table_max_idx = b.to_sgpr_u32(b.mul(num_seqs_p, bt_stride_p))
     _kv_base = TensorDescriptor.naive(
         "paged_kv_bytes",
         # ``lengths`` here is just informational (validity propagation
@@ -1063,6 +1268,7 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 into="physical_block",
                 table=block_tables,
                 base=seq_base,
+                max_idx=block_table_max_idx,
             ),
             unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
         )
@@ -1083,6 +1289,7 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 into="physical_block",
                 table=block_tables,
                 base=seq_base,
+                max_idx=block_table_max_idx,
             ),
         )
 
@@ -1392,18 +1599,34 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                 [b.vec_extract(fp8_vec, i) for i in range(4, 8)],
                 FP8E4M3,
             )
-            # gfx950 FUSED dequant+scale via ``v_cvt_scalef32_pk_f32_fp8``.
-            # Combines what used to be 3 separate instructions (
-            # ``cvt_pk_f32_fp8x4`` + 4× ``v_pk_mul`` per byte-quad) into
-            # 2 packed cvts (one per byte-pair). Matches Triton's
-            # ``v_cvt_scalef32_pk_f32_fp8`` emission for the long-prefill
-            # FP8 KV dequant — verified op-by-op in the ISA diff
-            # (see ck_long_prefill ISA analysis): drops the inner-loop
-            # ``v_pk_mul`` count from 64 → 16 and the ``v_cvt_pk_bf16_f32``
-            # count from 88 → 48 per iter (the per-byte scale apply
-            # gets folded into the cvt).
-            lo_f32x4 = b.cvt_scalef32_pk_f32_fp8x4(lo_quad, scale)
-            hi_f32x4 = b.cvt_scalef32_pk_f32_fp8x4(hi_quad, scale)
+            # CORRECTNESS: ``v_cvt_scalef32_pk_f32_fp8`` interprets its
+            # ``scale`` operand as an E8M0 microscaling factor (only the
+            # f32 exponent bits matter, mantissa is discarded). For
+            # arbitrary per-tensor scales like ``k_scale = max_abs/448 ≈
+            # 0.011`` the hardware silently rounds to the nearest
+            # power-of-two (0.0078 instead of 0.011), giving outputs
+            # ~0.71x of expected. Power-of-two scales happen to work
+            # bit-correctly by coincidence, which is why the original
+            # bench-driven "win" measurement looked correct on shapes
+            # whose extracted ``k_scale`` rounded toward the right
+            # exponent.
+            #
+            # The correct sequence is unfused: ``cvt_pk_f32_fp8`` (no
+            # scaling) followed by a regular ``v_pk_mul`` against the
+            # f32 scale. We pay ~4 extra packed muls per inner-loop
+            # iter; that's the cost of being correct for non-pow2
+            # scales. A future fast path can detect pow2 scales and
+            # opt into the fused intrinsic, but the production trace
+            # has only non-pow2 scales.
+            lo_f32x4 = b.cvt_pk_f32_fp8x4(lo_quad)
+            hi_f32x4 = b.cvt_pk_f32_fp8x4(hi_quad)
+            lo_scaled = []
+            hi_scaled = []
+            for i in range(4):
+                lo_scaled.append(b.fmul(b.vec_extract(lo_f32x4, i), scale))
+                hi_scaled.append(b.fmul(b.vec_extract(hi_f32x4, i), scale))
+            lo_f32x4 = b.vec_pack(lo_scaled, F32)
+            hi_f32x4 = b.vec_pack(hi_scaled, F32)
             dequanted = []
             for i in range(4):
                 dequanted.append(b.cast_f32_to(b.vec_extract(lo_f32x4, i), dtype))
@@ -1620,6 +1843,60 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         b.s_waitcnt(lgkmcnt=0)
         b.sync()
 
+    # ---- Per-lane Q gather for CK Tile/Triton 32x32x16 QK geometry ----
+    #
+    # This is the main-kernel migration path for long-prefill. It is not a
+    # separate fallback kernel. Once the downstream mask/softmax/PV sections
+    # consume the 32x32 accumulator layout, this replaces the 16x16x32
+    # QK body above for long-prefill shapes.
+    #
+    # CK Tile traits for M32N32K16:
+    #   A (Q) per lane: <8 x dtype>
+    #     row = wave_row_base + (lane % 32)
+    #     k   = k_iter*16 + (lane/32)*8 + [0..7]
+    #   B (K^T) per lane: <8 x dtype>
+    #     n   = n_tile*32 + (lane % 32)
+    #     k   = k_iter*16 + (lane/32)*8 + [0..7]
+    #   C per lane: <16 x f32>
+    #     row = wave_row_base + ((elem//4)*8 + (lane/32)*4 + elem%4)
+    #     col = tile_off + n_tile*32 + (lane % 32)
+    #
+    # The key structural win is that each lane owns 16 scores in one column
+    # rather than 4 scores. Softmax can reduce most values in-lane with
+    # chained v_max3 and only then use 32-lane-half shuffles. The old
+    # layout needed 4-stage row-group shuffles for every row slot.
+    if USE_MFMA_32X32:
+        if KV_FP8:
+            raise NotImplementedError(
+                "32x32x16 QK migration starts with bf16/fp16 KV; "
+                "FP8 reuses the same geometry after the bf16 path is parity-clean"
+            )
+        Q32_reg = [None] * QK_K_ITERS
+        lane_half = b.div(lane, b.const_i32(32))
+        lane_col32 = b.mod(lane, b.const_i32(32))
+        q32_row = b.add(wave_row_base, lane_col32)
+        if Q_ALIAS_K:
+            if Q_USES_DUAL_SLOT:
+                q32_buf = b.div(q32_row, b.const_i32(T))
+                q32_row_in_buf = b.mod(q32_row, b.const_i32(T))
+            else:
+                q32_buf = b.const_i32(0)
+                q32_row_in_buf = q32_row
+        for k in range(QK_K_ITERS):
+            q32_col = b.add(b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8)))
+            q32_idx_args = (
+                (q32_buf, q32_row_in_buf, q32_col) if Q_ALIAS_K else (q32_row, q32_col)
+            )
+            Q32_reg[k] = b.smem_load_vN(Q_lds, *q32_idx_args, dtype=dtype, n=8)
+        if Q_ALIAS_K:
+            # Q32_reg was gathered AFTER the original Q_reg drain above.
+            # When Q_lds aliases K_lds, the upcoming K[0] async prefetch
+            # writes into the same LDS slabs. Drain these 32x32 Q reads too
+            # before issuing K[0], otherwise random Q (but not all-zero Q)
+            # suffers sparse large errors from read/write races.
+            b.s_waitcnt(lgkmcnt=0)
+            b.sync()
+
     # ULP-correct fp8-K LDS path -- NO Q quantisation, Q stays bf16.
     # K_FP8_MFMA is True iff K_lds holds raw fp8 bytes (saving 8 KB of
     # LDS at T=64/HD=64 and halving the K HBM->LDS DMA). The QK MFMA
@@ -1673,7 +1950,10 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     hoist_row_ok = []
     hoist_causal_lim = []
     for reg in range(REGS_PER_LANE):
-        row = b.add(wave_row_base, _in_warp_row(reg))
+        if USE_MFMA_32X32:
+            row = b.add(wave_row_base, _mfma_32x32_c_row(b, lane, reg))
+        else:
+            row = b.add(wave_row_base, _in_warp_row(reg))
         qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
         qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
         row_ok = b.land(
@@ -1706,16 +1986,16 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         l_vals = [carry[2 * r + 1] for r in range(REGS_PER_LANE)]
         ml_count = 2 * REGS_PER_LANE
         acc_vals = [
-            carry[ml_count + n * M_ATOMS_PER_WARP + a]
-            for n in range(PV_N_TILES)
-            for a in range(M_ATOMS_PER_WARP)
+            carry[ml_count + n * ACC_M_ATOMS + a]
+            for n in range(ACC_N_TILES)
+            for a in range(ACC_M_ATOMS)
         ]
 
         # acc_vals is flat indexed by (n * M_ATOMS_PER_WARP + atom).
         def _acc_get(n: int, atom: int) -> Value:
-            return acc_vals[n * M_ATOMS_PER_WARP + atom]
+            return acc_vals[n * ACC_M_ATOMS + atom]
 
-        cur_buf = carry[ml_count + PV_N_TILES * M_ATOMS_PER_WARP]
+        cur_buf = carry[ml_count + ACC_N_TILES * ACC_M_ATOMS]
         nxt_buf = b.sub(b.const_i32(1), cur_buf)
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
 
@@ -1762,63 +2042,216 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         # "compiler scheduling hints don't work on gfx950" (see
         # ``/workspace/mlse-tools-internal/performance/kernel_optimization/
         # analysis/00_CONSOLIDATED_FINDINGS.md``). Leaving them out.
-        S_n = [[None] * QK_N_TILES for _ in range(M_ATOMS_PER_WARP)]
-        for n in range(QK_N_TILES):
-            acc_per_atom = [b.zero_vec_f32(4) for _ in range(M_ATOMS_PER_WARP)]
-            for k in range(QK_K_ITERS):
-                kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
-                k_row = b.add(b.const_i32(n * 16), lane_col)
-                if K_FP8_MFMA:
-                    # K_lds holds raw fp8 bytes. Dequant in register to
-                    # bf16 (bit-identical to what the bf16 K_lds path
-                    # would have written) then run the standard bf16
-                    # MFMA.
-                    #
-                    # Uses gfx950's fused ``v_cvt_scalef32_pk_f32_fp8``
-                    # which folds the per-element scale multiply into
-                    # the cvt: 2 fused scaled cvts + 2 packed bf16
-                    # cvts = 4 instructions per 8-element load (vs the
-                    # old 2 cvt_pk_f32_fp8 + 8 fmul + 2 cvt_pk_bf16_f32
-                    # = 12 instructions). Triton uses the same fused
-                    # intrinsic in its long-prefill FP8 kernel.
-                    B_fp8 = b.smem_load_vN(
-                        K_lds,
-                        cur_buf,
-                        k_row,
-                        kc_off,
-                        dtype=FP8E4M3,
-                        n=8,
-                    )
-                    lo_fp8 = b.vec_pack(
-                        [b.vec_extract(B_fp8, i) for i in range(4)],
-                        FP8E4M3,
-                    )
-                    hi_fp8 = b.vec_pack(
-                        [b.vec_extract(B_fp8, i) for i in range(4, 8)],
-                        FP8E4M3,
-                    )
-                    lo_f32 = b.cvt_scalef32_pk_f32_fp8x4(lo_fp8, k_scale_p)
-                    hi_f32 = b.cvt_scalef32_pk_f32_fp8x4(hi_fp8, k_scale_p)
-                    deq = []
-                    for i in range(4):
-                        deq.append(b.cast_f32_to(b.vec_extract(lo_f32, i), dtype))
-                    for i in range(4):
-                        deq.append(b.cast_f32_to(b.vec_extract(hi_f32, i), dtype))
-                    B_v = b.vec_pack(deq, dtype)
-                    for atom in range(M_ATOMS_PER_WARP):
-                        acc_per_atom[atom] = _mfma_16x16x32(
-                            b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
+        if USE_MFMA_32X32:
+            if TRANSPOSED_QK_32X32:
+                # Transposed-score orientation: compute S^T = K @ Q^T.
+                #
+                # A operand = K tile rows (KV tokens), B operand = Q rows
+                # (queries). The resulting C tile has:
+                #   row = KV position inside the tile
+                #   col = query row inside the warp's 32-row Q tile
+                #
+                # This orientation matches the Triton/CK Tile efficient
+                # reduction shape: softmax over K for one query column can
+                # be reduced mostly in-lane across the 16 C registers.
+                # B operand of the transposed MFMA wants Q[q_row=L%32,
+                # k_dim=(L/32)*8 + i + k*16]. This is the SAME per-lane
+                # layout that ``Q32_reg[k]`` already holds (loaded in the
+                # pre-loop Q gather above) -- the K-axis distribution is
+                # identical between the non-transposed and transposed
+                # operands of M32N32K16 MFMA. We MUST consume Q32_reg
+                # rather than re-reading ``Q_lds`` here: when
+                # ``Q_ALIAS_K`` is true (the bf16 path always sets it),
+                # the K[0] async prefetch issued before the kvloop has
+                # already overwritten Q_lds with K data. Reading Q_lds
+                # would silently feed K values into the B operand and
+                # silently corrupt every transposed S^T.
+                ST32_n = [None] * QK_N_TILES
+                for n in range(QK_N_TILES):
+                    acc32 = b.zero_vec_f32(16)
+                    # K row becomes the M dimension of the transposed score
+                    # tile. K_lds layout is [T, HD], so A is K_lds[row, k].
+                    k_row_t = b.add(b.const_i32(n * 32), lane_col32)
+                    for k in range(QK_K_ITERS):
+                        k_off_t = b.add(
+                            b.const_i32(k * 16), b.mul(lane_half32, b.const_i32(8))
                         )
-                else:
-                    B_v = b.smem_load_vN(
-                        K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=8
-                    )
-                    for atom in range(M_ATOMS_PER_WARP):
-                        acc_per_atom[atom] = _mfma_16x16x32(
-                            b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
+                        A_k_t = b.smem_load_vN(
+                            K_lds, cur_buf, k_row_t, k_off_t, dtype=dtype, n=8
                         )
-            for atom in range(M_ATOMS_PER_WARP):
-                S_n[atom][n] = acc_per_atom[atom]
+                        B_q_t = Q32_reg[k]
+                        acc32 = _mfma_32x32x16(b, dtype, A_k_t, B_q_t, acc32)
+                    ST32_n[n] = acc32
+
+                # Transposed softmax scaffold. ST32_n[n][reg] holds
+                # S^T[k, q] for one query column (lane_col32) and 16 K
+                # positions per lane. The counterpart lane (lane ^ 32)
+                # owns the complementary 16 K positions for the same
+                # query column. Therefore row-wise softmax over K needs:
+                #
+                #   1. local max/sum over all regs and all N-tiles
+                #   2. one cross-half exchange with lane^32
+                #
+                # This is the Triton-like reduction shape; it replaces the
+                # previous 5-stage per-row 32-lane butterfly.
+                st_local_max = neg_inf
+                st_scores = {}
+                for n in range(QK_N_TILES):
+                    for reg in range(16):
+                        k_local = b.add(
+                            b.const_i32(n * 32),
+                            _mfma_32x32_c_row(b, lane, reg),
+                        )
+                        q_row_t = b.add(wave_row_base, _mfma_32x32_c_col(b, lane, 0))
+                        qp_r = b.add(qb_start_pos, b.div(q_row_t, b.const_i32(NQK)))
+                        qh_r = b.add(
+                            b.mul(kv_head_idx, b.const_i32(NQK)),
+                            b.mod(q_row_t, b.const_i32(NQK)),
+                        )
+                        row_ok = b.land(
+                            b.cmp_lt(qp_r, cur_batch_q_len),
+                            b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+                        )
+                        col_abs = b.add(tile_off, k_local)
+                        causal_lim = b.add(context_len, qp_r)
+                        causal_ok = b.cmp_le(col_abs, causal_lim)
+                        in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
+                        m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                        if SLIDING_WINDOW > 0:
+                            dist = b.sub(causal_lim, col_abs)
+                            m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
+                        s_raw = b.vec_extract(ST32_n[n], reg)
+                        s_scaled = b.fmul(s_raw, qk_scale)
+                        if USE_SOFTCAP:
+                            s_scaled = b.fmul(
+                                _apply_softcap(b, s_scaled, softcap_p), rcp_ln2
+                            )
+                        score = b.select(m_ok, s_scaled, neg_inf)
+                        st_scores[(n, reg)] = score
+                        st_local_max = b.fmax(st_local_max, score)
+                st_remote_max = b.warp_shuffle_xor(st_local_max, 32)
+                st_tile_max = b.fmax(st_local_max, st_remote_max)
+                st_m_raw = b.fmax(m_vals[0], st_tile_max)
+                st_ok = b.fcmp("ogt", st_m_raw, neg_inf)
+                st_m_new = b.select(st_ok, st_m_raw, zero_f)
+                PT32_n = [[None] * 16 for _ in range(QK_N_TILES)]
+                st_l_local = zero_f
+                for n in range(QK_N_TILES):
+                    for reg in range(16):
+                        p_t = b.exp2(b.fsub(st_scores[(n, reg)], st_m_new))
+                        PT32_n[n][reg] = p_t
+                        st_l_local = b.fadd(st_l_local, p_t)
+                st_l_remote = b.warp_shuffle_xor(st_l_local, 32)
+                st_l_sum = b.fadd(st_l_local, st_l_remote)
+                # The transposed orientation has one softmax state per query
+                # column/lane, shared across all 16 output-dimension regs.
+                # ``m_new`` / ``l_local`` are intentionally broadcast across
+                # ``REGS_PER_LANE`` so the downstream alpha/L-update code
+                # (shared with the non-transposed path) keeps producing one
+                # state per query column. The alpha = exp2(m_old - m_new) and
+                # full ``l_new = alpha * l_old + l_sum`` updates are applied
+                # by that shared downstream block, not here.
+                m_new = [st_m_new for _ in range(REGS_PER_LANE)]
+                l_local = [st_l_sum for _ in range(REGS_PER_LANE)]
+                # In the transposed orientation we already have masked /
+                # scaled / softcapped scores in ``st_scores`` and softmax
+                # probabilities in ``PT32_n``. We must NOT recompute
+                # ``S32_n`` and run the non-transposed mask + softmax
+                # block below: it would (1) duplicate compute, and (2)
+                # overwrite the transposed ``m_new`` / ``l_local`` /
+                # ``masked`` with values keyed on the non-transposed
+                # (row=q, col=k) layout. The downstream alpha + l + PV
+                # code then expects the transposed layout, so leaving the
+                # non-transposed softmax in would silently scramble alpha
+                # and the running L per query column.
+                S32_n = None
+            else:
+                # Non-transposed 32x32 QK: ``S32_n[n] = vec_f32(16)``,
+                # one 32x32x16 C tile per warp. Downstream softmax/PV
+                # consume this via the non-transposed mask block below.
+                S32_n = [None] * QK_N_TILES
+                for n in range(QK_N_TILES):
+                    acc32 = b.zero_vec_f32(16)
+                    k_row32 = b.add(b.const_i32(n * 32), lane_col32)
+                    for k in range(QK_K_ITERS):
+                        kc_off32 = b.add(
+                            b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8))
+                        )
+                        B32_v = b.smem_load_vN(
+                            K_lds, cur_buf, k_row32, kc_off32, dtype=dtype, n=8
+                        )
+                        acc32 = _mfma_32x32x16(b, dtype, Q32_reg[k], B32_v, acc32)
+                    S32_n[n] = acc32
+        else:
+            S_n = [[None] * QK_N_TILES for _ in range(M_ATOMS_PER_WARP)]
+            for n in range(QK_N_TILES):
+                acc_per_atom = [b.zero_vec_f32(4) for _ in range(M_ATOMS_PER_WARP)]
+                for k in range(QK_K_ITERS):
+                    kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
+                    k_row = b.add(b.const_i32(n * 16), lane_col)
+                    if K_FP8_MFMA:
+                        # K_lds holds raw fp8 bytes. Dequant in register to
+                        # bf16 (bit-identical to what the bf16 K_lds path
+                        # would have written) then run the standard bf16
+                        # MFMA.
+                        #
+                        # Uses gfx950's fused ``v_cvt_scalef32_pk_f32_fp8``
+                        # which folds the per-element scale multiply into
+                        # the cvt: 2 fused scaled cvts + 2 packed bf16
+                        # cvts = 4 instructions per 8-element load (vs the
+                        # old 2 cvt_pk_f32_fp8 + 8 fmul + 2 cvt_pk_bf16_f32
+                        # = 12 instructions). Triton uses the same fused
+                        # intrinsic in its long-prefill FP8 kernel.
+                        B_fp8 = b.smem_load_vN(
+                            K_lds,
+                            cur_buf,
+                            k_row,
+                            kc_off,
+                            dtype=FP8E4M3,
+                            n=8,
+                        )
+                        lo_fp8 = b.vec_pack(
+                            [b.vec_extract(B_fp8, i) for i in range(4)],
+                            FP8E4M3,
+                        )
+                        hi_fp8 = b.vec_pack(
+                            [b.vec_extract(B_fp8, i) for i in range(4, 8)],
+                            FP8E4M3,
+                        )
+                        # See FP8 dequant note in _issue_fp8_dequant_loads:
+                        # cvt_scalef32_pk_f32_fp8 uses E8M0-only scale,
+                        # silently truncating non-pow2 scales. Use unfused
+                        # cvt_pk_f32_fp8 + explicit f32 multiply.
+                        lo_f32 = b.cvt_pk_f32_fp8x4(lo_fp8)
+                        hi_f32 = b.cvt_pk_f32_fp8x4(hi_fp8)
+                        deq = []
+                        for i in range(4):
+                            deq.append(
+                                b.cast_f32_to(
+                                    b.fmul(b.vec_extract(lo_f32, i), k_scale_p), dtype
+                                )
+                            )
+                        for i in range(4):
+                            deq.append(
+                                b.cast_f32_to(
+                                    b.fmul(b.vec_extract(hi_f32, i), k_scale_p), dtype
+                                )
+                            )
+                        B_v = b.vec_pack(deq, dtype)
+                        for atom in range(M_ATOMS_PER_WARP):
+                            acc_per_atom[atom] = _mfma_16x16x32(
+                                b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
+                            )
+                    else:
+                        B_v = b.smem_load_vN(
+                            K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=8
+                        )
+                        for atom in range(M_ATOMS_PER_WARP):
+                            acc_per_atom[atom] = _mfma_16x16x32(
+                                b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
+                            )
+                for atom in range(M_ATOMS_PER_WARP):
+                    S_n[atom][n] = acc_per_atom[atom]
 
         # Now that QK no longer needs VMEM, start current V first and next K
         # second. This ordering is what lets the partial wait before PV leave
@@ -1839,101 +2272,188 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         # ``alibi_per_row``, ``qp_r``, ``qh_r``, ``row_ok``, ``causal_lim``
         # are all CTA-constants -- pulled in from the pre-loop hoist above.
         alibi_per_row = hoist_alibi if USE_ALIBI else None
-        masked = {}
-        for reg in range(REGS_PER_LANE):
-            atom = reg // 4
-            in_atom = reg % 4
-            qp_r = hoist_qp_r[reg]
-            row_ok = hoist_row_ok[reg]
-            causal_lim = hoist_causal_lim[reg]
-            for n in range(QK_N_TILES):
-                col_abs = b.add(
-                    b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))), lane_col
-                )
-                causal_ok = b.cmp_le(col_abs, causal_lim)
-                in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
-                if SLIDING_WINDOW > 0:
-                    dist = b.sub(causal_lim, col_abs)
-                    m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
-                s_raw = b.vec_extract(S_n[atom][n], in_atom)
-                s_scaled = b.fmul(s_raw, qk_scale)
-                if USE_SOFTCAP:
-                    s_scaled = b.fmul(_apply_softcap(b, s_scaled, softcap_p), rcp_ln2)
-                score = b.select(m_ok, s_scaled, neg_inf)
-                if USE_ALIBI:
-                    # Triton order: mask first, then add ALiBi. For invalid
-                    # cells this is `-inf + finite == -inf`, avoiding any
-                    # pre-mask finite arithmetic from leaking into reductions.
-                    pos_off = b.sub(col_abs, context_len)
-                    pos_f = b.sitofp_f32(pos_off)
-                    add_term = b.fmul(b.fmul(alibi_per_row[reg], pos_f), rcp_ln2)
-                    score = b.fadd(score, add_term)
-                if USE_QQ_BIAS:
-                    # qq_bias[qp_r, key_rel_pos] with key_rel_pos = col - ctx.
-                    # Valid range 0 <= key_rel_pos < qq_bias_stride_0 AND
-                    # qp_r is a non-padding query position. The padding-row
-                    # guard is required because qb_start_pos can exceed
-                    # cur_batch_query_len for the last Q-block of a sequence;
-                    # without it `qq_bias_ptr + qp_r*stride0 + krp` can run
-                    # off the end of the tensor for tail blocks.
-                    krp = b.sub(col_abs, context_len)
-                    krp_ok = b.land(
-                        b.cmp_ge(krp, b.const_i32(0)), b.cmp_lt(krp, qq_bias_stride0_p)
-                    )
-                    qq_ok = b.land(row_ok, krp_ok)
-                    qp_safe = b.select(row_ok, qp_r, b.const_i32(0))
-                    qq_idx = b.add(b.mul(qp_safe, qq_bias_stride0_p), krp)
-                    qq_v = b.masked_global_load(
-                        qq_bias_ptr,
-                        qq_idx,
-                        qq_ok,
-                        b.const_f32(0.0),
-                        dtype=F32,
-                        align=4,
-                    )
-                    score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
-                masked[(n, reg)] = score
+        if USE_MFMA_32X32 and TRANSPOSED_QK_32X32:
+            # Transposed orientation: ``masked`` / ``m_new`` / ``l_local``
+            # were already produced by the in-place transposed softmax
+            # above. The downstream alpha + l + PV update uses them
+            # directly. ``P_lds`` is intentionally not written because the
+            # transposed PV consumes ``PT32_n`` from registers.
+            pass
+        elif USE_MFMA_32X32:
+            masked = {}
+            for reg in range(REGS_PER_LANE):
+                qp_r = hoist_qp_r[reg]
+                row_ok = hoist_row_ok[reg]
+                causal_lim = hoist_causal_lim[reg]
+                for n in range(QK_N_TILES):
+                    col_abs = b.add(tile_off, _mfma_32x32_c_col(b, lane, n))
+                    causal_ok = b.cmp_le(col_abs, causal_lim)
+                    in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
+                    m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                    if SLIDING_WINDOW > 0:
+                        dist = b.sub(causal_lim, col_abs)
+                        m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
+                    s_raw = b.vec_extract(S32_n[n], reg)
+                    s_scaled = b.fmul(s_raw, qk_scale)
+                    if USE_SOFTCAP:
+                        s_scaled = b.fmul(
+                            _apply_softcap(b, s_scaled, softcap_p), rcp_ln2
+                        )
+                    score = b.select(m_ok, s_scaled, neg_inf)
+                    if USE_ALIBI:
+                        pos_off = b.sub(col_abs, context_len)
+                        pos_f = b.sitofp_f32(pos_off)
+                        add_term = b.fmul(b.fmul(alibi_per_row[reg], pos_f), rcp_ln2)
+                        score = b.fadd(score, add_term)
+                    if USE_QQ_BIAS:
+                        krp = b.sub(col_abs, context_len)
+                        krp_ok = b.land(
+                            b.cmp_ge(krp, b.const_i32(0)),
+                            b.cmp_lt(krp, qq_bias_stride0_p),
+                        )
+                        qq_ok = b.land(row_ok, krp_ok)
+                        qp_safe = b.select(row_ok, qp_r, b.const_i32(0))
+                        qq_idx = b.add(b.mul(qp_safe, qq_bias_stride0_p), krp)
+                        qq_v = b.masked_global_load(
+                            qq_bias_ptr,
+                            qq_idx,
+                            qq_ok,
+                            b.const_f32(0.0),
+                            dtype=F32,
+                            align=4,
+                        )
+                        score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
+                    masked[(n, reg)] = score
 
-        # ---- per-row max via cross-lane butterfly ----
-        # Each lane has REGS_PER_LANE floats (one per row in its row-group(s)),
-        # repeated for every N-tile. Local lane-max across N-tiles, then 4-stage
-        # XOR butterfly across the 16 lanes in the row-group.
-        m_new = []
-        s_local = {}  # (reg, n) -> the lane's masked score (still owned per-lane)
-        for reg in range(REGS_PER_LANE):
-            local_max = neg_inf
-            for n in range(QK_N_TILES):
-                v = masked[(n, reg)]
-                s_local[(reg, n)] = v
-                local_max = b.fmax(local_max, v)
-            tile_max = _warp_xor_reduce_max(b, local_max)
-            # Online softmax update (FlashAttention/Triton): see docstring.
-            full_max_raw = b.fmax(m_vals[reg], tile_max)
-            ok = b.fcmp("ogt", full_max_raw, neg_inf)
-            m_new.append(b.select(ok, full_max_raw, zero_f))
+            m_new = []
+            s_local = {}
+            for reg in range(REGS_PER_LANE):
+                local_max = neg_inf
+                for n in range(QK_N_TILES):
+                    v = masked[(n, reg)]
+                    s_local[(reg, n)] = v
+                    local_max = b.fmax(local_max, v)
+                tile_max = _warp_xor_reduce_max_32lane(b, local_max)
+                full_max_raw = b.fmax(m_vals[reg], tile_max)
+                ok = b.fcmp("ogt", full_max_raw, neg_inf)
+                m_new.append(b.select(ok, full_max_raw, zero_f))
 
-        # ---- compute P = exp2(S - m_new) and l_local = sum(P) per row ----
-        # P_lds[row, col] = exp2(S[row, col] - m_new[row]). Each warp publishes
-        # its own BLOCK_M_PER_WARP-row slice (16 or 32 rows). Row coords come
-        # from the pre-loop hoist.
-        l_local = []
-        for reg in range(REGS_PER_LANE):
-            row = hoist_row[reg]
-            sum_p = zero_f
-            for n in range(QK_N_TILES):
-                p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
-                col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
-                if PV_FP8_MFMA:
-                    # FlyDSL pa_decode_fp8 pattern: quantise probabilities
-                    # into fp8 with a fixed 240x scale, then fold the
-                    # reciprocal plus v_scale into the PV result.
-                    p_q = b.cvt_f32_to_fp8(b.fmul(p, b.const_f32(240.0)))
-                    b.smem_store_vN(P_lds, [row, col], p_q, 1)
-                else:
+            l_local = []
+            for reg in range(REGS_PER_LANE):
+                row = hoist_row[reg]
+                sum_p = zero_f
+                for n in range(QK_N_TILES):
+                    p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
+                    col = _mfma_32x32_c_col(b, lane, n)
                     b.smem_store_vN(P_lds, [row, col], b.cast_f32_to(p, dtype), 1)
-                sum_p = b.fadd(sum_p, p)
-            l_local.append(_warp_xor_reduce_sum(b, sum_p))
+                    sum_p = b.fadd(sum_p, p)
+                l_local.append(_warp_xor_reduce_sum_32lane(b, sum_p))
+
+        else:
+            masked = {}
+            for reg in range(REGS_PER_LANE):
+                atom = reg // 4
+                in_atom = reg % 4
+                qp_r = hoist_qp_r[reg]
+                row_ok = hoist_row_ok[reg]
+                causal_lim = hoist_causal_lim[reg]
+                for n in range(QK_N_TILES):
+                    col_abs = b.add(
+                        b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))),
+                        lane_col,
+                    )
+                    causal_ok = b.cmp_le(col_abs, causal_lim)
+                    in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
+                    m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                    if SLIDING_WINDOW > 0:
+                        dist = b.sub(causal_lim, col_abs)
+                        m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
+                    s_raw = b.vec_extract(S_n[atom][n], in_atom)
+                    s_scaled = b.fmul(s_raw, qk_scale)
+                    if USE_SOFTCAP:
+                        s_scaled = b.fmul(
+                            _apply_softcap(b, s_scaled, softcap_p), rcp_ln2
+                        )
+                    score = b.select(m_ok, s_scaled, neg_inf)
+                    if USE_ALIBI:
+                        # Triton order: mask first, then add ALiBi. For invalid
+                        # cells this is `-inf + finite == -inf`, avoiding any
+                        # pre-mask finite arithmetic from leaking into reductions.
+                        pos_off = b.sub(col_abs, context_len)
+                        pos_f = b.sitofp_f32(pos_off)
+                        add_term = b.fmul(b.fmul(alibi_per_row[reg], pos_f), rcp_ln2)
+                        score = b.fadd(score, add_term)
+                    if USE_QQ_BIAS:
+                        # qq_bias[qp_r, key_rel_pos] with key_rel_pos = col - ctx.
+                        # Valid range 0 <= key_rel_pos < qq_bias_stride_0 AND
+                        # qp_r is a non-padding query position. The padding-row
+                        # guard is required because qb_start_pos can exceed
+                        # cur_batch_query_len for the last Q-block of a sequence;
+                        # without it `qq_bias_ptr + qp_r*stride0 + krp` can run
+                        # off the end of the tensor for tail blocks.
+                        krp = b.sub(col_abs, context_len)
+                        krp_ok = b.land(
+                            b.cmp_ge(krp, b.const_i32(0)),
+                            b.cmp_lt(krp, qq_bias_stride0_p),
+                        )
+                        qq_ok = b.land(row_ok, krp_ok)
+                        qp_safe = b.select(row_ok, qp_r, b.const_i32(0))
+                        qq_idx = b.add(b.mul(qp_safe, qq_bias_stride0_p), krp)
+                        qq_v = b.masked_global_load(
+                            qq_bias_ptr,
+                            qq_idx,
+                            qq_ok,
+                            b.const_f32(0.0),
+                            dtype=F32,
+                            align=4,
+                        )
+                        score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
+                    masked[(n, reg)] = score
+
+            # ---- per-row max via cross-lane butterfly ----
+            # Each lane has REGS_PER_LANE floats (one per row in its row-group(s)),
+            # repeated for every N-tile. Local lane-max across N-tiles, then 4-stage
+            # XOR butterfly across the 16 lanes in the row-group.
+            m_new = []
+            s_local = {}  # (reg, n) -> the lane's masked score (still owned per-lane)
+            for reg in range(REGS_PER_LANE):
+                local_max = neg_inf
+                for n in range(QK_N_TILES):
+                    v = masked[(n, reg)]
+                    s_local[(reg, n)] = v
+                    local_max = b.fmax(local_max, v)
+                tile_max = _warp_xor_reduce_max(b, local_max)
+                # Online softmax update (FlashAttention/Triton): see docstring.
+                full_max_raw = b.fmax(m_vals[reg], tile_max)
+                ok = b.fcmp("ogt", full_max_raw, neg_inf)
+                m_new.append(b.select(ok, full_max_raw, zero_f))
+
+            # ---- compute P = exp2(S - m_new) and l_local = sum(P) per row ----
+            # P_lds[row, col] = exp2(S[row, col] - m_new[row]). Each warp publishes
+            # its own BLOCK_M_PER_WARP-row slice (16 or 32 rows). Row coords come
+            # from the pre-loop hoist.
+            p_regs_f32 = [[None] * QK_N_TILES for _ in range(REGS_PER_LANE)]
+            l_local = []
+            for reg in range(REGS_PER_LANE):
+                sum_p = zero_f
+                for n in range(QK_N_TILES):
+                    p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
+                    p_regs_f32[reg][n] = p
+                    if not REGISTER_PV:
+                        row = hoist_row[reg]
+                        col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
+                        if PV_FP8_MFMA:
+                            # FlyDSL pa_decode_fp8 pattern: quantise probabilities
+                            # into fp8 with a fixed 240x scale, then fold the
+                            # reciprocal plus v_scale into the PV result.
+                            p_q = b.cvt_f32_to_fp8(b.fmul(p, b.const_f32(240.0)))
+                            b.smem_store_vN(P_lds, [row, col], p_q, 1)
+                        else:
+                            b.smem_store_vN(
+                                P_lds, [row, col], b.cast_f32_to(p, dtype), 1
+                            )
+                    sum_p = b.fadd(sum_p, p)
+                l_local.append(_warp_xor_reduce_sum(b, sum_p))
 
         # alpha and L update (still per-lane registers; matches FA-2 paper)
         alpha_regs = [b.exp2(b.fsub(m_vals[r], m_new[r])) for r in range(REGS_PER_LANE)]
@@ -1973,8 +2493,152 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         # because it tightly controls inter-wave interleaving via the
         # cluster pattern + stagger barriers; our DSL-lowered loop has
         # different scheduling pressure. Disabled.
-        new_acc = [None] * (PV_N_TILES * M_ATOMS_PER_WARP)
-        for n in range(PV_N_TILES):
+        new_acc = [None] * (ACC_N_TILES * ACC_M_ATOMS)
+        if USE_MFMA_32X32:
+            if TRANSPOSED_QK_32X32:
+                # Transposed PV: O^T = V^T @ P^T.
+                #
+                # A operand = V^T[M=d, K=kv-token]
+                # B operand = P^T[K=kv-token, N=query]
+                # C output = O^T[d, query]
+                #
+                # The P^T register layout from ST32 is cheap to consume:
+                # for each needed K row, the value is either local
+                # PT32_n[p_tile][reg] or the same register in lane^32.
+                v_buf = b.const_i32(0)
+                use_hi = b.cmp_eq(lane_half32, b.const_i32(1))
+                for n in range(ACC_N_TILES):
+                    scaled = []
+                    old_acc = _acc_get(n, 0)
+                    for reg in range(REGS_PER_LANE):
+                        e = b.vec_extract(old_acc, reg)
+                        scaled.append(b.fmul(e, alpha_regs[reg]))
+                    acc32 = b.vec_pack(scaled, F32)
+                    v_dim32 = b.add(b.const_i32(n * 32), lane_col32)
+                    for k in range(T // 16):
+                        # Issue all 8 V scalar loads first so the LDS port
+                        # can pipeline them back-to-back (the compiler is
+                        # free to interleave the address compute, but the
+                        # data dependencies don't force serialisation).
+                        a_v_elems = []
+                        for kk in range(8):
+                            k_static = k * 16 + kk
+                            v_row = b.add(
+                                b.const_i32(k_static),
+                                b.mul(lane_half32, b.const_i32(8)),
+                            )
+                            v1 = b.smem_load_vN(
+                                V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1
+                            )
+                            a_v_elems.append(b.vec_extract(v1, 0))
+                        # Then assemble the P operand. Each kk picks (k0,
+                        # k1) and may xor to fetch the cross-half register.
+                        # All xors are independent and can issue in
+                        # parallel with the V loads.
+                        b_p_elems = []
+                        for kk in range(8):
+                            k_static = k * 16 + kk
+                            k0 = k_static
+                            k1 = k_static + 8
+                            p_tile0 = k0 // 32
+                            p_tile1 = k1 // 32
+                            row0 = k0 % 32
+                            row1 = k1 % 32
+                            owner_half0 = (row0 % 8) // 4
+                            owner_half1 = (row1 % 8) // 4
+                            reg0 = (row0 // 8) * 4 + (row0 % 4)
+                            reg1 = (row1 // 8) * 4 + (row1 % 4)
+                            p0 = PT32_n[p_tile0][reg0]
+                            p1 = PT32_n[p_tile1][reg1]
+                            # PT32_n stores P^T[k, q] in lanes whose
+                            # column is the query row q. The K row only
+                            # selects which 32-lane half/register owns the
+                            # value; it does NOT change the source column.
+                            # Therefore cross-half exchange is only needed
+                            # when the K-row owner half differs from this
+                            # lane's half.
+                            if owner_half0 == 1:
+                                p0 = b.warp_shuffle_xor(p0, 32)
+                            if owner_half1 == 0:
+                                p1 = b.warp_shuffle_xor(p1, 32)
+                            p_val = b.select(use_hi, p1, p0)
+                            b_p_elems.append(b.cast_f32_to(p_val, dtype))
+                        A_v_t = b.vec_pack(a_v_elems, dtype)
+                        B_p_t = b.vec_pack(b_p_elems, dtype)
+                        acc32 = _mfma_32x32x16(b, dtype, A_v_t, B_p_t, acc32)
+                    new_acc[n] = acc32
+            else:
+                # Transitional 32x32 PV consumer. This still reads P from the
+                # logical P_lds bridge written above, but it consumes and produces
+                # the new vec_f32(16) accumulator state with M32N32K16 MFMA.
+                #
+                # PV32 operand layouts:
+                #   A = P[M,K] per lane:
+                #       row = wave_row_base + lane%32
+                #       k   = k_iter*16 + (lane/32)*8 + [0..7]
+                #   B = V[K,N] per lane:
+                #       k   = k_iter*16 + (lane/32)*8 + [0..7]
+                #       col = n_tile*32 + lane%32
+                #
+                # V is intentionally loaded with scalar strided LDS loads for this
+                # milestone. Once parity is clean, replace with CK Tile's 32x32
+                # swizzled/transposed LDS access so this path is fast as well as
+                # structurally correct.
+                v_buf = b.const_i32(0)
+                for n in range(ACC_N_TILES):
+                    scaled = []
+                    old_acc = _acc_get(n, 0)
+                    for reg in range(REGS_PER_LANE):
+                        e = b.vec_extract(old_acc, reg)
+                        scaled.append(b.fmul(e, alpha_regs[reg]))
+                    acc32 = b.vec_pack(scaled, F32)
+                    for k in range(T // 16):
+                        p_off32 = b.add(
+                            b.const_i32(k * 16), b.mul(lane_half32, b.const_i32(8))
+                        )
+                        p_row32 = b.add(wave_row_base, lane_col32)
+                        A_p32 = b.smem_load_vN(
+                            P_lds, p_row32, p_off32, dtype=dtype, n=8
+                        )
+                        # M32N32K16 B operand from row-major V_lds[T, HD].
+                        # One 32-column MFMA tile is two 16-column transpose-read
+                        # groups. For each lane:
+                        #   - lane_col32 % 32 is the output column
+                        #   - lane_half32 selects K rows 0..7 or 8..15
+                        #   - ds_read_tr16 gives 4 consecutive K rows, so two
+                        #     reads compose the required <8 x dtype> B operand.
+                        col_group16 = b.mul(
+                            b.div(lane_col32, b.const_i32(16)), b.const_i32(16)
+                        )
+                        tr_col32 = b.add(
+                            col_group16,
+                            b.mul(b.mod(lane_col32, b.const_i32(4)), b.const_i32(4)),
+                        )
+                        tr_row_base32 = b.add(
+                            b.add(
+                                b.const_i32(k * 16),
+                                b.mul(lane_half32, b.const_i32(8)),
+                            ),
+                            b.mod(b.div(lane_col32, b.const_i32(4)), b.const_i32(4)),
+                        )
+                        B32_r0 = b.ds_read_tr16_b64(
+                            V_lds,
+                            v_buf,
+                            tr_row_base32,
+                            b.add(b.const_i32(n * 32), tr_col32),
+                            dtype=dtype,
+                        )
+                        B32_r1 = b.ds_read_tr16_b64(
+                            V_lds,
+                            v_buf,
+                            b.add(tr_row_base32, b.const_i32(4)),
+                            b.add(b.const_i32(n * 32), tr_col32),
+                            dtype=dtype,
+                        )
+                        B_v32 = b.vec_concat(B32_r0, B32_r1)
+                        acc32 = _mfma_32x32x16(b, dtype, A_p32, B_v32, acc32)
+                    new_acc[n] = acc32
+        for n in range(0 if USE_MFMA_32X32 else PV_N_TILES):
             # Per-atom: scale the inherited acc by per-row alpha, then add P @ V.
             acc_per_atom: list[Value] = []
             for atom in range(M_ATOMS_PER_WARP):
@@ -2078,13 +2742,25 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                         )
                         B_v = b.vec_concat(B_r0, B_r1)
                         for atom in range(M_ATOMS_PER_WARP):
-                            # P_lds row for this atom: each warp's atom_idx slice
-                            # of P_lds[BLOCK_M_PER_WARP, T] -- the in-warp row is
-                            # ``atom * 16 + lane_col``.
-                            p_row = b.add(
-                                wave_row_base, b.add(b.const_i32(atom * 16), lane_col)
-                            )
-                            A_p = b.smem_load_vN(P_lds, p_row, p_off, dtype=dtype, n=8)
+                            if REGISTER_PV:
+                                A_p = _pack_p_a32(
+                                    [p_regs_f32[atom * 4 + r][2 * k] for r in range(4)],
+                                    [
+                                        p_regs_f32[atom * 4 + r][2 * k + 1]
+                                        for r in range(4)
+                                    ],
+                                )
+                            else:
+                                # P_lds row for this atom: each warp's atom_idx slice
+                                # of P_lds[BLOCK_M_PER_WARP, T] -- the in-warp row is
+                                # ``atom * 16 + lane_col``.
+                                p_row = b.add(
+                                    wave_row_base,
+                                    b.add(b.const_i32(atom * 16), lane_col),
+                                )
+                                A_p = b.smem_load_vN(
+                                    P_lds, p_row, p_off, dtype=dtype, n=8
+                                )
                             acc_per_atom[atom] = _mfma_16x16x32(
                                 b, dtype, A_p, B_v, acc_per_atom[atom]
                             )
@@ -2098,10 +2774,15 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
                         V_lds, v_buf, row_lane, n_col_base, dtype=dtype
                     )
                     for atom in range(M_ATOMS_PER_WARP):
-                        p_row = b.add(
-                            wave_row_base, b.add(b.const_i32(atom * 16), lane_col)
-                        )
-                        A_p = b.smem_load_vN(P_lds, p_row, p_off, dtype=dtype, n=4)
+                        if REGISTER_PV:
+                            A_p = _pack_p_a16(
+                                [p_regs_f32[atom * 4 + r][k] for r in range(4)]
+                            )
+                        else:
+                            p_row = b.add(
+                                wave_row_base, b.add(b.const_i32(atom * 16), lane_col)
+                            )
+                            A_p = b.smem_load_vN(P_lds, p_row, p_off, dtype=dtype, n=4)
                         acc_per_atom[atom] = _mfma_16x16x16(
                             b, dtype, A_p, B_v, acc_per_atom[atom]
                         )
@@ -2112,9 +2793,9 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
         for r in range(REGS_PER_LANE):
             yields.append(m_new[r])
             yields.append(new_l_vals[r])
-        for n in range(PV_N_TILES):
-            for atom in range(M_ATOMS_PER_WARP):
-                yields.append(new_acc[n * M_ATOMS_PER_WARP + atom])
+        for n in range(ACC_N_TILES):
+            for atom in range(ACC_M_ATOMS):
+                yields.append(new_acc[n * ACC_M_ATOMS + atom])
         yields.append(nxt_buf)
         b.scf_yield(*yields)
 
@@ -2131,19 +2812,124 @@ def build_unified_attention_2d_tiled(spec: UnifiedAttention2DTiledSpec) -> Kerne
     final = kvloop.results
     l_final = [final[2 * r + 1] for r in range(REGS_PER_LANE)]
     ml_count_final = 2 * REGS_PER_LANE
-    # acc_final indexed by (n * M_ATOMS_PER_WARP + atom)
+    # acc_final indexed by (n * ACC_M_ATOMS + atom)
     acc_final = [
-        final[ml_count_final + n * M_ATOMS_PER_WARP + atom]
-        for n in range(PV_N_TILES)
-        for atom in range(M_ATOMS_PER_WARP)
+        final[ml_count_final + n * ACC_M_ATOMS + atom]
+        for n in range(ACC_N_TILES)
+        for atom in range(ACC_M_ATOMS)
     ]
 
     def _acc_final_get(n: int, atom: int) -> Value:
-        return acc_final[n * M_ATOMS_PER_WARP + atom]
+        return acc_final[n * ACC_M_ATOMS + atom]
 
     # Per-row reciprocal of L (computed once, reused across stripes).
     rcp_l = [b.rcp(l_final[r]) for r in range(REGS_PER_LANE)]
     l_nonzero = [b.fcmp("ogt", l_final[r], zero_f) for r in range(REGS_PER_LANE)]
+
+    if USE_MFMA_32X32:
+        if TRANSPOSED_QK_32X32:
+            # Per-lane direct scalar global stores. Tested both this and a
+            # coalesced Acc_lds-staged variant; the scalar form was
+            # consistently faster on bf16 hd64/hd128 prefill (1.05-1.36x).
+            # Why: each lane already owns 16 d positions at one fixed
+            # q_row, so the 32 lanes in a half-wave naturally produce 32
+            # adjacent-token, 16-element stores per cycle. Hardware
+            # already coalesces those into ~32 transactions per CTA. The
+            # staged form added an LDS bounce plus barriers that cost
+            # more than the (now redundant) gather it saved.
+            q_row_t = b.add(wave_row_base, lane_col32)
+            op_pos_t = b.add(qb_start_pos, b.div(q_row_t, b.const_i32(NQK)))
+            op_qh_t = b.add(
+                b.mul(kv_head_idx, b.const_i32(NQK)),
+                b.mod(q_row_t, b.const_i32(NQK)),
+            )
+            op_mask_t = b.land(
+                b.cmp_lt(op_pos_t, cur_batch_q_len),
+                b.cmp_lt(op_qh_t, b.const_i32(NUM_QH)),
+            )
+            out_base_t, _ = q_desc.offset(
+                b,
+                token=b.add(cu_q_start, op_pos_t),
+                head=op_qh_t,
+                dim=b.const_i32(0),
+            )
+            inv_l_t = b.rcp(l_final[0])
+            l_nonzero_t = b.fcmp("ogt", l_final[0], zero_f)
+            for n in range(ACC_N_TILES):
+                acc32 = _acc_final_get(n, 0)
+                for reg in range(REGS_PER_LANE):
+                    out_col_t = b.add(
+                        b.const_i32(n * 32), _mfma_32x32_c_row(b, lane, reg)
+                    )
+                    v = b.vec_extract(acc32, reg)
+                    normalized = b.fmul(v, inv_l_t)
+                    final_h = b.cast_f32_to(
+                        b.select(l_nonzero_t, normalized, zero_f), dtype
+                    )
+                    with b.scf_if(op_mask_t):
+                        b.global_store(
+                            output, b.add(out_base_t, out_col_t), final_h, align=2
+                        )
+            return b.kernel
+
+        # Coalesced correctness-first epilogue for the M32N32K16 accumulator
+        # layout. Stage one 32-column stripe into Acc_lds, then reuse the
+        # vec8 cooperative global-store pattern. This avoids the very slow
+        # scalar global stores from the first end-to-end scaffold.
+        OUT_VEC32 = 8
+        OUT_PER_THREAD_HALVES32 = (BLOCK_M * 32) // THREADS
+        assert OUT_PER_THREAD_HALVES32 % OUT_VEC32 == 0
+        OUT_CHUNKS_PER_THREAD32 = OUT_PER_THREAD_HALVES32 // OUT_VEC32
+        OUT_THREADS_PER_ROW32 = 32 // (OUT_CHUNKS_PER_THREAD32 * OUT_VEC32)
+        OUT_ROW_BASE32 = b.div(tid, b.const_i32(OUT_THREADS_PER_ROW32))
+        OUT_col_base32 = b.mul(
+            b.mod(tid, b.const_i32(OUT_THREADS_PER_ROW32)),
+            b.const_i32(OUT_CHUNKS_PER_THREAD32 * OUT_VEC32),
+        )
+        op_pos32_base = b.add(qb_start_pos, b.div(OUT_ROW_BASE32, b.const_i32(NQK)))
+        op_qh32_base = b.add(
+            b.mul(kv_head_idx, b.const_i32(NQK)),
+            b.mod(OUT_ROW_BASE32, b.const_i32(NQK)),
+        )
+        op_mask32_base = b.land(
+            b.cmp_lt(op_pos32_base, cur_batch_q_len),
+            b.cmp_lt(op_qh32_base, b.const_i32(NUM_QH)),
+        )
+        out_base32_base, _ = q_desc.offset(
+            b,
+            token=b.add(cu_q_start, op_pos32_base),
+            head=op_qh32_base,
+            dim=b.const_i32(0),
+        )
+        for n in range(ACC_N_TILES):
+            acc32 = _acc_final_get(n, 0)
+            for reg in range(REGS_PER_LANE):
+                row = b.add(wave_row_base, _mfma_32x32_c_row(b, lane, reg))
+                col_in_stripe = lane_col32
+                v = b.vec_extract(acc32, reg)
+                normalized = b.fmul(v, rcp_l[reg])
+                final_h = b.cast_f32_to(
+                    b.select(l_nonzero[reg], normalized, zero_f), dtype
+                )
+                b.smem_store_vN(Acc_lds, [row, col_in_stripe], final_h, 1)
+            b.sync()
+            for chunk in range(OUT_CHUNKS_PER_THREAD32):
+                col_in_stripe = b.add(OUT_col_base32, b.const_i32(chunk * OUT_VEC32))
+                v8h = b.smem_load_vN(
+                    Acc_lds, OUT_ROW_BASE32, col_in_stripe, dtype=dtype, n=OUT_VEC32
+                )
+                out_col = b.add(b.const_i32(n * 32), col_in_stripe)
+                with b.scf_if(op_mask32_base):
+                    b.global_store_vN(
+                        output,
+                        b.add(out_base32_base, out_col),
+                        v8h,
+                        OUT_VEC32,
+                        align=16,
+                    )
+            if n + 1 < ACC_N_TILES:
+                b.sync()
+        return b.kernel
 
     # ---------------- striped epilogue ----------------
     # Loop in ``OUT_STRIPES`` stripes, each covering ``OUT_STRIPE_COLS = 32``

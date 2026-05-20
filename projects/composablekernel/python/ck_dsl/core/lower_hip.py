@@ -1177,6 +1177,14 @@ class _Lowerer:
             f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
         )
 
+    def _op_tile_mfma_f32_32x32x16_bf16(self, op: Op) -> None:
+        # gfx950 long-prefill atom used by CK Tile/Triton.
+        a, b, c = op.operands
+        self._emit(
+            f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x16_bf16("
+            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+        )
+
     # -------------------- vector helpers --------------------
 
     def _op_vector_concat(self, op: Op) -> None:

@@ -273,13 +273,13 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     ``T = block_size`` (single block per iter, 32 tokens) — measured
     1.15-1.30× win on every FP8 SW long-prefill shape.
     """
-    # Sliding-window long-prefill: when SW prunes the kv-loop to a few
-    # iters/CTA, bigger T over-allocates LDS without amortising any
-    # per-iter cost. Drop T to ``block_size`` (single block per iter).
-    # Empirically wins on both fp8 (round-2 cluster-B sweep: 1.15-1.30×)
-    # AND bf16 (``/tmp/sweep_long_prefill.py``: 310us → 291us, ~6%)
-    # for SW long-prefill, so the gate doesn't need ``use_fp8``.
-    if problem.sliding_window > 0 and problem.max_seqlen_q > 256:
+    # Sliding-window long-prefill FP8 exception. The latest broad sweep
+    # confirmed this should stay FP8-only: for bf16 SW long-prefill the
+    # correctness-clean winner was T=64, not T=32
+    # (``/workspace/trace_bench/sweep_attention2d_configs.json``:
+    # bf16_sw_n16_q1000_k1050 best T=64/mw16/hipcc at ~257us; T=32
+    # variants were >=258us and often incorrect under hipcc).
+    if problem.use_fp8 and problem.sliding_window > 0 and problem.max_seqlen_q > 256:
         return problem.block_size
     # T = 4 * block_size = 128 was tested on bf16 long-prefill (the
     # ``n=402 q=1000 k=1050`` regression bucket) and got WORSE, not
@@ -430,6 +430,9 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _select_2d_tile_size(problem),
         _select_2d_waves_per_eu(problem),
         _select_2d_block_m_per_warp(problem),
+        _enable_mfma_32x32(problem),
+        _enable_transposed_qk_32x32(problem),
+        _enable_register_pv(problem),
         _select_2d_compile_backend(problem),
     )
 
@@ -503,6 +506,81 @@ def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
     return problem.sliding_window > 0 or problem.max_seqlen_k <= 16 * T_eff
 
 
+def _enable_mfma_32x32(problem: UnifiedAttentionProblem) -> bool:
+    """Enable the in-kernel 32x32x16 migration on shapes where it wins.
+
+    The transposed 32x32 path (``use_mfma_32x32=True`` +
+    ``use_transposed_qk_32x32=True``) has been parity-validated against the
+    default 16x16x32 path across 17 representative shapes (bf16 long /
+    short prefill, multi-batch, sliding-window, GQA, hd64/128/256,
+    decode). Measured speedup vs default (MI355X, bf16):
+
+      * multi-batch prefill (num_seqs >= 2, max_seqlen_q >= 256):
+        1.21-1.48x on hd64, 1.28-1.39x on hd128
+      * single-batch long prefill (num_seqs == 1): 0.74-0.85x (slower)
+      * decode / very short prefill: ~tie
+
+    The win pattern is driven by the softmax: the transposed layout
+    reduces K-reduce work from 5 stages of intra-32-lane butterfly to a
+    single cross-half xor, and amortises that win across the multi-CTA
+    parallelism that multi-batch shapes provide. Single-batch prefill
+    has fewer CTAs to absorb the (still-present) PV scalar-V-load and
+    PT cross-half xor overhead.
+
+    The non-transposed 32x32 path is currently slower than default on
+    every shape we tested (its PV uses P_lds with the standard
+    ds_read_tr16 V reader but pays the higher register pressure), so we
+    only enable mfma_32x32 in conjunction with the transposed flag.
+    """
+    return _enable_transposed_qk_32x32(problem)
+
+
+def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
+    """Heuristic for the transposed-K layout.
+
+    The transposed path requires ``block_m_per_warp == 32`` (the M32N32K16
+    MFMA shape) so the conditions here MUST be a strict subset of the
+    ``_select_2d_block_m_per_warp`` conditions that pick ``mw=32``. The
+    latter requires ``max_seqlen_q > 256 AND num_seqs >= 2 AND not (sw
+    > 0 AND not use_fp8)``. Adding extra gates beyond those silently
+    breaks the post-init validation in the spec dataclass.
+
+    Beyond the mw=32 prereq we gate on:
+
+      * dtype == bf16 (fp16/fp8 paths still use the default kernel)
+      * no FP8 K/V (transposed path doesn't dequant K/V from fp8 yet)
+      * no ALiBi or QQ bias (transposed mask block doesn't fold them yet)
+      * head_size in {64, 128} (hd=256 not benchmarked yet)
+      * no softcap / sinks (not wired into transposed softmax yet)
+    """
+    if problem.dtype != "bf16":
+        return False
+    if problem.use_fp8:
+        return False
+    if problem.use_alibi or problem.use_qq_bias:
+        return False
+    if problem.softcap > 0 or problem.use_sinks:
+        return False
+    if problem.head_size not in (64, 128):
+        return False
+    # Must match _select_2d_block_m_per_warp's mw=32 conditions exactly.
+    if not (problem.max_seqlen_q > 256 and problem.num_seqs >= 2):
+        return False
+    if problem.sliding_window > 0 and not problem.use_fp8:
+        return False
+    return True
+
+
+def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
+    """Enable register-resident P for the existing 16x16x32 2D path.
+
+    Hard-disabled by default while the lane transform is being validated.
+    Tests/experiments can monkey-patch this selector; once parity and trace
+    benches are clean it can be enabled for bf16 no-window long-prefill.
+    """
+    return False
+
+
 def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ) -> UnifiedAttention2DTiledSpec:
@@ -523,6 +601,9 @@ def _tiled_spec_from_problem(
         kv_storage_dtype=_kv_storage_dtype(problem),
         tile_size=_select_2d_tile_size(problem),
         block_m_per_warp=_select_2d_block_m_per_warp(problem),
+        use_mfma_32x32=_enable_mfma_32x32(problem),
+        use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem),
+        use_register_pv=_enable_register_pv(problem),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
     )
 
@@ -551,11 +632,11 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
         the per-iter MFMA + LDS-staging overhead doubles but stays
         below the per-CTA prelude savings.
 
-      - **bf16 long-prefill SW**, ``n=16 q=1000 k=1050 sw=128``: ``mw=32
-        T=32`` beats ``mw=16 T=64`` by 6% (310us → 291us). SW prunes
-        the kv-loop to a handful of iters/CTA so per-CTA prelude
-        dominates more, and the smaller T avoids over-allocating LDS.
-        (T selection is handled separately in ``_select_2d_tile_size``.)
+      - **bf16 long-prefill SW**, ``n=16 q=1000 k=1050 sw=128``:
+        the broad sweep revised the earlier local result: correctness-
+        clean best is ``mw=16 T=64 hipcc`` at ~257us. ``mw=32`` and
+        T=32 do not beat it consistently, and several hipcc T=32
+        combinations are numerically wrong. Keep bf16 SW on mw=16.
 
     Cost: VGPR pressure rises (each warp tracks 32 rows × QK_N_TILES +
     32 rows × PV_N_TILES of f32 accumulators), pushing occupancy from
@@ -568,7 +649,11 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
     Gate: ``max_seqlen_q > 256 and num_seqs >= 2``. Below this, mw=16
     is consistently within noise of mw=32 in the per-shape sweep.
     """
-    if problem.max_seqlen_q > 256 and problem.num_seqs >= 2:
+    if (
+        problem.max_seqlen_q > 256
+        and problem.num_seqs >= 2
+        and not (problem.sliding_window > 0 and not problem.use_fp8)
+    ):
         return 32
     return 16
 
