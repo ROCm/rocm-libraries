@@ -522,7 +522,7 @@ namespace TensileLite
 
             uint8_t* buffer;
             HIP_CHECK_EXC(hipHostMalloc(&buffer, bytes, 0));
-            m_cpuResultBuffer.reset(buffer, hipFree);
+            m_cpuResultBuffer.reset(buffer, hipHostFree);
             m_cpuResultBufferSize = bytes;
         }
 
@@ -787,17 +787,40 @@ namespace TensileLite
 
             auto copykind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
 
-            {
-                ScopedTimer timer("validate_gpu_readback");
-                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(), result, bytesToCopy, copykind));
-            }
-
+            // For NaN bounds checking, the result pointer points to valid data (middle of buffer)
+            // We need to adjust it back to buffer start to copy the NaN padding
+            void const* copySource = result;
             if(boundsCheck == BoundsCheckMode::NaN)
             {
-                ptrdiff_t bPadding = maxElement - tensor.totalAllocatedElements();
-                elementsBeforeData = bPadding / 2;
+                // Match the EXACT allocation logic in copyBadInputBuffers:
+                // dPadding = totalElements - totalAllocatedElements()  (in elements)
+                // dPadding = multiplyElementSize(dPadding, elementBytes())  (convert to bytes)
+                // dPadding = round to multiple of (2 * ceil(max(1, elementBytes)))  (ensure alignment)
+                // dstOffset = dst + dPadding / 2  (divide bytes by 2)
+                ptrdiff_t paddingElements = maxElement - tensor.totalAllocatedElements();
+                size_t paddingBytes = multiplyElementSize(paddingElements, tensor.elementBytes());
+
+                // Ensure paddingBytes/2 is properly aligned for the element type
+                // Match the exact rounding logic from copyBadInputBuffers
+                float elementBytes = tensor.elementBytes();
+                size_t alignmentBytes = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, elementBytes)));
+                paddingBytes = (paddingBytes / alignmentBytes) * alignmentBytes;
+
+                size_t bytesBeforeData = paddingBytes / 2;
+
+                copySource = (uint8_t const*)result - bytesBeforeData;
+
+                // Calculate elementsBeforeData for bounds checking display
+                // Note: for sub-byte types this may not be exact due to rounding
+                elementsBeforeData = bytesBeforeData / std::max(static_cast<size_t>(1),
+                                                                 static_cast<size_t>(tensor.elementBytes()));
                 elementsAfterData
                     = elementsToCopy - (tensor.totalAllocatedElements() + elementsBeforeData);
+            }
+
+            {
+                ScopedTimer timer("validate_gpu_readback");
+                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(), copySource, bytesToCopy, copykind));
             }
             // If there was extra data allocated before the tensor to do bounds
             // checking, resultBuffer is the whole allocation, while resultData
