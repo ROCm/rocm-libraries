@@ -663,7 +663,8 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
                  InElementwiseOperation in_element_op,
                  WeiElementwiseOperation wei_element_op,
                  OutElementwiseOperation out_element_op,
-                 ck::index_t split_k)
+                 ck::index_t split_k,
+                 bool stride_overflow_in = false)
             : p_a_grid_{p_out_grid},
               p_b_grid_{p_in_grid},
               p_e_grid_{p_wei_grid},
@@ -691,6 +692,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
               a_g_n_k_wos_lengths_{a_g_n_k_wos_lengths},
               a_g_n_k_wos_strides_{a_g_n_k_wos_strides}
         {
+            stride_overflow = stride_overflow_in;
             static ActiveWorkgroupsPerCU active_workgroups_per_cu;
 
             c_space_size_bytes =
@@ -997,6 +999,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
 
         bool split_k_offset_hack_;
         long_index_t split_k_stride_a_, split_k_stride_b_;
+        bool stride_overflow;
     };
 
     // Invoker
@@ -1829,6 +1832,12 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if constexpr(!LargeTensors)
+        {
+            if(arg.stride_overflow)
+                return false;
+        }
+
         if constexpr(LargeTensors)
         {
             if(!IsPackedTensor(arg.b_g_n_c_wis_lengths_, arg.b_g_n_c_wis_strides_) ||
@@ -2222,6 +2231,17 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
         }
         else
         {
+            constexpr long_index_t TwoGB = (long_index_t{1} << 31);
+            auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
+                for(const auto& s : strides)
+                    if(s > TwoGB)
+                        return true;
+                return false;
+            };
+            const bool stride_ovf = any_stride_exceeds_2gb(b_g_n_c_wis_strides) ||
+                                    any_stride_exceeds_2gb(e_g_k_c_xs_strides) ||
+                                    any_stride_exceeds_2gb(a_g_n_k_wos_strides);
+
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;
             std::array<index_t, NDimSpatial + 3> e_g_k_c_xs_lengths_i32;
@@ -2262,7 +2282,8 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
                             in_element_op,
                             wei_element_op,
                             out_element_op,
-                            split_k};
+                            split_k,
+                            stride_ovf};
         }
     }
 
@@ -2398,6 +2419,17 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
         }
         else
         {
+            constexpr long_index_t TwoGB = (long_index_t{1} << 31);
+            auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
+                for(const auto& s : strides)
+                    if(s > TwoGB)
+                        return true;
+                return false;
+            };
+            const bool stride_ovf = any_stride_exceeds_2gb(b_g_n_c_wis_strides) ||
+                                    any_stride_exceeds_2gb(e_g_k_c_xs_strides) ||
+                                    any_stride_exceeds_2gb(a_g_n_k_wos_strides);
+
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;
             std::array<index_t, NDimSpatial + 3> e_g_k_c_xs_lengths_i32;
@@ -2438,7 +2470,8 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
                                               in_element_op,
                                               wei_element_op,
                                               out_element_op,
-                                              split_k);
+                                              split_k,
+                                              stride_ovf);
         }
     }
 
@@ -2463,8 +2496,13 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
             {BlockGemmPipelineVersion::v5, "v5"}};
 
         // clang-format off
-        str << "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle"
-            << "<"
+        str << "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle";
+
+        if constexpr(LargeTensors) {
+            str << "_Large_Tensor";
+        }
+
+        str << "<"
             << BlockSize << ", "
             << MPerBlock << ", "
             << NPerBlock << ", "

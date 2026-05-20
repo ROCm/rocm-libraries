@@ -260,10 +260,7 @@ struct BlockToCTileMap_M00_N0_M01Adapt<MPerBlock, NPerBlock, void, IndexType>
 };
 
 // keep the redundant type argument for backward compatibility
-template <index_t MPerBlock,
-          index_t NPerBlock,
-          typename CGridDesc_M_N,
-          typename IndexType = index_t>
+template <index_t MPerBlock, index_t NPerBlock, typename CGridDesc_M_N, typename IndexType>
 struct BlockToCTileMap_M00_N0_M01Adapt
     : BlockToCTileMap_M00_N0_M01Adapt<MPerBlock, NPerBlock, void, IndexType>
 {

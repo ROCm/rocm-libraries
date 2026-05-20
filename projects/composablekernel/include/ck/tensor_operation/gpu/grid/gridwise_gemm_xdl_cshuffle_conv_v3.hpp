@@ -125,6 +125,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                    is_same_v<BElementwiseOperation, tensor_operation::element_wise::PassThrough>) ||
                   !DirectLoad);
 
+    using IndexType = conditional_t<LargeTensors, long_index_t, index_t>;
+
     using Base = GridwiseGemm_xdl_cshuffle_base<
         ALayout,
         BLayout,
@@ -638,9 +640,13 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
         const long_index_t a_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
         const long_index_t b_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
 
-        const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+        const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                                    AmdBufferCoherenceEnum::DefaultCoherence,
+                                                    IndexType>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize() / a_space_size_divisor);
-        const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+        const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                                    AmdBufferCoherenceEnum::DefaultCoherence,
+                                                    IndexType>(
             p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize() / b_space_size_divisor);
 
         const AElementwiseOperation a_element_op{};
@@ -724,7 +730,7 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     AThreadTransferSrcResetCoordinateAfterRun,
                     true,
                     BlockwiseGemmPipe::GlobalBufferNum,
-                    conditional_t<LargeTensors, long_index_t, index_t>>(
+                    IndexType>(
                     a_grid_desc_ak0_m_ak1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, m_block_data_idx_on_grid, 0),
                     a_element_op,
@@ -777,7 +783,7 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     BThreadTransferSrcResetCoordinateAfterRun,
                     true,
                     BlockwiseGemmPipe::GlobalBufferNum,
-                    conditional_t<LargeTensors, long_index_t, index_t>>(
+                    IndexType>(
                     b_grid_desc_bk0_n_bk1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, n_block_data_idx_on_grid, 0),
                     b_element_op,
@@ -866,11 +872,17 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
         const long_index_t a_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
         const long_index_t b_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
 
-        const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+        const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                                    AmdBufferCoherenceEnum::DefaultCoherence,
+                                                    IndexType>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize() / a_space_size_divisor);
-        const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+        const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                                    AmdBufferCoherenceEnum::DefaultCoherence,
+                                                    IndexType>(
             p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize() / b_space_size_divisor);
-        auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+        auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                              AmdBufferCoherenceEnum::DefaultCoherence,
+                                              IndexType>(
             p_c_grid, c_grid_desc_mblock_mperblock_nblock_nperblock.GetElementSpaceSize());
 
         const AElementwiseOperation a_element_op{};
@@ -954,7 +966,7 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     AThreadTransferSrcResetCoordinateAfterRun,
                     true,
                     BlockwiseGemmPipe::GlobalBufferNum,
-                    conditional_t<LargeTensors, long_index_t, index_t>>(
+                    IndexType>(
                     a_grid_desc_ak0_m_ak1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, m_block_data_idx_on_grid, 0),
                     a_element_op,
@@ -1007,7 +1019,7 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     BThreadTransferSrcResetCoordinateAfterRun,
                     true,
                     BlockwiseGemmPipe::GlobalBufferNum,
-                    conditional_t<LargeTensors, long_index_t, index_t>>(
+                    IndexType>(
                     b_grid_desc_bk0_n_bk1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, n_block_data_idx_on_grid, 0),
                     b_element_op,

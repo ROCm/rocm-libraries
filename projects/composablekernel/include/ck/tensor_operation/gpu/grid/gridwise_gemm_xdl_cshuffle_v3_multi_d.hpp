@@ -213,6 +213,8 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                    is_same_v<BElementwiseOperation, tensor_operation::element_wise::PassThrough>) ||
                   !DirectLoad);
 
+    using IndexType = conditional_t<LargeTensors, long_index_t, index_t>;
+
     using Base = GridwiseGemm_xdl_cshuffle_base<
         ALayout,
         BLayout,
@@ -1412,10 +1414,14 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                                const CGridDesc_M_N& c_grid_desc_m_n)
     {
 
-        const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
-        const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize());
+        const auto a_grid_buf =
+            make_dynamic_buffer<AddressSpaceEnum::Global,
+                                AmdBufferCoherenceEnum::DefaultCoherence,
+                                IndexType>(p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
+        const auto b_grid_buf =
+            make_dynamic_buffer<AddressSpaceEnum::Global,
+                                AmdBufferCoherenceEnum::DefaultCoherence,
+                                IndexType>(p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize());
 
         const auto c_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
@@ -1499,13 +1505,12 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                     AThreadTransferSrcResetCoordinateAfterRun,
                     true,
                     BlockwiseGemmPipe::GlobalBufferNum,
-                    conditional_t<LargeTensors, long_index_t, index_t>>(
-                    a_grid_desc_ak0_m_ak1,
-                    make_multi_index(0, m_block_data_idx_on_grid, 0),
-                    a_element_op,
-                    a_block_desc_ak0_m_ak1,
-                    make_multi_index(0, 0, 0),
-                    ck::tensor_operation::element_wise::PassThrough{});
+                    IndexType>(a_grid_desc_ak0_m_ak1,
+                               make_multi_index(0, m_block_data_idx_on_grid, 0),
+                               a_element_op,
+                               a_block_desc_ak0_m_ak1,
+                               make_multi_index(0, 0, 0),
+                               ck::tensor_operation::element_wise::PassThrough{});
             }
         };
 
@@ -1556,13 +1561,12 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                     BThreadTransferSrcResetCoordinateAfterRun,
                     true,
                     BlockwiseGemmPipe::GlobalBufferNum,
-                    conditional_t<LargeTensors, long_index_t, index_t>>(
-                    b_grid_desc_bk0_n_bk1,
-                    make_multi_index(0, n_block_data_idx_on_grid, 0),
-                    b_element_op,
-                    b_block_desc_bk0_n_bk1,
-                    make_multi_index(0, 0, 0),
-                    ck::tensor_operation::element_wise::PassThrough{});
+                    IndexType>(b_grid_desc_bk0_n_bk1,
+                               make_multi_index(0, n_block_data_idx_on_grid, 0),
+                               b_element_op,
+                               b_block_desc_bk0_n_bk1,
+                               make_multi_index(0, 0, 0),
+                               ck::tensor_operation::element_wise::PassThrough{});
             }
         };
 
@@ -1730,10 +1734,14 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 c_grid_desc_m_n, problem.MBlock, problem.NBlock);
 
-        const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
-        const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize());
+        const auto a_grid_buf =
+            make_dynamic_buffer<AddressSpaceEnum::Global,
+                                AmdBufferCoherenceEnum::DefaultCoherence,
+                                IndexType>(p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
+        const auto b_grid_buf =
+            make_dynamic_buffer<AddressSpaceEnum::Global,
+                                AmdBufferCoherenceEnum::DefaultCoherence,
+                                IndexType>(p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize());
 
         const auto block_work_idx =
             block_2_ctile_map.CalculateBottomIndex(make_multi_index(get_block_1d_id()));
@@ -1813,13 +1821,12 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                     AThreadTransferSrcResetCoordinateAfterRun,
                     true,
                     BlockwiseGemmPipe::GlobalBufferNum,
-                    conditional_t<LargeTensors, long_index_t, index_t>>(
-                    a_grid_desc_ak0_m_ak1,
-                    make_multi_index(0, m_block_data_idx_on_grid, 0),
-                    a_element_op,
-                    a_block_desc_ak0_m_ak1,
-                    make_multi_index(0, 0, 0),
-                    ck::tensor_operation::element_wise::PassThrough{});
+                    IndexType>(a_grid_desc_ak0_m_ak1,
+                               make_multi_index(0, m_block_data_idx_on_grid, 0),
+                               a_element_op,
+                               a_block_desc_ak0_m_ak1,
+                               make_multi_index(0, 0, 0),
+                               ck::tensor_operation::element_wise::PassThrough{});
             }
         };
 
@@ -1870,13 +1877,12 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                     BThreadTransferSrcResetCoordinateAfterRun,
                     true,
                     BlockwiseGemmPipe::GlobalBufferNum,
-                    conditional_t<LargeTensors, long_index_t, index_t>>(
-                    b_grid_desc_bk0_n_bk1,
-                    make_multi_index(0, n_block_data_idx_on_grid, 0),
-                    b_element_op,
-                    b_block_desc_bk0_n_bk1,
-                    make_multi_index(0, 0, 0),
-                    ck::tensor_operation::element_wise::PassThrough{});
+                    IndexType>(b_grid_desc_bk0_n_bk1,
+                               make_multi_index(0, n_block_data_idx_on_grid, 0),
+                               b_element_op,
+                               b_block_desc_bk0_n_bk1,
+                               make_multi_index(0, 0, 0),
+                               ck::tensor_operation::element_wise::PassThrough{});
             }
         };
 

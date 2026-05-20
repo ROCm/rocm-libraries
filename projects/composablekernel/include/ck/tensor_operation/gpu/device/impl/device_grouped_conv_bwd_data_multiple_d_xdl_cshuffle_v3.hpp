@@ -490,7 +490,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                  const AElementwiseOp& a_element_op,
                  const BElementwiseOp& b_element_op,
                  const CDEElementwiseOp& cde_element_op,
-                 ck::index_t split_k = 1)
+                 ck::index_t split_k     = 1,
+                 bool stride_overflow_in = false)
             : p_a_grid_{static_cast<const ADataType*>(p_a)},
               p_b_grid_{static_cast<const BDataType*>(p_b)},
               p_e_grid_{static_cast<EDataType*>(p_e)},
@@ -509,6 +510,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
               input_right_pads_{input_right_pads},
               k_batch_{split_k}
         {
+            stride_overflow             = stride_overflow_in;
             bool image_covered_dilation = true;
             bool image_covered_strides  = true;
             for(index_t d = 0; d < NDimSpatial; d++)
@@ -754,6 +756,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
         bool bwd_needs_zero_out;
         long_index_t e_space_size_bytes;
+        bool stride_overflow;
     };
 
     // Invoker
@@ -889,6 +892,14 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if constexpr(!LargeTensors)
+        {
+            if(arg.stride_overflow)
+            {
+                return false;
+            }
+        }
+
         if constexpr(LargeTensors)
         {
             if(!IsPackedTensor(arg.a_g_n_k_wos_lengths_, arg.a_g_n_k_wos_strides_) ||
@@ -1258,6 +1269,20 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         }
         else
         {
+            constexpr long_index_t TwoGB = (long_index_t{1} << 31);
+            auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
+                for(const auto& s : strides)
+                    if(s > TwoGB)
+                        return true;
+                return false;
+            };
+            bool ds_stride_ovf = false;
+            for(index_t d = 0; d < NumDTensor; d++)
+                ds_stride_ovf |= any_stride_exceeds_2gb(ds_g_n_c_wis_strides[d]);
+            const bool stride_ovf = any_stride_exceeds_2gb(a_g_n_k_wos_strides) ||
+                                    any_stride_exceeds_2gb(b_g_k_c_xs_strides) ||
+                                    any_stride_exceeds_2gb(e_g_n_c_wis_strides) || ds_stride_ovf;
+
             std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
             std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
             std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
@@ -1306,7 +1331,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                             a_element_op,
                             b_element_op,
                             cde_element_op,
-                            split_k};
+                            split_k,
+                            stride_ovf};
         }
     }
 
@@ -1464,6 +1490,20 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         }
         else
         {
+            constexpr long_index_t TwoGB = (long_index_t{1} << 31);
+            auto any_stride_exceeds_2gb  = [TwoGB](const auto& strides) {
+                for(const auto& s : strides)
+                    if(s > TwoGB)
+                        return true;
+                return false;
+            };
+            bool ds_stride_ovf = false;
+            for(index_t d = 0; d < NumDTensor; d++)
+                ds_stride_ovf |= any_stride_exceeds_2gb(ds_g_n_c_wis_strides[d]);
+            const bool stride_ovf = any_stride_exceeds_2gb(a_g_n_k_wos_strides) ||
+                                    any_stride_exceeds_2gb(b_g_k_c_xs_strides) ||
+                                    any_stride_exceeds_2gb(e_g_n_c_wis_strides) || ds_stride_ovf;
+
             std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
             std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
             std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
@@ -1512,7 +1552,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                                               a_element_op,
                                               b_element_op,
                                               cde_element_op,
-                                              split_k);
+                                              split_k,
+                                              stride_ovf);
         }
     }
 
@@ -1528,6 +1569,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         // clang-format off
         str << "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3"
             << (DirectLoad ? "_DirectLoad" : "")
+            << (LargeTensors ? "_Large_Tensor" : "")
             << "<"
             << BlockSize << ", "
             << MPerBlock << ", "
