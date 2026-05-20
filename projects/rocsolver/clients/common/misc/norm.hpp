@@ -51,7 +51,7 @@ double norm_error(char norm_type,
 
     // norm type can be 'O', 'I', 'F', 'o', 'i', 'f' for one, infinity or
     // Frobenius norm one norm is max column sum infinity norm is max row sum
-    // Frobenius is l2 norm of matrix entries
+    // Frobenius is L2 norm of matrix entries
 
     rocblas_int lda = M;
     if(lda_comp <= 0)

@@ -471,7 +471,7 @@ public:
         for(I i = 0; i < size(); ++i)
         {
             S el = detail::abs(this->operator[](i));
-            norm = (norm > el) ? norm : el;
+            norm = rocblas_max_nan( norm, el );
         }
 
         return norm;

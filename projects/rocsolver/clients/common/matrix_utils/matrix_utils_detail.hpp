@@ -49,6 +49,7 @@ namespace detail
         return T{scalar.real(), -scalar.imag()};
     }
 
+    // norm-squared: scalar*scalar
     template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 1>
     inline auto norm(const T& scalar)
     {
