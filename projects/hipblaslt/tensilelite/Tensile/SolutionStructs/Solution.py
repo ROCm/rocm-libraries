@@ -2008,8 +2008,8 @@ class Solution(collections.abc.Mapping):
         return
 
 
-    # Force TDM for subtile+gfx1250 (replaces DTL which doesn't exist on gfx12)
-    if state["UseSubtileImpl"] and state["ISA"] == IsaVersion(12,5,0):
+    # Force TDM for subtile on archs with TDM but no DTL (e.g. gfx1250)
+    if state["UseSubtileImpl"] and isaInfoMap[isa].asmCaps["HasTDM"] and not state["TDMInst"]:
       state["TDMInst"] = 3
 
     if state["TDMInst"]:
