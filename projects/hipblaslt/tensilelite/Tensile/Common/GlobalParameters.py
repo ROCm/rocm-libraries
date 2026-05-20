@@ -507,6 +507,7 @@ defaultBenchmarkCommonParameters = [
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
     # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
     {"SwInstructionPrefetch": [True]},
+    {"ClusterDim": [[1, 1]]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter

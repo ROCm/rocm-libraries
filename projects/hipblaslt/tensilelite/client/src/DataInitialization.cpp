@@ -2706,25 +2706,30 @@ namespace TensileLite
                     {
                         // gfx1250 and other arches: apply K-dimension swizzle.
                         // gfx950 is excluded by the branches above.
+                        // Batch dim (if present) goes at the front; pad/reshape/permute
+                        // operate natively on N-D so all batches are processed at once.
                         using Tensor = Tensor::Manipulation::Tensor;
+                        size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
 
                         if (unrollMajor)
                         {
                             auto unrolledSize = desc.sizes()[0];
                             auto tiledSize    = desc.sizes()[1];
                             size_t dimk       = 128 / MX;
-                            auto tmpTensor    = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
+                            auto tmpTensor    = Tensor({batch, tiledSize, unrolledSize}, desc.elementBytes());
+                            ::Tensor::Manipulation::Shape paddedShape{
+                                batch, tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
 
                             memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
                             //Temporary hack
                             uint64_t padVal{};
                             auto     paddedTensor = ::Tensor::Manipulation::pad(
                                 tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                            paddedTensor.reshape({paddedShape[0],
-                                                  paddedShape[1] / dimk,
+                            paddedTensor.reshape({batch,
+                                                  paddedShape[1],
+                                                  paddedShape[2] / dimk,
                                                   dimk});
-                            Tensor permuted = permute(paddedTensor, {1,0,2});
+                            Tensor permuted = permute(paddedTensor, {0, 2, 1, 3});
                             ptr             = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
                                                    permuted.as<void>(),
@@ -2736,18 +2741,20 @@ namespace TensileLite
                             auto unrolledSize = desc.sizes()[1];
                             auto tiledSize    = desc.sizes()[0];
                             size_t dimk       = 128 / MX;
-                            auto tmpTensor    = Tensor({unrolledSize, tiledSize}, desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{(unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
+                            auto tmpTensor    = Tensor({batch, unrolledSize, tiledSize}, desc.elementBytes());
+                            ::Tensor::Manipulation::Shape paddedShape{
+                                batch, (unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
 
                             memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
                             //Temporary hack
                             uint64_t padVal{};
                             auto     paddedTensor = ::Tensor::Manipulation::pad(
                                 tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                            paddedTensor.reshape({paddedShape[0] / dimk,
+                            paddedTensor.reshape({batch,
+                                                  paddedShape[1] / dimk,
                                                   dimk,
-                                                  paddedShape[1]});
-                            Tensor permuted = permute(paddedTensor, {0,2,1});
+                                                  paddedShape[2]});
+                            Tensor permuted = permute(paddedTensor, {0, 1, 3, 2});
                             ptr             = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
                                                    permuted.as<void>(),
