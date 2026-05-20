@@ -1304,6 +1304,13 @@ private:
     std::vector<agent_t> agents;
 };
 
+// kind of point-to-point RCCL transfer issued by CommRCCLGrouped
+enum class rccl_op
+{
+    send,
+    recv
+};
+
 // RCCL-based grouped send/recv for non-uniform patterns
 struct CommRCCLGrouped : public MultiPlanItem
 {
@@ -1316,8 +1323,11 @@ struct CommRCCLGrouped : public MultiPlanItem
     {
     }
 
-    void AddTransfer(bool              is_send,
-                     int               peer_rank,
+    // transfer_kind is a non-type template parameter so call sites read
+    // as AddTransfer<rccl_op::send>(...) / AddTransfer<rccl_op::recv>(...)
+    // instead of using opaque true/false flags.
+    template <rccl_op transfer_kind>
+    void AddTransfer(rocfft_location_t peer_location,
                      rocfft_location_t local_location,
                      BufferPtr         buffer,
                      size_t            offset,
@@ -1325,12 +1335,12 @@ struct CommRCCLGrouped : public MultiPlanItem
                      int               comm_rank)
     {
         Transfer t;
-        t.peer_rank      = peer_rank;
+        t.peer_location  = peer_location;
         t.local_location = local_location;
         t.buffer         = buffer;
         t.offset         = offset;
         t.count          = count;
-        t.is_send        = is_send;
+        t.op             = transfer_kind;
 
         // allocate stream on the correct device
         if(local_location.comm_rank == comm_rank)
@@ -1360,7 +1370,7 @@ struct CommRCCLGrouped : public MultiPlanItem
     {
         for(const auto& t : transfers)
         {
-            if(!t.is_send && ptr == t.buffer)
+            if(t.op == rccl_op::recv && ptr == t.buffer)
                 return true;
         }
         return false;
@@ -1379,12 +1389,15 @@ struct CommRCCLGrouped : public MultiPlanItem
 private:
     struct Transfer
     {
-        int                 peer_rank;
+        // peer and local endpoints, both as (comm_rank, device) pairs;
+        // the peer's RCCL rank is derived at execution time from
+        // peer_location.device via rccl.get_rank().
+        rocfft_location_t   peer_location;
         rocfft_location_t   local_location;
         BufferPtr           buffer;
         size_t              offset;
         size_t              count;
-        bool                is_send; // true=send, false=recv
+        rccl_op             op;
         hipStream_wrapper_t stream; // each transfer has its own stream
     };
 

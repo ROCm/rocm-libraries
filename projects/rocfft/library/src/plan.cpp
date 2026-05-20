@@ -2587,28 +2587,26 @@ void rocfft_plan_t::GlobalTransposeRCCL(size_t                     elem_size,
             multiPlan[packIdx]->group = itemGroup;
             packItems.push_back(packIdx);
 
-            const int dst_rank = outBrick.location.device;
-            if(dst_rank >= 0)
+            // send pack -> peer that owns outBrick
+            if(outBrick.location.device >= 0)
             {
-                rcclGrouped->AddTransfer(true,
-                                         dst_rank,
-                                         inBrick.location,
-                                         BufferPtr::temp(pack.data()),
-                                         0,
-                                         info.count,
-                                         local_comm_rank);
+                rcclGrouped->AddTransfer<rccl_op::send>(outBrick.location,
+                                                        inBrick.location,
+                                                        BufferPtr::temp(pack.data()),
+                                                        0,
+                                                        info.count,
+                                                        local_comm_rank);
             }
 
-            const int src_rank = inBrick.location.device;
-            if(src_rank >= 0)
+            // recv into recv buffer from peer that owns inBrick
+            if(inBrick.location.device >= 0)
             {
-                rcclGrouped->AddTransfer(false,
-                                         src_rank,
-                                         outBrick.location,
-                                         BufferPtr::temp(recv.data()),
-                                         0,
-                                         info.count,
-                                         local_comm_rank);
+                rcclGrouped->AddTransfer<rccl_op::recv>(inBrick.location,
+                                                        outBrick.location,
+                                                        BufferPtr::temp(recv.data()),
+                                                        0,
+                                                        info.count,
+                                                        local_comm_rank);
             }
 
             auto unpackIdx

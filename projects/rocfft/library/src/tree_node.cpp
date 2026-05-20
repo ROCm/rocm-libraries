@@ -761,7 +761,7 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
         size_t nsends = 0, nrecvs = 0;
         for(const auto& t : transfers)
         {
-            if(t.is_send)
+            if(t.op == rccl_op::send)
                 ++nsends;
             else
                 ++nrecvs;
@@ -787,25 +787,30 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                                         precision,
                                         arrayType);
 
-            if(t.is_send)
+            // translate peer location to its RCCL rank (single-process RCCL:
+            // peer device belongs to the same local communicator)
+            const int peer_rank = rccl.get_rank(t.peer_location.device);
+
+            switch(t.op)
             {
+            case rccl_op::send:
                 rccl.send(data_ptr,
                           t.count,
-                          t.peer_rank,
+                          peer_rank,
                           t.local_location.device,
                           t.stream,
                           precision,
                           arrayType);
-            }
-            else
-            {
+                break;
+            case rccl_op::recv:
                 rccl.recv(data_ptr,
                           t.count,
-                          t.peer_rank,
+                          peer_rank,
                           t.local_location.device,
                           t.stream,
                           precision,
                           arrayType);
+                break;
             }
         }
     }
@@ -837,10 +842,12 @@ void CommRCCLGrouped::Print(rocfft_ostream& os, const int indent) const
     os << indentStr << "  num_transfers: " << transfers.size() << "\n";
     for(size_t i = 0; i < transfers.size(); ++i)
     {
-        const auto& t = transfers[i];
-        os << indentStr << "  " << (t.is_send ? "Send" : "Recv") << " " << t.count << " elems "
-           << (t.is_send ? "to" : "from") << " rank " << t.peer_rank << " on device "
-           << t.local_location.device << "\n";
+        const auto& t       = transfers[i];
+        const bool  is_send = (t.op == rccl_op::send);
+        os << indentStr << "  " << (is_send ? "Send" : "Recv") << " " << t.count << " elems "
+           << (is_send ? "to" : "from") << " (comm_rank=" << t.peer_location.comm_rank
+           << ", device=" << t.peer_location.device << ")"
+           << " on device " << t.local_location.device << "\n";
     }
     os << std::endl;
 }
