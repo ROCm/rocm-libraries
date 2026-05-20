@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 /**
@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
 {% if op.has_mode_fields or op.has_enum_fields %}
 #include <hipdnn_frontend/Types.hpp>
 {% endif %}
@@ -267,82 +266,6 @@ public:
     }
 {% endif %}
 {% endfor %}
-
-    flatbuffers::Offset<{{ op.fbs_namespace }}::{{ op.fbs_table }}>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        return {{ op.fbs_namespace }}::Create{{ op.fbs_table }}Direct(
-            builder
-{%- for tf in op.tensor_fields %}
-{%- set ft = op.tensor_field_frontend_map.get(tf.name) %}
-{%- if ft %},
-{%- if tf.required %}
-            {{ ft.effective_getter_name }}()->get_uid()
-{%- else %}
-            {{ ft.effective_getter_name }}() ? flatbuffers::Optional<int64_t>({{ ft.effective_getter_name }}()->get_uid()) : flatbuffers::nullopt
-{%- endif %}
-{%- else %},
-            0
-{%- endif %}
-{%- endfor %}
-{%- for df in op.data_fields %}
-{% if df.is_vector %},
-            &{{ df.name }}
-{%- elif df.is_mode %},
-            toSdkType({{ df.name }})
-{%- elif df.is_enum %},
-            {{ df.name }}
-{%- elif df.is_optional_scalar %},
-            {{ df.name }}
-{%- else %},
-            {{ df.name }}
-{%- endif %}
-{%- endfor %});
-    }
-
-    static {{ op.frontend.attributes_class }} fromFlatBuffer(
-        const {{ op.fbs_namespace }}::{{ op.fbs_table }}* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        {{ op.frontend.attributes_class }} attr;
-
-{% for tf in op.tensor_fields %}
-{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
-{% if ft %}
-{% if tf.required %}
-        attr.{{ ft.effective_setter_name }}(tensorMap.at(fb->{{ tf.fbs_field }}()));
-{% else %}
-        if(fb->{{ tf.fbs_field }}() != 0)
-        {
-            attr.{{ ft.effective_setter_name }}(tensorMap.at(fb->{{ tf.fbs_field }}()));
-        }
-{% endif %}
-{% endif %}
-{% endfor %}
-
-{% for df in op.data_fields %}
-{% if df.is_vector %}
-        if(fb->{{ df.fbs_field }}() != nullptr)
-        {
-            std::vector<int64_t> {{ df.camel_name }}(fb->{{ df.fbs_field }}()->begin(), fb->{{ df.fbs_field }}()->end());
-            attr.{{ df.frontend_setter_name }}(std::move({{ df.camel_name }}));
-        }
-{% elif df.is_mode %}
-        attr.{{ df.frontend_setter_name }}(fromSdkType(fb->{{ df.fbs_field }}()));
-{% elif df.is_enum %}
-        attr.{{ df.frontend_setter_name }}(fb->{{ df.fbs_field }}());
-{% elif df.is_optional_scalar %}
-        if(fb->{{ df.fbs_field }}().has_value())
-        {
-            attr.{{ df.frontend_setter_name }}(fb->{{ df.fbs_field }}().value());
-        }
-{% else %}
-        attr.{{ df.frontend_setter_name }}(fb->{{ df.fbs_field }}());
-{% endif %}
-{% endfor %}
-
-        return attr;
-    }
 };
 {% if op.frontend.compatibility_typedef %}
 typedef {{ op.frontend.attributes_class }} {{ op.frontend.compatibility_typedef }}; ///< @brief Compatibility alias

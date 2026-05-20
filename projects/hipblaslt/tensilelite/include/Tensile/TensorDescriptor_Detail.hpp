@@ -29,6 +29,10 @@
 #include <Tensile/Comparison.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     template <>
@@ -67,3 +71,5 @@ namespace std
         }
     };
 } // namespace std
+
+TENSILE_HIDDEN_END

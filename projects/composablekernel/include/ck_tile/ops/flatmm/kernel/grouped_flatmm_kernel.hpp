@@ -10,6 +10,10 @@
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/flatmm/kernel/flatmm_kernel.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck_tile {
 
 template <class ScaleM       = FlatmmScalePointer<-1>,
@@ -274,8 +278,8 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
         hipDeviceProp_t prop;
         int deviceId = 0; // default device
 
-        constexpr int block_size = UnderlyingGemmKernel::BlockSize().x;
-        int dync_smem_size       = 0;
+        const int block_size = UnderlyingGemmKernel::BlockSize().x;
+        int dync_smem_size   = 0;
         int maxActiveBlocksPerCU;
 
         [[maybe_unused]] auto e = hipGetDeviceProperties(&prop, deviceId);
@@ -309,8 +313,8 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
         hipDeviceProp_t prop;
         int deviceId = 0; // default device
 
-        constexpr int block_size = UnderlyingGemmKernel::BlockSize().x;
-        int dync_smem_size       = 0;
+        const int block_size = UnderlyingGemmKernel::BlockSize().x;
+        int dync_smem_size   = 0;
         int maxActiveBlocksPerCU;
 
         [[maybe_unused]] auto e = hipGetDeviceProperties(&prop, deviceId);
@@ -339,16 +343,6 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
     {
         return hostArgs;
     }
-    // CK_TILE_HOST static constexpr auto
-    // MakeKernelArgs(const ContiguousGroupedFlatmmHostArgs& hostArgs)
-    // {
-    //     return hostArgs;
-    // }
-    // CK_TILE_HOST static constexpr auto
-    // MakeKernelArgs(const MaskedGroupedFlatmmHostArgs& hostArgs)
-    // {
-    //     return hostArgs;
-    // }
 
     template <class ScaleM       = FlatmmScalePointer<-1>,
               class ScaleN       = FlatmmScalePointer<-1>,
@@ -478,3 +472,5 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
 };
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

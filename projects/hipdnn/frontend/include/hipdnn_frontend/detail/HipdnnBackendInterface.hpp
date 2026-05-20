@@ -51,6 +51,31 @@ public:
     virtual hipdnnStatus_t backendCreateAndDeserializeGraphExt(
         hipdnnBackendDescriptor_t* descriptor, const uint8_t* serializedGraph, size_t graphByteSize)
         = 0;
+    virtual hipdnnStatus_t backendGetSerializedBinaryGraphExt(hipdnnBackendDescriptor_t descriptor,
+                                                              size_t requestedByteSize,
+                                                              size_t* graphByteSize,
+                                                              uint8_t* serializedGraph)
+        = 0;
+    virtual hipdnnStatus_t backendGetSerializedJsonGraphExt(hipdnnBackendDescriptor_t descriptor,
+                                                            size_t requestedByteSize,
+                                                            size_t* graphByteSize,
+                                                            char* serializedJsonGraph)
+        = 0;
+    virtual hipdnnStatus_t backendCreateAndDeserializeJsonGraphExt(
+        hipdnnBackendDescriptor_t* descriptor, const char* jsonGraph, size_t jsonByteSize)
+        = 0;
+    virtual hipdnnStatus_t
+        backendGetSerializedExecutionPlanExt(hipdnnBackendDescriptor_t descriptor,
+                                             size_t requestedByteSize,
+                                             size_t* planByteSize,
+                                             uint8_t* serializedPlan)
+        = 0;
+    virtual hipdnnStatus_t
+        backendCreateAndDeserializeExecutionPlanExt(hipdnnHandle_t handle,
+                                                    hipdnnBackendDescriptor_t* descriptor,
+                                                    const uint8_t* serializedPlan,
+                                                    size_t planByteSize)
+        = 0;
     virtual void loggingCallbackExt(hipdnnSeverity_t severity, const char* msg) = 0;
 
     virtual hipdnnStatus_t setEnginePluginPathsExt(size_t numPaths,

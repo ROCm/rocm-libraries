@@ -4,7 +4,7 @@
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
 
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
 #include <cstdint>
@@ -146,7 +146,8 @@ public:
             flatbuffers::FlatBufferBuilder builder;
 
             // Create knobs vector using KnobFactory
-            std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobOffsets;
+            std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>>
+                knobOffsets;
 
             if(engineId == hipdnn_tests::plugin_constants::engineId<KnobsPlugin>())
             {
@@ -228,7 +229,7 @@ public:
                 {}));
 
             auto knobsVector = builder.CreateVector(knobOffsets);
-            auto newEngineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(
+            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
                 builder, engineId, knobsVector);
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();

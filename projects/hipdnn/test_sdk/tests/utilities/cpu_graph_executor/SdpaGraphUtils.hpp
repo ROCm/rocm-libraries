@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
 namespace hipdnn_sdk_test_utils
 {
@@ -17,13 +18,16 @@ template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildSdpaFwdGraph(SdpaFwdTensorBundle<InputType>& tensorBundle,
-                      hipdnn_data_sdk::data_objects::DataType dataType,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                       bool causalMask = false)
 {
-    const auto frontendDataType = hipdnn_frontend::fromSdkType(dataType);
+    const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("SdpaFwdTest");
+    graph->set_io_data_type(frontendDataType)
+        .set_compute_data_type(frontendDataType)
+        .set_intermediate_data_type(frontendDataType);
 
     int64_t uid = 1;
     auto qAttr

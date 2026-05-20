@@ -45,11 +45,11 @@ inline std::random_device::result_type get_default_seed()
     static std::random_device::result_type seed{[] {
         auto external_seed = env::value(MIOPEN_DEBUG_DRIVER_PRNG_SEED);
 
-        auto seed = external_seed == 0
-                        ? std::random_device{}()
-                        : static_cast<std::random_device::result_type>(external_seed);
-        std::cout << "PRNG seed: " << seed << "\n";
-        return seed;
+        auto seed_ = external_seed == 0
+                         ? std::random_device{}()
+                         : static_cast<std::random_device::result_type>(external_seed);
+        std::cout << "PRNG seed: " << seed_ << "\n";
+        return seed_;
     }()};
     return seed;
 }
@@ -137,7 +137,7 @@ inline T gen_subnorm()
 {
     T denorm_val = static_cast<T>(0);
     if constexpr(!std::is_integral_v<T> && !std::is_same_v<T, double> &&
-                 details::has_digits<T>::value)
+                 std::is_trivially_copyable<T>::value && details::has_digits<T>::value)
     {
         using BitType = std::conditional_t<sizeof(T) == 1,
                                            uint8_t,

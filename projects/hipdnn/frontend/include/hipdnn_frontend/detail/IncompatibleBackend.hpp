@@ -87,6 +87,47 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
+    hipdnnStatus_t backendGetSerializedBinaryGraphExt(hipdnnBackendDescriptor_t /*descriptor*/,
+                                                      size_t /*requestedByteSize*/,
+                                                      size_t* /*graphByteSize*/,
+                                                      uint8_t* /*serializedGraph*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t backendGetSerializedJsonGraphExt(hipdnnBackendDescriptor_t /*descriptor*/,
+                                                    size_t /*requestedByteSize*/,
+                                                    size_t* /*graphByteSize*/,
+                                                    char* /*serializedJsonGraph*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t
+        backendCreateAndDeserializeJsonGraphExt(hipdnnBackendDescriptor_t* /*descriptor*/,
+                                                const char* /*jsonGraph*/,
+                                                size_t /*jsonByteSize*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t backendGetSerializedExecutionPlanExt(hipdnnBackendDescriptor_t /*descriptor*/,
+                                                        size_t /*requestedByteSize*/,
+                                                        size_t* /*planByteSize*/,
+                                                        uint8_t* /*serializedPlan*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t
+        backendCreateAndDeserializeExecutionPlanExt(hipdnnHandle_t /*handle*/,
+                                                    hipdnnBackendDescriptor_t* /*descriptor*/,
+                                                    const uint8_t* /*serializedPlan*/,
+                                                    size_t /*planByteSize*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
     hipdnn_data_sdk::utilities::Version version() override
     {
         return hipdnn_data_sdk::utilities::Version{-1, 0, 0};
@@ -114,4 +155,4 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 };
-}
+} // namespace hipdnn_frontend::detail

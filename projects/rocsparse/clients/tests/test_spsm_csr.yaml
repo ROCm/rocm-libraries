@@ -67,7 +67,7 @@ Tests:
 - name: spsm_csr
   category: quick
   function: spsm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   K: [0, 1, 280]
@@ -87,7 +87,7 @@ Tests:
 - name: spsm_csr_file
   category: quick
   function: spsm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions
   M: 1
   N: 1
@@ -109,7 +109,7 @@ Tests:
 - name: spsm_csr_file
   category: quick
   function: spsm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions
   M: 1
   N: 1
@@ -131,7 +131,7 @@ Tests:
 - name: spsm_csr_file
   category: quick
   function: spsm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions
   M: 1
   N: 1
@@ -153,7 +153,7 @@ Tests:
 - name: spsm_csr_file
   category: quick
   function: spsm_csr
-  indextype: *i32
+  indextype: *i64
   precision: *double_only_precisions_complex
   M: 1
   N: 1
@@ -455,7 +455,7 @@ Tests:
              shipsec1,
              bmwcra_1]
   host_memory_gb: 64
-  device_memory_gb: 32
+  device_memory_gb: 47
 
 - name: spsm_csr_file
   category: stress

@@ -5,7 +5,13 @@ cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipsparselt VERSION 0.2.7 LANGUAGES CXX)
+project(hipsparselt VERSION 0.2.8 LANGUAGES CXX)
+
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
@@ -185,6 +191,10 @@ if(HIPSPARSELT_ENABLE_HIP)
 endif()
 
 add_subdirectory(library)
+
+if(HIPSPARSELT_BUILD_TESTING)
+  enable_testing()
+endif()
 
 if(HIPSPARSELT_ENABLE_CLIENT)
     if(NOT HIPSPARSELT_ENABLE_THEROCK)

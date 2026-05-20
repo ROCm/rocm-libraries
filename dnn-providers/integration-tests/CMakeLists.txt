@@ -3,11 +3,15 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 
 project(hipdnn-integration-tests LANGUAGES CXX)
+
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,15 +20,24 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE
     CACHE BOOL "Add paths to linker search and installed rpath"
 )
 
-if(NOT WIN32)
-    # Only set if not already specified by user
-    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
-    endif()
-    message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+if(NOT DEFINED ROCM_PATH)
+    set(ROCM_PATH "/opt/rocm")
 endif()
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+# Only set if not already specified by user
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    message(STATUS "CMAKE_INSTALL_PREFIX set using ROCM_PATH: ${CMAKE_INSTALL_PREFIX}")
+elseif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_CMAKE_PATH)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_CMAKE_PATH}" CACHE PATH "Install path prefix" FORCE)
+    message(STATUS "CMAKE_INSTALL_PREFIX set using ROCM_CMAKE_PATH: ${CMAKE_INSTALL_PREFIX}")
+else()
+    message(STATUS "CMAKE_INSTALL_PREFIX set to default: ${CMAKE_INSTALL_PREFIX}")
+endif()
+
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+     ${CMAKE_CURRENT_SOURCE_DIR}/../cmake
+)
 
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(NOT ENABLE_CLANG_FORMAT)
@@ -94,33 +107,38 @@ endif()
 find_package(Threads REQUIRED)
 
 include(Dependencies)
+fetch_gtest_dependency()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-add_executable(hipdnn_integration_tests
+set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
+
+add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
-    src/IntegrationGpuBatchnormBackwardActivation.cpp
-    src/IntegrationGpuConvForward.cpp
-    src/IntegrationIsSupportedExtPerformance.cpp
 )
 
-target_include_directories(hipdnn_integration_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_include_directories(hipdnn_integration_tests SYSTEM PRIVATE
+add_subdirectory(src/integration_tests)
+
+target_include_directories(${INTEGRATION_TESTS_EXE} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(${INTEGRATION_TESTS_EXE} SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/argparse
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/tomlplusplus
 )
 
-target_link_libraries(hipdnn_integration_tests
+target_link_libraries(${INTEGRATION_TESTS_EXE}
     PRIVATE
         hip::host
+        hipdnn_gpu_ref
         hipdnn_test_sdk
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
-target_compile_options(hipdnn_integration_tests PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
+target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
 
-clang_tidy_check(hipdnn_integration_tests)
+clang_tidy_check(${INTEGRATION_TESTS_EXE})
 
 add_subdirectory(gpu_ref)
 add_subdirectory(tests)
@@ -132,7 +150,7 @@ finalize_test_targets("${PROJECT_NAME}")
 
 # For standalone builds we need to install the ctest files
 if(NOT ROCM_LIBS_SUPERBUILD)
-    install_integration_tests_ctest_files()
+    install_provider_ctest_files("hipdnn_integration_tests_ctest")
 endif()
 
 include(CMakePackageConfigHelpers)
@@ -140,7 +158,7 @@ include(CMakePackageConfigHelpers)
 set(HIPDNN_INTEGRATION_TESTS_VERSION "0.1.0")
 
 set_target_properties(
-    hipdnn_integration_tests
+    ${INTEGRATION_TESTS_EXE}
     PROPERTIES
         INSTALL_RPATH
         "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR};\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/hipdnn_plugins/engines"
@@ -149,8 +167,8 @@ set_target_properties(
 )
 
 # Install the executables with an export set
-install(TARGETS hipdnn_integration_tests
-    EXPORT hipdnn_integration_tests_targets
+install(TARGETS ${INTEGRATION_TESTS_EXE}
+    EXPORT ${INTEGRATION_TESTS_EXE}_targets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
@@ -158,37 +176,34 @@ install(TARGETS hipdnn_integration_tests
 
 # Generate Config.cmake from template
 configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_integration_testsConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsConfig.cmake"
-    INSTALL_DESTINATION lib/cmake/hipdnn_integration_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/${INTEGRATION_TESTS_EXE}Config.cmake.in"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}/${INTEGRATION_TESTS_EXE}Config.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}
 )
 
 # Generate ConfigVersion.cmake
 write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsConfigVersion.cmake"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}/${INTEGRATION_TESTS_EXE}ConfigVersion.cmake"
     VERSION ${HIPDNN_INTEGRATION_TESTS_VERSION}
     COMPATIBILITY AnyNewerVersion
 )
 
 # Build-tree export so superbuild consumers can find the package without installing
-export(TARGETS hipdnn_integration_tests
-    FILE "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsTargets.cmake"
-)
-file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipdnnIntegrationTestHelpers.cmake"
-    DESTINATION "${CMAKE_CURRENT_BINARY_DIR}"
+export(TARGETS ${INTEGRATION_TESTS_EXE}
+    FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}/${INTEGRATION_TESTS_EXE}Targets.cmake"
 )
 
 # Install-tree exports
-install(EXPORT hipdnn_integration_tests_targets
-    FILE hipdnn_integration_testsTargets.cmake
-    DESTINATION lib/cmake/hipdnn_integration_tests
+install(EXPORT ${INTEGRATION_TESTS_EXE}_targets
+    FILE ${INTEGRATION_TESTS_EXE}Targets.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}
 )
 
 install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsConfigVersion.cmake"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}/${INTEGRATION_TESTS_EXE}Config.cmake"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}/${INTEGRATION_TESTS_EXE}ConfigVersion.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipdnnIntegrationTestHelpers.cmake"
-    DESTINATION lib/cmake/hipdnn_integration_tests
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}
 )
 
 add_clang_tidy_custom_target()

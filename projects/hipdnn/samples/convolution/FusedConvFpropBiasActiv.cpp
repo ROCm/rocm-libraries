@@ -89,7 +89,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto yAttr = graph->pointwise(biasOutAttr, activationAttributes);
     yAttr->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
@@ -139,7 +139,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         // Step 2: Add bias using pointwise ADD with broadcasting
         utilities::Tensor<InputType> biasRefTensor(convOutAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_data_sdk::data_objects::PointwiseMode::ADD,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
             biasRefTensor,
             convRefTensor,
             biasTensor);
@@ -147,7 +147,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         // Step 3: Apply ReLU activation
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, yRefTensor, biasRefTensor);
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+            yRefTensor,
+            biasRefTensor);
 
         auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceFwd<InputType>();
 

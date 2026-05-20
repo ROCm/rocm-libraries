@@ -31,7 +31,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
     int64_t n = 1; // Batch size
-    int64_t c = 3; // Channels
+    int64_t c = 16; // Channels
     int64_t h = 14; // Height
     int64_t w = 14; // Width
 
@@ -83,7 +83,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     dbias->set_data_type(intermediateType);
     dbias->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     // Create tensors for execution
@@ -159,7 +159,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         cpuVariantPack[dbias->get_uid()] = dbiasRefTensor.memory().hostData();
 
         // Execute on CPU using graph executor
-        auto serializedGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        if(serErr.is_bad())
+        {
+            std::cerr << "Failed to serialize graph: " << serErr.get_message() << std::endl;
+            return false;
+        }
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
@@ -197,18 +202,21 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         validationPassed = dxValid && dscaleValid && dbiasValid;
     }
 
-    std::cout << "First 10 dx values: ";
-    for(int i = 0; i < 10; ++i)
+    auto printCount = std::min<int64_t>(10, n * c * h * w);
+    auto perChannelPrintCount = std::min<int64_t>(10, c);
+
+    std::cout << "First " << printCount << " dx values: ";
+    for(int64_t i = 0; i < printCount; ++i)
     {
         std::cout << static_cast<InputType>(dxHostPtr[i]) << " ";
     }
-    std::cout << "\nFirst 10 dscale values: ";
-    for(int i = 0; i < 10; ++i)
+    std::cout << "\nFirst " << perChannelPrintCount << " dscale values: ";
+    for(int64_t i = 0; i < perChannelPrintCount; ++i)
     {
         std::cout << static_cast<IntermediateType>(dscaleHostPtr[i]) << " ";
     }
-    std::cout << "\nFirst 10 dbias values: ";
-    for(int i = 0; i < 10; ++i)
+    std::cout << "\nFirst " << perChannelPrintCount << " dbias values: ";
+    for(int64_t i = 0; i < perChannelPrintCount; ++i)
     {
         std::cout << static_cast<IntermediateType>(dbiasHostPtr[i]) << " ";
     }

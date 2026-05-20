@@ -1,0 +1,75 @@
+/* ************************************************************************
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+MACRO(IF_MUBUFLoad)
+MACRO(IF_MUBUFStore)
+MACRO(IF_MUBUFAtomic)
+MACRO(IF_FLATLoad)
+MACRO(IF_FLATStore)
+MACRO(IF_FLATAtomic)
+MACRO(IF_GLOBALLoad)
+MACRO(IF_GLOBALStore)
+MACRO(IF_TENSORLoadToLds)
+MACRO(IF_SMemLoad)
+MACRO(IF_SMemStore)
+MACRO(IF_SMemAtomic)
+MACRO(IF_ScalarInstPrefetch)
+MACRO(IF_DSRead)
+MACRO(IF_DSStore)
+MACRO(IF_DSAtomic)
+MACRO(IF_Barrier)
+MACRO(IF_Branch)
+MACRO(IF_ConditionalBranch)
+MACRO(IF_WaitCnt)
+MACRO(IF_WaitTensorCnt)
+
+// ALU instruction classifications for delay_alu and scheduling
+MACRO(IF_VALU)
+MACRO(IF_SALU)
+MACRO(IF_Transcendental)
+MACRO(IF_Trans64)
+MACRO(IF_WMMA_XDL)
+MACRO(IF_VCmp)
+MACRO(IF_VCmpX)
+
+// Instructions that have side effects but not belongs to any of the
+// following categories:
+// - memory stores, ds writes, branches, barriers, and waitcnts
+MACRO(IF_HasSideEffect)
+MACRO(IF_MFMA)
+MACRO(IF_SMFMA)
+MACRO(IF_WMMA)
+MACRO(IF_SWMMA)
+MACRO(IF_MXWMMA)
+
+// Arithmetic properties
+MACRO(IF_Commutative)
+
+// Implicit special-register access.
+// These flags record implicit reads/writes to SCC, VCC, or EXEC that are NOT
+// encoded as explicit operands.
+MACRO(IF_ImplicitReadVCC)
+MACRO(IF_ImplicitReadEXEC)
+MACRO(IF_ImplicitWriteEXEC)
+MACRO(IF_ImplicitReadSCC)
+MACRO(IF_ImplicitWriteSCC)

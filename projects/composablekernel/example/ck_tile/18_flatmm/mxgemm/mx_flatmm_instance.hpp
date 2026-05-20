@@ -84,7 +84,26 @@ float mx_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
         ck_tile::GemmSpatiallyLocalTilePartitioner<FlatmmShape,
                                                    FlatmmConfig::TileParitionerGroupNum,
                                                    FlatmmConfig::TileParitionerM01>;
-    using GemmEpilogue =
+    using GemmEpilogue = std::conditional_t<
+        FlatmmConfig::TiledMMAPermuteN,
+        ck_tile::PermuteNEpilogue<ck_tile::PermuteNEpilogueProblem<ComputeDataType,
+                                                                   ComputeDataType,
+                                                                   DsDatatype,
+                                                                   AccDataType,
+                                                                   CDataType,
+                                                                   DsLayout,
+                                                                   CLayout,
+                                                                   CDEElementWise,
+                                                                   TilePartitioner::MPerBlock,
+                                                                   TilePartitioner::NPerBlock,
+                                                                   FlatmmConfig::M_Warp,
+                                                                   FlatmmConfig::N_Warp,
+                                                                   FlatmmConfig::M_Warp_Tile,
+                                                                   FlatmmConfig::N_Warp_Tile,
+                                                                   FlatmmConfig::K_Warp_Tile,
+                                                                   MXPipelineProblem::TransposeC,
+                                                                   false, // FixedVectorSize
+                                                                   1>>,   // VectorSizeC
         ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<ComputeDataType,
                                                                    ComputeDataType,
                                                                    DsDatatype,
@@ -104,15 +123,14 @@ float mx_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
                                                                    FlatmmConfig::NumWaveGroups,
                                                                    false, // FixedVectorSize
                                                                    1,     // VectorSizeC
-                                                                   FlatmmConfig::TiledMMAPermuteN,
-                                                                   BlockedXDLN_PerWarp>>;
+                                                                   BlockedXDLN_PerWarp>>>;
 
     using Kernel = ck_tile::MXFlatmmKernel<TilePartitioner, MXFlatmmPipeline, GemmEpilogue>;
 
     auto kargs = Kernel::MakeKernelArgs(args);
 
-    const dim3 grids      = Kernel::GridSize(kargs);
-    constexpr dim3 blocks = Kernel::BlockSize();
+    const dim3 grids  = Kernel::GridSize(kargs);
+    const dim3 blocks = Kernel::BlockSize();
 
     if(!Kernel::IsSupportedArgument(kargs))
         throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!\n");

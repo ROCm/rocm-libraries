@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -128,6 +128,10 @@ TEST(rocfft_UnitTest, plan_description)
     {
         GTEST_SKIP() << e.what();
     }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 TEST(rocfft_UnitTest, plan_description_reuse)
@@ -240,6 +244,78 @@ TEST(rocfft_UnitTest, plan_description_reuse)
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+}
+
+TEST(rocfft_UnitTest, nonzero_offsets)
+{
+    // check that plan creation does not proceed with non-zero offsets.
+
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
+    try
+    {
+        size_t                  length    = 96;
+        size_t                  in_offset = 2, out_offset = 1;
+        rocfft_plan_description desc = nullptr;
+        ASSERT_EQ(rocfft_plan_description_create(&desc), rocfft_status_success);
+        // use default strides and distances
+        auto rocfft_ret
+            = rocfft_plan_description_set_data_layout(desc,
+                                                      rocfft_array_type_real,
+                                                      rocfft_array_type_hermitian_interleaved,
+                                                      &in_offset,
+                                                      &out_offset,
+                                                      0,
+                                                      nullptr,
+                                                      0,
+                                                      0,
+                                                      nullptr,
+                                                      0);
+        if(rocfft_ret != rocfft_status_success)
+            rocfft_plan_description_destroy(desc);
+        ASSERT_EQ(rocfft_ret, rocfft_status_success);
+        // Try to create the plan
+        rocfft_plan plan                 = nullptr;
+        const auto  plan_creation_status = rocfft_plan_create(&plan,
+                                                             rocfft_placement_inplace,
+                                                             rocfft_transform_type_real_forward,
+                                                             rocfft_precision_single,
+                                                             1,
+                                                             &length,
+                                                             1,
+                                                             desc);
+        rocfft_plan_destroy(plan);
+        rocfft_plan_description_destroy(desc);
+        ASSERT_EQ(plan_creation_status, rocfft_status_invalid_offset);
+    }
+    catch(const std::bad_alloc&)
+    {
+        GTEST_SKIP() << "host memory allocation failure";
+    }
+    catch(const ROCFFT_SKIP& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const ROCFFT_FAIL& e)
+    {
+        GTEST_FAIL() << e.what();
+    }
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }
@@ -357,6 +433,10 @@ TEST(rocfft_UnitTest, log_levels)
     {
         GTEST_SKIP() << e.what();
     }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // Check whether logs can be emitted from multiple threads properly
@@ -436,6 +516,10 @@ TEST(rocfft_UnitTest, log_multithreading)
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }
@@ -539,6 +623,10 @@ TEST(rocfft_UnitTest, workmem_missing)
     {
         GTEST_SKIP() << e.what();
     }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // check what happens if work memory is required but not enough is provided
@@ -568,6 +656,10 @@ TEST(rocfft_UnitTest, workmem_small)
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }
@@ -602,6 +694,10 @@ TEST(rocfft_UnitTest, workmem_big)
     {
         GTEST_SKIP() << e.what();
     }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 // check if a user explicitly gives a null pointer - set work buffer
@@ -632,6 +728,10 @@ TEST(rocfft_UnitTest, workmem_null)
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }
@@ -816,6 +916,10 @@ TEST(rocfft_UnitTest, rtc_cache_iter_1)
     {
         GTEST_SKIP() << e.what();
     }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 }
 
 TEST(rocfft_UnitTest, rtc_cache_iter_2)
@@ -837,6 +941,10 @@ TEST(rocfft_UnitTest, rtc_cache_iter_2)
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }
@@ -874,6 +982,10 @@ TEST(rocfft_UnitTest, rtc_cache_null)
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }
@@ -965,6 +1077,10 @@ TEST(rocfft_UnitTest, rtc_helper_crash)
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }

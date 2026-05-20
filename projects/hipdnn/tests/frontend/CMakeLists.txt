@@ -50,16 +50,20 @@ add_executable(
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationResampleFwdDescriptorLifting.cpp
+    IntegrationResampleFwdDescriptorLowering.cpp
     IntegrationReductionDescriptorLifting.cpp
     IntegrationReductionDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLifting.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
+    IntegrationRMSNormBackwardDescriptorLowering.cpp
+    IntegrationRMSNormBackwardDescriptorLifting.cpp
     IntegrationSetPluginPathsExt.cpp
-    IntegrationSdpaBpropDescriptorLowering.cpp
-    IntegrationSdpaBpropLifting.cpp
-    IntegrationSdpaFpropDescriptorLifting.cpp
-    IntegrationSdpaFpropDescriptorLowering.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaBwdDescriptorLowering.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaBwdLifting.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaFwdDescriptorLifting.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaFwdDescriptorLowering.cpp>
 )
 
 target_compile_options(hipdnn_public_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

@@ -16,9 +16,10 @@ namespace miopen_plugin
 
 // --- Type Configuration Helpers ---
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedIoTypes()
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
+    bn_type_configs::getAllowedIoTypes()
 {
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
         types.insert(config.io);
@@ -26,9 +27,10 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::get
     return types;
 }
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedAffineTypes()
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
+    bn_type_configs::getAllowedAffineTypes()
 {
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
         types.insert(config.affine);
@@ -36,9 +38,10 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::get
     return types;
 }
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::getAllowedStatTypes()
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
+    bn_type_configs::getAllowedStatTypes()
 {
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
         types.insert(config.stat);
@@ -46,10 +49,10 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> bn_type_configs::get
     return types;
 }
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType>
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
     bn_type_configs::getAllowedIntermediateTypes()
 {
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
         types.insert(config.intermediate);
@@ -60,7 +63,7 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType>
 // --- Tensor Descriptor Implementation ---
 
 BatchnormTensorDescriptor::BatchnormTensorDescriptor(
-    const hipdnn_data_sdk::data_objects::TensorAttributes* attr)
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attr)
     : dims(attr->dims()->begin(), attr->dims()->end())
     , strides(attr->strides()->begin(), attr->strides()->end())
     , strideOrder(hipdnn_data_sdk::utilities::extractStrideOrder(strides))
@@ -199,8 +202,8 @@ void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& ten
 }
 
 void validateDataTypeIsSupported(
-    hipdnn_data_sdk::data_objects::DataType dataType,
-    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>& allowedTypes,
     const std::string& errorMessage)
 {
     if(allowedTypes.count(dataType) > 0)
@@ -212,9 +215,10 @@ void validateDataTypeIsSupported(
 
 void validateConsistentDataTypes(
     const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
-    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>& allowedTypes,
     const std::string& typeErrorMessage,
     const std::string& consistencyErrorMessage)
 {
@@ -241,9 +245,10 @@ void validateConsistentDataTypes(
 
 void validateFixedDataType(
     const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
-    hipdnn_data_sdk::data_objects::DataType expectedType,
+    hipdnn_flatbuffers_sdk::data_objects::DataType expectedType,
     const std::string& errorMessage)
 {
     for(const auto tensorId : tensorIds)
@@ -259,7 +264,8 @@ void validateFixedDataType(
 
 void validateConsistentShapes(
     const std::vector<int64_t>& tensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     const std::vector<int64_t>& referenceShape,
     const std::string& errorMessage)
@@ -297,8 +303,8 @@ void validateSpatialDimensions(const std::vector<int64_t>& ioDims)
     }
 }
 
-void validatePeerStatsNotPopulated(const flatbuffers::Vector<int64_t>* peerStatsTensorUid,
-                                   const std::string& errorMessage)
+static void validatePeerStatsNotPopulated(const flatbuffers::Vector<int64_t>* peerStatsTensorUid,
+                                          const std::string& errorMessage)
 {
     if(peerStatsTensorUid != nullptr && !peerStatsTensorUid->empty())
     {
@@ -312,7 +318,8 @@ void validatePeerStatsNotPopulated(const flatbuffers::Vector<int64_t>* peerStats
 // --- Component Validators ---
 
 void checkTensorLayoutsAndDimsSupported(
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     // Skip scalars (epsilon, momentum) - their type is validated by MIOpen
@@ -321,7 +328,7 @@ void checkTensorLayoutsAndDimsSupported(
 
     for(const auto& [id, attr] : tensorMap)
     {
-        if(attr->value_type() != hipdnn_data_sdk::data_objects::TensorValue::NONE)
+        if(attr->value_type() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
         {
             continue;
         }
@@ -338,7 +345,8 @@ void checkTensorDataTypesSupported(
     const std::vector<int64_t>& affineTensorIds,
     const std::vector<int64_t>& statTensorIds,
     const std::vector<int64_t>& intermediateTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     validators::validateConsistentDataTypes(
@@ -411,7 +419,8 @@ void checkTensorShapesSupported(
     const std::vector<int64_t>& ioTensorIds,
     const std::vector<int64_t>& affineTensorIds,
     const std::vector<int64_t>& statTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     bool isTraining)
 {
@@ -456,7 +465,8 @@ void checkBatchnormTensorConfigSupported(
     const std::vector<int64_t>& affineTensorIds,
     const std::vector<int64_t>& statTensorIds,
     const std::vector<int64_t>& intermediateTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     bool isTraining)
 {
@@ -469,14 +479,15 @@ void checkBatchnormTensorConfigSupported(
 } // namespace
 
 void checkBatchnormInferenceTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
-    std::vector<int64_t> affineTensorIds
+    const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
         = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    std::vector<int64_t> statTensorIds
+    const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
@@ -484,14 +495,15 @@ void checkBatchnormInferenceTensorConfigSupported(
 }
 
 void checkBatchnormInferenceVarianceExtTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
-    std::vector<int64_t> affineTensorIds
+    const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
         = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    std::vector<int64_t> statTensorIds
+    const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
@@ -499,19 +511,20 @@ void checkBatchnormInferenceVarianceExtTensorConfigSupported(
 }
 
 void checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     checkBatchnormFwdActivationModeSupported(actAttr);
 
-    std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
-    std::vector<int64_t> affineTensorIds
+    const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
         = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    std::vector<int64_t> statTensorIds
+    const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
-    std::vector<int64_t> intermediateTensorIds
+    const std::vector<int64_t> intermediateTensorIds
         = {bnInfAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
@@ -519,19 +532,20 @@ void checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
 }
 
 void checkBatchnormInferenceActivationTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     checkBatchnormFwdActivationModeSupported(actAttr);
 
-    std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
-    std::vector<int64_t> affineTensorIds
+    const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
         = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    std::vector<int64_t> statTensorIds
+    const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()};
-    std::vector<int64_t> intermediateTensorIds
+    const std::vector<int64_t> intermediateTensorIds
         = {bnInfAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
@@ -539,16 +553,18 @@ void checkBatchnormInferenceActivationTensorConfigSupported(
 }
 
 void checkBatchnormFwdTrainingTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     validators::validatePeerStatsNotPopulated(
         bnAttr.peer_stats_tensor_uid(),
         "Batchnorm forward training does not support peer statistics");
 
-    std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
+    const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
+        = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
     if(bnAttr.mean_tensor_uid().has_value())
     {
@@ -564,17 +580,19 @@ void checkBatchnormFwdTrainingTensorConfigSupported(
 }
 
 void checkBatchnormFwdTrainingActivationTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     validators::validatePeerStatsNotPopulated(
         bnAttr.peer_stats_tensor_uid(),
         "Batchnorm forward training activation does not support peer statistics");
 
-    std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
+    const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
+        = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
     if(bnAttr.mean_tensor_uid().has_value())
     {
@@ -584,23 +602,25 @@ void checkBatchnormFwdTrainingActivationTensorConfigSupported(
     {
         statTensorIds.push_back(bnAttr.inv_variance_tensor_uid().value());
     }
-    std::vector<int64_t> intermediateTensorIds = {bnAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
+    const std::vector<int64_t> intermediateTensorIds
+        = {bnAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap, true);
 }
 
 void checkBatchnormBackwardTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     validators::validatePeerStatsNotPopulated(
         bnBwdAttr.peer_stats_tensor_uid(), "Batchnorm backward does not support peer statistics");
 
-    std::vector<int64_t> ioTensorIds
+    const std::vector<int64_t> ioTensorIds
         = {bnBwdAttr.x_tensor_uid(), bnBwdAttr.dy_tensor_uid(), bnBwdAttr.dx_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {
+    const std::vector<int64_t> affineTensorIds = {
         bnBwdAttr.scale_tensor_uid(), bnBwdAttr.dscale_tensor_uid(), bnBwdAttr.dbias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
     if(bnBwdAttr.mean_tensor_uid().has_value())
@@ -617,10 +637,11 @@ void checkBatchnormBackwardTensorConfigSupported(
 }
 
 void checkBatchnormInferenceActivationBackwardTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     checkBatchnormBwdActivationModeSupported(actAttr);
@@ -636,12 +657,12 @@ void checkBatchnormInferenceActivationBackwardTensorConfigSupported(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Activation backward node must have a second input tensor (in_1)");
     }
-    std::vector<int64_t> ioTensorIds
+    const std::vector<int64_t> ioTensorIds
         = {bnBwdAttr.x_tensor_uid(), *actIn1Uid, bnBwdAttr.dx_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {bnBwdAttr.scale_tensor_uid(),
-                                            bnBwdAttr.dscale_tensor_uid(),
-                                            bnBwdAttr.dbias_tensor_uid(),
-                                            bnInfAttr.bias_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds = {bnBwdAttr.scale_tensor_uid(),
+                                                  bnBwdAttr.dscale_tensor_uid(),
+                                                  bnBwdAttr.dbias_tensor_uid(),
+                                                  bnInfAttr.bias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
     if(bnBwdAttr.mean_tensor_uid().has_value())
     {
@@ -651,10 +672,10 @@ void checkBatchnormInferenceActivationBackwardTensorConfigSupported(
     {
         statTensorIds.push_back(bnBwdAttr.inv_variance_tensor_uid().value());
     }
-    std::vector<int64_t> intermediateTensorIds = {bnInfAttr.y_tensor_uid(),
-                                                  actAttr.in_0_tensor_uid(),
-                                                  actAttr.out_0_tensor_uid(),
-                                                  bnBwdAttr.dy_tensor_uid()};
+    const std::vector<int64_t> intermediateTensorIds = {bnInfAttr.y_tensor_uid(),
+                                                        actAttr.in_0_tensor_uid(),
+                                                        actAttr.out_0_tensor_uid(),
+                                                        bnBwdAttr.dy_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap, true);
@@ -666,18 +687,18 @@ namespace
 {
 
 void checkBatchnormActivationModeSupported(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr, bool isBwd)
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr, bool isBwd)
 {
     // MIOpen supports: PASSTHRU, RELU, CLIPPEDREU, CLAMP (no Leaky ReLU)
 
-    if(activAttr.operation() == hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY)
+    if(activAttr.operation() == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY)
     {
         return;
     }
 
     if(activAttr.operation()
-       == (isBwd ? hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD
-                 : hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD))
+       == (isBwd ? hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD
+                 : hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD))
     {
         if(!activAttr.relu_lower_clip_slope())
         {
@@ -695,13 +716,13 @@ void checkBatchnormActivationModeSupported(
 } // namespace
 
 void checkBatchnormFwdActivationModeSupported(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr)
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr)
 {
     checkBatchnormActivationModeSupported(activAttr, false);
 }
 
 void checkBatchnormBwdActivationModeSupported(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr)
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr)
 {
     checkBatchnormActivationModeSupported(activAttr, true);
 }

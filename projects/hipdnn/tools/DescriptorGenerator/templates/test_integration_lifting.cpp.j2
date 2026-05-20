@@ -10,36 +10,25 @@
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/{{ op.frontend.node_class }}.hpp>
 #include <hipdnn_test_sdk/constants/{{ op.effective_constants_include }}.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
-
-#include "test_plugins/TestPluginConstants.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
+using hipdnn_tests::liftGraph;
+using hipdnn_tests::liftGraphWithoutFinalization;
+using hipdnn_tests::TestableGraphLifting;
+using hipdnn_tests::IntegrationTestFixture;
 
 namespace
 {
-
-// Exposes protected Graph methods for lifting integration tests
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph;
-    using Graph::fromBackendDescriptor;
-    using Graph::deserialize_via_backend;
-    using Graph::get_raw_graph_descriptor;
-
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
-    {
-        return _sub_nodes;
-    }
-};
 
 {% set first_tensor = op.tensor_fields[0] %}
 {% set first_tc = op.test_data.tensor_configs.get(first_tensor.name) %}
@@ -53,36 +42,13 @@ public:
 {% endif %}
 // Lifts a frontend graph via build_operation_graph(handle), then
 // reconstructs it with fromBackendDescriptor() for verification.
-class Integration{{ op.name }}DescriptorLifting : public ::testing::Test
+class Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting : public IntegrationTestFixture
 {
 protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
     /// Builds a standard {{ op.name }} graph for round-trip testing.
-    static std::shared_ptr<TestableGraph> buildGraph()
+    static std::shared_ptr<TestableGraphLifting> buildGraph()
     {
-        auto graph = std::make_shared<TestableGraph>();
+        auto graph = std::make_shared<TestableGraphLifting>();
         graph->set_name("{{ op.name }}LiftingTestGraph")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
@@ -144,29 +110,17 @@ protected:
 
         return graph;
     }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 // Builds a standard {{ op.name }} graph, lowers via build_operation_graph(handle),
 // lifts back with fromBackendDescriptor(), and performs comprehensive field-by-field
 // validation of graph data types, tensor attributes, and operation parameters.
-TEST_F(Integration{{ op.name }}DescriptorLifting, Basic{{ op.name }}RoundTrip)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, Basic{{ op.name }}RoundTrip)
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -219,22 +173,12 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, Basic{{ op.name }}RoundTrip)
 
 // After lifting, verifies tensor objects in the node attributes are the same
 // shared_ptr instances as in the tensor map (pointer equality).
-TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}TensorSharingPreserved)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, {{ op.name }}TensorSharingPreserved)
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
 
@@ -258,26 +202,13 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}TensorSharingPres
 
 // Builds a {{ op.name }} graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all fields survive the FlatBuffer-direct path.
-TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinalization)
+// all fields survive the backend C API serialization path.
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinalization)
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
-    ASSERT_FALSE(data.empty());
-
-    // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
-    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor"; // NOLINT(readability-implicit-bool-conversion)
-
-    // Lift into a new graph via fromBackendDescriptor
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(graphDesc.get());
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -336,9 +267,9 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinali
 {% set test_val = '1' %}
 {% endif %}
 // Verifies that the optional {{ df.name }} attribute survives a lifting round-trip.
-TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedInLiftingRoundTrip)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("{{ op.name }}{{ df.pascal_name }}LiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -399,18 +330,8 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
         .set_name("{{ out_name }}");
 {% endif %}
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
@@ -430,9 +351,9 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
 // Builds a {{ op.name }} graph without calling set_uid() on any tensor,
 // lowers to backend, lifts, and verifies all auto-assigned UIDs are
 // distinct and survive the round-trip.
-TEST_F(Integration{{ op.name }}DescriptorLifting, AutoAssignedUidsPreservedInLiftingRoundTrip)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, AutoAssignedUidsPreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("{{ op.name }}AutoUidLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -485,18 +406,8 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, AutoAssignedUidsPreservedInLif
         .set_name("{{ out_name }}");
 {% endif %}
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify the tensor map has the expected number of tensors
     auto tensorMap = liftedGraph->getTensorsByUid();

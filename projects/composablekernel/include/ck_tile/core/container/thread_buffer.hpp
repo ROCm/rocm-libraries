@@ -8,6 +8,7 @@
 #include "ck_tile/core/container/tuple.hpp"
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
@@ -22,18 +23,6 @@ CK_TILE_HOST_DEVICE constexpr auto make_thread_buffer(Ts&&... ts)
     return make_tuple(ts...);
 }
 #else
-
-#if 0
-template <typename T, index_t N>
-using thread_buffer = array<T, N>;
-
-template <typename... Ts>
-CK_TILE_HOST_DEVICE constexpr auto make_thread_buffer(Ts&&... ts)
-{
-    return make_array(ts...);
-}
-
-#endif
 
 // clang-format off
 template<typename T_, index_t N_>
@@ -103,25 +92,6 @@ struct thread_buffer {
         return vx.data;
     }
 
-#if 0
-    template <typename X_,
-              index_t Is,
-              typename std::enable_if<has_same_scalar_type<value_type, X_>::value, bool>::type = false>
-    CK_TILE_HOST_DEVICE constexpr void _set_as(number<Is> is, X_ x)
-    {
-        using X = remove_cvref_t<X_>;
-
-        constexpr index_t kSPerX = vector_traits<X>::vector_size;
-
-        union {
-            X_ data;
-            tuple_array<value_type, kSPerX> sub_data;
-        } vx {x};
-
-        static_for<0, kSPerX, 1>{}(
-           [&](auto j) { operator()((is * number<sizeof(X_)/sizeof(value_type)>{}) + j) = vx.sub_data[j]; });
-    }
-#endif
 
 
 #define TB_COMMON_AS() \

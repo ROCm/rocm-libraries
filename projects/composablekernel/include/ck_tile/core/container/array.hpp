@@ -13,6 +13,7 @@
 #include "ck_tile/core/utility/functional.hpp"
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
@@ -83,19 +84,6 @@ struct array
         for(auto i = 0; i < size(); i++)
             data[i] = static_cast<value_type>(c);
     }
-
-    // template <typename Y>
-    // CK_TILE_HOST_DEVICE constexpr array(const array& o)
-    // {
-    //     // static_assert(ArrayType::size() == size(), "wrong! size not the same");
-    //     __content = o.__content;
-    // }
-    // CK_TILE_HOST_DEVICE constexpr array& operator=(const array& o)
-    // {
-    //     // static_assert(ArrayType::size() == size(), "wrong! size not the same");
-    //     __content = o.__content;
-    //     return *this;
-    // }
 
     CK_TILE_HOST_DEVICE static constexpr auto size() { return N; }
     CK_TILE_HOST_DEVICE static constexpr bool is_static() { return is_static_v<value_type>; }
@@ -201,9 +189,8 @@ CK_TILE_HOST_DEVICE static void print(const array<T, 0>&)
     printf("array{size: 0, data: []}");
 }
 
-template <typename, typename>
+template <typename T, typename>
 struct vector_traits;
-
 // specialization for array
 template <typename T, index_t N>
 struct vector_traits<array<T, N>, void>
@@ -246,13 +233,6 @@ CK_TILE_HOST_DEVICE constexpr details::return_type<D, Ts...> make_array(Ts&&... 
 {
     return {std::forward<Ts>(ts)...};
 }
-
-// // make empty array
-// template <typename T>
-// CK_TILE_HOST_DEVICE constexpr auto make_array()
-// {
-//     return array<T, 0>{};
-// }
 
 // compatible with old ck's initializer, make an array and fill it withe the last element from
 // initializer_list

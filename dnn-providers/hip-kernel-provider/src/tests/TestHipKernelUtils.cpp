@@ -7,8 +7,8 @@
 
 #include "HipKernelUtils.hpp"
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
@@ -23,19 +23,24 @@ flatbuffers::FlatBufferBuilder createSingleTensorGraph(const std::vector<int64_t
                                                        const std::vector<int64_t>& strides)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "tensor", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        1,
+        "tensor",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &strides,
+        &dims));
 
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
-    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::HALF,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
         &nodes);
     builder.Finish(graphOffset);
@@ -43,8 +48,8 @@ flatbuffers::FlatBufferBuilder createSingleTensorGraph(const std::vector<int64_t
 }
 
 /// Extracts the TensorAttributes pointer (UID 1) from a single-tensor graph.
-const hipdnn_data_sdk::data_objects::TensorAttributes*
-    getTensor(const hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper& graph)
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    getTensor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph)
 {
     return graph.getTensorMap().at(1);
 }
@@ -110,8 +115,8 @@ TEST(TestFindDeviceBuffer, FindsFirstMatchWhenDuplicateUidsExist)
 TEST(TestFindTensorAttributes, FindsTensorWithMatchingUid)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& tensorMap = graph.getTensorMap();
 
@@ -123,8 +128,8 @@ TEST(TestFindTensorAttributes, FindsTensorWithMatchingUid)
 TEST(TestFindTensorAttributes, ThrowsWhenUidNotFound)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& tensorMap = graph.getTensorMap();
 
@@ -133,7 +138,8 @@ TEST(TestFindTensorAttributes, ThrowsWhenUidNotFound)
 
 TEST(TestFindTensorAttributes, ThrowsWhenMapIsEmpty)
 {
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*> emptyMap;
+    const std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
+        emptyMap;
 
     EXPECT_THROW(findTensorAttributes(emptyMap, 1), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -144,26 +150,26 @@ TEST(TestFindTensorAttributes, ThrowsWhenMapIsEmpty)
 
 TEST(TestIsChannelLastLayout, ReturnsTrueForNhwc4D)
 {
-    std::vector<int64_t> dims = {1, 3, 224, 224};
+    const std::vector<int64_t> dims = {1, 3, 224, 224};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(
         dims, hipdnn_data_sdk::utilities::TensorLayout::NHWC.strideOrder);
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(isChannelLastLayout(getTensor(graph)));
 }
 
 TEST(TestIsChannelLastLayout, ReturnsFalseForNchw4D)
 {
-    std::vector<int64_t> dims = {1, 3, 224, 224};
+    const std::vector<int64_t> dims = {1, 3, 224, 224};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(
         dims, hipdnn_data_sdk::utilities::TensorLayout::NCHW.strideOrder);
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(isChannelLastLayout(getTensor(graph)));
 }
@@ -174,26 +180,26 @@ TEST(TestIsChannelLastLayout, ReturnsFalseForNchw4D)
 
 TEST(TestIsChannelLastLayout, ReturnsTrueForNdhwc5D)
 {
-    std::vector<int64_t> dims = {1, 3, 8, 224, 224};
+    const std::vector<int64_t> dims = {1, 3, 8, 224, 224};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(
         dims, hipdnn_data_sdk::utilities::TensorLayout::NDHWC.strideOrder);
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(isChannelLastLayout(getTensor(graph)));
 }
 
 TEST(TestIsChannelLastLayout, ReturnsFalseForNcdhw5D)
 {
-    std::vector<int64_t> dims = {1, 3, 8, 224, 224};
+    const std::vector<int64_t> dims = {1, 3, 8, 224, 224};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(
         dims, hipdnn_data_sdk::utilities::TensorLayout::NCDHW.strideOrder);
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(isChannelLastLayout(getTensor(graph)));
 }
@@ -204,24 +210,24 @@ TEST(TestIsChannelLastLayout, ReturnsFalseForNcdhw5D)
 
 TEST(TestIsChannelLastLayout, ThrowsFor3DTensor)
 {
-    std::vector<int64_t> dims = {1, 3, 224};
-    std::vector<int64_t> strides = {672, 224, 1};
+    const std::vector<int64_t> dims = {1, 3, 224};
+    const std::vector<int64_t> strides = {672, 224, 1};
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(isChannelLastLayout(getTensor(graph)), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestIsChannelLastLayout, ThrowsFor6DTensor)
 {
-    std::vector<int64_t> dims = {1, 3, 4, 8, 224, 224};
-    std::vector<int64_t> strides = {4816896, 1605632, 401408, 50176, 224, 1};
+    const std::vector<int64_t> dims = {1, 3, 4, 8, 224, 224};
+    const std::vector<int64_t> strides = {4816896, 1605632, 401408, 50176, 224, 1};
 
     auto builder = createSingleTensorGraph(dims, strides);
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(isChannelLastLayout(getTensor(graph)), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -234,8 +240,8 @@ namespace
 {
 
 // Helper function to create PointwiseAttributes
-const hipdnn_data_sdk::data_objects::PointwiseAttributes*
-    createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode mode,
+flatbuffers::FlatBufferBuilder
+    createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode,
                               flatbuffers::Optional<float> reluLowerClip = flatbuffers::nullopt,
                               flatbuffers::Optional<float> reluUpperClip = flatbuffers::nullopt,
                               flatbuffers::Optional<float> reluLowerClipSlope
@@ -244,29 +250,33 @@ const hipdnn_data_sdk::data_objects::PointwiseAttributes*
                               flatbuffers::Optional<float> softplusBeta = flatbuffers::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(builder,
-                                                                               mode,
-                                                                               reluLowerClip,
-                                                                               reluUpperClip,
-                                                                               reluLowerClipSlope,
-                                                                               flatbuffers::nullopt,
-                                                                               0,
-                                                                               flatbuffers::nullopt,
-                                                                               flatbuffers::nullopt,
-                                                                               1,
-                                                                               flatbuffers::nullopt,
-                                                                               eluAlpha,
-                                                                               softplusBeta);
+    auto attrOffset
+        = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(builder,
+                                                                          mode,
+                                                                          reluLowerClip,
+                                                                          reluUpperClip,
+                                                                          reluLowerClipSlope,
+                                                                          flatbuffers::nullopt,
+                                                                          0,
+                                                                          flatbuffers::nullopt,
+                                                                          flatbuffers::nullopt,
+                                                                          1,
+                                                                          flatbuffers::nullopt,
+                                                                          eluAlpha,
+                                                                          softplusBeta);
     builder.Finish(attrOffset);
-    return flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
-        builder.GetBufferPointer());
+    return builder;
 }
 
 } // namespace
 
 TEST(TestParseActivation, ReluDefault)
 {
-    auto attrs = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD);
+    auto builder
+        = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -276,8 +286,11 @@ TEST(TestParseActivation, ReluDefault)
 
 TEST(TestParseActivation, ReluClippedUpperOnly)
 {
-    auto attrs = createPointwiseAttributes(
-        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, flatbuffers::nullopt, 5.0f);
+    auto builder = createPointwiseAttributes(
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, flatbuffers::nullopt, 5.0f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -287,8 +300,11 @@ TEST(TestParseActivation, ReluClippedUpperOnly)
 
 TEST(TestParseActivation, ReluClampLowerAndUpper)
 {
-    auto attrs = createPointwiseAttributes(
-        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, 0.5f, 10.0f);
+    auto builder = createPointwiseAttributes(
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, 0.5f, 10.0f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -299,10 +315,14 @@ TEST(TestParseActivation, ReluClampLowerAndUpper)
 
 TEST(TestParseActivation, ReluLeaky)
 {
-    auto attrs = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
-                                           flatbuffers::nullopt,
-                                           flatbuffers::nullopt,
-                                           0.01f);
+    auto builder
+        = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+                                    flatbuffers::nullopt,
+                                    flatbuffers::nullopt,
+                                    0.01f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -313,19 +333,26 @@ TEST(TestParseActivation, ReluLeaky)
 TEST(TestParseActivation, ThrowsOnReluUnsupportedLowerClipOnly)
 {
     // lower clip without upper clip is not supported
-    auto attrs = createPointwiseAttributes(
-        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, 0.5f, flatbuffers::nullopt);
+    auto builder = createPointwiseAttributes(
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, 0.5f, flatbuffers::nullopt);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     EXPECT_THROW(parseActivation(*attrs), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestParseActivation, EluCustomAlpha)
 {
-    auto attrs = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::ELU_FWD,
-                                           flatbuffers::nullopt,
-                                           flatbuffers::nullopt,
-                                           flatbuffers::nullopt,
-                                           1.50f);
+    auto builder
+        = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD,
+                                    flatbuffers::nullopt,
+                                    flatbuffers::nullopt,
+                                    flatbuffers::nullopt,
+                                    1.50f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -335,13 +362,16 @@ TEST(TestParseActivation, EluCustomAlpha)
 
 TEST(TestParseActivation, SoftplusValidBeta)
 {
-    auto attrs
-        = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    1.0f);
+    auto builder = createPointwiseAttributes(
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        1.0f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -350,21 +380,27 @@ TEST(TestParseActivation, SoftplusValidBeta)
 
 TEST(TestParseActivation, SoftplusInvalidBeta)
 {
-    auto attrs
-        = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    2.0f);
+    auto builder = createPointwiseAttributes(
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        2.0f);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     EXPECT_THROW(parseActivation(*attrs), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestParseActivation, Sigmoid)
 {
-    auto attrs
-        = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
+    auto builder = createPointwiseAttributes(
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
     EXPECT_EQ(params.mode, ActivationMode::LOGISTIC);
@@ -372,7 +408,11 @@ TEST(TestParseActivation, Sigmoid)
 
 TEST(TestParseActivation, TanhWithDefaults)
 {
-    auto attrs = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::TANH_BWD);
+    auto builder
+        = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_BWD);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 
@@ -383,7 +423,11 @@ TEST(TestParseActivation, TanhWithDefaults)
 
 TEST(TestParseActivation, Passthru)
 {
-    auto attrs = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY);
+    auto builder
+        = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
 
     auto params = parseActivation(*attrs);
 

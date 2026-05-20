@@ -5,6 +5,7 @@ This document describes the environment variables and runtime configuration opti
 ## Table of Contents
 
 - [Environment Variables](#environment-variables)
+  - [Plugin Discovery](#plugin-discovery)
   - [Logging Variables](#logging-variables)
   - [MIOpen Plugin Logging](#miopen-plugin-logging)
   - [Test Configuration](#test-configuration)
@@ -16,6 +17,55 @@ This document describes the environment variables and runtime configuration opti
 ---
 
 ## Environment Variables
+
+### Plugin Discovery
+
+hipDNN supports a plugin architecture for both execution engines and heuristic policies. Plugins are automatically discovered at runtime from configurable search paths.
+
+#### HIPDNN_PLUGIN_DIR
+
+Specifies the directory path where hipDNN will search for engine plugins (shared libraries that provide operation implementations).
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Uses default path: `hipdnn_plugins/engines/` (relative to current working directory) |
+| `<path>`   | Search for engine plugins in the specified directory  |
+
+When set, this variable completely overrides the default search path. The path can be absolute or relative to the current working directory.
+
+**Example:**
+```bash
+export HIPDNN_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/engines
+```
+
+**Notes:**
+- Engine plugins must implement the Engine Plugin API (see `EnginePluginApi.h`)
+- Plugin libraries are typically named `libhipdnn_provider_*.so` (Linux) or `hipdnn_provider_*.dll` (Windows)
+- Only plugins whose API version major matches `HIPDNN_ENGINE_API_VERSION_MAJOR` (declared in `hipdnn_plugin_sdk/engine_api_version.h`) will be loaded
+- See the [Plugin Development Guide](PluginDevelopment.md) for details on creating engine plugins
+
+#### HIPDNN_HEURISTIC_PLUGIN_DIR
+
+Specifies the directory path where hipDNN will search for heuristic plugins (shared libraries that provide operation selection policies).
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Uses default path: `hipdnn_plugins/heuristics/` (relative to current working directory) |
+| `<path>`   | Search for heuristic plugins in the specified directory |
+
+When set, this variable completely overrides the default search path. The path can be absolute or relative to the current working directory.
+
+**Example:**
+```bash
+export HIPDNN_HEURISTIC_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/heuristics
+```
+
+**Notes:**
+- Heuristic plugins must implement the Heuristic Plugin API (see `HeuristicsPluginApi.h`)
+- Heuristic plugins have independent API versioning from engine plugins
+- Only plugins with API version matching the Heuristic API major version will be loaded
+- Each heuristic plugin must provide a unique policy ID and policy name
+- See the [Plugin Development Guide](PluginDevelopment.md) for details on creating heuristic plugins
 
 ### Logging Variables
 
