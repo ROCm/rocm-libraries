@@ -91,7 +91,7 @@ bool resolveAsmSetRhs(const std::string& valstr,
     if (t.empty()) return false;
     if (parseAsmSetNumericToken(t, out)) return true;
     if (!isAsmSetIdentifier(t)) return false;
-    if (expanding.count(t) != 0u) return false;
+    if (expanding.contains(t)) return false;
     auto it = raw.find(t);
     if (it == raw.end()) return false;
     expanding.insert(t);

@@ -20,6 +20,14 @@ from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
 from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
 from ..execution.timing import Timer
+from ..metrics import (
+    CpuTimeProbe,
+    GpuSmiProbe,
+    compute_flops,
+    compute_io_bytes,
+    derive_throughputs,
+)
+from ..metrics._diagnostic import warn_once
 from ..reporting.reporter import Reporter
 from ..reporting.statistics import BenchmarkStats
 from ..reporting.suite_results import (
@@ -305,6 +313,23 @@ def run_graph_all_providers(
 
     ref_provider = _get_reference_provider(config, graph_json)
 
+    # Compute analytical metrics once per graph — they're a function of
+    # the graph shape only and don't change across engines. Both calls
+    # are pure-Python and microsecond-cheap, but no point repeating
+    # them per engine. Failures route through warn_once and yield None.
+    analytical_flops: Optional[int] = None
+    analytical_flops_partial = False
+    analytical_io_bytes: Optional[int] = None
+    if config.metrics.basic_enabled:
+        try:
+            analytical_flops, analytical_flops_partial = compute_flops(graph_json)
+        except Exception as e:
+            warn_once("analytical", f"compute_flops failed for {graph_name}: {e}")
+        try:
+            analytical_io_bytes = compute_io_bytes(tensor_infos)
+        except Exception as e:
+            warn_once("analytical", f"compute_io_bytes failed for {graph_name}: {e}")
+
     pe_results: List[ProviderEngineResult] = []
     for engine_id in engine_ids:
         engine_name = _resolve_engine_name(engine_id)
@@ -323,6 +348,9 @@ def run_graph_all_providers(
                 ref_provider=ref_provider,
                 validation_requested=validation_requested,
                 graph_json=graph_json,
+                analytical_flops=analytical_flops,
+                analytical_flops_partial=analytical_flops_partial,
+                analytical_io_bytes=analytical_io_bytes,
             )
         pe_result.elapsed_time_ms = t.elapsed_ms
         if reporter is not None:
@@ -337,6 +365,66 @@ def run_graph_all_providers(
     )
 
 
+def _collect_basic_metrics_post_loop(
+    result: ProviderEngineResult,
+    cpu_time_probe: Optional[CpuTimeProbe],
+    benchmark_iters: int,
+    analytical_flops: Optional[int],
+    analytical_flops_partial: bool,
+    analytical_io_bytes: Optional[int],
+) -> None:
+    """Populate the basic always-on metric fields on ``result``.
+
+    Called once after the timed loop when ``metrics.tier == "basic"``.
+    Pulled out of :func:`_run_single_provider_engine` to keep that
+    function focused on the timed loop itself; the basic-tier book
+    keeping is otherwise just a long sequence of conditionals on
+    intermediate results.
+    """
+    if cpu_time_probe is not None and cpu_time_probe.delta is not None:
+        # Per-iter microseconds is the interpretable unit: the loop
+        # total is dominated by Python dispatch cost, and per-iter
+        # lets users compare directly against the kernel mean (also
+        # reported per-iter).
+        iters = max(benchmark_iters, 1)
+        result.cpu_user_time_per_iter_us = (
+            cpu_time_probe.delta.user_time_ms * 1000.0 / iters
+        )
+        result.cpu_kernel_time_per_iter_us = (
+            cpu_time_probe.delta.kernel_time_ms * 1000.0 / iters
+        )
+
+    # Analytical totals were computed once at the graph level; propagate
+    # them onto every engine's result so JSON consumers don't have to
+    # look up across structures.
+    result.analytical_flops = analytical_flops
+    result.analytical_flops_partial = analytical_flops_partial
+    result.analytical_io_bytes = analytical_io_bytes
+
+    # Derived throughputs use the *arithmetic mean* of post-warmup kernel
+    # timings — no trimming, no outlier rejection. A single noisy iter
+    # (context switch, thermal throttle) skews the headline number; for
+    # tighter signal use gpu_kernel_stats.min_ms or p95_ms.
+    kernel_mean = (
+        result.gpu_kernel_stats.mean_ms if result.gpu_kernel_stats is not None else None
+    )
+    tflops, gbytes = derive_throughputs(
+        analytical_flops, analytical_io_bytes, kernel_mean
+    )
+    result.derived_tflops_per_s = tflops
+    result.derived_gbytes_per_s = gbytes
+
+    # VRAM is sampled here (still inside the BufferManager context, so
+    # workspace + I/O buffers are still allocated). This is the only
+    # amdsmi field we expose per-engine — see ProviderEngineResult
+    # docstring.
+    try:
+        snap = GpuSmiProbe().snapshot()
+        result.vram_used_mb = snap.get("vram_used_mb")
+    except Exception as e:
+        warn_once("gpu_smi", f"vram snapshot failed: {e}")
+
+
 def _run_single_provider_engine(
     graph_path: Path,
     graph_json_str: str,
@@ -349,6 +437,9 @@ def _run_single_provider_engine(
     ref_provider: Optional[ReferenceProvider],
     validation_requested: bool,
     graph_json: Dict[str, Any],
+    analytical_flops: Optional[int] = None,
+    analytical_flops_partial: bool = False,
+    analytical_io_bytes: Optional[int] = None,
 ) -> ProviderEngineResult:
     """Execute a single engine for a graph (single attempt)."""
     # Initialise the result conservatively as an error and mutate fields as
@@ -358,6 +449,8 @@ def _run_single_provider_engine(
         engine_id=engine_id,
         status="error",
     )
+
+    metrics_basic = config.metrics.basic_enabled
 
     try:
         bench_config = BenchmarkConfig(
@@ -374,6 +467,8 @@ def _run_single_provider_engine(
         )
         executor.prepare(handle, engine_id=engine_id)
         result.cpu_build_time_ms = executor.init_time_ms
+        if metrics_basic:
+            result.workspace_bytes = executor.workspace_size
 
         with BufferManager(tensor_infos) as bm:
             bm.allocate_all()
@@ -383,15 +478,68 @@ def _run_single_provider_engine(
             variant_pack = bm.create_variant_pack()
             executor.warmup(handle, variant_pack)
 
-            bench_result = executor.benchmark(
-                handle, variant_pack, graph_name=graph_name
-            )
+            # Wrap the timed loop with always-on host probes when basic
+            # tier is enabled. The probes are designed to be no-cost on
+            # the GPU side: CPU-time sampling is two read-only kernel
+            # calls before/after the loop, and the amdsmi snapshot fires
+            # once after the benchmark returns. Failures inside probes
+            # are swallowed and surface as None fields on the result.
+            cpu_time_probe = CpuTimeProbe() if metrics_basic else None
+            if cpu_time_probe is not None:
+                cpu_time_probe.__enter__()
+            try:
+                bench_result = executor.benchmark(
+                    handle, variant_pack, graph_name=graph_name
+                )
+            finally:
+                if cpu_time_probe is not None:
+                    cpu_time_probe.__exit__(None, None, None)
 
             result.e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
             if bench_result.has_kernel_timings:
                 result.gpu_kernel_stats = BenchmarkStats.from_timings(
                     bench_result.kernel_timings
                 )
+
+            if metrics_basic:
+                _collect_basic_metrics_post_loop(
+                    result=result,
+                    cpu_time_probe=cpu_time_probe,
+                    benchmark_iters=config.benchmark_iters,
+                    analytical_flops=analytical_flops,
+                    analytical_flops_partial=analytical_flops_partial,
+                    analytical_io_bytes=analytical_io_bytes,
+                )
+
+            # Opt-in profiling pass — runs *after* the timed pass and
+            # always-on probes, so the profiler's overhead can't
+            # pollute the headline numbers. The orchestrator handles
+            # tool-missing / paranoid / parse failures internally and
+            # never raises; we still wrap defensively because anything
+            # bubbling out would otherwise mark a successful timed run
+            # as failed.
+            if config.metrics.opt_in_pass_requested:
+                try:
+                    from ..metrics.profiling_orchestrator import (
+                        run_profiling_passes,
+                    )
+
+                    extra = run_profiling_passes(
+                        graph_path=graph_path,
+                        engine_id=engine_id,
+                        seed=config.seed,
+                        warmup_iters=config.warmup_iters,
+                        benchmark_iters=config.benchmark_iters,
+                        metrics_config=config.metrics,
+                        plugin_path=config.plugin_path,
+                    )
+                    if extra:
+                        result.extra_metrics = extra
+                except Exception as e:
+                    warn_once(
+                        "profiling_orchestrator",
+                        f"profiling pass failed: {e}",
+                    )
 
             if ref_provider is not None:
                 result.correctness = _check_correctness(

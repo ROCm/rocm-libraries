@@ -497,7 +497,7 @@ namespace hipblaslt_norm_dist
     };
 
     // Device function to initialize XORWOW state
-    __device__ void init_xorwow(XorwowState* state, unsigned int seed)
+    __host__ __device__ inline void init_xorwow(XorwowState* state, unsigned int seed)
     {
         unsigned int s = seed;
         for(int i = 0; i < 5; ++i)
@@ -509,7 +509,7 @@ namespace hipblaslt_norm_dist
     }
 
     // Device function for XORWOW RNG
-    __device__ unsigned int xorwow_rand(XorwowState* state)
+    __host__ __device__ inline unsigned int xorwow_rand(XorwowState* state)
     {
         unsigned int t = state->x[4];
         unsigned int s = state->x[0];
@@ -525,13 +525,13 @@ namespace hipblaslt_norm_dist
     }
 
     // Device function for uniform distribution
-    __device__ float xorwow_uniform(XorwowState* state)
+    __host__ __device__ inline float xorwow_uniform(XorwowState* state)
     {
         return xorwow_rand(state) / 4294967296.0f;
     }
 
     // Device function for Box-Muller normal distribution
-    __device__ float box_muller_normal(XorwowState* state)
+    __host__ __device__ inline float box_muller_normal(XorwowState* state)
     {
         float u1 = xorwow_uniform(state);
         float u2 = xorwow_uniform(state);
