@@ -7,12 +7,11 @@ This project provides Python bindings for the hipDNN frontend library using the 
 
 ## Project Structure
 
-The project is organized as follows:
-
 ```
 python
 ├── src
 │   ├── module.cpp               # Main entry point for the nanobind module
+│   ├── bindings.hpp             # Shared declarations for binding functions
 │   ├── graph_bindings.cpp       # Bindings for the Graph class and its methods
 │   ├── handle_bindings.cpp      # Bindings for handle management
 │   ├── memory_bindings.cpp      # Bindings for device memory management
@@ -21,11 +20,8 @@ python
 │   └── types_bindings.cpp       # Bindings for custom types and enums
 ├── hipdnn_frontend
 │   ├── __init__.py              # Initializes the hipdnn_frontend package
-│   └── samples
-│       ├── bn_inference.py      # Batch normalization inference sample (DISABLED)
-│       ├── conv_fprop.py        # Convolution forward propagation sample
-│       ├── conv_dgrad.py        # Convolution backward data gradient sample
-│       └── conv_wgrad.py        # Convolution backward weight gradient sample
+│   ├── samples/                 # Sample scripts (conv_fprop, conv_dgrad, conv_wgrad, matmul)
+│   └── test/                    # Tests for the Python bindings
 ├── CMakeLists.txt               # CMake configuration (scikit-build-core + subdirectory dual-mode)
 ├── pyproject.toml               # Python project configuration (scikit-build-core backend)
 └── README.md                    # Project documentation
@@ -37,11 +33,28 @@ python
 - A C++ compiler with C++17 support (e.g. clang++)
 - Python 3.9 or higher
 - ROCm/HIP runtime and libraries
-- hipDNN frontend library (built and installed)
 
-## Getting Started
+## Building
 
-### 1. Setting up a Python Virtual Environment
+There are two ways to build the Python bindings:
+
+### Subdirectory build (via parent hipDNN CMake)
+
+When building hipDNN from the project root, enable the `HIPDNN_BUILD_PYTHON_BINDINGS` option (off by default):
+
+```bash
+cmake -S projects/hipdnn -B build -GNinja -DHIPDNN_BUILD_PYTHON_BINDINGS=ON
+cmake --build build
+cmake --install build --prefix /path/to/install
+```
+
+The bindings are staged to `share/hipdnn/python/hipdnn_frontend/` under the install prefix.
+
+### Standalone build (via pip)
+
+hipDNN must already be built and installed (e.g. at `/opt/rocm`).
+
+#### 1. Setting up a Python Virtual Environment
 
 It's recommended to use a Python virtual environment to isolate the project dependencies:
 
@@ -59,11 +72,7 @@ source hipdnn_env/bin/activate
 pip install --upgrade pip
 ```
 
-### 2. Building and Installing the Python Bindings
-
-The Python bindings use [scikit-build-core](https://scikit-build-core.readthedocs.io/) as the build backend, which drives CMake automatically through pip.
-
-hipDNN must be installed (e.g. at `/opt/rocm`) before building the bindings:
+#### 2. Building and Installing
 
 ```bash
 # Navigate to the hipdnn python directory
@@ -78,7 +87,7 @@ If hipDNN is installed somewhere other than `/opt/rocm`, pass the prefix:
 pip install -v . -Ccmake.define.CMAKE_PREFIX_PATH=/path/to/hipdnn/install
 ```
 
-### 3. Development Installation
+#### 3. Development Installation
 
 After C++ changes, uninstall and reinstall:
 
@@ -87,34 +96,13 @@ pip uninstall hipdnn-frontend -y
 pip install -v .
 ```
 
-### 4. Running the Sample Applications
+## Running the Samples
 
-The repository includes several sample applications demonstrating different operations:
+Sample scripts are located in `hipdnn_frontend/samples/`:
 
-#### Convolution Forward Propagation
 ```bash
-python conv_fprop.py
+python hipdnn_frontend/samples/conv_fprop.py
+python hipdnn_frontend/samples/conv_dgrad.py
+python hipdnn_frontend/samples/conv_wgrad.py
+python hipdnn_frontend/samples/matmul.py
 ```
-
-This sample demonstrates:
-- Setting up a convolution forward pass
-- Configuring padding, stride, and dilation parameters
-- Executing the convolution and displaying results
-
-#### Convolution Backward Data Gradient
-```bash
-python conv_dgrad.py
-```
-
-This sample demonstrates:
-- Computing input gradients (dx) given output gradients (dy) and weights
-- Used in backpropagation for training neural networks
-
-#### Convolution Backward Weight Gradient
-```bash
-python conv_wgrad.py
-```
-
-This sample demonstrates:
-- Computing weight gradients (dw) given output gradients (dy) and input (x)
-- Used for updating convolution filter weights during training
