@@ -1753,6 +1753,34 @@ miopenConvolutionForwardGetWorkSpaceSize(miopenHandle_t handle,
                                          const miopenTensorDescriptor_t yDesc,
                                          size_t* workSpaceSize);
 
+/*! @brief Query the minimum and maximum workspace size required across the full applicable forward
+ * convolution solver set.
+ *
+ * Returns the workspace range {min, max} in bytes over every solver that is applicable to the
+ * given forward convolution problem. Unlike miopenConvolutionForwardGetWorkSpaceSize(), which
+ * reports the workspace of only the single fastest solver, this function covers the complete
+ * applicable solver set (including both static and dynamic solvers).
+ *
+ * This function performs no device memory allocations and launches no GPU kernels.
+ *
+ * @param handle             MIOpen handle (input)
+ * @param wDesc              Tensor descriptor for weight tensor w (input)
+ * @param xDesc              Tensor descriptor for input data tensor x (input)
+ * @param convDesc           Convolution layer descriptor (input)
+ * @param yDesc              Tensor descriptor for output data tensor y (input)
+ * @param minWorkspaceSize   Minimum workspace size in bytes over all applicable solvers (output)
+ * @param maxWorkspaceSize   Maximum workspace size in bytes over all applicable solvers (output)
+ * @return                   miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t
+miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                              const miopenTensorDescriptor_t wDesc,
+                                              const miopenTensorDescriptor_t xDesc,
+                                              const miopenConvolutionDescriptor_t convDesc,
+                                              const miopenTensorDescriptor_t yDesc,
+                                              size_t* minWorkspaceSize,
+                                              size_t* maxWorkspaceSize);
+
 /*! @brief Search and run the forward convolutional algorithms and return a list of kernel times.
  *
  * This function attempts all MIOpen forward convolution algorithms based on
@@ -1918,6 +1946,34 @@ miopenConvolutionBackwardDataGetWorkSpaceSize(miopenHandle_t handle,
                                               const miopenTensorDescriptor_t dxDesc,
                                               size_t* workSpaceSize);
 
+/*! @brief Query the minimum and maximum workspace size required across the full applicable backward
+ * data convolution solver set.
+ *
+ * Returns the workspace range {min, max} in bytes over every solver that is applicable to the
+ * given backward data convolution problem. Unlike miopenConvolutionBackwardDataGetWorkSpaceSize(),
+ * which reports the workspace of only the single fastest solver, this function covers the complete
+ * applicable solver set (including both static and dynamic solvers).
+ *
+ * This function performs no device memory allocations and launches no GPU kernels.
+ *
+ * @param handle             MIOpen handle (input)
+ * @param dyDesc             Tensor descriptor for data input tensor dy (input)
+ * @param wDesc              Tensor descriptor for weight tensor w (input)
+ * @param convDesc           Convolution layer descriptor (input)
+ * @param dxDesc             Tensor descriptor for output data tensor dx (input)
+ * @param minWorkspaceSize   Minimum workspace size in bytes over all applicable solvers (output)
+ * @param maxWorkspaceSize   Maximum workspace size in bytes over all applicable solvers (output)
+ * @return                   miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t
+miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                   const miopenTensorDescriptor_t dyDesc,
+                                                   const miopenTensorDescriptor_t wDesc,
+                                                   const miopenConvolutionDescriptor_t convDesc,
+                                                   const miopenTensorDescriptor_t dxDesc,
+                                                   size_t* minWorkspaceSize,
+                                                   size_t* maxWorkspaceSize);
+
 /*! @brief Search and run the backwards data convolution algorithms and return a list of kernel
  * times.
  *
@@ -2059,6 +2115,35 @@ miopenConvolutionBackwardWeightsGetWorkSpaceSize(miopenHandle_t handle,
                                                  const miopenConvolutionDescriptor_t convDesc,
                                                  const miopenTensorDescriptor_t dwDesc,
                                                  size_t* workSpaceSize);
+
+/*! @brief Query the minimum and maximum workspace size required across the full applicable backward
+ * weights convolution solver set.
+ *
+ * Returns the workspace range {min, max} in bytes over every solver that is applicable to the
+ * given backward weights convolution problem. Unlike
+ * miopenConvolutionBackwardWeightsGetWorkSpaceSize(), which reports the workspace of only the
+ * single fastest solver, this function covers the complete applicable solver set (including both
+ * static and dynamic solvers).
+ *
+ * This function performs no device memory allocations and launches no GPU kernels.
+ *
+ * @param handle             MIOpen handle (input)
+ * @param dyDesc             Tensor descriptor for data input tensor dy (input)
+ * @param xDesc              Tensor descriptor for data tensor x (input)
+ * @param convDesc           Convolution layer descriptor (input)
+ * @param dwDesc             Tensor descriptor for output weights tensor dw (input)
+ * @param minWorkspaceSize   Minimum workspace size in bytes over all applicable solvers (output)
+ * @param maxWorkspaceSize   Maximum workspace size in bytes over all applicable solvers (output)
+ * @return                   miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t
+miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                      const miopenTensorDescriptor_t dyDesc,
+                                                      const miopenTensorDescriptor_t xDesc,
+                                                      const miopenConvolutionDescriptor_t convDesc,
+                                                      const miopenTensorDescriptor_t dwDesc,
+                                                      size_t* minWorkspaceSize,
+                                                      size_t* maxWorkspaceSize);
 
 /*! @brief Search and run the backwards weights convolutional algorithms and return a list of kernel
  * times.
