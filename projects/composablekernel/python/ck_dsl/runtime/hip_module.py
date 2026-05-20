@@ -20,8 +20,10 @@ We expose only what the GEMM kernel needs:
 from __future__ import annotations
 
 import ctypes
+import os
+import sys
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 HIP_LAUNCH_PARAM_BUFFER_POINTER = ctypes.c_void_p(1)
@@ -48,13 +50,60 @@ class _HipEventHandle(ctypes.Structure):
     _fields_ = [("p", ctypes.c_void_p)]
 
 
+def _torch_bundled_lib(stem: str) -> Optional[str]:
+    """Return path to ``<torch>/lib/lib<stem>.so`` if torch is in this process.
+
+    Newer PyTorch+ROCm wheels (e.g. torch>=2.12 / ROCm 7.2) ship their
+    own ``libamdhip64.so`` and ``libamd_comgr.so`` inside the wheel's
+    ``torch/lib/`` directory. When torch is imported, those bundled
+    libraries get loaded into the process and own torch's HIP context.
+    A second copy of HIP loaded by ck_dsl from ``/opt/rocm/lib`` is a
+    *different* runtime instance with disjoint state — modules loaded
+    via one are invisible to ``hipModuleGetFunction`` from the other,
+    surfacing as ``hipError(500) named symbol not found`` even when the
+    HSACO is well-formed and the symbol is present in its ELF.
+
+    To keep both halves of the process talking to the same HIP/comgr
+    runtime, prefer torch's bundled lib when torch is already imported.
+    Avoids importing torch as a side effect: only honors a torch that
+    is *already* in :data:`sys.modules`.
+    """
+    torch_mod = sys.modules.get("torch")
+    if torch_mod is None:
+        return None
+    torch_file = getattr(torch_mod, "__file__", None)
+    if not torch_file:
+        return None
+    candidate = os.path.join(os.path.dirname(torch_file), "lib", f"lib{stem}.so")
+    return candidate if os.path.exists(candidate) else None
+
+
+def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[str]:
+    """Resolution order for the HIP runtime / COMGR shared libraries.
+
+    Order:
+      1. ``$CK_DSL_HIP_LIB`` (explicit override, full path).
+      2. ``<torch>/lib/lib<stem>.so`` if torch is already imported.
+      3. ``/opt/rocm/lib/lib<stem>.so`` and the requested SONAME variants.
+      4. Bare ``lib<stem>.so`` for the dynamic linker's search path.
+    """
+    paths: List[str] = []
+    override = os.environ.get(env_var)
+    if override:
+        paths.append(override)
+    bundled = _torch_bundled_lib(stem)
+    if bundled is not None:
+        paths.append(bundled)
+    paths.append(f"/opt/rocm/lib/lib{stem}.so")
+    for soname in sonames:
+        paths.append(f"/opt/rocm/lib/lib{stem}.so.{soname}")
+    paths.append(f"lib{stem}.so")
+    return paths
+
+
 def _load_lib() -> ctypes.CDLL:
     err = None
-    for p in [
-        "/opt/rocm/lib/libamdhip64.so",
-        "/opt/rocm/lib/libamdhip64.so.7",
-        "libamdhip64.so",
-    ]:
+    for p in _candidate_lib_paths("amdhip64", "CK_DSL_HIP_LIB", ["7"]):
         try:
             return ctypes.CDLL(p)
         except OSError as e:
@@ -62,14 +111,64 @@ def _load_lib() -> ctypes.CDLL:
     raise HipError(f"cannot load libamdhip64.so ({err!r})")
 
 
-_hip = _load_lib()
+# Holds the resolved ``libamdhip64`` handle. Stays ``None`` until the
+# first HIP call actually goes through the runtime; this lets the user
+# import ck_dsl before importing torch (or vice versa) and still end
+# up sharing torch's bundled HIP runtime instead of double-loading the
+# system one.
+_hip: Optional[ctypes.CDLL] = None
 
 
-def _b(name: str, *argtypes, restype=ctypes.c_int):
-    fn = getattr(_hip, name)
-    fn.argtypes = list(argtypes)
-    fn.restype = restype
-    return fn
+def _resolve_hip() -> ctypes.CDLL:
+    global _hip
+    if _hip is None:
+        _hip = _load_lib()
+    return _hip
+
+
+class _LazyFn:
+    """Lazy ctypes function wrapper.
+
+    Defers ``getattr`` on the underlying CDLL until the first call so
+    that ck_dsl and torch can be imported in any order without ending
+    up with two HIP runtimes (see ``_torch_bundled_lib``). Resolved on
+    first use; subsequent calls dispatch directly through the cached
+    function pointer.
+
+    ``lib_resolver`` returns the shared ``ctypes.CDLL`` for this lib
+    family (HIP runtime / comgr / ...). It is invoked exactly once per
+    function on first call.
+    """
+
+    __slots__ = ("_name", "_argtypes", "_restype", "_lib_resolver", "_fn")
+
+    def __init__(
+        self,
+        name: str,
+        argtypes: List[Any],
+        restype: Any,
+        lib_resolver: "Callable[[], ctypes.CDLL]",
+    ) -> None:
+        self._name = name
+        self._argtypes = argtypes
+        self._restype = restype
+        self._lib_resolver = lib_resolver
+        self._fn: Optional[Any] = None
+
+    def _resolve(self) -> Any:
+        fn = getattr(self._lib_resolver(), self._name)
+        fn.argtypes = self._argtypes
+        fn.restype = self._restype
+        self._fn = fn
+        return fn
+
+    def __call__(self, *args: Any) -> Any:
+        fn = self._fn or self._resolve()
+        return fn(*args)
+
+
+def _b(name: str, *argtypes, restype=ctypes.c_int) -> _LazyFn:
+    return _LazyFn(name, list(argtypes), restype, _resolve_hip)
 
 
 # HIP function table.

@@ -33,6 +33,7 @@ What's hard, and how we handle it:
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -77,27 +78,88 @@ LLVM_FLAVOR_LLVM20 = "llvm20"
 LLVM_FLAVOR_LLVM22 = "llvm22"
 
 
-def _detect_llvm_flavor() -> str:
-    """Read ``CK_DSL_LLVM_FLAVOR`` (env) then ``/opt/rocm/.info/version``.
+def _flavor_for_rocm(major: int, minor: int) -> str:
+    """ROCm release -> LLVM flavor expected by the bundled comgr."""
+    return LLVM_FLAVOR_LLVM22 if (major, minor) >= (7, 2) else LLVM_FLAVOR_LLVM20
 
-    Falls back to :data:`LLVM_FLAVOR_LLVM22` (the modern default) when
-    nothing is found. Unknown env values fall through to the file
-    probe rather than raising on a typo at import time.
+
+def _torch_hip_version() -> Optional[Tuple[int, int]]:
+    """Return ``(major, minor)`` from ``torch.version.hip`` if torch is loaded.
+
+    Torch wheels (e.g. ``torch 2.8.0+rocm7.0.2`` vs ``torch 2.12.0+rocm7.2``)
+    bundle their own ``libamd_comgr.so`` whose LLVM version follows the
+    wheel's ROCm release, not the system ``/opt/rocm`` one. When ck_dsl
+    is paired with a torch-bundled comgr (see
+    :func:`runtime.hip_module._torch_bundled_lib`), the flavor must
+    match torch's ROCm vintage or comgr will reject the IR or
+    silently auto-upgrade declares the lowerer didn't intend.
+    """
+    torch_mod = sys.modules.get("torch")
+    if torch_mod is None:
+        return None
+    version = getattr(getattr(torch_mod, "version", None), "hip", None)
+    if not version:
+        return None
+    head = str(version).strip().split("-", 1)[0]
+    parts = head.split(".")
+    try:
+        return int(parts[0]), int(parts[1]) if len(parts) >= 2 else 0
+    except (IndexError, ValueError):
+        return None
+
+
+def _system_rocm_version() -> Optional[Tuple[int, int]]:
+    """Return ``(major, minor)`` from ``/opt/rocm/.info/version``."""
+    try:
+        with open("/opt/rocm/.info/version") as fh:
+            head = fh.read().strip().split("-", 1)[0]
+        parts = head.split(".")
+        return int(parts[0]), int(parts[1]) if len(parts) >= 2 else 0
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _detect_llvm_flavor() -> str:
+    """Pick the LLVM IR flavor for this process.
+
+    Resolution order:
+
+    1. ``$CK_DSL_LLVM_FLAVOR`` (explicit override; test/dev knob).
+    2. ``torch.version.hip`` if torch is already imported. This is what
+       :func:`runtime.hip_module._torch_bundled_lib` will resolve at
+       first comgr call, so emit IR matching that bundle.
+    3. ``/opt/rocm/.info/version`` — the system ROCm install ck_dsl
+       falls back to when torch is not in the process.
+    4. :data:`LLVM_FLAVOR_LLVM22` (the modern default).
+
+    Unknown env values fall through to the auto-detection rather than
+    raising on a typo. Each step is wrapped in :func:`try` so a
+    misconfigured environment never crashes import.
     """
     env = os.environ.get("CK_DSL_LLVM_FLAVOR", "").strip().lower()
     if env in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
         return env
-    try:
-        with open("/opt/rocm/.info/version") as fh:
-            major, minor = (
-                int(p) for p in fh.read().strip().split("-", 1)[0].split(".")[:2]
-            )
-        return LLVM_FLAVOR_LLVM22 if (major, minor) >= (7, 2) else LLVM_FLAVOR_LLVM20
-    except (OSError, ValueError):
-        return LLVM_FLAVOR_LLVM22
+    torch_ver = _torch_hip_version()
+    if torch_ver is not None:
+        return _flavor_for_rocm(*torch_ver)
+    sys_ver = _system_rocm_version()
+    if sys_ver is not None:
+        return _flavor_for_rocm(*sys_ver)
+    return LLVM_FLAVOR_LLVM22
 
 
-_LLVM_FLAVOR: str = _detect_llvm_flavor()
+# Lazy: resolved on first ``_resolve_llvm_flavor`` call (i.e. the first
+# ``lower_kernel_to_llvm`` invocation) so that ck_dsl and torch can be
+# imported in any order. Tests / callers who need a specific flavor
+# pass ``llvm_flavor=`` directly to :func:`lower_kernel_to_llvm`.
+_LLVM_FLAVOR: Optional[str] = None
+
+
+def _resolve_llvm_flavor() -> str:
+    global _LLVM_FLAVOR
+    if _LLVM_FLAVOR is None:
+        _LLVM_FLAVOR = _detect_llvm_flavor()
+    return _LLVM_FLAVOR
 
 
 # Intrinsic declarations we may emit.
@@ -438,7 +500,7 @@ class _Lowerer:
         llvm_flavor: Optional[str] = None,
     ) -> None:
         self.kernel = kernel
-        flavor = llvm_flavor if llvm_flavor is not None else _LLVM_FLAVOR
+        flavor = llvm_flavor if llvm_flavor is not None else _resolve_llvm_flavor()
         if flavor not in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
             raise ValueError(f"unknown LLVM flavor {flavor!r}")
         self._flavor: str = flavor

@@ -26,6 +26,8 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+from .hip_module import _LazyFn, _candidate_lib_paths
+
 
 # Status codes.
 AMD_COMGR_STATUS_SUCCESS = 0
@@ -47,20 +49,18 @@ AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE = 0x4
 AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE = 0x7
 
 
-_lib_paths = [
-    "/opt/rocm/lib/libamd_comgr.so",
-    "/opt/rocm/lib/libamd_comgr.so.3",
-    "libamd_comgr.so",
-]
-
-
 class ComgrError(RuntimeError):
     pass
 
 
 def _load_lib() -> ctypes.CDLL:
+    # Pair the loader with ``hip_module._load_lib`` so the two halves of
+    # the process always share a single HIP/comgr runtime instance. See
+    # ``_torch_bundled_lib`` in ``hip_module`` for why a torch-shipped
+    # libamd_comgr is preferred over /opt/rocm when torch is in the
+    # process.
     err = None
-    for p in _lib_paths:
+    for p in _candidate_lib_paths("amd_comgr", "CK_DSL_COMGR_LIB", ["3"]):
         try:
             return ctypes.CDLL(p)
         except OSError as e:
@@ -68,7 +68,16 @@ def _load_lib() -> ctypes.CDLL:
     raise ComgrError(f"cannot load libamd_comgr.so ({err!r})")
 
 
-_lib = _load_lib()
+# Lazy: resolved on first call so that ck_dsl and torch can be imported
+# in any order. See ``hip_module._torch_bundled_lib`` for context.
+_lib: Optional[ctypes.CDLL] = None
+
+
+def _resolve_lib() -> ctypes.CDLL:
+    global _lib
+    if _lib is None:
+        _lib = _load_lib()
+    return _lib
 
 
 # Opaque handles are returned as a struct containing a single uint64_t.
@@ -82,11 +91,10 @@ _Data = _Handle
 _ActionInfo = _Handle
 
 
-def _bind(name: str, restype, *argtypes):
-    fn = getattr(_lib, name)
-    fn.restype = restype
-    fn.argtypes = list(argtypes)
-    return fn
+def _bind(name: str, restype, *argtypes) -> _LazyFn:
+    # Lazy ctypes wrapper: resolves on first call against the shared
+    # comgr lib chosen by ``_load_lib`` above.
+    return _LazyFn(name, list(argtypes), restype, _resolve_lib)
 
 
 # ABI bindings. We list only what we use.
