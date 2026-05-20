@@ -637,19 +637,20 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
 
     if kernel["enableTDMB"]:
-      # Always alias B→A descriptors for subtile (saves 24 SGPRs).
-      # The subtile main loop separates A and B TDM loads with SWaitTensorcnt(0)
-      # + full descriptor reprogram before each tensor_load_to_lds, so aliasing
-      # is safe despite the shared SGPR storage.
-      #
-      # TODO: The non-subtile path only aliases for multi-wave (MIWaveGroup > 1)
-      # and uses separate descriptors for single-wave to avoid ~40 scalar
-      # reprogram instructions per loop iteration. The subtile path currently
-      # can't do this because SGPR usage is already at 106 (the gfx1250 limit);
-      # separate descriptors would add 12 SGPRs. Reducing SGPR pressure
-      # elsewhere would allow restoring the non-subtile pattern.
-      module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
-      module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
+      # Alias B→A descriptors when waves share descriptors (multi-wave) or when
+      # subtile needs to save SGPRs (gfx1250 is at the 106-SGPR limit).
+      if kernel["UseSubtileImpl"] or prod(kernel["MIWaveGroup"]) > 1:
+        module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
+        module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
+          module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
+      else:
+        module.add(self.defineSgpr("tdmBGroup0", 4, 4))
+        module.add(self.defineSgpr("tdmBGroup1", 8, 4))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.defineSgpr("tdmMXSBGroup0", 4, 4))
+          module.add(self.defineSgpr("tdmMXSBGroup1", 8, 4))
 
     if kernel["enableTDMA"] and kernel["enableTDMB"] and prod(kernel["MIWaveGroup"]) > 1:
       module.add(self.defineSgpr("tdmABIncs", 1))
