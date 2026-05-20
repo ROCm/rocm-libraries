@@ -48,6 +48,17 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
                              const std::string& arch,
                              const std::string& solver);
 
+/// Expands metadata-ordered raw features into the vector consumed by the input_encoder
+/// submodel. Implement derived features here (log transforms, GEMM shapes, ratios, etc.).
+MIOPEN_INTERNALS_EXPORT std::vector<float> EngineerCandidateSelectionInputFeatures(
+    const std::vector<float>& raw_features,
+    const std::map<std::string, float>& features_by_name);
+
+/// Expands metadata-ordered encoded kernel params into the vector consumed by the
+/// kernel_config_encoder submodel.
+MIOPEN_INTERNALS_EXPORT std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
+    const std::vector<float>& raw_config_features);
+
 using ValidationFunc = std::function<bool(int, int)>;
 
 class CandidateSelectionMetadata

@@ -43,6 +43,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <cmath>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 namespace miopen {
@@ -238,6 +239,78 @@ const std::vector<int>& CandidateSelectionMetadata::GetSplitKValues() const
     return split_k_values_;
 }
 
+// --- Input feature engineering ----------------------------------------------
+
+namespace {
+
+// Widths expected by fdeep submodels. Update when retraining changes them.
+constexpr std::size_t kCandidateSelectionEncoderInputSize            = 43;
+constexpr std::size_t kCandidateSelectionKernelConfigEncoderInputSize = 39;
+
+} // namespace
+
+MIOPEN_INTERNALS_EXPORT
+std::vector<float> EngineerCandidateSelectionInputFeatures(
+    const std::vector<float>& raw_features, const std::map<std::string, float>& features_by_name)
+{
+    (void)features_by_name;
+
+    std::vector<float> engineered;
+    engineered.reserve(kCandidateSelectionEncoderInputSize);
+
+    // TODO: Implement feature engineering to match the training pipeline.
+    // raw_features holds non-constant metadata inputs in input_params order (20 for 2D fwd).
+    // Append derived features below, then remove the zero-padding fallback once complete.
+    //
+    // Example derived features (see ExtractTunaNetND2dFeatures in ai_heuristics.cpp):
+    //   safe_log1p(flops), safe_log1p(M), safe_ratio(M, N_gemm), spatial_reduction, ...
+
+    engineered = raw_features;
+
+    if(engineered.size() < kCandidateSelectionEncoderInputSize)
+    {
+        MIOPEN_LOG_I2("EngineerCandidateSelectionInputFeatures: padding "
+                      << (kCandidateSelectionEncoderInputSize - engineered.size())
+                      << " placeholder features (implement feature engineering)");
+        engineered.resize(kCandidateSelectionEncoderInputSize, 0.0f);
+    }
+    else if(engineered.size() > kCandidateSelectionEncoderInputSize)
+    {
+        MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: got "
+                     + std::to_string(engineered.size()) + " features, expected "
+                     + std::to_string(kCandidateSelectionEncoderInputSize));
+    }
+
+    return engineered;
+}
+
+MIOPEN_INTERNALS_EXPORT
+std::vector<float>
+EngineerCandidateSelectionKernelConfigFeatures(const std::vector<float>& raw_config_features)
+{
+    std::vector<float> engineered;
+
+    // TODO: Implement kernel-config feature engineering to match the training pipeline.
+    // raw_config_features holds non-constant output_params encodings (16 for gfx950 fwd).
+    engineered = raw_config_features;
+
+    if(engineered.size() < kCandidateSelectionKernelConfigEncoderInputSize)
+    {
+        MIOPEN_LOG_I2("EngineerCandidateSelectionKernelConfigFeatures: padding "
+                      << (kCandidateSelectionKernelConfigEncoderInputSize - engineered.size())
+                      << " placeholder features (implement feature engineering)");
+        engineered.resize(kCandidateSelectionKernelConfigEncoderInputSize, 0.0f);
+    }
+    else if(engineered.size() > kCandidateSelectionKernelConfigEncoderInputSize)
+    {
+        MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: got "
+                     + std::to_string(engineered.size()) + " features, expected "
+                     + std::to_string(kCandidateSelectionKernelConfigEncoderInputSize));
+    }
+
+    return engineered;
+}
+
 // --- CandidateSelectionModel ------------------------------------------------
 
 MIOPEN_INTERNALS_EXPORT
@@ -274,15 +347,21 @@ CandidateSelectionModel::EncodeInputFeatures(const std::map<std::string, float>&
         }
     }
 
-    // Pass the filtered vector to the encoding function
-    return EncodeInputFeaturesWithFdeep(filtered_features, arch_, solver_);
+    const auto engineered_features = EngineerCandidateSelectionInputFeatures(filtered_features, features);
+    return EncodeInputFeaturesWithFdeep(engineered_features, arch_, solver_);
 }
 
 MIOPEN_INTERNALS_EXPORT
 std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
     const std::vector<std::vector<float>>& encoded_candidates) const
 {
-    return EncodeKernelConfigsWithFdeep(encoded_candidates, arch_, solver_);
+    std::vector<std::vector<float>> engineered_candidates;
+    engineered_candidates.reserve(encoded_candidates.size());
+    for(const auto& candidate : encoded_candidates)
+    {
+        engineered_candidates.push_back(EngineerCandidateSelectionKernelConfigFeatures(candidate));
+    }
+    return EncodeKernelConfigsWithFdeep(engineered_candidates, arch_, solver_);
 }
 
 MIOPEN_INTERNALS_EXPORT
@@ -661,8 +740,29 @@ ModelSelectBestCandidate(const std::string& arch,
         }
 
         const auto& encoded_features = model.EncodeInputFeatures(features);
-        const auto& encoded_configs  = model.EncodeKernelConfigs(encoded_candidates);
-
+        {
+            std::ostringstream encoded_features_log;
+            miopen::LogRange(encoded_features_log << "Encoded features: [",
+                             encoded_features,
+                             ", ")
+                << "]";
+            MIOPEN_LOG_I2(encoded_features_log.str());
+        }
+        const auto& encoded_configs = model.EncodeKernelConfigs(encoded_candidates);
+        {
+            std::ostringstream encoded_configs_log;
+            encoded_configs_log << "Encoded configs: [";
+            bool first_config = true;
+            for(const auto& cfg : encoded_configs)
+            {
+                if(!first_config)
+                    encoded_configs_log << ", ";
+                first_config = false;
+                miopen::LogRange(encoded_configs_log << "[", cfg, ", ") << "]";
+            }
+            encoded_configs_log << "]";
+            MIOPEN_LOG_I2(encoded_configs_log.str());
+        }
         // Get all candidates sorted by score (best to worst)
         auto scored_candidates =
             model.SelectBestCandidateIndices(encoded_features, encoded_configs);
