@@ -12,6 +12,13 @@
 //   4. Dropping a new .json file adds a test on next run
 //   5. Zero bundles triggers a hard failure (not a silent pass)
 //
+// Architecture — 5 components (base for ALMIOPEN-1947):
+//   Component 1: Test Fixture         — GoldenRefTest class with TestBody()
+//   Component 2: Suite Name Derivation — deriveSuiteName() from path structure
+//   Component 3: Test Name Sanitization — sanitizeTestName() for gtest safety
+//   Component 4: Scanner + Registrar   — registerGoldenRefTests() loop
+//   Component 5: Zero-Bundles Guard    — NoBundlesFailTest sentinel
+//
 // Usage:
 //   ./register_test_prototype --gtest_list_tests
 //   ./register_test_prototype
@@ -28,12 +35,13 @@
 namespace
 {
 
-// ---------------------------------------------------------------------------
-// Test fixture for dynamically registered golden reference tests.
-// Each instance receives a bundle path via the factory lambda.
-// TestBody() verifies the bundle structure — a real implementation
-// would load the graph and validate tensors against CPU reference.
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// COMPONENT 1: Test Fixture
+//
+// Each instance receives a bundle path via the factory lambda in RegisterTest.
+// TestBody() verifies bundle structure — in ALMIOPEN-1947 this will be
+// replaced with real graph loading + CPU/GPU reference validation.
+// ===========================================================================
 class GoldenRefTest : public ::testing::Test
 {
 public:
@@ -66,10 +74,12 @@ public:
     }
 };
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// COMPONENT 5: Zero-Bundles Guard
+//
 // Sentinel test that FAILs when no bundles are discovered.
-// Prevents silent green CI when data directory is missing.
-// ---------------------------------------------------------------------------
+// Prevents silent green CI when data directory is missing or empty.
+// ===========================================================================
 class NoBundlesFailTest : public ::testing::Test
 {
 public:
@@ -81,12 +91,14 @@ public:
     }
 };
 
-// ---------------------------------------------------------------------------
-// Derive a gtest-safe suite name from the directory structure.
+// ===========================================================================
+// COMPONENT 2: Suite Name Derivation
+//
+// Derives a gtest-safe suite name from the directory structure.
 // golden_reference_data/BatchnormFwdInference/nchw/fp32/Small/Small.json
 //                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 //                        -> "BatchnormFwdInference_nchw_fp32"
-// ---------------------------------------------------------------------------
+// ===========================================================================
 std::string deriveSuiteName(const std::filesystem::path& jsonPath,
                             const std::filesystem::path& dataRoot)
 {
@@ -99,6 +111,11 @@ std::string deriveSuiteName(const std::filesystem::path& jsonPath,
     return suiteName;
 }
 
+// ===========================================================================
+// COMPONENT 3: Test Name Sanitization
+//
+// Ensures test names contain only [a-zA-Z0-9_] as required by gtest.
+// ===========================================================================
 std::string sanitizeTestName(const std::string& name)
 {
     std::string result = name;
@@ -112,10 +129,14 @@ std::string sanitizeTestName(const std::string& name)
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// Scan golden_reference_data/ and register one test per .json bundle.
-// Uses static initialization -- same mechanism INSTANTIATE_TEST_SUITE_P uses.
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// COMPONENT 4: Scanner + Registrar
+//
+// Scans golden_reference_data/ and registers one test per .json bundle
+// using ::testing::RegisterTest. Uses Components 2, 3, and 5 internally.
+// Invoked via static initialization — same mechanism INSTANTIATE_TEST_SUITE_P
+// uses internally (no main.cpp changes needed).
+// ===========================================================================
 int registerGoldenRefTests()
 {
     namespace fs = std::filesystem;
