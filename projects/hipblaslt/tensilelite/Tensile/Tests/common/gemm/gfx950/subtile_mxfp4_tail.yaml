@@ -19,12 +19,14 @@ TestParameters:
 # in aligned-K subtile_mxfp4.yaml; the SK=0 half is silently filtered
 # at SolutionStructs.
 #
-# Coverage (~14 kernels, ~80 problem runs):
+# Coverage (~14 kernels, ~70 problem runs):
 #   - Section 1: K_rem × PGR matrix on MT 128x128
-#                (single scale group, smoke epicenter).
+#                (single scale group, smoke epicenter); includes
+#                1-/2-/3-iter + tail decorative cases.
 #   - Section 2: K_rem × PGR matrix on MT 256x256
 #                (multi scale-group surface).
-#   - Section 3: DU=512 proof-of-life.
+#   - Section 3: DU=512 K_rem × PGR matrix mirroring Section 2,
+#                with 1-/2-iter + tail combinations.
 #   - Sections 4-6: bias / F16 dest / F32 dest one-PGR=0 cell each.
 #
 # Wave-tile shape diversity is delegated to the aligned-K
@@ -110,8 +112,12 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 160]
           # K_rem=224 (partial, near-full): 7 of 8 K-blocks
           - Exact: [128, 128, 1, 224]
-          # K = 1*DU + tail (PGR=2 small-counter realign path)
-          - Exact: [128, 128, 1, 288]   # K = 256 + 32
+          # K = 1*DU + tail (1 main iter + tail; PGR=2 small-counter realign path)
+          - Exact: [128, 128, 1, 288]   # K = 1*256 + 32
+          # K = 2*DU + tail (2 main iters + tail; PGR=2 large-counter SRD-advance path)
+          - Exact: [128, 128, 1, 544]   # K = 2*256 + 32
+          # K = 3*DU + tail (3 main iters + tail; PGR>=2 large-counter path with NLL drained)
+          - Exact: [128, 128, 1, 800]   # K = 3*256 + 32
           # Decorative: batched + partial-MFMA tail
           - Exact: [128, 128, 2, 160]
           # Decorative: odd M,N + smallest tail
@@ -169,11 +175,13 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 384]
 
   ########################################
-  # Section 3: FP4 TN — DU=512 proof-of-life
+  # Section 3: FP4 TN — DU=512, K_rem × PGR matrix (mirrors Section 2's
+  # K_rem coverage on a bigger main loop)
   #
   # Two kernels (PGR ∈ {0, 2}, SK=3). Same tail logic as DU=256, just a
   # bigger main loop. PGR=0 covers the baseline path; PGR=2 covers the
-  # small-counter realign path with K = 1*DU + tail.
+  # small-counter realign path (K = 1*DU + tail) and the large-counter
+  # SRD-advance path (K = N*DU + tail, N>=2).
   ########################################
   -
     - # ProblemType
@@ -207,10 +215,24 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # K_rem=32 (tail-only, K << DU)
+          # K_rem=32 (partial first MFMA, mostly masked)
           - Exact: [128, 128, 1,  32]
+          # K_rem=96 (partial first MFMA, 3 of 4 K-blocks)
+          - Exact: [128, 128, 1,  96]
+          # K_rem=128 (full last MFMA, K_rem == 1 MIK)
+          - Exact: [128, 128, 1, 128]
+          # K_rem=224 (partial, near-full: 7 of 8 K-blocks)
+          - Exact: [128, 128, 1, 224]
           # K_rem=256 (2 full last MFMAs, K_rem mod 128 == 0)
           - Exact: [128, 128, 1, 256]
+          # K_rem=384 (3 full last MFMAs)
+          - Exact: [128, 128, 1, 384]
+          # K = 1*DU + tail (1 main iter + full-last-MFMA tail;
+          #                  PGR=2 small-counter realign path)
+          - Exact: [128, 128, 1, 640]   # K = 1*512 + 128
+          # K = 2*DU + tail (2 main iters + tail;
+          #                  PGR=2 large-counter SRD-advance path)
+          - Exact: [128, 128, 1, 1056]  # K = 2*512 + 32
 
   ########################################
   # Section 4: F4HS TN — bias epilogue, F16 output
