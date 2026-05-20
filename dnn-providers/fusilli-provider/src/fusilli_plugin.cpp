@@ -23,6 +23,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -338,12 +339,17 @@ hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
         HIPDNN_PLUGIN_STATUS_BAD_PARAM, "unexpected engine id");
   }
 
-  // Build engine details object, we're only storing the engine id for the time
-  // being.
+  // Build engine details object with advisory metadata for the fusilli engine.
   flatbuffers::FlatBufferBuilder builder;
+  const std::vector<int32_t> behaviorNotes = {
+      static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+      static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY),
+      static_cast<int32_t>(
+          HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)};
+  auto behaviorNotesVector = builder.CreateVector(behaviorNotes);
   auto engineDetailsObj =
-      hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder,
-                                                                engineId);
+      hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+          builder, engineId, 0, behaviorNotesVector);
   builder.Finish(engineDetailsObj);
 
   // Populate out parameter.
@@ -526,28 +532,17 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroySerializedExecutionContext(
 
 hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized(
     hipdnnEnginePluginHandle_t handle,
-    const hipdnnPluginConstData_t *engineConfig,
     const hipdnnPluginConstData_t *serializedContext,
     hipdnnEnginePluginExecutionContext_t *executionContext) {
-  LOG_API_ENTRY("handle=" << static_cast<void *>(handle) << ", engineConfig="
-                          << static_cast<const void *>(engineConfig)
+  LOG_API_ENTRY("handle=" << static_cast<void *>(handle)
                           << ", serializedContext="
                           << static_cast<const void *>(serializedContext)
                           << ", executionContext="
                           << static_cast<void *>(executionContext));
   FUSILLI_PLUGIN_CHECK_NULL(handle);
-  FUSILLI_PLUGIN_CHECK_NULL(engineConfig);
   FUSILLI_PLUGIN_CHECK_NULL(serializedContext);
   FUSILLI_PLUGIN_CHECK_NULL(serializedContext->ptr);
   FUSILLI_PLUGIN_CHECK_NULL(executionContext);
-
-  hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
-      engineConfigWrapper(engineConfig->ptr, engineConfig->size);
-  if (engineConfigWrapper.engineId() !=
-      hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID) {
-    return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "unexpected engine id");
-  }
 
   hipdnnPluginConstData_t serializedOpGraph{nullptr, 0};
   auto payloadStatus =

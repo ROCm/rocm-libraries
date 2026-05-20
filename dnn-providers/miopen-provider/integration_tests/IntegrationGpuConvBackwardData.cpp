@@ -69,7 +69,8 @@ protected:
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
-
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;
