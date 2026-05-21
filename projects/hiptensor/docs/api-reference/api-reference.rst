@@ -38,10 +38,11 @@ List of supported RDNA architectures:
 * gfx1153
 * gfx1200
 * gfx1201
+* gfx1250
 
 .. note::
     gfx11 = gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153
-    gfx12 = gfx1200, gfx1201
+    gfx12 = gfx1200, gfx1201, gfx1250
 
 .. _hiptensor-supported-data-types:
 
@@ -82,7 +83,7 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / bf16         |                     | 4m4n4k (Rank8)      |
 |                     +------------------------------+---------------------+                     |
-|                     |     f16 / f16 / f32          |  gfx9               | 5m5n5k (Rank10)     |
+|                     |     f16 / f16 / f32          |  gfx9 gfx1250       | 5m5n5k (Rank10)     |
 |                     +------------------------------+                     |                     |
 |                     |     bf16 / bf16 / f32        |                     | 6m6n6k (Rank12)     |
 |                     +------------------------------+                     |                     |

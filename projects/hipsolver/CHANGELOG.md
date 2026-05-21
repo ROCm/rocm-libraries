@@ -6,6 +6,17 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ## (Unreleased) hipSOLVER
 
 ### Added
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+### Known issues
+### Upcoming changes
+
+
+## hipSOLVER 3.4.0 for ROCm 7.13.0
+
+### Added
 
 * Added compatibility-only functions
   * geev
@@ -21,13 +32,12 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
     * hipsolverDnXsytrs_bufferSize
     * hipsolverDnXsytrs
 
-### Changed
-### Removed
-### Optimized
-### Resolved issues
-### Known issues
-### Upcoming changes
 
+## hipSOLVER 3.3.0 for ROCm 7.12.0
+
+### Changed
+
+* Minor internal changes
 
 
 ## hipSOLVER 3.2.0 for ROCm 7.2.0

@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Version.h"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -126,11 +127,10 @@ std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
         if (arg.substr(0, 2) == "--") {
             static constexpr char kSnapJson[] = "--pass-order-snapshot-json=";
             static constexpr char kSnapAfter[] = "--pass-order-snapshot-after-passes=";
-            if (arg.rfind(kSnapJson, 0) == 0 || arg.rfind(kSnapAfter, 0) == 0 ||
+            if (arg.starts_with(kSnapJson) || arg.starts_with(kSnapAfter) ||
                 arg == "--print-output" || arg == "--emit-asm" ||
                 arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
-                arg.rfind("--ds-read-order=", 0) == 0 || arg == "--from-label" ||
-                arg == "--to-label")
+                arg.starts_with("--ds-read-order=") || arg == "--from-label" || arg == "--to-label")
                 continue;
             if (arg == "-o") {
                 ++i;  // skip the filename argument
@@ -146,7 +146,7 @@ std::string extractPassOrderSnapshotJsonPath(int argc, char** argv) {
     static constexpr char kPrefix[] = "--pass-order-snapshot-json=";
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a.rfind(kPrefix, 0) == 0) return a.substr(std::strlen(kPrefix));
+        if (a.starts_with(kPrefix)) return a.substr(std::strlen(kPrefix));
     }
     return {};
 }
@@ -161,7 +161,7 @@ static void trimWhitespace(std::string& s) {
 }
 
 static std::vector<std::string> splitCommaPassNames(const char* prefix, const std::string& a) {
-    if (a.rfind(prefix, 0) != 0) return {};
+    if (!a.starts_with(prefix)) return {};
     std::string rest = a.substr(std::strlen(prefix));
     std::vector<std::string> out;
     size_t start = 0;
@@ -206,6 +206,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Input formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
@@ -243,6 +244,14 @@ int main(int argc, char** argv) {
         printAvailablePasses();
         return 0;
     }
+    if (firstArg == "--version") {
+        std::cout << "stinkytofu-opt " << STINKYTOFU_VERSION_MAJOR << "."
+                  << STINKYTOFU_VERSION_MINOR << "." << STINKYTOFU_VERSION_PATCH;
+        constexpr char tweak[] = STINKYTOFU_VERSION_TWEAK;
+        if (tweak[0] != '\0') std::cout << "-" << tweak;
+        std::cout << "\n";
+        return 0;
+    }
     if (firstArg == "--help") {
         std::cerr << "stinkytofu-opt - StinkyTofu IR optimizer\n\n";
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
@@ -255,6 +264,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
                      "(optional; default: scheduler only)\n";
         std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Input formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
@@ -328,7 +338,7 @@ int main(int argc, char** argv) {
     // Parse --ds-read-order=ProgramOrder|Ascending|AscendingCache
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a.rfind("--ds-read-order=", 0) == 0) {
+        if (a.starts_with("--ds-read-order=")) {
             std::string val = a.substr(16);
             if (val == "ProgramOrder")
                 passFeatureConfig.dagFeatures.dsReadOrder =
@@ -376,6 +386,9 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
+        if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
+            stinkytofu::PassManagerDebugConfig::addDebugOnly(argv[++i]);
+        }
         if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
         if (std::string(argv[i]) == "--from-label" && i + 1 < argc) fromLabel = argv[++i];
         if (std::string(argv[i]) == "--to-label" && i + 1 < argc) toLabel = argv[++i];

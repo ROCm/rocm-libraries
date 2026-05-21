@@ -276,7 +276,18 @@ public:
 
     bool isYZGridDim16bit()
     {
-        return archMajor == 12;
+        static bool expectedYZGrid = [&] {
+            if(device_properties.maxGridSize[1] < c_YZ_grid_launch_limit
+               || device_properties.maxGridSize[2] < c_YZ_grid_launch_limit)
+            {
+                rocblas_cerr << "rocBLAS error: maxGridSize Y or Z smaller than known hardware. "
+                                "If larger problems return error code try ILP64 APIs."
+                             << std::endl;
+                return false;
+            }
+            return true;
+        }();
+        return true;
     }
 
     int getBatchGridDim(int batch_count)

@@ -121,39 +121,39 @@ bool parseTestFile(const std::string& filename, std::string& runCmd,
         if (pos == std::string::npos) continue;
         rest = rest.substr(pos);
 
-        if (rest.rfind("XFAIL", 0) == 0) {
+        if (rest.starts_with("XFAIL")) {
             xfail = true;
-        } else if (rest.rfind("RUN:", 0) == 0) {
+        } else if (rest.starts_with("RUN:")) {
             runCmd = rest.substr(4);
             // Trim leading whitespace
             pos = runCmd.find_first_not_of(" \t");
             if (pos != std::string::npos) runCmd = runCmd.substr(pos);
-        } else if (rest.rfind("CHECK-LABEL:", 0) == 0) {
+        } else if (rest.starts_with("CHECK-LABEL:")) {
             std::string pat = rest.substr(12);
             pos = pat.find_first_not_of(" \t");
             if (pos != std::string::npos) pat = pat.substr(pos);
             checks.push_back({CheckDirective::CHECK_LABEL, pat, lineNum});
-        } else if (rest.rfind("CHECK-SAME:", 0) == 0) {
+        } else if (rest.starts_with("CHECK-SAME:")) {
             std::string pat = rest.substr(11);
             pos = pat.find_first_not_of(" \t");
             if (pos != std::string::npos) pat = pat.substr(pos);
             checks.push_back({CheckDirective::CHECK_SAME, pat, lineNum});
-        } else if (rest.rfind("CHECK-NEXT:", 0) == 0) {
+        } else if (rest.starts_with("CHECK-NEXT:")) {
             std::string pat = rest.substr(11);
             pos = pat.find_first_not_of(" \t");
             if (pos != std::string::npos) pat = pat.substr(pos);
             checks.push_back({CheckDirective::CHECK_NEXT, pat, lineNum});
-        } else if (rest.rfind("CHECK-DAG:", 0) == 0) {
+        } else if (rest.starts_with("CHECK-DAG:")) {
             std::string pat = rest.substr(10);
             pos = pat.find_first_not_of(" \t");
             if (pos != std::string::npos) pat = pat.substr(pos);
             checks.push_back({CheckDirective::CHECK_DAG, pat, lineNum});
-        } else if (rest.rfind("CHECK-NOT:", 0) == 0) {
+        } else if (rest.starts_with("CHECK-NOT:")) {
             std::string pat = rest.substr(10);
             pos = pat.find_first_not_of(" \t");
             if (pos != std::string::npos) pat = pat.substr(pos);
             checks.push_back({CheckDirective::CHECK_NOT, pat, lineNum});
-        } else if (rest.rfind("CHECK:", 0) == 0) {
+        } else if (rest.starts_with("CHECK:")) {
             std::string pat = rest.substr(6);
             pos = pat.find_first_not_of(" \t");
             if (pos != std::string::npos) pat = pat.substr(pos);
@@ -315,14 +315,6 @@ bool verifyChecks(const std::vector<std::string>& outputLines,
             for (size_t g = 0; g < dagGroup.size(); ++g) {
                 bool found = false;
                 for (size_t j = startIdx; j < endIdx; ++j) {
-                    // Skip lines already consumed by another DAG pattern.
-                    bool alreadyUsed = false;
-                    for (size_t g2 = 0; g2 < g; ++g2) {
-                        if (matched[g2]) {
-                            // Check if this line was the one that matched g2
-                            // (simplified: we re-scan, so just check all)
-                        }
-                    }
                     if (matchPattern(outputLines[j], dagGroup[g]->pattern)) {
                         matched[g] = true;
                         found = true;

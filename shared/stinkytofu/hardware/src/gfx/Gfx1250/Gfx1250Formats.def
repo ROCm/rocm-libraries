@@ -131,6 +131,7 @@ DEF_FORMAT(VOP1,
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 2,  // dst + src
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
@@ -150,6 +151,7 @@ DEF_FORMAT(VOP2,
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 3,  // dst + src0 + src1
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
@@ -171,6 +173,7 @@ DEF_FORMAT(VOP3,
     .unit = VALU,
     .encoding = {64},
     .maxOperands = 4,  // dst + src0 + src1 + src2
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
@@ -205,6 +208,7 @@ DEF_FORMAT(VOPC,
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 3,  // dst(vcc/sdst) + src0 + src1
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vcc, M64},
@@ -257,6 +261,7 @@ DEF_FORMAT(VOP2_COMMUTATIVE,
 // Vector 1-operand transcendental: v_rcp_f32, v_rsq_f32, v_exp_f32, etc.
 DEF_FORMAT(VOP1_TRANSCENDENTAL,
     .parent = VOP1,
+    .cost = {1, 8},
     .flags = {Transcendental},
 )
 
@@ -295,11 +300,11 @@ DEF_FORMAT(VOP3PX2,
     .encoding = {128},
 )
 
-// Vector 3-operand packed extended (192-bit encoding)
+// Vector 3-operand packed extended (128-bit encoding; ENC_VOP3PX3 — paired VOP3P / LD_SCALE class)
 DEF_FORMAT(VOP3PX3,
     .microcode = MC_VOP3PX3,
     .unit = VALU,
-    .encoding = {192},
+    .encoding = {128},
 )
 
 // Vector dual-issue (64-bit encoding)
@@ -341,6 +346,7 @@ DEF_FORMAT(SOP1,
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 2,  // dst + src
+    .cost = {1, 2},
     .flags = {SALU},
     .fields = {
         {D0, sdst, sdst, 32},
@@ -355,6 +361,7 @@ DEF_FORMAT(SOP2,
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 3,  // dst + src0 + src1
+    .cost = {1, 2},
     .flags = {SALU},
     .fields = {
         {D0, sdst, sdst, 32},
@@ -370,6 +377,7 @@ DEF_FORMAT(SOPC,
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 2,  // src0 + src1 (result to SCC)
+    .cost = {1, 2},
     .flags = {SALU, ImplicitWriteSCC},
     .fields = {
         {S0, ssrc0, ssrc, 32},
@@ -378,7 +386,7 @@ DEF_FORMAT(SOPC,
 )
 
 // Scalar program flow (32-bit encoding)
-// Used for: s_branch, s_cbranch_*, s_waitcnt, s_barrier, etc.
+// Used for: s_branch, s_cbranch_*, s_waitcnt, s_barrier, s_set_vgpr_msb, etc.
 DEF_FORMAT(SOPP,
     .microcode = MC_SOPP,
     .unit = BranchUnit,
@@ -414,6 +422,7 @@ DEF_FORMAT(SOPK,
     .microcode = MC_SOPK,
     .unit = SALU,
     .encoding = {32},
+    .cost = {1, 2},
     .flags = {SALU},
 )
 
@@ -427,8 +436,10 @@ DEF_FORMAT(WMMA,
     .parent = VOP3P,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
+    .encoding = {64},
     .maxOperands = 4,
-    .cost = {4, 8},
+    .cost = {1, 8},
+    .coissue = 0x00F0,
     .flags = {WMMA},
     .fields = {
         {D0, vdst, vgpr, 256},
@@ -440,17 +451,20 @@ DEF_FORMAT(WMMA,
 
 DEF_FORMAT(WMMA_INT8,
     .parent = WMMA,
-    .cost = {8, 16},
+    .cost = {1, 16},
+    .coissue = 0xFF00,
 )
 
 DEF_FORMAT(WMMA_FLOAT8MIX_16x16x64,
     .parent = WMMA,
-    .cost = {3, 4},
+    .cost = {1, 4},
+    .coissue = 0x0008,
 )
 
 DEF_FORMAT(WMMA_FLOAT8MIX_16x16x128,
     .parent = WMMA,
-    .cost = {5, 8},
+    .cost = {1, 8},
+    .coissue = 0x00E0,
 )
 
 // Sparse Wave Matrix Multiply-Accumulate
@@ -459,7 +473,8 @@ DEF_FORMAT(SWMMA,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
     .maxOperands = 5,
-    .cost = {6, 8},
+    .cost = {1, 8},
+    .coissue = 0x00C0,
     .flags = {SWMMA},
     .fields = {
         {D0, vdst, vgpr, 256, RW},
@@ -471,7 +486,8 @@ DEF_FORMAT(SWMMA,
 
 DEF_FORMAT(SWMMA_INT8,
     .parent = SWMMA,
-    .cost = {12, 16},
+    .cost = {1, 16},
+    .coissue = 0xF000,
 )
 
 // MX Format Wave Matrix Multiply-Accumulate (v_mxwmma_*, v_wmma_scale*)
@@ -479,8 +495,10 @@ DEF_FORMAT(MXWMMA,
     .parent = VOP3P,
     .microcode = MC_VOP3P,
     .unit = MatrixUnit,
+    .encoding = {128},
     .maxOperands = 4,
-    .cost = {6, 8},
+    .cost = {1, 8},
+    .coissue = 0x00C0,
     .flags = {MXWMMA},
 )
 
@@ -500,12 +518,12 @@ DEF_FORMAT(MXWMMA_SCALE,
     },
 )
 
-// v_wmma_scale16_* (VOP3PX3, 192-bit encoding, 6 operands)
+// v_wmma_scale16_* (VOP3PX3, 128-bit encoding, 6 operands)
 DEF_FORMAT(MXWMMA_SCALE16,
     .parent = MXWMMA,
     .microcode = MC_VOP3PX3,
     .maxOperands = 6,
-    .encoding = {192},
+    .encoding = {128},
     .fields = {
         {D0, vdst, vgpr, 256},
         {S0, src0, src_vgpr, 512},
@@ -632,7 +650,8 @@ DEF_FORMAT(FLAT_ATOMIC,
     },
 )
 
-// SMRD - Scalar Memory Read/Write (hardware encoding, gfx12 uses 64-bit)
+// SMRD - Scalar Memory Read/Write (hardware encoding, gfx12 uses 64-bit).
+// Tablegen exposes this as MicrocodeFormat::MC_SMEM (e.g. literal-size costing treats MC_SMEM as fixed SMRD).
 DEF_FORMAT(SMRD,
     .microcode = MC_SMEM,
     .unit = ScalarMemory,
@@ -656,8 +675,7 @@ DEF_FORMAT(SMRD_STORE,
     .flags = {SMemStore},
 )
 
-// VIMAGE - vector memory image (96-bit encoding)
-// Used for: image_load_*, image_store_*, image_sample_*, etc.
+// VIMAGE - ISA ENC_VIMAGE (96-bit encoding). Gfx1250: tensor memory instructions (e.g. TENSOR_LOAD_TO_LDS).
 DEF_FORMAT(VIMAGE,
     .microcode = MC_VIMAGE,
     .encoding = {96},
@@ -678,10 +696,10 @@ DEF_FORMAT(VSCRATCH,
     .encoding = {96},
 )
 
-// Tensor operations (GFX1250-specific; no shared parent in defs)
+// Tensor ops - VIMAGE-class encoding (96 b); inherit `.encoding` / `.microcode` from VIMAGE parent above.
 DEF_FORMAT(TENSOR,
+    .parent = VIMAGE,
     .unit = TensorUnit,
-    .encoding = {64},
     .maxOperands = 4,
     .flags = {TENSORLoadToLds},
     .fields = {

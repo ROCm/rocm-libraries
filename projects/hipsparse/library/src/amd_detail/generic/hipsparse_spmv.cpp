@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -81,26 +81,7 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
     const rocsparse_operation operation = hipsparse::hipOperationToHCCOperation(opA);
     rocsparse_spmv_alg        spmv_alg  = hipsparse::hipSpMVAlgToHCCSpMVAlg(alg);
 
-    //
-    // Fallback algorithm?
-    //
-    if(spmv_alg == rocsparse_spmv_alg_csr_lrb)
-    {
-        rocsparse_matrix_type matrix_type;
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse_spmat_get_attribute(to_rocsparse_const_spmat_descr(matA),
-                                          rocsparse_spmat_matrix_type,
-                                          &matrix_type,
-                                          sizeof(matrix_type)));
-
-        if((matrix_type == rocsparse_matrix_type_symmetric)
-           || (operation != rocsparse_operation_none))
-        {
-            spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
-        }
-    }
-    else if((spmv_alg == rocsparse_spmv_alg_csr_adaptive)
-            && (operation != rocsparse_operation_none))
+    if((spmv_alg == rocsparse_spmv_alg_csr_adaptive) && (operation != rocsparse_operation_none))
     {
         spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
     }
@@ -221,26 +202,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
     const rocsparse_operation operation = hipsparse::hipOperationToHCCOperation(opA);
     rocsparse_spmv_alg        spmv_alg  = hipsparse::hipSpMVAlgToHCCSpMVAlg(alg);
 
-    //
-    // Fallback algorithm?
-    //
-    if(spmv_alg == rocsparse_spmv_alg_csr_lrb)
-    {
-        rocsparse_matrix_type matrix_type;
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse_spmat_get_attribute(to_rocsparse_const_spmat_descr(matA),
-                                          rocsparse_spmat_matrix_type,
-                                          &matrix_type,
-                                          sizeof(matrix_type)));
-
-        if((matrix_type == rocsparse_matrix_type_symmetric)
-           || (operation != rocsparse_operation_none))
-        {
-            spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
-        }
-    }
-    else if((spmv_alg == rocsparse_spmv_alg_csr_adaptive)
-            && (operation != rocsparse_operation_none))
+    if((spmv_alg == rocsparse_spmv_alg_csr_adaptive) && (operation != rocsparse_operation_none))
     {
         spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
     }
@@ -363,27 +325,11 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
 
         hip_spmv_descr->set_spmv_descr(spmv_descr);
 
-        if(spmv_alg == rocsparse_spmv_alg_csr_lrb)
-        {
-            rocsparse_matrix_type matrix_type;
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse_spmat_get_attribute(to_rocsparse_const_spmat_descr(matA),
-                                              rocsparse_spmat_matrix_type,
-                                              &matrix_type,
-                                              sizeof(matrix_type)));
-            if((matrix_type == rocsparse_matrix_type_symmetric)
-               || (operation != rocsparse_operation_none))
-            {
-                spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
-            }
-        }
-        else if((spmv_alg == rocsparse_spmv_alg_csr_adaptive)
-                && (operation != rocsparse_operation_none))
+        if((spmv_alg == rocsparse_spmv_alg_csr_adaptive) && (operation != rocsparse_operation_none))
         {
             spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
         }
-        else if(((spmv_alg == rocsparse_spmv_alg_csr_adaptive)
-                 || (spmv_alg == rocsparse_spmv_alg_csr_lrb))
+        else if((spmv_alg == rocsparse_spmv_alg_csr_adaptive)
                 && (hip_spmv_descr->is_stage_analysis_called() == false))
         {
             spmv_alg = rocsparse_spmv_alg_csr_rowsplit;

@@ -132,9 +132,6 @@ class IRParser {
         return diagnostics;
     }
 
-    /// Print all diagnostics to stderr.
-    void printDiagnostics() const;
-
     /// Parse all functions in the input.
     std::vector<std::unique_ptr<ParsedFunction>> parseAllFunctions();
 
@@ -300,12 +297,6 @@ std::unique_ptr<ParsedFunction> IRParser::parse() {
     func->funcName = "";
     func->blocks.push_back(std::move(block));
     return func;
-}
-
-void IRParser::printDiagnostics() const {
-    for (const auto& diag : diagnostics) {
-        std::cerr << diag.format() << "\n";
-    }
 }
 
 std::unique_ptr<ParsedInstruction> IRParser::parseInstruction() {

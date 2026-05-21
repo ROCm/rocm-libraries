@@ -20,6 +20,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+import os
+import shutil
 import pytest
 
 import rocisa
@@ -31,11 +33,19 @@ from rocisa.container import DSModifiers, vgpr, sgpr, accvgpr, ContinuousRegiste
 from rocisa.instruction import VLShiftLeftB32, DSLoadB128, DSLoadB64, VMovB32, SBarrier, MFMAInstruction, SNop, SWaitCnt, SBarrier, SMovB32, VMulLOU32, VAddLShiftLeftU32, VAddCOU32
 from rocisa.functions import vectorStaticRemainder, vectorStaticMultiply, vectorStaticDivide, vectorStaticMultiplyAdd
 
+pytestmark = pytest.mark.gpu
+
 def gfx(version=(9,5,0), wavefront_size = 64):
     def decorator(func):
         def wrapper():
             ti = rocIsa.getInstance()
-            ti.init(version, "amdclang++")
+            rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+            search_path = os.pathsep.join([
+                os.path.join(rocm_path, "bin"),
+                os.path.join(rocm_path, "lib", "llvm", "bin"),
+            ])
+            assembler = shutil.which("amdclang++", path=search_path) or "amdclang++"
+            ti.init(version, assembler)
             ti.setKernel(version, wavefront_size)
             return func()
         return wrapper

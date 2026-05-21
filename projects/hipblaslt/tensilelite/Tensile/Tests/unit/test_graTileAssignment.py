@@ -16,60 +16,15 @@ import pytest
 from types import SimpleNamespace
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     BPE, LOAD_WIDTH, WAVESIZE, NUM_THREADS, NUM_WAVES,
-    create_writer,
-    init_rocisa,
-    assemble_and_run,
-    generate_kernel_asm,
-    generate_load_params,
-    generate_export_epilogue,
+    generate_gra_asm,
+    export_register,
+    compute_expected_subtile,
     print_offset_grid,
 )
-from Tensile.Components.SubtileBasedKernel import graTileAssignment
-
-EXPORT_LOAD_PARAMS = (
-    (4, 2, 0x00, "output_ptr"),
-    ("StrideA0I", 1, 0x08, "strideA"),
-    ("StrideB1J", 1, 0x0c, "strideB"),
-)
-
-EXPORT_ARGS = (
-    ("output_ptr", 8, "global_buffer", "u32"),
-    ("strideA",    4, "by_value",      "u32"),
-    ("strideB",    4, "by_value",      "u32"),
-)
-
-
-def generate_gra_asm(cfg):
-    """Run graTileAssignment and return (gra_asm, writer, tileInfoA, tileInfoB, kernel)."""
-    writer, kernel, tileInfoA, tileInfoB = create_writer(cfg)
-    init_rocisa()
-
-    # Reserve s0-s11 for hardware regs + kernarg loads
-    writer.sgprPool.checkOut(12)
-    writer.sgprs["StrideA0I"] = 10
-    writer.sgprs["StrideB1J"] = 11
-    tileInfoA.allocOffsetRegisters(writer, kernel)
-    tileInfoB.allocOffsetRegisters(writer, kernel)
-
-    prologue = generate_load_params(EXPORT_LOAD_PARAMS)
-    module = graTileAssignment(writer, kernel, useSwizzling=cfg.use_swizzling)
-    gra_asm = f"{prologue}\n{module}"
-    return gra_asm, writer, tileInfoA, tileInfoB, kernel
-
-
-def export_register(writer, test_asm, export_reg, is_sgpr, cfg, tmp_path, label):
-    """Generate export kernel, assemble, run, return per-thread u32 results."""
-    epilogue, allocated = generate_export_epilogue(writer, export_reg, is_sgpr)
-    kernel_asm = generate_kernel_asm(f"{test_asm}\n{epilogue}", writer, EXPORT_ARGS)
-    for v in allocated:
-        writer.vgprPool.checkIn(v)
-
-    raw = assemble_and_run(kernel_asm, tmp_path, label, NUM_THREADS * 4,
-                           scalars=(cfg.stride_a, cfg.stride_b))
-    return struct.unpack(f"{NUM_THREADS}I", raw)
 
 
 # ---- Reference implementations ----
@@ -158,15 +113,6 @@ def compute_expected_offset(thread_id, cfg, tileInfo):
     offset2 = totalRow2 * stride * bpe + colId2_bytes
     return [base, offset2]
 
-def compute_expected_subtile(regId, stride, tileInfo):
-    """Compute expected subtile register value: rowOffset * bpe * regId * stride.
-
-    The kernel uses regId (index into localSubtilesRegister) and rowOffset
-    which is 2*subtileSize when loadRatioGR==2.0, otherwise subtileSize.
-    """
-    subtileSize = tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0]
-    rowOffset = 2 * subtileSize if tileInfo.loadRatioGR == 2.0 else subtileSize
-    return rowOffset * BPE * regId * stride
 
 
 # Tile configs to test
@@ -187,7 +133,7 @@ TILE_CONFIGS = [
 
 # ---- Pytest tests ----
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestGraTileAssignmentGPU:
 
     @pytest.fixture(params=TILE_CONFIGS, ids=lambda c: c.label)
@@ -243,7 +189,7 @@ class TestGraTileAssignmentGPU:
             for reg in tileInfo.localSubtilesRegister[regId]:
                 results = export_register(gra_env.writer, gra_env.gra_asm, reg, st.useSgpr,
                                           cfg, gra_env.tmp_path, f"subtile{tc}_s{reg}_{cfg.label}")
-                expected = compute_expected_subtile(regId, stride, tileInfo)
+                expected = compute_expected_subtile(regId, stride, tileInfo, BPE)
                 actual = results[0]
                 assert actual == expected, \
                     f"[{cfg.label}] {tc} subtile s{reg} (regId={regId}): " \
@@ -289,66 +235,63 @@ if __name__ == "__main__":
                     print(line)
             print("--- End ---\n")
 
-            if HAS_HIP:
-                # Test all sharedVgprGROffset vgprs for both matrices
-                for tc, tileInfo, stride, mt in [("A", tileInfoA, cfg.stride_a, cfg.mt_a),
-                                                  ("B", tileInfoB, cfg.stride_b, cfg.mt_b)]:
-                    for idx, reg in enumerate(tileInfo.sharedVgprGROffset):
-                        results = export_register(writer, gra_asm, reg, False, cfg, tmp_path,
-                                                  f"offset{tc}_v{reg}_{cfg.label}")
+            # Test all sharedVgprGROffset vgprs for both matrices
+            for tc, tileInfo, stride, mt in [("A", tileInfoA, cfg.stride_a, cfg.mt_a),
+                                              ("B", tileInfoB, cfg.stride_b, cfg.mt_b)]:
+                for idx, reg in enumerate(tileInfo.sharedVgprGROffset):
+                    results = export_register(writer, gra_asm, reg, False, cfg, tmp_path,
+                                              f"offset{tc}_v{reg}_{cfg.label}")
 
-                        if args.grid:
-                            print_offset_grid(f"Matrix {tc} GPU offset[{idx}] v{reg} ({cfg.label})",
-                                              results, WAVESIZE, NUM_WAVES)
+                    if args.grid:
+                        print_offset_grid(f"Matrix {tc} GPU offset[{idx}] v{reg} ({cfg.label})",
+                                          results, WAVESIZE, NUM_WAVES)
 
-                            if args.debug:
-                                expected = [compute_expected_offset(tid, cfg,
-                                                                     tileInfo)[idx]
-                                            for tid in range(NUM_THREADS)]
-                                print_offset_grid(f"Matrix {tc} EXPECTED offset[{idx}] ({cfg.label})",
-                                                  expected, WAVESIZE, NUM_WAVES)
+                        if args.debug:
+                            expected = [compute_expected_offset(tid, cfg,
+                                                                 tileInfo)[idx]
+                                        for tid in range(NUM_THREADS)]
+                            print_offset_grid(f"Matrix {tc} EXPECTED offset[{idx}] ({cfg.label})",
+                                              expected, WAVESIZE, NUM_WAVES)
 
-                                mismatches = sum(1 for t in range(NUM_THREADS) if results[t] != expected[t])
-                                if mismatches:
-                                    print(f"\n--- Matrix {tc} offset[{idx}] DIFF ({mismatches} mismatches) ---")
-                                    for w in range(NUM_WAVES):
-                                        print(f"  w{w}: ", end="")
-                                        for lane in range(WAVESIZE):
-                                            tid = w * WAVESIZE + lane
-                                            if results[tid] != expected[tid]:
-                                                print(f" t{tid}:{results[tid]}!={expected[tid]}", end="")
-                                        print()
-                                else:
-                                    print(f"\n  Matrix {tc} offset[{idx}]: all match.")
+                            mismatches = sum(1 for t in range(NUM_THREADS) if results[t] != expected[t])
+                            if mismatches:
+                                print(f"\n--- Matrix {tc} offset[{idx}] DIFF ({mismatches} mismatches) ---")
+                                for w in range(NUM_WAVES):
+                                    print(f"  w{w}: ", end="")
+                                    for lane in range(WAVESIZE):
+                                        tid = w * WAVESIZE + lane
+                                        if results[tid] != expected[tid]:
+                                            print(f" t{tid}:{results[tid]}!={expected[tid]}", end="")
+                                    print()
+                            else:
+                                print(f"\n  Matrix {tc} offset[{idx}]: all match.")
 
-                        errors = 0
-                        for tid in range(NUM_THREADS):
-                            exp = compute_expected_offset(tid, cfg, tileInfo)[idx]
-                            if results[tid] != exp:
-                                errors += 1
-                                if not args.grid:
-                                    print(f"  FAIL {tc} offset[{idx}] v{reg} tid={tid}: got {results[tid]}, expected {exp}")
-                            elif not args.grid and tid < 64:
-                                print(f"  OK   {tc} offset[{idx}] v{reg} tid={tid}: {results[tid]}")
+                    errors = 0
+                    for tid in range(NUM_THREADS):
+                        exp = compute_expected_offset(tid, cfg, tileInfo)[idx]
+                        if results[tid] != exp:
+                            errors += 1
+                            if not args.grid:
+                                print(f"  FAIL {tc} offset[{idx}] v{reg} tid={tid}: got {results[tid]}, expected {exp}")
+                        elif not args.grid and tid < 64:
+                            print(f"  OK   {tc} offset[{idx}] v{reg} tid={tid}: {results[tid]}")
 
-                        print(f"  Matrix {tc} offset[{idx}] v{reg}: {NUM_THREADS} threads, {errors} errors")
+                    print(f"  Matrix {tc} offset[{idx}] v{reg}: {NUM_THREADS} threads, {errors} errors")
 
-                # Subtile registers
-                for tc, tileInfo, stride in [("A", tileInfoA, cfg.stride_a),
-                                              ("B", tileInfoB, cfg.stride_b)]:
-                    seen = set()
-                    for st in tileInfo.localSubtiles:
-                        regId = st.regListId
-                        if regId in seen:
-                            continue
-                        seen.add(regId)
-                        for reg in tileInfo.localSubtilesRegister[regId]:
-                            print("Regl",reg)
-                            results = export_register(writer, gra_asm, reg, st.useSgpr, cfg,
-                                                      tmp_path, f"subtile{tc}_s{reg}_{cfg.label}")
-                            expected = compute_expected_subtile(regId, stride, tileInfo)
-                            actual = results[0]
-                            status = "OK" if actual == expected else "FAIL"
-                            print(f"  Subtile {tc} s{reg} (regId={regId}): {actual} (expected {expected}) {status}")
-            else:
-                print("HIP not available - assembly generated but not executed")
+            # Subtile registers
+            for tc, tileInfo, stride in [("A", tileInfoA, cfg.stride_a),
+                                          ("B", tileInfoB, cfg.stride_b)]:
+                seen = set()
+                for st in tileInfo.localSubtiles:
+                    regId = st.regListId
+                    if regId in seen:
+                        continue
+                    seen.add(regId)
+                    for reg in tileInfo.localSubtilesRegister[regId]:
+                        print("Regl",reg)
+                        results = export_register(writer, gra_asm, reg, st.useSgpr, cfg,
+                                                  tmp_path, f"subtile{tc}_s{reg}_{cfg.label}")
+                        expected = compute_expected_subtile(regId, stride, tileInfo, BPE)
+                        actual = results[0]
+                        status = "OK" if actual == expected else "FAIL"
+                        print(f"  Subtile {tc} s{reg} (regId={regId}): {actual} (expected {expected}) {status}")
