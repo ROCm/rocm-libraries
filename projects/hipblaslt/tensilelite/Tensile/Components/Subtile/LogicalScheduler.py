@@ -142,15 +142,24 @@ class SchedulerConfig:
     scaleSchedulingPeriod (R): how many data body iters a single scale fetch
     covers (ScaleDepthURatio).  R == 1 is the historical behavior; R > 1 is
     used by the MXFP8 MT256x256/DU=128 path where the scale DepthU is 2x the
-    data DepthU.  When R > 1 the scheduler treats one "scheduler period" as
-    R body iters: data placements span R*numSubIterK_data K-slots, scale
-    placements fire exactly once over the same K-span.  The assembly then
-    emits R distinct body copies via the existing unroll_factor machinery
-    (see assign_vgpr_tiles below, which forces unroll_factor = lcm(.., R)).
+    data DepthU.
+
+    When R > 1 the scheduler keeps numSubIterK at the data-side value
+    (one schedule period == one data body iter).  The R-period cadence is
+    realised at the EMIT layer:
+      - assign_vgpr_tiles forces unroll_factor = lcm(natural, R) so the
+        assembly emits R distinct body copies per outer loop iteration.
+      - InstructionEmitter.populate gates scale GR (DTL) and the scale
+        gr_inc / lr_inc preOps so they fire only in the ui%R == 0 copy.
+        Scale LRs (ds_read) are NOT gated — they fire every copy into
+        cycled VGPRs, all reading the same 4 B LDS slot (R K-position
+        bytes packed); the MFMA op_sel selects byte (ui%R) of that VGPR.
+      - emitAllLoops keeps LoopCounterL decrement=1 and exitValue=pgr
+        per emit copy: each copy IS one data body iter.
     """
     numMFMATilesM: int    # MFMA tiles in M dimension (for A)
     numMFMATilesN: int    # MFMA tiles in N dimension (for B)
-    numSubIterK: int      # subIterK steps within the macrotile (per body iter — widened by R when scaleSchedulingPeriod>1)
+    numSubIterK: int      # subIterK steps within one body iter (data-side)
     lrA: ReadGranularity
     lrB: ReadGranularity
     grA: ReadGranularity
@@ -176,30 +185,29 @@ class SchedulerConfig:
         R = self.scaleSchedulingPeriod
         assert R >= 1 and (R & (R - 1)) == 0, (
             f"scaleSchedulingPeriod must be a positive power of 2, got {R}")
-        # Record the data-side subIterK before widening so consumers that need
-        # "one body iter's K count" can recover it (op_sel plumbing, LoopCounter
-        # decrement, body-iter slicing, etc.).
+        # numSubIterK stays at the data-side value.  numSubIterK_data is an
+        # alias kept for emit-time consumers that want to be explicit; the
+        # two are bit-identical (no widening anymore).
         self.numSubIterK_data = self.numSubIterK
         if R > 1:
             assert self.hasScale, (
                 "scaleSchedulingPeriod>1 requires scale tensors (hasScale)")
-            # The scale LR/GR must fit exactly once into the R-period K span:
-            # one scale fetch covers R*numSubIterK_data K-slots and the scale
-            # LR k-granularity must divide that span evenly so the existing
-            # k_gran chunking emits exactly one scale LR per period.
-            assert (R * self.numSubIterK_data) % self.lrSA.k == 0, (
-                f"R*numSubIterK_data ({R}*{self.numSubIterK_data}) must be a "
-                f"multiple of lrSA.k ({self.lrSA.k})")
-            # Widen numSubIterK so one scheduler period = R body iters.  Data
-            # placements at k_gran=1 naturally fill R*numK_data K-slots (R body
-            # iters' worth of MFMAs/LRs/GRs); scale placements at k_gran=2 fire
-            # exactly (R*numK_data)//2 == 1 time per period (given the validity
-            # assertion above, R*numK_data == lrSA.k for the supported MXFP8
-            # configs).  Op_sel in InstructionEmitter.emit_mfma uses subIterK
-            # directly which now ranges 0..R*numK_data-1, so the existing
-            # formula `(a%2) + 2*subIterK` continues to address the correct
-            # byte of the scale VGPR across all R body copies.
-            self.numSubIterK = self.numSubIterK_data * R
+            # The scale LR/GR k_gran must divide the data-side period: one
+            # scheduler period = one data body iter, so scale ops at
+            # k_gran=lrSA.k must fit cleanly inside data_numSubIterK slots
+            # (typically k_gran == numSubIterK_data, producing exactly one
+            # scale LR/GR per period — same as R=1).
+            assert self.numSubIterK_data % self.lrSA.k == 0 or \
+                   self.lrSA.k % self.numSubIterK_data == 0, (
+                f"lrSA.k ({self.lrSA.k}) must be commensurate with "
+                f"numSubIterK_data ({self.numSubIterK_data})")
+            # Op_sel byte index of the 4 B scale VGPR is
+            #   (a % 2) + 2 * (subIterK + (ui % R) * numSubIterK_data)
+            # which must stay in [0, 4).  That requires R*numSubIterK_data<=2
+            # (the only supported MXFP8 configs).
+            assert R * self.numSubIterK_data <= 2, (
+                f"R*numSubIterK_data ({R}*{self.numSubIterK_data}) must be "
+                "<= 2 (scale VGPR holds at most 2 K-bytes per M parity).")
 
     @property
     def hasScale(self) -> bool:
@@ -2351,14 +2359,15 @@ class LogicalScheduler:
         module.addComment0("MAINLOOP")
         loopBegin = Label("LoopBeginL", "")
 
-        # Decouple-scale-DU: with scaleSchedulingPeriod=R, one emit copy spans
-        # an R-period worth of data body iters (the scheduler placed R copies
-        # of data MFMAs/LRs/GRs and one scale fetch in the widened K span).
-        # LoopCounterL is the data body iter counter, so decrement by R per
-        # emit copy and reserve R*PGR body iters for the NGLL+NLL tail.
-        # For R==1 this collapses back to (decrement=1, exitValue=PGR).
-        R = self.config.scaleSchedulingPeriod
-        exitValue = self.config.pgr * R
+        # Decouple-scale-DU: with scaleSchedulingPeriod=R, the assembly emits
+        # R distinct body copies per outer iteration (unroll_factor is a
+        # multiple of R, forced in assign_vgpr_tiles).  Each emit copy IS one
+        # data body iter — data SRD/LDS placements advance by 1 DU per copy
+        # just like R==1.  Scale operations are gated at populate time so the
+        # scale SRD/LDS swap fires only in the ui%R == 0 copy, naturally
+        # advancing once per R copies.  LoopCounter cadence therefore matches
+        # the data side (decrement=1, exitValue=pgr) regardless of R.
+        exitValue = self.config.pgr
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
@@ -2366,8 +2375,8 @@ class LogicalScheduler:
             module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
                                       self._emitted_per_unroll[ui]))
             module.add(SSubU32(dst=sgpr("LoopCounterL"),
-                               src0=sgpr("LoopCounterL"), src1=R,
-                               comment=f"dec counterL by {R} (copy {ui})"))
+                               src0=sgpr("LoopCounterL"), src1=1,
+                               comment=f"dec counterL (copy {ui})"))
             module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
                                  comment=f"counterL == {exitValue}? (copy {ui} exit)"))
             if ui < uf - 1:

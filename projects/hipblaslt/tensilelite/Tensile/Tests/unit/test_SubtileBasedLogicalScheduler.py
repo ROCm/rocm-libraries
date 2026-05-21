@@ -2144,12 +2144,16 @@ def test_scheduler_R2_FP8_MT256():
     """MT256x256x128 FP8 with ScaleDepthURatio{A,B}=2.
 
     Models the configuration emitted by Solution.py for the
-    subtile_mxfp8_mt256.yaml regression: data DU=128 (numSubIterK_data=1)
-    paired with a scale DU=256 cadence (R=2).  The scheduler should:
-      - widen numSubIterK from 1 to 2 (R*numSubIterK_data),
-      - force unroll_factor to a multiple of R=2,
-      - emit at least one scale-side inc op (lr_inc(SA/SB) or gr_inc(SA/SB))
-        in the grouped output, proving the R-period emit took effect.
+    subtile_mxfp8_mt256.yaml regression: data DU=128 (data_numSubIterK=1)
+    paired with a scale DU=256 cadence (R=2).  Under the Path B contract:
+      - numSubIterK is NOT widened (stays at the data-side value of 1).
+      - assign_vgpr_tiles forces unroll_factor to a multiple of R=2 so the
+        assembly emits R distinct body copies per outer iteration.
+      - At populate-time, scale gr / lr_inc(SA,SB) / gr_inc(SA,SB) ops
+        produce real instructions ONLY in the ui%R == 0 copy; in the
+        ui%R != 0 copy they produce an empty instruction list.  Scale
+        LRs (ds_read) fire in every copy (the MFMA op_sel selects the
+        right K byte of the 4 B scale VGPR per copy — see emit_mfma).
     """
     cfg = SchedulerConfig(
         numMFMATilesM=8,                      # MT0=256 / MI_M=16 / WG_M=2
@@ -2159,36 +2163,162 @@ def test_scheduler_R2_FP8_MT256():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        lrSA=ReadGranularity(mn=2, k=2),
-        lrSB=ReadGranularity(mn=2, k=2),
-        grSA=ReadGranularity(mn=8, k=2),
-        grSB=ReadGranularity(mn=8, k=2),
+        lrSA=ReadGranularity(mn=2, k=1),
+        lrSB=ReadGranularity(mn=2, k=1),
+        grSA=ReadGranularity(mn=8, k=1),
+        grSB=ReadGranularity(mn=8, k=1),
         scaleSchedulingPeriod=2,
     )
 
-    assert cfg.numSubIterK == 2, \
-        f"R=2 should widen numSubIterK from 1 to 2, got {cfg.numSubIterK}"
-    assert cfg.numSubIterK_data == 1, \
-        f"data-side numSubIterK should remain 1, got {cfg.numSubIterK_data}"
+    assert cfg.numSubIterK == 1, (
+        "Path B contract: numSubIterK stays at the data-side value, "
+        f"got {cfg.numSubIterK}")
+    assert cfg.numSubIterK_data == 1, (
+        f"numSubIterK_data should mirror data DU, got {cfg.numSubIterK_data}")
 
     sched = LogicalScheduler(cfg)
-    # assign_vgpr_tiles is a separate pass from build/emit — it is what
-    # forces unroll_factor to be a multiple of R (see SchedulerConfig docstring).
     sched.assign_vgpr_tiles()
     sched.build()
 
     assert sched.unroll_factor % 2 == 0, (
-        f"unroll_factor must be a multiple of R=2 (lcm(.., R)), "
+        "unroll_factor must be a multiple of R=2 (lcm(natural, R)), "
         f"got {sched.unroll_factor}")
 
-    scale_inc_ops = []
-    for partition_emitted in sched._emitted:
-        for emitted in partition_emitted:
-            for em in emitted:
-                if em.opType in ('lr_inc', 'gr_inc') \
-                        and getattr(em.source, 'tensor', None) in ('SA', 'SB'):
-                    scale_inc_ops.append((em.opType, em.source.tensor))
+    # Build the population gate predicate and verify scale GR / scale
+    # gr_inc / scale lr_inc appear identically in every emit copy at the
+    # schedule layer (the gating happens at populate-time, not in the
+    # schedule itself).
+    R = cfg.scaleSchedulingPeriod
+    scale_gr_count_per_copy = []
+    scale_inc_count_per_copy = []
+    for _ in range(R):
+        scale_gr = 0
+        scale_inc = 0
+        for partition_emitted in sched._emitted:
+            for emitted in partition_emitted:
+                for em in emitted:
+                    tensor = getattr(em.source, 'tensor', None)
+                    if em.opType == 'gr' and tensor in ('SA', 'SB'):
+                        scale_gr += 1
+                    elif em.opType in ('lr_inc', 'gr_inc') \
+                            and tensor in ('SA', 'SB'):
+                        scale_inc += 1
+        scale_gr_count_per_copy.append(scale_gr)
+        scale_inc_count_per_copy.append(scale_inc)
+    assert scale_gr_count_per_copy[0] > 0, (
+        "Schedule must place at least one scale GR per period "
+        f"(got {scale_gr_count_per_copy})")
+    assert scale_inc_count_per_copy[0] > 0, (
+        "Schedule must place at least one scale inc per period "
+        f"(got {scale_inc_count_per_copy})")
 
-    assert len(scale_inc_ops) > 0, (
-        f"Expected at least one scale lr_inc/gr_inc op in the emitted "
-        f"output, got none. scale_inc_ops={scale_inc_ops}")
+    # Simulate the populate-time gating predicate explicitly.  This is
+    # what InstructionEmitter.populate uses to decide whether to call the
+    # handler or set em.instructions = [] for the given unroll iter.
+    from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+    gated_by_ui = {ui: [] for ui in range(R)}
+    for ui in range(R):
+        for partition_emitted in sched._emitted:
+            for emitted in partition_emitted:
+                for em in emitted:
+                    if InstructionEmitter._scale_op_gated_out(em, ui, R):
+                        gated_by_ui[ui].append(
+                            (em.opType, getattr(em.source, 'tensor', None)))
+    # ui=0 (first copy of an R-period) must emit scale GR + scale gr_inc
+    # (DTL + SRD advance + LDS write-side swap) and must NOT emit scale
+    # lr_inc (the LDS read-side swap must defer to the last copy).
+    gated_ui0_opTypes = {opType for opType, _ in gated_by_ui[0]}
+    assert gated_ui0_opTypes == {'lr_inc'}, (
+        f"ui=0 must gate ONLY scale lr_inc, got {gated_ui0_opTypes}")
+    # ui=R-1 (last copy of an R-period) must emit scale lr_inc and must
+    # NOT emit scale GR or scale gr_inc.
+    gated_last_opTypes = {opType for opType, _ in gated_by_ui[R - 1]}
+    assert gated_last_opTypes == {'gr', 'gr_inc'}, (
+        f"ui=R-1 must gate scale gr and gr_inc, got {gated_last_opTypes}")
+
+
+def test_data_gr_inc_lr_inc_emit_split_R2():
+    """Data gr_inc / lr_inc emit split for ScaleDepthURatio=2.
+
+    Verifies the InstructionEmitter contract that fixes the R=2 PGR=2
+    correctness bug observed in MT256x256x128 MXFP8 (subtile_mxfp8_mt256
+    K=512/1024).  The data emitters must split into:
+
+      gr_inc(A|B)  →  always emit SRD advance (per body copy);
+                       emit LDS write-side swap ONLY at ui%R == 0.
+      lr_inc(A|B)  →  emit LDS read-side swap ONLY at ui%R == 0;
+                       otherwise emit nothing.
+
+    Both swaps gating to ui%R == 0 is intentional: as preOps on GR/LR
+    placements they fire BEFORE the GR/LR.  Gating to ui%R == 0 means
+    the swap happens at outer-iter boundaries so all R body copies of
+    a given outer iter operate on the SAME LDS half.
+
+    For R=1 the gate collapses to "fire every body copy" — bit-identical
+    to the pre-fix behavior.
+    """
+    from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+    from Tensile.Components.Subtile.LogicalScheduler import (
+        GRIncOp, LRIncOp,
+    )
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    # ── R=2: gating splits SRD-advance from LDS-swap ──
+    R = 2
+    emitter = SimpleNamespace(
+        writer=None, kernel=None,
+        config=SimpleNamespace(scaleSchedulingPeriod=R),
+    )
+    grA = GRIncOp(tensor='A')
+    lrA = LRIncOp(tensor='A')
+
+    # Patch the emit-helper imports to record what was called per ui.
+    calls_per_ui = {}
+    def _record(ui, label):
+        calls_per_ui.setdefault(ui, []).append(label)
+        from rocisa.code import Module as _M
+        return _M()
+    with patch('Tensile.Components.Subtile.InstructionEmitter.globalReadPtrUpdates',
+               side_effect=lambda tc, w, k: _record(_ui[0], f'gr_ptr_{tc}')), \
+         patch('Tensile.Components.Subtile.InstructionEmitter.globalReadLDSBufferSwap',
+               side_effect=lambda tc, w, k: _record(_ui[0], f'gr_swap_{tc}')), \
+         patch('Tensile.Components.Subtile.InstructionEmitter.localReadLDSBufferSwap',
+               side_effect=lambda tc, w, k: _record(_ui[0], f'lr_swap_{tc}')):
+        _ui = [0]
+        for ui in range(R):
+            _ui[0] = ui
+            InstructionEmitter.emit_gr_inc(emitter, grA, ui)
+            InstructionEmitter.emit_lr_inc(emitter, lrA, ui)
+
+    # ui=0: SRD-advance fires AND BOTH LDS-write-swap AND LDS-read-swap fire.
+    assert calls_per_ui[0] == ['gr_ptr_A', 'gr_swap_A', 'lr_swap_A'], (
+        f"R=2 ui=0: expected SRD-advance + LDS-write-swap + LDS-read-swap, "
+        f"got {calls_per_ui[0]}")
+    # ui=R-1 (1): SRD-advance fires alone — no LDS swaps.
+    assert calls_per_ui[1] == ['gr_ptr_A'], (
+        f"R=2 ui=R-1: expected SRD-advance only (no LDS swaps), "
+        f"got {calls_per_ui[1]}")
+
+    # ── R=1: bit-identical to legacy (both swaps and advance fire every copy) ──
+    R = 1
+    emitter1 = SimpleNamespace(
+        writer=None, kernel=None,
+        config=SimpleNamespace(scaleSchedulingPeriod=R),
+    )
+    calls_r1 = []
+    def _rec_r1(label):
+        calls_r1.append(label)
+        from rocisa.code import Module as _M
+        return _M()
+    with patch('Tensile.Components.Subtile.InstructionEmitter.globalReadPtrUpdates',
+               side_effect=lambda tc, w, k: _rec_r1(f'gr_ptr_{tc}')), \
+         patch('Tensile.Components.Subtile.InstructionEmitter.globalReadLDSBufferSwap',
+               side_effect=lambda tc, w, k: _rec_r1(f'gr_swap_{tc}')), \
+         patch('Tensile.Components.Subtile.InstructionEmitter.localReadLDSBufferSwap',
+               side_effect=lambda tc, w, k: _rec_r1(f'lr_swap_{tc}')):
+        InstructionEmitter.emit_gr_inc(emitter1, GRIncOp(tensor='A'), 0)
+        InstructionEmitter.emit_lr_inc(emitter1, LRIncOp(tensor='A'), 0)
+    assert calls_r1 == ['gr_ptr_A', 'gr_swap_A', 'lr_swap_A'], (
+        f"R=1: expected SRD + GR-swap + LR-swap each per body copy, "
+        f"got {calls_r1}")

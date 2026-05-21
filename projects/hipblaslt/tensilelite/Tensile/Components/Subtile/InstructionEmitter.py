@@ -75,7 +75,8 @@ class InstructionEmitter:
             self.tileInfoMap['SA'] = scaleTileInfoA
             self.tileInfoMap['SB'] = scaleTileInfoB
 
-        # Dispatch table — unroll_iter is passed for mfma/lr
+        # Dispatch table — unroll_iter is passed for mfma/lr/gr_inc/lr_inc
+        # (gr_inc/lr_inc consume ui for the R-period swap-vs-advance split).
         self._dispatch = {
             'mfma':     lambda em, ui: self.emit_mfma(em.source, ui),
             'lr':       lambda em, ui: self.emit_lr(em.source, ui),
@@ -83,8 +84,8 @@ class InstructionEmitter:
             'wait_gr':  lambda em, ui: self.emit_wait_gr(em.source),
             'wait_lr':  lambda em, ui: self.emit_wait_lr(),
             'sync':     lambda em, ui: self.emit_sync(),
-            'lr_inc':   lambda em, ui: self.emit_lr_inc(em.source),
-            'gr_inc':   lambda em, ui: self.emit_gr_inc(em.source),
+            'lr_inc':   lambda em, ui: self.emit_lr_inc(em.source, ui),
+            'gr_inc':   lambda em, ui: self.emit_gr_inc(em.source, ui),
             'skip':     lambda em, ui: self.emit_skip(em.source),
         }
 
@@ -94,6 +95,17 @@ class InstructionEmitter:
         subIterK = placement.subIterK
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
+
+        # Decouple-scale-DU op_sel: scaleSchedulingPeriod (R) > 1 means one
+        # scale fetch covers R body copies' worth of K-bytes packed in the
+        # 4 B scale VGPR.  numSubIterK is the data-side value (not widened),
+        # so we add (ui % R) * numSubIterK_data to subIterK to advance the
+        # scale byte index from one body copy to the next.  For R==1 this
+        # collapses to the original `(a%2) + 2*subIterK` formula.
+        R = self.config.scaleSchedulingPeriod
+        numSubIterK_data = getattr(self.config, 'numSubIterK_data',
+                                   self.config.numSubIterK)
+        effectiveSubIterK = subIterK + (unroll_iter % R) * numSubIterK_data
 
         for a in placement.tileA.tileId_list:
             for b in placement.tileB.tileId_list:
@@ -110,16 +122,8 @@ class InstructionEmitter:
                     scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
                     scaleAVgpr = next(iter(scaleATile))
                     scaleBVgpr = next(iter(scaleBTile))
-                    # Op_sel selects the byte of the 4-byte scale VGPR keyed
-                    # by (M-parity, K-position).  Under scaleSchedulingPeriod
-                    # (R) > 1 the scheduler has widened subIterK so that one
-                    # scheduler period spans R*numSubIterK_data K-slots, so
-                    # subIterK already ranges 0..R*numK_data-1 across the R
-                    # body copies that share the same scale VGPR.  The
-                    # supported configs all satisfy R*numK_data <= 2, so the
-                    # op_sel byte index (a%2 + 2*subIterK) stays in [0, 4).
-                    sAsel = (a % 2) + 2 * subIterK
-                    sBsel = (b % 2) + 2 * subIterK
+                    sAsel = (a % 2) + 2 * effectiveSubIterK
+                    sBsel = (b % 2) + 2 * effectiveSubIterK
                 else:
                     scaleAVgpr = scaleBVgpr = -1
                     sAsel = sBsel = 0
@@ -128,7 +132,7 @@ class InstructionEmitter:
                     self.writer, self.kernel, aTile, bTile, dTile, dTile,
                     scaleAVgpr=scaleAVgpr, scaleBVgpr=scaleBVgpr,
                     scaleAsel=sAsel, scaleBsel=sBsel,
-                    comment=f"MFMA C[{a},{b}] += A[{a},K={subIterK}] * B[{b},K={subIterK}]"))
+                    comment=f"MFMA C[{a},{b}] += A[{a},K={effectiveSubIterK}] * B[{b},K={effectiveSubIterK}]"))
         return list(module.flatitems())
 
     def emit_lr(self, placement, unroll_iter=0):
@@ -221,24 +225,76 @@ class InstructionEmitter:
     def emit_sync(self):
         return [SBarrier(comment="Barrier")]
 
-    def emit_lr_inc(self, source):
-        """Emit localReadLDSBufferSwap for a single tensor."""
+    def emit_lr_inc(self, source, unroll_iter=0):
+        """Emit localReadLDSBufferSwap for a single tensor.
+
+        Decouple-scale-DU (data path): the LDS read-side swap is conceptually
+        an outer-iter-boundary event, not a per-body-copy event.  With
+        scaleSchedulingPeriod (R) > 1 the unroll factor expands to R body
+        copies per outer iter; the LDS read half must flip exactly ONCE per
+        outer iter so that all R copies in a given outer iter consume the
+        SAME half (the one written by the PGR-prefetched outer iter).
+        lr_inc is a preOp on the LR placement, so it fires immediately
+        BEFORE the LR ds_read.  Firing it at ui%R == 0 means the swap
+        happens between outer iter N's last copy and outer iter N+1's
+        first copy — i.e. AFTER all R copies of outer iter N have consumed
+        the current half (matching the design intent).  ui%R != 0 copies
+        emit nothing.
+
+        For R == 1 the gate (ui%1 == 0) is always true and the output is
+        bit-identical to the pre-R-period emitter (lr_inc fires every body
+        copy, same as today's per-body alternation).
+
+        Scale lr_inc (SA/SB) ops are gated out of this handler entirely by
+        InstructionEmitter.populate via _scale_op_gated_out (at ui%R != R-1
+        for scale lr_inc; the asymmetry comes from scale lr/gr_inc being a
+        single atomic op rather than the data path's split SRD-advance vs
+        LDS-swap), so the gate below only governs data (A/B) tensors in
+        practice.
+        """
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
+        R = self.config.scaleSchedulingPeriod
         module = Module()
+        if tensor in ('A', 'B') and R > 1 and (unroll_iter % R) != 0:
+            return []
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
-    def emit_gr_inc(self, source):
-        """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor."""
+    def emit_gr_inc(self, source, unroll_iter=0):
+        """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor.
+
+        Decouple-scale-DU (data path): the data SRD must advance on EVERY
+        body copy so the next GR reads the next data-DU of K, but the LDS
+        write-side swap (XOR LocalWriteBaseAddr with Swap) is an outer-iter
+        boundary event — it flips which LDS half the next R-period worth
+        of GRs writes into.  With scaleSchedulingPeriod (R) > 1 the unroll
+        factor expands to R body copies per outer iter; we want the LDS
+        swap to fire exactly once per outer iter at ui%R == 0 (so the next
+        period's R GRs target the OTHER half).  The SRD advance still fires
+        every copy, cumulatively advancing by R*DU per outer iter as
+        required by the data layout.
+
+        For R == 1 the gate (ui%1 == 0) is always true so we emit both the
+        SRD advance and the LDS swap on every copy — bit-identical to the
+        pre-R-period emitter.
+
+        Scale gr_inc (SA/SB) ops are gated out of this handler entirely by
+        InstructionEmitter.populate via _scale_op_gated_out at ui%R != 0,
+        so the scale path still emits both ScalePtrUpdate and ScaleLDSSwap
+        atomically (when it does emit).
+        """
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
+        R = self.config.scaleSchedulingPeriod
         module = Module()
         if tensor in ('SA', 'SB'):
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
+            module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         else:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
-        module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
+            if R == 1 or (unroll_iter % R) == 0:
+                module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
     def emit_skip(self, source):
@@ -253,10 +309,73 @@ class InstructionEmitter:
         ]
 
     def populate(self, emitted, unroll_iter=0):
-        """Walk emitted partitions and fill em.instructions."""
+        """Walk emitted partitions and fill em.instructions.
+
+        Decouple-scale-DU: when scaleSchedulingPeriod (R) > 1, the
+        emission cadence within an R-period of body copies is:
+
+          Scale (SA/SB) path  — gated atomically at populate time via
+          _scale_op_gated_out (whole op is skipped in non-firing copies):
+            - scale GR (DTL → LDS) and scale gr_inc (SRD advance + LDS
+              write-side swap) fire in the FIRST copy of the period
+              (ui%R == 0) so the DTL goes to the current half and the
+              swap sets up the next period's write target.
+            - scale lr_inc (LDS read-side swap) fires in the LAST copy
+              of the period (ui%R == R-1) so the swap happens AFTER
+              all R copies have read the same half (PGR=0 postOp
+              cadence; the residual R=2 PGR=2 K>=512 regression
+              traces to scale lr_inc being a preOp under PGR>0 but
+              that is left as-is per the scope of this fix —
+              touching the scale path globally regresses PGR=2 K=256
+              and PGR=0 cases).
+            - scale LR (ds_read) is NOT gated: it re-issues the same
+              4 B load into a cycled VGPR each copy.  MFMA op_sel
+              picks the right K byte per copy (see emit_mfma).
+
+          Data (A/B) path  — gated INSIDE emit_gr_inc / emit_lr_inc
+          because the SRD advance and the LDS swap have different
+          cadences:
+            - data SRD advance (s_add Srd{tc}, Srd{tc}, DU*bpe) fires
+              every copy in emit_gr_inc — the SRD cumulatively walks
+              R*DU per outer iter so the next GR reads the next K-DU.
+            - data LDS write-side swap (s_xor LocalWriteBaseAddr,
+              Swap) fires only at ui%R == 0 — the next period's R
+              GRs all write into the OTHER half (preOp on GR, so the
+              swap happens before the GR).
+            - data LDS read-side swap (v_xor sharedVgprLROffset,
+              sharedVgprLROffsetSwap) fires only at ui%R == 0 — same
+              gate as the write-side swap.  lr_inc is a preOp on LR
+              so firing at ui%R == 0 means the swap is sandwiched
+              between outer iter N's last LR (ui=R-1) and outer iter
+              N+1's first LR (ui=0).  Both bodies of a given outer
+              iter then consume the SAME LDS half.
+
+        For R == 1 every gate reduces to "fire every copy" and the
+        output is bit-identical to the pre-R-period scheduler.
+        """
+        R = self.config.scaleSchedulingPeriod
         for partition_emitted in emitted:
             for emitted_group in partition_emitted:
                 for em in emitted_group:
                     handler = self._dispatch.get(em.opType)
-                    if handler:
-                        em.instructions = handler(em, unroll_iter)
+                    if handler is None:
+                        continue
+                    if R > 1 and self._scale_op_gated_out(em, unroll_iter, R):
+                        em.instructions = []
+                        continue
+                    em.instructions = handler(em, unroll_iter)
+
+    @staticmethod
+    def _scale_op_gated_out(em, unroll_iter: int, R: int) -> bool:
+        """Return True for scale ops that should NOT emit in this ui.
+
+        See populate() docstring for the cadence rationale.
+        """
+        tensor = getattr(em.source, 'tensor', None)
+        if tensor not in ('SA', 'SB'):
+            return False
+        if em.opType in ('gr', 'gr_inc'):
+            return (unroll_iter % R) != 0
+        if em.opType == 'lr_inc':
+            return (unroll_iter % R) != (R - 1)
+        return False

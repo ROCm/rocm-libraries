@@ -4147,7 +4147,7 @@ class KernelWriterAssembly(KernelWriter):
       tcab = "A" if tc == "MXSA" else "B"
       mxBlock = kernel["ProblemType"]["MXBlock%s"%tcab]
       swizzleSize0 = 32 # M,N direction
-      swizzleSize1 = 256 # K direction
+      swizzleSize1 = 256 # K direction (per-scale-fetch K span in data elements)
       swizzleBlockSize = swizzleSize0 * swizzleSize1 // mxBlock
     else:
       if isSwizzledSubtile:
@@ -4197,11 +4197,29 @@ class KernelWriterAssembly(KernelWriter):
             #
             # tileStart is in block units (roundUp(MT/swizzleSize0)).
             #   numLine = min(roundUp(size/swizzleSize0) - tileStart_blk, roundUp(MT/swizzleSize0)) - 1
-            #   Srd+2   = numLine * stride_bytes + swizzleBlockSize*(DepthU/swizzleSize1)
+            #   Srd+2   = numLine * stride_bytes + swizzleBlockSize*(scaleSpanK/swizzleSize1)
             #
             # Key: numLine/numElems <= MT (compile-time), so the multiply stays in 32 bits.
+            #
+            # scaleSpanK: per-scale-fetch K span in DATA elements.  For MX scale
+            # swizzled layout this MUST use the SCALE-side DU (= R*DepthU under
+            # ScaleDepthURatio>1), not the data DepthU.  Otherwise at R>1 with
+            # DepthU<swizzleSize1 the integer division `DepthU//swizzleSize1`
+            # truncates to 0 and the buffer SRD limit drops the LAST swizzle
+            # block from the valid range, so wave-N lanes covering the last N
+            # tile read OOB and return 0x00.  That manifested as ~2^-120
+            # outputs in MT256/R=2 (the bug this comment block now guards).
+            #
+            # For A/B data the swizzleBlockSize path is gated by
+            # isPreShuffledAB (not MX-scale), so the formula stays as
+            # `DepthU // swizzleSize1`.
             mt_units    = mt  # roundUp(MT/swizzleSize0), compile-time
-            extra_bytes = swizzleBlockSize * (kernel["DepthU"] // swizzleSize1)
+            if isMxSwizzledScaleLayout:
+              scaleR     = kernel.get("ScaleDepthURatio%s" % tcab, 1)
+              scaleSpanK = scaleR * kernel["DepthU"]
+            else:
+              scaleSpanK = kernel["DepthU"]
+            extra_bytes = swizzleBlockSize * (scaleSpanK // swizzleSize1)
 
             for i in range(0, numDim):
               idx = indices[i]

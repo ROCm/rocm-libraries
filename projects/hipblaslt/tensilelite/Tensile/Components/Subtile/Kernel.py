@@ -1239,17 +1239,6 @@ def mainLoop(writer, kernel):
   grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
   grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
   numSubIterK = tiA.localMMATileGrid[1]
-  # Decouple-scale-DU: scale LR/GR granularities are in scale-MMA-tile units and
-  # already encode the per-fetch K span via the updated scaleTi*.localMMATileGrid
-  # (sized from scaleDepthU = R * data_DU).  lrS*Gran.k = lrSubtileShape[1] is
-  # the K span of one scale LR fetch (always 2 for the (2,2) LR subtile); the
-  # scheduler uses scaleSchedulingPeriod=R below to know that one scale fetch
-  # spans R data body iters.
-  lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=scaleTiA.lrSubtileShape[1]) if scaleTiA else None
-  lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=scaleTiB.lrSubtileShape[1]) if scaleTiB else None
-  grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
-  grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
-
   # R-period: number of data body iters covered by one scale fetch.  R == 1 for
   # non-MX kernels and for MX kernels with ScaleDepthURatio == 1 (the existing
   # MT128x128/DU=256 baseline), so the scheduler sees no change for those cases.
@@ -1258,6 +1247,28 @@ def mainLoop(writer, kernel):
     scaleSchedulingPeriod = max(scaleSchedulingPeriod, getattr(scaleTiA, 'scaleSchedulingPeriod', 1))
   if scaleTiB is not None:
     scaleSchedulingPeriod = max(scaleSchedulingPeriod, getattr(scaleTiB, 'scaleSchedulingPeriod', 1))
+  R = scaleSchedulingPeriod
+
+  # Decouple-scale-DU (Path B): scale LR/GR k_gran is expressed in the
+  # scheduler's data-side K-slot units.  The geometry's lrSubtileShape[1]
+  # and localMMATileGrid[1] are sized from scaleDepthU = R * data_DU, so
+  # they already encode the R factor.  We divide by R to express "one
+  # scale LR/GR per data body iter" — the same as R==1 — and rely on the
+  # emit-time gating in InstructionEmitter.populate to actually fire the
+  # scale op only in ui%R == 0.  For R==1 the divisions are no-ops.
+  def _div_r(v):
+    assert v % R == 0, (
+      f"scale granularity {v} not divisible by ScaleDepthURatio={R}; check "
+      f"scaleDepthU/MXScale geometry sizing")
+    return v // R
+  lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0],
+                             k=_div_r(scaleTiA.lrSubtileShape[1])) if scaleTiA else None
+  lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0],
+                             k=_div_r(scaleTiB.lrSubtileShape[1])) if scaleTiB else None
+  grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0],
+                             k=_div_r(scaleTiA.localMMATileGrid[1])) if scaleTiA else None
+  grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0],
+                             k=_div_r(scaleTiB.localMMATileGrid[1])) if scaleTiB else None
 
   schedulerPgr = pgr
 
