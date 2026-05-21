@@ -8,32 +8,36 @@
 #include <cstddef>
 #include <cstdint>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
+#include <memory>
 
 #include "../../CkDslContext.hpp"
 #include "../../CkDslHandle.hpp"
 #include "../../CkDslSettings.hpp"
+#include "ConvImplicitGemmPlanBuilder.hpp"
 
 namespace ck_dsl_provider {
+
+class CompileServiceBridge;
 
 /// IEngine implementation for CK DSL implicit-GEMM forward
 /// convolution.
 ///
 /// The M1 plan registers one engine per CK DSL op kind; this is the
-/// first. For the I-1 milestone the engine is a load-bearing stub:
+/// first. The engine owns exactly one plan builder
+/// (``ConvImplicitGemmPlanBuilder``) per plan §5's "one engine per
+/// op" structure -- M5+ adds sibling engines for new ops rather than
+/// growing this engine's plan-builder list.
 ///
-///  - isApplicable() returns false unconditionally (no graphs match
-///    until the adapter and plan builder land in I-6/I-7).
-///  - getDetails() returns an empty FlatBuffer payload via the
-///    handle's detached-buffer map, matching the SDK contract.
-///  - getMaxWorkspaceSize() returns 0.
-///  - initializeExecutionContext() throws because isApplicable()
-///    promised "not applicable" and the SDK should never reach it.
+/// All five IEngine virtuals delegate to the single plan builder.
+/// ``getDetails`` still publishes an EngineDetails FlatBuffer (with
+/// the engine id and an empty knob vector for M1) via the handle's
+/// detached-buffer map so the SDK's plugin-API surface keeps working.
 class CkDslConvImplicitGemmEngine
     : public hipdnn_plugin_sdk::IEngine<::CkDslHandle, CkDslSettings, CkDslContext> {
    public:
-    explicit CkDslConvImplicitGemmEngine(int64_t id);
+    CkDslConvImplicitGemmEngine(std::int64_t id, CompileServiceBridge& bridge);
 
-    int64_t id() const override;
+    std::int64_t id() const override;
 
     bool isApplicable(
         ::CkDslHandle& handle,
@@ -43,10 +47,11 @@ class CkDslConvImplicitGemmEngine
                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
 
-    size_t getMaxWorkspaceSize(const ::CkDslHandle& handle,
-                               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-                               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
-                                   engineConfig) const override;
+    std::size_t getMaxWorkspaceSize(
+        const ::CkDslHandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig)
+        const override;
 
     void initializeExecutionContext(
         const ::CkDslHandle& handle,
@@ -54,8 +59,15 @@ class CkDslConvImplicitGemmEngine
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         CkDslContext& executionContext) const override;
 
+    /// Test-only accessor: lets the I-7 plan-builder test exercise
+    /// the same cache the engine uses for cache-hit verification.
+    ConvImplicitGemmPlanBuilder& planBuilderForTesting() const {
+        return *_planBuilder;
+    }
+
    private:
-    int64_t _id;
+    std::int64_t _id;
+    std::unique_ptr<ConvImplicitGemmPlanBuilder> _planBuilder;
 };
 
 }  // namespace ck_dsl_provider

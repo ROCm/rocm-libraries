@@ -62,22 +62,31 @@ class CompileServiceBridge {
     /// the Python side's compile_smoke docstring) -- enough to prove
     /// the round-trip from compile-service to hipModuleLaunchKernel
     /// without depending on any per-op adapter logic. Production
-    /// compiles will land via I-7's ``compile(op_kind, payload)`` on
-    /// the same bridge.
+    /// compiles go through :func:`compile`.
     KernelArtifact compileSmoke();
+
+    /// Production compile entry point. Invokes
+    /// ck_dsl_provider.compile_service.compile(op_kind, payload),
+    /// translates the returned dict into a ``KernelArtifact``, and
+    /// returns it. The payload is the on-wire dict emitted by the
+    /// matching per-op ``*Payload::*SpecToPayload`` translator (for
+    /// M1: ``convImplicitGemmSpecToPayload``).
+    ///
+    /// Acquires the GIL internally; the caller must NOT already hold
+    /// it. Any ``py::error_already_set`` from the Python side is
+    /// translated via ``PythonError::raise``.
+    ///
+    /// The ``opKind`` string is the same identifier the JitCache key
+    /// derivation uses; pick a stable value per op and never rename.
+    KernelArtifact compile(std::string_view opKind, const pybind11::dict& payload);
 
     /// Test-only access to the imported compile_service module. Allows
     /// the unit suite to exercise the PythonError translation path by
     /// calling a deliberately-missing attribute. Production callers
-    /// should use noopSmoke() (and the I-7 compile()).
+    /// should use noopSmoke() or compile().
     pybind11::module_& moduleForTesting() noexcept {
         return _module;
     }
-
-    // TODO(I-7): compile(std::string_view opKind, py::dict payload)
-    //            -> std::pair<std::vector<std::byte>, py::dict>
-    //            Calls compile_service.compile(...), returns HSACO
-    //            bytes plus a launch-ABI dict.
 
    private:
     /// Prepend a single path to sys.path iff it is not already present.

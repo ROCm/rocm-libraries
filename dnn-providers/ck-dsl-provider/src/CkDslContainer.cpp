@@ -4,9 +4,11 @@
 #include "CkDslContainer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <string>
 
 #include "engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.hpp"
 #include "python/CompileServiceBridge.hpp"
@@ -22,22 +24,36 @@ namespace ck_dsl_provider {
 // in any host already configured to pick this engine.
 HIPDNN_REGISTER_ENGINE(CK_DSL_CONV_IMPLICIT_GEMM_ENGINE, "ck_dsl_conv_implicit_gemm_engine")
 
-const std::vector<CkDslContainer::EngineDefinition>& CkDslContainer::getEngineDefinitions() {
-    static const std::vector<EngineDefinition> s_engineDefinitions = {
-        {CK_DSL_CONV_IMPLICIT_GEMM_ENGINE_ID,
-         []() -> CkDslEnginePtr {
-             return std::make_unique<CkDslConvImplicitGemmEngine>(
-                 CK_DSL_CONV_IMPLICIT_GEMM_ENGINE_ID);
-         }},
-    };
+namespace {
 
-    return s_engineDefinitions;
+// One entry per registered engine. Wrapped in a function-local static
+// so the array is initialised on first call rather than at global
+// static-init time -- HIPDNN_REGISTER_ENGINE fills in the engine ID
+// via a runtime static initialiser, and a namespace-level constexpr
+// or const array would capture the pre-init zero. The
+// function-local static defers initialisation until after all global
+// constructors have run, by which time the macro has populated the
+// ID.
+const std::array<int64_t, 1>& engineIds() {
+    static const std::array<int64_t, 1> ids = {CK_DSL_CONV_IMPLICIT_GEMM_ENGINE_ID};
+    return ids;
 }
 
-uint32_t CkDslContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines,
+}  // namespace
+
+CkDslEnginePtr CkDslContainer::createEngine(int64_t id) const {
+    if (id == CK_DSL_CONV_IMPLICIT_GEMM_ENGINE_ID) {
+        return std::make_unique<CkDslConvImplicitGemmEngine>(id, *_compileServiceBridge);
+    }
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        "CkDslContainer::createEngine: no engine registered for id=" + std::to_string(id));
+}
+
+uint32_t CkDslContainer::copyEngineIds(int64_t* engineIdsOut, uint32_t maxEngines,
                                        uint32_t& numEngines) {
-    const auto& engineDefinitions = getEngineDefinitions();
-    auto totalEngines = static_cast<uint32_t>(engineDefinitions.size());
+    const auto& ids = engineIds();
+    auto totalEngines = static_cast<uint32_t>(ids.size());
 
     if (maxEngines == 0) {
         numEngines = totalEngines;
@@ -46,7 +62,7 @@ uint32_t CkDslContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines,
 
     auto enginesToCopy = std::min(maxEngines, totalEngines);
     for (uint32_t i = 0; i < enginesToCopy; ++i) {
-        engineIds[i] = engineDefinitions[i].id;
+        engineIdsOut[i] = ids[i];
     }
 
     numEngines = enginesToCopy;
@@ -80,8 +96,8 @@ CkDslContainer::CkDslContainer() {
     _engineManager = std::make_unique<
         hipdnn_plugin_sdk::EngineManager<::CkDslHandle, CkDslSettings, CkDslContext>>();
 
-    for (const auto& engineDefinition : getEngineDefinitions()) {
-        _engineManager->addEngine(engineDefinition.createEngine());
+    for (int64_t id : engineIds()) {
+        _engineManager->addEngine(createEngine(id));
     }
 }
 

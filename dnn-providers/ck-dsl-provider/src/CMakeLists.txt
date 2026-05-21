@@ -14,6 +14,9 @@ add_library(
     adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.cpp
     adapters/conv_implicit_gemm/ConvImplicitGemmPayload.cpp
     engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.cpp
+    engines/conv_implicit_gemm/ConvImplicitGemmPlan.cpp
+    engines/conv_implicit_gemm/ConvImplicitGemmPlanBuilder.cpp
+    graph/GraphSignature.cpp
     python/CompileServiceBridge.cpp
     python/EmbeddedInterpreter.cpp
     python/PythonError.cpp
