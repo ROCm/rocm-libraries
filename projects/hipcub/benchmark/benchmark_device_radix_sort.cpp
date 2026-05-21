@@ -131,7 +131,7 @@ private:
             .add("algo", "device_radix_sort")
             .add("subalgo", "sort_keys")
             .add("lvl", "device")
-            .add("key_type", primbench::name<Key>())
+            .add("key_data_type", primbench::name<Key>())
             .add("descending", Descending);
     }
 
@@ -288,8 +288,8 @@ private:
             .add("algo", "device_radix_sort")
             .add("subalgo", "sort_pairs")
             .add("lvl", "device")
-            .add("key_type", primbench::name<Key>())
-            .add("value_type", primbench::name<Value>())
+            .add("key_data_type", primbench::name<Key>())
+            .add("value_data_type", primbench::name<Value>())
             .add("descending", Descending);
     }
 

@@ -62,7 +62,7 @@ private:
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("flag_type", primbench::name<F>())
-            .add("split_threshold", Threshold);
+            .add("split_threshold", std::to_string(Threshold) + "%");
     }
 
     void run(primbench::state& state) override
@@ -138,7 +138,7 @@ private:
             .add("subalgo", "predicate")
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
-            .add("split_threshold", Threshold);
+            .add("split_threshold", std::to_string(Threshold) + "%");
     }
 
     void run(primbench::state& state) override
@@ -203,11 +203,11 @@ private:
     {
         return primbench::json{}
             .add("algo", "device_partition")
-            .add("subalgo", "threeway")
+            .add("subalgo", "three_way")
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
-            .add("small_threshold", SmallThreshold)
-            .add("large_threshold", LargeThreshold);
+            .add("small_threshold", std::to_string(SmallThreshold) + "%")
+            .add("large_threshold", std::to_string(LargeThreshold) + "%");
     }
 
     void run(primbench::state& state) override
