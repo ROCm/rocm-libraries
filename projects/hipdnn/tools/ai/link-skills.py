@@ -113,7 +113,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     host = parser.add_mutually_exclusive_group()
     host.add_argument("--codex", action="store_true", help="Install into Codex skills")
-    host.add_argument("--claude", action="store_true", help="Install into Claude skills")
+    host.add_argument(
+        "--claude", action="store_true", help="Install into Claude skills"
+    )
     parser.add_argument("--target", help="Explicit skills target directory")
     parser.add_argument("--copy", action="store_true", help="Copy instead of linking")
     parser.add_argument("--list", action="store_true", help="List available skills")
@@ -128,7 +130,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def resolve_target_and_requested(args: argparse.Namespace) -> tuple[Path | None, list[str]]:
+def resolve_target_and_requested(
+    args: argparse.Namespace,
+) -> tuple[Path | None, list[str]]:
     host_target_count = sum([bool(args.codex), bool(args.claude), bool(args.target)])
     if host_target_count > 1:
         raise ValueError("Choose only one of --codex, --claude, or --target.")
@@ -197,9 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     method = (
         "copy"
         if args.copy
-        else "junction"
-        if platform.system() == "Windows"
-        else "symlink"
+        else "junction" if platform.system() == "Windows" else "symlink"
     )
     print(f"Source:  {skills_dir}")
     print(f"Target:  {target_dir}")
