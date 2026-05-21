@@ -25,13 +25,13 @@ A contributor walkthrough for landing a new op across the hipDNN stack. The code
 Adding a new op touches FlatBuffers schemas, backend descriptors, frontend nodes, JSON utilities, and tests at four levels. Most of it is mechanical.
 
 > [!IMPORTANT]
-> Use an agentic AI that can run the [`hipdnn-codegen`](../tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md) skill. The skill drives the full workflow — schema construction, code generation, file placement, build, and tests — with only a handful of confirmation prompts from you.
+> Preferred workflow: use an agentic AI that can run the [`hipdnn-codegen`](../tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md) skill. The skill drives the full workflow — schema construction, code generation, file placement, build, and tests — with only a handful of confirmation prompts from you.
 
 ```
 Decisions (you) → /hipdnn-codegen (agent) → Review implementation (you) → PR
 ```
 
-**Without agentic AI:** the [`hipdnn-codegen` skill file](../tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md) doubles as a detailed step-by-step procedure. Follow it manually alongside the [Layer-by-Layer Reference](#layer-by-layer-reference) and [Testing Requirements](#testing-requirements) below.
+**Without agentic AI:** either follow the [`hipdnn-codegen` skill file](../tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md) as the manual procedure, or use a chat-only AI as a reading assistant while you carry out the referenced repo edits yourself. Pair it with the [Layer-by-Layer Reference](#layer-by-layer-reference) and [Testing Requirements](#testing-requirements) below.
 
 ## Two Decisions Before You Run the Agent
 
@@ -230,7 +230,7 @@ For when an agent step fails or you need to do a layer by hand. Subsections are 
 
 ### JSON Utilities and Python Bindings
 
-See [Polish the Stubs](#polish-the-stubs).
+See [Review Implementation](#review-implementation), especially the optional sample and Python binding follow-ups.
 
 ---
 
@@ -278,7 +278,7 @@ Each layer has a required test. Every checkbox in the [PR Checklist](#pr-checkli
 | Generator output not built | The CMake fragment was not inserted. Confirm the snippet from `fragments/*_cmake_*.txt` was applied to the right `CMakeLists.txt`. |
 | Lifting test fails on tensor sharing | The unpacker is not using `getOrCreate` semantics for shared tensors. Check the unpacker against `MatmulUnpacker.hpp`. |
 | Unpacker references a converter that exists in backend headers but not in frontend `Types.hpp` | The mode-frontend-plumbing fragment was not fully applied. Insert the inverse converter from the fragment. |
-| Segfaults during graph execution plan build | Plugins require PIC/PIE. Set `set(CMAKE_POSITION_INDEPENDENT_CODE ON)` in your consumer CMake. See [HowTo.md troubleshooting](./HowTo.md#-troubleshooting). |
+| Segfaults during graph execution plan build | Plugins require PIC/PIE. Set `set(CMAKE_POSITION_INDEPENDENT_CODE ON)` in your consumer CMake. See [HowTo.md troubleshooting](./HowTo.md#troubleshooting). |
 
 ---
 

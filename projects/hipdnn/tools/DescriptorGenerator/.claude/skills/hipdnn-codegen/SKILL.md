@@ -2,7 +2,7 @@
 name: hipdnn-codegen
 description: Generate hipDNN operation boilerplate from a YAML config. Use when the user wants to add a new operation type to hipDNN, or generate descriptor/packer/unpacker code.
 argument-hint: "<schema-path-or-op-name> [mode: backend|frontend|full]"
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, WebFetch, AskUserQuestion
 ---
 
 # hipDNN Code Generator Skill
@@ -472,7 +472,7 @@ There are two classes of question the agent is expected to ask the user. Everyth
 - "Are there additional validation rules?"
   - e.g., "input channels must match weight channels"
   - e.g., "stride and dilation must be > 0"
-  - Default: leave with just the standard null/dim checks
+  - **Default:** leave with just the standard null/dim checks
 
 Do NOT ask the user about any other fields or decisions — derive everything else from the schema, existing code, and conventions.
 
