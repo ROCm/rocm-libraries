@@ -3489,11 +3489,13 @@ namespace TensileLite
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
             origami::problem_t origami_problem = {
-                .size     = {x, y, z},
-                .batch    = batch,
-                .a_dtype  = datatypeToAnalyticalDatatype(problem.alphaType()),
-                .b_dtype  = datatypeToAnalyticalDatatype(problem.betaType()),
-                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
+                .size        = {x, y, z},
+                .batch       = batch,
+                .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+                .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+                .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
             };
             origami::config_t origami_config = {
                 .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),
