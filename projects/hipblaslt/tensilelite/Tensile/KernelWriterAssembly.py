@@ -17801,6 +17801,10 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module()
     skipClusterBarrierPreSignal = Label(self.labels.getUniqueNamePrefix("skipCBPreSignal"), "")
     if handleSkipPGR2 and kernel["PrefetchGlobalRead"] == 2:
+      loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
+      endCounter = 1 if kernel["SuppressNoLoadLoop"] else 2
+      mod.add(SCmpEQU32(src0=loopCounter, src1=hex(endCounter - 1),
+                        comment="LoopCounter == endCounter-1 ? (PGR=2 but only 1 unroll iter)"))
       mod.add(SCBranchSCC1(skipClusterBarrierPreSignal.getLabelName(), \
                            "skip cluster barrier pre-signal if PGR=2 but only 1 loop"))
     mod.add(SCmpEQU32(sgpr("WaveIdx"), 0x0, "Check for waveID 0"))
