@@ -16,6 +16,7 @@ add_library(
     python/EmbeddedInterpreter.cpp
     python/PythonError.cpp
     runtime/HipModule.cpp
+    runtime/JitCache.cpp
     runtime/KernelArtifact.cpp
     runtime/LaunchAbi.cpp
 )
