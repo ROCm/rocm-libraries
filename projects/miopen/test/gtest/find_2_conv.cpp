@@ -99,6 +99,7 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
         EXPECT_EQ(miopenSetFindOptionAttachBinaries(options, test_case.attach_binaries),
                   miopenStatusSuccess);
 
+        Workspace wspace{}; // This GPU buffer may be used by miopenFindSolutions
         if(test_case.preallocate)
         {
             std::size_t workspace_max = 0;
@@ -123,7 +124,7 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
             }
 
             const auto workspace_size = std::min(test_case.workspace_limit, workspace_max);
-            Workspace wspace{workspace_size};
+            wspace.resize(workspace_size);
 
             EXPECT_EQ(
                 miopenSetFindOptionPreallocatedWorkspace(options, wspace.ptr(), wspace.size()),

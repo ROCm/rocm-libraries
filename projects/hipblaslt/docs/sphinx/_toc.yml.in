@@ -9,8 +9,10 @@ subtrees:
 
 - caption: Install
   entries:
+  - file: install/install
+    title: Install hipBLASLt
   - file: install/building-installing-hipblaslt
-    title: Installation guide
+    title: Build from source
 
 - caption: Conceptual
   entries:
@@ -18,6 +20,8 @@ subtrees:
     title: hipBLASLt library organization
   - file: conceptual/hipblaslt-clients
     title: hipBLASLt clients
+  - file: conceptual/pci-chip-id-predicates-walkthrough
+    title: hipBLASLt PCI chip ID predicates
 
 - caption: How to
   entries:

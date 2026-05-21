@@ -175,6 +175,7 @@ install_packages( )
   local client_dependencies_ubuntu=( "python3" "python3-yaml" )
   local client_dependencies_centos=( "python36" "python3-pip" )
   local client_dependencies_centos8=( "python39" "python3-pip" )
+  local client_dependencies_centos10=( "python3" "python3-pip" )
   local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" )
   local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" )
 
@@ -184,7 +185,9 @@ install_packages( )
     else
       library_dependencies_centos+=( "numactl-libs" )
     fi
-    if [[ "${MAJORVERSION}" == "9" ]]; then
+    if [[ "${MAJORVERSION}" -ge 10 ]]; then
+      client_dependencies_centos10+=( "python3-pyyaml" )
+    elif [[ "${MAJORVERSION}" == "9" ]]; then
       client_dependencies_centos8+=( "python3-pyyaml" )
     elif [[ "${MAJORVERSION}" == "8" ]]; then
       client_dependencies_centos8+=( "python3-pyyaml" )
@@ -220,7 +223,13 @@ install_packages( )
 #     yum -y update brings *all* installed packages up to date
 #     without seeking user approval
 #     elevate_if_not_root yum -y update
-      if [[ "${MAJORVERSION}" -ge 8 ]]; then
+      if [[ "${MAJORVERSION}" -ge 10 ]]; then
+        install_yum_packages "${library_dependencies_centos8[@]}"
+        if [[ "${build_clients}" == true ]]; then
+          install_yum_packages "${client_dependencies_centos10[@]}"
+          pip3 install pyyaml
+        fi
+      elif [[ "${MAJORVERSION}" -ge 8 ]]; then
         install_yum_packages "${library_dependencies_centos8[@]}"
         if [[ "${build_clients}" == true ]]; then
           install_yum_packages "${client_dependencies_centos8[@]}"
@@ -523,7 +532,7 @@ if [[ "${install_dependencies}" == true ]]; then
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
     ${cmake_executable} ../../deps
     make -j$(nproc)
-    elevate_if_not_root make install
+    elevate_if_not_root make install_deps
   popd
 fi
 

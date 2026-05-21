@@ -57,6 +57,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// In the example an exchange operation is performed on a warp of 8 threads, using type
 /// \p int with 4 items per thread.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/warp/example_warp_exchange.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {

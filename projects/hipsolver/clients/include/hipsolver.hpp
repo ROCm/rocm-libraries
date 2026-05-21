@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1874,6 +1874,572 @@ inline hipsolverStatus_t hipsolver_gebrd(testAPI_t               API,
                                  (hipDoubleComplex*)work,
                                  lwork,
                                  info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+/********************************************************/
+
+/******************** GEEV ********************/
+inline hipsolverStatus_t hipsolver_geev_bufferSize(testAPI_t           API,
+                                                   hipsolverHandle_t   handle,
+                                                   hipsolverDnParams_t params,
+                                                   hipsolverEigMode_t  jobvl,
+                                                   hipsolverEigMode_t  jobvr,
+                                                   int64_t             n,
+                                                   float*              A,
+                                                   int64_t             lda,
+                                                   float*              W,
+                                                   float*              VL,
+                                                   int64_t             ldvl,
+                                                   float*              VR,
+                                                   int64_t             ldvr,
+                                                   size_t*             lworkOnDevice,
+                                                   size_t*             lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev_bufferSize(handle,
+                                           params,
+                                           jobvl,
+                                           jobvr,
+                                           n,
+                                           HIP_R_32F,
+                                           A,
+                                           lda,
+                                           HIP_R_32F,
+                                           W,
+                                           HIP_R_32F,
+                                           VL,
+                                           ldvl,
+                                           HIP_R_32F,
+                                           VR,
+                                           ldvr,
+                                           HIP_R_32F,
+                                           lworkOnDevice,
+                                           lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev_bufferSize(testAPI_t           API,
+                                                   hipsolverHandle_t   handle,
+                                                   hipsolverDnParams_t params,
+                                                   hipsolverEigMode_t  jobvl,
+                                                   hipsolverEigMode_t  jobvr,
+                                                   int64_t             n,
+                                                   float*              A,
+                                                   int64_t             lda,
+                                                   hipsolverComplex*   W,
+                                                   float*              VL,
+                                                   int64_t             ldvl,
+                                                   float*              VR,
+                                                   int64_t             ldvr,
+                                                   size_t*             lworkOnDevice,
+                                                   size_t*             lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev_bufferSize(handle,
+                                           params,
+                                           jobvl,
+                                           jobvr,
+                                           n,
+                                           HIP_R_32F,
+                                           A,
+                                           lda,
+                                           HIP_C_32F,
+                                           (hipFloatComplex*)W,
+                                           HIP_R_32F,
+                                           VL,
+                                           ldvl,
+                                           HIP_R_32F,
+                                           VR,
+                                           ldvr,
+                                           HIP_R_32F,
+                                           lworkOnDevice,
+                                           lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev_bufferSize(testAPI_t           API,
+                                                   hipsolverHandle_t   handle,
+                                                   hipsolverDnParams_t params,
+                                                   hipsolverEigMode_t  jobvl,
+                                                   hipsolverEigMode_t  jobvr,
+                                                   int64_t             n,
+                                                   double*             A,
+                                                   int64_t             lda,
+                                                   double*             W,
+                                                   double*             VL,
+                                                   int64_t             ldvl,
+                                                   double*             VR,
+                                                   int64_t             ldvr,
+                                                   size_t*             lworkOnDevice,
+                                                   size_t*             lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev_bufferSize(handle,
+                                           params,
+                                           jobvl,
+                                           jobvr,
+                                           n,
+                                           HIP_R_64F,
+                                           A,
+                                           lda,
+                                           HIP_R_64F,
+                                           W,
+                                           HIP_R_64F,
+                                           VL,
+                                           ldvl,
+                                           HIP_R_64F,
+                                           VR,
+                                           ldvr,
+                                           HIP_R_64F,
+                                           lworkOnDevice,
+                                           lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev_bufferSize(testAPI_t               API,
+                                                   hipsolverHandle_t       handle,
+                                                   hipsolverDnParams_t     params,
+                                                   hipsolverEigMode_t      jobvl,
+                                                   hipsolverEigMode_t      jobvr,
+                                                   int64_t                 n,
+                                                   double*                 A,
+                                                   int64_t                 lda,
+                                                   hipsolverDoubleComplex* W,
+                                                   double*                 VL,
+                                                   int64_t                 ldvl,
+                                                   double*                 VR,
+                                                   int64_t                 ldvr,
+                                                   size_t*                 lworkOnDevice,
+                                                   size_t*                 lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev_bufferSize(handle,
+                                           params,
+                                           jobvl,
+                                           jobvr,
+                                           n,
+                                           HIP_R_64F,
+                                           A,
+                                           lda,
+                                           HIP_C_64F,
+                                           (hipDoubleComplex*)W,
+                                           HIP_R_64F,
+                                           VL,
+                                           ldvl,
+                                           HIP_R_64F,
+                                           VR,
+                                           ldvr,
+                                           HIP_R_64F,
+                                           lworkOnDevice,
+                                           lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev_bufferSize(testAPI_t           API,
+                                                   hipsolverHandle_t   handle,
+                                                   hipsolverDnParams_t params,
+                                                   hipsolverEigMode_t  jobvl,
+                                                   hipsolverEigMode_t  jobvr,
+                                                   int64_t             n,
+                                                   hipsolverComplex*   A,
+                                                   int64_t             lda,
+                                                   hipsolverComplex*   W,
+                                                   hipsolverComplex*   VL,
+                                                   int64_t             ldvl,
+                                                   hipsolverComplex*   VR,
+                                                   int64_t             ldvr,
+                                                   size_t*             lworkOnDevice,
+                                                   size_t*             lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev_bufferSize(handle,
+                                           params,
+                                           jobvl,
+                                           jobvr,
+                                           n,
+                                           HIP_C_32F,
+                                           A,
+                                           lda,
+                                           HIP_C_32F,
+                                           W,
+                                           HIP_C_32F,
+                                           VL,
+                                           ldvl,
+                                           HIP_C_32F,
+                                           VR,
+                                           ldvr,
+                                           HIP_C_32F,
+                                           lworkOnDevice,
+                                           lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev_bufferSize(testAPI_t               API,
+                                                   hipsolverHandle_t       handle,
+                                                   hipsolverDnParams_t     params,
+                                                   hipsolverEigMode_t      jobvl,
+                                                   hipsolverEigMode_t      jobvr,
+                                                   int64_t                 n,
+                                                   hipsolverDoubleComplex* A,
+                                                   int64_t                 lda,
+                                                   hipsolverDoubleComplex* W,
+                                                   hipsolverDoubleComplex* VL,
+                                                   int64_t                 ldvl,
+                                                   hipsolverDoubleComplex* VR,
+                                                   int64_t                 ldvr,
+                                                   size_t*                 lworkOnDevice,
+                                                   size_t*                 lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev_bufferSize(handle,
+                                           params,
+                                           jobvl,
+                                           jobvr,
+                                           n,
+                                           HIP_C_64F,
+                                           A,
+                                           lda,
+                                           HIP_C_64F,
+                                           W,
+                                           HIP_C_64F,
+                                           VL,
+                                           ldvl,
+                                           HIP_C_64F,
+                                           VR,
+                                           ldvr,
+                                           HIP_C_64F,
+                                           lworkOnDevice,
+                                           lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev(testAPI_t           API,
+                                        hipsolverHandle_t   handle,
+                                        hipsolverDnParams_t params,
+                                        hipsolverEigMode_t  jobvl,
+                                        hipsolverEigMode_t  jobvr,
+                                        int64_t             n,
+                                        float*              A,
+                                        int64_t             lda,
+                                        float*              W,
+                                        float*              VL,
+                                        int64_t             ldvl,
+                                        float*              VR,
+                                        int64_t             ldvr,
+                                        float*              workOnDevice,
+                                        size_t              lworkOnDevice,
+                                        float*              workOnHost,
+                                        size_t              lworkOnHost,
+                                        int*                info)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev(handle,
+                                params,
+                                jobvl,
+                                jobvr,
+                                n,
+                                HIP_R_32F,
+                                A,
+                                lda,
+                                HIP_R_32F,
+                                W,
+                                HIP_R_32F,
+                                VL,
+                                ldvl,
+                                HIP_R_32F,
+                                VR,
+                                ldvr,
+                                HIP_R_32F,
+                                workOnDevice,
+                                lworkOnDevice,
+                                workOnHost,
+                                lworkOnHost,
+                                info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev(testAPI_t           API,
+                                        hipsolverHandle_t   handle,
+                                        hipsolverDnParams_t params,
+                                        hipsolverEigMode_t  jobvl,
+                                        hipsolverEigMode_t  jobvr,
+                                        int64_t             n,
+                                        float*              A,
+                                        int64_t             lda,
+                                        hipsolverComplex*   W,
+                                        float*              VL,
+                                        int64_t             ldvl,
+                                        float*              VR,
+                                        int64_t             ldvr,
+                                        float*              workOnDevice,
+                                        size_t              lworkOnDevice,
+                                        float*              workOnHost,
+                                        size_t              lworkOnHost,
+                                        int*                info)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev(handle,
+                                params,
+                                jobvl,
+                                jobvr,
+                                n,
+                                HIP_R_32F,
+                                A,
+                                lda,
+                                HIP_C_32F,
+                                (hipFloatComplex*)W,
+                                HIP_R_32F,
+                                VL,
+                                ldvl,
+                                HIP_R_32F,
+                                VR,
+                                ldvr,
+                                HIP_R_32F,
+                                workOnDevice,
+                                lworkOnDevice,
+                                workOnHost,
+                                lworkOnHost,
+                                info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev(testAPI_t           API,
+                                        hipsolverHandle_t   handle,
+                                        hipsolverDnParams_t params,
+                                        hipsolverEigMode_t  jobvl,
+                                        hipsolverEigMode_t  jobvr,
+                                        int64_t             n,
+                                        double*             A,
+                                        int64_t             lda,
+                                        double*             W,
+                                        double*             VL,
+                                        int64_t             ldvl,
+                                        double*             VR,
+                                        int64_t             ldvr,
+                                        double*             workOnDevice,
+                                        size_t              lworkOnDevice,
+                                        double*             workOnHost,
+                                        size_t              lworkOnHost,
+                                        int*                info)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev(handle,
+                                params,
+                                jobvl,
+                                jobvr,
+                                n,
+                                HIP_R_64F,
+                                A,
+                                lda,
+                                HIP_R_64F,
+                                W,
+                                HIP_R_64F,
+                                VL,
+                                ldvl,
+                                HIP_R_64F,
+                                VR,
+                                ldvr,
+                                HIP_R_64F,
+                                workOnDevice,
+                                lworkOnDevice,
+                                workOnHost,
+                                lworkOnHost,
+                                info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev(testAPI_t               API,
+                                        hipsolverHandle_t       handle,
+                                        hipsolverDnParams_t     params,
+                                        hipsolverEigMode_t      jobvl,
+                                        hipsolverEigMode_t      jobvr,
+                                        int64_t                 n,
+                                        double*                 A,
+                                        int64_t                 lda,
+                                        hipsolverDoubleComplex* W,
+                                        double*                 VL,
+                                        int64_t                 ldvl,
+                                        double*                 VR,
+                                        int64_t                 ldvr,
+                                        double*                 workOnDevice,
+                                        size_t                  lworkOnDevice,
+                                        double*                 workOnHost,
+                                        size_t                  lworkOnHost,
+                                        int*                    info)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev(handle,
+                                params,
+                                jobvl,
+                                jobvr,
+                                n,
+                                HIP_R_64F,
+                                A,
+                                lda,
+                                HIP_C_64F,
+                                (hipDoubleComplex*)W,
+                                HIP_R_64F,
+                                VL,
+                                ldvl,
+                                HIP_R_64F,
+                                VR,
+                                ldvr,
+                                HIP_R_64F,
+                                workOnDevice,
+                                lworkOnDevice,
+                                workOnHost,
+                                lworkOnHost,
+                                info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev(testAPI_t           API,
+                                        hipsolverHandle_t   handle,
+                                        hipsolverDnParams_t params,
+                                        hipsolverEigMode_t  jobvl,
+                                        hipsolverEigMode_t  jobvr,
+                                        int64_t             n,
+                                        hipsolverComplex*   A,
+                                        int64_t             lda,
+                                        hipsolverComplex*   W,
+                                        hipsolverComplex*   VL,
+                                        int64_t             ldvl,
+                                        hipsolverComplex*   VR,
+                                        int64_t             ldvr,
+                                        hipsolverComplex*   workOnDevice,
+                                        size_t              lworkOnDevice,
+                                        hipsolverComplex*   workOnHost,
+                                        size_t              lworkOnHost,
+                                        int*                info)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev(handle,
+                                params,
+                                jobvl,
+                                jobvr,
+                                n,
+                                HIP_C_32F,
+                                A,
+                                lda,
+                                HIP_C_32F,
+                                W,
+                                HIP_C_32F,
+                                VL,
+                                ldvl,
+                                HIP_C_32F,
+                                VR,
+                                ldvr,
+                                HIP_C_32F,
+                                workOnDevice,
+                                lworkOnDevice,
+                                workOnHost,
+                                lworkOnHost,
+                                info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_geev(testAPI_t               API,
+                                        hipsolverHandle_t       handle,
+                                        hipsolverDnParams_t     params,
+                                        hipsolverEigMode_t      jobvl,
+                                        hipsolverEigMode_t      jobvr,
+                                        int64_t                 n,
+                                        hipsolverDoubleComplex* A,
+                                        int64_t                 lda,
+                                        hipsolverDoubleComplex* W,
+                                        hipsolverDoubleComplex* VL,
+                                        int64_t                 ldvl,
+                                        hipsolverDoubleComplex* VR,
+                                        int64_t                 ldvr,
+                                        hipsolverDoubleComplex* workOnDevice,
+                                        size_t                  lworkOnDevice,
+                                        hipsolverDoubleComplex* workOnHost,
+                                        size_t                  lworkOnHost,
+                                        int*                    info)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXgeev(handle,
+                                params,
+                                jobvl,
+                                jobvr,
+                                n,
+                                HIP_C_64F,
+                                A,
+                                lda,
+                                HIP_C_64F,
+                                W,
+                                HIP_C_64F,
+                                VL,
+                                ldvl,
+                                HIP_C_64F,
+                                VR,
+                                ldvr,
+                                HIP_C_64F,
+                                workOnDevice,
+                                lworkOnDevice,
+                                workOnHost,
+                                lworkOnHost,
+                                info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -7021,125 +7587,144 @@ inline hipsolverStatus_t hipsolver_potrs(testAPI_t               API,
 // normal and strided_batched
 inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t           API,
                                                           hipsolverHandle_t   handle,
+                                                          hipsolverDnParams_t params,
                                                           hipsolverEigMode_t  jobz,
                                                           hipsolverFillMode_t uplo,
                                                           int                 n,
                                                           float*              A,
                                                           int                 lda,
                                                           float*              W,
-                                                          int*                lwork)
+                                                          int*                lworkOnDevice,
+                                                          int*                lworkOnHost)
 {
+    *lworkOnHost = 0;
     switch(API)
     {
     case API_NORMAL:
-        return hipsolverSsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork);
+        return hipsolverSsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lworkOnDevice);
     case API_FORTRAN:
-        return hipsolverSsyevd_bufferSizeFortran(handle, jobz, uplo, n, A, lda, W, lwork);
+        return hipsolverSsyevd_bufferSizeFortran(handle, jobz, uplo, n, A, lda, W, lworkOnDevice);
     case API_COMPAT:
-        return hipsolverDnSsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork);
+        return hipsolverDnSsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lworkOnDevice);
     default:
+        *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
 
 inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t           API,
                                                           hipsolverHandle_t   handle,
+                                                          hipsolverDnParams_t params,
                                                           hipsolverEigMode_t  jobz,
                                                           hipsolverFillMode_t uplo,
                                                           int                 n,
                                                           double*             A,
                                                           int                 lda,
                                                           double*             W,
-                                                          int*                lwork)
+                                                          int*                lworkOnDevice,
+                                                          int*                lworkOnHost)
 {
+    *lworkOnHost = 0;
     switch(API)
     {
     case API_NORMAL:
-        return hipsolverDsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork);
+        return hipsolverDsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lworkOnDevice);
     case API_FORTRAN:
-        return hipsolverDsyevd_bufferSizeFortran(handle, jobz, uplo, n, A, lda, W, lwork);
+        return hipsolverDsyevd_bufferSizeFortran(handle, jobz, uplo, n, A, lda, W, lworkOnDevice);
     case API_COMPAT:
-        return hipsolverDnDsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork);
+        return hipsolverDnDsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lworkOnDevice);
     default:
+        *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
 
 inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t           API,
                                                           hipsolverHandle_t   handle,
+                                                          hipsolverDnParams_t params,
                                                           hipsolverEigMode_t  jobz,
                                                           hipsolverFillMode_t uplo,
                                                           int                 n,
                                                           hipsolverComplex*   A,
                                                           int                 lda,
                                                           float*              W,
-                                                          int*                lwork)
+                                                          int*                lworkOnDevice,
+                                                          int*                lworkOnHost)
 {
+    *lworkOnHost = 0;
     switch(API)
     {
     case API_NORMAL:
         return hipsolverCheevd_bufferSize(
-            handle, jobz, uplo, n, (hipFloatComplex*)A, lda, W, lwork);
+            handle, jobz, uplo, n, (hipFloatComplex*)A, lda, W, lworkOnDevice);
     case API_FORTRAN:
         return hipsolverCheevd_bufferSizeFortran(
-            handle, jobz, uplo, n, (hipFloatComplex*)A, lda, W, lwork);
+            handle, jobz, uplo, n, (hipFloatComplex*)A, lda, W, lworkOnDevice);
     case API_COMPAT:
         return hipsolverDnCheevd_bufferSize(
-            handle, jobz, uplo, n, (hipFloatComplex*)A, lda, W, lwork);
+            handle, jobz, uplo, n, (hipFloatComplex*)A, lda, W, lworkOnDevice);
     default:
+        *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
 
 inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t               API,
                                                           hipsolverHandle_t       handle,
+                                                          hipsolverDnParams_t     params,
                                                           hipsolverEigMode_t      jobz,
                                                           hipsolverFillMode_t     uplo,
                                                           int                     n,
                                                           hipsolverDoubleComplex* A,
                                                           int                     lda,
                                                           double*                 W,
-                                                          int*                    lwork)
+                                                          int*                    lworkOnDevice,
+                                                          int*                    lworkOnHost)
 {
+    *lworkOnHost = 0;
     switch(API)
     {
     case API_NORMAL:
         return hipsolverZheevd_bufferSize(
-            handle, jobz, uplo, n, (hipDoubleComplex*)A, lda, W, lwork);
+            handle, jobz, uplo, n, (hipDoubleComplex*)A, lda, W, lworkOnDevice);
     case API_FORTRAN:
         return hipsolverZheevd_bufferSizeFortran(
-            handle, jobz, uplo, n, (hipDoubleComplex*)A, lda, W, lwork);
+            handle, jobz, uplo, n, (hipDoubleComplex*)A, lda, W, lworkOnDevice);
     case API_COMPAT:
         return hipsolverDnZheevd_bufferSize(
-            handle, jobz, uplo, n, (hipDoubleComplex*)A, lda, W, lwork);
+            handle, jobz, uplo, n, (hipDoubleComplex*)A, lda, W, lworkOnDevice);
     default:
+        *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
 
 inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
                                                hipsolverHandle_t   handle,
+                                               hipsolverDnParams_t params,
                                                hipsolverEigMode_t  jobz,
                                                hipsolverFillMode_t uplo,
                                                int                 n,
                                                float*              A,
                                                int                 lda,
-                                               int                 stA,
                                                float*              W,
-                                               int                 stW,
-                                               float*              work,
-                                               int                 lwork,
+                                               float*              workOnDevice,
+                                               int                 lworkOnDevice,
+                                               float*              workOnHost,
+                                               int                 lworkOnHost,
                                                int*                info,
                                                int                 bc)
 {
     switch(API)
     {
     case API_NORMAL:
-        return hipsolverSsyevd(handle, jobz, uplo, n, A, lda, W, work, lwork, info);
+        return hipsolverSsyevd(handle, jobz, uplo, n, A, lda, W, workOnDevice, lworkOnDevice, info);
     case API_FORTRAN:
-        return hipsolverSsyevdFortran(handle, jobz, uplo, n, A, lda, W, work, lwork, info);
+        return hipsolverSsyevdFortran(
+            handle, jobz, uplo, n, A, lda, W, workOnDevice, lworkOnDevice, info);
     case API_COMPAT:
-        return hipsolverDnSsyevd(handle, jobz, uplo, n, A, lda, W, work, lwork, info);
+        return hipsolverDnSsyevd(
+            handle, jobz, uplo, n, A, lda, W, workOnDevice, lworkOnDevice, info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -7147,27 +7732,30 @@ inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
 
 inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
                                                hipsolverHandle_t   handle,
+                                               hipsolverDnParams_t params,
                                                hipsolverEigMode_t  jobz,
                                                hipsolverFillMode_t uplo,
                                                int                 n,
                                                double*             A,
                                                int                 lda,
-                                               int                 stA,
                                                double*             W,
-                                               int                 stW,
-                                               double*             work,
-                                               int                 lwork,
+                                               double*             workOnDevice,
+                                               int                 lworkOnDevice,
+                                               double*             workOnHost,
+                                               int                 lworkOnHost,
                                                int*                info,
                                                int                 bc)
 {
     switch(API)
     {
     case API_NORMAL:
-        return hipsolverDsyevd(handle, jobz, uplo, n, A, lda, W, work, lwork, info);
+        return hipsolverDsyevd(handle, jobz, uplo, n, A, lda, W, workOnDevice, lworkOnDevice, info);
     case API_FORTRAN:
-        return hipsolverDsyevdFortran(handle, jobz, uplo, n, A, lda, W, work, lwork, info);
+        return hipsolverDsyevdFortran(
+            handle, jobz, uplo, n, A, lda, W, workOnDevice, lworkOnDevice, info);
     case API_COMPAT:
-        return hipsolverDnDsyevd(handle, jobz, uplo, n, A, lda, W, work, lwork, info);
+        return hipsolverDnDsyevd(
+            handle, jobz, uplo, n, A, lda, W, workOnDevice, lworkOnDevice, info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -7175,16 +7763,17 @@ inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
 
 inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
                                                hipsolverHandle_t   handle,
+                                               hipsolverDnParams_t params,
                                                hipsolverEigMode_t  jobz,
                                                hipsolverFillMode_t uplo,
                                                int                 n,
                                                hipsolverComplex*   A,
                                                int                 lda,
-                                               int                 stA,
                                                float*              W,
-                                               int                 stW,
-                                               hipsolverComplex*   work,
-                                               int                 lwork,
+                                               hipsolverComplex*   workOnDevice,
+                                               int                 lworkOnDevice,
+                                               hipsolverComplex*   workOnHost,
+                                               int                 lworkOnHost,
                                                int*                info,
                                                int                 bc)
 {
@@ -7198,8 +7787,8 @@ inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
                                (hipFloatComplex*)A,
                                lda,
                                W,
-                               (hipFloatComplex*)work,
-                               lwork,
+                               (hipFloatComplex*)workOnDevice,
+                               lworkOnDevice,
                                info);
     case API_FORTRAN:
         return hipsolverCheevdFortran(handle,
@@ -7209,8 +7798,8 @@ inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
                                       (hipFloatComplex*)A,
                                       lda,
                                       W,
-                                      (hipFloatComplex*)work,
-                                      lwork,
+                                      (hipFloatComplex*)workOnDevice,
+                                      lworkOnDevice,
                                       info);
     case API_COMPAT:
         return hipsolverDnCheevd(handle,
@@ -7220,8 +7809,8 @@ inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
                                  (hipFloatComplex*)A,
                                  lda,
                                  W,
-                                 (hipFloatComplex*)work,
-                                 lwork,
+                                 (hipFloatComplex*)workOnDevice,
+                                 lworkOnDevice,
                                  info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
@@ -7230,16 +7819,17 @@ inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
 
 inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t               API,
                                                hipsolverHandle_t       handle,
+                                               hipsolverDnParams_t     params,
                                                hipsolverEigMode_t      jobz,
                                                hipsolverFillMode_t     uplo,
                                                int                     n,
                                                hipsolverDoubleComplex* A,
                                                int                     lda,
-                                               int                     stA,
                                                double*                 W,
-                                               int                     stW,
-                                               hipsolverDoubleComplex* work,
-                                               int                     lwork,
+                                               hipsolverDoubleComplex* workOnDevice,
+                                               int                     lworkOnDevice,
+                                               hipsolverDoubleComplex* workOnHost,
+                                               int                     lworkOnHost,
                                                int*                    info,
                                                int                     bc)
 {
@@ -7253,8 +7843,8 @@ inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t               API,
                                (hipDoubleComplex*)A,
                                lda,
                                W,
-                               (hipDoubleComplex*)work,
-                               lwork,
+                               (hipDoubleComplex*)workOnDevice,
+                               lworkOnDevice,
                                info);
     case API_FORTRAN:
         return hipsolverZheevdFortran(handle,
@@ -7264,8 +7854,8 @@ inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t               API,
                                       (hipDoubleComplex*)A,
                                       lda,
                                       W,
-                                      (hipDoubleComplex*)work,
-                                      lwork,
+                                      (hipDoubleComplex*)workOnDevice,
+                                      lworkOnDevice,
                                       info);
     case API_COMPAT:
         return hipsolverDnZheevd(handle,
@@ -7275,8 +7865,309 @@ inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t               API,
                                  (hipDoubleComplex*)A,
                                  lda,
                                  W,
-                                 (hipDoubleComplex*)work,
-                                 lwork,
+                                 (hipDoubleComplex*)workOnDevice,
+                                 lworkOnDevice,
+                                 info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+// DnX (64-bit) overloads
+inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t           API,
+                                                          hipsolverHandle_t   handle,
+                                                          hipsolverDnParams_t params,
+                                                          hipsolverEigMode_t  jobz,
+                                                          hipsolverFillMode_t uplo,
+                                                          int64_t             n,
+                                                          float*              A,
+                                                          int64_t             lda,
+                                                          float*              W,
+                                                          size_t*             lworkOnDevice,
+                                                          size_t*             lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsyevd_bufferSize(handle,
+                                            params,
+                                            jobz,
+                                            uplo,
+                                            n,
+                                            HIP_R_32F,
+                                            A,
+                                            lda,
+                                            HIP_R_32F,
+                                            W,
+                                            HIP_R_32F,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t           API,
+                                                          hipsolverHandle_t   handle,
+                                                          hipsolverDnParams_t params,
+                                                          hipsolverEigMode_t  jobz,
+                                                          hipsolverFillMode_t uplo,
+                                                          int64_t             n,
+                                                          double*             A,
+                                                          int64_t             lda,
+                                                          double*             W,
+                                                          size_t*             lworkOnDevice,
+                                                          size_t*             lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsyevd_bufferSize(handle,
+                                            params,
+                                            jobz,
+                                            uplo,
+                                            n,
+                                            HIP_R_64F,
+                                            A,
+                                            lda,
+                                            HIP_R_64F,
+                                            W,
+                                            HIP_R_64F,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t           API,
+                                                          hipsolverHandle_t   handle,
+                                                          hipsolverDnParams_t params,
+                                                          hipsolverEigMode_t  jobz,
+                                                          hipsolverFillMode_t uplo,
+                                                          int64_t             n,
+                                                          hipsolverComplex*   A,
+                                                          int64_t             lda,
+                                                          float*              W,
+                                                          size_t*             lworkOnDevice,
+                                                          size_t*             lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsyevd_bufferSize(handle,
+                                            params,
+                                            jobz,
+                                            uplo,
+                                            n,
+                                            HIP_C_32F,
+                                            A,
+                                            lda,
+                                            HIP_R_32F,
+                                            W,
+                                            HIP_C_32F,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syevd_heevd_bufferSize(testAPI_t               API,
+                                                          hipsolverHandle_t       handle,
+                                                          hipsolverDnParams_t     params,
+                                                          hipsolverEigMode_t      jobz,
+                                                          hipsolverFillMode_t     uplo,
+                                                          int64_t                 n,
+                                                          hipsolverDoubleComplex* A,
+                                                          int64_t                 lda,
+                                                          double*                 W,
+                                                          size_t*                 lworkOnDevice,
+                                                          size_t*                 lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsyevd_bufferSize(handle,
+                                            params,
+                                            jobz,
+                                            uplo,
+                                            n,
+                                            HIP_C_64F,
+                                            A,
+                                            lda,
+                                            HIP_R_64F,
+                                            W,
+                                            HIP_C_64F,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
+                                               hipsolverHandle_t   handle,
+                                               hipsolverDnParams_t params,
+                                               hipsolverEigMode_t  jobz,
+                                               hipsolverFillMode_t uplo,
+                                               int64_t             n,
+                                               float*              A,
+                                               int64_t             lda,
+                                               float*              W,
+                                               float*              workOnDevice,
+                                               size_t              lworkOnDevice,
+                                               float*              workOnHost,
+                                               size_t              lworkOnHost,
+                                               int*                info,
+                                               int                 bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsyevd(handle,
+                                 params,
+                                 jobz,
+                                 uplo,
+                                 n,
+                                 HIP_R_32F,
+                                 A,
+                                 lda,
+                                 HIP_R_32F,
+                                 W,
+                                 HIP_R_32F,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost,
+                                 info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
+                                               hipsolverHandle_t   handle,
+                                               hipsolverDnParams_t params,
+                                               hipsolverEigMode_t  jobz,
+                                               hipsolverFillMode_t uplo,
+                                               int64_t             n,
+                                               double*             A,
+                                               int64_t             lda,
+                                               double*             W,
+                                               double*             workOnDevice,
+                                               size_t              lworkOnDevice,
+                                               double*             workOnHost,
+                                               size_t              lworkOnHost,
+                                               int*                info,
+                                               int                 bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsyevd(handle,
+                                 params,
+                                 jobz,
+                                 uplo,
+                                 n,
+                                 HIP_R_64F,
+                                 A,
+                                 lda,
+                                 HIP_R_64F,
+                                 W,
+                                 HIP_R_64F,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost,
+                                 info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t           API,
+                                               hipsolverHandle_t   handle,
+                                               hipsolverDnParams_t params,
+                                               hipsolverEigMode_t  jobz,
+                                               hipsolverFillMode_t uplo,
+                                               int64_t             n,
+                                               hipsolverComplex*   A,
+                                               int64_t             lda,
+                                               float*              W,
+                                               hipsolverComplex*   workOnDevice,
+                                               size_t              lworkOnDevice,
+                                               hipsolverComplex*   workOnHost,
+                                               size_t              lworkOnHost,
+                                               int*                info,
+                                               int                 bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsyevd(handle,
+                                 params,
+                                 jobz,
+                                 uplo,
+                                 n,
+                                 HIP_C_32F,
+                                 A,
+                                 lda,
+                                 HIP_R_32F,
+                                 W,
+                                 HIP_C_32F,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost,
+                                 info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syevd_heevd(testAPI_t               API,
+                                               hipsolverHandle_t       handle,
+                                               hipsolverDnParams_t     params,
+                                               hipsolverEigMode_t      jobz,
+                                               hipsolverFillMode_t     uplo,
+                                               int64_t                 n,
+                                               hipsolverDoubleComplex* A,
+                                               int64_t                 lda,
+                                               double*                 W,
+                                               hipsolverDoubleComplex* workOnDevice,
+                                               size_t                  lworkOnDevice,
+                                               hipsolverDoubleComplex* workOnHost,
+                                               size_t                  lworkOnHost,
+                                               int*                    info,
+                                               int                     bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsyevd(handle,
+                                 params,
+                                 jobz,
+                                 uplo,
+                                 n,
+                                 HIP_C_64F,
+                                 A,
+                                 lda,
+                                 HIP_R_64F,
+                                 W,
+                                 HIP_C_64F,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost,
                                  info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
@@ -9735,6 +10626,641 @@ inline hipsolverStatus_t hipsolver_sytrf(testAPI_t               API,
     case API_COMPAT:
         return hipsolverDnZsytrf(
             handle, uplo, n, (hipDoubleComplex*)A, lda, ipiv, (hipDoubleComplex*)work, lwork, info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+/********************************************************/
+
+/******************** SYEV/HEEV ********************/
+// normal and strided_batched
+// bufferSize
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        bool                STRIDED,
+                                                        hipsolverHandle_t   handle,
+                                                        hipsolverDnParams_t params,
+                                                        hipsolverEigMode_t  jobz,
+                                                        hipsolverFillMode_t uplo,
+                                                        int64_t             n,
+                                                        float*              A,
+                                                        int64_t             lda,
+                                                        float*              W,
+                                                        size_t*             lworkOnDevice,
+                                                        size_t*             lworkOnHost,
+                                                        int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched_bufferSize(handle,
+                                                  params,
+                                                  jobz,
+                                                  uplo,
+                                                  n,
+                                                  HIP_R_32F,
+                                                  A,
+                                                  lda,
+                                                  HIP_R_32F,
+                                                  W,
+                                                  HIP_R_32F,
+                                                  lworkOnDevice,
+                                                  lworkOnHost,
+                                                  batchSize);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        bool                STRIDED,
+                                                        hipsolverHandle_t   handle,
+                                                        hipsolverDnParams_t params,
+                                                        hipsolverEigMode_t  jobz,
+                                                        hipsolverFillMode_t uplo,
+                                                        int64_t             n,
+                                                        double*             A,
+                                                        int64_t             lda,
+                                                        double*             W,
+                                                        size_t*             lworkOnDevice,
+                                                        size_t*             lworkOnHost,
+                                                        int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched_bufferSize(handle,
+                                                  params,
+                                                  jobz,
+                                                  uplo,
+                                                  n,
+                                                  HIP_R_64F,
+                                                  A,
+                                                  lda,
+                                                  HIP_R_64F,
+                                                  W,
+                                                  HIP_R_64F,
+                                                  lworkOnDevice,
+                                                  lworkOnHost,
+                                                  batchSize);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        bool                STRIDED,
+                                                        hipsolverHandle_t   handle,
+                                                        hipsolverDnParams_t params,
+                                                        hipsolverEigMode_t  jobz,
+                                                        hipsolverFillMode_t uplo,
+                                                        int64_t             n,
+                                                        hipsolverComplex*   A,
+                                                        int64_t             lda,
+                                                        float*              W,
+                                                        size_t*             lworkOnDevice,
+                                                        size_t*             lworkOnHost,
+                                                        int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched_bufferSize(handle,
+                                                  params,
+                                                  jobz,
+                                                  uplo,
+                                                  n,
+                                                  HIP_C_32F,
+                                                  A,
+                                                  lda,
+                                                  HIP_R_32F,
+                                                  W,
+                                                  HIP_C_32F,
+                                                  lworkOnDevice,
+                                                  lworkOnHost,
+                                                  batchSize);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t               API,
+                                                        bool                    STRIDED,
+                                                        hipsolverHandle_t       handle,
+                                                        hipsolverDnParams_t     params,
+                                                        hipsolverEigMode_t      jobz,
+                                                        hipsolverFillMode_t     uplo,
+                                                        int64_t                 n,
+                                                        hipsolverDoubleComplex* A,
+                                                        int64_t                 lda,
+                                                        double*                 W,
+                                                        size_t*                 lworkOnDevice,
+                                                        size_t*                 lworkOnHost,
+                                                        int64_t                 batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched_bufferSize(handle,
+                                                  params,
+                                                  jobz,
+                                                  uplo,
+                                                  n,
+                                                  HIP_C_64F,
+                                                  A,
+                                                  lda,
+                                                  HIP_R_64F,
+                                                  W,
+                                                  HIP_C_64F,
+                                                  lworkOnDevice,
+                                                  lworkOnHost,
+                                                  batchSize);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+// solve
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             bool                STRIDED,
+                                             hipsolverHandle_t   handle,
+                                             hipsolverDnParams_t params,
+                                             hipsolverEigMode_t  jobz,
+                                             hipsolverFillMode_t uplo,
+                                             int64_t             n,
+                                             float*              A,
+                                             int64_t             lda,
+                                             float*              W,
+                                             float*              workOnDevice,
+                                             size_t              lworkOnDevice,
+                                             float*              workOnHost,
+                                             size_t              lworkOnHost,
+                                             int*                devInfo,
+                                             int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched(handle,
+                                       params,
+                                       jobz,
+                                       uplo,
+                                       n,
+                                       HIP_R_32F,
+                                       A,
+                                       lda,
+                                       HIP_R_32F,
+                                       W,
+                                       HIP_R_32F,
+                                       workOnDevice,
+                                       lworkOnDevice,
+                                       workOnHost,
+                                       lworkOnHost,
+                                       devInfo,
+                                       batchSize);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             bool                STRIDED,
+                                             hipsolverHandle_t   handle,
+                                             hipsolverDnParams_t params,
+                                             hipsolverEigMode_t  jobz,
+                                             hipsolverFillMode_t uplo,
+                                             int64_t             n,
+                                             double*             A,
+                                             int64_t             lda,
+                                             double*             W,
+                                             double*             workOnDevice,
+                                             size_t              lworkOnDevice,
+                                             double*             workOnHost,
+                                             size_t              lworkOnHost,
+                                             int*                devInfo,
+                                             int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched(handle,
+                                       params,
+                                       jobz,
+                                       uplo,
+                                       n,
+                                       HIP_R_64F,
+                                       A,
+                                       lda,
+                                       HIP_R_64F,
+                                       W,
+                                       HIP_R_64F,
+                                       workOnDevice,
+                                       lworkOnDevice,
+                                       workOnHost,
+                                       lworkOnHost,
+                                       devInfo,
+                                       batchSize);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             bool                STRIDED,
+                                             hipsolverHandle_t   handle,
+                                             hipsolverDnParams_t params,
+                                             hipsolverEigMode_t  jobz,
+                                             hipsolverFillMode_t uplo,
+                                             int64_t             n,
+                                             hipsolverComplex*   A,
+                                             int64_t             lda,
+                                             float*              W,
+                                             hipsolverComplex*   workOnDevice,
+                                             size_t              lworkOnDevice,
+                                             hipsolverComplex*   workOnHost,
+                                             size_t              lworkOnHost,
+                                             int*                devInfo,
+                                             int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched(handle,
+                                       params,
+                                       jobz,
+                                       uplo,
+                                       n,
+                                       HIP_C_32F,
+                                       A,
+                                       lda,
+                                       HIP_R_32F,
+                                       W,
+                                       HIP_C_32F,
+                                       workOnDevice,
+                                       lworkOnDevice,
+                                       workOnHost,
+                                       lworkOnHost,
+                                       devInfo,
+                                       batchSize);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t               API,
+                                             bool                    STRIDED,
+                                             hipsolverHandle_t       handle,
+                                             hipsolverDnParams_t     params,
+                                             hipsolverEigMode_t      jobz,
+                                             hipsolverFillMode_t     uplo,
+                                             int64_t                 n,
+                                             hipsolverDoubleComplex* A,
+                                             int64_t                 lda,
+                                             double*                 W,
+                                             hipsolverDoubleComplex* workOnDevice,
+                                             size_t                  lworkOnDevice,
+                                             hipsolverDoubleComplex* workOnHost,
+                                             size_t                  lworkOnHost,
+                                             int*                    devInfo,
+                                             int64_t                 batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched(handle,
+                                       params,
+                                       jobz,
+                                       uplo,
+                                       n,
+                                       HIP_C_64F,
+                                       A,
+                                       lda,
+                                       HIP_R_64F,
+                                       W,
+                                       HIP_C_64F,
+                                       workOnDevice,
+                                       lworkOnDevice,
+                                       workOnHost,
+                                       lworkOnHost,
+                                       devInfo,
+                                       batchSize);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+/********************************************************/
+
+/******************** SYTRS ********************/
+inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t           API,
+                                                    hipsolverHandle_t   handle,
+                                                    hipsolverFillMode_t uplo,
+                                                    int64_t             n,
+                                                    int64_t             nrhs,
+                                                    float*              A,
+                                                    int64_t             lda,
+                                                    const int64_t*      ipiv,
+                                                    float*              B,
+                                                    int64_t             ldb,
+                                                    size_t*             lworkOnDevice,
+                                                    size_t*             lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsytrs_bufferSize(handle,
+                                            uplo,
+                                            n,
+                                            nrhs,
+                                            HIP_R_32F,
+                                            A,
+                                            lda,
+                                            ipiv,
+                                            HIP_R_32F,
+                                            B,
+                                            ldb,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnHost   = 0;
+        *lworkOnDevice = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t           API,
+                                                    hipsolverHandle_t   handle,
+                                                    hipsolverFillMode_t uplo,
+                                                    int64_t             n,
+                                                    int64_t             nrhs,
+                                                    double*             A,
+                                                    int64_t             lda,
+                                                    const int64_t*      ipiv,
+                                                    double*             B,
+                                                    int64_t             ldb,
+                                                    size_t*             lworkOnDevice,
+                                                    size_t*             lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsytrs_bufferSize(handle,
+                                            uplo,
+                                            n,
+                                            nrhs,
+                                            HIP_R_64F,
+                                            A,
+                                            lda,
+                                            ipiv,
+                                            HIP_R_64F,
+                                            B,
+                                            ldb,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnHost   = 0;
+        *lworkOnDevice = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t           API,
+                                                    hipsolverHandle_t   handle,
+                                                    hipsolverFillMode_t uplo,
+                                                    int64_t             n,
+                                                    int64_t             nrhs,
+                                                    hipsolverComplex*   A,
+                                                    int64_t             lda,
+                                                    const int64_t*      ipiv,
+                                                    hipsolverComplex*   B,
+                                                    int64_t             ldb,
+                                                    size_t*             lworkOnDevice,
+                                                    size_t*             lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsytrs_bufferSize(handle,
+                                            uplo,
+                                            n,
+                                            nrhs,
+                                            HIP_C_32F,
+                                            (const hipFloatComplex*)A,
+                                            lda,
+                                            ipiv,
+                                            HIP_C_32F,
+                                            (hipFloatComplex*)B,
+                                            ldb,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnHost   = 0;
+        *lworkOnDevice = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t               API,
+                                                    hipsolverHandle_t       handle,
+                                                    hipsolverFillMode_t     uplo,
+                                                    int64_t                 n,
+                                                    int64_t                 nrhs,
+                                                    hipsolverDoubleComplex* A,
+                                                    int64_t                 lda,
+                                                    const int64_t*          ipiv,
+                                                    hipsolverDoubleComplex* B,
+                                                    int64_t                 ldb,
+                                                    size_t*                 lworkOnDevice,
+                                                    size_t*                 lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsytrs_bufferSize(handle,
+                                            uplo,
+                                            n,
+                                            nrhs,
+                                            HIP_C_64F,
+                                            (const hipDoubleComplex*)A,
+                                            lda,
+                                            ipiv,
+                                            HIP_C_64F,
+                                            (hipDoubleComplex*)B,
+                                            ldb,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnHost   = 0;
+        *lworkOnDevice = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_sytrs(testAPI_t           API,
+                                         hipsolverHandle_t   handle,
+                                         hipsolverFillMode_t uplo,
+                                         int64_t             n,
+                                         int64_t             nrhs,
+                                         float*              A,
+                                         int64_t             lda,
+                                         const int64_t*      ipiv,
+                                         float*              B,
+                                         int64_t             ldb,
+                                         void*               workOnDevice,
+                                         size_t              lworkOnDevice,
+                                         void*               workOnHost,
+                                         size_t              lworkOnHost,
+                                         int*                info,
+                                         int                 bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsytrs(handle,
+                                 uplo,
+                                 n,
+                                 nrhs,
+                                 HIP_R_32F,
+                                 A,
+                                 lda,
+                                 ipiv,
+                                 HIP_R_32F,
+                                 B,
+                                 ldb,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost,
+                                 info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_sytrs(testAPI_t           API,
+                                         hipsolverHandle_t   handle,
+                                         hipsolverFillMode_t uplo,
+                                         int64_t             n,
+                                         int64_t             nrhs,
+                                         double*             A,
+                                         int64_t             lda,
+                                         const int64_t*      ipiv,
+                                         double*             B,
+                                         int64_t             ldb,
+                                         void*               workOnDevice,
+                                         size_t              lworkOnDevice,
+                                         void*               workOnHost,
+                                         size_t              lworkOnHost,
+                                         int*                info,
+                                         int                 bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsytrs(handle,
+                                 uplo,
+                                 n,
+                                 nrhs,
+                                 HIP_R_64F,
+                                 A,
+                                 lda,
+                                 ipiv,
+                                 HIP_R_64F,
+                                 B,
+                                 ldb,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost,
+                                 info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_sytrs(testAPI_t           API,
+                                         hipsolverHandle_t   handle,
+                                         hipsolverFillMode_t uplo,
+                                         int64_t             n,
+                                         int64_t             nrhs,
+                                         hipsolverComplex*   A,
+                                         int64_t             lda,
+                                         const int64_t*      ipiv,
+                                         hipsolverComplex*   B,
+                                         int64_t             ldb,
+                                         void*               workOnDevice,
+                                         size_t              lworkOnDevice,
+                                         void*               workOnHost,
+                                         size_t              lworkOnHost,
+                                         int*                info,
+                                         int                 bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsytrs(handle,
+                                 uplo,
+                                 n,
+                                 nrhs,
+                                 HIP_C_32F,
+                                 (const hipFloatComplex*)A,
+                                 lda,
+                                 ipiv,
+                                 HIP_C_32F,
+                                 (hipFloatComplex*)B,
+                                 ldb,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost,
+                                 info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_sytrs(testAPI_t               API,
+                                         hipsolverHandle_t       handle,
+                                         hipsolverFillMode_t     uplo,
+                                         int64_t                 n,
+                                         int64_t                 nrhs,
+                                         hipsolverDoubleComplex* A,
+                                         int64_t                 lda,
+                                         const int64_t*          ipiv,
+                                         hipsolverDoubleComplex* B,
+                                         int64_t                 ldb,
+                                         void*                   workOnDevice,
+                                         size_t                  lworkOnDevice,
+                                         void*                   workOnHost,
+                                         size_t                  lworkOnHost,
+                                         int*                    info,
+                                         int                     bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXsytrs(handle,
+                                 uplo,
+                                 n,
+                                 nrhs,
+                                 HIP_C_64F,
+                                 (const hipDoubleComplex*)A,
+                                 lda,
+                                 ipiv,
+                                 HIP_C_64F,
+                                 (hipDoubleComplex*)B,
+                                 ldb,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost,
+                                 info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }

@@ -27,7 +27,7 @@
 typedef enum
 {
     /** @brief Invalid descriptor type - used for error detection */
-    HIPDNN_INVALID_TYPE = 0,
+    HIPDNN_INVALID_TYPE_EXT = 0,
 
     /**
      * @brief Engine descriptor
@@ -182,7 +182,7 @@ typedef enum
      * Represents a backward data convolution operation with output gradient (DY),
      * weight (W), and input gradient (DX) tensors plus convolution parameters.
      */
-    HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR = 19,
+    HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR = 19,
 
     /**
      * @brief Batchnorm backward operation descriptor (extension)
@@ -206,7 +206,7 @@ typedef enum
      * Represents a matrix multiplication operation with input (A),
      * input (B), and output (C) tensors plus a compute data type.
      */
-    HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT = 22,
+    HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR = 22,
 
     /**
      * @brief RMSNorm operation descriptor
@@ -218,13 +218,13 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT = 23,
 
     /**
-     * @brief SDPA forward propagation operation descriptor (extension)
+     * @brief SDPA forward propagation operation descriptor
      *
      * Represents a scaled dot-product attention forward operation with
      * query (Q), key (K), value (V), and output (O) tensors plus
      * attention parameters.
      */
-    HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT = 24,
+    HIPDNN_BACKEND_OPERATION_SDPA_FWD_DESCRIPTOR = 24,
 
     /**
      * @brief Layer normalization operation descriptor
@@ -234,5 +234,74 @@ typedef enum
      * mean and inverse variance outputs plus a compute data type.
      */
     HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT = 25,
+
+    /**
+     * @brief Block scale quantize operation descriptor
+     *
+     * Represents a block scale quantize operation with input (X),
+     * output (Y), and scale tensors plus block_size, axis, and transpose parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR = 26,
+
+    /**
+     * @brief Batchnorm training forward operation descriptor (extension)
+     *
+     * Represents a batch normalization training forward operation with
+     * input (X), scale, bias, epsilon, output (Y), optional mean and
+     * inverse variance outputs, optional running statistics, and peer stats.
+     */
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT = 27,
+
+    /**
+     * @brief Block scale dequantize operation descriptor
+     *
+     * Represents a block scale dequantize operation with input (X),
+     * scale, and output (Y) tensors plus block size parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR = 28,
+
+    /**
+     * @brief Custom operation descriptor
+     *
+     * Represents an opaque custom (plugin-provided) operation with
+     * variable-length input/output tensor arrays, a plugin identifier
+     * string, and an opaque byte payload interpreted by the plugin.
+     */
+    HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT = 29,
+
+    /**
+     * @brief SDPA backward propagation operation descriptor (extension)
+     *
+     * Represents a scaled dot-product attention backward operation with
+     * query (Q), key (K), value (V), output (O), gradient output (dO),
+     * and stats tensors as inputs, producing gradients dQ, dK, dV.
+     */
+    HIPDNN_BACKEND_OPERATION_SDPA_BWD_DESCRIPTOR_EXT = 30,
+
+    /**
+     * @brief Reduction operation descriptor
+     *
+     * Represents a reduction operation with input (X) and output (Y)
+     * tensors, a reduction operator, and a compute data type.
+     */
+    HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR = 31,
+
+    /**
+     * @brief Resample forward operation descriptor
+     *
+     * Represents a resample forward operation (max, average, etc.).
+     * Takes an input tensor X and produces an output tensor Y,
+     * with optional index tensor IDX for max resample.
+     */
+    HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR = 32,
+
+    /**
+     * @brief RMSNorm backward operation descriptor
+     *
+     * Represents an RMS normalization backward operation with gradient
+     * input (DY), input (X), scale, inverse RMS, and outputs
+     * DX, DScale, DBias (optional).
+     */
+    HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT = 33,
 
 } hipdnnBackendDescriptorType_t;

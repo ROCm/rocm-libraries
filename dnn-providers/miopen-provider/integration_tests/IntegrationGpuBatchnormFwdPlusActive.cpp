@@ -66,7 +66,7 @@ protected:
             "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
-        graph::BatchnormInferenceAttributes bnAttrs;
+        const graph::BatchnormInferenceAttributes bnAttrs;
 
         auto yTensorAttr = graphObj.batchnorm_inference(xTensorAttr,
                                                         meanTensorAttr,
@@ -110,6 +110,38 @@ protected:
         this->verifyGraph(graphObj, testCase.seed);
     }
 };
+
+//NCL
+using IntegrationGpuBatchnormFwdPlusActivNclFp32
+    = BatchnormFwdPlusActiv<float,
+                            float,
+                            std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
+
+using IntegrationGpuBatchnormFwdPlusActivNclBfp16
+    = BatchnormFwdPlusActiv<bfloat16,
+                            float,
+                            std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
+
+using IntegrationGpuBatchnormFwdPlusActivNclFp16
+    = BatchnormFwdPlusActiv<half,
+                            float,
+                            std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
+
+//NLC
+using IntegrationGpuBatchnormFwdPlusActivNlcFp32
+    = BatchnormFwdPlusActiv<float,
+                            float,
+                            std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
+
+using IntegrationGpuBatchnormFwdPlusActivNlcBfp16
+    = BatchnormFwdPlusActiv<bfloat16,
+                            float,
+                            std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
+
+using IntegrationGpuBatchnormFwdPlusActivNlcFp16
+    = BatchnormFwdPlusActiv<half,
+                            float,
+                            std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
 
 //NCHW
 using IntegrationGpuBatchnormFwdPlusActivNchwFp32
@@ -176,6 +208,108 @@ using IntegrationGpuBatchnormFwdPlusActivNdhwcFp16
                             std::tuple<BatchnormTestCase, test_activation_common::ActivTestCase>>;
 
 } // namespace
+
+TEST_P(IntegrationGpuBatchnormFwdPlusActivNclFp32, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdPlusActivNclFp32,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdPlusActivNclFp32,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+TEST_P(IntegrationGpuBatchnormFwdPlusActivNclBfp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdPlusActivNclBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdPlusActivNclBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+TEST_P(IntegrationGpuBatchnormFwdPlusActivNclFp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdPlusActivNclFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdPlusActivNclFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+TEST_P(IntegrationGpuBatchnormFwdPlusActivNlcFp32, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdPlusActivNlcFp32,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdPlusActivNlcFp32,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+TEST_P(IntegrationGpuBatchnormFwdPlusActivNlcBfp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdPlusActivNlcBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdPlusActivNlcBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+TEST_P(IntegrationGpuBatchnormFwdPlusActivNlcFp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdPlusActivNlcFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormFwdPlusActivNlcFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference1dFullTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNchwFp32, Correctness)
 {

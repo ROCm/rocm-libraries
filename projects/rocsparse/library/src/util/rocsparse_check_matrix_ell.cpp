@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,8 +52,8 @@ rocsparse_status rocsparse::check_matrix_ell_core(rocsparse_handle       handle,
     rocsparse_data_status* d_data_status = reinterpret_cast<rocsparse_data_status*>(ptr);
     ptr += ((sizeof(rocsparse_data_status) - 1) / 256 + 1) * 256;
 
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(d_data_status, 0, sizeof(rocsparse_data_status)));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(
+        hipMemsetAsync(d_data_status, 0, sizeof(rocsparse_data_status), handle->stream));
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_ell_device<256>),
                                        dim3((m - 1) / 256 + 1),

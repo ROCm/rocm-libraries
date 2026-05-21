@@ -122,7 +122,7 @@ TEST(TestDescriptorFactory, CreateGraphExtZeroByteSize)
 TEST(TestDescriptorFactory, CreateGraphExtInvalidGraphData)
 {
     const std::array<uint8_t, 2> invalidSerializedGraph = {0xFF, 0xFF};
-    size_t graphByteSize = sizeof(invalidSerializedGraph);
+    const size_t graphByteSize = sizeof(invalidSerializedGraph);
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
     ASSERT_THROW_HIPDNN_STATUS(DescriptorFactory::createGraphExt(

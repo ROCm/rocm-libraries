@@ -16,6 +16,10 @@
 #include "gemm_utils.hpp"
 #include "run_gemm_example.inc"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 /**
  * @brief Tile partitioner with output offset support.
  *
@@ -160,12 +164,25 @@ float gemm_stage1(const GemmSplitKHostArgs& args, const ck_tile::stream_config& 
                                     args.stride_E);
     constexpr auto scheduler = GemmConfig::Scheduler;
 
-    using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                                       BDataType,
-                                                                       AccDataType,
-                                                                       GemmShape,
-                                                                       GemmUniversalTraits,
-                                                                       scheduler>;
+    using AComputeDataType =
+        std::conditional_t<std::is_same_v<ADataType, ck_tile::pk_int4_t>, BDataType, ADataType>;
+    using BComputeDataType =
+        std::conditional_t<std::is_same_v<BDataType, ck_tile::pk_int4_t> ||
+                               std::is_same_v<BDataType, ck_tile::pk_fp4_raw_t>,
+                           ADataType,
+                           BDataType>;
+
+    using UniversalGemmProblem =
+        ck_tile::UniversalGemmPipelineProblem<ADataType,
+                                              BDataType,
+                                              AccDataType,
+                                              GemmShape,
+                                              GemmUniversalTraits,
+                                              scheduler,
+                                              ck_tile::element_wise::PassThrough,
+                                              ck_tile::element_wise::PassThrough,
+                                              AComputeDataType,
+                                              BComputeDataType>;
 
     using GemmPipeline = typename PipelineTypeTraits<GemmConfig::Pipeline>::template GemmPipeline<
         UniversalGemmProblem>;
@@ -961,3 +978,5 @@ int main(int argc, char* argv[])
     }
     return EXIT_SUCCESS;
 }
+
+#pragma clang diagnostic pop

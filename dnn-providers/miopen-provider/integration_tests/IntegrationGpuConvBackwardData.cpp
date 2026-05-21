@@ -34,9 +34,15 @@ protected:
                           unsigned int seed) override
     {
         assert(_minVal < _maxVal && "Invalid tensor value range");
+
+        bundle.sentinelFillOutputTensors();
+
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+            if(!bundle.isOutput(tensorPair.first))
+            {
+                bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+            }
         }
     }
 
@@ -63,7 +69,8 @@ protected:
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
-
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;

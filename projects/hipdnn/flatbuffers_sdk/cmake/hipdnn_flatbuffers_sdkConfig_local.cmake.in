@@ -1,0 +1,25 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(hipdnn_data_sdk @HIPDNN_FLATBUFFERS_SDK_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
+
+# Reflects how hipDNN was built; not consumer-overridable, since the imported
+# target's compile definitions are already baked in.
+set(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB @HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB@)
+
+# nlohmann_json is optional based on HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
+    find_dependency(nlohmann_json REQUIRED)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_flatbuffers_sdkTargets.cmake")
+
+# In the local build FlatBuffers headers are bundled with the install, so
+# CMake doesn't populate flatbuffers_VERSION via find_dependency. The bundled
+# headers are guaranteed to match HIPDNN_FLATBUFFERS_VERSION (enforced at
+# hipDNN configure time), so just surface that version in the status message.
+message(STATUS "hipDNN Flatbuffers SDK: Using local FlatBuffers @HIPDNN_FLATBUFFERS_VERSION@ headers")

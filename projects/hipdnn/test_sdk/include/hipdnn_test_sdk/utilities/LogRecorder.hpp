@@ -8,6 +8,9 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <initializer_list>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -86,26 +89,73 @@ public:
             return;
         }
 
-        std::lock_guard<std::mutex> lock(_logsMutex);
-        _recordedLogs.push_back({severity, message});
+        {
+            const std::lock_guard<std::mutex> lock(_logsMutex);
+            _recordedLogs.push_back({severity, message});
+        }
+        _cvLogRecorded.notify_all();
     }
 
     void clearLogs()
     {
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        const std::lock_guard<std::mutex> lock(_logsMutex);
         _recordedLogs.clear();
     }
 
     std::vector<RecordedLog> getRecordedLogs() const
     {
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        const std::lock_guard<std::mutex> lock(_logsMutex);
         return _recordedLogs;
     }
 
     size_t getRecordedLogCount() const
     {
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        const std::lock_guard<std::mutex> lock(_logsMutex);
         return _recordedLogs.size();
+    }
+
+    /**
+     * @brief Wait until log count reaches target, with timeout
+     * @param targetCount The target log count to wait for
+     * @param timeout Maximum time to wait
+     * @return true if target reached, false if timed out
+     */
+    [[nodiscard]] bool waitForLogCount(size_t targetCount, std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(_logsMutex);
+        return _cvLogRecorded.wait_for(
+            lock, timeout, [&] { return _recordedLogs.size() >= targetCount; });
+    }
+
+    /**
+     * @brief Wait until logs containing all given texts are recorded, with a single shared timeout
+     * @param texts The substrings to search for in log messages
+     * @param timeout Maximum total time to wait for all texts to appear
+     * @return true if all matching logs found, false if timed out
+     */
+    [[nodiscard]] bool waitForLogsContaining(std::initializer_list<std::string> texts,
+                                             std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(_logsMutex);
+        return _cvLogRecorded.wait_for(lock, timeout, [&] {
+            for(const auto& text : texts)
+            {
+                bool found = false;
+                for(const auto& log : _recordedLogs)
+                {
+                    if(log.message.find(text) != std::string::npos)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if(!found)
+                {
+                    return false;
+                }
+            }
+            return true;
+        });
     }
 
     LogRecording(const LogRecording&) = delete;
@@ -116,6 +166,7 @@ private:
     ~LogRecording() = default;
 
     mutable std::mutex _logsMutex;
+    std::condition_variable _cvLogRecorded;
     std::atomic<bool> _isRecording{false};
     std::vector<RecordedLog> _recordedLogs;
 };
@@ -328,7 +379,7 @@ public:
         }
 
         std::ostringstream oss;
-        size_t logsToOutput = (maxLogs == 0 || maxLogs > logs.size()) ? logs.size() : maxLogs;
+        const size_t logsToOutput = (maxLogs == 0 || maxLogs > logs.size()) ? logs.size() : maxLogs;
 
         for(size_t i = 0; i < logsToOutput; ++i)
         {
@@ -337,7 +388,7 @@ public:
 
         if(maxLogs > 0 && logs.size() > maxLogs)
         {
-            size_t skipped = logs.size() - maxLogs;
+            const size_t skipped = logs.size() - maxLogs;
             oss << "(Skipped " << skipped << " additional log" << (skipped > 1 ? "s" : "")
                 << ".)\n";
         }
@@ -348,6 +399,37 @@ public:
     std::vector<RecordedLog> getRecordedLogs() const
     {
         return LogRecording::instance(_recordingId).getRecordedLogs();
+    }
+
+    /**
+     * @brief Clear all recorded logs for the current log recorder.
+     */
+    void clearLogs()
+    {
+        LogRecording::instance(_recordingId).clearLogs();
+    }
+
+    /**
+     * @brief Wait until log count reaches target, with timeout
+     * @param targetCount The target log count to wait for
+     * @param timeout Maximum time to wait
+     * @return true if target reached, false if timed out
+     */
+    [[nodiscard]] bool waitForLogCount(size_t targetCount, std::chrono::milliseconds timeout)
+    {
+        return LogRecording::instance(_recordingId).waitForLogCount(targetCount, timeout);
+    }
+
+    /**
+     * @brief Wait until logs containing all given texts are recorded, with a single shared timeout
+     * @param texts The substrings to search for in log messages
+     * @param timeout Maximum total time to wait for all texts to appear
+     * @return true if all matching logs found, false if timed out
+     */
+    [[nodiscard]] bool waitForLogsContaining(std::initializer_list<std::string> texts,
+                                             std::chrono::milliseconds timeout)
+    {
+        return LogRecording::instance(_recordingId).waitForLogsContaining(texts, timeout);
     }
 
 protected:
@@ -402,7 +484,7 @@ public:
      */
     static SharedLogRecorder withCurrentLevel()
     {
-        hipdnnSeverity_t currentLevel = hipdnn_data_sdk::logging::getLogLevel();
+        const hipdnnSeverity_t currentLevel = hipdnn_data_sdk::logging::getLogLevel();
         return {currentLevel, false}; // Don't change level
     }
 
@@ -454,7 +536,7 @@ public:
      */
     static IsolatedLogRecorder withCurrentLevel()
     {
-        hipdnnSeverity_t currentLevel = hipdnn_data_sdk::logging::getLogLevel();
+        const hipdnnSeverity_t currentLevel = hipdnn_data_sdk::logging::getLogLevel();
         return {currentLevel, false}; // Don't change level
     }
 

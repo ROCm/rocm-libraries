@@ -14,7 +14,9 @@
 #include <initializer_list>
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#pragma clang diagnostic ignored "-Wlifetime-safety-lifetimebound-violation"
 
 #ifndef CK_TILE_TUPLE_IMPL
 #define CK_TILE_TUPLE_IMPL 1
@@ -292,9 +294,6 @@ struct tuple : impl::tuple_base<make_index_sequence<sizeof...(T)>, T...>
     // below function should be used under tuple_array<> type, no extra check will perform here
     template <typename Tx> CK_TILE_HOST_DEVICE constexpr decltype(auto) get_as()                            { return reinterpret_cast<tuple_array<Tx, size()>&>(*this); }
     template <typename Tx> CK_TILE_HOST_DEVICE constexpr decltype(auto) get_as() const                      { return reinterpret_cast<const tuple_array<Tx, size()>&>(*this); }
-    // below index is for index *AFTER* type convert, not before
-    //template <typename Tx> CK_TILE_HOST_DEVICE constexpr decltype(auto) get_as(index_t i)                   { TP_COM_(); return reinterpret_cast<tuple_array<Tx, size()>&>(*this).at(i); }
-    //template <typename Tx> CK_TILE_HOST_DEVICE constexpr decltype(auto) get_as(index_t i) const             { TP_COM_(); return reinterpret_cast<const tuple_array<Tx, size()>&>(*this).at(i); }
     template <typename Tx, index_t I> CK_TILE_HOST_DEVICE constexpr decltype(auto) get_as(number<I>)        { TP_COM_(); return reinterpret_cast<tuple_array<Tx, size()>&>(*this).at(number<I>{}); }
     template <typename Tx, index_t I> CK_TILE_HOST_DEVICE constexpr decltype(auto) get_as(number<I>) const  { TP_COM_(); return reinterpret_cast<const tuple_array<Tx, size()>&>(*this).at(number<I>{}); }
 
@@ -333,13 +332,6 @@ struct vector_traits<tuple<T...>, void>
     static constexpr index_t vector_size = sizeof...(T);
 };
 
-// template <class... T>
-// CK_TILE_HOST_DEVICE constexpr
-// tuple<T...>
-// make_tuple(T const&... t)
-// {
-//     return {t...};
-// }
 template <typename... Xs>
 CK_TILE_HOST_DEVICE constexpr bool operator==(const tuple<Xs...>& a, const tuple<Xs...>& b)
 {

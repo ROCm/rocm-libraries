@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -103,6 +103,8 @@ rocsparse_status rocsparse::csrsv_analysis_buffer_size(rocsparse_handle         
 rocsparse_status rocsparse::csrsv_solve_buffer_size(rocsparse_handle            handle,
                                                     rocsparse_operation         op,
                                                     rocsparse_const_spmat_descr A,
+                                                    rocsparse_const_dnvec_descr x,
+                                                    rocsparse_const_dnvec_descr y,
                                                     size_t*                     buffer_size)
 {
     ROCSPARSE_CHECKARG(2, A, A->descr == nullptr, rocsparse_status_invalid_pointer);
@@ -126,14 +128,15 @@ rocsparse_status rocsparse::csrsv_solve_buffer_size(rocsparse_handle            
     // rocsparse_int max_nnz
     buffer_size[0] = 256;
     // rocsparse_int done_array[m]
-    const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
-    buffer_size[0] += ((sizeof(int32_t) * A->rows * A_batch_count - 1) / 256 + 1) * 256;
+    const int64_t batch_count = (y) ? y->batch_count : A->batch_count;
+
+    buffer_size[0] += ((sizeof(int32_t) * A->rows * batch_count - 1) / 256 + 1) * 256;
 
     // On transposed case, we might need more temporary storage for transposing
     if(op != rocsparse_operation_none)
     {
         const size_t sizeof_T       = rocsparse::datatype_sizeof(A->data_type);
-        const size_t transpose_size = ((sizeof_T * A_batch_count * A->nnz - 1) / 256 + 1) * 256;
+        const size_t transpose_size = ((sizeof_T * A->batch_count * A->nnz - 1) / 256 + 1) * 256;
         buffer_size[0] += transpose_size;
     }
     return rocsparse_status_success;

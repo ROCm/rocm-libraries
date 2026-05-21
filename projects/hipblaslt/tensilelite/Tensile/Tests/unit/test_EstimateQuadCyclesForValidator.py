@@ -23,8 +23,6 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-import unittest
-
 from Tensile.Components.CMSValidator import estimate_quad_cycles_precomputed, MFMA, MFMAPack, Pack, precompute_issue_times, SchedulePosition, SNop, ValidatorInstruction
 
 
@@ -32,7 +30,7 @@ def _pos(vmfma_index: int, sub_index: int) -> SchedulePosition:
     return SchedulePosition(loop_index=0, vmfma_index=vmfma_index, sub_index=sub_index)
 
 
-class TestEstimateQuadCyclesValidator(unittest.TestCase):
+class TestEstimateQuadCyclesValidator:
     def validate(self, instruction: ValidatorInstruction, expected_quad_cycles: int, all_instructions: list[ValidatorInstruction]):
         """
         Helper method to validate quad-cycle estimation.

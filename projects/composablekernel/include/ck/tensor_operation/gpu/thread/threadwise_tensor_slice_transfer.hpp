@@ -12,6 +12,10 @@
 
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer_util.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 // Assume:
 //   1. src:
@@ -1245,6 +1249,8 @@ struct ThreadwiseTensorSliceTransfer_v3
 //     3. DstOriginIdx is known at compile-time
 //     4. use direct address calculation
 //   3. vector access on src
+//     Note:
+//     SrcScalarStrideInVector is not used in this implementation
 template <typename SrcData,
           typename DstData,
           typename SrcDesc,
@@ -1827,25 +1833,24 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic
         }
         else
         {
-            static_for<0, num_access, 1>{}([&](auto idx_1d) {
+            static_ford<Sequence<num_access, DstScalarPerVector>>{}([&](auto access_idx) {
+                constexpr auto idx_1d = Number<access_idx[Number<0>{}]>{};
+                constexpr auto i      = Number<access_idx[Number<1>{}]>{};
                 constexpr auto idx_md = SpaceFillingCurve::GetIndex(idx_1d);
 
-                // copy data from src_buf into dst_vector
-                static_for<0, DstScalarPerVector, 1>{}([&](auto i) {
-                    constexpr index_t src_offset = src_desc.CalculateOffset(
-                        src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+                constexpr index_t src_offset = src_desc.CalculateOffset(
+                    src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
 
-                    constexpr index_t dst_offset = dst_desc.CalculateOffset(
-                        dst_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+                constexpr index_t dst_offset = dst_desc.CalculateOffset(
+                    dst_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
 
-                    DstData v;
+                DstData v;
 
-                    // apply element-wise operation
-                    element_op_(v, src_buf[Number<src_offset>{}]);
+                // apply element-wise operation
+                element_op_(v, src_buf[Number<src_offset>{}]);
 
-                    // apply type convert
-                    dst_buf(Number<dst_offset>{}) = v;
-                });
+                // apply type convert
+                dst_buf(Number<dst_offset>{}) = v;
             });
         }
     }
@@ -1933,57 +1938,56 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic_InterRow
 
         constexpr auto num_access = SpaceFillingCurve::GetNumOfAccess();
 
-        static_for<0, num_access, 1>{}([&](auto idx_1d) {
+        static_ford<Sequence<num_access, DstScalarPerVector>>{}([&](auto access_idx) {
+            constexpr auto idx_1d = Number<access_idx[Number<0>{}]>{};
+            constexpr auto i      = Number<access_idx[Number<1>{}]>{};
             constexpr auto idx_md = SpaceFillingCurve::GetIndex(idx_1d);
 
-            // copy data from src_buf into dst_vector
-            static_for<0, DstScalarPerVector, 1>{}([&](auto i) {
-                // src_desc error, non constexpr, caused by merge transform
-                constexpr index_t src_offset = src_desc.CalculateOffset(
-                    src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+            // src_desc error, non constexpr, caused by merge transform
+            constexpr index_t src_offset = src_desc.CalculateOffset(src_slice_origin_idx + idx_md +
+                                                                    i * dst_scalar_step_in_vector);
 
-                constexpr index_t dst_offset = dst_desc.CalculateOffset(
-                    dst_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+            constexpr index_t dst_offset = dst_desc.CalculateOffset(dst_slice_origin_idx + idx_md +
+                                                                    i * dst_scalar_step_in_vector);
 
-                SrcData v_this_row, v_theother_row;
-                // int type temp value due to intrinsic requirement
-                int temp = 0;
+            SrcData v_this_row, v_theother_row;
+            // int type temp value due to intrinsic requirement
+            int temp = 0;
 
-                // apply element-wise operation
-                element_op_(v_this_row, src_buf[Number<src_offset>{}]);
+            // apply element-wise operation
+            element_op_(v_this_row, src_buf[Number<src_offset>{}]);
 
-                // apply intra-row permute.
-                if constexpr(IntraRowSwizzlePerm)
-                {
-                    temp = __builtin_amdgcn_permlane16(
-                        temp, type_convert_sp<int>(v_this_row), 0xb3a29180, 0xf7e6d5c4, 1, 0);
-                    v_this_row = type_convert_sp<SrcData>(temp);
-                }
+            // apply intra-row permute.
+            if constexpr(IntraRowSwizzlePerm)
+            {
+                temp = __builtin_amdgcn_permlane16(
+                    temp, type_convert_sp<int>(v_this_row), 0xb3a29180, 0xf7e6d5c4, 1, 0);
+                v_this_row = type_convert_sp<SrcData>(temp);
+            }
 
-                // apply inter-row permute.
-                temp           = __builtin_amdgcn_permlanex16(temp,
-                                                    type_convert_sp<int>(v_this_row),
-                                                    LowEightRowlaneIdx,
-                                                    HighEightRowLaneIdx,
-                                                    1,
-                                                    0);
-                v_theother_row = type_convert_sp<SrcData>(temp);
+            // apply inter-row permute.
+            temp           = __builtin_amdgcn_permlanex16(temp,
+                                                type_convert_sp<int>(v_this_row),
+                                                LowEightRowlaneIdx,
+                                                HighEightRowLaneIdx,
+                                                1,
+                                                0);
+            v_theother_row = type_convert_sp<SrcData>(temp);
 
-                if(get_thread_local_1d_id() % 32 < 16)
-                {
-                    // apply type convert
-                    dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_this_row);
-                    dst_buf(Number<dst_offset + DstScalarPerVector>{}) =
-                        type_convert_sp<DstData>(v_theother_row);
-                }
-                else
-                {
-                    // apply type convert
-                    dst_buf(Number<dst_offset + DstScalarPerVector>{}) =
-                        type_convert_sp<DstData>(v_this_row);
-                    dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_theother_row);
-                }
-            });
+            if(get_thread_local_1d_id() % 32 < 16)
+            {
+                // apply type convert
+                dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_this_row);
+                dst_buf(Number<dst_offset + DstScalarPerVector>{}) =
+                    type_convert_sp<DstData>(v_theother_row);
+            }
+            else
+            {
+                // apply type convert
+                dst_buf(Number<dst_offset + DstScalarPerVector>{}) =
+                    type_convert_sp<DstData>(v_this_row);
+                dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_theother_row);
+            }
         });
     }
 };
@@ -2060,39 +2064,40 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic_IntraRow
 
         constexpr auto num_access = SpaceFillingCurve::GetNumOfAccess();
 
-        static_for<0, num_access, 1>{}([&](auto idx_1d) {
+        static_ford<Sequence<num_access, DstScalarPerVector>>{}([&](auto access_idx) {
+            constexpr auto idx_1d = Number<access_idx[Number<0>{}]>{};
+            constexpr auto i      = Number<access_idx[Number<1>{}]>{};
             constexpr auto idx_md = SpaceFillingCurve::GetIndex(idx_1d);
 
-            // copy data from src_buf into dst_vector
-            static_for<0, DstScalarPerVector, 1>{}([&](auto i) {
-                // src_desc error, non constexpr, caused by merge transform
-                constexpr index_t src_offset = src_desc.CalculateOffset(
-                    src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+            // src_desc error, non constexpr, caused by merge transform
+            constexpr index_t src_offset = src_desc.CalculateOffset(src_slice_origin_idx + idx_md +
+                                                                    i * dst_scalar_step_in_vector);
 
-                constexpr index_t dst_offset = dst_desc.CalculateOffset(
-                    dst_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+            constexpr index_t dst_offset = dst_desc.CalculateOffset(dst_slice_origin_idx + idx_md +
+                                                                    i * dst_scalar_step_in_vector);
 
-                SrcData v_this_row;
-                // int type temp value due to intrinsic requirement
-                int temp = 0;
+            SrcData v_this_row;
+            // int type temp value due to intrinsic requirement
+            int temp = 0;
 
-                // apply element-wise operation
-                element_op_(v_this_row, src_buf[Number<src_offset>{}]);
+            // apply element-wise operation
+            element_op_(v_this_row, src_buf[Number<src_offset>{}]);
 
-                // apply intra-row permute.
-                if constexpr(IntraRowSwizzlePerm)
-                {
-                    temp = __builtin_amdgcn_permlane16(
-                        temp, type_convert_sp<int>(v_this_row), 0xb3a29180, 0xf7e6d5c4, 1, 0);
-                    v_this_row = type_convert_sp<SrcData>(temp);
-                }
+            // apply intra-row permute.
+            if constexpr(IntraRowSwizzlePerm)
+            {
+                temp = __builtin_amdgcn_permlane16(
+                    temp, type_convert_sp<int>(v_this_row), 0xb3a29180, 0xf7e6d5c4, 1, 0);
+                v_this_row = type_convert_sp<SrcData>(temp);
+            }
 
-                // apply type convert
-                dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_this_row);
-            });
+            // apply type convert
+            dst_buf(Number<dst_offset>{}) = type_convert_sp<DstData>(v_this_row);
         });
     }
     ElementwiseOperation element_op_{};
 };
 
 } // namespace ck
+
+#pragma clang diagnostic pop

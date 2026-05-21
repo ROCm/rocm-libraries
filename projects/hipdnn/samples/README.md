@@ -61,6 +61,15 @@ All samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp
 The current samples include:
 
 
+### [**`BnInference`**](./batchnorm/BnInference.cpp)
+
+Executes a single-node batch normalization inference graph on a 4D input tensor using inverse variance.
+
+- It normalizes each dimension of the input tensor `x` of shape `(N, C, H, W)`, using pre-calculated population statistics (mean and inverse variance). The result is then transformed by the learned parameters `scale` and `bias`, each with shape `(1, C, 1, 1)`:
+    ```python
+    y = scale * ((x - mean) * inv_variance) + bias
+    ```
+
 ### [**`BnInferenceWithVariance`**](./batchnorm/BnInferenceWithVariance.cpp)
 
 Executes a single-node batch normalization inference with variance graph on a 4D input tensor.
@@ -285,6 +294,22 @@ Executes the backward pass (filter gradient) of a 2D convolution operation to co
     - `C` = number of input channels per filter
     - `R, S` = filter spatial dimensions (height, width)
 
+### [**`ConvFpropDeterministic`**](./convolution/ConvFpropDeterministic.cpp)
+
+Executes a deterministic forward pass of a 2D convolution operation. This sample specifically targets the deterministic engine variant (`MIOPEN_ENGINE_DETERMINISTIC`), which guarantees bit-reproducible results across runs at a potential performance cost. This is useful for debugging and validation scenarios where exact reproducibility is required.
+
+### [**`FusedConvFpropBiasActiv`**](./convolution/FusedConvFpropBiasActiv.cpp)
+
+Executes a fused convolution forward pass with bias addition and activation function in a single graph.
+
+The fused graph consists of three operations:
+
+1. **Convolution Forward**: Performs standard 2D convolution
+2. **Pointwise Add (Bias)**: Adds a per-channel bias vector to the convolution output
+3. **Activation**: Applies an activation function (clamped ReLU) to the result
+
+This demonstrates a common deep learning pattern where convolution, bias, and activation are fused into a single graph for improved performance.
+
 ### [**`FusedConvFpropActiv`**](./convolution/FusedConvFpropActiv.cpp)
 
 Executes a fused convolution forward pass with activation function in a single graph.
@@ -322,6 +347,29 @@ Output: y (activated convolution result)
 - Reduces memory bandwidth by avoiding intermediate tensor writes/reads
 - Eliminates kernel launch overhead between operations
 - Enables better cache utilization by processing data in a single pass
+
+### [**`SdpaFprop`**](./sdpa/SdpaFprop.cpp)
+
+Executes the forward pass of a scaled dot-product attention (SDPA) operation on rank-4 input tensors.
+
+- For query `Q`, key `K`, and value `V` tensors of shape `(B, H, S, D)`, the attention output is computed as:
+
+    ```python
+    O = softmax(Q @ K^T / sqrt(D)) @ V
+    ```
+
+    where:
+    - `B` = batch size
+    - `H` = number of attention heads
+    - `S` = sequence length
+    - `D` = head dimension
+
+- Supports both `BHSD` (row-major) and `BSHD` (sequence-major) memory layouts via strides.
+- Configurations without engine support are gracefully skipped.
+
+### [**`SerializationRoundTrip`**](./serialization/SerializationRoundTrip.cpp)
+
+Demonstrates graph serialization and deserialization (round-trip) using hipDNN's JSON and binary serialization formats. The sample builds a convolution forward graph, serializes and deserializes it in both formats, then executes the deserialized graphs to verify correctness. This shows how graphs can be saved, transmitted, and restored for deployment or caching scenarios.
 
 ### [**`KnobsUsage`**](./knobs/KnobsUsage.cpp)
 

@@ -24,18 +24,20 @@
 #include "../../../../shared/arithmetic.h"
 #include "../kernels/device_enum.h"
 #include "rocfft/rocfft.h"
+#include <optional>
 #include <ostream>
 #include <string>
 #include <vector>
 
 struct StockhamGeneratorSpecs
 {
-    StockhamGeneratorSpecs(const std::vector<unsigned int>& factors,
-                           const std::vector<unsigned int>& factors2d,
-                           unsigned int                     precision,
-                           const std::string&               gcn_arch_name,
-                           unsigned int                     workgroup_size,
-                           const std::string&               scheme)
+    StockhamGeneratorSpecs(const std::vector<unsigned int>&   factors,
+                           const std::vector<unsigned int>&   factors2d,
+                           unsigned int                       precision,
+                           const std::string&                 gcn_arch_name,
+                           unsigned int                       workgroup_size,
+                           const std::string&                 scheme,
+                           const std::optional<unsigned int>& transform_type = std::nullopt)
         : factors(factors)
         , factors2d(factors2d)
         , precision(precision)
@@ -44,6 +46,7 @@ struct StockhamGeneratorSpecs
         , length2d(product(factors2d.begin(), factors2d.end()))
         , workgroup_size(workgroup_size)
         , scheme(scheme)
+        , transform_type(transform_type)
     {
     }
 
@@ -66,6 +69,8 @@ struct StockhamGeneratorSpecs
     // statically defined for the kernel
     unsigned int static_dim = 0;
     std::string  scheme;
+
+    std::optional<unsigned int> transform_type; // mapped from rocfft_transform_type
 
     EmbeddedType ebtype = EmbeddedType::NONE;
 

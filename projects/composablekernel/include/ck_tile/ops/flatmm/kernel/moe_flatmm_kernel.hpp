@@ -10,6 +10,10 @@
 #include "ck_tile/ops/gemm/kernel/gemm_tile_partitioner.hpp"
 #include "ck_tile/host.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 // #define disable_tile_gs
 
 namespace ck_tile {
@@ -329,7 +333,17 @@ struct MoeFlatmmKernel
             '_', "moe_flatmm", gemm_prec_str<ADataType, BDataType>(), FlatmmPipeline::GetName());
     }
 
-    static constexpr auto BlockSize() -> dim3 { return dim3(kBlockSize); }
+    static auto BlockSize() -> dim3
+    {
+        if(ck_tile::is_wave32())
+        {
+            return dim3(kBlockSize / 2);
+        }
+        else
+        {
+            return dim3(kBlockSize);
+        }
+    }
 
     static constexpr auto GridSize(index_t M, index_t N, index_t KBatch)
     {
@@ -371,13 +385,9 @@ struct MoeFlatmmKernel
         }
     }
 
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemPingSize()
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         return max(FlatmmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
-    }
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemPongSize()
-    {
-        return FlatmmPipeline::GetSmemSize();
     }
 
     struct SplitKBatchOffset
@@ -483,13 +493,6 @@ struct MoeFlatmmKernel
 
         if constexpr(std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>)
         {
-            // if(kargs.N % TilePartitioner::NPerBlock != 0 && FlatmmPipeline::kPadN == false)
-            // {
-            //     std::cerr << "Can't support N that is not a multiple of NPerBlock"
-            //                  " without padding!"
-            //               << std::endl;
-            //     return false;
-            // }
             if(kargs.N % FlatmmPipeline::GetVectorSizeB() != 0)
             {
                 std::cerr << "N is not a multiple of vector load size for B tensor!" << std::endl;
@@ -930,8 +933,7 @@ struct MoeFlatmmKernel
         const index_t coord_m = __builtin_amdgcn_readfirstlane(iM * TilePartitioner::MPerBlock);
         const index_t coord_n = __builtin_amdgcn_readfirstlane(iN * TilePartitioner::NPerBlock);
         // allocate LDS
-        __shared__ char smem_ptr_ping[GetSmemPingSize()];
-        __shared__ char smem_ptr_pong[GetSmemPongSize()];
+        __shared__ char smem_ptr[GetSmemSize()];
 
         const index_t expert_id = kargs.p_sorted_expert_ids[iM];
 
@@ -1013,8 +1015,7 @@ struct MoeFlatmmKernel
                         a_scale_block_window, // weight scale with granularityK = 32
                         b_scale_block_window, // weight scale with granularityK = 32
                         num_loop,
-                        smem_ptr_ping,
-                        smem_ptr_pong);
+                        smem_ptr);
                 }
                 else
                 {
@@ -1024,18 +1025,13 @@ struct MoeFlatmmKernel
                         b_scale_block_window, // weight scale with granularityK = 32
                         num_loop,
                         kargs.k_padded_zeros,
-                        smem_ptr_ping,
-                        smem_ptr_pong);
+                        smem_ptr);
                 }
             }
             else
             {
-                return FlatmmPipeline{}(a_gather_block_tile,
-                                        b_block_window,
-                                        number<IsGateUp>{},
-                                        num_loop,
-                                        smem_ptr_ping,
-                                        smem_ptr_pong);
+                return FlatmmPipeline{}(
+                    a_gather_block_tile, b_block_window, number<IsGateUp>{}, num_loop, smem_ptr);
             }
         }();
 
@@ -1073,7 +1069,7 @@ struct MoeFlatmmKernel
 
             // EpiloguePipeline::template MakeLdsBlockDescriptor<EpiProblem>();
             auto o_lds_block = make_tensor_view<address_space_enum::lds>(
-                reinterpret_cast<ODataType*>(smem_ptr_ping), lds_block_desc);
+                reinterpret_cast<ODataType*>(smem_ptr), lds_block_desc);
 
             constexpr int ScaleGranularityM = decltype(kargs.scale_m)::GranularityMN;
             constexpr int ScaleGranularityN = decltype(kargs.scale_n)::GranularityMN;
@@ -1105,15 +1101,14 @@ struct MoeFlatmmKernel
             statically_indexed_array<index_t, ScaleMRepeat> scale_m_offsets;
 
             if constexpr(!BMXFP4_Pipeline)
-                static_for<0, MRepeat, 1>{}([&](auto mIter) {
-                    static_for<0, kM0, 1>{}([&](auto m0) {
-                        static_for<0, kM2, 1>{}([&](auto m2) {
-                            const auto row_idx =
-                                coord_m + mIter * MPerXdl + m0 * kM1 * kM2 + m2 + scale_m_coord[I0];
-                            scale_m_offsets[mIter * number<kM0 * kM2>{} + m0 * number<kM2>{} + m2] =
-                                row_to_token_idx(row_idx);
-                        });
-                    });
+                static_ford<sequence<MRepeat, kM0, kM2>>{}([&](auto mmm) {
+                    constexpr auto mIter = number<mmm[number<0>{}]>{};
+                    constexpr auto m0    = number<mmm[number<1>{}]>{};
+                    constexpr auto m2    = number<mmm[number<2>{}]>{};
+                    const auto row_idx =
+                        coord_m + mIter * MPerXdl + m0 * kM1 * kM2 + m2 + scale_m_coord[I0];
+                    scale_m_offsets[mIter * number<kM0 * kM2>{} + m0 * number<kM2>{} + m2] =
+                        row_to_token_idx(row_idx);
                 });
 
             constexpr int DynamicTileOffsetFlag = 0;
@@ -1278,13 +1273,15 @@ struct MoeFlatmmKernel
                           "Currently, the CShuffle EpiloguePipeline only supports the Row Major "
                           "Output layout");
 
-            using TileEncodingPattern = tile_distribution_encoding_pattern_2d<
-                kBlockSize,
-                MPerIterationShuffle,
-                LDS_NPerIterationShuffle,
-                kind == MoeFlatmmKind::kFFN_gemm2 ? 2 : EpiloguePipeline::GetVectorSizeC(),
-                tile_distribution_pattern::thread_raked,
-                EpiProblem::kNumWaveGroups>;
+            using TileEncodingPattern =
+                tile_distribution_encoding_pattern_2d<kBlockSize,
+                                                      MPerIterationShuffle,
+                                                      LDS_NPerIterationShuffle,
+                                                      kind == MoeFlatmmKind::kFFN_gemm2
+                                                          ? (get_warp_size() == 64 ? 2 : 4)
+                                                          : EpiloguePipeline::GetVectorSizeC(),
+                                                      tile_distribution_pattern::thread_raked,
+                                                      EpiProblem::kNumWaveGroups>;
 
             constexpr auto dram_tile_distribution =
                 TileEncodingPattern::make_2d_static_tile_distribution();
@@ -1426,19 +1423,19 @@ struct MoeFlatmmKernel
             statically_indexed_array<statically_indexed_array<bool, MPerThread>, NumMEpiTile>
                 c_scatter_valids;
             auto c_coord = dram_tile_distribution.calculate_index();
-            static_for<0, NumMEpiTile, 1>{}([&](auto mIter) {
-                static_for<0, MPerThread, 1>{}([&](auto m0) {
-                    auto row_idx = coord_m + mIter * MPerIterationShuffle + c_coord[0] + m0;
-                    auto fused_token =
-                        kargs.p_sorted_token_ids[row_idx]; // topk-idx[31:24] + token_idx[23:0]
+            static_ford<sequence<NumMEpiTile, MPerThread>>{}([&](auto mm) {
+                constexpr auto mIter = number<mm[number<0>{}]>{};
+                constexpr auto m0    = number<mm[number<1>{}]>{};
+                auto row_idx         = coord_m + mIter * MPerIterationShuffle + c_coord[0] + m0;
+                auto fused_token =
+                    kargs.p_sorted_token_ids[row_idx]; // topk-idx[31:24] + token_idx[23:0]
 
-                    index_t scatter_token_id    = fused_token & token_id_mask;
-                    c_scatter_valids[mIter][m0] = (scatter_token_id < kargs.NumTokens);
-                    if constexpr(IsInputGemm)
-                        scatter_token_id =
-                            scatter_token_id * kargs.TopK + (fused_token >> token_id_offset);
-                    c_scatter_offsets[mIter][m0] = scatter_token_id * kargs.stride_C;
-                });
+                index_t scatter_token_id    = fused_token & token_id_mask;
+                c_scatter_valids[mIter][m0] = (scatter_token_id < kargs.NumTokens);
+                if constexpr(IsInputGemm)
+                    scatter_token_id =
+                        scatter_token_id * kargs.TopK + (fused_token >> token_id_offset);
+                c_scatter_offsets[mIter][m0] = scatter_token_id * kargs.stride_C;
             });
 
             //===----------------------------------------------------------------------===//
@@ -1501,3 +1498,5 @@ struct MoeFlatmmKernel
 };
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

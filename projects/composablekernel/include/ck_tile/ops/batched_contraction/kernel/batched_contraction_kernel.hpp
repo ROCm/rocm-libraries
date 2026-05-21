@@ -8,6 +8,10 @@
 #include "ck_tile/ops/batched_contraction/utils/tensor_descriptor_utils.hpp"
 #include "ck_tile/ops/gemm/kernel/universal_gemm_kernel.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 /**
  * @file batched_contraction_kernel.hpp
  * @brief Batched Tensor Contraction Operations
@@ -364,10 +368,7 @@ struct BatchedContractionKernel
 
     /// @brief Returns the GPU block size for kernel launch.
     /// @return 3D block dimensions for GPU kernel execution
-    CK_TILE_HOST static constexpr auto GetBlockSize()
-    {
-        return dim3(UniversalGemmKernel::kBlockSize);
-    }
+    CK_TILE_HOST static constexpr auto GetBlockSize() { return UniversalGemmKernel::BlockSize(); }
 
     CK_TILE_HOST static constexpr auto GridSize(const KernelArgs& kargs)
     {
@@ -687,3 +688,5 @@ struct BatchedContractionKernel
 };
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

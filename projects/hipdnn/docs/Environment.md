@@ -5,6 +5,7 @@ This document describes the environment variables and runtime configuration opti
 ## Table of Contents
 
 - [Environment Variables](#environment-variables)
+  - [Plugin Discovery](#plugin-discovery)
   - [Logging Variables](#logging-variables)
   - [MIOpen Plugin Logging](#miopen-plugin-logging)
   - [Test Configuration](#test-configuration)
@@ -17,9 +18,58 @@ This document describes the environment variables and runtime configuration opti
 
 ## Environment Variables
 
+### Plugin Discovery
+
+hipDNN supports a plugin architecture for both execution engines and heuristic policies. Plugins are automatically discovered at runtime from configurable search paths.
+
+#### HIPDNN_PLUGIN_DIR
+
+Specifies the directory path where hipDNN will search for engine plugins (shared libraries that provide operation implementations).
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Uses default path: `hipdnn_plugins/engines/` (relative to current working directory) |
+| `<path>`   | Search for engine plugins in the specified directory  |
+
+When set, this variable completely overrides the default search path. The path can be absolute or relative to the current working directory.
+
+**Example:**
+```bash
+export HIPDNN_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/engines
+```
+
+**Notes:**
+- Engine plugins must implement the Engine Plugin API (see `EnginePluginApi.h`)
+- Plugin libraries are typically named `libhipdnn_provider_*.so` (Linux) or `hipdnn_provider_*.dll` (Windows)
+- Only plugins whose API version major matches `HIPDNN_ENGINE_API_VERSION_MAJOR` (declared in `hipdnn_plugin_sdk/engine_api_version.h`) will be loaded
+- See the [Plugin Development Guide](PluginDevelopment.md) for details on creating engine plugins
+
+#### HIPDNN_HEURISTIC_PLUGIN_DIR
+
+Specifies the directory path where hipDNN will search for heuristic plugins (shared libraries that provide operation selection policies).
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Uses default path: `hipdnn_plugins/heuristics/` (relative to current working directory) |
+| `<path>`   | Search for heuristic plugins in the specified directory |
+
+When set, this variable completely overrides the default search path. The path can be absolute or relative to the current working directory.
+
+**Example:**
+```bash
+export HIPDNN_HEURISTIC_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/heuristics
+```
+
+**Notes:**
+- Heuristic plugins must implement the Heuristic Plugin API (see `HeuristicsPluginApi.h`)
+- Heuristic plugins have independent API versioning from engine plugins
+- Only plugins with API version matching the Heuristic API major version will be loaded
+- Each heuristic plugin must provide a unique policy ID and policy name
+- See the [Plugin Development Guide](PluginDevelopment.md) for details on creating heuristic plugins
+
 ### Logging Variables
 
-hipDNN provides two environment variables to control logging behavior:
+hipDNN provides the following environment variables to control logging behavior:
 #### HIPDNN_LOG_LEVEL
 
 Sets the minimum severity that will be emitted. Levels are inclusive: choosing a level enables messages at that level and all higher severities.
@@ -44,6 +94,24 @@ Specifies the file path where logs will be **appended**. If not set, logs are wr
 **Example:**
 ```bash
 export HIPDNN_LOG_FILE=/path/to/hipdnn.log
+```
+
+#### HIPDNN_LOG_GRAPH_DIR
+
+Controls graph structure logging. When set to a non-empty directory path, graphs are written as JSON files during finalization.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Graph logging disabled (default)                       |
+| `<path>`   | Write graph structures as JSON files to the given directory |
+
+Graph JSON files are written to the directory specified by `HIPDNN_LOG_GRAPH_DIR`. If the directory does not exist, it is created automatically. Relative paths are resolved against the current working directory. Files are named `graph_<hash>.json` where `<hash>` is derived from the graph content, ensuring identical graphs are not duplicated.
+
+This variable is independent of `HIPDNN_LOG_LEVEL` and `HIPDNN_LOG_FILE`.
+
+**Example:**
+```bash
+export HIPDNN_LOG_GRAPH_DIR=/tmp/hipdnn_graphs
 ```
 
 ### MIOpen Plugin Logging

@@ -3,16 +3,12 @@ defaults:
 root: index
 subtrees:
 
-- caption: Installation
+- caption: Install
   entries:
-  - file: install/rocPRIM-prerequisites.rst
-    title: Prerequisites
-  - file: install/rocPRIM-install-overview.rst
-    title: Installation overview
-  - file: install/rocPRIM-build-install-linux.rst
-    title: Installing on Linux
-  - file: install/rocPRIM-build-install-windows.rst
-    title: Building and installing from source
+  - file: install/install.rst
+    title: Install rocPRIM
+  - file: install/build.rst
+    title: Build from source
 
 - caption: Conceptual
   entries:
