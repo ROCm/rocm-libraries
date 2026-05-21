@@ -533,6 +533,111 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
         hipsparse::hipDataTypeToHCCDataType(valueType)));
 }
 
+hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
+                                     int64_t                mb,
+                                     int64_t                nb,
+                                     int64_t                nnzb,
+                                     int64_t                rowBlockDim,
+                                     int64_t                colBlockDim,
+                                     void*                  bsrRowPtr,
+                                     void*                  bsrColInd,
+                                     void*                  bsrValues,
+                                     hipsparseIndexType_t   bsrRowPtrType,
+                                     hipsparseIndexType_t   bsrColIndType,
+                                     hipsparseIndexBase_t   idxBase,
+                                     hipDataType            valueType,
+                                     hipsparseOrder_t       order)
+{
+    if(spMatDescr == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(rowBlockDim != colBlockDim)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    spMatDescr[0] = new hipsparseSpMatDescr_st();
+
+    hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_create_bsr_descr(
+        spMatDescr[0]->get_spmat_descr_reference(),
+        mb,
+        nb,
+        nnzb,
+        (order == HIPSPARSE_ORDER_ROW)
+            ? hipsparse::hipDirectionToHCCDirection(HIPSPARSE_DIRECTION_ROW)
+            : hipsparse::hipDirectionToHCCDirection(HIPSPARSE_DIRECTION_COLUMN),
+        rowBlockDim,
+        bsrRowPtr,
+        bsrColInd,
+        bsrValues,
+        hipsparse::hipIndexTypeToHCCIndexType(bsrRowPtrType),
+        hipsparse::hipIndexTypeToHCCIndexType(bsrColIndType),
+        hipsparse::hipBaseToHCCBase(idxBase),
+        hipsparse::hipDataTypeToHCCDataType(valueType)));
+
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        delete spMatDescr[0];
+    }
+
+    return status;
+}
+
+hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
+                                          int64_t                     mb,
+                                          int64_t                     nb,
+                                          int64_t                     nnzb,
+                                          int64_t                     rowBlockDim,
+                                          int64_t                     colBlockDim,
+                                          const void*                 bsrRowPtr,
+                                          const void*                 bsrColInd,
+                                          const void*                 bsrValues,
+                                          hipsparseIndexType_t        bsrRowPtrType,
+                                          hipsparseIndexType_t        bsrColIndType,
+                                          hipsparseIndexBase_t        idxBase,
+                                          hipDataType                 valueType,
+                                          hipsparseOrder_t            order)
+{
+    if(spMatDescr == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(rowBlockDim != colBlockDim)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    spMatDescr[0] = new hipsparseSpMatDescr_st();
+
+    hipsparseStatus_t status
+        = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_create_const_bsr_descr(
+            spMatDescr[0]->get_const_spmat_descr_reference(),
+            mb,
+            nb,
+            nnzb,
+            (order == HIPSPARSE_ORDER_ROW)
+                ? hipsparse::hipDirectionToHCCDirection(HIPSPARSE_DIRECTION_ROW)
+                : hipsparse::hipDirectionToHCCDirection(HIPSPARSE_DIRECTION_COLUMN),
+            rowBlockDim,
+            bsrRowPtr,
+            bsrColInd,
+            bsrValues,
+            hipsparse::hipIndexTypeToHCCIndexType(bsrRowPtrType),
+            hipsparse::hipIndexTypeToHCCIndexType(bsrColIndType),
+            hipsparse::hipBaseToHCCBase(idxBase),
+            hipsparse::hipDataTypeToHCCDataType(valueType)));
+
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        delete spMatDescr[0];
+    }
+
+    return status;
+}
+
 hipsparseStatus_t hipsparseCreateCooAoS(hipsparseSpMatDescr_t* spMatDescr,
                                         int64_t                rows,
                                         int64_t                cols,

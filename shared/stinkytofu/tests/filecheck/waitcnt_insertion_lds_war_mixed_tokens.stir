@@ -1,0 +1,32 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): WAR-on-LDS with mixed tokens.
+# Two ds_load_b64 with token 0 are followed by two ds_load_b64 with token 1,
+# then a tensor_load_to_lds with token 0. Only the token-0 reads conflict
+# with the writer. The pass picks the youngest conflicting reader (the second
+# token-0 read at position 3 from end) and emits dlcnt = 3 - 1 = 2, draining
+# both token-0 reads while leaving both token-1 reads outstanding.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_war_mixed_tokens
+# CHECK: ds_load_b64
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: ds_load_b64
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: ds_load_b64
+# CHECK-SAME: tokens = [1]
+# CHECK-NEXT: ds_load_b64
+# CHECK-SAME: tokens = [1]
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 2
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_lds_war_mixed_tokens() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[4:5] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[6:7] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+}

@@ -719,15 +719,35 @@ namespace TensileLite
         }
 
         args.append("alpha", inputs.alpha, problem.alphaType());
+
         if(problem.alphaType() == rocisa::DataType::Half)
             args.append("alpha_2", inputs.alpha, problem.alphaType());
 
         if(problemType.useBeta)
         {
             args.append("beta", inputs.beta, problem.betaType());
+            
             if(problem.betaType() == rocisa::DataType::Half)
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
+
+        if(sizeMapping.expertSchedulingMode > 0)
+        {
+            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+            if(hipAMDGPU
+               && (hipAMDGPU->processor == AMDGPU::Processor::gfx1200
+                   || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
+            {
+                int32_t esmRuntimeSupported = 0;
+#if HIP_VERSION >= 70353390
+                HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
+                                                    hipDeviceAttributeExpertSchedMode,
+                                                    hipAMDGPU->deviceId));
+#endif
+                args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
+            }
+        }
+
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
         if(sizeMapping.streamK != 0)
@@ -1455,22 +1475,18 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties
-        auto removePrefix = [](const std::string& s) {
-            size_t pos = s.find("gfx");
-            if(pos != std::string::npos)
-            {
-                return s.substr(pos + 3);
-            }
-            return s;
-        };
-        auto gpu_arch_no_prefix = removePrefix(hardware.archName());
-        if(internalArgsSupport.version >= 1)
+        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+        if(!enableCluster)
         {
-            rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
-            rv.numWorkGroups.y = 1;
-            rv.numWorkGroups.z = 1;
+            if(internalArgsSupport.version >= 1)
+            {
+                rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
+                rv.numWorkGroups.y = 1;
+                rv.numWorkGroups.z = 1;
+            }
         }
+
+        rv.clusterDim = sizeMapping.clusterDim;
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,6 +58,9 @@ namespace rocsparse
                                                              bool                 mul,
                                                              bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -84,6 +87,7 @@ namespace rocsparse
 
         // Entry point into columns of C
         I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = csr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over the row chunks until the end of the row has been reached (which is
         // the number of total columns)
@@ -260,7 +264,7 @@ namespace rocsparse
                 I idx = row_begin_C + offset - 1;
 
                 // Only threads with a non-zero value write to C
-                if(has_nnz)
+                if(has_nnz && idx < row_end_C)
                 {
                     csr_col_ind_C[idx] = i + chunk_begin + idx_base_C;
                 }
@@ -456,6 +460,8 @@ namespace rocsparse
                                             const I* __restrict__ csr_row_ptr,
                                             J* __restrict__ workspace)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
         J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
 
         // Initialize local maximum
@@ -491,6 +497,8 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_symbolic_max_row_nnz_part2(I* __restrict__ workspace)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
         // Shared memory for block reduction
         __shared__ I sdata[BLOCKSIZE];
 
@@ -515,6 +523,8 @@ namespace rocsparse
     template <uint32_t HASHVAL, uint32_t HASHSIZE, typename I>
     ROCSPARSE_DEVICE_ILF bool insert_key(I key, I* __restrict__ table, I empty)
     {
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Compute hash
         I hash = (key * HASHVAL) & (HASHSIZE - 1);
 
@@ -575,6 +585,11 @@ namespace rocsparse
                                                 bool                 mul,
                                                 bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -659,6 +674,7 @@ namespace rocsparse
 
         // Entry point of current row into C
         I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = csr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over hash table
         for(uint32_t i = lid; i < HASHSIZE; i += WFSIZE)
@@ -695,7 +711,10 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtained position in C
-            csr_col_ind_C[idx_C] = col_C + idx_base_C;
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
+            {
+                csr_col_ind_C[idx_C] = col_C + idx_base_C;
+            }
         }
     }
 
@@ -726,6 +745,11 @@ namespace rocsparse
                                                    bool                 mul,
                                                    bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -888,7 +912,10 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtain position in C
-            csr_col_ind_C[idx_C] = col_C + idx_base_C;
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
+            {
+                csr_col_ind_C[idx_C] = col_C + idx_base_C;
+            }
         }
     }
 }

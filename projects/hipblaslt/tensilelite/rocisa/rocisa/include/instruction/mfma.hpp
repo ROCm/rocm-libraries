@@ -637,6 +637,10 @@ namespace rocisa
                     return " cbsz:3 blgp:4";
                 case InstType::INST_F4_B6:
                     return " cbsz:4 blgp:3";
+                case InstType::INST_B8_F4:
+                    return " cbsz:1 blgp:4";
+                case InstType::INST_F4_B8:
+                    return " cbsz:4 blgp:1";
                 default:
                     break;
                 }
