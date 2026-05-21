@@ -1380,30 +1380,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         pipelines = []
         if dtype in cls._DT_FP16_BF16:
             qscale = "no"
-            for logits, mask, bias, lse, dropout, skip, sink in itertools.product(
-                ["t", "f"],
-                get_mask_map(mask_impl).keys(),
-                BIAS_MAP.keys(),
-                ["t", "f"],
-                ["t", "f"],
-                ["t", "f"],
-                ["t", "f"],
-            ):
-                # Step B2: qr_vr emit disabled to force runtime dispatch to qr_tdm
-                # pipeline for d=128 fp16/bf16 single-head cases. Without this disable,
-                # dispatcher selects qr_vr first (no TDM acceleration).
-                #
-                # This is a workaround. Proper fix: dispatcher should prefer qr_tdm over
-                # qr_vr when both available + trait match. Tracked in Step C backlog.
-                #
-                # Re-enable when dispatcher logic adds proper qr_tdm priority preference.
-                # pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
-                # pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
-                pass
-
-            # qr_tdm: gfx1250 dedicated pipeline. Step B1 rewires distribution to
-            # use base async path; pipeline still calls async_load_tile (Step B2
-            # will swap in real TDM intrinsics).
+            # qr_tdm: gfx1250 TDM pipeline, preferred for d=128.
+            # Emitted first so runtime dispatcher selects qr_tdm over qr
+            # when both match (dispatch order = list order in generated code).
             if hdim == 128 and hdim_v == 128:
                 for logits, mask, lse, sink in itertools.product(
                     ["t", "f"],
@@ -1413,6 +1392,20 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 ):
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, "no", lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, "no", lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+
+            # qr: generic pipeline fallback for trait combos not covered by
+            # qr_tdm (e.g., bias, dropout, skip, d!=128).
+            for logits, mask, bias, lse, dropout, skip, sink in itertools.product(
+                ["t", "f"],
+                get_mask_map(mask_impl).keys(),
+                BIAS_MAP.keys(),
+                ["t", "f"],
+                ["t", "f"],
+                ["t", "f"],
+                ["t", "f"],
+            ):
+                pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
+                pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
             # no need lse/dropout kernels
             for logits, qscale, mask, bias in itertools.product(
