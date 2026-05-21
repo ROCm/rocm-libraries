@@ -2134,3 +2134,61 @@ class TestBuildLoopVariants_PGR0:
         sched.emit()
         nll = sched.build_nll()
         assert nll == [[[]]]
+
+
+# ══════════════════════════════════════════════════════════════
+# ScaleDepthURatio R=2 (MX subtile decoupled scale DU)
+# ══════════════════════════════════════════════════════════════
+
+def test_scheduler_R2_FP8_MT256():
+    """MT256x256x128 FP8 with ScaleDepthURatio{A,B}=2.
+
+    Models the configuration emitted by Solution.py for the
+    subtile_mxfp8_mt256.yaml regression: data DU=128 (numSubIterK_data=1)
+    paired with a scale DU=256 cadence (R=2).  The scheduler should:
+      - widen numSubIterK from 1 to 2 (R*numSubIterK_data),
+      - force unroll_factor to a multiple of R=2,
+      - emit at least one scale-side inc op (lr_inc(SA/SB) or gr_inc(SA/SB))
+        in the grouped output, proving the R-period emit took effect.
+    """
+    cfg = SchedulerConfig(
+        numMFMATilesM=8,                      # MT0=256 / MI_M=16 / WG_M=2
+        numMFMATilesN=8,                      # MT1=256 / MI_N=16 / WG_N=2
+        numSubIterK=1,                        # data DU=128 / MI_K=128 = 1
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        lrSA=ReadGranularity(mn=2, k=2),
+        lrSB=ReadGranularity(mn=2, k=2),
+        grSA=ReadGranularity(mn=8, k=2),
+        grSB=ReadGranularity(mn=8, k=2),
+        scaleSchedulingPeriod=2,
+    )
+
+    assert cfg.numSubIterK == 2, \
+        f"R=2 should widen numSubIterK from 1 to 2, got {cfg.numSubIterK}"
+    assert cfg.numSubIterK_data == 1, \
+        f"data-side numSubIterK should remain 1, got {cfg.numSubIterK_data}"
+
+    sched = LogicalScheduler(cfg)
+    # assign_vgpr_tiles is a separate pass from build/emit — it is what
+    # forces unroll_factor to be a multiple of R (see SchedulerConfig docstring).
+    sched.assign_vgpr_tiles()
+    sched.build()
+
+    assert sched.unroll_factor % 2 == 0, (
+        f"unroll_factor must be a multiple of R=2 (lcm(.., R)), "
+        f"got {sched.unroll_factor}")
+
+    scale_inc_ops = []
+    for partition_emitted in sched._emitted:
+        for emitted in partition_emitted:
+            for em in emitted:
+                if em.opType in ('lr_inc', 'gr_inc') \
+                        and getattr(em.source, 'tensor', None) in ('SA', 'SB'):
+                    scale_inc_ops.append((em.opType, em.source.tensor))
+
+    assert len(scale_inc_ops) > 0, (
+        f"Expected at least one scale lr_inc/gr_inc op in the emitted "
+        f"output, got none. scale_inc_ops={scale_inc_ops}")
