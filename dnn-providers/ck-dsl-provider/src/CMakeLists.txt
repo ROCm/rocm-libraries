@@ -15,6 +15,9 @@ add_library(
     python/CompileServiceBridge.cpp
     python/EmbeddedInterpreter.cpp
     python/PythonError.cpp
+    runtime/HipModule.cpp
+    runtime/KernelArtifact.cpp
+    runtime/LaunchAbi.cpp
 )
 
 target_include_directories(ck_dsl_provider_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
