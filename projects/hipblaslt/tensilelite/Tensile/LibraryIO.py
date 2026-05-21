@@ -869,6 +869,7 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
         data["TileSelectionIndices"] = None
 
     data["PerfMetric"] = logicTuple[7]
+    data["Library"] = {}
     if libraryType == "FreeSize":
         data["LibraryType"] = "FreeSize"
         data["Library"]["distance"] = libraryType
