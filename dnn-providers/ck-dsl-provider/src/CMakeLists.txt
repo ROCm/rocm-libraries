@@ -12,12 +12,14 @@ add_library(
     CkDslHandle.cpp
     CkDslPluginPublic.cpp
     engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.cpp
+    python/EmbeddedInterpreter.cpp
 )
 
 target_include_directories(ck_dsl_provider_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(
     ck_dsl_provider_impl
     PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk hip::host
+           Python3::Python pybind11::embed
 )
 
 set_target_properties(ck_dsl_provider_impl PROPERTIES
@@ -33,6 +35,7 @@ target_include_directories(ck_dsl_provider_private PUBLIC ${CMAKE_CURRENT_SOURCE
 target_link_libraries(
     ck_dsl_provider_private
     PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk ck_dsl_provider_impl
+           Python3::Python pybind11::embed
 )
 
 # Shared library: the actual plugin loaded at runtime by hipDNN.
@@ -40,6 +43,7 @@ add_library(ck_dsl_provider_plugin SHARED $<TARGET_OBJECTS:ck_dsl_provider_impl>
 target_link_libraries(
     ck_dsl_provider_plugin
     PRIVATE hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk hip::host
+            Python3::Python pybind11::embed
 )
 
 if(NOT WIN32)
