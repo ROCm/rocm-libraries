@@ -533,6 +533,7 @@ struct tile_window_with_static_distribution
                 constexpr index_t d =
                     tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys_start) /
                     Traits::PackedSize;
+                static_assert(Traits::ScalarPerVector % Traits::PackedSize == 0);
                 static_assert(d % (Traits::ScalarPerVector / Traits::PackedSize) == 0);
 
                 this->get_bottom_tensor_view().template get_vectorized_elements_raw<vector_t>(
