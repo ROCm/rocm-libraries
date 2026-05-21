@@ -12,7 +12,6 @@ on:
     paths:
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
-      - '!dnn-providers/fusilli-provider/**'
 
 permissions:
   contents: read
