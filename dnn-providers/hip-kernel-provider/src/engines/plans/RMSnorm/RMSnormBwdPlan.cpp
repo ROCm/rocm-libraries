@@ -111,12 +111,10 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     const auto dYDataType = _params.dy()->data_type();
     const auto dXDataType = _params.dx()->data_type();
     const auto scaleDataType = _params.scale()->data_type();
-    const auto computeDataType = (_params.invRMS() == nullptr)
-                                     ? hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
-                                     : _params.invRMS()->data_type();
+    const auto computeDataType = _params.invRMS()->data_type();
     const std::string xTypeString = getKernelParamTypeString(xDataType);
-    const std::string dYTypeString = getKernelParamTypeString(dXDataType);
-    const std::string dXTypeString = getKernelParamTypeString(dYDataType);
+    const std::string dYTypeString = getKernelParamTypeString(dYDataType);
+    const std::string dXTypeString = getKernelParamTypeString(dXDataType);
     const std::string scaleTypeString = getKernelParamTypeString(scaleDataType);
     const std::string computeTypeString = getKernelParamTypeString(computeDataType);
 
@@ -172,6 +170,8 @@ void RMSnormBwdPlan::execute([[maybe_unused]] const HipKernelHandle& handle,
         _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
     auto dYBuffer
         = hip_kernel_utils::findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
+    auto invRMSBuffer = hip_kernel_utils::findDeviceBuffer(
+        _params.invRMS()->uid(), deviceBuffers, numDeviceBuffers);
     auto dXBuffer
         = hip_kernel_utils::findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
     auto dScaleBufferPtr = hip_kernel_utils::findDeviceBuffer(
@@ -181,26 +181,20 @@ void RMSnormBwdPlan::execute([[maybe_unused]] const HipKernelHandle& handle,
                                : hip_kernel_utils::findDeviceBuffer(
                                      _params.dbias()->uid(), deviceBuffers, numDeviceBuffers)
                                      .ptr;
-    void* invRMSBufferPtr
-        = (_params.invRMS() == nullptr)
-              ? nullptr
-              : hip_kernel_utils::findDeviceBuffer(
-                    _params.invRMS()->uid(), deviceBuffers, numDeviceBuffers)
-                    .ptr; // TODO: SHOULD BE MADE MANDATORY BASED ON THE FRONTEND CHANGES!!!
 
     // Run the BwdData kernel
     _runnableKernels[0]->launch(handle.getStream(),
                                 dYBuffer.ptr,
                                 xBuffer.ptr,
                                 scaleBuffer.ptr,
-                                invRMSBufferPtr,
+                                invRMSBuffer.ptr,
                                 dXBuffer.ptr);
 
     // Run the BwdWeightBias kernel
     _runnableKernels[1]->launch(handle.getStream(),
                                 dYBuffer.ptr,
                                 xBuffer.ptr,
-                                invRMSBufferPtr,
+                                invRMSBuffer.ptr,
                                 dScaleBufferPtr.ptr,
                                 dBiasBufferPtr);
 }

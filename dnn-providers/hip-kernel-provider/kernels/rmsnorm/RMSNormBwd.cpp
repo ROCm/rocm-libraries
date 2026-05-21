@@ -51,10 +51,10 @@ extern "C" __global__ void RMSnormBwdWeightBias(const DyType* __restrict__ dy,
         }
     }
 
-    dweight[tidx] = sum_dw;
+    dweight[tidx] = from_float32<ScaleType>(sum_dw);
     if(dbias)
     {
-        dbias[tidx] = sum_db;
+        dbias[tidx] = from_float32<ScaleType>(sum_db);
     }
 }
 

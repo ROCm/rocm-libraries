@@ -54,7 +54,7 @@ void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>&
                                     "BFLOAT16 data types for x and y tensors.");
     }
 
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedAffineTypes{
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedAffineTypes{
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF};
