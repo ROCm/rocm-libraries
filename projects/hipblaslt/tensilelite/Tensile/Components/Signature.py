@@ -216,11 +216,12 @@ class SignatureDefault(Signature):
 
         if kernel["StreamK"] == 4:
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
-            signature.addArg("TotalTiles",                         SVK.SIG_VALUE, "u32")
+            signature.addArg("TotalItems",                         SVK.SIG_VALUE, "u32")
             signature.addArg("SKTiles",                            SVK.SIG_VALUE, "u32")
+            signature.addArg("SKSplit",                            SVK.SIG_VALUE, "u32")
             signature.addArg("SKItersPerWI",                       SVK.SIG_VALUE, "u32")
             signature.addArg("SKGrid",                             SVK.SIG_VALUE, "u32")
-            userArgumentsInfo.gemmArgumentSize += 20
+            userArgumentsInfo.gemmArgumentSize += 24
         elif kernel["StreamK"]:
             # StreamK args
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")

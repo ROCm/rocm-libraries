@@ -8317,11 +8317,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["StreamK"] == 4:
       self.defineSgpr("ItersPerTile", 1)
-      self.defineSgpr("TotalTiles", 1)
+      self.defineSgpr("TotalItems", 1)
       self.defineSgpr("skTiles", 1)
+      self.defineSgpr("SKSplit", 1)
       self.defineSgpr("SKItersPerWI", 1)
       self.defineSgpr("skGrid", 1)
-      self.states.numSgprStreamK += 5
+      self.states.numSgprStreamK += 6
     elif kernel["StreamK"]:
       # StreamK args
       self.defineSgpr("ItersPerTile", 1)
@@ -8381,6 +8382,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       requiredUnalignedSgprVar += [
         "StreamKIdx",
         "StreamKTileIdx",
+        "StreamKPartialIdx",
         "StreamKLocalStart",
         "StreamKLocalEnd",
       ]
