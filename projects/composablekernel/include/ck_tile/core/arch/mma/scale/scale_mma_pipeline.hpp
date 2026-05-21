@@ -42,10 +42,10 @@ template <typename ADataType,
           std::uint32_t WaveTileM,
           std::uint32_t WaveTileN,
           std::uint32_t WaveTileK,
+          MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
           typename CompilerTarget =
               decltype(get_compiler_target()), // TODO: c++20 amdgcn_target_arch_id GfxTargetId =
                                                // get_compiler_target(),
-          MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
           typename MmaOp_ =
               typename MmaDefaultSelector<ADataType, // TODO: c++20 MmaOpI MmaOp_ = typename
                                                      // MmaDefaultSelector<ADataType,
@@ -59,9 +59,9 @@ template <typename ADataType,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp_, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, CompilerTarget, AccumPolicy, MmaOp_, MmaTransforms>>
+struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CompilerTarget, MmaOp_, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, CompilerTarget, AccumPolicy, MmaOp_, MmaTransforms>>;
+    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
 
     using MmaOp = MmaOp_; // Expose the selected MmaOp

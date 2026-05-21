@@ -168,9 +168,7 @@ struct ScalePipelineKernel
     __device__ void
     operator()(const void* a_per_lane, const void* b_per_lane, void* c_per_lane) const
     {
-        using CompilerTarget = decltype(get_compiler_target());
-        using Pipeline =
-            ScaleMmaPipeline<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK, CompilerTarget>;
+        using Pipeline = ScaleMmaPipeline<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>;
 
         using AVecType = typename Pipeline::AVecType;
         using BVecType = typename Pipeline::BVecType;
@@ -218,7 +216,14 @@ struct ScalePipelineFactory
     template <typename Target>
     struct Create
     {
-        using type = ScaleMmaPipeline<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK, Target>;
+        using type = ScaleMmaPipeline<AType,
+                                      BType,
+                                      CType,
+                                      WaveTileM,
+                                      WaveTileN,
+                                      WaveTileK,
+                                      MmaAccumPolicy::ROW_MAJOR,
+                                      Target>;
     };
 };
 
@@ -327,8 +332,8 @@ struct ScaleWaveWisePipelineKernel
                                                 WaveTileM,
                                                 WaveTileN,
                                                 WaveTileK,
-                                                CompilerTarget,
-                                                AccumPolicy>;
+                                                AccumPolicy,
+                                                CompilerTarget>;
 
         using AVecType = typename Pipeline::AVecType;
         using BVecType = typename Pipeline::BVecType;
@@ -383,8 +388,8 @@ struct ScaleWaveWisePipelineFactory
                                       WaveTileM,
                                       WaveTileN,
                                       WaveTileK,
-                                      Target,
-                                      AccumPolicy>;
+                                      AccumPolicy,
+                                      Target>;
     };
 };
 
