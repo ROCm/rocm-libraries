@@ -1,0 +1,5 @@
+{
+  "kind": "elementwise_fp16",
+  "min_tflops": 0.0,
+  "notes": "Elementwise is memory-bound; bandwidth (~1 TB/s GB/s on MI355X for fp16) bounds throughput, not FLOPS. The run_manifest verify gate enforces bit-exactness against a fp32 numpy reference (tolerance 1e-2 fp16 ULP). Performance is informational."
+}

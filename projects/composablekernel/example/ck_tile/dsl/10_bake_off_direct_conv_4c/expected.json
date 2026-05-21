@@ -1,0 +1,17 @@
+{
+  "schema": "ck.dsl.example.expected/v1",
+  "kind": "conv_fp16",
+  "notes": [
+    "Direct grouped convolution bake-off 2, 4c path.",
+    "Default shape: N=32, H=W=200, groups=64, cpg=kpg=4, R=S=3, pad=1.",
+    "Uses mfma_f32_4x4x4_f16: 16 independent 4x4x4 matmuls per wave.",
+    "block_q=8 processes two 4-wide Q tiles per wave.",
+    "Wide vec2-dword epilogue (1 buffer_store_dwordx2 per lane) fuses the 4 per-lane fp16 outputs into one global store. Reaches ~45-49 TFLOPS warm.",
+    "The example-test path verifies correctness first, so the lower bound is conservative against thermal noise."
+  ],
+  "min_tflops": 25.0,
+  "verify": {
+    "max_abs_atol": 1.0e-2,
+    "max_rel_rtol": 5.0e-2
+  }
+}
