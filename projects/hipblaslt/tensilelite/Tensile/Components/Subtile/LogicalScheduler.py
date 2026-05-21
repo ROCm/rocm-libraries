@@ -2426,9 +2426,22 @@ class LogicalScheduler:
         Owns all control flow (labels, branches, counter management).
         For unroll_factor > 1, emits per-unroll copies with correct vgpr tiles.
         Each mainloop exit jumps to its corresponding NGLL→NLL pair.
+
+        Decouple-scale-DU last-iter no-prefetch path: when pgr >= 2 +
+        scaleSchedulingPeriod > 1, the mainloop emits TWO copies of each
+        per-ui body — a regular one with full prefetch and a "last iter"
+        one with prefetch-only ops stripped (see InstructionEmitter
+        strip_prefetch).  At LoopBeginL we test counter <= pgr + uf and
+        branch to the last-iter copies, which exit via the existing
+        ExitC{ui} → NGLL_C{ui} chain.  This fixes the MT256 R=2 PGR=2
+        SrdA/SrdMXSA over-fetch by one tile-stride past the buffer end
+        (crashes when the last M-tile's buffer lands on a page boundary).
+        Under R == 1 or pgr < 2 the original single-body mainloop is
+        kept for bit-identical legacy codegen.
         """
         from rocisa.code import Module, Label
-        from rocisa.instruction import (SSubU32, SCmpEQU32, SCBranchSCC0,
+        from rocisa.instruction import (SSubU32, SCmpEQU32, SCmpLeU32,
+                                        SCBranchSCC0,
                                         SCBranchSCC1, SBranch)
         from rocisa.container import sgpr
 
@@ -2458,22 +2471,72 @@ class LogicalScheduler:
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
-        for ui in range(uf):
-            module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
-                                      self._emitted_per_unroll[ui]))
-            module.add(SSubU32(dst=sgpr("LoopCounterL"),
-                               src0=sgpr("LoopCounterL"), src1=1,
-                               comment=f"dec counterL (copy {ui})"))
-            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
-                                 comment=f"counterL == {exitValue}? (copy {ui} exit)"))
-            if ui < uf - 1:
-                module.add(SCBranchSCC1(
-                    labelName=exitLabels[ui].getLabelName(),
-                    comment=f"copy {ui} exit → NGLL_C{ui}"))
-            else:
-                module.add(SCBranchSCC0(
-                    labelName=loopBegin.getLabelName(),
-                    comment="restart mainloop"))
+
+        gate_last_iter = getattr(self, '_gate_last_iter', False)
+        if gate_last_iter:
+            # Last outer iter enters C0 with counterL == pgr + uf; each body
+            # copy decrements counterL by 1, so the last iter's C{ui} body
+            # enters with counterL == pgr + uf - ui.  All values in
+            # [pgr+1, pgr+uf] => last iter.  We test the C0-entry value
+            # (counterL <= pgr+uf) once at the top of the loop and branch
+            # to the stripped-prefetch copies for the entire last iter.
+            lastIterEntry = Label("LoopLastIterL", "")
+            module.add(SCmpLeU32(
+                src0=sgpr("LoopCounterL"), src1=exitValue + uf,
+                comment=f"counterL <= {exitValue + uf}? (last outer iter, no prefetch)"))
+            module.add(SCBranchSCC1(
+                labelName=lastIterEntry.getLabelName(),
+                comment="last iter → MAINLOOP_LASTITER (no prefetch)"))
+
+            # Regular (prefetch) path.  By the LoopBeginL guard,
+            # counterL > pgr + uf at entry; after uf decrements counterL
+            # > pgr, so we always loop back — no intermediate exit checks
+            # needed inside the regular body.
+            for ui in range(uf):
+                module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
+                                          self._emitted_per_unroll[ui]))
+                module.add(SSubU32(dst=sgpr("LoopCounterL"),
+                                   src0=sgpr("LoopCounterL"), src1=1,
+                                   comment=f"dec counterL (copy {ui})"))
+            module.add(SBranch(labelName=loopBegin.getLabelName(),
+                               comment="restart mainloop (regular path)"))
+
+            # Last-iter (no-prefetch) path.  Same SSubU32 + SCmpEQU32 +
+            # SCBranchSCC1 cadence as the original single-body mainloop,
+            # but using the stripped-prefetch body copies.  Last ui
+            # falls through to SkipMainloop → NGLL_C{uf-1}.
+            module.add(lastIterEntry)
+            for ui in range(uf):
+                module.add(self._emitLoop(
+                    writer, kernel, f"MAINLOOP_LASTITER_C{ui}",
+                    self._emitted_per_unroll_lastiter[ui]))
+                module.add(SSubU32(dst=sgpr("LoopCounterL"),
+                                   src0=sgpr("LoopCounterL"), src1=1,
+                                   comment=f"dec counterL (last iter copy {ui})"))
+                if ui < uf - 1:
+                    module.add(SCmpEQU32(
+                        src0=sgpr("LoopCounterL"), src1=exitValue,
+                        comment=f"counterL == {exitValue}? (last iter copy {ui} exit)"))
+                    module.add(SCBranchSCC1(
+                        labelName=exitLabels[ui].getLabelName(),
+                        comment=f"last iter copy {ui} exit → NGLL_C{ui}"))
+        else:
+            for ui in range(uf):
+                module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
+                                          self._emitted_per_unroll[ui]))
+                module.add(SSubU32(dst=sgpr("LoopCounterL"),
+                                   src0=sgpr("LoopCounterL"), src1=1,
+                                   comment=f"dec counterL (copy {ui})"))
+                module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
+                                     comment=f"counterL == {exitValue}? (copy {ui} exit)"))
+                if ui < uf - 1:
+                    module.add(SCBranchSCC1(
+                        labelName=exitLabels[ui].getLabelName(),
+                        comment=f"copy {ui} exit → NGLL_C{ui}"))
+                else:
+                    module.add(SCBranchSCC0(
+                        labelName=loopBegin.getLabelName(),
+                        comment="restart mainloop"))
 
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2
@@ -2648,13 +2711,44 @@ class LogicalScheduler:
 
         emitter.populate(self._preloop_emitted, unroll_iter=0)
 
+        # Decouple-scale-DU last-iter scale-GR strip (R>1 + PGR>=2):
+        #   With R>1, the mainloop's last outer iter walks SrdMXSA by
+        #   IPT/2 advances of 256 bytes, landing at orig + K bytes —
+        #   exactly one M-block-row stride past the scale buffer's
+        #   valid K range.  The C0 scale buffer_load that fires at
+        #   this SRD reads OOB.  For interior M-tiles the over-fetch
+        #   lands in adjacent tile memory; for the last M-tile it
+        #   reads past the scale buffer end and crashes when the HSA
+        #   allocation lands on a page boundary.  Data SRD on the
+        #   other hand ends at orig + K - 128 (last valid in-row DU),
+        #   so the data buffer_loads are NOT OOB.  We emit a SECOND
+        #   copy of each body with only the scale `gr` ops stripped
+        #   (see InstructionEmitter._is_prefetch_only) and branch to
+        #   it on the last outer iter.  All other ops (data GRs, all
+        #   SRD advances, all LW/LR XORs, data lr_inc, scale lr_inc)
+        #   keep firing on the last iter, preserving the LDS / SRD /
+        #   LW base state cadence the un-fixed NGLL/NLL chain depends
+        #   on.  R == 1 keeps the single-body mainloop for
+        #   bit-identical legacy codegen.
+        self._gate_last_iter = (
+            self.config.pgr >= 2
+            and self.config.scaleSchedulingPeriod > 1
+        )
+
         self._emitted_per_unroll = []
+        self._emitted_per_unroll_lastiter = []
         self._ngll_per_unroll = []
         self._nll_per_unroll = []
         for ui in range(self.unroll_factor):
             em_copy = copy.deepcopy(self._emitted)
             emitter.populate(em_copy, unroll_iter=ui)
             self._emitted_per_unroll.append(em_copy)
+
+            if self._gate_last_iter:
+                em_copy_li = copy.deepcopy(self._emitted)
+                emitter.populate(em_copy_li, unroll_iter=ui,
+                                 strip_prefetch=True)
+                self._emitted_per_unroll_lastiter.append(em_copy_li)
 
             ngll_copy = copy.deepcopy(self._ngll_emitted)
             emitter.populate(ngll_copy, unroll_iter=ui)

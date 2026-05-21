@@ -313,7 +313,7 @@ class InstructionEmitter:
                          comment=f"skip to {source.target}"),
         ]
 
-    def populate(self, emitted, unroll_iter=0):
+    def populate(self, emitted, unroll_iter=0, strip_prefetch=False):
         """Walk emitted partitions and fill em.instructions.
 
         Decouple-scale-DU: when scaleSchedulingPeriod (R) > 1, the
@@ -366,6 +366,32 @@ class InstructionEmitter:
 
         For R == 1 every gate reduces to "fire every copy" and the
         output is bit-identical to the pre-R-period scheduler.
+
+        strip_prefetch (last-iter mainloop variant): when True, the
+        scale buffer_load that walks SrdMXSA / SrdMXSB one tile-stride
+        past the valid K range is stripped to an empty instruction
+        list.  Per the over-fetch analysis (see scaleSchedulingPeriod
+        R>1 + PGR>=2 path), AFTER the last mainloop outer iter
+            SrdMXSA = orig + (IPT/2)·256 = orig + K bytes
+            SrdA    = orig + (IPT-1)·128 = orig + K - 128 bytes
+        i.e. only the scale SRD ends up past the valid K range
+        (one M-block-row stride OOB).  Data SRD ends one DU SHORT
+        of the buffer end, so the data buffer_load at K-128 is still
+        in-bounds for the row.  Stripping just the scale `gr` on the
+        last iter avoids the scale OOB DTL while keeping every other
+        op (data GRs that read valid K bytes, all SRD advances, all
+        LW/LR XORs, partition-transition data lr_inc) intact — LDS
+        state cadence at NGLL_C{ui} entry stays bit-identical to the
+        un-fixed code.  Stripped op types:
+          - 'gr' for tensor in (SA, SB)  — OOB scale DTL load
+        NOT stripped:
+          - 'gr'     for A, B       (data GRs read valid in-row K)
+          - 'gr_inc' for all tensors (SRD advance + LW XOR; needed so
+                                      NGLL sees the same SRD / LW base
+                                      state as the un-fixed code)
+          - 'lr_inc' for all tensors (scale + data LR XOR; same LDS
+                                      half cadence preserved for NGLL)
+          - mfma / lr / wait_gr / wait_lr / sync / skip
         """
         R = self.config.scaleSchedulingPeriod
         for partition_emitted in emitted:
@@ -377,7 +403,25 @@ class InstructionEmitter:
                     if R > 1 and self._scale_op_gated_out(em, unroll_iter, R):
                         em.instructions = []
                         continue
+                    if strip_prefetch and self._is_prefetch_only(em):
+                        em.instructions = []
+                        continue
                     em.instructions = handler(em, unroll_iter)
+
+    @staticmethod
+    def _is_prefetch_only(em) -> bool:
+        """Return True for the scale GR (DTL b128) ops that go OOB on
+        the last mainloop outer iter.
+
+        Only the scale `gr` (SA/SB) is stripped — see populate()
+        docstring (strip_prefetch) for the over-fetch analysis.  Data
+        GR is NOT stripped because SrdA / SrdB end at K - 128 (last
+        valid byte) rather than at K.
+        """
+        if em.opType != 'gr':
+            return False
+        tensor = getattr(em.source, 'tensor', None)
+        return tensor in ('SA', 'SB')
 
     @staticmethod
     def _scale_op_gated_out(em, unroll_iter: int, R: int) -> bool:
