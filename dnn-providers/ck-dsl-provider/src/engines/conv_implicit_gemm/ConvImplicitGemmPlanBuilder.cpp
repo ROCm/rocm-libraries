@@ -7,8 +7,10 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <pybind11/embed.h>
 
+#include <cstdint>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -124,21 +126,43 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
 
     std::shared_ptr<HipModule> module = _cache.getOrLoad(key, loader);
 
-    // The plan only needs the module + tensor UIDs: HipModule carries
-    // the launch metadata (grid, block, ldsBytes, argSchema) captured
-    // from the artifact at load time, so execute() can pack args and
-    // launch without re-reading the cache.
-    auto plan =
-        std::make_unique<ConvImplicitGemmPlan>(std::move(module), convAttr.x_tensor_uid(),
-                                               convAttr.w_tensor_uid(), convAttr.y_tensor_uid());
+    // Buffer-rsrc byte sizes for the kernel's free OOB-clamping args
+    // (A_bytes / B_bytes / D_bytes). Computed from the spec's
+    // ConvProblem geometry rather than re-walking the tensor map:
+    //   X (NHWC fp16): N * Hi * Wi * C * 2
+    //   W (KRSC fp16): K * R  * S  * C * 2
+    //   Y (NHWK fp16): N * Ho * Wo * K * 2
+    // The kernel's signature is i32 for these; the bake-off shape
+    // produces values well under 2^31 (~3.2 MB for X/Y, ~73 KB for W).
+    // I-8 only handles FP16, so the byte multiplier is hardcoded to 2;
+    // M2+ will derive this from the spec's dtype field when the
+    // adapter starts surfacing one.
+    constexpr std::int64_t kFp16Bytes = 2;
+    const auto& p = spec.problem;
+    std::int64_t xBytes64 = static_cast<std::int64_t>(p.N) * p.Hi * p.Wi * p.C * kFp16Bytes;
+    std::int64_t wBytes64 = static_cast<std::int64_t>(p.K) * p.R * p.S * p.C * kFp16Bytes;
+    std::int64_t yBytes64 = static_cast<std::int64_t>(p.N) * p.Ho() * p.Wo() * p.K * kFp16Bytes;
+    if (xBytes64 > std::numeric_limits<std::int32_t>::max() ||
+        wBytes64 > std::numeric_limits<std::int32_t>::max() ||
+        yBytes64 > std::numeric_limits<std::int32_t>::max()) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ConvImplicitGemmPlanBuilder: tensor byte sizes exceed int32_t "
+            "(the kernel signature is i32 for A_bytes/B_bytes/D_bytes); "
+            "shapes this large need an M2+ extension to widen the ABI");
+    }
+
+    // The plan needs the module + tensor UIDs + buffer-rsrc byte
+    // sizes. HipModule carries the launch metadata (grid, block,
+    // ldsBytes, argSchema) captured from the artifact at load time,
+    // so execute() can pack args and launch without re-reading the
+    // cache.
+    auto plan = std::make_unique<ConvImplicitGemmPlan>(
+        std::move(module), convAttr.x_tensor_uid(), convAttr.w_tensor_uid(),
+        convAttr.y_tensor_uid(), static_cast<std::int32_t>(xBytes64),
+        static_cast<std::int32_t>(wBytes64), static_cast<std::int32_t>(yBytes64));
 
     executionContext.setPlan(std::move(plan));
-
-    // `spec` is built above for both the cache loader and as a
-    // forward-compat hook for I-9's perf-measurement (which will read
-    // the FLOPS-derived shape from the spec). For I-7 we silence the
-    // unused warning explicitly so the intent is clear.
-    (void)spec;
 }
 
 std::vector<data_objects::KnobT> ConvImplicitGemmPlanBuilder::getCustomKnobs(
