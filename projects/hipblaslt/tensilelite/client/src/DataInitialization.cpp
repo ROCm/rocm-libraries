@@ -770,14 +770,25 @@ namespace TensileLite
                                   size_t                  totalElements,
                                   hipMemcpyKind           kind)
         {
+            // First, fill entire buffer with NaN/Inf sentinels from "bad" buffer
             HIP_CHECK_EXC(
                 hipMemcpy(dst,
-                          src,
+                          bad,
                           multiplyElementSize(totalElements,
                                               DataTypeInfo::Get(descriptor.dataType()).elementSize),
                           kind));
+            // Then, copy valid data to middle section, overwriting sentinel padding
             ptrdiff_t dPadding = totalElements - descriptor.totalAllocatedElements();
             dPadding           = multiplyElementSize(dPadding, descriptor.elementBytes());
+
+            // Ensure dPadding/2 is properly aligned for the element type
+            // Round dPadding to multiple of (2 * ceil(elementBytes)) to ensure:
+            // 1. dPadding is even (so dPadding/2 is a whole number)
+            // 2. dPadding/2 is aligned to element boundaries
+            float elementBytes = descriptor.elementBytes();
+            size_t alignmentBytes = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, elementBytes)));
+            dPadding = (dPadding / alignmentBytes) * alignmentBytes;
+
             void* dstOffset    = (void*)((uint8_t*)dst + dPadding / 2);
             TensileLite::hip::CopyTensorVoid(dstOffset, src, descriptor, kind);
             return dstOffset;
@@ -2460,27 +2471,55 @@ namespace TensileLite
                 if(it != m_vdata[i].pristine.end())
                 {
                     auto& p = it->second;
-                    if(kind == hipMemcpyHostToHost)
-                        ptr = copyInputBuffers(desc,
-                                               p.cpuInput.current.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
-                    else if(kind == hipMemcpyHostToDevice)
-                        ptr = copyInputBuffers(desc,
-                                               p.gpuInput.current.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
-                    else if(kind == hipMemcpyDeviceToDevice)
-                        ptr = copyInputBuffers(desc,
-                                               p.gpuInput.current.get(),
-                                               p.gpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
+                    // For output tensors with NaN bounds checking, initialize buffer with NaN sentinels
+                    if(m_curBoundsCheck == BoundsCheckMode::NaN)
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.cpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.cpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.cpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.gpuInput.valid.get(),
+                                                      p.gpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                    }
+                    else
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyInputBuffers(desc,
+                                                   p.cpuInput.current.get(),
+                                                   p.cpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyInputBuffers(desc,
+                                                   p.gpuInput.current.get(),
+                                                   p.cpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyInputBuffers(desc,
+                                                   p.gpuInput.current.get(),
+                                                   p.gpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                    }
                     if(ptr == nullptr)
                     {
-                        std::runtime_error("output ptr is null when copy input");
+                        throw std::runtime_error("output ptr is null when copy input");
                     }
                     ptrs[i]        = ptr;
                     batchPtrs[i]   = p.getInputByKind(kind).batch.get();
@@ -2667,25 +2706,30 @@ namespace TensileLite
                     {
                         // gfx1250 and other arches: apply K-dimension swizzle.
                         // gfx950 is excluded by the branches above.
+                        // Batch dim (if present) goes at the front; pad/reshape/permute
+                        // operate natively on N-D so all batches are processed at once.
                         using Tensor = Tensor::Manipulation::Tensor;
+                        size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
 
                         if (unrollMajor)
                         {
                             auto unrolledSize = desc.sizes()[0];
                             auto tiledSize    = desc.sizes()[1];
                             size_t dimk       = 128 / MX;
-                            auto tmpTensor    = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
+                            auto tmpTensor    = Tensor({batch, tiledSize, unrolledSize}, desc.elementBytes());
+                            ::Tensor::Manipulation::Shape paddedShape{
+                                batch, tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
 
                             memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
                             //Temporary hack
                             uint64_t padVal{};
                             auto     paddedTensor = ::Tensor::Manipulation::pad(
                                 tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                            paddedTensor.reshape({paddedShape[0],
-                                                  paddedShape[1] / dimk,
+                            paddedTensor.reshape({batch,
+                                                  paddedShape[1],
+                                                  paddedShape[2] / dimk,
                                                   dimk});
-                            Tensor permuted = permute(paddedTensor, {1,0,2});
+                            Tensor permuted = permute(paddedTensor, {0, 2, 1, 3});
                             ptr             = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
                                                    permuted.as<void>(),
@@ -2697,18 +2741,20 @@ namespace TensileLite
                             auto unrolledSize = desc.sizes()[1];
                             auto tiledSize    = desc.sizes()[0];
                             size_t dimk       = 128 / MX;
-                            auto tmpTensor    = Tensor({unrolledSize, tiledSize}, desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{(unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
+                            auto tmpTensor    = Tensor({batch, unrolledSize, tiledSize}, desc.elementBytes());
+                            ::Tensor::Manipulation::Shape paddedShape{
+                                batch, (unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
 
                             memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
                             //Temporary hack
                             uint64_t padVal{};
                             auto     paddedTensor = ::Tensor::Manipulation::pad(
                                 tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                            paddedTensor.reshape({paddedShape[0] / dimk,
+                            paddedTensor.reshape({batch,
+                                                  paddedShape[1] / dimk,
                                                   dimk,
-                                                  paddedShape[1]});
-                            Tensor permuted = permute(paddedTensor, {0,2,1});
+                                                  paddedShape[2]});
+                            Tensor permuted = permute(paddedTensor, {0, 1, 3, 2});
                             ptr             = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
                                                    permuted.as<void>(),

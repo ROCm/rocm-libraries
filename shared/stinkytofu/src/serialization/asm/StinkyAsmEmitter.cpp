@@ -214,6 +214,13 @@ inline std::ostream& operator<<(std::ostream& os, const MUBUFModifiers& mubufMod
     return os;
 }
 
+inline std::ostream& operator<<(std::ostream& os, const CacheScopeModifiers& mod) {
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(mod.scope);
+    }
+    return os;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const SMEMModifiers& smemMod) {
     if (smemMod.offset != 0) {
         os << " offset:" << smemMod.offset;
@@ -527,7 +534,11 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
     // Check if instruction has VOP3 modifiers
     const VOP3Modifiers* vop3Mod = inst.getModifier<VOP3Modifiers>();
 
-    // Check if this is a MUBUF instruction (buffer operations) with offen
+    // Check if this is a MUBUF instruction (buffer operations) with offen.
+    // Note: SOPP fences (global_wb / global_inv) carry a CacheScopeModifiers
+    // instead of MUBUFModifiers, so this query correctly returns nullptr for
+    // them — the null/0-soffset substitution below is only meaningful for
+    // true buffer ops with src registers.
     const MUBUFModifiers* mubufMod = inst.getModifier<MUBUFModifiers>();
 
     // Compute the number of source operands to emit from the HW field metadata.
@@ -715,6 +726,7 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
             EMIT_TRAILING_MODIFIER(DS, DS);
             EMIT_TRAILING_MODIFIER(FLAT, FLAT);
             EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
+            EMIT_TRAILING_MODIFIER(CACHE_SCOPE, CacheScope);
             EMIT_TRAILING_MODIFIER(SMEM, SMEM);
             EMIT_TRAILING_MODIFIER(SDWA, SDWA);
             EMIT_TRAILING_MODIFIER(DPP, DPP);
