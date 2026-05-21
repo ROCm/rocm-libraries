@@ -162,7 +162,58 @@ TEST_P(IntegrationGpuBatchnormUnhappyActivation, RejectsUnsupportedActivations)
         << ", err_msg: " << result.err_msg;
 }
 
+// Since ReLU is the only supported fusion (not leakyReLU),
+// also test that it is accepted in the forward case to validate that the test is correctly set up
+// to allow supported fusions and reject unsupported ones.
+TEST_F(IntegrationGpuBatchnormUnhappyActivation, AcceptsReluForwardFusion)
+{
+    Graph g;
+
+    g.set_name("IntegrationGpuBatchnormHappyRelu");
+    g.set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Valid 4D tensor
+    const std::vector<int64_t> dims = {2, 4, 8, 8};
+    const std::vector<int64_t> cDims = getDerivedShape(dims);
+
+    // Input
+    auto x = std::make_shared<TensorAttributes>(
+        makeTensorAttributes("x", DataType::FLOAT, dims, generateStrides(dims)));
+
+    // BN parameters
+    auto mean = std::make_shared<TensorAttributes>(
+        makeTensorAttributes("mean", DataType::FLOAT, cDims, generateStrides(cDims)));
+    auto invVar = std::make_shared<TensorAttributes>(
+        makeTensorAttributes("inv_variance", DataType::FLOAT, cDims, generateStrides(cDims)));
+    auto scale = std::make_shared<TensorAttributes>(
+        makeTensorAttributes("scale", DataType::FLOAT, cDims, generateStrides(cDims)));
+    auto bias = std::make_shared<TensorAttributes>(
+        makeTensorAttributes("bias", DataType::FLOAT, cDims, generateStrides(cDims)));
+
+    // Forward BatchNorm
+    const BatchnormInferenceAttributes bn;
+    auto bnOut = g.batchnorm_inference(x, mean, invVar, scale, bias, bn);
+
+    // ReLU activation (supported fusion)
+    PointwiseAttributes pw;
+    pw.set_mode(PointwiseMode::RELU_FWD);
+
+    auto z = g.pointwise(bnOut, pw);
+    z->set_output(true);
+
+    // Build graph
+    auto result = g.build(_handle);
+
+    // Must succeed
+    EXPECT_EQ(result.code, ErrorCode::OK)
+        << "Expected successful build but got error: " << result.err_msg;
+}
+
 // Test cases
+// LeakyReLU has been emulated by using RELU_FWD with a non-zero negative slope,
+// since frontend does not directly expose a LeakyReLU mode.
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormUnhappyActivation,
