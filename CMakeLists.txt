@@ -55,6 +55,7 @@ set(AVAILABLE_COMPONENTS
     miopen-provider
     hipblaslt-provider
     hip-kernel-provider
+    ck-dsl-provider
     hipdnn-samples
 )
 
@@ -216,6 +217,14 @@ if("hip-kernel-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT hip-kernel-provider
         PREFIX_PATH dnn-providers
         EXPECT_TARGET hip_kernel_provider
+    )
+endif()
+
+if("ck-dsl-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT ck-dsl-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET ck_dsl_provider_plugin
     )
 endif()
 
