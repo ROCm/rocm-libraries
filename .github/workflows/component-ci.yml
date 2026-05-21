@@ -1,0 +1,176 @@
+name: Component CI
+
+on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: "Detect changes"
+    runs-on: ubuntu-24.04
+    outputs:
+      linux_components: ${{ steps.configure.outputs.linux_components }}
+      windows_components: ${{ steps.configure.outputs.windows_components }}
+      docker-image: ${{ steps.env.outputs.docker-image }}
+      linux-runner: ${{ steps.env.outputs.linux-runner }}
+      windows-runner: ${{ steps.env.outputs.windows-runner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/actions/ci-env
+            .github/scripts/component_ci.py
+          fetch-depth: 2
+      - uses: ./.github/actions/ci-env
+        id: env
+      - name: Detect changed components
+        id: configure
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'HEAD^' }}
+        run: python .github/scripts/component_ci.py
+
+  linux:
+    name: "Linux (${{ matrix.component.name }})"
+    needs: changes
+    if: needs.changes.outputs.linux_components != '[]'
+    runs-on: ${{ needs.changes.outputs.linux-runner }}
+    container:
+      image: ${{ needs.changes.outputs.docker-image }}
+    env:
+      ROCM_PATH: /opt/rocm
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON(needs.changes.outputs.linux_components) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.component.dir }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Install Python dependencies
+        if: matrix.component.requirements != ''
+        run: pip install -r ${{ matrix.component.requirements }}
+
+      - name: Build (GCC)
+        if: matrix.component.build_gcc
+        run: invoke build --gcc --build-dir build_gcc --clean
+
+      - name: Build
+        if: matrix.component.build
+        run: invoke build
+
+      - name: Test
+        if: matrix.component.test
+        working-directory: ${{ matrix.component.dir }}/build
+        run: ctest --output-on-failure
+
+      - name: Test pip install
+        if: matrix.component.pip_test_path != ''
+        uses: ./.github/actions/pip-install-test
+        with:
+          package_path: ${{ matrix.component.dir }}
+          test_path: ${{ matrix.component.pip_test_path }}
+
+  windows:
+    name: "Windows (${{ matrix.component.name }})"
+    needs: changes
+    if: needs.changes.outputs.windows_components != '[]'
+    runs-on: ${{ needs.changes.outputs.windows-runner }}
+    env:
+      BUILD_DIR: B:\build
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON(needs.changes.outputs.windows_components) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.component.dir }}
+    steps:
+      - name: Configure git long paths
+        working-directory: .
+        run: git config --global core.longpaths true
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-windows
+        with:
+          amdgpu_family: gfx1151
+
+      - name: Install Python dependencies
+        if: matrix.component.requirements != ''
+        run: pip install -r ${{ matrix.component.requirements }}
+
+      - name: Install GTest
+        if: matrix.component.build
+        run: vcpkg install gtest
+
+      - name: Build
+        if: matrix.component.build
+        run: invoke build --build-dir "${{ env.BUILD_DIR }}/${{ matrix.component.name }}"
+
+      - name: Test
+        if: matrix.component.test
+        working-directory: ${{ env.BUILD_DIR }}/${{ matrix.component.name }}
+        run: ctest --output-on-failure
+
+      - name: Build (static)
+        if: matrix.component.build_static
+        run: invoke build --static --build-dir "${{ env.BUILD_DIR }}/${{ matrix.component.name }}-static" --clean
+
+      - name: Test (static)
+        if: matrix.component.build_static
+        working-directory: ${{ env.BUILD_DIR }}/${{ matrix.component.name }}-static
+        run: ctest --output-on-failure
+
+      - name: Test pip install
+        if: matrix.component.pip_test_path != ''
+        uses: ./.github/actions/pip-install-test
+        with:
+          package_path: ${{ matrix.component.dir }}
+          test_path: ${{ matrix.component.pip_test_path }}
+
+  component-ci-summary:
+    name: "Component CI Summary"
+    if: always()
+    needs:
+      - linux
+      - windows
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check results
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "The following jobs failed: ${FAILED_JOBS}"
+            exit 1
+          fi
