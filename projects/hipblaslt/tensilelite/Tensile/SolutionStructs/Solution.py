@@ -879,6 +879,11 @@ class Solution(collections.abc.Mapping):
       if state["ClusterBarrier"] == True:
         reject(state, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
 
+    # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated
+    # when TDM is enabled.
+    if state["ClusterBarrier"] == True and state["TDMInst"] == 0:
+      reject(state, "ClusterBarrier requires TDMInst != 0 (TDMA or TDMB enabled).")
+
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 

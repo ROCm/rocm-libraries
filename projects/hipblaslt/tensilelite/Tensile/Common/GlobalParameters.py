@@ -524,8 +524,15 @@ defaultBenchmarkCommonParameters = [
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
     # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
     {"SwInstructionPrefetch": [True]},
-    {"ClusterBarrier": [ False ]},
+    # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
+    # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
+    # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
+    # ClusterBarrier — True: emit split signal/wait cluster_barrier instructions
+    # so workgroups in a cluster synchronize before/after consuming shared
+    # TDM-multicast data. Requires ClusterDim != [1, 1] and TDMInst != 0;
+    # False: standard per-WG barriers, no inter-WG synchronization.
+    {"ClusterBarrier": [ False ]},
     {"HalfPLR": [0]}
 ]
 
