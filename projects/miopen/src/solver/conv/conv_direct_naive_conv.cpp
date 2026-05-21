@@ -54,7 +54,7 @@ constexpr size_t NAIVE_CONV_BLOCK_SIZE = 256;
 // where one block can no longer cover the spatial dimension in its thread-loop.
 constexpr size_t WRW_SPATIAL_TILING_THRESHOLD = 262144;
 
-// Native scalar 16-bit float atomicAdd (half, __hip_bfloat16) is available
+// Native scalar 16-bit float atomicAdd (half, hip_bfloat16) is available
 // on CDNA2+ (gfx90a, gfx94x, gfx95x) and RDNA4 (gfx120x). RDNA3/3.5
 // (gfx110x, gfx115x) only have packed f16 atomics in hardware.
 bool HasNative16BitFloatAtomic(const ExecutionContext& ctx)
@@ -194,7 +194,7 @@ std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
     }
     else if(IsInputBfp16(problem))
     {
-        kernel_name << "__hip_bfloat16_";
+        kernel_name << "hip_bfloat16_";
     }
     else if(IsInputInt8(problem))
     {
@@ -218,7 +218,7 @@ std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
     else if(IsOutputFp16(problem))
         kernel_name << "half";
     else if(IsOutputBfp16(problem))
-        kernel_name << "__hip_bfloat16";
+        kernel_name << "hip_bfloat16";
     else if(IsOutputInt8(problem))
         kernel_name << "int8_t";
     else if(IsOutputInt32(problem))

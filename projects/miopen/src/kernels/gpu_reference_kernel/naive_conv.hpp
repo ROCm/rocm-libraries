@@ -4,8 +4,11 @@
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
-#endif
 #include <hip/hip_bfloat16.h>
+#endif
+// hip_bfloat16 is provided by hiprtc_runtime.h during HIPRTC compilation
+// and by hip/hip_bfloat16.h during host compilation. It is portable across
+// all ROCm versions, unlike __hip_bfloat16 which requires newer ROCm.
 
 #include "miopen_cstdint.hpp"
 #include "miopen_limits.hpp"
@@ -17,14 +20,14 @@ inline __device__ __host__ dst_data_t cast_to(const src_data_t& val)
 {
     return static_cast<dst_data_t>(val);
 }
-// __hip_bfloat16 ↔ double
+// hip_bfloat16 ↔ double
 template <>
-inline __device__ __host__ __hip_bfloat16 cast_to(const double& val)
+inline __device__ __host__ hip_bfloat16 cast_to(const double& val)
 {
-    return __hip_bfloat16(static_cast<float>(val));
+    return hip_bfloat16(static_cast<float>(val));
 }
 template <>
-inline __device__ __host__ double cast_to(const __hip_bfloat16& val)
+inline __device__ __host__ double cast_to(const hip_bfloat16& val)
 {
     return static_cast<double>(static_cast<float>(val));
 }
@@ -39,14 +42,14 @@ inline __device__ __host__ double cast_to(const half& val)
 {
     return static_cast<double>(__half2float(val));
 }
-// __hip_bfloat16 ↔ float
+// hip_bfloat16 ↔ float
 template <>
-inline __device__ __host__ __hip_bfloat16 cast_to(const float& val)
+inline __device__ __host__ hip_bfloat16 cast_to(const float& val)
 {
-    return __hip_bfloat16(val);
+    return hip_bfloat16(val);
 }
 template <>
-inline __device__ __host__ float cast_to(const __hip_bfloat16& val)
+inline __device__ __host__ float cast_to(const hip_bfloat16& val)
 {
     return static_cast<float>(val);
 }
@@ -91,12 +94,12 @@ inline __device__ __host__ bool IsZero(double val) { return val == 0.0; }
 
 inline __device__ __host__ bool IsOne(double val) { return val == 1.0; }
 
-// Type trait: does the target GPU provide a native atomicAdd for this type?
-// float/double are universally supported. half/__hip_bfloat16 require gfx90a+
-// (CDNA2) or RDNA3+. The solver passes -DNAIVE_CONV_HAS_16BIT_FLOAT_ATOMIC=1
-// when the target GPU supports 16-bit float atomics. Using if constexpr on
-// this trait prevents the compiler from instantiating atomicAdd for
-// unsupported types.
+// Type trait: does the target GPU support atomicAdd for this type?
+// float/double are universally supported via hardware. half/hip_bfloat16
+// require -DNAIVE_CONV_HAS_16BIT_FLOAT_ATOMIC=1, set by the solver for
+// CDNA2+ (gfx90a, gfx94x, gfx95x) and RDNA4 (gfx120x).
+// For hip_bfloat16/half, we provide CAS-based atomicAdd overloads below
+// so no native HIP atomicAdd for these types is required.
 template <typename T>
 struct has_native_atomic_add
 {
@@ -119,10 +122,43 @@ struct has_native_atomic_add<half>
     static constexpr bool value = true;
 };
 template <>
-struct has_native_atomic_add<__hip_bfloat16>
+struct has_native_atomic_add<hip_bfloat16>
 {
     static constexpr bool value = true;
 };
+
+// CAS-based atomicAdd for 16-bit float types.
+// Operates on the aligned 32-bit word containing the target element.
+// Addition is performed in float precision. This is portable across all
+// ROCm versions (only requires 32-bit atomicCAS, which is universal).
+// Same principle as CK's generic_memory_space_atomic.hpp bf16x2 CAS loop.
+inline __device__ hip_bfloat16 atomicAdd(hip_bfloat16* address, hip_bfloat16 val)
+{
+    unsigned int* addr32 =
+        reinterpret_cast<unsigned int*>(reinterpret_cast<size_t>(address) & ~size_t(2));
+    bool is_upper      = (reinterpret_cast<size_t>(address) & 2) != 0;
+    unsigned int shift = is_upper ? 16 : 0;
+    unsigned int mask  = is_upper ? 0x0000FFFF : 0xFFFF0000;
+
+    unsigned int old32 = *addr32;
+    unsigned int assumed;
+    do
+    {
+        assumed                 = old32;
+        unsigned short old_bits = static_cast<unsigned short>(assumed >> shift);
+        hip_bfloat16 old_bf16;
+        old_bf16.data = old_bits;
+        float sum     = static_cast<float>(old_bf16) + static_cast<float>(val);
+        hip_bfloat16 new_bf16(sum);
+        unsigned int new32 = (assumed & mask) | (static_cast<unsigned int>(new_bf16.data) << shift);
+        old32              = atomicCAS(addr32, assumed, new32);
+    } while(old32 != assumed);
+
+    unsigned short ret_bits = static_cast<unsigned short>(old32 >> shift);
+    hip_bfloat16 result;
+    result.data = ret_bits;
+    return result;
+}
 #endif
 
 // Precompute valid filter range for FWD (and WRW spatial checks).

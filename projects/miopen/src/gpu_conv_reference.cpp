@@ -42,7 +42,7 @@ std::string RefKernelName(const std::string& direction,
     {
     case miopenFloat: name << "float_"; break;
     case miopenHalf: name << "half_"; break;
-    case miopenBFloat16: name << "__hip_bfloat16_"; break;
+    case miopenBFloat16: name << "hip_bfloat16_"; break;
     case miopenInt8: name << "int8_t_"; break;
     default: MIOPEN_THROW("GpuConvReference: unsupported input data type");
     }
@@ -58,7 +58,7 @@ std::string RefKernelName(const std::string& direction,
     {
     case miopenFloat: name << "float"; break;
     case miopenHalf: name << "half"; break;
-    case miopenBFloat16: name << "__hip_bfloat16"; break;
+    case miopenBFloat16: name << "hip_bfloat16"; break;
     case miopenInt8: name << "int8_t"; break;
     case miopenInt32: name << "int32_t"; break;
     default: MIOPEN_THROW("GpuConvReference: unsupported output data type");
