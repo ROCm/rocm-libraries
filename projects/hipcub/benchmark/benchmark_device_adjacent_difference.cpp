@@ -151,24 +151,26 @@ class device_adjacent_difference_benchmark : public primbench::benchmark_interfa
         // Allocate temporary storage
         std::size_t temp_storage_size{};
         void*       d_temp_storage = nullptr;
+
+        const auto launch = [&]
+        {
+            return dispatch_adjacent_difference(left_tag,
+                                                copy_tag,
+                                                d_temp_storage,
+                                                temp_storage_size,
+                                                d_input,
+                                                d_output,
+                                                size,
+                                                hipcub::Sum{},
+                                                stream);
+        };
+
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
 
         state.set_items(size);
         state.add_writes<T>(size);
 
-        state.run(
-            [&]
-            {
-                return dispatch_adjacent_difference(left_tag,
-                                                    copy_tag,
-                                                    d_temp_storage,
-                                                    temp_storage_size,
-                                                    d_input,
-                                                    d_output,
-                                                    size,
-                                                    hipcub::Sum{},
-                                                    stream);
-            });
+        state.run(launch);
 
         HIP_CHECK(hipFree(d_input));
         if(copy)

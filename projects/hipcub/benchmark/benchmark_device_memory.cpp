@@ -305,6 +305,7 @@ template<typename T,
          unsigned int            BlockSize,
          unsigned int            ItemsPerThread,
          memory_operation_method MemOp,
+         size_t                  Size,
          kernel_operation        KernelOp = no_operation>
 class device_memory_benchmark : public primbench::benchmark_interface
 {
@@ -317,7 +318,9 @@ class device_memory_benchmark : public primbench::benchmark_interface
             .add("data_type", primbench::name<T>())
             .add("items_per_thread", ItemsPerThread)
             .add("kernel_op", get_name(KernelOp))
-            .add("block_size", BlockSize);
+            .add("block_size", BlockSize)
+            .add("size", Size);
+        ;
     }
 
     void run(primbench::state& state) override
@@ -401,7 +404,7 @@ class memcpy_benchmark : public primbench::benchmark_interface
 };
 
 #define CREATE_BENCHMARK_IPT(METHOD, OPERATION, T, SIZE, BS, IPT) \
-    executor.queue<device_memory_benchmark<T, BS, IPT, METHOD, OPERATION>>()
+    executor.queue<device_memory_benchmark<T, BS, IPT, METHOD, SIZE, OPERATION>>()
 
 #define CREATE_BENCHMARK_MEMCPY(T, SIZE) executor.queue<memcpy_benchmark<T, SIZE>>()
 
