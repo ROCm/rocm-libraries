@@ -4309,7 +4309,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Store tensor params so emitter can access them for TDM descriptor reprogramming
     self.tPA = tensorParametersA
     self.tPB = tensorParametersB
-    self._subtileDtileBaseVgpr = None  # set later by D-tile allocation
+    # First VGPR of the D-tile accumulator allocation.  On gfx1250 (MIArchVgpr),
+    # WMMA writes directly to regular VGPRs, so the post-loop store path aliases
+    # ValuC to these VGPRs instead of allocating a separate range.
+    self._subtileDtileBaseVgpr = None
     #expand = kernel["ExpandPointerSwap"]
     self.dontAppendCode = False
 
@@ -4420,7 +4423,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment("Allocating v%s for %s LR"%(str(tileInfo.sharedVgprLROffset), tileInfo.tc))
       module.addComment("Allocating v%s for %s LR Swap"%(str(tileInfo.sharedVgprLROffsetSwap), tileInfo.tc))
 
-    # TDM descriptor init for gfx1250 subtile
     if hasTDM:
       module.add(self.tdmGlobalOffsetSubtile(kernel, tensorParametersA))
       module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersA))
@@ -4429,12 +4431,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))
     module.add(lraTileAssignment(self, kernel))
-    # LR swap VGPRs are needed for LDS double-buffering regardless of TDM
     module.add(localReadDTLInitCommonSwapVgpr(self, kernel))
 
     if not hasTDM:
       module.add(graTileAssignmentScaleSwizzled(self, kernel))
-    # Scale LR tile assignment needed even with TDM (initializes scale LR offset VGPRs)
     module.add(lraTileAssignmentScaleSwizzled(self, kernel))
 
     module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
@@ -4452,7 +4452,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
-    # Save D-tile base for gfx1250 subtile ValuC aliasing
     if dtileInfo.vgprTiles:
       self._subtileDtileBaseVgpr = dtileInfo.vgprTiles[0].regList.indices[0]
 
@@ -4500,9 +4499,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment0(" =================== Start of post-loop code =================== ")
       module.addComment0(" =============================================================== ")
 
-      # On gfx1250 subtile, WMMA accumulators are in regular VGPRs (D-tile allocation).
-      # Point ValuC directly at the D-tile base instead of allocating a new range,
-      # since there are no accVGPRs and the mapping phase is empty.
+      # ValuC aliases D-tile VGPRs on MIArchVgpr (see _subtileDtileBaseVgpr)
       if kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None:
         self.states.c.startVgprValu = self._subtileDtileBaseVgpr
       else:
@@ -4540,7 +4537,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
       module.add(storeModule)
 
-      # When ValuC aliases D-tile VGPRs (gfx1250 subtile), the D-tile dealloc handles cleanup
       if not (kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
         self.vgprPool.checkIn(self.states.c.startVgprValu)
 
@@ -8059,7 +8055,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #self.states.c.startVgprValu = vgprIdx;
 
       #vgprIdx += self.states.c.numVgprValu
-      # StreamK constant VGPRs
       if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
         numSKConsts = 5
         if kernel["StreamK"] >= 2:

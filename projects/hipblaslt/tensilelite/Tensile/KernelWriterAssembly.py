@@ -673,7 +673,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("tdmMetadataGroup1", 8, 4))
 
     # TDM LDS address tracking for aliased descriptors with subtile double-buffering
-    if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["UseSubtileImpl"]:
+    if kernel["UseSubtileImpl"] and kernel["enableTDMA"] and kernel["enableTDMB"]:
       module.add(self.defineSgpr("tdmLdsAddrA", 1))
       module.add(self.defineSgpr("tdmLdsAddrB", 1))
       module.add(self.defineSgpr("tdmLdsSwapMaskA", 1))
