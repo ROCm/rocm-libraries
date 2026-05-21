@@ -309,46 +309,54 @@ class InstructionEmitter:
                 dst=vgpr(halfMaskVgpr), src="0x0000FFFF",
                 comment="BF16 half-mask: keep K0 (low 16b), zero K1 (high 16b)"))
 
-            # Precompute the 4 boundary masks from d = rem%8.
-            # The boundary-mask pattern (which vgprs are full/half/zero) depends
-            # only on rem%8: since laneK_0 is always a multiple of 8 and we mod
-            # out MatrixInstK=32, every "boundary" lane in every subIterK has
-            # effective_diff ≡ rem (mod 8). So all boundary lanes share the same
-            # 4-vgpr mask pattern, and we can build it once here.
+            # Precompute the boundary masks from d = rem % numMIInUnroll.
+            # The boundary-mask pattern (which vgprs are full/half/zero)
+            # depends only on rem % numMIInUnroll: laneK_0 is always a
+            # multiple of numMIInUnroll, and (assuming MatrixInstK is a
+            # multiple of numMIInUnroll) every "boundary" lane in every
+            # subIterK has effective_diff ≡ rem (mod numMIInUnroll). So all
+            # boundary lanes share the same mask pattern (one per vgpr held
+            # per lane: numMIInUnroll // kStride masks).
+            kStride = 2  # BF16: 2 K-elements packed per 32-bit vgpr
+            assert numMIInUnroll % kStride == 0, \
+                f"numMIInUnroll ({numMIInUnroll}) must be a multiple of kStride ({kStride})"
+            numBoundaryMasks = numMIInUnroll // kStride
             laneSGPRCount = writer.states.laneSGPRCount
-            vD8 = writer.vgprPool.checkOut(1, "tail_vD8")
+            vDLaneRem = writer.vgprPool.checkOut(1, "tail_vDLaneRem")
             module.add(VAndB32(
-                dst=vgpr(vD8),
-                src0=sgpr(loopCounterName), src1=7,
-                comment="d = rem % 8 (boundary-mask pattern depends only on this)"))
+                dst=vgpr(vDLaneRem),
+                src0=sgpr(loopCounterName), src1=numMIInUnroll - 1,
+                comment=f"d = rem % {numMIInUnroll} (boundary-mask pattern depends only on this)"))
             self._tail_boundaryMask = [
                 writer.vgprPool.checkOut(1, f"tail_boundaryMask{i}")
-                for i in range(4)
+                for i in range(numBoundaryMasks)
             ]
             with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
                 maskSgpr = tmpSgprInfo.idx
-                for i in range(4):
+                for i in range(numBoundaryMasks):
                     bm = self._tail_boundaryMask[i]
+                    hiBound = i * kStride + kStride  # d < hiBound → half-keep
+                    loBound = i * kStride + 1        # d < loBound → zero
                     module.add(VCmpLtI32(
                         dst=sgpr(maskSgpr, laneSGPRCount),
-                        src0=vgpr(vD8), src1=2*i + 2,
-                        comment=f"boundary[{i}]: d < {2*i+2} ? halfKeep : full"))
+                        src0=vgpr(vDLaneRem), src1=hiBound,
+                        comment=f"boundary[{i}]: d < {hiBound} ? halfKeep : full"))
                     module.add(VCndMaskB32(
                         dst=vgpr(bm),
                         src0=-1,
                         src1=vgpr(halfMaskVgpr),
                         src2=sgpr(maskSgpr, laneSGPRCount),
-                        comment=f"boundaryMask[{i}] = (d<{2*i+2}) ? halfKeep : full"))
+                        comment=f"boundaryMask[{i}] = (d<{hiBound}) ? halfKeep : full"))
                     module.add(VCmpLtI32(
                         dst=sgpr(maskSgpr, laneSGPRCount),
-                        src0=vgpr(vD8), src1=2*i + 1,
-                        comment=f"boundary[{i}]: d < {2*i+1} ? 0 : prev"))
+                        src0=vgpr(vDLaneRem), src1=loBound,
+                        comment=f"boundary[{i}]: d < {loBound} ? 0 : prev"))
                     module.add(VCndMaskB32(
                         dst=vgpr(bm), src0=vgpr(bm), src1=0,
                         src2=sgpr(maskSgpr, laneSGPRCount),
-                        comment=f"boundaryMask[{i}] = (d<{2*i+1}) ? 0 : prev"))
+                        comment=f"boundaryMask[{i}] = (d<{loBound}) ? 0 : prev"))
             writer.vgprPool.checkIn(halfMaskVgpr)
-            writer.vgprPool.checkIn(vD8)
+            writer.vgprPool.checkIn(vDLaneRem)
         return list(module.flatitems())
 
     def emit_mask_k(self, source):
