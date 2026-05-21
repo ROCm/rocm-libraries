@@ -147,7 +147,7 @@ struct StreamKTilePartitionerBase
      * assigned.
      * @param local_iter_end The workgroup's non-inclusive end iteration that is local to its
      * current tile.
-     * @return index_t  The corresponding 2D tile index in the C tensor for the workgroup.
+     * @return index_t  The K dimension size for the current Stream-K loop iteration.
      */
     CK_TILE_DEVICE index_t get_k_size(index_t num_macro_tiles,
                                       index_t local_iter_end) const noexcept;
