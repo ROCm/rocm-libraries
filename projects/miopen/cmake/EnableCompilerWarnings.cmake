@@ -84,7 +84,15 @@ endif()
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
         -fms-extensions
-        -fms-compatibility)
+        -fms-compatibility
+        )
+    # AMD clang reports `__declspec(dllexport)` as "not supported" on the
+    # x86_64-pc-windows-msvc target, even though the attribute is honored
+    # (verified via llvm-readobj --coff-exports on MIOpen.dll). This produces
+    # ~150k spurious warnings from the CMake-generated MIOPEN_EXPORT and
+    # MIOPEN_INTERNALS_EXPORT macros. Suppress until the compiler issue is
+    # resolved upstream.
+    list(APPEND __clang_cxx_compile_options -Wno-ignored-attributes)
 endif()
 
 add_compile_options(

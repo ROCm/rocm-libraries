@@ -13,7 +13,7 @@ namespace asm_sdpa_engine
 using namespace hipdnn_frontend;
 using namespace hip_kernel_provider_common;
 
-DataType toDataType(const std::string& configDataType)
+static DataType toDataType(const std::string& configDataType)
 {
     std::unordered_map<std::string, DataType> typeMap = {{config::BFLOAT16, DataType::BFLOAT16},
                                                          {config::HALF, DataType::HALF},
@@ -49,7 +49,7 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config)
         break;
     }
 
-    std::string modeStr
+    const std::string modeStr
         = (static_cast<BatchMode>(config.mode) == BatchMode::GROUP) ? "Group" : "Batch";
 
     return config.arch + config.dtype + "HdimQ" + std::to_string(config.hdim_q) + "HdimV"
@@ -69,12 +69,12 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
     const int64_t seqKv = 256;
 
     // Determine data type
-    DataType dataType = toDataType(config.dtype);
+    const DataType dataType = toDataType(config.dtype);
 
     // Create tensor dimensions
-    std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
-    std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
-    std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
+    const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
+    const std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
+    const std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
 
     auto graph = std::make_shared<Graph>();
     graph->set_io_data_type(DataType::FLOAT)
@@ -130,7 +130,7 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
     auto batchMode = static_cast<BatchMode>(config.mode);
     if(batchMode == BatchMode::GROUP)
     {
-        std::vector<int64_t> seqLenDims = {batch};
+        const std::vector<int64_t> seqLenDims = {batch};
         auto seqLenStrides = generateStrides(seqLenDims);
 
         auto seqLenQ = std::make_shared<TensorAttributes>();

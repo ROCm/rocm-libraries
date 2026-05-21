@@ -476,6 +476,11 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SMovB32(sgpr(f"{group1}+6"), 0))
         return mod
 
+    def setMulticastMask(self, group1: int | str, mask: str, writer: "KernelWriterAssembly") -> Module:
+        mod = Module()
+        mod.add(SOrB32(sgpr(f"{group1}"), sgpr(f"{group1}"), sgpr(f"{mask}")))
+        return mod
+
     def setIterationIncrements(self, group2: int | str, ldsInc: int, sgprGlobalInc: int | str) -> Module:
         mod = Module()
         mod.add(SMovB32(sgpr(f"{group2}+1"), hex(ldsInc), f"set lds increment to {ldsInc}"))
@@ -493,6 +498,8 @@ class TensorDataMoverLoad(TensorDataMover):
     def calPadInterval(ldsBlockSizePerPad: int) -> int:
         ldsBlockDwordsPerPad = ldsBlockSizePerPad // 4 # bytes to dwords
         assert ldsBlockDwordsPerPad > 0
+        assert (ldsBlockDwordsPerPad & (ldsBlockDwordsPerPad - 1)) == 0, \
+            f"LdsBlockSizePerPad//4 ({ldsBlockDwordsPerPad}) must be a power of 2 for TDM hardware encoding"
         return int(log2(ldsBlockDwordsPerPad)) - 1
 
     @staticmethod
