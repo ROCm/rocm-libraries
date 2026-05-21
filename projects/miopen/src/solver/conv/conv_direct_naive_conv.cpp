@@ -54,16 +54,6 @@ constexpr size_t NAIVE_CONV_BLOCK_SIZE = 256;
 // where one block can no longer cover the spatial dimension in its thread-loop.
 constexpr size_t WRW_SPATIAL_TILING_THRESHOLD = 262144;
 
-// Native scalar 16-bit float atomicAdd (half, hip_bfloat16) is available
-// on CDNA2+ (gfx90a, gfx94x, gfx95x) and RDNA4 (gfx120x). RDNA3/3.5
-// (gfx110x, gfx115x) only have packed f16 atomics in hardware.
-bool HasNative16BitFloatAtomic(const ExecutionContext& ctx)
-{
-    const auto device_name = ctx.GetStream().GetDeviceName();
-    return StartsWith(device_name, "gfx90a") || StartsWith(device_name, "gfx94") ||
-           StartsWith(device_name, "gfx95") || StartsWith(device_name, "gfx120");
-}
-
 bool ConvDirectNaiveConvIsAssemblyKernel(const ExecutionContext& ctx,
                                          const ProblemDescription& problem)
 {
@@ -289,11 +279,6 @@ std::string ConvDirectNaiveConvCompileOption(const ExecutionContext& ctx,
     }
 
     ss << " -DNAIVE_CONV_BLOCK_SIZE=" << NAIVE_CONV_BLOCK_SIZE;
-
-    if(HasNative16BitFloatAtomic(ctx))
-    {
-        ss << " -DNAIVE_CONV_HAS_16BIT_FLOAT_ATOMIC=1";
-    }
 
     return ss.str();
 }
@@ -841,14 +826,11 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     size_t grid_size  = static_cast<size_t>(k);
 
     // Cross-block spatial tiling for WRW uses atomicAdd on the weight buffer.
-    // Float/double atomicAdd is universally available, but half/bf16 atomicAdd
-    // requires native hardware support (CDNA2+, RDNA4). On other GPUs, the
-    // kernel's if constexpr guard eliminates the atomicAdd path, so tiling
-    // must be disabled to avoid non-atomic write races across blocks.
+    // float/double have native hardware atomicAdd; half/hip_bfloat16 use
+    // CAS-based atomicAdd (portable across all GPUs and ROCm versions).
     size_t spatial           = static_cast<size_t>(n) * ho * wo;
     size_t num_spatial_tiles = 1;
-    bool can_use_wrw_atomic  = IsInputFp32(problem) || HasNative16BitFloatAtomic(ctx);
-    if(!IsAccInt32(problem) && can_use_wrw_atomic && spatial > WRW_SPATIAL_TILING_THRESHOLD)
+    if(!IsAccInt32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
         num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
@@ -1008,8 +990,7 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     // Cross-block spatial tiling for WRW — see 2D WRW comment for details.
     size_t spatial           = static_cast<size_t>(n) * do_ * ho * wo;
     size_t num_spatial_tiles = 1;
-    bool can_use_wrw_atomic  = IsInputFp32(problem) || HasNative16BitFloatAtomic(ctx);
-    if(!IsAccInt32(problem) && can_use_wrw_atomic && spatial > WRW_SPATIAL_TILING_THRESHOLD)
+    if(!IsAccInt32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
         num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;

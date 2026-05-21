@@ -94,12 +94,10 @@ inline __device__ __host__ bool IsZero(double val) { return val == 0.0; }
 
 inline __device__ __host__ bool IsOne(double val) { return val == 1.0; }
 
-// Type trait: does the target GPU support atomicAdd for this type?
-// float/double are universally supported via hardware. half/hip_bfloat16
-// require -DNAIVE_CONV_HAS_16BIT_FLOAT_ATOMIC=1, set by the solver for
-// CDNA2+ (gfx90a, gfx94x, gfx95x) and RDNA4 (gfx120x).
-// For hip_bfloat16/half, we provide CAS-based atomicAdd overloads below
-// so no native HIP atomicAdd for these types is required.
+// Type trait: does atomicAdd exist for this type?
+// float/double have native hardware support on all GPUs. half/hip_bfloat16
+// use CAS-based atomicAdd overloads defined below, which only require
+// universal atomicCAS(unsigned int*) support.
 template <typename T>
 struct has_native_atomic_add
 {
@@ -115,7 +113,6 @@ struct has_native_atomic_add<double>
 {
     static constexpr bool value = true;
 };
-#if NAIVE_CONV_HAS_16BIT_FLOAT_ATOMIC
 template <>
 struct has_native_atomic_add<half>
 {
@@ -127,12 +124,56 @@ struct has_native_atomic_add<hip_bfloat16>
     static constexpr bool value = true;
 };
 
-// CAS-based atomicAdd for 16-bit float types.
-// Operates on the aligned 32-bit word containing the target element.
-// Addition is performed in float precision. This is portable across all
-// ROCm versions (only requires 32-bit atomicCAS, which is universal).
-// Same principle as CK's generic_memory_space_atomic.hpp bf16x2 CAS loop.
-inline __device__ hip_bfloat16 atomicAdd(hip_bfloat16* address, hip_bfloat16 val)
+// Unified atomic add wrapper for WRW cross-block tiling.
+// float/double: forwards to native atomicAdd (universally available).
+// half/hip_bfloat16: CAS-based implementation using atomicCAS on the aligned
+// 32-bit word. Addition is performed in float precision. Portable across all
+// GPUs and ROCm versions. Same principle as CK's generic_memory_space_atomic.hpp.
+template <typename T>
+inline __device__ T naive_atomic_add(T* address, T val);
+
+template <>
+inline __device__ float naive_atomic_add(float* address, float val)
+{
+    return atomicAdd(address, val);
+}
+
+template <>
+inline __device__ double naive_atomic_add(double* address, double val)
+{
+    return atomicAdd(address, val);
+}
+
+template <>
+inline __device__ half naive_atomic_add(half* address, half val)
+{
+    unsigned int* addr32 =
+        reinterpret_cast<unsigned int*>(reinterpret_cast<size_t>(address) & ~size_t(2));
+    bool is_upper      = (reinterpret_cast<size_t>(address) & 2) != 0;
+    unsigned int shift = is_upper ? 16 : 0;
+    unsigned int mask  = is_upper ? 0x0000FFFF : 0xFFFF0000;
+
+    unsigned int old32 = *addr32;
+    unsigned int assumed;
+    do
+    {
+        assumed       = old32;
+        half old_half = *reinterpret_cast<const half*>(reinterpret_cast<const char*>(&assumed) +
+                                                       (is_upper ? 2 : 0));
+        float sum     = __half2float(old_half) + __half2float(val);
+        half new_half = __float2half(sum);
+        unsigned int new32 =
+            (assumed & mask) |
+            (static_cast<unsigned int>(*reinterpret_cast<unsigned short*>(&new_half)) << shift);
+        old32 = atomicCAS(addr32, assumed, new32);
+    } while(old32 != assumed);
+
+    return *reinterpret_cast<const half*>(reinterpret_cast<const char*>(&old32) +
+                                          (is_upper ? 2 : 0));
+}
+
+template <>
+inline __device__ hip_bfloat16 naive_atomic_add(hip_bfloat16* address, hip_bfloat16 val)
 {
     unsigned int* addr32 =
         reinterpret_cast<unsigned int*>(reinterpret_cast<size_t>(address) & ~size_t(2));
@@ -159,7 +200,6 @@ inline __device__ hip_bfloat16 atomicAdd(hip_bfloat16* address, hip_bfloat16 val
     result.data = ret_bits;
     return result;
 }
-#endif
 
 // Precompute valid filter range for FWD (and WRW spatial checks).
 //

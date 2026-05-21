@@ -72,9 +72,8 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
     int bdx            = static_cast<int>(blockDim.x);
     int tx             = static_cast<int>(threadIdx.x);
     // Invariant: the solver must only set gridDim.y > 1 when dst_data_t has
-    // native atomicAdd (has_native_atomic_add<dst_data_t>::value). The if
-    // constexpr guard prevents compilation of atomicAdd for unsupported types,
-    // but racing non-atomic writes would produce wrong results at runtime.
+    // naive_atomic_add (has_native_atomic_add<dst_data_t>::value). The if
+    // constexpr guard takes the non-atomic fallback path for unsupported types.
     bool use_atomic = (gridDim.y > 1);
 
     // Spatial tile range for cross-block tiling (gridDim.y > 1)
@@ -207,7 +206,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -225,7 +224,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -355,7 +354,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -373,7 +372,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -463,9 +462,8 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
     int bdx            = static_cast<int>(blockDim.x);
     int tx             = static_cast<int>(threadIdx.x);
     // Invariant: the solver must only set gridDim.y > 1 when dst_data_t has
-    // native atomicAdd (has_native_atomic_add<dst_data_t>::value). The if
-    // constexpr guard prevents compilation of atomicAdd for unsupported types,
-    // but racing non-atomic writes would produce wrong results at runtime.
+    // naive_atomic_add (has_native_atomic_add<dst_data_t>::value). The if
+    // constexpr guard takes the non-atomic fallback path for unsupported types.
     bool use_atomic = (gridDim.y > 1);
 
     // Spatial tile range for cross-block tiling (gridDim.y > 1)
@@ -613,7 +611,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -632,7 +630,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -782,7 +780,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -801,7 +799,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -884,9 +882,8 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
     int bdx            = static_cast<int>(blockDim.x);
     int tx             = static_cast<int>(threadIdx.x);
     // Invariant: the solver must only set gridDim.y > 1 when dst_data_t has
-    // native atomicAdd (has_native_atomic_add<dst_data_t>::value). The if
-    // constexpr guard prevents compilation of atomicAdd for unsupported types,
-    // but racing non-atomic writes would produce wrong results at runtime.
+    // naive_atomic_add (has_native_atomic_add<dst_data_t>::value). The if
+    // constexpr guard takes the non-atomic fallback path for unsupported types.
     bool use_atomic = (gridDim.y > 1);
 
     // Spatial tile range for cross-block tiling (gridDim.y > 1)
@@ -1018,7 +1015,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -1036,7 +1033,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -1166,7 +1163,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -1184,7 +1181,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -1273,9 +1270,8 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
     int bdx            = static_cast<int>(blockDim.x);
     int tx             = static_cast<int>(threadIdx.x);
     // Invariant: the solver must only set gridDim.y > 1 when dst_data_t has
-    // native atomicAdd (has_native_atomic_add<dst_data_t>::value). The if
-    // constexpr guard prevents compilation of atomicAdd for unsupported types,
-    // but racing non-atomic writes would produce wrong results at runtime.
+    // naive_atomic_add (has_native_atomic_add<dst_data_t>::value). The if
+    // constexpr guard takes the non-atomic fallback path for unsupported types.
     bool use_atomic = (gridDim.y > 1);
 
     // Spatial tile range for cross-block tiling (gridDim.y > 1)
@@ -1423,7 +1419,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -1442,7 +1438,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -1592,7 +1588,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -1611,7 +1607,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        atomicAdd(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
