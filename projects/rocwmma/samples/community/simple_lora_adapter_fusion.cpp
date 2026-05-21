@@ -1226,6 +1226,12 @@ ROCWMMA_HOST void run_lora_sample(uint32_t m,
     if(skipValidation)
     {
         std::cout << "Skipping validation as requested.\n";
+        CHECK_HIP_ERROR(hipFree(d_x));
+        CHECK_HIP_ERROR(hipFree(d_w));
+        CHECK_HIP_ERROR(hipFree(d_alora));
+        CHECK_HIP_ERROR(hipFree(d_blora));
+        CHECK_HIP_ERROR(hipFree(d_y));
+        std::cout << "Finished!\n";
         return;
     }
 
