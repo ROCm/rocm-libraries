@@ -21,10 +21,11 @@ include "sdpa_attributes.fbs";
 include "sdpa_backward_attributes.fbs";
 include "custom_op_attributes.fbs";
 include "reduction_attributes.fbs";
+include "resample_fwd_attributes.fbs";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes, BatchnormInferenceAttributesVarianceExt, MatmulAttributes, RMSNormAttributes, LayernormAttributes, SdpaAttributes, BlockScaleDequantizeAttributes, BlockScaleQuantizeAttributes, SdpaBackwardAttributes, CustomOpAttributes, RMSNormBackwardAttributes, ReductionAttributes}
+union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes, BatchnormInferenceAttributesVarianceExt, MatmulAttributes, RMSNormAttributes, LayernormAttributes, SdpaAttributes, BlockScaleDequantizeAttributes, BlockScaleQuantizeAttributes, SdpaBackwardAttributes, CustomOpAttributes, RMSNormBackwardAttributes, ReductionAttributes, ResampleFwdAttributes}
 
 table Node {
 	name: string;

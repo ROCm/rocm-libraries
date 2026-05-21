@@ -3,7 +3,18 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## (Unreleased) rocFFT 1.0.37
+## Since last release (ROCm 7.13)
+
+### Added
+* Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
+
+### Changed
+
+* Modified the `rocfft_plan_get_work_buffer_size` and `rocfft_execution_info_set_work_buffer` functions to get and set work memory for the current HIP device.
+  * Multi-device transforms can require work memory on any of the devices used for input or output bricks, and the current device set at plan creation.  Users should loop over the set of devices used by the input/output of the transform and check the work memory requirements for each device.
+
+
+## rocFFT 1.0.37 for ROCm 7.13
 
 ### Optimized
 
@@ -31,8 +42,7 @@ Documentation for rocFFT is available at
 * Removed Boost as a dependency for clients and samples.
 * Split the precompiled kernel cache file (`rocfft_kernel_cache.db`) into per-architecture files (`rocfft_kernel_cache_gfx950.db`, `rocfft_kernel_cache_gfx1201.db`, etc).
 * `rocfft_plan_create` returns `rocfft_status_invalid_offset` for any usage of non-zero offsets in plan descriptions. The feature is not supported yet.
-* Modified the `rocfft_plan_get_work_buffer_size` and `rocfft_execution_info_set_work_buffer` functions to get and set work memory for the current HIP device.
-  * Multi-device transforms can require work memory on any of the devices used for input or output bricks, and the current device set at plan creation.  Users should loop over the set of devices used by the input/output of the transform and check the work memory requirements for each device.
+* Callback functions will be deprecated in a future release.
 
 ### Resolved issues
 

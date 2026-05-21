@@ -16,7 +16,9 @@
 #include <hip/hip_runtime.h>
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#pragma clang diagnostic ignored "-Wlifetime-safety-lifetimebound-violation"
 
 namespace ck_tile {
 
@@ -131,6 +133,41 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
         kernel<<<grid_dim, block_dim, lds_byte, s.stream_id_>>>(args...);
     };
 }
+
+//
+// overload of make_kernel: Cluster launch version of make_kernel
+//
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+template <int MinBlockPerCu = CK_TILE_MIN_BLOCK_PER_CU, typename KernelImpl, typename... Args>
+CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
+                              dim3 cluster_dim,
+                              dim3 grid_dim,
+                              dim3 block_dim,
+                              std::size_t lds_byte,
+                              Args... args)
+{
+    const auto kernel = kentry<MinBlockPerCu, KernelImpl, Args...>;
+    return [=](const stream_config& s) {
+        // Set cluster dimensions as launch attributes
+        hipLaunchConfig_t config{};
+        config.gridDim          = grid_dim;
+        config.blockDim         = block_dim;
+        config.dynamicSmemBytes = lds_byte;
+        config.stream           = s.stream_id_;
+
+        hipLaunchAttribute attrs[1];
+        attrs[0].id               = hipLaunchAttributeClusterDimension;
+        attrs[0].val.clusterDim.x = cluster_dim.x;
+        attrs[0].val.clusterDim.y = cluster_dim.y;
+        attrs[0].val.clusterDim.z = cluster_dim.z;
+        config.attrs              = attrs;
+        config.numAttrs           = 1;
+
+        // Launch kernel with cluster attributes
+        return hipLaunchKernelEx(&config, kernel, args...);
+    };
+}
+#endif
 
 template <typename... Callables>
 CK_TILE_HOST void launch_and_check(const stream_config& sc, Callables&&... callables)

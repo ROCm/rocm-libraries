@@ -22,7 +22,8 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/building-installing-hipblaslt>`
+    * :doc:`Install hipBLASLt <./install/install>`
+    * :doc:`Build from source <./install/building-installing-hipblaslt>`
 
 .. grid:: 2
   :gutter: 3

@@ -49,7 +49,7 @@ inline std::string getDeviceString(hipStream_t stream)
 {
     auto props = getDeviceProperties(stream);
 
-    std::string archStr(props.gcnArchName);
+    const std::string archStr(props.gcnArchName);
 
     return archStr.substr(0, archStr.find(':'));
 }

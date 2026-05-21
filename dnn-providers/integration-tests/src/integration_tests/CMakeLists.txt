@@ -9,3 +9,4 @@ target_sources(${INTEGRATION_TESTS_EXE}
 add_subdirectory(batchnorm)
 add_subdirectory(conv)
 add_subdirectory(reduction)
+add_subdirectory(rmsnorm)
