@@ -1049,17 +1049,19 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
                                    vop3=VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2], op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2]), \
                                    comment=comment))
     else:
-      # Fallback: hardcoded scale 0x7f (scale=1.0 for all elements)
-      tmpVgprScale = writer.vgprPool.checkOut(1)
-      module.add(VMovB32(dst=vgpr(tmpVgprScale), src=hex(0x7f7f7f7f), comment="hardcoded scale 0x7f (E8M0)"))
+      # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
+      # Initialized once in mainLoop() before emitAllLoops() — VMovB32 cannot live here
+      # because InstructionScheduler drops non-MFMA instructions from the MFMA module.
+      unitScaleVgpr = kernel.get("_subtileUnitScaleVgpr", -1)
+      assert unitScaleVgpr >= 0, \
+          "emitMfmaInstruction: plain FP8 fallback requires _subtileUnitScaleVgpr in kernel dict"
       module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
                                    acc=dAccAlias(vgprDStart,opDSize), \
                                    a=aOperand, \
                                    b=bOperand, \
                                    acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(tmpVgprScale), mxsb=vgpr(tmpVgprScale), \
+                                   mxsa=vgpr(unitScaleVgpr), mxsb=vgpr(unitScaleVgpr), \
                                    comment=comment))
-      writer.vgprPool.checkIn(tmpVgprScale)
   else:
     # BF16: 16x16x32
     module.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[16,16,miK,1], mfma1k=False, \
@@ -1258,6 +1260,17 @@ def mainLoop(writer, kernel):
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
   dtileInfo = writer.states.d.tileInfo
+
+  # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize
+  # it once here, before the loop. emitMfmaInstruction will reference it via kernel dict.
+  miK = kernel["MatrixInstK"]
+  unitScaleVgpr = -1
+  if miK == 128 and scaleTiA is None:
+      unitScaleVgpr = writer.vgprPool.checkOut(1)
+      module.add(VMovB32(dst=vgpr(unitScaleVgpr), src=hex(0x7f7f7f7f),
+                         comment="unit scale=1.0 (E8M0) for plain FP8 MFMA"))
+      kernel["_subtileUnitScaleVgpr"] = unitScaleVgpr
+
   scheduler.populate_instructions(
       writer, kernel,
       tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
@@ -1265,5 +1278,8 @@ def mainLoop(writer, kernel):
 
   module.add(scheduler.emitAllLoops(writer, kernel))
   scheduler.deallocVgprTiles(writer)
+
+  if unitScaleVgpr >= 0:
+      writer.vgprPool.checkIn(unitScaleVgpr)
 
   return module
