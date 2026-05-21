@@ -757,7 +757,7 @@ static inline void ReturnSolutions(const std::vector<miopenConvSolution_t>& solu
         *solution_count_ret = solutions.size();
     if(solutions_ret != nullptr)
     {
-        for(auto i = 0U; i < solutions.size(); ++i)
+        for(size_t i = 0ULL; i < solutions.size(); ++i)
             solutions_ret[i] = solutions[i];
     }
 }

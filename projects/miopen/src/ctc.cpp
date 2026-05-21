@@ -46,7 +46,7 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
     int max_label_len   = 0;
     int total_label_len = 0;
 
-    for(size_t i = 0; i < batch_size; i++)
+    for(size_t i = 0ULL; i < batch_size; i++)
     {
         if(static_cast<size_t>(inputLengths[i]) > max_time_step)
         {
