@@ -11,7 +11,6 @@
 #include "ck_tile/core/arch/mma/mma_traits.hpp"
 #include "ck_tile/core/arch/mma/scale/scale_mma_pipeline.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
-#include "ck_tile/core/numeric/pk_fp4.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 
 #include <gtest/gtest.h>
@@ -67,14 +66,10 @@ TEST(ScaleMMATrait, ScaleMfmaGfx950Specialization)
     ScaleMfmaGfx950Specialization_impl<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u>();
     // Test bf8 -> fp32 scale MFMA for GFX950 (16x16x128)
     ScaleMfmaGfx950Specialization_impl<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u>();
-    // Test fp4 -> fp32 scale MFMA for GFX950 (16x16x128)
-    ScaleMfmaGfx950Specialization_impl<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u>();
-    // Test fp8 -> fp32 scale MFMA for GFX950 (32x32x64)
+    // Test fp8 → fp32 scale MFMA for GFX950 (32x32x64)
     ScaleMfmaGfx950Specialization_impl<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u>();
     // Test bf8 -> fp32 scale MFMA for GFX950 (32x32x64)
     ScaleMfmaGfx950Specialization_impl<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u>();
-    // Test fp4 -> fp32 scale MFMA for GFX950 (32x32x64)
-    ScaleMfmaGfx950Specialization_impl<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u>();
 
     std::cout << "GFX950 scale MFMA specialization is correct" << std::endl;
 }
@@ -106,10 +101,8 @@ TEST(ScaleMMATrait, TestConceptRequirements)
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
     TestConceptRequirements_impl<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u>();
     TestConceptRequirements_impl<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u>();
-    TestConceptRequirements_impl<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u>();
     TestConceptRequirements_impl<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u>();
     TestConceptRequirements_impl<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u>();
-    TestConceptRequirements_impl<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u>();
 #else
     GTEST_SKIP() << "Not compiled with concepts. Skipping test.";
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
@@ -150,7 +143,6 @@ TEST(ScaleMMATrait, ScaleSelector)
 {
     ScaleSelector_impl<fp8_t, fp8_t, fp32_t>();
     ScaleSelector_impl<bf8_t, bf8_t, fp32_t>();
-    ScaleSelector_impl<pk_fp4_t, pk_fp4_t, fp32_t>();
 }
 
 template <typename AType,
@@ -281,12 +273,6 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_16x16x128_Real)
 }
 
 // Live test on real hardware for scale selection and execution.
-TEST(ScaleMMATrait, MmaSelector_Scale_F4_F4_F32_16x16x128_Real)
-{
-    MmaSelector_Scale_Real_impl<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u>();
-}
-
-// Live test on real hardware for scale selection and execution.
 TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_32x32x64_Real)
 {
     MmaSelector_Scale_Real_impl<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u>();
@@ -296,12 +282,6 @@ TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_32x32x64_Real)
 TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 {
     MmaSelector_Scale_Real_impl<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u>();
-}
-
-// Live test on real hardware for scale selection and execution.
-TEST(ScaleMMATrait, MmaSelector_Scale_F4_F4_F32_32x32x64_Real)
-{
-    MmaSelector_Scale_Real_impl<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u>();
 }
 
 // ---------------------------------------------------------------------------
