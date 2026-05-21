@@ -197,17 +197,54 @@ struct MmaLayoutTestKernel
                 {
                     a_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem_pack);
 
-                    // Calc an appropriate sparse idx value for a single 1 in position k. We use a
-                    // baseline index of 0x88888888. This sends each compressed index i to
-                    // uncompressed index i * 2. If k is odd, we should send it to i * 2 + 1
-                    // instead. We update only the absolutely necessary pair of bits for this
-                    // (idx[v*2:v*2+1]), where v is meant to be the idx of the *value items* in the
-                    // lane. Note that this simple calculation works for any 4:2 sparse intrinsic
-                    // with up to 16 packed k elements per lane.
+                    if constexpr(MmaOpTraits<MmaOp>::IsSparse && MmaOp::kK != 64)
+                    {
+                        // X32 swmmac path: sparse_idx is a single wave-uniform i32. Calc an
+                        // appropriate value for a single 1 in position k. We use a baseline
+                        // index of 0x88888888. This sends each compressed index i to
+                        // uncompressed index i * 2. If k is odd, we should send it to i * 2 + 1
+                        // instead. We update only the absolutely necessary pair of bits for
+                        // this (idx[v*2:v*2+1]), where v is meant to be the idx of the *value
+                        // items* in the lane. Note that this simple calculation works for any
+                        // 4:2 sparse intrinsic with up to 16 packed k elements per lane.
 
-                    // Calc vector item idx as if the datatype were not packed (value item).
-                    uint32_t vec_value_item_idx = v * MmaOp::APackedSize + k_rem_pack;
-                    sparse_idx = 0x88888888 | (k_rem_sparse << (vec_value_item_idx * 2));
+                        // Calc vector item idx as if the datatype were not packed (value item).
+                        uint32_t vec_value_item_idx = v * MmaOp::APackedSize + k_rem_pack;
+                        sparse_idx = 0x88888888 | (k_rem_sparse << (vec_value_item_idx * 2));
+                    }
+                }
+            }
+
+            // X64 swmmac path (gfx1250): the per-lane sparsity index is only 16 bits wide and
+            // each lane independently owns metadata for a different chunk of A's packed cols.
+            // See findings.md for the full HW model. We construct a per-lane i32 (low half =
+            // `index_key:0`, high half = `index_key:1`) where exactly one lane writes a
+            // non-default nibble describing our (m, k) placement; every other lane keeps the
+            // collision-free default 0x88888888.
+            if constexpr(MmaOpTraits<MmaOp>::IsSparse && MmaOp::kK == 64)
+            {
+                // pcol is the post-sparse-compression column. For non-value-packed A types
+                // (APackedSize == 1, e.g. f16/bf16) this is just k / kCompressionRatio.
+                const int pcol     = static_cast<int>(k) / MmaOp::kCompressionRatio;
+                const int key      = (pcol >> 4) & 1;          // 0 = low i16, 1 = high i16
+                const int idx_lane = static_cast<int>(m) +
+                                     16 * ((pcol >> 3) & 1);   // lane that carries this nibble
+                const int nib_pos  = (pcol >> 1) & 3;          // nibble within the i16 half
+                const int sub      = pcol & 1;                 // 0 -> idx0 slot, 1 -> idx1 slot
+                const uint32_t k_off = static_cast<uint32_t>(k) & 3u; // K-offset within pair
+
+                sparse_idx = 0x88888888u;
+                if(static_cast<int>(lane) == idx_lane)
+                {
+                    // Build the nibble: the slot we own holds k_off; the other slot in the
+                    // same nibble holds any value different from k_off so the HW's collision
+                    // rule (idx0 == idx1 suppresses the even-pcol contribution) cannot
+                    // silently drop our element.
+                    const uint32_t other = (k_off + 1u) & 3u;
+                    const uint32_t nibble =
+                        (sub == 0) ? ((other << 2) | k_off) : ((k_off << 2) | other);
+                    const int shift = (key * 16) + nib_pos * 4;
+                    sparse_idx      = (sparse_idx & ~(0xFu << shift)) | (nibble << shift);
                 }
             }
 
@@ -226,9 +263,11 @@ struct MmaLayoutTestKernel
 
             if constexpr(MmaOpTraits<MmaOp>::IsSparse)
             {
-                // Sparse_idx is calculated (overwriting default 0 value) in *exactly* one lane
-                // (assert), but must be broadcast to all (warp-level "or" reduction intrinsic).
-                int num_sparse_idx_calced = __popcll(__ballot(sparse_idx != 0));
+                // For both paths we expect exactly one lane to hold a non-default sparse_idx
+                // (X32: only the data-owner lane wrote it; X64: only the index-owner lane).
+                const uint32_t non_default = (MmaOp::kK == 64) ? 0x88888888u : 0u;
+                int num_sparse_idx_calced =
+                    __popcll(__ballot(sparse_idx != non_default));
                 if(num_sparse_idx_calced != 1)
                 {
                     if(threadIdx.x == 0)
@@ -238,8 +277,15 @@ struct MmaLayoutTestKernel
                     }
                     __builtin_trap();
                 }
-                sparse_idx = __reduce_or_sync(__activemask(), sparse_idx);
-                c_frag     = MmaOp::exec(a_frag, b_frag, c_frag, sparse_idx);
+                if constexpr(MmaOp::kK != 64)
+                {
+                    // X32 swmmac: sparse_idx is wave-uniform; broadcast it from the producer.
+                    sparse_idx = __reduce_or_sync(__activemask(), sparse_idx);
+                }
+                // X64 swmmac (gfx1250): per-lane sparse_idx is the data the HW consumes, so we
+                // do NOT broadcast — each lane already holds either 0x88888888 (default) or
+                // the perturbed value owned by the single index lane.
+                c_frag = MmaOp::exec(a_frag, b_frag, c_frag, sparse_idx);
             }
             else if constexpr(MmaOpTraits<MmaOp>::IsScale)
             {
