@@ -3371,25 +3371,25 @@ inline VectorNorms distance_1to1_complex(const Tcomplex*                        
                 const double rdiff
                     = std::abs(static_cast<double>(output[odx + ooffset[0]].real()) * output_scalar
                                - static_cast<double>(input[idx + ioffset[0]].real()));
-                cur_linf = std::max(rdiff, cur_linf);
-                if(cur_linf > linf_cutoff)
+                if(rdiff > linf_cutoff)
                 {
                     std::pair<size_t, size_t> fval(b, idx);
                     if(linf_failures)
                         linf_failures_private.push_back(fval);
                 }
+                cur_linf = std::max(rdiff, cur_linf);
                 cur_l2 += rdiff * rdiff;
 
                 const double idiff
                     = std::abs(static_cast<double>(output[odx + ooffset[0]].imag()) * output_scalar
                                - static_cast<double>(input[idx + ioffset[0]].imag()));
-                cur_linf = std::max(idiff, cur_linf);
-                if(cur_linf > linf_cutoff)
+                if(idiff > linf_cutoff)
                 {
                     std::pair<size_t, size_t> fval(b, idx);
                     if(linf_failures)
                         linf_failures_private.push_back(fval);
                 }
+                cur_linf = std::max(idiff, cur_linf);
                 cur_l2 += idiff * idiff;
 
             } while(increment_rowmajor(index, length));
@@ -3456,13 +3456,13 @@ inline VectorNorms distance_1to1_real(const Tfloat*                           in
                 const double diff
                     = std::abs(static_cast<double>(output[odx + ooffset[0]]) * output_scalar
                                - static_cast<double>(input[idx + ioffset[0]]));
-                cur_linf = std::max(diff, cur_linf);
-                if(cur_linf > linf_cutoff)
+                if(diff > linf_cutoff)
                 {
                     std::pair<size_t, size_t> fval(b, idx);
                     if(linf_failures)
                         linf_failures_private.push_back(fval);
                 }
+                cur_linf = std::max(diff, cur_linf);
                 cur_l2 += diff * diff;
 
             } while(increment_rowmajor(index, length));
@@ -3530,25 +3530,25 @@ inline VectorNorms distance_1to2(const rocfft_complex<Tval>*             input,
                 const double rdiff
                     = std::abs(static_cast<double>(output0[odx + ooffset[0]]) * output_scalar
                                - static_cast<double>(input[idx + ioffset[0]].real()));
-                cur_linf = std::max(rdiff, cur_linf);
-                if(cur_linf > linf_cutoff)
+                if(rdiff > linf_cutoff)
                 {
                     std::pair<size_t, size_t> fval(b, idx);
                     if(linf_failures)
                         linf_failures_private.push_back(fval);
                 }
+                cur_linf = std::max(rdiff, cur_linf);
                 cur_l2 += rdiff * rdiff;
 
                 const double idiff
                     = std::abs(static_cast<double>(output1[odx + ooffset[1]]) * output_scalar
                                - static_cast<double>(input[idx + ioffset[0]].imag()));
-                cur_linf = std::max(idiff, cur_linf);
-                if(cur_linf > linf_cutoff)
+                if(idiff > linf_cutoff)
                 {
                     std::pair<size_t, size_t> fval(b, idx);
                     if(linf_failures)
                         linf_failures_private.push_back(fval);
                 }
+                cur_linf = std::max(idiff, cur_linf);
                 cur_l2 += idiff * idiff;
 
             } while(increment_rowmajor(index, length));
