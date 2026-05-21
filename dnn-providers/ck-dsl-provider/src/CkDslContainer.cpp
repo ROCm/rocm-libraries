@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.hpp"
+#include "python/EmbeddedInterpreter.hpp"
 
 namespace ck_dsl_provider {
 
@@ -53,6 +54,18 @@ uint32_t CkDslContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines,
 
 CkDslContainer::CkDslContainer() {
     HIPDNN_PLUGIN_LOG_INFO("Creating CkDslContainer");
+
+    // The CK DSL provider drives its compile pipeline through an
+    // embedded CPython interpreter (plan §3.2). This is the natural
+    // per-process initialisation point: hipDNN's SharedContainerManager
+    // ensures the container is constructed exactly once per process
+    // (see EnginePluginImpl.inl), regardless of how many handles the
+    // host creates. ensureInitialized() is also idempotent and
+    // thread-safe, so repeated calls in pathological host code are
+    // harmless. The plan v0.9 step I-2 wording ("CkDslHandle
+    // constructs") is imprecise on this point; the container ctor is
+    // the right hook for the per-process singleton.
+    ck_dsl_provider::EmbeddedInterpreter::ensureInitialized();
 
     _engineManager = std::make_unique<
         hipdnn_plugin_sdk::EngineManager<::CkDslHandle, CkDslSettings, CkDslContext>>();
