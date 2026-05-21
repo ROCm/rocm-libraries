@@ -200,6 +200,17 @@ struct _rocblaslt_matmul_desc
     float act0 = 0.f;
     float act1 = 0.f;
 
+    // User-supplied target compute-unit count for kernel selection /
+    // persistent-grid sizing. 0 (default) means "no constraint; use all
+    // CUs the device exposes". Negative values are rejected by the setter.
+    int32_t sm_count_target = 0;
+
+    // Opt-in to the dynamic persistent tile scheduler (work-stealing StreamK).
+    // Exposed via the _EXT attribute namespace (no equivalent in the base C API).
+    // 0 (default) = library default scheduler; non-zero = request dynamic
+    // persistent tile path.
+    int32_t dyn_persistent_tile_ext = 0;
+
     std::shared_ptr<void> m_data; // Tensile data
 
     void copy(const _rocblaslt_matmul_desc& src)
@@ -229,6 +240,8 @@ struct _rocblaslt_matmul_desc
         this->scale_type            = src.scale_type;
         this->act0                  = src.act0;
         this->act1                  = src.act1;
+        this->sm_count_target       = src.sm_count_target;
+        this->dyn_persistent_tile_ext = src.dyn_persistent_tile_ext;
     }
 };
 
@@ -247,6 +260,11 @@ struct _rocblaslt_matmul_preference
     //
     uint32_t search_mode         = 0;
     uint64_t max_workspace_bytes = 0;
+
+    // User-supplied target compute-unit count used as a heuristic-selection
+    // hint. 0 (default) means "no constraint; use all CUs the device exposes".
+    // Negative values are rejected by the setter.
+    int32_t sm_count_target = 0;
 
     int64_t alg_config_id     = 0;
     int64_t alg_max_id        = 0;

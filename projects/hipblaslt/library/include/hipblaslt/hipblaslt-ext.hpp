@@ -79,11 +79,56 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
         /*! \ingroup library_module
+         *  \brief Set a target compute-unit (CU) count for kernel selection.
+         *
+         *  \details
+         *  ``0`` (the default) means "no constraint, use all CUs the device
+         *  exposes." Negative values are rejected and leave the previously
+         *  stored value unchanged.
+         *
+         *  When the dynamic persistent tile scheduler is selected (see
+         *  ``setDynPersistentTileEnabled``), this value bounds the persistent
+         *  grid to at most ``smCountTarget`` work-groups per wave.
+         *
+         *  @param[in]
+         *  smCountTarget  Target compute-unit count, ``0`` for "all CUs".
+         */
+        HIPBLASLT_EXPORT void setSmCountTarget(int32_t smCountTarget);
+
+        /*! \ingroup library_module
+         *  \brief Opt in to the dynamic persistent tile (work-stealing
+         *  StreamK) scheduler.
+         *
+         *  \details
+         *  Exposed via the ``hipblaslt_ext`` namespace because it controls a
+         *  hipBLASLt-internal scheduler with no equivalent in the base
+         *  ``hipblasLt`` C API. When ``enabled`` is ``true`` and the chosen
+         *  kernel supports the feature, hipBLASLt launches a persistent grid
+         *  that uses the dynamic work-stealing StreamK scheduler; otherwise
+         *  the library default scheduler is used.
+         *
+         *  @param[in]
+         *  enabled  ``true`` to request the dynamic persistent tile path.
+         */
+        HIPBLASLT_EXPORT void setDynPersistentTileEnabled(bool enabled);
+
+        /*! \ingroup library_module
          *  \brief This function returns the maximum workspace size that was set.
          *
          *  \retval size_t Returns the set max workspace size.
          */
         HIPBLASLT_EXPORT const size_t getMaxWorkspaceBytes() const;
+
+        /*! \ingroup library_module
+         *  \brief Return the current SM-count target hint. ``0`` means "all CUs".
+         */
+        HIPBLASLT_EXPORT int32_t getSmCountTarget() const;
+
+        /*! \ingroup library_module
+         *  \brief Return whether the dynamic persistent tile scheduler has
+         *  been requested via ``setDynPersistentTileEnabled``.
+         */
+        HIPBLASLT_EXPORT bool getDynPersistentTileEnabled() const;
 
     private:
         friend GemmInstance;

@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include "hipblaslt_test.hpp"
+#include "hipblaslt/hipblaslt-ext.hpp"
 #include <cerrno>
 #include <csetjmp>
 #include <csignal>
@@ -426,4 +427,35 @@ bool match_test_category(const Arguments& arg, const char* category)
     // return valid_category(arg.category);
 
     return true;
+}
+
+TEST(aux_ext_test, gemm_preference_sm_count_target_default_is_zero)
+{
+    hipblaslt_ext::GemmPreference pref;
+    ASSERT_EQ(pref.getSmCountTarget(), 0);
+    ASSERT_FALSE(pref.getDynPersistentTileEnabled());
+}
+
+TEST(aux_ext_test, gemm_preference_sm_count_target_round_trip)
+{
+    hipblaslt_ext::GemmPreference pref;
+    pref.setSmCountTarget(96);
+    ASSERT_EQ(pref.getSmCountTarget(), 96);
+
+    // Negative is rejected silently; the prior value is preserved.
+    pref.setSmCountTarget(-1);
+    ASSERT_EQ(pref.getSmCountTarget(), 96);
+
+    pref.setSmCountTarget(0);
+    ASSERT_EQ(pref.getSmCountTarget(), 0);
+}
+
+TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_round_trip)
+{
+    hipblaslt_ext::GemmPreference pref;
+    pref.setDynPersistentTileEnabled(true);
+    ASSERT_TRUE(pref.getDynPersistentTileEnabled());
+
+    pref.setDynPersistentTileEnabled(false);
+    ASSERT_FALSE(pref.getDynPersistentTileEnabled());
 }
