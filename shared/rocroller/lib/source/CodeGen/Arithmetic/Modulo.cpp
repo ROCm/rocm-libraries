@@ -519,7 +519,7 @@ namespace rocRoller
                                 toString(DataType::Int64)));
 
         auto VCC  = m_context->getVCC();
-        auto EXEC = m_context->getExec();
+        auto EXEC = m_context->getEXEC();
 
         // Adapted from the following HIP code:
         //  extern "C"

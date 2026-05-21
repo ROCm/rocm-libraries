@@ -11,8 +11,8 @@
 
 #include <memory>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include "TestHelpers.hpp"
 #include "engines/plans/ReluPlan.hpp"
@@ -23,74 +23,74 @@
 
 using namespace example_provider;
 using namespace example_provider::test_helpers;
-using ::testing::_;
+using ::testing::_; // NOLINT(bugprone-reserved-identifier)
 using ::testing::Return;
 
 class ReluPlanBuilderTest : public ::testing::Test
 {
 protected:
-    MockKernelCompiler mockCompiler;
-    ExampleProviderHandle handle;
+    MockKernelCompiler _mockCompiler;
+    ExampleProviderHandle _handle;
 
-    std::unique_ptr<ReluPlanBuilder> planBuilder;
+    std::unique_ptr<ReluPlanBuilder> _planBuilder;
 
     void SetUp() override
     {
-        planBuilder = std::make_unique<ReluPlanBuilder>(mockCompiler);
+        _planBuilder = std::make_unique<ReluPlanBuilder>(_mockCompiler);
     }
 };
 
 TEST_F(ReluPlanBuilderTest, IsApplicable_SingleNodeReluFwd_ReturnsTrue)
 {
     auto fbb = createReluFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                           fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
-    EXPECT_TRUE(planBuilder->isApplicable(handle, graph));
+    EXPECT_TRUE(_planBuilder->isApplicable(_handle, graph));
 }
 
 TEST_F(ReluPlanBuilderTest, IsApplicable_NonReluPointwise_ReturnsFalse)
 {
     auto fbb = createNonReluPointwiseGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                           fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
-    EXPECT_FALSE(planBuilder->isApplicable(handle, graph));
+    EXPECT_FALSE(_planBuilder->isApplicable(_handle, graph));
 }
 
 TEST_F(ReluPlanBuilderTest, IsApplicable_MultiNodeGraph_ReturnsFalse)
 {
     auto fbb = createMultiNodeReluGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                           fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
-    EXPECT_FALSE(planBuilder->isApplicable(handle, graph));
+    EXPECT_FALSE(_planBuilder->isApplicable(_handle, graph));
 }
 
 TEST_F(ReluPlanBuilderTest, IsApplicable_ConvFwdGraph_ReturnsFalse)
 {
     auto fbb = createConvFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                           fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
-    EXPECT_FALSE(planBuilder->isApplicable(handle, graph));
+    EXPECT_FALSE(_planBuilder->isApplicable(_handle, graph));
 }
 
 TEST_F(ReluPlanBuilderTest, GetMaxWorkspaceSize_ReturnsZero)
 {
     auto fbb = createReluFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
-    ExampleProviderSettings settings;
-    EXPECT_EQ(planBuilder->getMaxWorkspaceSize(handle, graph, settings), 0u);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                           fbb.GetSize());
+    const ExampleProviderSettings settings;
+    EXPECT_EQ(_planBuilder->getMaxWorkspaceSize(_handle, graph, settings), 0u);
 }
 
 TEST_F(ReluPlanBuilderTest, GetCustomKnobs_ReturnsNegativeSlopeKnob)
 {
     auto fbb = createReluFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
-    auto knobs = planBuilder->getCustomKnobs(handle, graph);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                           fbb.GetSize());
+    const auto knobs = _planBuilder->getCustomKnobs(_handle, graph);
     ASSERT_EQ(knobs.size(), 1u);
     EXPECT_EQ(knobs[0].knob_id, "example.relu.negative_slope");
 }
@@ -98,15 +98,15 @@ TEST_F(ReluPlanBuilderTest, GetCustomKnobs_ReturnsNegativeSlopeKnob)
 TEST_F(ReluPlanBuilderTest, InitializeExecutionSettings_NegativeSlopeKnob_StoresInSettings)
 {
     auto graphFbb = createReluFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(graphFbb.GetBufferPointer(),
-                                                              graphFbb.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        graphFbb.GetBufferPointer(), graphFbb.GetSize());
 
     auto configFbb = createEngineConfigWithFloatKnob(0, "example.relu.negative_slope", 0.5);
-    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper config(configFbb.GetBufferPointer(),
-                                                                      configFbb.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        configFbb.GetBufferPointer(), configFbb.GetSize());
 
     ExampleProviderSettings settings;
-    planBuilder->initializeExecutionSettings(handle, graph, config, settings);
+    _planBuilder->initializeExecutionSettings(_handle, graph, config, settings);
 
     EXPECT_DOUBLE_EQ(settings.reluNegativeSlope, 0.5);
 }
@@ -114,25 +114,25 @@ TEST_F(ReluPlanBuilderTest, InitializeExecutionSettings_NegativeSlopeKnob_Stores
 TEST_F(ReluPlanBuilderTest, BuildPlan_SetsPlanOnContext)
 {
     auto graphFbb = createReluFwdGraph({1, 1, 4});
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(graphFbb.GetBufferPointer(),
-                                                              graphFbb.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        graphFbb.GetBufferPointer(), graphFbb.GetSize());
 
     auto configFbb = createEngineConfig(0);
-    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper config(configFbb.GetBufferPointer(),
-                                                                      configFbb.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        configFbb.GetBufferPointer(), configFbb.GetSize());
 
     // Set up mock expectations for buildPlan
     auto compiledProgram = std::make_unique<MockCompiledProgram>();
     auto* rawProgram = compiledProgram.get();
     auto kernel = std::make_unique<MockRunnableKernel>();
 
-    EXPECT_CALL(mockCompiler, compile("ReluForward.cpp", _))
+    EXPECT_CALL(_mockCompiler, compile("ReluForward.cpp", _))
         .WillOnce(Return(testing::ByMove(std::move(compiledProgram))));
     EXPECT_CALL(*rawProgram, getRunnableKernel("relu_forward_kernel"))
         .WillOnce(Return(testing::ByMove(std::move(kernel))));
 
     ExampleProviderContext context;
-    planBuilder->buildPlan(handle, graph, config, context);
+    _planBuilder->buildPlan(_handle, graph, config, context);
 
     // After buildPlan, context should have a valid plan
     EXPECT_TRUE(context.hasValidPlan());

@@ -4,13 +4,14 @@
 #include <gtest/gtest.h>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
+using hipdnn_test_sdk::utilities::createTensor;
 using hipdnn_test_sdk::utilities::frontendToSdkDataType;
 using hipdnn_test_sdk::utilities::frontendToSdkPointwiseMode;
 using hipdnn_test_sdk::utilities::sdkToFrontendDataType;
 using hipdnn_test_sdk::utilities::sdkToFrontendPointwiseMode;
 
 namespace fe = hipdnn_frontend;
-namespace sdk = hipdnn_data_sdk::data_objects;
+namespace sdk = hipdnn_flatbuffers_sdk::data_objects;
 
 // ============================================================================
 // DataType round-trip tests
@@ -103,6 +104,12 @@ TEST(TestSdkFrontendTypeConversions, DataTypeRoundTripInt64)
               fe::DataType::INT64);
 }
 
+TEST(TestSdkFrontendTypeConversions, DataTypeRoundTripBoolean)
+{
+    EXPECT_EQ(sdkToFrontendDataType(frontendToSdkDataType(fe::DataType::BOOLEAN)),
+              fe::DataType::BOOLEAN);
+}
+
 // ============================================================================
 // DataType default/fallback tests
 // ============================================================================
@@ -121,6 +128,23 @@ TEST(TestSdkFrontendTypeConversions, NotSetRoundTrip)
 {
     EXPECT_EQ(sdkToFrontendDataType(frontendToSdkDataType(fe::DataType::NOT_SET)),
               fe::DataType::NOT_SET);
+}
+
+// ============================================================================
+// createTensor tests
+// ============================================================================
+
+TEST(TestSdkFrontendTypeConversions, CreateTensorBoolean)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    auto tensor = createTensor(fe::DataType::BOOLEAN, dims, strides);
+
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->dims(), dims);
+    EXPECT_EQ(tensor->strides(), strides);
+    EXPECT_EQ(tensor->elementSize(), sizeof(bool));
 }
 
 // ============================================================================

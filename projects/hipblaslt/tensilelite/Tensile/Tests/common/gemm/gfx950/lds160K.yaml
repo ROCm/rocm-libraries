@@ -6,7 +6,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   NumWarmups: 0
   NumBenchmarks: 1
-  SyncsPerBenchmark: 1
+  SyncsPerBenchmark: 0
   EnqueuesPerSync: 1
   SleepPercent: 0
   DataInitTypeA: 3 #12

@@ -9,10 +9,10 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -20,8 +20,9 @@ namespace hip_kernel_provider::layernorm
 {
 
 LayernormFwdParams::LayernormFwdParams(
-    const hipdnn_data_sdk::data_objects::LayernormAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(tensorMap.at(attributes.x_tensor_uid()))
     , _y(tensorMap.at(attributes.y_tensor_uid()))
@@ -37,37 +38,38 @@ LayernormFwdParams::LayernormFwdParams(
 {
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* LayernormFwdParams::x() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormFwdParams::x() const
 {
     return _x;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* LayernormFwdParams::y() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormFwdParams::y() const
 {
     return _y;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* LayernormFwdParams::scale() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormFwdParams::scale() const
 {
     return _scale;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* LayernormFwdParams::bias() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormFwdParams::bias() const
 {
     return _bias;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* LayernormFwdParams::mean() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormFwdParams::mean() const
 {
     return _mean;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* LayernormFwdParams::invVariance() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    LayernormFwdParams::invVariance() const
 {
     return _invVariance;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* LayernormFwdParams::epsilon() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormFwdParams::epsilon() const
 {
     return _epsilon;
 }
@@ -95,7 +97,7 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(
         std::vector<int64_t>(xStrides->begin(), xStrides->end()));
 
-    size_t normalizedDim
+    const size_t normalizedDim
         = layernorm::guessNormalizedDim(_params.x(), _params.scale(), _params.mean());
     long outerSize = 1;
     long innerSize = 1;
@@ -106,7 +108,7 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     if(normalizedDim > 1
        && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
     {
-        stride = xDims->Get(1);
+        stride = static_cast<long>(xDims->Get(1));
     }
 
     for(unsigned int i = 0; i < xDims->size(); ++i)
@@ -115,21 +117,21 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
         {
             if(stride == 1 || i != 1) // Don't add C to outerSize if there is a stride
             {
-                outerSize *= xDims->Get(i);
+                outerSize *= static_cast<long>(xDims->Get(i));
             }
         }
         else
         {
-            innerSize *= xDims->Get(i);
+            innerSize *= static_cast<long>(xDims->Get(i));
         }
     }
 
-    long xlocalsize = 1024;
-    long xgridsize = outerSize * stride;
-    long ylocalsize = 1;
-    long ygridsize = 1;
-    long zlocalsize = 1;
-    long zgridsize = 1;
+    const long xlocalsize = 1024;
+    const long xgridsize = outerSize * stride;
+    const long ylocalsize = 1;
+    const long ygridsize = 1;
+    const long zlocalsize = 1;
+    const long zgridsize = 1;
 
     // Prepare compilation options
     std::vector<std::string> options;
@@ -144,13 +146,13 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
     options.emplace_back(
         std::string("-DHIP_PLUGIN_USE_FP32=")
-        + (xDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT ? "1" : "0"));
+        + (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT ? "1" : "0"));
     options.emplace_back(
         std::string("-DHIP_PLUGIN_USE_FP16=")
-        + (xDataType == hipdnn_data_sdk::data_objects::DataType::HALF ? "1" : "0"));
+        + (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF ? "1" : "0"));
     options.emplace_back(
         std::string("-DHIP_PLUGIN_USE_BFP16=")
-        + (xDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16 ? "1" : "0"));
+        + (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16 ? "1" : "0"));
     options.emplace_back(std::string("-DOUTER_SIZE=") + std::to_string(outerSize));
     options.emplace_back(std::string("-DINNER_SIZE=") + std::to_string(innerSize));
     options.emplace_back(std::string("-DSTRIDE=") + std::to_string(stride));
@@ -199,10 +201,10 @@ void LayernormFwdPlan::execute(const HipKernelHandle& handle,
                                                                       numDeviceBuffers)
                                  : hipdnnPluginDeviceBuffer_t{-1, nullptr};
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
     _params.epsilon()->UnPackTo(&epsilonTensor);
     double epsilon
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
+        = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
 
     // Launch kernel
     _runnableKernel->launch(handle.getStream(),

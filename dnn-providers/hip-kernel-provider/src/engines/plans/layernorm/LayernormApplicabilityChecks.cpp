@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "engines/plans/layernorm/LayernormUtilities.hpp"
-#include "hipdnn_data_sdk/data_objects/data_types_generated.h"
-#include "hipdnn_data_sdk/data_objects/tensor_attributes_generated.h"
+#include "hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h"
+#include "hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h"
 #include "hipdnn_plugin_sdk/PluginApiDataTypes.h"
 #include "hipdnn_plugin_sdk/PluginException.hpp"
 #include <cstdint>
@@ -20,9 +20,9 @@ namespace hip_kernel_provider::layernorm
 
 // --- Type Configuration Helpers ---
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> type_configs::getAllowedIoTypes()
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> type_configs::getAllowedIoTypes()
 {
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
         types.insert(config.io);
@@ -30,9 +30,10 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> type_configs::getAll
     return types;
 }
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> type_configs::getAllowedAffineTypes()
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
+    type_configs::getAllowedAffineTypes()
 {
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
         types.insert(config.affine);
@@ -40,9 +41,10 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> type_configs::getAll
     return types;
 }
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> type_configs::getAllowedStatTypes()
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
+    type_configs::getAllowedStatTypes()
 {
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
         types.insert(config.stat);
@@ -50,9 +52,10 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> type_configs::getAll
     return types;
 }
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> type_configs::getAllowedEpsilonTypes()
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
+    type_configs::getAllowedEpsilonTypes()
 {
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> types;
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
     for(const auto& config : VALID)
     {
         types.insert(config.epsilon);
@@ -84,16 +87,16 @@ void LayernormValidator::validateNormalizedDim(const std::vector<int64_t>& ioTen
     const auto& ioAttr = hip_kernel_utils::findTensorAttributes(_tensorMap, ioTensorIds[0]);
     const std::vector<int64_t> ioDims(ioAttr.dims()->begin(), ioAttr.dims()->end());
 
-    size_t affineNormalizedDimMin
+    const size_t affineNormalizedDimMin
         = getMinNormalizedDimFromAffine(ioTensorIds[0], affineTensorIds[0], _tensorMap);
-    size_t affineNormalizedDimMax
+    const size_t affineNormalizedDimMax
         = getMaxNormalizedDimFromAffine(ioTensorIds[0], affineTensorIds[0], _tensorMap);
 
-    size_t statNormalizedDimMin
+    const size_t statNormalizedDimMin
         = statTensorIds.empty()
               ? 0
               : getMinNormalizedDimFromStat(ioTensorIds[0], statTensorIds[0], _tensorMap);
-    size_t statNormalizedDimMax
+    const size_t statNormalizedDimMax
         = statTensorIds.empty()
               ? ioDims.size()
               : getMaxNormalizedDimFromStat(ioTensorIds[0], statTensorIds[0], _tensorMap);
@@ -119,7 +122,7 @@ void LayernormValidator::checkTensorIDLayoutsAndDimsSupported(const std::vector<
     for(const auto& id : tensorIds)
     {
         auto attr = _tensorMap.at(id);
-        if(attr->value_type() == hipdnn_data_sdk::data_objects::TensorValue::NONE)
+        if(attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
         {
             tensors.emplace_back(attr);
         }
@@ -137,7 +140,7 @@ void LayernormValidator::checkTensorLayoutsAndDimsSupported()
     tensorIds.reserve(_tensorMap.size());
     for(const auto& [id, attr] : _tensorMap)
     {
-        if(attr->value_type() == hipdnn_data_sdk::data_objects::TensorValue::NONE)
+        if(attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
         {
             tensorIds.emplace_back(id);
         }
@@ -180,7 +183,7 @@ void LayernormValidator::checkTensorDataTypesSupported(const std::vector<int64_t
     allTensorIds.insert(allTensorIds.end(), affineTensorIds.begin(), affineTensorIds.end());
     allTensorIds.insert(allTensorIds.end(), statTensorIds.begin(), statTensorIds.end());
 
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> allAllowedTypes;
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allAllowedTypes;
     allAllowedTypes.insert(allowedIoTypes.begin(), allowedIoTypes.end());
     allAllowedTypes.insert(allowedAffineTypes.begin(), allowedAffineTypes.end());
     allAllowedTypes.insert(allowedStatTypes.begin(), allowedStatTypes.end());
@@ -248,10 +251,11 @@ void LayernormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
 // --- High-level Configuration Validators ---
 
 void LayernormValidator::checkTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::LayernormAttributes& lnAttr)
+    const hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes& lnAttr)
 {
     std::vector<int64_t> ioTensorIds = {lnAttr.x_tensor_uid(), lnAttr.y_tensor_uid()};
-    std::vector<int64_t> affineTensorIds = {lnAttr.scale_tensor_uid(), lnAttr.bias_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
+        = {lnAttr.scale_tensor_uid(), lnAttr.bias_tensor_uid()};
     std::vector<int64_t> statTensorIds;
     if(lnAttr.mean_tensor_uid().has_value())
     {
@@ -261,7 +265,7 @@ void LayernormValidator::checkTensorConfigSupported(
     {
         statTensorIds.push_back(lnAttr.inv_variance_tensor_uid().value());
     }
-    std::vector<int64_t> epsilonTensorIds = {lnAttr.epsilon_tensor_uid()};
+    const std::vector<int64_t> epsilonTensorIds = {lnAttr.epsilon_tensor_uid()};
 
     std::vector<int64_t> ioAndStatTensorIds
         = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());

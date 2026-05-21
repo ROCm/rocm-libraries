@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include <ck_tile/core/numeric/math.hpp>
+#include <ck_tile/core/numeric/math_v2.hpp>
 #include <ck_tile/core/numeric/type_convert.hpp>
 
 #define CK_TILE_ATTENTION_LOGITS_SOFT_CAP_TANH 0
@@ -18,6 +19,10 @@
 #ifndef CK_TILE_ATTENTION_USE_SOFTSIGN_ASM
 #define CK_TILE_ATTENTION_USE_SOFTSIGN_ASM 0
 #endif
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
 namespace internal {
@@ -333,3 +338,5 @@ struct ComposedAttention
 };
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

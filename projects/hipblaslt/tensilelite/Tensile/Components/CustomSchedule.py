@@ -270,15 +270,31 @@ class ScheduleInfo:
         return self._disabledPasses.get(pass_id)
 
     def pretty_print(self):
-        klen = max(len(k) for k in self.optSchedule.keys())
-        for k,v in self.optSchedule.items():
-            print(f"{k:>{klen}}: {v}")
-        
+        print("{")
+        keys = list(self.optSchedule.keys())
+        maxKeyLen = max(len(k) for k in keys) if keys else 0
+        for i, k in enumerate(keys):
+            v = self.optSchedule[k]
+            comma = "," if i < len(keys) - 1 else ""
+            pad = " " * (maxKeyLen - len(k))
+            if len(v) == 1:
+                print(f"    '{k}':{pad} [{v[0]}]{comma}")
+            else:
+                # Align continuation rows after the opening bracket
+                bracketCol = 8 + maxKeyLen
+                indent = " " * (bracketCol + 1)
+                print(f"    '{k}':{pad} [")
+                for j, row in enumerate(v):
+                    row_comma = "," if j < len(v) - 1 else ""
+                    print(f"{indent}{row}{row_comma}")
+                print(f"{' ' * bracketCol}]{comma}")
+        print("}")
+
         if snops := self.optSchedule.get('SNOP', []):
             print("---- SNOP code ----")
             for idx, code in zip(snops[0], self.snopCode):
                 print(f"{idx:>2}: {str(code).strip()}")
-        
+
         if syncs := self.optSchedule.get('SYNC', []):
             print("---- SYNC code ----")
             for idx, code in zip(syncs[0], self.syncCode):
@@ -1002,7 +1018,6 @@ def _get_schedule_256x96x64_16bit_DPLB(kernel, useLDSTr, TLDS):
 
     numMfma = 48
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidationPass(cmsv.ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS, "GR validation is not yet supported for DtlPlusLdsBuf")
     return True, opt1
 
 @RegisterSchedule(
@@ -4098,7 +4113,6 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0
-    disable_validation = False
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
@@ -4287,15 +4301,11 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3 to complete"),
         ]
         nglshift = nllshift = 16 # vmcnt shift for ngl and nll
-        # disable the validation until 4x4MFMA with wider loads is supported by validator
-        disable_validation = True
     else:
         return False, None
         
     kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    if disable_validation:
-        opt1.disableValidation("4x4MFMA with wider loads is not yet supported by validator")
     return True, opt1
 
 @RegisterSchedule(
@@ -4488,7 +4498,6 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     syncs = SyncSchedule()
     gr_inc_step = 0
-    disable_validation = False
     num_code_paths = 1
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
@@ -4531,8 +4540,6 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         lwsb   = [                                                                          20]
         
     elif isNN(kernel) and TLDS==1  and kernel["VectorWidthA"] == 2:
-        disable_validation = True # swap instructions included in pack are not supported yet
-
         lra0   = [0,0,0,0,
                     1,1,1,1]
         lrb0   = [     3,  4,6,6]
@@ -4576,8 +4583,6 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         lwsb   = [                                                                            20]    
     
     elif isNT(kernel) and useLDSTr and TLDS==0  and kernel["VectorWidthA"] == 2 and kernel["VectorWidthB"] == 2:
-        disable_validation = True # swap instructions included in pack are not supported yet
-
         lra0   = [0,0,0,0,
                     1,1,1,1]
         lrb0   = [     3,3,4,4,
@@ -4663,8 +4668,6 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     kernel["UseMFMAF32XEmulation"] = True
     kernel["UseDot2F32XEmulation"] = False
     opt1 = ScheduleInfo(num_code_paths, n_mfma, optSchedule, syncCode, nglshift, nllshift)
-    if disable_validation:
-        opt1.disableValidationPass(cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS, "swap instructions included in pack are not supported yet")
     return True, opt1
 
 @RegisterSchedule(
@@ -4682,7 +4685,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     syncs = SyncSchedule()
     syncCode = []   
     gr_inc_step = 1
-    disable_validation = False
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         offset=[0,0,1,1, 8,8,  9, 9,10,10, 
@@ -4723,8 +4725,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         pack_b1 =[                                                                                 i+77 for i in offset] # last at 93
 
     elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 4:
-        disable_validation = True
-
         offset=[0,0,1,1, 8,8,  9, 9,10,10, 
                 2,2,3,3, 8,8, 11,11,12,12,
                 4,4,5,5, 8,8, 13,13,14,14, 
@@ -4798,8 +4798,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     kernel["UseDot2F32XEmulation"] = False
     kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
-    if disable_validation:
-        opt1.disableValidationPass(cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS, "Pack validation for NN transpose is not yet supported by validator")
     return True, opt1
 
 

@@ -109,7 +109,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
                                   int& num_uint32_case_imgidx,
                                   int& num_uint64_case,
                                   int& num_uint64_case_imgidx,
-                                  bool skip_wide_check         = false,
+                                  bool /*skip_wide_check         = false*/,
                                   bool apply_index_type_limits = true,
                                   bool is_wide_dataset         = false)
 {

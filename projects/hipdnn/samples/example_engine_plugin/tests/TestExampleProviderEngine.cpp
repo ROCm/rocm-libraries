@@ -7,8 +7,8 @@
 #include <memory>
 #include <vector>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 #include "TestHelpers.hpp"
@@ -30,37 +30,38 @@ public:
 
     bool isApplicable(
         const ExampleProviderHandle& /*handle*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
     {
         return _applicable;
     }
 
-    size_t getMaxWorkspaceSize(const ExampleProviderHandle& /*handle*/,
-                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-                               const ExampleProviderSettings& /*executionSettings*/) const override
+    size_t
+        getMaxWorkspaceSize(const ExampleProviderHandle& /*handle*/,
+                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+                            const ExampleProviderSettings& /*executionSettings*/) const override
     {
         return 0;
     }
 
     void initializeExecutionSettings(
         const ExampleProviderHandle& /*handle*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
         ExampleProviderSettings& /*executionSettings*/) const override
     {
     }
 
     void buildPlan(const ExampleProviderHandle& /*handle*/,
-                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-                   [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::
+                   const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+                   [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::
                        IEngineConfig& /*engineConfig*/,
                    ExampleProviderContext& /*executionContext*/) const override
     {
     }
 
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> getCustomKnobs(
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> getCustomKnobs(
         const ExampleProviderHandle& /*handle*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
     {
         return {};
     }
@@ -72,7 +73,7 @@ private:
 class ExampleProviderEngineTest : public ::testing::Test
 {
 protected:
-    ExampleProviderHandle handle;
+    ExampleProviderHandle _handle;
 };
 
 TEST_F(ExampleProviderEngineTest, IsApplicable_WithMatchingBuilder_ReturnsTrue)
@@ -81,10 +82,10 @@ TEST_F(ExampleProviderEngineTest, IsApplicable_WithMatchingBuilder_ReturnsTrue)
     engine.addPlanBuilder(std::make_unique<MockPlanBuilder>(true));
 
     auto fbb = createReluFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                           fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
-    EXPECT_TRUE(engine.isApplicable(handle, graph));
+    EXPECT_TRUE(engine.isApplicable(_handle, graph));
 }
 
 TEST_F(ExampleProviderEngineTest, IsApplicable_WithNoMatchingBuilder_ReturnsFalse)
@@ -93,8 +94,8 @@ TEST_F(ExampleProviderEngineTest, IsApplicable_WithNoMatchingBuilder_ReturnsFals
     engine.addPlanBuilder(std::make_unique<MockPlanBuilder>(false));
 
     auto fbb = createReluFwdGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
-                                                              fbb.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(fbb.GetBufferPointer(),
+                                                                           fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
-    EXPECT_FALSE(engine.isApplicable(handle, graph));
+    EXPECT_FALSE(engine.isApplicable(_handle, graph));
 }

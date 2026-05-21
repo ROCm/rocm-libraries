@@ -18,15 +18,14 @@ namespace hip_kernel_provider::rmsnorm
 {
 
 RMSnormBwdParams::RMSnormBwdParams(
-    const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _dy(tensorMap.at(attributes.dy_tensor_uid()))
     , _x(tensorMap.at(attributes.x_tensor_uid()))
     , _scale(tensorMap.at(attributes.scale_tensor_uid()))
-    , _invRMS(attributes.inv_rms_tensor_uid().has_value()
-                  ? tensorMap.at(attributes.inv_rms_tensor_uid().value())
-                  : nullptr)
+    , _invRMS(tensorMap.at(attributes.inv_rms_tensor_uid()))
     , _dx(tensorMap.at(attributes.dx_tensor_uid()))
     , _dscale(tensorMap.at(attributes.dscale_tensor_uid()))
     , _dbias(attributes.dbias_tensor_uid().has_value()
@@ -35,37 +34,37 @@ RMSnormBwdParams::RMSnormBwdParams(
 {
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormBwdParams::dy() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormBwdParams::dy() const
 {
     return _dy;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormBwdParams::x() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormBwdParams::x() const
 {
     return _x;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormBwdParams::scale() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormBwdParams::scale() const
 {
     return _scale;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormBwdParams::invRMS() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormBwdParams::invRMS() const
 {
     return _invRMS;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormBwdParams::dx() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormBwdParams::dx() const
 {
     return _dx;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormBwdParams::dscale() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormBwdParams::dscale() const
 {
     return _dscale;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormBwdParams::dbias() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormBwdParams::dbias() const
 {
     return _dbias;
 }

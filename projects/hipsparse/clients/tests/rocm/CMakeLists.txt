@@ -104,6 +104,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmm_csr.cpp
     test_spmv_coo.cpp
     test_spmv_coo_aos.cpp
+    test_spmv_bsr.cpp
     test_spmv_csr.cpp
     test_spmv_csr_pytorch_compat.cpp
     test_spmv_sell.cpp
@@ -209,6 +210,7 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_spmm_coo.yaml
     rocm/test_spmm_csc.yaml
     rocm/test_spmm_csr.yaml
+    rocm/test_spmv_bsr.yaml
     rocm/test_spmv_coo.yaml
     rocm/test_spmv_coo_aos.yaml
     rocm/test_spmv_csr.yaml

@@ -3,521 +3,112 @@
 
 """Main entry point for dnn-benchmark CLI."""
 
-import json
+import os
 import sys
+
 from pathlib import Path
-from typing import Literal, Optional
 
-from ..common.exceptions import ExecutionError, GraphLoadError
-from ..config.benchmark_config import ABTestConfig, BenchmarkConfig, ValidationConfig
-from ..execution.ab_runner import ABRunner
-from ..execution.buffer_manager import BufferManager
-from ..execution.executor import Executor
-from ..graph.loader import GraphLoader
+# Redirect ROCm/tool caches away from the network home directory before any
+# ROCm library is imported. MIOpen, comgr, pip, and torch all default to
+# ~/.cache/ or ~/.miopen/, which is a network filesystem on AMD dev machines.
+# DNN_BENCH_WORKSPACE is set by setup.sh; fall back to /tmp/dnn-bench-cache.
+_CACHE_BASE = Path(os.environ.get("DNN_BENCH_WORKSPACE", "/workspace"))
+_LOCAL_CACHE_DEFAULTS = {
+    "XDG_CACHE_HOME": _CACHE_BASE / "cache",
+    "MIOPEN_USER_DB_PATH": _CACHE_BASE / "miopen_cache",
+    "MIOPEN_CUSTOM_CACHE_DIR": _CACHE_BASE / "miopen_cache",
+    "AMD_COMGR_CACHE_DIR": _CACHE_BASE / "comgr_cache",
+}
+for _var, _default in _LOCAL_CACHE_DEFAULTS.items():
+    if _var not in os.environ:
+        _default.mkdir(parents=True, exist_ok=True)
+        os.environ[_var] = str(_default)
+
+from ..common.exceptions import GraphLoadError
 from ..reporting.reporter import Reporter
-from ..reporting.statistics import BenchmarkStats, CombinedBenchmarkStats
-from ..validation import ArrayComparator, ReferenceProviderRegistry
-from ..validation.validator import Validator
+from .ab_runner_cli import run_ab_cli
+from .internal_profiling import run_internal_profiling
 from .parser import create_parser
+from .pytorch_runner_cli import run_pytorch_cli
+from .suite_runner_cli import run_suite_cli
+from .gpu_check import gpu_is_available
 
 
-def run_benchmark(
-    config: BenchmarkConfig,
-    seed: Optional[int] = None,
-    validation_config: Optional[ValidationConfig] = None,
-    output_path: Optional[Path] = None,
-    gpu_backend: Literal["torch", "auto", "none"] = "auto",
-) -> int:
-    """Run the benchmark workflow.
+def _resolve_graphs(args, reporter: Reporter):
+    """Resolve --graph args to file paths. Returns (tmpdirs, files, tarball_source)."""
+    from ..graph.resolver import is_tarball as _is_tarball, resolve_graph_files_multi
 
-    Args:
-        config: Benchmark configuration.
-        seed: Optional random seed for reproducibility.
-        validation_config: Optional validation configuration.
-        output_path: Optional path to export benchmark results as JSON.
-        gpu_backend: GPU timer backend to use (torch, auto, none).
-
-    Returns:
-        Exit code (0 for success, 1 for error, 2 for validation failure).
-    """
-    reporter = Reporter()
-    validation_passed = True
+    if len(args.graph) == 1 and _is_tarball(args.graph[0]):
+        reporter.print_extracting(args.graph[0])
 
     try:
-        # Load and validate graph
-        loader = GraphLoader()
-        graph_json = loader.load_json(config.graph_path)
-        loader.validate(graph_json)
-
-        graph_name = loader.get_graph_name(graph_json)
-        tensor_infos = loader.extract_tensor_info(graph_json)
-
-        # Print header
-        reporter.print_header(config, graph_name)
-
-        # Import hipdnn after validation to give better error messages
-        try:
-            import hipdnn_frontend as hipdnn
-        except ImportError:
-            reporter.print_error(
-                "hipdnn_frontend not available. "
-                "Install hipDNN Python bindings first."
-            )
-            return 1
-
-        # Create handle
-        handle = hipdnn.Handle()
-
-        # Prepare executor
-        graph_json_str = json.dumps(graph_json)
-        executor = Executor(graph_json_str, config, gpu_backend=gpu_backend)
-        executor.prepare(handle)
-
-        reporter.print_init_time(executor.init_time_ms)
-
-        # Allocate buffers
-        with BufferManager(tensor_infos) as buffer_manager:
-            buffer_manager.allocate_all()
-            buffer_manager.fill_inputs_random(seed=seed)
-            buffer_manager.zero_outputs()
-
-            variant_pack = buffer_manager.create_variant_pack()
-
-            # Run warmup
-            executor.warmup(handle, variant_pack)
-
-            # Run benchmark
-            result = executor.benchmark(handle, variant_pack, graph_name=graph_name)
-
-            # Calculate statistics
-            stats = CombinedBenchmarkStats.from_result(result)
-            reporter.print_combined_stats(stats)
-
-            # Export results if requested
-            if output_path:
-                result.save_json(str(output_path))
-                print(f"Results exported to: {output_path}")
-
-            # Validation
-            if validation_config is not None and validation_config.enabled:
-                validation_passed = _run_reference_validation(
-                    graph_json=graph_json,
-                    buffer_manager=buffer_manager,
-                    tensor_infos=tensor_infos,
-                    validation_config=validation_config,
-                    reporter=reporter,
-                )
-
-        reporter.print_footer()
-        return 0 if validation_passed else 2
-
+        tmpdirs, files, tarball_source = resolve_graph_files_multi(args.graph)
     except GraphLoadError as e:
-        reporter.print_error(f"Graph load error: {e}")
-        return 1
+        reporter.print_error(str(e))
+        return None, None, None
 
-    except ExecutionError as e:
-        reporter.print_error(f"Execution error: {e}")
-        return 1
+    if tmpdirs:
+        reporter.print_extracted_count(len(files), str(args.graph))
 
-    except Exception as e:
-        reporter.print_error(f"Unexpected error: {e}")
-        return 1
+    if not files:
+        for td in tmpdirs:
+            td.cleanup()
+        reporter.print_no_graphs_found(str(args.graph))
+        return tmpdirs, None, None
 
-
-def _run_reference_validation(
-    graph_json: dict,
-    buffer_manager: BufferManager,
-    tensor_infos: list,
-    validation_config: ValidationConfig,
-    reporter: Reporter,
-) -> bool:
-    """Run reference validation against a provider.
-
-    Args:
-        graph_json: The graph as a parsed JSON dictionary.
-        buffer_manager: Buffer manager with allocated tensors.
-        tensor_infos: List of TensorInfo objects.
-        validation_config: Validation configuration.
-        reporter: Reporter for output.
-
-    Returns:
-        True if validation passed, False otherwise.
-    """
-    try:
-        # Get reference provider
-        provider = ReferenceProviderRegistry.get_provider(validation_config.provider)
-
-        if not provider.is_available():
-            reporter.print_error(
-                f"Reference provider '{validation_config.provider}' is not available. "
-                f"Available providers: {ReferenceProviderRegistry.list_available()}"
-            )
-            return False
-
-        # Check if provider supports all operations in graph
-        if not provider.supports_graph(graph_json):
-            unsupported = provider.get_unsupported_operations(graph_json)
-            reporter.print_error(
-                f"Reference provider '{validation_config.provider}' does not support "
-                f"operations: {unsupported}"
-            )
-            return False
-
-        # Collect input data from buffer manager
-        input_data = {}
-        for tensor_info in tensor_infos:
-            if not tensor_info.is_virtual and not tensor_info.is_output:
-                data = buffer_manager.get_input_data(tensor_info.uid)
-                if data is not None:
-                    input_data[tensor_info.uid] = data
-
-        # Compute reference outputs
-        reference_outputs = provider.compute_reference(graph_json, input_data)
-
-        # Compare each output tensor
-        comparator = ArrayComparator(
-            rtol=validation_config.rtol, atol=validation_config.atol
-        )
-
-        all_passed = True
-        for tensor_info in tensor_infos:
-            if not tensor_info.is_output:
-                continue
-
-            actual_data = buffer_manager.get_output_data(tensor_info.uid)
-            if actual_data is None:
-                reporter.print_error(
-                    f"Failed to get output data for tensor {tensor_info.uid}"
-                )
-                all_passed = False
-                continue
-
-            ref_output = reference_outputs.get(tensor_info.uid)
-            if ref_output is None:
-                reporter.print_error(
-                    f"Reference provider did not produce output for tensor {tensor_info.uid}"
-                )
-                all_passed = False
-                continue
-
-            comparison = comparator.compare(
-                actual_data, ref_output.data, "hipDNN", validation_config.provider
-            )
-
-            reporter.print_reference_validation(
-                provider_name=validation_config.provider,
-                passed=comparison.passed,
-                max_abs_diff=comparison.max_abs_diff,
-                max_rel_diff=comparison.max_rel_diff,
-                rtol=validation_config.rtol,
-                atol=validation_config.atol,
-            )
-
-            if not comparison.passed:
-                all_passed = False
-
-        return all_passed
-
-    except ValueError as e:
-        reporter.print_error(f"Validation error: {e}")
-        return False
-    except NotImplementedError as e:
-        reporter.print_error(f"Validation error: {e}")
-        return False
-    except ImportError as e:
-        reporter.print_error(f"Validation error: {e}")
-        return False
-
-
-def run_pytorch_benchmark(
-    config: BenchmarkConfig,
-    seed: Optional[int] = None,
-    output_path: Optional[Path] = None,
-    device: str = "cuda:0",
-) -> int:
-    """Run PyTorch CUDA benchmark workflow.
-
-    Args:
-        config: Benchmark configuration.
-        seed: Optional random seed for reproducibility.
-        output_path: Optional path to export benchmark results as JSON.
-        device: CUDA device to use.
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
-    from ..execution.pytorch_buffer_manager import PyTorchCudaBufferManager
-    from ..execution.pytorch_executor import PyTorchCudaExecutor, PyTorchExecutionError
-
-    reporter = Reporter()
-
-    try:
-        # Load graph (skip hipDNN-specific validation)
-        loader = GraphLoader()
-        graph_json = loader.load_json(config.graph_path)
-
-        graph_name = loader.get_graph_name(graph_json)
-        tensor_infos = loader.extract_tensor_info(graph_json)
-
-        # Print header
-        reporter.print_pytorch_header(config, graph_name, device)
-
-        # Check PyTorch CUDA availability
-        try:
-            import torch
-
-            if not torch.cuda.is_available():
-                reporter.print_error(
-                    "PyTorch GPU not available. "
-                    "Install PyTorch with CUDA or ROCm support."
-                )
-                return 1
-        except ImportError:
-            reporter.print_error(
-                "PyTorch not available. Install with: pip install torch"
-            )
-            return 1
-
-        # Create executor
-        executor = PyTorchCudaExecutor(graph_json, config, device=device)
-        executor.prepare()
-
-        reporter.print_init_time(executor.init_time_ms)
-
-        # Allocate buffers
-        with PyTorchCudaBufferManager(tensor_infos, device=device) as buffer_manager:
-            buffer_manager.allocate_all()
-            buffer_manager.fill_inputs_random(seed=seed)
-            buffer_manager.zero_outputs()
-
-            tensors = buffer_manager.get_tensors()
-
-            # Run warmup
-            executor.warmup(tensors)
-
-            # Run benchmark
-            result = executor.benchmark(tensors, graph_name=graph_name)
-
-            # Calculate statistics
-            stats = CombinedBenchmarkStats.from_result(result)
-            reporter.print_combined_stats(stats)
-
-            # Export results if requested
-            if output_path:
-                result.save_json(str(output_path))
-                print(f"Results exported to: {output_path}")
-
-        reporter.print_footer()
-        return 0
-
-    except GraphLoadError as e:
-        reporter.print_error(f"Graph load error: {e}")
-        return 1
-
-    except PyTorchExecutionError as e:
-        reporter.print_error(f"PyTorch execution error: {e}")
-        return 1
-
-    except Exception as e:
-        reporter.print_error(f"Unexpected error: {e}")
-        return 1
-
-
-def run_ab_test(
-    config: BenchmarkConfig,
-    ab_config: ABTestConfig,
-    seed: Optional[int] = None,
-    gpu_backend: Literal["torch", "auto", "none"] = "auto",
-    validation_config: Optional[ValidationConfig] = None,
-) -> int:
-    """Run A/B comparison workflow.
-
-    Args:
-        config: Benchmark configuration.
-        ab_config: A/B test configuration.
-        seed: Optional random seed for reproducibility.
-        gpu_backend: GPU timer backend to use (torch, auto, none).
-        validation_config: Optional validation configuration for reference checking.
-
-    Returns:
-        Exit code (0 for success, 1 for error, 2 for comparison failure).
-    """
-    reporter = Reporter()
-
-    try:
-        # Validate plugin paths if specified
-        ab_config.validate_paths()
-
-        # Load and validate graph
-        loader = GraphLoader()
-        graph_json = loader.load_json(config.graph_path)
-        loader.validate(graph_json)
-
-        graph_name = loader.get_graph_name(graph_json)
-
-        # Print header
-        reporter.print_ab_header(config, ab_config, graph_name)
-
-        # Run A/B comparison
-        runner = ABRunner(
-            graph_json,
-            config,
-            ab_config,
-            gpu_backend=gpu_backend,
-            validation_config=validation_config,
-        )
-        result = runner.run(seed=seed)
-
-        # Compute combined stats from results
-        stats_a = CombinedBenchmarkStats.from_result(result.result_a)
-        stats_b = CombinedBenchmarkStats.from_result(result.result_b)
-
-        # Print results with both E2E and kernel stats
-        reporter.print_ab_combined_stats(
-            stats_a,
-            stats_b,
-            result.init_time_a_ms,
-            result.init_time_b_ms,
-        )
-
-        reporter.print_ab_comparison(
-            result.passed,
-            result.max_abs_diff,
-            result.max_rel_diff,
-            ab_config.rtol,
-            ab_config.atol,
-        )
-
-        # Print validation results if available
-        if validation_config is not None and validation_config.enabled:
-            reporter.print_ab_validation(
-                result.validation_a,
-                result.validation_b,
-                validation_config.rtol,
-                validation_config.atol,
-            )
-
-        reporter.print_footer()
-
-        # Check validation results
-        validation_passed = True
-        if result.validation_a is not None and not result.validation_a.passed:
-            validation_passed = False
-        if result.validation_b is not None and not result.validation_b.passed:
-            validation_passed = False
-
-        # Return 0 for pass, 2 for comparison or validation failure
-        return 0 if (result.passed and validation_passed) else 2
-
-    except GraphLoadError as e:
-        reporter.print_error(f"Graph load error: {e}")
-        return 1
-
-    except ExecutionError as e:
-        reporter.print_error(f"Execution error: {e}")
-        return 1
-
-    except ValueError as e:
-        reporter.print_error(f"Configuration error: {e}")
-        return 1
-
-    except Exception as e:
-        reporter.print_error(f"Unexpected error: {e}")
-        return 1
+    return tmpdirs, files, tarball_source
 
 
 def main() -> int:
-    """CLI entry point.
-
-    Returns:
-        Exit code.
-    """
+    """CLI entry point."""
     parser = create_parser()
     args = parser.parse_args()
+    reporter = Reporter()
 
-    try:
-        config = BenchmarkConfig(
-            graph_path=args.graph,
-            warmup_iters=args.warmup,
-            benchmark_iters=args.iters,
-            engine_id=args.engine_id,
+    # Hidden re-exec sub-mode for the profiling orchestrator. Skips
+    # gpu_check / Reporter / engine discovery and runs a single
+    # (graph, engine) workload as quietly as possible.
+    if getattr(args, "internal_profiling_run", False):
+        return run_internal_profiling(args)
+
+    if not gpu_is_available():
+        reporter.print_error(
+            "No GPU detected. A GPU with ROCm or CUDA support is required."
         )
-    except ValueError as e:
-        print(f"Configuration error: {e}", file=sys.stderr)
         return 1
 
-    # Check if A/B testing mode is enabled (either AId or BId specified)
-    if args.AId is not None or args.BId is not None:
-        # Both AId and BId should be specified for A/B testing
-        if args.AId is None or args.BId is None:
-            print(
-                "A/B testing requires both --AId and --BId to be specified",
-                file=sys.stderr,
-            )
-            return 1
+    tmpdirs, resolved_files, tarball_source = _resolve_graphs(args, reporter)
+    if resolved_files is None:
+        return 1
 
-        try:
-            ab_config = ABTestConfig(
-                a_path=args.APath,
-                a_id=args.AId,
-                b_path=args.BPath,
-                b_id=args.BId,
-                rtol=args.rtol,
-                atol=args.atol,
-            )
-        except ValueError as e:
-            print(f"A/B configuration error: {e}", file=sys.stderr)
-            return 1
-
-        # Create validation config if validation is enabled for A/B test
-        ab_validation_config = None
-        if args.validate != "none":
-            try:
-                ab_validation_config = ValidationConfig(
-                    provider=args.validate,
-                    rtol=args.validate_rtol,
-                    atol=args.validate_atol,
+    try:
+        if args.AId is not None or args.BId is not None:
+            if len(resolved_files) > 1:
+                reporter.print_error(
+                    "A/B testing requires a single graph file, not a glob pattern"
                 )
-            except ValueError as e:
-                print(f"Validation configuration error: {e}", file=sys.stderr)
                 return 1
+            return run_ab_cli(args, Path(resolved_files[0]), reporter)
 
-        return run_ab_test(
-            config,
-            ab_config,
-            seed=args.seed,
-            gpu_backend=args.gpu_backend,
-            validation_config=ab_validation_config,
-        )
+        elif args.backend == "pytorch":
+            if len(resolved_files) > 1:
+                reporter.print_error(
+                    "Suite mode is not supported with --backend pytorch"
+                )
+                return 1
+            return run_pytorch_cli(args, Path(resolved_files[0]), reporter)
 
-    # Route based on execution backend
-    if args.backend == "pytorch":
-        return run_pytorch_benchmark(
-            config,
-            seed=args.seed,
-            output_path=args.output,
-        )
-
-    # Create validation config if validation is enabled
-    validation_config = None
-    if args.validate != "none":
-        try:
-            validation_config = ValidationConfig(
-                provider=args.validate,
-                rtol=args.validate_rtol,
-                atol=args.validate_atol,
+        else:
+            return run_suite_cli(
+                args,
+                graph_paths=[Path(p) for p in resolved_files],
+                reporter=reporter,
+                tarball_source=tarball_source,
             )
-        except ValueError as e:
-            print(f"Validation configuration error: {e}", file=sys.stderr)
-            return 1
-
-    return run_benchmark(
-        config,
-        seed=args.seed,
-        validation_config=validation_config,
-        output_path=args.output,
-        gpu_backend=args.gpu_backend,
-    )
+    finally:
+        if tmpdirs:
+            for td in tmpdirs:
+                td.cleanup()
 
 
 if __name__ == "__main__":

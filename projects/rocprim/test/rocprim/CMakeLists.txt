@@ -123,9 +123,10 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
       )
     endforeach()
   else()
-      add_relative_test(${TEST_NAME} ${TEST_TARGET})
+      add_relative_test(${TEST_NAME} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
       set_tests_properties(${TEST_NAME}
           PROPERTIES
+              RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
               LABELS "hip"
       )
   endif()
@@ -297,6 +298,7 @@ add_rocprim_test_parallel("rocprim.block_scan" test_block_scan.cpp.in)
 add_rocprim_test("rocprim.block_shuffle" test_block_shuffle.cpp)
 add_rocprim_test("rocprim.block_sort_bitonic" test_block_sort_bitonic.cpp)
 add_rocprim_test("rocprim.config_dispatch" test_config_dispatch.cpp)
+add_rocprim_test("rocprim.config_types" test_config_types.cpp)
 add_rocprim_test("rocprim.constant_iterator" test_constant_iterator.cpp)
 add_rocprim_test("rocprim.counting_iterator" test_counting_iterator.cpp)
 add_rocprim_test("rocprim.device_batch_memcpy" test_device_batch_memcpy.cpp)
