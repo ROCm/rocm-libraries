@@ -14,6 +14,20 @@ namespace py = pybind11;
 
 namespace ck_dsl_provider {
 
+CompileServiceBridge::~CompileServiceBridge() noexcept {
+    // Drop the py::module_ reference while the GIL is held. Member
+    // destructors run after this body, but by then _module is empty
+    // and its default destructor touches no Python state.
+    try {
+        py::gil_scoped_acquire gil;
+        _module = py::module_();
+    } catch (...) {  // NOLINT(bugprone-empty-catch)
+        // ~noexcept; if GIL acquisition itself throws (interpreter
+        // already torn down by a sibling plugin), we have nothing left
+        // to do but let _module's no-op destructor run.
+    }
+}
+
 CompileServiceBridge::CompileServiceBridge() {
     EmbeddedInterpreter::ensureInitialized();
 
