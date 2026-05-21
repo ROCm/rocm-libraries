@@ -27,7 +27,6 @@ from unittest.mock import mock_open, patch
 import sys
 import os
 import tempfile
-import subprocess
 import filecmp
 
 from Tensile import TensileLibLogicToYaml
@@ -466,26 +465,8 @@ def mockLibLogicFile():
 
 
 def findAvailableArchs():
-    availableArchs = []
-    rocmpath = "/opt/rocm"
-    if "ROCM_PATH" in os.environ:
-        rocmpath = os.environ.get("ROCM_PATH")
-    if "TENSILE_ROCM_PATH" in os.environ:
-        rocmpath = os.environ.get("TENSILE_ROCM_PATH")
-    rocmAgentEnum = os.path.join(rocmpath, "bin/rocm_agent_enumerator")
-    if not os.path.exists(rocmAgentEnum):
-        return availableArchs
-    try:
-        output = subprocess.check_output([rocmAgentEnum, "-t", "GPU"])
-    except subprocess.CalledProcessError:
-        return availableArchs
-    lines = output.decode().splitlines()
-    for line in lines:
-        line = line.strip()
-        if (not line in availableArchs) and (not "gfx000" in line):
-            availableArchs.append(line)
-    return availableArchs
-
+    from Tensile.Tests.gpu_detection import get_available_archs
+    return get_available_archs()
 
 @pytest.mark.skipif(
     "gfx950" not in findAvailableArchs(), reason="Requires gfx950 architecture"

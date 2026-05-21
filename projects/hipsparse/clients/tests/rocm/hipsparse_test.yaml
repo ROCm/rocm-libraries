@@ -119,6 +119,7 @@ include: test_spmm_batched_csr.yaml
 include: test_spmm_coo.yaml
 include: test_spmm_csc.yaml
 include: test_spmm_csr.yaml
+include: test_spmv_bsr.yaml
 include: test_spmv_coo_aos.yaml
 include: test_spmv_coo.yaml
 include: test_spmv_csr.yaml

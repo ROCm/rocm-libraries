@@ -6,6 +6,7 @@
 #include "HipdnnAttentionImplementation.h"
 #include "HipdnnBackendAttributeName.h"
 #include "HipdnnBackendAttributeType.h"
+#include "HipdnnBackendBehaviorNote.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
@@ -176,6 +177,27 @@ inline const char* hipdnnGetAttributeTypeString(hipdnnBackendAttributeType_t typ
 
     default:
         return "HIPDNN_ATTRIBUTE_UNKNOWN";
+    }
+}
+
+inline const char* hipdnnGetBehaviorNoteString(hipdnnBackendBehaviorNote_t note)
+{
+    switch(note)
+    {
+    case HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION:
+        return "HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION";
+    case HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM:
+        return "HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM";
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE:
+        return "HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE";
+    case HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY:
+        return "HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY";
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return "HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION";
+    case HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT:
+        return "HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT";
+    default:
+        return "HIPDNN_BEHAVIOR_NOTE_UNKNOWN";
     }
 }
 

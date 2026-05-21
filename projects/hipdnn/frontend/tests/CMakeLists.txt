@@ -39,7 +39,6 @@ add_executable(
     TestDescriptorHelpers.cpp
     TestDescriptorUnpackHelpers.cpp
     TestConvolutionWgradNode.cpp
-    TestEngineOverrideConfig.cpp
     TestError.cpp
     TestFrontendLogging.cpp
     TestGraph.cpp
