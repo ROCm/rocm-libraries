@@ -397,9 +397,8 @@ class SyncOp(BaseOp):
 
 @dataclass
 class MaskKOp(BaseOp):
-    """Zero A (and MXSA if scaled) vgprs whose K-index >= remaining tail K,
-    for one subIterK group. Emits VCmpGEI32 against the tail loop counter
-    sgpr followed by VCndMaskB32 over the tile's vgprs.
+    """Zero A and B vgprs whose K-index >= remaining
+    tail K, for one subIterK group. 
     """
     subIterK: int = 0
     vgpr_tile_map: dict = field(default_factory=dict)
@@ -2291,10 +2290,6 @@ class LogicalScheduler:
         uf = self.unroll_factor
 
         # ── Skip preloop/mainloop/NGLL/NLL when K < DepthU ──
-        # PRELOOP's first GR + GRIncOp would otherwise read OOB and bump the
-        # SRD past valid data, leaving the tail loop reading from offset DU
-        # instead of 0. Jump straight to the post-mainloop label so the
-        # caller's tail-loop setup runs on a pristine SRD/LDS state.
         endLabel = Label("SkipToEnd", "")
         if not kernel["NoTailLoop"]:
             module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
