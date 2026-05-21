@@ -34,7 +34,6 @@ from typing import List, Tuple
 from unittest.mock import MagicMock, call, mock_open, patch
 
 import pytest
-pytestmark = pytest.mark.requires_compiler
 import yaml
 
 import Tensile.ClientWriter as ClientWriter
@@ -88,6 +87,7 @@ def mock_KernelWriterBase():
     return mock
 
 
+@pytest.mark.requires_compiler
 def test_loadSolutions(caplog, useGlobalParameters):
     with useGlobalParameters():
         mylogger.debug("this is a test of debug log")

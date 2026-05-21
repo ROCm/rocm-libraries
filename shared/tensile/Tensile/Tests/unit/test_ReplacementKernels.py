@@ -23,7 +23,6 @@
 ################################################################################
 
 import pytest
-pytestmark = pytest.mark.requires_compiler
 import os
 
 from Tensile.ReplacementKernels import ReplacementKernels

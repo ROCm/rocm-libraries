@@ -23,7 +23,6 @@
 ################################################################################
 
 import pytest
-pytestmark = pytest.mark.requires_compiler
 
 import Tensile.Component  as Component
 import Tensile.Components as Components
@@ -183,6 +182,7 @@ def test_MAC_F16_FMA_NonPacked(navi10, f16):
 def test_componentPath():
     assert Components.MAC_F16.FMA_F16_NonPacked.componentPath() == ["Component", "MAC", "FMA_F16_NonPacked"]
 
+@pytest.mark.requires_compiler
 def test_find_macs(useGlobalParameters, f16, f16_hpa, f16_hpa_ldl):
     with useGlobalParameters() as globals:
         for dtype in [f16, f16_hpa, f16_hpa_ldl]:
