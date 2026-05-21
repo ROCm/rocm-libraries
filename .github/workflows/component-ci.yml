@@ -70,15 +70,15 @@ jobs:
         run: pip install -r ${{ matrix.component.requirements }}
 
       - name: Build (GCC)
-        if: matrix.component.build_gcc
+        if: matrix.component.build_gcc == true
         run: invoke build --gcc --build-dir build_gcc --clean
 
       - name: Build
-        if: matrix.component.build
+        if: matrix.component.build == true
         run: invoke build
 
       - name: Test
-        if: matrix.component.test
+        if: matrix.component.test == true
         working-directory: ${{ matrix.component.dir }}/build
         run: ctest --output-on-failure
 
@@ -127,24 +127,24 @@ jobs:
         run: pip install -r ${{ matrix.component.requirements }}
 
       - name: Install GTest
-        if: matrix.component.build
+        if: matrix.component.build == true
         run: vcpkg install gtest
 
       - name: Build
-        if: matrix.component.build
+        if: matrix.component.build == true
         run: invoke build --build-dir "${{ env.BUILD_DIR }}/${{ matrix.component.name }}"
 
       - name: Test
-        if: matrix.component.test
+        if: matrix.component.test == true
         working-directory: ${{ env.BUILD_DIR }}/${{ matrix.component.name }}
         run: ctest --output-on-failure
 
       - name: Build (static)
-        if: matrix.component.build_static
+        if: matrix.component.build_static == true
         run: invoke build --static --build-dir "${{ env.BUILD_DIR }}/${{ matrix.component.name }}-static" --clean
 
       - name: Test (static)
-        if: matrix.component.build_static
+        if: matrix.component.build_static == true
         working-directory: ${{ env.BUILD_DIR }}/${{ matrix.component.name }}-static
         run: ctest --output-on-failure
 
