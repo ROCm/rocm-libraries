@@ -119,7 +119,27 @@ message(STATUS "CK DSL provider plugin build directory: ${HIPDNN_BUILD_PLUGIN_EN
 message(STATUS "CK DSL provider plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
+# Resolve absolute paths to the in-tree ck_dsl Python package and the
+# provider-local ck_dsl_provider package, then bake them into a
+# generated header that the embedded interpreter uses to prepend them
+# to sys.path (PREP_FINDINGS §P-4).
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/CkDslProviderPaths.cmake)
+ck_dsl_provider_resolve_python_paths()
+
+set(_ckDslPathsHeader "${CMAKE_CURRENT_BINARY_DIR}/include/ckdsl_provider_paths.h")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/templates/ckdsl_provider_paths.h.in"
+    "${_ckDslPathsHeader}"
+    @ONLY
+)
+
 add_subdirectory(src)
+
+# Make the generated path header visible to every TU in the OBJECT
+# library (and therefore to the static + shared downstream targets).
+target_include_directories(ck_dsl_provider_impl
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+)
 
 # Generate version.h on top of the plugin's OBJECT library so every
 # translation unit sees CK_DSL_PROVIDER_VERSION_STRING.

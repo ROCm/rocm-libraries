@@ -13,6 +13,7 @@ endif()
 add_executable(
     ck_dsl_provider_unit_tests
     main.cpp
+    CompileServiceBridgeTest.cpp
     EmbeddedInterpreterTest.cpp
 )
 
