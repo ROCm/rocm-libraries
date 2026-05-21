@@ -59,7 +59,9 @@ if(WIN32)
 endif()
 
 set(STINKYTOFU_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-set(STINKYTOFU_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" PARENT_SCOPE)
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(STINKYTOFU_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" PARENT_SCOPE)
+endif()
 
 ##===----------------------------------------------------------------------===##
 # Architectures
@@ -177,19 +179,11 @@ target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 # Add source files from src/ subdirectory
 add_subdirectory(src)
 
-##===----------------------------------------------------------------------===##
-# Unit tests
-##===----------------------------------------------------------------------===##
 # Option to build unit tests
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(_stinkytofu_build_tests_default ON)
 else()
     set(_stinkytofu_build_tests_default OFF)
-endif()
-option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
-if(STINKYTOFU_BUILD_TESTS)
-    enable_testing()
-    add_subdirectory(tests)
 endif()
 
 ##===----------------------------------------------------------------------===##
@@ -199,6 +193,15 @@ endif()
 option(STINKYTOFU_BUILD_PYTHON "Build StinkyTofu Python bindings" ${_stinkytofu_build_tests_default})
 if(STINKYTOFU_BUILD_PYTHON)
     add_subdirectory(python_module)
+endif()
+
+##===----------------------------------------------------------------------===##
+# Unit tests
+##===----------------------------------------------------------------------===##
+option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
+if(STINKYTOFU_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
 endif()
 
 ##===----------------------------------------------------------------------===##
