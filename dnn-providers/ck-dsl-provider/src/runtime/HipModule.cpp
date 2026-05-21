@@ -31,7 +31,13 @@ void checkHip(hipError_t err, std::string_view context) {
 
 }  // namespace
 
-HipModule::HipModule(const KernelArtifact& artifact) : _kernelName(artifact.kernelName) {
+HipModule::HipModule(const KernelArtifact& artifact)
+    : _kernelName(artifact.kernelName),
+      _kind(artifact.kind),
+      _grid(artifact.grid),
+      _block(artifact.block),
+      _ldsBytes(artifact.ldsBytes),
+      _argSchema(artifact.argSchema) {
     if (artifact.hsaco.empty()) {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -89,7 +95,12 @@ HipModule::~HipModule() noexcept {
 HipModule::HipModule(HipModule&& other) noexcept
     : _module(other._module),
       _function(other._function),
-      _kernelName(std::move(other._kernelName)) {
+      _kernelName(std::move(other._kernelName)),
+      _kind(std::move(other._kind)),
+      _grid(other._grid),
+      _block(other._block),
+      _ldsBytes(other._ldsBytes),
+      _argSchema(std::move(other._argSchema)) {
     other._module = nullptr;
     other._function = nullptr;
 }

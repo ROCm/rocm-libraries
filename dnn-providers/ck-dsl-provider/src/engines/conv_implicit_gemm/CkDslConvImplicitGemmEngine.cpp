@@ -12,28 +12,27 @@
 
 namespace ck_dsl_provider {
 
-CkDslConvImplicitGemmEngine::CkDslConvImplicitGemmEngine(int64_t id) : _id(id) {}
+CkDslConvImplicitGemmEngine::CkDslConvImplicitGemmEngine(std::int64_t id,
+                                                         CompileServiceBridge& bridge)
+    : _id(id), _planBuilder(std::make_unique<ConvImplicitGemmPlanBuilder>(bridge)) {}
 
-int64_t CkDslConvImplicitGemmEngine::id() const {
+std::int64_t CkDslConvImplicitGemmEngine::id() const {
     return _id;
 }
 
 bool CkDslConvImplicitGemmEngine::isApplicable(
-    ::CkDslHandle& /*handle*/,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const {
-    // I-1 skeleton: no graphs match. The adapter + plan builder that
-    // would justify a true return land in milestones I-6/I-7.
-    return false;
+    ::CkDslHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const {
+    return _planBuilder->isApplicable(handle, opGraph);
 }
 
 void CkDslConvImplicitGemmEngine::getDetails(
     ::CkDslHandle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
     hipdnnPluginConstData_t& detailsOut) const {
-    // The SDK contract requires us to publish engine details as a
-    // FlatBuffer whose lifetime is managed by the handle. For I-1 we
-    // emit an EngineDetails table containing this engine's id and an
-    // empty knob vector; once knobs are real (I-7+) we will populate
-    // them from the plan builder.
+    // EngineDetails FlatBuffer with this engine's id + an empty knob
+    // vector (no custom knobs in M1; ConvImplicitGemmPlanBuilder::
+    // getCustomKnobs returns {}). The handle's detached-buffer map
+    // owns the FlatBuffer until the SDK explicitly releases it.
     flatbuffers::FlatBufferBuilder builder;
 
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> emptyKnobs;
@@ -49,25 +48,33 @@ void CkDslConvImplicitGemmEngine::getDetails(
     handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
 }
 
-size_t CkDslConvImplicitGemmEngine::getMaxWorkspaceSize(
-    const ::CkDslHandle& /*handle*/,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+std::size_t CkDslConvImplicitGemmEngine::getMaxWorkspaceSize(
+    const ::CkDslHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const {
-    return 0;
+    if (!_planBuilder->isApplicable(handle, opGraph)) {
+        return 0;
+    }
+    CkDslSettings settings;
+    return _planBuilder->getMaxWorkspaceSize(handle, opGraph, settings);
 }
 
 void CkDslConvImplicitGemmEngine::initializeExecutionContext(
-    const ::CkDslHandle& /*handle*/,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
-    CkDslContext& /*executionContext*/) const {
-    // Unreachable in the I-1 skeleton: isApplicable() always returns
-    // false, so the SDK must not call this. If it does, fail loudly
-    // rather than silently leaving the context uninitialised.
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-        "CkDslConvImplicitGemmEngine::initializeExecutionContext was called but the engine "
-        "reported no applicable plans (I-1 skeleton). Real planning lands in milestone I-7.");
+    const ::CkDslHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    CkDslContext& executionContext) const {
+    if (!_planBuilder->isApplicable(handle, opGraph)) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "CkDslConvImplicitGemmEngine::initializeExecutionContext called on a graph "
+            "the plan builder reports as not applicable; the SDK should have skipped this "
+            "engine after isApplicable returned false.");
+    }
+    CkDslSettings settings;
+    _planBuilder->initializeExecutionSettings(handle, opGraph, engineConfig, settings);
+    executionContext.setExecutionSettings(settings);
+    _planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
 }
 
 }  // namespace ck_dsl_provider

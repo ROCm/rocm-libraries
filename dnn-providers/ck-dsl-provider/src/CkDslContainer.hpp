@@ -58,12 +58,11 @@ class CkDslContainer {
     CompileServiceBridge& compileServiceBridge();
 
    private:
-    struct EngineDefinition {
-        int64_t id;
-        std::function<CkDslEnginePtr()> createEngine;
-    };
-
-    static const std::vector<EngineDefinition>& getEngineDefinitions();
+    /// Per-engine constructor invoked from the container ctor. Each
+    /// engine takes a non-owning ref to the container's
+    /// CompileServiceBridge; the container owns the bridge for the
+    /// engine's lifetime.
+    CkDslEnginePtr createEngine(int64_t id) const;
 
     std::unique_ptr<hipdnn_plugin_sdk::EngineManager<::CkDslHandle, CkDslSettings, CkDslContext>>
         _engineManager;
