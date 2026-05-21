@@ -1265,6 +1265,11 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
   if not kernel["NoTailLoop"]:
     module.add(writer.calculateLoopNumIter(
         kernel, tensorParametersA, tensorParametersB, -1))
+    # Tighten Srd{A,B}+2 OOB limit using the K remainder just computed
+    # (no-op outside UseSubtileImpl bf16 A/B).
+    module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersA))
+    module.add(writer.computeTailLoopSrdLimit(kernel, tensorParametersB))
+    module.add(Label("seb", ""))
     module.add(scheduler.emitTailLoop(writer, kernel))
     module.add(writer.closeLoop(
         kernel, tensorParametersA, tensorParametersB,

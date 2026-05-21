@@ -4432,6 +4432,77 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
+  # Tighten Srd{A,B}+2 (num_records / OOB limit) just before the tail loop.
+  #
+  # Replaces the conservative tile-boundary limit set in computeLoadSrd
+  #   Srd+2 = (numLine * stride + DepthU) * bpeGR
+  # with a tail-aware limit using the actual K remainder:
+  #   Srd+2 = (numLine * stride + K_rem) * bpeGR
+  # where:
+  #   numLine = min(SizeI/J - WG*MT, MT) - 1   (0-based last line index)
+  #   K_rem   = SizesSum % DepthU              (already in LoopCounter<unrollChar>
+  #                                             after calculateLoopNumIter(-1))
+  #   stride  = strideRef(tc, tP['tileIdx'])   in elements
+  #
+  # bf16 A/B only — FP4 / MX scale / swizzled paths fall through unchanged.
+  ##############################################################################
+  def computeTailLoopSrdLimit(self, kernel, tP):
+    module = Module("computeTailLoopSrdLimit")
+    tc = tP["tensorChar"]
+
+    if not kernel.get("UseSubtileImpl"):
+      return module
+    if tc not in ("A", "B"):
+      return module
+    if not kernel["ProblemType"]["DataType"].isBFloat16():
+      return module
+    if self.states.groOffsetInMacroTile != 1:
+      return module
+
+    strideF = self.strideRef(tc, tP['tileIdx'])
+    if self.isConstUnitStride(strideF):
+      return module
+
+    mt = kernel[tP["mt"]]
+    loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
+
+    # Determine tile axis (Index0 for A, Index1 for B) by scanning numDim — mirrors
+    # the loop in computeLoadSrd that picks the M/N dim from indices.
+    tileIdx = tP["tileIdx"]
+
+    with self.allocTmpSgpr(3) as tmpSgprInfo:
+      stmp = tmpSgprInfo.idx
+      module.addComment1("Tighten Srd%s+2 for tail loop: (numLine * stride + K_rem) * bpe"%tc)
+
+      # tileStart = WG * MT (element units)
+      module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(tP["wg"]), src1=mt,
+                         comment="tileStart = WG%s * MT(%u)"%(tP["wg"][-1], mt)))
+
+      # numToEnd = sizeTile - tileStart
+      module.add(SSubU32(dst=sgpr(stmp+0), src0=self.sizeRef(tileIdx), src1=sgpr(stmp+0),
+                         comment="numToEnd = Size%s - WG*MT"%self.states.indexChars[tileIdx]))
+
+      # numLine = min(numToEnd, MT) - 1   (0-based last line index)
+      module.add(SMinU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=mt,
+                         comment="min(numToEnd, MT)"))
+      module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=1,
+                         comment="numLine = min - 1 (0-based)"))
+
+      # m_stride_elems = numLine * strideF (low 32 bits)
+      module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=strideF,
+                         comment="numLine * stride (element units)"))
+
+      # limit_elems = m_stride_elems + K_rem  (K_rem in sgpr(loopCounterName), elements)
+      module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(loopCounterName),
+                         comment="+ K_rem (tail loop remainder in elements)"))
+
+      # Srd+2 = limit_elems * bpeGR (bytes)
+      module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]),
+                                   comment="buffer_load limit for %s (tail-loop tight)"%tc))
+
+    return module
+
+  ##############################################################################
   # Global Read Addresses: Addresses A/B
   ##############################################################################
   def graAddresses(self, kernel, tP):
