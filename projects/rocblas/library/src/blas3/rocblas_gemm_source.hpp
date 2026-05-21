@@ -69,7 +69,6 @@ namespace
             auto C = cond_load_ptr_batch(beta != 0, CP_array, batch, shift_c, stride_c);
             auto D = load_ptr_batch(DP_array, batch, shift_d, stride_d);
             gemm_ex_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc, D, ldd);
-
         }
     }
 
@@ -171,7 +170,6 @@ namespace
         {
             auto C = load_ptr_batch(dC, batch, shift_c, stride_c);
             rocblas_gemm_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc);
-
         }
     }
 
@@ -405,7 +403,6 @@ namespace
                     }
                 }
             }
-
         }
     }
 
@@ -572,7 +569,6 @@ namespace
                     }
                 }
             }
-
         }
     }
 

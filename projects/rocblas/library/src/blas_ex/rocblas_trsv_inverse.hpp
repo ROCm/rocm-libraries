@@ -62,7 +62,6 @@ rocblas_internal_flip_vector_kernel(U* __restrict__ data,
             T           temp  = pdata[end];
             pdata[end]        = pdata[start];
             pdata[start]      = temp;
-
         }
     }
 }

@@ -226,25 +226,24 @@ rocblas_tbsv_kernel(rocblas_operation transA,
                     rocblas_stride    stride_x)
 {
 
-        const auto* A = load_ptr_batch(Aa, blockIdx.x, shift_A, stride_A);
-        auto*       x = load_ptr_batch(xa, blockIdx.x, shift_x, stride_x);
+    const auto* A = load_ptr_batch(Aa, blockIdx.x, shift_A, stride_A);
+    auto*       x = load_ptr_batch(xa, blockIdx.x, shift_x, stride_x);
 
-        if(transA == rocblas_operation_none)
-        {
-            if(is_upper)
-                rocblas_tbsv_backward_substitution_calc<false, false, BLK_SIZE>(
-                    is_unit_diag, n, k, A, lda, x, incx);
-            else
-                rocblas_tbsv_forward_substitution_calc<false, false, BLK_SIZE>(
-                    is_unit_diag, n, k, A, lda, x, incx);
-        }
-        else if(is_upper)
-            rocblas_tbsv_forward_substitution_calc<CONJ, true, BLK_SIZE>(
+    if(transA == rocblas_operation_none)
+    {
+        if(is_upper)
+            rocblas_tbsv_backward_substitution_calc<false, false, BLK_SIZE>(
                 is_unit_diag, n, k, A, lda, x, incx);
         else
-            rocblas_tbsv_backward_substitution_calc<CONJ, true, BLK_SIZE>(
+            rocblas_tbsv_forward_substitution_calc<false, false, BLK_SIZE>(
                 is_unit_diag, n, k, A, lda, x, incx);
-
+    }
+    else if(is_upper)
+        rocblas_tbsv_forward_substitution_calc<CONJ, true, BLK_SIZE>(
+            is_unit_diag, n, k, A, lda, x, incx);
+    else
+        rocblas_tbsv_backward_substitution_calc<CONJ, true, BLK_SIZE>(
+            is_unit_diag, n, k, A, lda, x, incx);
 }
 
 template <typename TConstPtr, typename TPtr>
