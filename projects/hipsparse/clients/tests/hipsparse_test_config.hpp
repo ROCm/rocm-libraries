@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -85,5 +85,34 @@ struct hipsparse_test_config_ijt_real_only
 struct hipsparse_test_config_ijt_complex_only
     : hipsparse_test_config_template<hipsparse_test_dispatch_enum::ijt,
                                      hipsparse_test_numeric_types_enum::complex_only>
+{
+};
+
+struct hipsparse_test_config_scatter
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::scatter,
+                                     hipsparse_test_numeric_types_enum::scatter>
+{
+};
+struct hipsparse_test_config_axpby
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::axpby,
+                                     hipsparse_test_numeric_types_enum::all>
+{
+};
+
+struct hipsparse_test_config_gather
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::gather,
+                                     hipsparse_test_numeric_types_enum::gather>
+{
+};
+
+struct hipsparse_test_config_ijabct_spmv
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::ijabct_spmv,
+                                     hipsparse_test_numeric_types_enum::spmv>
+{
+};
+
+struct hipsparse_test_config_iabct_spmv
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::iabct_spmv,
+                                     hipsparse_test_numeric_types_enum::spmv>
 {
 };

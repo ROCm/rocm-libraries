@@ -356,6 +356,7 @@ def writeBenchmarkFiles(
                             errorTolerant=True,
                             generateSourcesAndExit=globalParameters["GenerateSourcesAndExit"], # put in debug config
                             compress=False,
+                            removeTemporaries=not globalParameters["KeepBuildTmp"],
                         )
     # ^ this is where solutions is mutated
     with timing_context("python_kernel_bench_postprocess"):

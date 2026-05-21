@@ -246,9 +246,6 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             PLUGIN_TARGET miopen_plugin
             ENGINE_NAME   MIOPEN_ENGINE
             TEST_CONFIG   ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
-            GTEST_FILTER
-                *IsSupported*
-                *ConvFwd*
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
     else()

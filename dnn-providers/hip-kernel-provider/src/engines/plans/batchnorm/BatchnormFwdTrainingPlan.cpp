@@ -203,11 +203,13 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     // FP16 IO and FP16 scale/bias data types, the hip kernel plugin
     // applicability checks require the scale and bias tensors to be FP32.
     // So we are not using the USE_FP16 path in the kernel for now.
-    bool useFp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
-                       && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    bool useBfp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
-                        && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    bool useFp32 = !useFp16Mix && !useBfp16Mix;
+    const bool useFp16Mix
+        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const bool useBfp16Mix
+        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const bool useFp32 = !useFp16Mix && !useBfp16Mix;
 
     // Extract dimensions from x tensor
     const auto* xDims = _trainingParams.x()->dims();
@@ -246,7 +248,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     auto invInNhw = static_cast<float>(1.0 / inNhw);
 
     // Detect layout
-    bool isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(_trainingParams.x());
+    const bool isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(_trainingParams.x());
 
     // Kernel launch parameters
     // NOTE: These are generally selected based on heuristics and tuning,
@@ -380,11 +382,11 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     // Detect GPU architecture
-    std::string archName(deviceProperties.gcnArchName);
-    bool isGfx103X = (archName.find("gfx103") == 0);
-    bool isGfx110X = (archName.find("gfx110") == 0);
-    bool isGfx120X = (archName.find("gfx120") == 0);
-    bool isGfx115X = (archName.find("gfx115") == 0);
+    const std::string archName(deviceProperties.gcnArchName);
+    const bool isGfx103X = (archName.find("gfx103") == 0);
+    const bool isGfx110X = (archName.find("gfx110") == 0);
+    const bool isGfx120X = (archName.find("gfx120") == 0);
+    const bool isGfx115X = (archName.find("gfx115") == 0);
 
     // Get activation mode
     auto activationMode = hip_kernel_utils::ActivationMode::PASTHRU;
