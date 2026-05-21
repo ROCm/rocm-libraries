@@ -202,12 +202,17 @@ struct CKArgs
         }
     }
 
-    // CK BWD interface accepts int32 arrays only; narrow at the boundary.
-    // Safe because RequiresLargeTensorCKInstance blocks overflow shapes
-    // from selecting any BWD instance (no BWD large-tensor registrations).
-    NarrowedCKArrays3D NarrowedArrays() const
+    // CK BWD interface accepts int32 arrays only; lazy-populate so narrowing
+    // only runs for kernels that survived the RequiresLargeTensorCKInstance
+    // filter (FillValidKernelsIDs constructs CKArgs unconditionally, before
+    // filtering -- narrowing here on overflow shapes would assert even when
+    // no kernel is ultimately selected). The bundle is a mutable member so
+    // its arrays outlive any arg_ptr that captures references to them.
+    // Safe because no BWD large-tensor registrations exist, so MakeArgPtr
+    // is never reached on >INT_MAX inputs.
+    const NarrowedCKArrays3D& NarrowedArrays() const
     {
-        return NarrowedCKArrays3D{
+        narrowed = NarrowedCKArrays3D{
             .in_l             = ToCKIndexArray(in_lengths),
             .in_s             = ToCKIndexArray(in_strides),
             .out_l            = ToCKIndexArray(out_lengths),
@@ -219,6 +224,7 @@ struct CKArgs
             .lPadding         = ToCKIndexArray(lPadding),
             .rPadding         = ToCKIndexArray(rPadding),
         };
+        return narrowed;
     }
 
     template <typename ConvPtr>
@@ -229,7 +235,7 @@ struct CKArgs
                             float alpha,
                             float beta) const
     {
-        const auto a = NarrowedArrays();
+        const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(out,
                                              w,
                                              {in},
@@ -255,7 +261,7 @@ struct CKArgs
     auto MakeScaleArgPtr(
         const ConvPtr& conv_ptr, Data_t in, ConstData_t w, ConstData_t out, float alpha) const
     {
-        const auto a = NarrowedArrays();
+        const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(out,
                                              w,
                                              {},
@@ -280,7 +286,7 @@ struct CKArgs
     template <typename ConvPtr>
     auto MakeDefaultArgPtr(const ConvPtr& conv_ptr, Data_t in, ConstData_t w, ConstData_t out) const
     {
-        const auto a = NarrowedArrays();
+        const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(out,
                                              w,
                                              {},
@@ -349,6 +355,10 @@ struct CKArgs
     std::array<ck::long_index_t, 3> filter_dilations;
     std::array<ck::long_index_t, 3> lPadding;
     std::array<ck::long_index_t, 3> rPadding;
+    // mutable: populated lazily by NarrowedArrays() (const) so MakeArgPtr
+    // (also const) can hand CK references that outlive the call.
+    // See NarrowedCKArrays3D comment in ck_grouped_conv_impl_helpers.hpp.
+    mutable NarrowedCKArrays3D narrowed;
 };
 
 // ---------------------------------------------------------------------------

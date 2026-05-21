@@ -45,11 +45,16 @@ constexpr std::array<ck::index_t, N> ToCKIndexArray(const std::array<T, N>& src)
 }
 
 // ---------------------------------------------------------------------------
-// NarrowedCKArrays3D — bundle of int32-narrowed length/stride arrays that the
-// 3D BWD and WRW CKArgs::NarrowedArrays() helpers populate before handing
-// them to CK's int32 MakeArgumentPointer overload. Same caveat as
-// ToCKIndexArray: only safe when RequiresLargeTensorCKInstance is filtering
-// out >INT_MAX shapes.
+// NarrowedCKArrays3D / NarrowedCKArrays2D — bundles of int32-narrowed
+// length/stride arrays handed to CK's int32 MakeArgumentPointer overload.
+// Same caveat as ToCKIndexArray: only safe when RequiresLargeTensorCKInstance
+// is filtering out >INT_MAX shapes.
+//
+// These bundles MUST be stored as members of the owning CKArgs (not as
+// function-local temporaries), because CK's MakeArgumentPointer captures
+// references to the array elements into the returned Argument object. If
+// the bundle goes out of scope before IsSupportedArgument runs, CK reads
+// freed stack memory (caught by ASAN as stack-use-after-scope).
 // ---------------------------------------------------------------------------
 struct NarrowedCKArrays3D
 {
@@ -63,6 +68,20 @@ struct NarrowedCKArrays3D
     std::array<ck::index_t, 3> filter_dilations;
     std::array<ck::index_t, 3> lPadding;
     std::array<ck::index_t, 3> rPadding;
+};
+
+struct NarrowedCKArrays2D
+{
+    std::array<ck::index_t, 5> in_l;
+    std::array<ck::index_t, 5> in_s;
+    std::array<ck::index_t, 5> out_l;
+    std::array<ck::index_t, 5> out_s;
+    std::array<ck::index_t, 5> wei_l;
+    std::array<ck::index_t, 5> wei_s;
+    std::array<ck::index_t, 2> filter_strides;
+    std::array<ck::index_t, 2> filter_dilations;
+    std::array<ck::index_t, 2> lPadding;
+    std::array<ck::index_t, 2> rPadding;
 };
 
 // ---------------------------------------------------------------------------
@@ -141,6 +160,28 @@ struct CKArgsSplitK
                     ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
     }
 
+    // Populate-and-return the narrowed bundle. Lazy so narrowing only runs
+    // for kernels that survived the RequiresLargeTensorCKInstance filter --
+    // BWD/WRW CKArgs is constructed unconditionally in FillValidKernelsIDs
+    // before filtering, so narrowing in the constructor would assert on
+    // >INT_MAX shapes even though no kernel is ultimately selected.
+    const NarrowedCKArrays2D& GetNarrowedArrays() const
+    {
+        narrowed = NarrowedCKArrays2D{
+            .in_l             = ToCKIndexArray(input),
+            .in_s             = ToCKIndexArray(in_strides),
+            .out_l            = ToCKIndexArray(output),
+            .out_s            = ToCKIndexArray(out_strides),
+            .wei_l            = ToCKIndexArray(weight),
+            .wei_s            = ToCKIndexArray(wei_strides),
+            .filter_strides   = ToCKIndexArray(strides),
+            .filter_dilations = ToCKIndexArray(dilation),
+            .lPadding         = ToCKIndexArray(lPadding),
+            .rPadding         = ToCKIndexArray(rPadding),
+        };
+        return narrowed;
+    }
+
     CKArgsSplitK(const CKArgsSplitK&)            = default;
     CKArgsSplitK(CKArgsSplitK&&)                 = default;
     CKArgsSplitK& operator=(const CKArgsSplitK&) = default;
@@ -204,6 +245,9 @@ struct CKArgsSplitK
     std::array<ck::long_index_t, 2> dilation;
     std::array<ck::long_index_t, 2> lPadding;
     std::array<ck::long_index_t, 2> rPadding;
+    // mutable: populated lazily by GetNarrowedArrays() (const) so derived
+    // MakeArgPtr (also const) can hand CK references that outlive the call.
+    mutable NarrowedCKArrays2D narrowed;
 
 private:
     const Derived& derived() const { return static_cast<const Derived&>(*this); }
